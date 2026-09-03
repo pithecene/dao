@@ -1,3 +1,5 @@
 # Standard Library
 
-Reserved root for Dao standard-library surface and future implementation.
+Dao standard library. `core/` and `io/` are loaded automatically as the
+prelude by `daoc`; `concepts/` holds deferred concept definitions that
+are not yet auto-imported; `numerics/` is reserved.

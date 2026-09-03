@@ -10,7 +10,8 @@ for the Dao compiler project. It is subordinate to `CLAUDE.md` and
 ### Language and compiler
 
 - Host implementation language: **C++23**
-- Primary compiler: **clang++ 17+** (first-class)
+- Primary compiler: **clang++ 21+** (first-class; `profiles/clang-21-debug`
+  pins `compiler.version=21`)
 - Secondary compiler: **GCC 13+** (best-effort; does not block progress)
 - GCC compatibility analysis deferred until enough code exists to
   benchmark compile times, diagnostic quality, and C++23 feature
@@ -26,9 +27,10 @@ for the Dao compiler project. It is subordinate to `CLAUDE.md` and
 - **Conan 2.x** in manifest mode
 - `conanfile.py` with custom logic for LLVM option configuration
 - Compiler profiles managed via Conan profiles
-  (e.g. `profiles/clang-17-debug`, `profiles/gcc-13-release`)
+  (currently `profiles/clang-21-debug`; e.g. `profiles/gcc-13-release`
+  later)
 - One `conan.lock` per profile, colocated under `profiles/`
-  (e.g. `profiles/clang-17-debug.lock`); lockfiles are
+  (e.g. `profiles/clang-21-debug.lock`); lockfiles are
   configuration-specific and must not be shared across profiles
 - LLVM is managed by Conan like all other dependencies
 
@@ -46,6 +48,10 @@ for the Dao compiler project. It is subordinate to `CLAUDE.md` and
 - `.clang-tidy`: `modernize-*`, `performance-*`, `readability-*`
 
 ### CI
+
+Status: **not implemented** — no CI pipeline exists in the repository.
+Verification is local (`task test`, `task bootstrap-test`).  The design
+below is the plan of record.
 
 - **Earthly** for reproducible, cacheable builds
 - GitHub Actions as the trigger/runner; Earthly defines the actual
@@ -94,12 +100,13 @@ Deliverables:
 - `CMakeLists.txt` (root) — top-level build with C++23 target
 - `CMakePresets.json` — presets for clang debug/release
 - `conanfile.py` — declares boost-ext/ut, cpp-httplib, nlohmann_json, llvm-core
-- `profiles/clang-17-debug` — Conan profile for primary dev
-- `profiles/clang-17-debug.lock` — committed lockfile for primary profile
+- `profiles/clang-21-debug` — Conan profile for primary dev
+- `profiles/clang-21-debug.lock` — committed lockfile for primary profile
 - `.clang-format` — LLVM base + Dao overrides
 - `.clang-tidy` — strict modernize/performance/readability checks
 - `.gitignore` — updated for build/, Conan output
-- `.github/workflows/build.yml` — CI pipeline
+- `.github/workflows/build.yml` — CI pipeline (not delivered; see CI
+  status above)
 - `compiler/driver/main.cpp` — skeleton driver that reads a source file
   and exits
 - `compiler/driver/CMakeLists.txt` — builds `daoc`
@@ -109,7 +116,7 @@ Exit criteria:
 - `cmake --build build` succeeds
 - the `daoc` binary produced by the build reads a file and exits cleanly
 - `clang-format` and `clang-tidy` pass on all source
-- CI runs green on push
+- CI runs green on push (pending CI)
 
 ### Task 1 — Lexer
 
@@ -313,7 +320,7 @@ in `bootstrap/shared/base.dao`; assembly via `bootstrap/assemble.sh`.
 Task 29 (bootstrap MIR) is complete — HIR lowered to basic-block MIR
 with 8 tests.
 Task 30 (bootstrap LLVM backend) is complete — MIR lowered to
-deterministic textual LLVM IR with 12 tests.
+deterministic textual LLVM IR with 17 tests.
 
 The Tier A bootstrap frontend-to-IR-to-text pipeline (lex → parse →
 resolve → typecheck → HIR → MIR → LLVM text) is complete.

@@ -6,6 +6,7 @@ Defines the allowed top-level ontology and major subroots for Dao.
 
 ## Required Top-Level Directories
 
+- `bootstrap/`
 - `compiler/`
 - `runtime/`
 - `stdlib/`
@@ -13,6 +14,7 @@ Defines the allowed top-level ontology and major subroots for Dao.
 - `docs/`
 - `examples/`
 - `testdata/`
+- `tools/`
 - `ai/`
 
 ## Required Major Subroots
@@ -33,8 +35,9 @@ Defines the allowed top-level ontology and major subroots for Dao.
 - `types/`
 - `typecheck/`
 
-Expected next subroots once implementation begins:
-- `lower/`
+Surface-to-HIR lowering is implemented by the HIR builder under
+`compiler/ir/hir/`; no separate `compiler/frontend/lower/` subroot is
+required.
 
 ### Under `compiler/ir/`
 - `hir/`
@@ -50,6 +53,8 @@ Expected next subroots once implementation begins:
 
 ## Directory Semantics
 
+- `bootstrap/` owns Dao-implemented compiler subsystems on the
+  self-hosting path only.
 - `compiler/` owns compiler implementation concerns only.
 - `compiler/frontend/` owns source-facing compiler stages only.
 - `compiler/ir/` owns target-agnostic program representations only.
@@ -61,7 +66,9 @@ Expected next subroots once implementation begins:
 - `spec/` owns grammar fragments, language notes, and semantic probes only.
 - `docs/contracts/` owns normative repository and language contracts.
 - `examples/` owns illustrative Dao programs only.
-- `testdata/` owns future fixtures only.
+- `testdata/` owns test fixtures and golden files only.
+- `tools/` owns developer-surface tooling (playground, LSP, formatter,
+  diagnostics presentation) built on `compiler/analysis/` only.
 - `ai/` owns Bonsai governance artifacts only.
 
 ## Laws

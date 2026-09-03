@@ -37,8 +37,9 @@ Required subroots:
 
 - `compiler/frontend/typecheck/` — semantic type-checking pass
 
-Expected next frontend subroots once implementation begins:
-- `compiler/frontend/lower/`
+Surface-to-HIR lowering is implemented by the HIR builder under
+`compiler/ir/hir/`; no separate `compiler/frontend/lower/` subroot is
+required.
 
 Dependency rules:
 - `types/` must not depend on `typecheck/`

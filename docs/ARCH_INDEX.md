@@ -14,6 +14,14 @@ Normative behavior lives in `CLAUDE.md` and `docs/contracts/`.
 | `.grove.yaml` | Grove project metadata and consolidation hints |
 | `mise.toml` | mise tool/runtime pins, env-based build parallelism cap |
 | `Taskfile.yml` | Task runner commands (build, test, playground, etc.) |
+| `CMakeLists.txt` / `CMakePresets.json` | CMake build entry and debug/release presets |
+| `conanfile.py` | Conan 2 dependency manifest (llvm-core, boost-ext/ut, cpp-httplib, nlohmann_json) |
+| `.clang-format` / `.clang-tidy` | C++ formatting and static-analysis configuration |
+
+## `profiles/`
+
+Conan profiles and their lockfiles (`clang-21-debug`,
+`clang-21-debug.lock`). See `docs/building.md`.
 
 ## `docs/`
 
@@ -22,7 +30,7 @@ Contracts and explanatory material.
 - `ARCH_INDEX.md` — this file
 - `contracts/` — normative contracts for structure, syntax, execution contexts, compiler architecture, bootstrap/interop posture, tooling boundaries, runtime ABI, numeric semantics, and C ABI interop
 - `ROADMAP.md` — staged implementation plan from frontend skeleton to self-hosting, tooling maturity, and GPU expansion
-- `IMPLEMENTATION_PLAN.md` — concrete task sequence, toolchain decisions, and delivery order for Tasks 0–5
+- `IMPLEMENTATION_PLAN.md` — concrete task sequence, toolchain decisions, and delivery order (Tasks 0–5 in full; Tasks 6+ summarized with status)
 - `task_specs/` — detailed per-task design specs for Tasks 6+
 - `compiler_bootstrap_and_architecture.md` — explanatory notes on preferred compiler internals and staged bootstrap posture
 - `PLAYGROUND_ARCHITECTURE.md` — explanatory architecture for the playground as a first-class development surface and future web IDE
@@ -61,7 +69,7 @@ Source-facing compiler pipeline.
 - `resolve/` — name resolution: scope chain, symbol binding, and identifier resolution
 - `types/` — canonical semantic type universe: type kinds, interning, context, printing
 - `typecheck/` — first type-checking pass: side-table typing, assignability, expression/statement validation, diagnostics
-- the intended next explicit root is `lower/` rather than a monolithic semantic pass
+- surface-to-HIR lowering lives in `compiler/ir/hir/` (the HIR builder); there is no separate `lower/` root
 
 ### `compiler/ir/`
 
@@ -99,7 +107,7 @@ CLI, playground, and LSP.
 
 Execution support for lowered programs.
 
-- `core/` — minimal native runtime linked into every executable: ABI declarations (`dao_abi.h`), IO hooks (`io.c`), equality hooks (`equality.c`), scalar-to-string conversion hooks (`convert.c`)
+- `core/` — minimal native runtime linked into every executable: ABI declarations (`dao_abi.h`) and hooks for IO (`io.c`), equality (`equality.c`), scalar-to-string conversion (`convert.c`), strings (`string.c`), checked overflow (`overflow.c`), panics (`panic.c`), resource domains (`resource.c`), and generators (`generator.c`)
 - `memory/` — scoped resource and allocation-domain support
 - `modes/` — runtime integration for `mode` semantics
 - `gpu/` — GPU/runtime bindings and execution support
@@ -171,7 +179,7 @@ Developer-surface tooling built on compiler analysis.
 - `playground/` — first-class web playground and future web-IDE surface
   - `compiler_service/` — HTTP server wrapping the compiler frontend (cpp-httplib + nlohmann/json); shared pipeline utilities in `pipeline.h/.cpp`
   - `frontend/` — Vite + TypeScript with CodeMirror 6; dev mode uses HMR with API proxy, prod builds to `dist/` served by the compiler service
-- `lsp/` — Language Server Protocol implementation
+- `lsp/` — reserved LSP root (not yet implemented; the analysis APIs it will wrap live in `compiler/analysis/`)
 - `formatter/` — reserved canonical formatter root
 - `diagnostics/` — presentation and diagnostics tooling experiments
 
