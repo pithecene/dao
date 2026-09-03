@@ -18,6 +18,7 @@ inline auto token_category(TokenKind kind) -> std::string_view {
   case TokenKind::KwExtern:
   case TokenKind::KwFn:
   case TokenKind::KwClass:
+  case TokenKind::KwEnum:
   case TokenKind::KwType:
   case TokenKind::KwLet:
   case TokenKind::KwIf:
@@ -25,6 +26,8 @@ inline auto token_category(TokenKind kind) -> std::string_view {
   case TokenKind::KwWhile:
   case TokenKind::KwFor:
   case TokenKind::KwIn:
+  case TokenKind::KwMatch:
+  case TokenKind::KwBreak:
   case TokenKind::KwReturn:
   case TokenKind::KwYield:
   case TokenKind::KwMode:
