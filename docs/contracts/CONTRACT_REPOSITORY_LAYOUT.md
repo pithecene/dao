@@ -68,7 +68,8 @@ required.
 - `examples/` owns illustrative Dao programs only.
 - `testdata/` owns test fixtures and golden files only.
 - `tools/` owns developer-surface tooling (playground, LSP, formatter,
-  diagnostics presentation) built on `compiler/analysis/` only.
+  diagnostics presentation) that consumes compiler-produced analysis,
+  diagnostics, and IR; it must not reimplement language logic.
 - `ai/` owns Bonsai governance artifacts only.
 
 ## Laws
