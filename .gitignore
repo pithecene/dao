@@ -46,3 +46,9 @@ tools/playground/frontend/dist/
 # Local machine config
 CLAUDE.local.md
 mise.local.toml
+
+# Local agent session state (shared .claude/settings.json stays tracked)
+.claude/settings.local.json
+.claude/worktrees/
+.codex
+.codex-worktrees/

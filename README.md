@@ -8,17 +8,23 @@ Current priorities:
 - memory/execution model (`mode` / `resource`)
 - numeric, graph, routing, and GPU-oriented workloads
 
-This scaffold is governance-first. It gives Claude/Bonsai a stable constitutional frame before implementation begins.
+The project is governance-first: contracts under `docs/contracts/` are
+the authoritative source of intent. Implementation is well underway — a
+C++23 host compiler targeting LLVM, a native runtime, an initial standard
+library, a web playground, and a Dao-implemented bootstrap compiler that
+lowers Tier A Dao to textual LLVM IR.
 
 ## Repository shape
 
-- `compiler/` — compiler pipeline notes, future implementation roots
+- `bootstrap/` — self-hosting compiler subsystems written in Dao
+- `compiler/` — C++23 host compiler: lexer → parser → resolve → typecheck → HIR → MIR → LLVM backend → driver, plus tooling-facing analysis
 - `runtime/` — runtime and execution backends
 - `stdlib/` — standard library surface
 - `spec/` — grammar, syntax notes, semantic reference inputs
 - `docs/` — contracts, architecture index, explanatory docs
 - `examples/` — small Dao programs and syntax probes
 - `testdata/` — parser/compiler fixtures
+- `tools/` — playground, LSP, formatter, and diagnostics tooling
 - `ai/` — Bonsai governance skills, baselines, outputs
 
 ## Governance docs

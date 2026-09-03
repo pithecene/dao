@@ -27,10 +27,11 @@ source to produce `*.gen.dao` files that the compiler can build.
 bash bootstrap/assemble.sh
 ```
 
-This produces:
-- `bootstrap/lexer/lexer.gen.dao` = `base.dao` + `lexer/tests.dao`
-- `bootstrap/parser/parser.gen.dao` = `base.dao` + `parser/tests.dao`
-- `bootstrap/resolver/resolver.gen.dao` = `base.dao` + `resolver/impl.dao`
+This produces one `<subsystem>.gen.dao` per subsystem (lexer, parser,
+graph, resolver, typecheck, hir, mir, llvm).  Each is `base.dao` plus
+the library portion of every upstream subsystem it depends on (the part
+before that file's `BEGIN_*_TESTS` marker) plus the subsystem's own
+source.  `assemble.sh` is the exact statement of that composition.
 
 The `*.gen.dao` files are gitignored — they are build artifacts.
 
@@ -39,7 +40,8 @@ The `*.gen.dao` files are gitignored — they are build artifacts.
 1. **Edit `base.dao` or subsystem `.dao` sources** — never edit the
    `.gen.dao` files directly.
 2. **Run `bash bootstrap/assemble.sh`** after any edit.
-3. **Verify all three subsystems** still compile and pass tests.
+3. **Verify every subsystem** still compiles and passes tests
+   (`task bootstrap-test`).
 
 ## Why this exists
 

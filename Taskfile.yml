@@ -85,6 +85,8 @@ tasks:
       - bootstrap/resolver/impl.dao
       - bootstrap/typecheck/impl.dao
       - bootstrap/hir/impl.dao
+      - bootstrap/mir/impl.dao
+      - bootstrap/llvm/impl.dao
     generates:
       - bootstrap/lexer/lexer.gen.dao
       - bootstrap/parser/parser.gen.dao
@@ -92,6 +94,8 @@ tasks:
       - bootstrap/resolver/resolver.gen.dao
       - bootstrap/typecheck/typecheck.gen.dao
       - bootstrap/hir/hir.gen.dao
+      - bootstrap/mir/mir.gen.dao
+      - bootstrap/llvm/llvm.gen.dao
 
   bootstrap-test:
     desc: Assemble, build, and test all bootstrap subsystems
@@ -103,6 +107,8 @@ tasks:
       - "{{.BUILD_DIR}}/compiler/driver/daoc build bootstrap/resolver/resolver.gen.dao && ./bootstrap/resolver/resolver.gen"
       - "{{.BUILD_DIR}}/compiler/driver/daoc build bootstrap/typecheck/typecheck.gen.dao && ./bootstrap/typecheck/typecheck.gen"
       - "{{.BUILD_DIR}}/compiler/driver/daoc build bootstrap/hir/hir.gen.dao && ./bootstrap/hir/hir.gen"
+      - "{{.BUILD_DIR}}/compiler/driver/daoc build bootstrap/mir/mir.gen.dao && ./bootstrap/mir/mir.gen"
+      - "{{.BUILD_DIR}}/compiler/driver/daoc build bootstrap/llvm/llvm.gen.dao && ./bootstrap/llvm/llvm.gen"
 
   format:
     desc: Run clang-format on all source files

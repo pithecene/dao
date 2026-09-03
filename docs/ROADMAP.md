@@ -215,7 +215,7 @@ Status: **Tier A frontend-to-IR-to-text pipeline complete** — Tasks
 substrate (`bootstrap/shared/base.dao`): lexer (105 tests), parser
 (51 tests), graph (12 tests), resolver (34 tests), type checker
 (43 tests), HIR lowering (22 tests), MIR lowering (8 tests), and
-LLVM backend (12 tests) — 287 bootstrap tests total.  The Tier A
+LLVM backend (17 tests) — 292 bootstrap tests total.  The Tier A
 pipeline covers lex → parse → resolve → typecheck → HIR → MIR →
 LLVM text.  The `Program` value threads through resolve →
 typecheck → HIR at both single-file and program level with canonical
@@ -233,8 +233,11 @@ kind handling.  Task 30 (bootstrap LLVM backend) lowers MIR to
 deterministic textual LLVM IR via a backend-private mini-IR and
 text serializer, with alloca-everything SSA, param seeding, fail-
 closed type/terminator validation, and correct string-literal
-escape handling.  Next: `llc`/`clang` validation of emitted IR
-(Task 30.5), then Tier B bootstrap feature slices.
+escape handling.  The first Tier B slice (#255) adds struct type
+definitions, struct construction, `extractvalue` field reads, and
+struct-typed call/return edges to the bootstrap MIR → LLVM path.
+Next: `llc`/`clang` validation of emitted IR (Task 30.5), then
+further Tier B bootstrap feature slices.
 
 Goals:
 - begin implementing non-trivial compiler subsystems in Dao itself
