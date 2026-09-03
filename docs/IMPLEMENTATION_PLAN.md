@@ -524,6 +524,42 @@ Narrow upstream fix landed alongside:
 See `docs/task_specs/TASK_30_BOOTSTRAP_LLVM_BACKEND.md` and
 `bootstrap/llvm/impl.dao`.
 
+### Task 31 — Host Multi-file Compilation
+
+**Objective**: make the C++ host compiler compile a program spanning
+multiple Dao source files with real module identity, import-driven
+discovery, and cross-module resolution, type checking, and lowering —
+using the `module` / `import` syntax and the module semantics already
+frozen for the bootstrap (Tasks 25–27).
+
+See `docs/task_specs/TASK_31_HOST_MULTIFILE_COMPILATION.md`.
+
+Deliverables:
+
+- program-wide source map: per-file base offsets replace every
+  `prelude_bytes` / `prelude_lines` site (136 across 13 files) and
+  the prelude concatenation in the driver and playground
+- `Program` / `ModuleInfo` / module graph with discovery over ordered
+  module roots, explicit file-list mode, in-memory inputs, and
+  deterministic topological order
+- per-module scopes and export tables; qualified `b::f`, `b::T`,
+  `b::E::V`, `b::T::m` across modules; module-scoped `extend` sets
+- prelude group: `stdlib/core` + `stdlib/io` stay visible unqualified
+  (including their `extend` methods) as part of every module's scope
+- `HirProgram` root; MIR flattened in topological order;
+  module-qualified LLVM symbol names via one `mangled_name` helper;
+  entry-module `main` rule
+- analysis APIs and the playground on the shared `load_program` API
+- new frontend subroot `compiler/frontend/module/` with the matching
+  contract and `ARCH_INDEX.md` updates
+
+This is host compiler work, not a bootstrap task.  It lands before
+further bootstrap Tier B slices because every slice adds Dao source
+the host must currently concatenate, and because the stdlib-as-modules,
+LSP workspace, and playground T3 tracks all need this substrate.
+`assemble.sh` retirement is explicitly Task 32: it needs an import-form
+decision (selective/glob) in `CONTRACT_SYNTAX_SURFACE.md` first.
+
 ### Task 14 — Numeric Type Expansion
 
 **Objective**: Implement the numeric semantics frozen in
