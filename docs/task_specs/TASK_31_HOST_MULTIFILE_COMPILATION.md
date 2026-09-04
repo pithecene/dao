@@ -175,9 +175,11 @@ retirement are Task 32 (§21).
 
 ## 7. Semantic model
 
-The following rules are inputs to this task.  §7.1–§7.5 restate what
-`CONTRACT_SYNTAX_SURFACE.md`, Task 25 §10, and Task 26 §6 already
-froze; §7.6–§7.8 are the host-specific decisions Task 31 adds.
+Every rule in this section is normative in `CONTRACT_MODULE_SYSTEM.md`,
+which lands in the same change as this spec.  §7.1–§7.5 were already
+frozen by `CONTRACT_SYNTAX_SURFACE.md`, Task 25 §10, and Task 26 §6;
+§7.6–§7.8 are the rules the new contract adds.  This section explains
+them; the contract governs.
 
 ### 7.1 Module identity
 
@@ -248,10 +250,15 @@ by `vector::Vector` is legal and resolves to the same symbols.
 
 ### 7.7 Entry module and `main`
 
-The entry module is the module declared by the root file (root-file
-mode) or the first file of an explicit list.  Its `fn main` is the
-program entry and is emitted with the LLVM name `main`.  A `main` in
-any other module is an ordinary function (mangled per §12).
+Exactly one module of a program is the entry module.  In root-file
+mode it is the module declared by the root file.  In explicit file-list
+and in-memory modes it is selected by `--entry <module>`; when `--entry`
+is absent and exactly one module declares `fn main`, that module is the
+entry; zero or several such modules without `--entry` is an error.
+Entry selection is therefore a function of the file set and the
+options, never of input order (§8.4).  The entry module's `fn main` is
+the program entry and is emitted with the LLVM name `main`.  A `main`
+in any other module is an ordinary function (mangled per §12).
 
 ### 7.8 Qualified forms
 
@@ -277,9 +284,9 @@ Three ways to build a program:
 1. **root-file mode** (default CLI): one root path; imports drive
    discovery (§8.3)
 2. **explicit file list mode**: every file enumerated; discovery is
-   off; unresolved imports are diagnosed, never searched.  The first
-   file is the entry.  This is the primitive the tests and the
-   bootstrap fixtures use.
+   off; unresolved imports are diagnosed, never searched.  The entry
+   module is chosen per §7.7 (`--entry`, or the unique `main`).  This
+   is the primitive the tests and the bootstrap fixtures use.
 3. **in-memory mode**: `SourceInput`s instead of paths (playground,
    LSP, unit tests).  Identical to (2) otherwise.
 
@@ -317,7 +324,11 @@ and each module is loaded once.
   lexical order of module display name
 - diagnostics are emitted in `file_id` order, then offset order
 
-The same file set in any input order yields byte-identical output.
+- the entry module is selected per §7.7, which does not consult
+  input order
+
+The same file set with the same entry selection, in any input order,
+yields byte-identical output.
 
 ### 8.5 Graph diagnostics
 
@@ -343,14 +354,24 @@ one of them.
 ### 9.2 Decision
 
 Keep `Span` unchanged.  Give each file a **base offset** in one
-program-wide offset space:
+program-wide offset space, with one reserved position after every file
+so that a file's end-of-file offset is its own:
 
 ```
-file 0 (prelude core::builtins)   [0,          size0)
-file 1 (prelude core::comparable) [size0,      size0+size1)
+file 0 (prelude core::builtins)   [0,       size0]        EOF at size0
+                                   size0+1  reserved — never a position of any file
+file 1 (prelude core::comparable) [base1,   base1+size1]  base1 = size0 + 1
 …
-file n (user app::main)           [base_n,     base_n+size_n)
+file n (user app::main)           [base_n,  base_n+size_n]
 ```
+
+Each range is closed: `base + size` is the file's EOF position, the
+offset at which the lexer already emits its zero-length `Eof` token
+(`lexer.cpp`: `emit(TokenKind::Eof, pos_, 0)`) and at which
+unexpected-end diagnostics are reported.  Because
+`base_{n+1} = base_n + size_n + 1`, the EOF position of file *n* is
+never the first byte of file *n+1*, and an empty file (`size = 0`) has
+the single representable position `base`.
 
 `lex(const SourceBuffer&, uint32_t base_offset = 0)` adds the base to
 every span it emits.  Nothing downstream changes: offsets are already
@@ -372,6 +393,13 @@ class SourceMap {
   auto text(Span) const -> std::string_view;
 };
 ```
+
+`file_for(o)` returns file *n* iff `base_n <= o <= base_n + size_n`
+(closed range, §9.2); an offset in a reserved gap is a programming
+error and asserts.  `locate(base_n + size_n)` is the EOF location of
+file *n*: its last line, column one past the last character (`1:1` for
+an empty file) — the same answer `SourceBuffer::line_col(size)` gives
+today for a single file.
 
 ### 9.4 What it replaces
 
@@ -552,8 +580,8 @@ are unaffected: C receives a pointer, never the name.
 
 ```
 daoc <cmd> <root.dao> [--module-root DIR]... [--stdlib-root DIR]
-daoc <cmd> --source a.dao --source b.dao ...        # explicit set; first is entry
-daoc build ... [link inputs]                         # unchanged passthrough
+daoc <cmd> --source a.dao --source b.dao ... [--entry a::b]   # explicit set (§7.7)
+daoc build ... [link inputs]                                  # unchanged passthrough
 ```
 
 `<cmd>` ∈ `check`, `tokens`, `resolve`, `hir`, `mir`, `llvm-ir`,
@@ -575,6 +603,8 @@ main.dao:2:8: error: import cycle: app::main -> app::math -> app::main
 main.dao:7:12: error: module 'app::math' has no export 'sub'
 main.dao:3:8: error: 'math' is already declared in this module
 main.dao:9:5: error: 'math::Vec::Item::x' — imports bind a single segment
+error: no entry module: no module declares 'fn main' (use --entry)
+error: ambiguous entry module: 'fn main' declared in app::main and tools::main (use --entry)
 ```
 
 Wording of existing single-file diagnostics does not change.
@@ -650,17 +680,25 @@ Each slice lands green and behaviour-preserving unless noted.
 - **D5 — Tooling.**  Analysis APIs and the playground on
   `load_program`; playground concatenation deleted; `daoc` debug dumps
   select user modules by `is_prelude`.
-- **D6 — Docs.**  `ARCH_INDEX.md`, `CONTRACT_COMPILER_PHASES.md`,
-  `CONTRACT_REPOSITORY_LAYOUT.md` gain the new frontend subroot (§20);
-  `docs/building.md` documents `--module-root`; `IMPLEMENTATION_PLAN`
-  and `ROADMAP` mark the task complete and name Task 32.
+- **D6 — Docs.**  `docs/building.md` documents `--module-root`,
+  `--source`, and `--entry`; `IMPLEMENTATION_PLAN` and `ROADMAP` mark
+  the task complete and name Task 32.  (The contracts already govern
+  this task — §20; `ARCH_INDEX.md` gains the new subroot in D0, in the
+  same diff that creates it.)
 
 ## 18. Test plan
 
 ### 18.1 Source map (D0)
 
-- offsets of file n start at the sum of sizes of files < n
-- `locate` round-trips for the first/last byte of every file
+- `base_n` equals the sum over files `< n` of `size + 1`
+- `locate` round-trips for the first byte, last byte, and EOF position
+  of every file; `file_for(base_n + size_n)` is file *n*, not *n+1*
+- an empty file between two non-empty files: its EOF locates to itself
+  at `1:1`; its neighbours are unaffected
+- the lexer's `Eof` token of every file maps back to that file
+- a parse diagnostic at end of file (unterminated block in the middle
+  file of three) prints that file's path and its last line, not the
+  next file's first line
 - a diagnostic in the third of three files prints that file's path and
   its local line
 
@@ -708,8 +746,9 @@ declared in one module instantiated from another (Task 28 §21.2).
 
 ### 18.7 Determinism
 
-`daoc llvm-ir` on the same file set in two input orders is
-byte-identical.
+`daoc llvm-ir --source ... --entry m` on the same file set in two
+`--source` orders is byte-identical; the same set with a different
+`--entry` differs only in which function is named `main`.
 
 ## 19. Acceptance criteria
 
@@ -719,16 +758,20 @@ byte-identical.
    fixtures with the bootstrap's outcomes.
 3. `prelude_bytes` / `prelude_lines` / `blank_leading_module` no longer
    exist in the tree.
-4. Every diagnostic prints the real file path and local line.
+4. Every diagnostic, including those at end of file, prints the real
+   file path and local line.
 5. All existing examples build and produce identical output; all host
    tests pass; `task bootstrap-test` passes with no bootstrap source
    change.
 6. Two modules may declare the same function name.
 7. The playground has no language logic of its own for program
    assembly.
-8. Output is deterministic under input-order permutation.
+8. Output is deterministic under input-order permutation for a fixed
+   file set and entry selection.
 9. The one behaviour change (prelude shadowing, §7.6) is covered by a
    test and called out in the changelog.
+10. Every rule in §7 is stated in `CONTRACT_MODULE_SYSTEM.md`; the
+    implementation cites the contract, not this spec.
 
 ## 20. Layout and contracts
 
@@ -743,12 +786,14 @@ compiler/frontend/module/
   program.h             Program
 ```
 
-This is the host counterpart of `bootstrap/graph/`.  Adding the subroot
-requires, in the same change: `ARCH_INDEX.md`, the frontend subroot
-list in `CONTRACT_REPOSITORY_LAYOUT.md`, and `CONTRACT_COMPILER_PHASES.md`
-(D6).  Orchestration of passes over a `Program` stays in
-`compiler/driver/`, which remains a library both `daoc` and the
-playground link.
+This is the host counterpart of `bootstrap/graph/`.  The subroot is
+already required by `CONTRACT_REPOSITORY_LAYOUT.md` and
+`CONTRACT_COMPILER_PHASES.md` (both amended together with this spec),
+and the language rules it implements are frozen in
+`CONTRACT_MODULE_SYSTEM.md`; law precedes code.  `ARCH_INDEX.md` gains
+the entry in D0, in the same diff that creates the directory.
+Orchestration of passes over a `Program` stays in `compiler/driver/`,
+which remains a library both `daoc` and the playground link.
 
 ## 21. Explicit deferrals
 

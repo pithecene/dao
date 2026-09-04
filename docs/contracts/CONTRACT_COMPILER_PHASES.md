@@ -36,6 +36,8 @@ Required subroots:
   (types, interning, comparison, printing)
 
 - `compiler/frontend/typecheck/` — semantic type-checking pass
+- `compiler/frontend/module/` — source sets, module graph, and the
+  program-wide source map (`CONTRACT_MODULE_SYSTEM.md`)
 
 Surface-to-HIR lowering is implemented by the HIR builder under
 `compiler/ir/hir/`; no separate `compiler/frontend/lower/` subroot is

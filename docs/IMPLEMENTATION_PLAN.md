@@ -536,9 +536,14 @@ See `docs/task_specs/TASK_31_HOST_MULTIFILE_COMPILATION.md`.
 
 Deliverables:
 
-- program-wide source map: per-file base offsets replace every
-  `prelude_bytes` / `prelude_lines` site (136 across 13 files) and
-  the prelude concatenation in the driver and playground
+- `CONTRACT_MODULE_SYSTEM.md` (landed with the spec): module identity,
+  import binding and exposure, exports, `extend` scoping, qualified
+  forms, the prelude, entry-module selection, determinism
+- program-wide source map: per-file base offsets with a reserved
+  position after each file (so end-of-file diagnostics locate to the
+  right file) replace every `prelude_bytes` / `prelude_lines` site
+  (136 across 13 files) and the prelude concatenation in the driver
+  and playground
 - `Program` / `ModuleInfo` / module graph with discovery over ordered
   module roots, explicit file-list mode, in-memory inputs, and
   deterministic topological order
@@ -550,8 +555,9 @@ Deliverables:
   module-qualified LLVM symbol names via one `mangled_name` helper;
   entry-module `main` rule
 - analysis APIs and the playground on the shared `load_program` API
-- new frontend subroot `compiler/frontend/module/` with the matching
-  contract and `ARCH_INDEX.md` updates
+- new frontend subroot `compiler/frontend/module/` (required by the
+  layout and phase contracts as of the spec; created in D0 together
+  with its `ARCH_INDEX.md` entry)
 
 This is host compiler work, not a bootstrap task.  It lands before
 further bootstrap Tier B slices because every slice adds Dao source
