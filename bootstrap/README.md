@@ -293,6 +293,23 @@ expressions, break/continue, LLVM C API integration,
 bash bootstrap/assemble.sh && daoc build bootstrap/llvm/llvm.gen.dao && ./bootstrap/llvm/llvm.gen
 ```
 
+## Module-system contract parity
+
+`docs/contracts/CONTRACT_MODULE_SYSTEM.md` governs both compilers.
+This table mirrors its §12 for the bootstrap side and must move in the
+same change as the bootstrap work that closes a row.
+
+| Contract section | Bootstrap status |
+|---|---|
+| §2 module identity | conforms (Task 25) — explicit file lists only; no path convention |
+| §3 imports | conforms (Tasks 25–26) — one-segment binding, module-name-only exposure, cycle rejection |
+| §4 exports, same-module access | conforms (Task 26) |
+| §5 `extend` scoping | conforms (Task 26 §6.5) — module granularity, not imported |
+| §6 qualified forms | `b::f`, `b::T`, `b::E::V` conform (Task 27 D4); `b::T::m` is rejected until the bootstrap has methods — Task 33 |
+| §7 prelude | not implemented — the resolver declares compiler builtins only and loads no stdlib — Task 33 |
+| §8 entry module | not implemented — no driver or entry concept; MIR flattens every function of every module — Task 33 |
+| §9 determinism | graph construction conforms (Task 25 §8; graph tests 7–8); program-level output determinism is unverified — Task 33 |
+
 ## Relationship to probes
 
 The `examples/bootstrap_probe/` directory contains earlier experimental

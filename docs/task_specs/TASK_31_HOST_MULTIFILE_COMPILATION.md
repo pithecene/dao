@@ -159,8 +159,11 @@ the playground's private prelude concatenation is deleted.
 
 ### 6.3 Bootstrap
 
-No change to `bootstrap/`.  Parity is verified by running the host on
-the bootstrap's existing multi-file fixtures (§18.5), not by editing
+No change to bootstrap code.  `bootstrap/README.md` gains the
+module-system conformance table (mirrored from
+`CONTRACT_MODULE_SYSTEM.md` §12) so the gaps are recorded; closing
+them is Task 33 (§21).  Parity is verified by running the host on the
+bootstrap's existing multi-file fixtures (§18.5), not by editing
 bootstrap code.
 
 ### 6.4 `assemble.sh` retirement
@@ -371,7 +374,9 @@ offset at which the lexer already emits its zero-length `Eof` token
 unexpected-end diagnostics are reported.  Because
 `base_{n+1} = base_n + size_n + 1`, the EOF position of file *n* is
 never the first byte of file *n+1*, and an empty file (`size = 0`) has
-the single representable position `base`.
+the single representable position `base`.  Base offsets are assigned
+only after the whole file set is loaded and the position budget in
+§9.6 has been checked.
 
 `lex(const SourceBuffer&, uint32_t base_offset = 0)` adds the base to
 every span it emits.  Nothing downstream changes: offsets are already
@@ -415,10 +420,19 @@ Every `prelude_bytes` / `prelude_lines` parameter and every
 `SourceMap::locate`; the line-rebasing arithmetic is deleted.  The
 playground's JSON diagnostics carry the same triple.
 
-### 9.6 Limit
+### 9.6 Position budget
 
-Total program bytes must fit in `uint32_t`.  Exceeding 4 GiB of source
-is diagnosed at load time, not silently wrapped.
+Every file consumes `size + 1` positions (§9.2), so the bound is on
+positions, not bytes.  Before any base offset is assigned, the loader
+computes `Σ (size_i + 1)` over all files in 64-bit arithmetic and
+requires it to be `≤ 2^32`; the highest position then used,
+`base_last + size_last = Σ − 1`, fits in `uint32_t`.  Exceeding the
+budget is a load-time error naming the file count and byte total
+(`program exceeds the 4 GiB offset space: N files, M bytes`), never a
+wrapped offset.  The check runs before lexing, so no span is ever
+created outside the space.  N empty files consume N positions; a byte
+total just under 4 GiB can still exceed the budget once the reserved
+positions are counted.
 
 ## 10. Data model
 
@@ -652,6 +666,14 @@ must accept the first two and reject/accept `extend_isolation` exactly
 as the bootstrap does.  These fixtures are read by both compilers and
 edited by neither task.
 
+Where the two compilers diverge from the contract today is recorded
+in `CONTRACT_MODULE_SYSTEM.md` §12 and `bootstrap/README.md`: the
+bootstrap conforms to §2–§5 and to the `b::f` / `b::T` / `b::E::V`
+forms of §6, rejects `b::T::m` until it has methods, has no prelude
+(§7) and no entry-module selection (§8), and verifies determinism at
+graph level only (§9).  Task 33 closes those gaps on the bootstrap
+side; Task 31 closes the host side.
+
 ## 17. Migration plan
 
 Each slice lands green and behaviour-preserving unless noted.
@@ -691,6 +713,10 @@ Each slice lands green and behaviour-preserving unless noted.
 ### 18.1 Source map (D0)
 
 - `base_n` equals the sum over files `< n` of `size + 1`
+- position budget, as a pure function of injected sizes (no real
+  allocation): `{2^32 − 2, 0}` fits (Σ = 2^32); `{2^32 − 1, 0}` is
+  rejected; `{2^32 − 1}` alone is rejected; five empty files consume
+  five positions; rejection happens before any base is assigned
 - `locate` round-trips for the first byte, last byte, and EOF position
   of every file; `file_for(base_n + size_n)` is file *n*, not *n+1*
 - an empty file between two non-empty files: its EOF locates to itself
@@ -800,6 +826,10 @@ which remains a library both `daoc` and the playground link.
 - **Task 32 — import forms and `assemble.sh` retirement.**  Decide
   selective/glob/alias import syntax (contract change), then convert
   `bootstrap/` to real modules and delete `assemble.sh`.
+- **Task 33 — bootstrap module-system parity.**  Bring the bootstrap
+  to `CONTRACT_MODULE_SYSTEM.md` §6 (`b::T::m`, once it has methods),
+  §7 (prelude), §8 (entry module), and program-level §9 determinism;
+  status table in `bootstrap/README.md`.
 - visibility modifiers; packages and workspaces
 - cross-module `extend` visibility, coherence, orphan rules
 - separate compilation, object caching, incremental rebuilds

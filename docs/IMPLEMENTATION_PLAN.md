@@ -565,6 +565,20 @@ the host must currently concatenate, and because the stdlib-as-modules,
 LSP workspace, and playground T3 tracks all need this substrate.
 `assemble.sh` retirement is explicitly Task 32: it needs an import-form
 decision (selective/glob) in `CONTRACT_SYNTAX_SURFACE.md` first.
+Bootstrap conformance to `CONTRACT_MODULE_SYSTEM.md` is Task 33.
+
+### Task 33 — Bootstrap Module-System Parity
+
+Status: **not started** — sequenced after Task 31 and the bootstrap
+methods slice.
+
+**Objective**: close the bootstrap compiler's gaps against
+`CONTRACT_MODULE_SYSTEM.md` §12: `b::T::m` qualified static methods
+(§6, once bootstrap methods exist), the prelude (§7), entry-module
+selection (§8), and program-level output determinism (§9).  The
+conformance table in `CONTRACT_MODULE_SYSTEM.md` §12 and its mirror in
+`bootstrap/README.md` are the status of record and move only with the
+bootstrap work that closes each row.
 
 ### Task 14 — Numeric Type Expansion
 

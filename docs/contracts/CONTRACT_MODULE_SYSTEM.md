@@ -8,9 +8,11 @@ Authority: language semantics
 ## 1. Purpose
 
 This contract freezes how a Dao program is assembled from source files
-and how names cross file boundaries.  It applies to every Dao compiler
-in this repository; the bootstrap compiler's parity with it is tracked
-in `bootstrap/README.md`.
+and how names cross file boundaries.  It states the language rules and
+applies to every Dao compiler in this repository.  §12 records which
+compiler conforms to which section and names the task that closes each
+gap; until a gap is closed the contract still governs, and the gap is
+a documented non-conformance, not a permission.
 
 Syntax is frozen in `CONTRACT_SYNTAX_SURFACE.md` (module declarations,
 namespace qualification).  This contract does not restate syntax.
@@ -138,3 +140,21 @@ from it:
   symbol export is reserved
 - `CONTRACT_RUNTIME_ABI.md` — runtime hooks are prelude-visible
   `extern fn` declarations under the `__dao_` prefix
+
+## 12. Conformance status
+
+| Section | Host compiler | Bootstrap compiler |
+|---|---|---|
+| §2 identity | Task 31 | conforms (Task 25; explicit file lists only, no path convention) |
+| §3 imports | Task 31 | conforms (Tasks 25–26) |
+| §4 exports, same-module access | Task 31 | conforms (Task 26) |
+| §5 `extend` scoping | Task 31 | conforms (Task 26 §6.5) |
+| §6 qualified forms | Task 31 | `b::f`, `b::T`, `b::E::V` conform (Task 27); `b::T::m` rejected until the bootstrap has methods — Task 33 |
+| §7 prelude | Task 31 | not implemented: the bootstrap resolver declares compiler builtins only and loads no stdlib — Task 33 |
+| §8 entry module | Task 31 | not implemented: no driver or entry concept; MIR flattens all functions — Task 33 |
+| §9 determinism | Task 31 | graph construction conforms (Task 25 §8); program-level output determinism unverified — Task 33 |
+
+"Task N" in a cell means the section is not yet implemented by that
+compiler and Task N delivers it.  The bootstrap column is mirrored in
+`bootstrap/README.md` and must be updated in the same change as any
+bootstrap work that moves a row.
