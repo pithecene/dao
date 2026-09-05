@@ -34,6 +34,7 @@ Defines the allowed top-level ontology and major subroots for Dao.
 - `diagnostics/`
 - `types/`
 - `typecheck/`
+- `module/` — source sets, module graph, program-wide source map
 
 Surface-to-HIR lowering is implemented by the HIR builder under
 `compiler/ir/hir/`; no separate `compiler/frontend/lower/` subroot is
