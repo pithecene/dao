@@ -83,8 +83,11 @@ void handle_run(const httplib::Request& req, httplib::Response& res,
   auto prog = build_playground_program(repo_root, request["source"].get<std::string>());
   if (prog.user == nullptr || !prog.program.diagnostics.empty()) {
     for (const auto& diag : prog.program.diagnostics) {
-      diagnostics.push_back(make_internal_error(diag.message));
+      if (diag.span.length == 0) {
+        diagnostics.push_back(make_internal_error(diag.message));
+      }
     }
+    collect_diagnostics(diagnostics, prog, prog.program.diagnostics);
     respond_failure(res, diagnostics);
     return;
   }

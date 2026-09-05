@@ -11,6 +11,7 @@
 
 #include <llvm/Support/Program.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <filesystem>
@@ -26,9 +27,19 @@ namespace {
 // Command handlers
 // ---------------------------------------------------------------------------
 
+/// lex/parse/ast run before module structure exists: one file, no set.
+auto single_file(const dao::ProgramRequest& request) -> const std::filesystem::path& {
+  if (!request.sources.empty()) {
+    std::cerr << "error: this command takes a single file, not --source inputs\n";
+    std::exit(EXIT_FAILURE);
+  }
+  return request.root;
+}
+
 // Debug-only token dump. Output format is not stable and must not be
 // relied upon by tests, tooling, or documentation.
-void cmd_lex(const std::filesystem::path& path) {
+void cmd_lex(const dao::ProgramRequest& request) {
+  const auto& path = single_file(request);
   auto contents = dao::read_file(path);
   dao::SourceBuffer source(path.generic_string(), std::move(contents));
   auto result = dao::lex(source);
@@ -53,7 +64,8 @@ void cmd_lex(const std::filesystem::path& path) {
 }
 
 // Debug-only parse diagnostic dump. Output format is not stable.
-void cmd_parse(const std::filesystem::path& path) {
+void cmd_parse(const dao::ProgramRequest& request) {
+  const auto& path = single_file(request);
   auto result = dao::lex_and_parse(path);
   if (result.parse_result.file != nullptr) {
     std::cout << "File: " << result.parse_result.file->imports.size() << " imports, "
@@ -62,7 +74,8 @@ void cmd_parse(const std::filesystem::path& path) {
 }
 
 // Pretty-print AST. Output is deterministic and suitable for golden-file testing.
-void cmd_ast(const std::filesystem::path& path) {
+void cmd_ast(const dao::ProgramRequest& request) {
+  const auto& path = single_file(request);
   auto result = dao::lex_and_parse(path);
   if (result.parse_result.file != nullptr) {
     dao::print_ast(std::cout, *result.parse_result.file);
@@ -72,8 +85,8 @@ void cmd_ast(const std::filesystem::path& path) {
 // Emit semantic token classification for the user file. Output is
 // deterministic. Prelude files are separate program files and are not
 // printed.
-void cmd_tokens(const std::filesystem::path& path) {
-  auto program = dao::load_program(path);
+void cmd_tokens(const dao::ProgramRequest& request) {
+  auto program = dao::load_program(request);
   const auto& user = *program.user_files().front();
 
   // Run name resolution for resolve-driven classifications.
@@ -90,8 +103,8 @@ void cmd_tokens(const std::filesystem::path& path) {
 }
 
 // Run name resolution and print results for the user file.
-void cmd_resolve(const std::filesystem::path& path) {
-  auto program = dao::load_program(path);
+void cmd_resolve(const dao::ProgramRequest& request) {
+  auto program = dao::load_program(request);
   const auto& source_map = program.source_map;
   auto resolve_result = dao::resolve(program);
 
@@ -146,34 +159,34 @@ void cmd_resolve(const std::filesystem::path& path) {
 }
 
 // Run type checking and print diagnostics.
-void cmd_check(const std::filesystem::path& path) {
-  dao::run_frontend(path);
+void cmd_check(const dao::ProgramRequest& request) {
+  dao::run_frontend(request);
   std::cout << "ok\n";
 }
 
 // Build and print HIR. Output is deterministic.
-void cmd_hir(const std::filesystem::path& path) {
-  auto result = dao::run_through_hir(path);
+void cmd_hir(const dao::ProgramRequest& request) {
+  auto result = dao::run_through_hir(request);
   if (result.hir.module != nullptr) {
     dao::print_hir(std::cout, *result.hir.module);
   }
 }
 
 // Build and print MIR. Output is deterministic.
-void cmd_mir(const std::filesystem::path& path) {
-  auto result = dao::run_through_mir(path);
+void cmd_mir(const dao::ProgramRequest& request) {
+  auto result = dao::run_through_mir(request);
   if (result.mir.module != nullptr) {
     dao::print_mir(std::cout, *result.mir.module);
   }
 }
 
 // Build and emit LLVM IR. Output is deterministic.
-void cmd_llvm_ir(const std::filesystem::path& path) {
+void cmd_llvm_ir(const dao::ProgramRequest& request) {
   // Initialize targets so the module gets a correct DataLayout
   // for ABI-sensitive lowering (struct coercion, alignment).
   dao::LlvmBackend::initialize_targets();
 
-  auto mir = dao::run_through_mir(path);
+  auto mir = dao::run_through_mir(request);
   llvm::LLVMContext llvm_ctx;
   auto llvm_result = dao::lower_to_llvm(mir, llvm_ctx);
   dao::LlvmBackend::print_ir(std::cout, *llvm_result.module);
@@ -182,13 +195,14 @@ void cmd_llvm_ir(const std::filesystem::path& path) {
 // Compile a .dao file to a native executable.
 // Extra link inputs (object files, -l flags, -L flags) are forwarded
 // to the system linker.
-void cmd_build(const std::filesystem::path& path,
+void cmd_build(const dao::ProgramRequest& request,
                std::span<const std::string> link_extras = {}) {
+  const auto& path = request.primary_file();
   // Initialize targets before lowering so the module gets a correct
   // DataLayout for ABI-sensitive struct coercion.
   dao::LlvmBackend::initialize_targets();
 
-  auto mir = dao::run_through_mir(path);
+  auto mir = dao::run_through_mir(request);
   llvm::LLVMContext llvm_ctx;
   auto llvm_result = dao::lower_to_llvm(mir, llvm_ctx);
 
@@ -250,7 +264,7 @@ void cmd_build(const std::filesystem::path& path,
 // Command dispatch
 // ---------------------------------------------------------------------------
 
-using CommandFn = void (*)(const std::filesystem::path&);
+using CommandFn = void (*)(const dao::ProgramRequest&);
 
 struct Command {
   std::string_view name;
@@ -269,58 +283,98 @@ constexpr auto commands = std::array{
     Command{.name = "llvm-ir", .handler = cmd_llvm_ir},
 };
 
+void print_usage() {
+  std::cerr << "usage: daoc <command> <root.dao> [--module-root DIR]... [--stdlib-root DIR]\n"
+            << "       daoc <command> --source a.dao [--source b.dao]... [--entry a::b]\n"
+            << "       daoc build <inputs as above> [link-inputs...]\n"
+            << "commands: lex, parse, ast, tokens, resolve, check, hir, mir, llvm-ir, build\n";
+}
+
+auto require_file(const std::filesystem::path& path) -> void {
+  if (!std::filesystem::exists(path)) {
+    std::cerr << "error: file not found: " << path << "\n";
+    std::exit(EXIT_FAILURE);
+  }
+}
+
 } // namespace
 
 auto main(int argc, char* argv[]) -> int {
   if (argc < 2) {
-    std::cerr << "usage: daoc <command> <file>\n"
-              << "commands: lex, parse, ast, tokens, resolve, check, hir, mir, llvm-ir, build\n";
+    print_usage();
+    return EXIT_FAILURE;
+  }
+  std::string_view command(argv[1]);
+
+  // daoc <file> -- read and exit (Task 0 compat)
+  const bool known_command =
+      command == "build" || std::ranges::any_of(commands, [&](const Command& c) {
+        return c.name == command;
+      });
+  if (!known_command) {
+    std::filesystem::path path(command);
+    if (argc == 2 && std::filesystem::exists(path)) {
+      dao::read_file(path);
+      return EXIT_SUCCESS;
+    }
+    print_usage();
     return EXIT_FAILURE;
   }
 
-  std::string_view arg1(argv[1]);
+  dao::ProgramRequest request{
+      .options = {.stdlib_root = std::filesystem::path(DAO_SOURCE_DIR) / "stdlib"}};
+  std::vector<std::string> extras; // build: link inputs after the sources
+  for (int i = 2; i < argc; ++i) {
+    std::string_view arg(argv[i]);
+    auto value = [&]() -> const char* {
+      if (i + 1 >= argc) {
+        std::cerr << "error: " << arg << " needs a value\n";
+        std::exit(EXIT_FAILURE);
+      }
+      return argv[++i];
+    };
+    if (arg == "--module-root") {
+      request.options.module_roots.emplace_back(value());
+    } else if (arg == "--stdlib-root") {
+      request.options.stdlib_root = value();
+    } else if (arg == "--source") {
+      request.sources.emplace_back(value());
+    } else if (arg == "--entry") {
+      request.options.entry = value();
+    } else if (arg.starts_with("--")) {
+      std::cerr << "error: unknown option " << arg << "\n";
+      return EXIT_FAILURE;
+    } else if (request.root.empty() && request.sources.empty()) {
+      request.root = arg;
+    } else {
+      extras.emplace_back(arg);
+    }
+  }
 
+  if (request.root.empty() && request.sources.empty()) {
+    print_usage();
+    return EXIT_FAILURE;
+  }
+  if (!request.root.empty()) {
+    require_file(request.root);
+  }
+  for (const auto& source : request.sources) {
+    require_file(source);
+  }
+
+  if (command == "build") {
+    cmd_build(request, extras);
+    return EXIT_SUCCESS;
+  }
+  if (!extras.empty()) {
+    std::cerr << "error: unexpected argument: " << extras.front() << "\n";
+    return EXIT_FAILURE;
+  }
   for (const auto& [name, handler] : commands) {
-    if (arg1 == name) {
-      if (argc < 3) {
-        std::cerr << "usage: daoc " << name << " <file>\n";
-        return EXIT_FAILURE;
-      }
-      std::filesystem::path path(argv[2]);
-      if (!std::filesystem::exists(path)) {
-        std::cerr << "error: file not found: " << path << "\n";
-        return EXIT_FAILURE;
-      }
-      handler(path);
+    if (command == name) {
+      handler(request);
       return EXIT_SUCCESS;
     }
   }
-
-  // build -- accepts extra link inputs after the source file.
-  if (arg1 == "build") {
-    if (argc < 3) {
-      std::cerr << "usage: daoc build <file> [link-inputs...]\n";
-      return EXIT_FAILURE;
-    }
-    std::filesystem::path path(argv[2]);
-    if (!std::filesystem::exists(path)) {
-      std::cerr << "error: file not found: " << path << "\n";
-      return EXIT_FAILURE;
-    }
-    std::vector<std::string> extras;
-    for (int i = 3; i < argc; ++i) {
-      extras.emplace_back(argv[i]);
-    }
-    cmd_build(path, extras);
-    return EXIT_SUCCESS;
-  }
-
-  // daoc <file> -- read and exit (Task 0 compat)
-  std::filesystem::path path(arg1);
-  if (!std::filesystem::exists(path)) {
-    std::cerr << "error: file not found: " << path << "\n";
-    return EXIT_FAILURE;
-  }
-  dao::read_file(path);
-  return EXIT_SUCCESS;
+  return EXIT_FAILURE;
 }

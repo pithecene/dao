@@ -334,8 +334,11 @@ and each module is loaded once.
 
 ### 8.4 Determinism
 
-- `file_id` is assigned in lexical order of the normalized absolute
-  path (in-memory inputs: lexical order of `display_path`)
+- `file_id` is assigned to the prelude group first, then to the other
+  files, each group in lexical order of the normalized absolute path
+  (in-memory inputs: lexical order of `display_path`); prelude-first
+  keeps prelude declarations ahead of user files for passes that walk
+  files in id order
 - `module_id` is assigned in registration order, which is a pure
   function of `file_id` order
 - topological order is Kahn's algorithm with the ready set kept in

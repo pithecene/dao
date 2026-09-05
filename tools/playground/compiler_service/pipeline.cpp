@@ -33,7 +33,8 @@ auto build_playground_program(const std::filesystem::path& repo_root,
                     .text = std::move(user_source),
                     .is_prelude = false});
   prog.program = build_program(std::move(inputs));
-  prog.user = prog.program.files.empty() ? nullptr : prog.program.files.back().get();
+  auto user_files = prog.program.user_files();
+  prog.user = user_files.empty() ? nullptr : user_files.front();
   return prog;
 }
 

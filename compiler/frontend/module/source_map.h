@@ -29,6 +29,8 @@ namespace dao {
 // program-wide offset.
 // ---------------------------------------------------------------------------
 
+struct ModuleInfo;
+
 struct SourceFile {
   uint32_t file_id = 0;
   std::string display_path;  // shown in diagnostics
@@ -37,6 +39,7 @@ struct SourceFile {
   bool is_prelude = false;   // member of the prelude group (stdlib/core, stdlib/io)
   LexResult lex;
   ParseResult parse;
+  ModuleInfo* module = nullptr; // set by the module graph; null when the file declares no module
 
   [[nodiscard]] auto file() const -> const FileNode* { return parse.file; }
   [[nodiscard]] auto eof_offset() const -> uint32_t {

@@ -7,19 +7,27 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace dao {
 
 // ---------------------------------------------------------------------------
-// Program — the set of source files compiled together.
+// Program — the set of source files compiled together, their modules,
+// and the import graph over them (CONTRACT_MODULE_SYSTEM.md §2, §3, §8,
+// §9).
 //
 // Files are lexed and parsed into one program-wide offset space
-// (source_map.h).  Module identity, the import graph, and per-module
-// scopes are not implemented yet: every file is declared into one
-// shared scope, which is what the former concatenated buffer gave the
-// passes, so behaviour is unchanged.
+// (source_map.h) with the prelude group first and each group in lexical
+// order of display path, so file ids, diagnostics order, and every
+// downstream output are independent of the order inputs were supplied
+// in.  Each file's `module` declaration is
+// its identity; imports are edges; modules are ordered so that every
+// module follows the modules it imports.  Per-module scopes and
+// cross-module resolution are later slices: the passes still declare
+// every file into one shared scope.
 // ---------------------------------------------------------------------------
 
 struct SourceInput {
@@ -28,10 +36,30 @@ struct SourceInput {
   bool is_prelude = false;
 };
 
+struct ModuleInfo {
+  uint32_t module_id = 0;
+  std::vector<std::string_view> segments; // canonical identity, viewing the declaring file's buffer
+  std::string display;                    // "a::b::c" — diagnostics and, later, symbol mangling
+  SourceFile* file = nullptr;
+  bool is_prelude = false;
+  bool declares_main = false;       // a top-level `fn main`
+  std::vector<ModuleInfo*> imports; // resolved edges in declaration order, duplicates removed
+};
+
+/// Options common to the loaders that read the filesystem.
+struct ProgramOptions {
+  std::filesystem::path stdlib_root;               // prelude group source; empty loads no prelude
+  std::vector<std::filesystem::path> module_roots; // root-file mode: searched after the root's directory
+  std::optional<std::string> entry;                // explicit-set mode: entry module by display name
+};
+
 struct Program {
-  std::vector<std::unique_ptr<SourceFile>> files; // load order; prelude group first
+  std::vector<std::unique_ptr<SourceFile>> files;   // file_id order: prelude group, then lexical by display path
+  std::vector<std::unique_ptr<ModuleInfo>> modules; // module_id order: file_id order of declaring files
+  std::vector<ModuleInfo*> topo_order;              // imported modules before importers
+  ModuleInfo* entry = nullptr;                      // §7.7; null when no rule selects one
   SourceMap source_map;
-  std::vector<Diagnostic> diagnostics; // load-level: position budget
+  std::vector<Diagnostic> diagnostics; // load level (position budget) and graph level (§8.5)
 
   Program() = default;
   Program(const Program&) = delete;
@@ -40,21 +68,40 @@ struct Program {
   auto operator=(Program&&) noexcept -> Program& = default;
   ~Program() = default;
 
-  /// Parsed roots of every file that produced one, in load order.
+  /// Parsed roots of every file that produced one, in file_id order.
   [[nodiscard]] auto file_nodes() const -> std::vector<const FileNode*>;
 
-  /// The non-prelude files, in load order.
+  /// The non-prelude files, in file_id order.
   [[nodiscard]] auto user_files() const -> std::vector<const SourceFile*>;
 
   /// True when no file produced a lex or parse diagnostic.
   [[nodiscard]] auto lexed_and_parsed_cleanly() const -> bool;
+
+  /// The module with this display identity, or null.
+  [[nodiscard]] auto module_named(std::string_view display) const -> ModuleInfo*;
 };
 
-/// Lex and parse every input into a Program.  Inputs are placed in the
-/// offset space in the given order; the position budget is checked
-/// before any base offset is assigned (position_budget_fits).  Does not
-/// read the filesystem.
-auto build_program(std::vector<SourceInput> inputs) -> Program;
+/// In-memory mode (§8.1): lex, parse, and build the module graph over
+/// exactly these inputs; imports of modules outside the set are
+/// diagnosed, never searched.  The entry module is `entry` when given,
+/// else the unique non-prelude module declaring `fn main` (§7.7).  Does
+/// not read the filesystem.
+auto build_program(std::vector<SourceInput> inputs, std::optional<std::string> entry = {})
+    -> Program;
+
+/// Root-file mode (§8.1–§8.3): the prelude group, the root file, and
+/// every module reachable from it by imports.  `import a::b::c` is
+/// satisfied by the first `<root>/a/b/c.dao` over the root file's
+/// directory, `options.module_roots`, and the stdlib root; the located
+/// file must declare `a::b::c`.  The entry module is the root's.
+auto load_program_from_root(const std::filesystem::path& root_file, const ProgramOptions& options)
+    -> Program;
+
+/// Explicit file-list mode (§8.1): the prelude group plus exactly these
+/// files; discovery is off.  Entry per `options.entry` or the unique
+/// `fn main`.
+auto load_program_from_files(const std::vector<std::filesystem::path>& files,
+                             const ProgramOptions& options) -> Program;
 
 /// Read a file into a SourceInput.  The display path is the path as
 /// given, or — when `display_root` is non-empty and contains it — the
@@ -65,10 +112,13 @@ auto build_program(std::vector<SourceInput> inputs) -> Program;
 auto read_source_input(const std::filesystem::path& path, bool is_prelude,
                        const std::filesystem::path& display_root = {}) -> SourceInput;
 
-/// The prelude group (CONTRACT_MODULE_SYSTEM.md §7): every .dao file
-/// under <stdlib_root>/core then <stdlib_root>/io, each directory in
-/// sorted path order, displayed relative to the stdlib root's parent
-/// (e.g. `stdlib/core/vector.dao`).  Missing directories are skipped.
+/// The prelude group's files (CONTRACT_MODULE_SYSTEM.md §7): every .dao
+/// file under <stdlib_root>/core then <stdlib_root>/io, each directory
+/// in sorted path order.  Missing directories are skipped.
+auto prelude_files(const std::filesystem::path& stdlib_root) -> std::vector<std::filesystem::path>;
+
+/// The prelude group as inputs, displayed relative to the stdlib root's
+/// parent (e.g. `stdlib/core/vector.dao`).
 auto load_prelude_inputs(const std::filesystem::path& stdlib_root) -> std::vector<SourceInput>;
 
 } // namespace dao

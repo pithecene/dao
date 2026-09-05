@@ -1,0 +1,3 @@
+module lib::other
+
+fn one(): i32 -> 1

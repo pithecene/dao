@@ -21,6 +21,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace dao {
 
@@ -89,13 +90,28 @@ auto read_file(const std::filesystem::path& path) -> std::string;
 auto lex_file(const std::filesystem::path& path) -> LexedFile;
 auto lex_and_parse(const std::filesystem::path& path) -> ParsedFile;
 
-// Program stages: the prelude group (stdlib/core, stdlib/io) plus the
-// user file, lexed and parsed into one program-wide offset space.
-// Exits the process on lex/parse errors after printing them.
-auto load_program(const std::filesystem::path& user_path) -> Program;
-auto run_frontend(const std::filesystem::path& path) -> FrontendResult;
-auto run_through_hir(const std::filesystem::path& path) -> HirResult;
-auto run_through_mir(const std::filesystem::path& path) -> MirResult;
+// What to compile: a root file whose imports drive discovery, or an
+// explicit file set (`--source`, discovery off).  The prelude group is
+// loaded from `options.stdlib_root` in both modes.
+struct ProgramRequest {
+  std::filesystem::path root;                 // root-file mode; empty in explicit mode
+  std::vector<std::filesystem::path> sources; // explicit file-list mode
+  ProgramOptions options;
+
+  /// The file that names build outputs: the root, else the first source.
+  [[nodiscard]] auto primary_file() const -> const std::filesystem::path& {
+    return sources.empty() ? root : sources.front();
+  }
+};
+
+// Program stages: the prelude group plus the requested files, lexed and
+// parsed into one program-wide offset space with the module graph
+// built.  Exits the process on load, graph, lex, or parse errors after
+// printing them.
+auto load_program(const ProgramRequest& request) -> Program;
+auto run_frontend(const ProgramRequest& request) -> FrontendResult;
+auto run_through_hir(const ProgramRequest& request) -> HirResult;
+auto run_through_mir(const ProgramRequest& request) -> MirResult;
 auto lower_to_llvm(const MirResult& mir, llvm::LLVMContext& llvm_ctx) -> LlvmBackendResult;
 
 } // namespace dao
