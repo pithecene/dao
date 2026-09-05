@@ -88,12 +88,23 @@ unchanged.  Any deeper path through a binding is an error.
 5. Prelude modules have ordinary identities (`core::vector`,
    `io::file`) and may also be imported and referenced qualified;
    both paths resolve to the same declarations.
+6. Compiler builtins and predeclared names — the outermost scope — can
+   be neither shadowed nor redeclared by any module, prelude
+   included.  A top-level declaration bearing such a name is an
+   error.  Rule 4 applies to prelude declarations only.
+7. Only prelude modules may declare names carrying the `__dao_`
+   prefix, which `CONTRACT_RUNTIME_ABI.md` reserves for runtime hooks.
+   Such a declaration in any other module is an error.
 
 Scope order, outermost to innermost:
 
 ```
 compiler builtins → prelude → module → function / block / lambda
 ```
+
+Lookup is innermost-first, but declaration into the module or prelude
+scope must also be checked against the builtins scope (rule 6);
+scope nesting alone does not enforce it.
 
 ## 8. Entry module and program entry
 

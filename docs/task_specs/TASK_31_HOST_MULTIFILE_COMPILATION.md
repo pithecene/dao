@@ -247,6 +247,21 @@ duplicate top-level declaration because prelude and user share one
 scope; this is the one deliberate behaviour change in the task and is
 listed in §19.
 
+**Builtins are not shadowable.**  Shadowing stops at the prelude.
+Compiler builtins and predeclared names (`i32`, `string`, `void`,
+`Generator`, `null_ptr`, `ptr_cast`, the `size_of`/`align_of` family)
+cannot be redeclared by any module, prelude included
+(`CONTRACT_MODULE_SYSTEM.md` §7.6).  Today this falls out of builtins
+sharing the file scope; with builtins in their own outer scope,
+`Scope::declare`'s local-only check would silently let `fn size_of`
+through, and §12's intrinsic recognition would then lower calls to it
+as the intrinsic instead of its body.  Pass 1 therefore checks every
+top-level declaration against the builtins scope explicitly (§11.2)
+and keeps today's `duplicate top-level declaration` diagnostic.  The
+`__dao_` prefix likewise stays reserved to prelude modules
+(`CONTRACT_MODULE_SYSTEM.md` §7.7), keyed on the declaring module's
+`is_prelude` rather than on a byte offset.
+
 **Qualified access.**  Prelude modules are ordinary modules with
 identities (`core::vector`, `io::file`); `import core::vector` followed
 by `vector::Vector` is legal and resolves to the same symbols.
@@ -503,9 +518,16 @@ needed.
 Pass 1, in topological order: create the builtins scope once; create
 the prelude scope; for each module create its scope (parent: prelude
 scope) and declare its top-level names; for prelude modules declare
-into the prelude scope instead.  Then bind imports: `import a::b`
-declares `b` → `Module` symbol → `ModuleInfo` in the importing module's
-scope.
+into the prelude scope instead.  Before declaring any top-level name
+into a module or prelude scope, check it against the builtins scope
+and reject a hit with today's `duplicate top-level declaration`
+diagnostic — `Scope::declare` only checks the target scope, so this
+check is explicit, not inherited from nesting.  Reject a `__dao_`-
+prefixed name unless the declaring module `is_prelude`, with today's
+"reserved for compiler/runtime use" diagnostic; this replaces the
+`name_span.offset >= prelude_bytes_` test.  Then bind imports:
+`import a::b` declares `b` → `Module` symbol → `ModuleInfo` in the
+importing module's scope.
 
 Pass 2: resolve bodies exactly as today, with two additions:
 
@@ -583,9 +605,14 @@ both the function-definition site and every lookup site in the backend
 | instantiation `f$i32` in `a::b` | `a::b::f$i32` | existing `$` generic mangling preserved |
 | builtin intrinsic (`size_of`, `ptr_cast`) | unchanged | bodies replaced by inline IR |
 
-`LlvmRuntimeHooks::is_runtime_hook` and `is_builtin_intrinsic` test the
-unqualified tail so they keep matching.  Names are not ABI-stable; the
-C-facing export story stays reserved (§6.2).
+Recognition of special symbols is by identity, never by name pattern:
+`is_builtin_intrinsic` applies only to symbols with no owning module
+(the predeclared builtin function symbols the resolver creates), and
+`is_runtime_hook` applies only to `extern fn` symbols, whose names are
+never mangled.  A user function can therefore never be mistaken for an
+intrinsic or a hook regardless of its name — and §11.2 rejects such
+names at declaration anyway.  Names are not ABI-stable; the C-facing
+export story stays reserved (§6.2).
 
 Named-function callbacks passed to C (`examples/ffi/ffi_callback.dao`)
 are unaffected: C receives a pointer, never the name.
@@ -743,7 +770,13 @@ export; import binding collides with declaration; import binding
 collides with import; prelude name visible unqualified; user
 declaration shadows prelude name; prelude `extend` method visible in
 user module; non-prelude `extend` method invisible across modules;
-`import core::vector` + `vector::Vector` resolves to the prelude symbol.
+`import core::vector` + `vector::Vector` resolves to the prelude symbol;
+user `fn size_of`, `class string`, and `fn null_ptr` are rejected with
+today's `duplicate top-level declaration` diagnostic, in the entry
+module and in an imported module alike; a prelude module redeclaring a
+builtin is rejected the same way; user `fn __dao_x` is rejected with
+today's reserved-prefix diagnostic while a prelude `extern fn __dao_x`
+is accepted.
 
 ### 18.4 Type checker (D3)
 
@@ -755,6 +788,10 @@ declared in one module instantiated from another (Task 28 §21.2).
 
 - two modules both defining `add`: both lowered, distinct LLVM names,
   correct call targets
+- intrinsic and hook recognition is by symbol identity: a MIR function
+  whose symbol has an owning module is never treated as an intrinsic,
+  and only `extern fn` symbols are matched against the runtime hook
+  table (regression guard for §12 even though §11.2 rejects the names)
 - `main` in a non-entry module is not `main`
 - `daoc build` on a three-module fixture under `testdata/multifile/`
   (nested layout, discovery mode) produces an executable whose exit
@@ -850,6 +887,11 @@ which remains a library both `daoc` and the playground link.
 - **Golden churn.**  HIR/MIR/LLVM goldens change once (module headers,
   qualified names).  Regenerate in one commit, review the diff for
   anything that is not a rename.
+- **Scope nesting is not a collision check.**  Splitting builtins,
+  prelude, and module into separate scopes makes `Scope::declare`'s
+  local-only check insufficient for the rules that must not relax
+  (builtins, `__dao_`).  Any future scope-shape change must re-run the
+  §18.3 collision tests.
 - **Prelude group as a semantic special case.**  It is the only place
   where "part of every scope" differs from "imported".  Keep it
   confined to scope construction (§7.6) so a future prelude manifest
