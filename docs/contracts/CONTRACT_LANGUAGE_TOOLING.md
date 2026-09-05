@@ -93,6 +93,38 @@ classify at least the following categories:
 This taxonomy may expand, but downstream tooling must not assume a
 smaller baseline than the one above.
 
+### Expansions since the initial freeze
+
+The compiler additionally classifies the following. Tooling may rely on
+them; the "at least" rule above still governs the baseline.
+
+Declaration sites of value bindings:
+- `decl.variable.local` — `let` binders, `for` binders, `match` arm
+  bindings and `as` bindings
+- `decl.variable.param` — function and method parameters
+
+Keywords introduced after the initial freeze:
+- `keyword.concept`, `keyword.derived`, `keyword.extend`,
+  `keyword.deny`, `keyword.as`, `keyword.self`, `keyword.where`,
+  `keyword.match`, `keyword.break`, `keyword.yield`
+
+Operators without a dedicated initial category:
+- `operator.arithmetic` — `+ - * / %`
+- `operator.comparison` — `== != < <= > >=`
+- `operator.logical` — `!`, `and`, `or`
+- `operator.member` — `.`
+- `operator.range` — `..`
+- `operator.address` — `&`
+- `operator.try` — `?`
+
+Literals and uses:
+- `literal.bool` — `true`, `false`
+- `use.type` — a type used as a value (constructor call, static-method
+  receiver, enum-variant path head, concept reference, generic
+  parameter)
+- `use.variant` — an enum variant referenced through its enum
+  (`Color::Red`, `Option.Some` in expressions and patterns)
+
 ## Frozen Initial LSP Capability Slice
 
 The first supported LSP capability slice must include:
