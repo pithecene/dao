@@ -9,6 +9,8 @@
 
 #include <boost/ut.hpp>
 #include <string>
+#include <vector>
+#include <utility>
 
 using namespace boost::ut;
 using namespace dao;
@@ -111,6 +113,186 @@ struct TypecheckPipeline {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Multi-module programs (Task 31 D3): files named `stdlib/...` form the
+// prelude group; the rest are user modules.
+// ---------------------------------------------------------------------------
+
+struct CheckedProgram {
+  Program program;
+  ResolveResult resolved;
+  TypeCheckResult result;
+};
+
+using NamedSource = std::pair<std::string, std::string>;
+
+auto check_program(std::vector<NamedSource> files) -> CheckedProgram {
+  std::vector<SourceInput> inputs;
+  for (auto& [display, text] : files) {
+    inputs.push_back({.display_path = display, .text = text,
+                      .is_prelude = display.starts_with("stdlib/")});
+  }
+  CheckedProgram checked{.program = build_program(std::move(inputs)), .resolved = {}, .result = {}};
+  checked.resolved = resolve(checked.program);
+  TypeContext types;
+  checked.result = typecheck(checked.program, checked.resolved, types);
+  return checked;
+}
+
+auto all_messages(const CheckedProgram& checked) -> std::string {
+  std::string out;
+  for (const auto& diag : checked.resolved.diagnostics) {
+    out += "[resolve] " + diag.message + " | ";
+  }
+  for (const auto& diag : checked.result.diagnostics) {
+    out += "[check] " + diag.message + " | ";
+  }
+  return out;
+}
+
+auto clean(const CheckedProgram& checked) -> bool {
+  return checked.resolved.diagnostics.empty() && is_ok(checked.result);
+}
+
+// Literals, not std::string objects: boost.ut runs suites after main
+// returns, when namespace-scope objects are already destroyed.
+constexpr const char* kMathModule =
+    "module app::math\n"
+    "fn add(a: i32, b: i32): i32 -> a + b\n"
+    "fn identity<T>(x: T): T -> x\n"
+    "class Point:\n"
+    "  x: i32\n"
+    "  fn origin(): Point -> Point(0)\n"
+    "enum Color:\n"
+    "  Red\n"
+    "  Green\n"
+    "enum class Maybe:\n"
+    "  Some(value: i32)\n"
+    "  None\n";
+
+} // namespace
+
+suite<"typecheck_modules"> typecheck_modules = [] {
+  "cross_module_call_checks_arity_and_argument_types"_test = [] {
+    auto arity = check_program({
+        {"main.dao", "module app::main\nimport app::math\nfn main(): i32 -> math::add(1)\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(has_error_containing(arity.result, "expected 2 argument(s), got 1")) << all_messages(arity);
+
+    auto types = check_program({
+        {"main.dao", "module app::main\nimport app::math\nfn main(): i32 -> math::add(1, \"two\")\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(!is_ok(types.result)) << all_messages(types);
+
+    auto ok = check_program({
+        {"main.dao", "module app::main\nimport app::math\nfn main(): i32 -> math::add(1, 2)\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(clean(ok)) << all_messages(ok);
+  };
+
+  "qualified_type_as_parameter_return_and_field"_test = [] {
+    auto checked = check_program({
+        {"main.dao", "module app::main\nimport app::math\n"
+                     "class Holder:\n  p: math::Point\n"
+                     "fn area(p: math::Point): i32 -> p.x\n"
+                     "fn make(): math::Point -> math::Point(3)\n"
+                     "fn main(): i32\n"
+                     "  let h: Holder = Holder(math::Point(1))\n"
+                     "  return area(make()) + h.p.x\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "qualified_enum_construction_and_match"_test = [] {
+    auto checked = check_program({
+        {"main.dao", "module app::main\nimport app::math\n"
+                     "fn f(c: math::Color): i32\n"
+                     "  match c:\n"
+                     "    math::Color::Red:\n"
+                     "      return 1\n"
+                     "    math::Color::Green:\n"
+                     "      return 2\n"
+                     "  return 0\n"
+                     "fn g(m: math::Maybe): i32\n"
+                     "  match m:\n"
+                     "    math::Maybe::Some(value):\n"
+                     "      return value\n"
+                     "    math::Maybe::None:\n"
+                     "      return 0\n"
+                     "  return 0\n"
+                     "fn main(): i32\n"
+                     "  let c: math::Color = math::Color::Red\n"
+                     "  let m: math::Maybe = math::Maybe::Some(value = 5)\n"
+                     "  return f(c) + g(m)\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(clean(checked)) << all_messages(checked);
+
+    auto bad = check_program({
+        {"main.dao", "module app::main\nimport app::math\n"
+                     "fn main(): i32\n  let c: math::Color = math::Color::Blue\n  return 0\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(has_error_containing(bad.result, "'Blue' is not a variant")) << all_messages(bad);
+  };
+
+  "qualified_static_method_call"_test = [] {
+    auto checked = check_program({
+        {"main.dao", "module app::main\nimport app::math\n"
+                     "fn main(): i32\n  let p: math::Point = math::Point::origin()\n  return p.x\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "cross_module_generic_call_explicit_and_inferred"_test = [] {
+    auto checked = check_program({
+        {"main.dao", "module app::main\nimport app::math\n"
+                     "fn main(): i32\n"
+                     "  let a: i32 = math::identity<i32>(3)\n"
+                     "  let b: i32 = math::identity(4)\n"
+                     "  return a + b\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "unknown_export_in_type_position_is_a_resolver_error"_test = [] {
+    auto checked = check_program({
+        {"main.dao", "module app::main\nimport app::math\nfn f(p: math::Nope): i32 -> 0\nfn main(): i32 -> 0\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(checked.resolved.diagnostics.size() == 1_u &&
+           checked.resolved.diagnostics[0].message == "module 'app::math' has no export 'Nope'")
+        << all_messages(checked);
+  };
+
+  "prelude_generics_instantiate_identically_regardless_of_module_order"_test = [] {
+    // `aaa` sorts before `core::box` and imports nothing; its signatures
+    // instantiate a prelude generic, which must already be registered.
+    auto checked = check_program({
+        {"stdlib/core/box.dao", "module core::box\nclass Box<T>:\n  v: T\n"},
+        {"aaa.dao", "module aaa\nclass Holder:\n  b: Box<i32>\n"
+                    "fn take(h: Holder): i32 -> 0\n"
+                    "fn main(): i32\n  let h: Holder = Holder(Box<i32>(1))\n  return take(h)\n"},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "module_binding_is_not_a_value"_test = [] {
+    auto checked = check_program({
+        {"main.dao", "module app::main\nimport app::math\nfn main(): i32\n  let m: i32 = math\n  return 0\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(has_error_containing(checked.result, "'math' is a module, not a value")) << all_messages(checked);
+  };
+};
+
+namespace {
 } // namespace
 
 // ---------------------------------------------------------------------------

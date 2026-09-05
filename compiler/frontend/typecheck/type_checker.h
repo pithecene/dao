@@ -63,8 +63,9 @@ public:
   TypeChecker(TypeContext& types, const ResolveResult& resolve);
 
   // Check every file's declarations as one program: register all
-  // declarations first, then check all bodies.  Per-module checking is
-  // not implemented yet.
+  // declarations first, then check all bodies.  Files arrive in
+  // topological module order; cross-module references need no
+  // ordering because of the two passes.
   auto check(std::span<const FileNode* const> files) -> TypeCheckResult;
 
 private:
@@ -87,6 +88,12 @@ private:
 
   // Symbol -> semantic type cache (populated in pass 1).
   std::unordered_map<const Symbol*, const Type*> symbol_types_;
+
+  // The symbol an identifier or qualified name denotes, following the
+  // resolver's per-segment entries: `b::name` is the export recorded at
+  // `name`, `b::T::m` the member recorded at `m` (CONTRACT_MODULE_SYSTEM.md
+  // §6).  Null when unresolved.
+  [[nodiscard]] auto symbol_for_use(const Expr* expr) const -> const Symbol*;
 
   // decl_span.offset -> Symbol* for finding symbols at declaration sites.
   std::unordered_map<uint32_t, const Symbol*> decl_symbols_;

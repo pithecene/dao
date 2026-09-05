@@ -18,6 +18,19 @@ TypeChecker::TypeChecker(TypeContext& types, const ResolveResult& resolve)
   }
 }
 
+namespace {
+
+/// `a::b::c` for diagnostics.
+auto qualified_path_text(const std::vector<std::string_view>& segments) -> std::string {
+  std::string text;
+  for (auto segment : segments) {
+    text += (text.empty() ? "" : "::") + std::string(segment);
+  }
+  return text;
+}
+
+} // namespace
+
 // ---------------------------------------------------------------------------
 // Top-level entry
 // ---------------------------------------------------------------------------
@@ -106,43 +119,52 @@ auto TypeChecker::resolve_type_node(const TypeNode* node) -> const Type* {
   case NodeKind::NamedType: {
     const auto& named = node->as<NamedType>();
     const auto& path = named.name;
-    if (path.segments.size() != 1) {
-      error(node->span, "qualified type names are not yet supported");
+    if (path.segments.size() > 2) {
+      error(node->span, "'" + qualified_path_text(path.segments) +
+                            "': a type path through an import binding has one more "
+                            "segment (imports bind one segment)");
       return nullptr;
     }
-    auto name = path.segments[0];
+    auto name = path.segments.back();
 
-    // Check builtin scalars.
-    auto builtin = builtin_kind_from_name(name);
-    if (builtin.has_value()) {
-      return types_.builtin(*builtin);
-    }
-
-    // Check predeclared types.
-    if (name == "void") {
-      return types_.void_type();
-    }
-    if (name == "string") {
-      // string is a predeclared named type. For now, use a sentinel
-      // named type with a null decl_id.
-      return types_.named_type(nullptr, "string", {});
-    }
-
-    // Generator<T> — compiler-provided coroutine type.
-    if (name == "Generator") {
-      if (named.type_args.size() != 1) {
-        error(node->span, "Generator requires exactly one type argument");
-        return nullptr;
+    if (path.segments.size() == 1) {
+      // Check builtin scalars.
+      auto builtin = builtin_kind_from_name(name);
+      if (builtin.has_value()) {
+        return types_.builtin(*builtin);
       }
-      const auto* yield_type = resolve_type_node(named.type_args[0]);
-      if (yield_type == nullptr) {
-        return nullptr;
+
+      // Check predeclared types.
+      if (name == "void") {
+        return types_.void_type();
       }
-      return types_.generator_type(yield_type);
+      if (name == "string") {
+        // string is a predeclared named type. For now, use a sentinel
+        // named type with a null decl_id.
+        return types_.named_type(nullptr, "string", {});
+      }
+
+      // Generator<T> — compiler-provided coroutine type.
+      if (name == "Generator") {
+        if (named.type_args.size() != 1) {
+          error(node->span, "Generator requires exactly one type argument");
+          return nullptr;
+        }
+        const auto* yield_type = resolve_type_node(named.type_args[0]);
+        if (yield_type == nullptr) {
+          return nullptr;
+        }
+        return types_.generator_type(yield_type);
+      }
     }
 
-    // Look up user-defined types via resolver symbols.
-    auto it = resolve_.uses.find(node->span.offset);
+    // Look up user-defined types via resolver symbols: a plain name at
+    // its own offset, `b::T` at T's offset where the resolver recorded
+    // the export.
+    auto symbol_offset = path.segments.size() == 1
+                             ? node->span.offset
+                             : path.span.offset + static_cast<uint32_t>(path.segments[0].size()) + 2;
+    auto it = resolve_.uses.find(symbol_offset);
     if (it != resolve_.uses.end()) {
       const auto* sym = it->second;
       // Generic type parameters resolve to TypeGenericParam.
@@ -1457,27 +1479,55 @@ done_generic_check:
 // Identifier
 // ---------------------------------------------------------------------------
 
+auto TypeChecker::symbol_for_use(const Expr* expr) const -> const Symbol* {
+  auto at = [&](uint32_t offset) -> const Symbol* {
+    auto it = resolve_.uses.find(offset);
+    return it == resolve_.uses.end() ? nullptr : it->second;
+  };
+  const auto* head = at(expr->span.offset);
+  if (head == nullptr || !expr->is<QualifiedName>()) {
+    return head;
+  }
+  const auto& qn = expr->as<QualifiedName>();
+  if (head->kind != SymbolKind::Module || qn.segments.size() < 2) {
+    return head;
+  }
+  auto export_offset = expr->span.offset + static_cast<uint32_t>(qn.segments[0].size()) + 2;
+  const auto* exported = at(export_offset);
+  if (exported == nullptr || qn.segments.size() < 3) {
+    return exported;
+  }
+  return at(export_offset + static_cast<uint32_t>(qn.segments[1].size()) + 2);
+}
+
 auto TypeChecker::check_identifier(const Expr* expr) -> const Type* {
-  // Works for both IdentifierExpr and QualifiedName (static method calls).
-  auto it = resolve_.uses.find(expr->span.offset);
-  if (it == resolve_.uses.end()) {
-    std::string name_str;
+  // Works for IdentifierExpr and QualifiedName (static method calls,
+  // enum variants, and names through import bindings).
+  auto name_text = [&] {
     if (expr->is<IdentifierExpr>()) {
-      name_str = expr->as<IdentifierExpr>().name;
-    } else if (expr->is<QualifiedName>()) {
-      const auto& qn = expr->as<QualifiedName>();
-      for (size_t i = 0; i < qn.segments.size(); ++i) {
-        if (i > 0)
-          name_str += "::";
-        name_str += qn.segments[i];
-      }
+      return std::string(expr->as<IdentifierExpr>().name);
     }
-    error(expr->span, "unresolved identifier '" + name_str + "'");
+    return qualified_path_text(expr->as<QualifiedName>().segments);
+  };
+  const auto* sym = symbol_for_use(expr);
+  if (sym == nullptr) {
+    // An import the graph reported missing leaves its binding without a
+    // module; the graph's diagnostic already names the problem.
+    const auto* head = resolve_.uses.contains(expr->span.offset)
+                           ? resolve_.uses.at(expr->span.offset)
+                           : nullptr;
+    if (head == nullptr || head->kind != SymbolKind::Module || head->decl != nullptr) {
+      error(expr->span, "unresolved identifier '" + name_text() + "'");
+    }
     return nullptr;
   }
-  const auto* result = resolve_symbol_type(it->second);
-  if (result == nullptr && it->second->kind == SymbolKind::Param) {
-    error(expr->span, "'" + std::string(it->second->name) + "' has no known type in this context");
+  if (sym->kind == SymbolKind::Module) {
+    error(expr->span, "'" + name_text() + "' is a module, not a value");
+    return nullptr;
+  }
+  const auto* result = resolve_symbol_type(sym);
+  if (result == nullptr && sym->kind == SymbolKind::Param) {
+    error(expr->span, "'" + std::string(sym->name) + "' has no known type in this context");
   }
   return result;
 }
@@ -1832,15 +1882,16 @@ void TypeChecker::verify_concept_constraints(
     const Expr* callee_expr,
     Span error_span,
     const std::unordered_map<uint32_t, const Type*>& bindings) {
-  if (bindings.empty() || !callee_expr->is<IdentifierExpr>()) {
+  if (bindings.empty() ||
+      !(callee_expr->is<IdentifierExpr>() || callee_expr->is<QualifiedName>())) {
     return;
   }
-  auto sym_it = resolve_.uses.find(callee_expr->span.offset);
-  if (sym_it == resolve_.uses.end() || sym_it->second->kind != SymbolKind::Function ||
-      sym_it->second->decl == nullptr) {
+  const auto* callee_sym = symbol_for_use(callee_expr);
+  if (callee_sym == nullptr || callee_sym->kind != SymbolKind::Function ||
+      callee_sym->decl == nullptr) {
     return;
   }
-  const auto* fn_decl = sym_it->second->decl_as_decl();
+  const auto* fn_decl = callee_sym->decl_as_decl();
   if (!fn_decl->is<FunctionDecl>()) {
     return;
   }
@@ -2033,9 +2084,10 @@ auto TypeChecker::check_call(const Expr* expr) -> const Type* {
   // Constructor call: callee must be an identifier that resolves to a
   // Type symbol (e.g. `Point`), not merely any expression whose type
   // happens to be a struct (e.g. `p` where `p: Point`).
-  if (callee_type->kind() == TypeKind::Struct && call.callee->is<IdentifierExpr>()) {
-    auto sym_it = resolve_.uses.find(call.callee->span.offset);
-    if (sym_it != resolve_.uses.end() && sym_it->second->kind == SymbolKind::Type) {
+  if (callee_type->kind() == TypeKind::Struct &&
+      (call.callee->is<IdentifierExpr>() || call.callee->is<QualifiedName>())) {
+    const auto* callee_sym = symbol_for_use(call.callee);
+    if (callee_sym != nullptr && callee_sym->kind == SymbolKind::Type) {
       return check_construct(expr, static_cast<const TypeStruct*>(callee_type));
     }
   }
@@ -2057,11 +2109,11 @@ auto TypeChecker::check_call(const Expr* expr) -> const Type* {
 
   // Detect if the callee is an extern fn (for ABI boundary enforcement).
   bool callee_is_extern = false;
-  if (call.callee->is<IdentifierExpr>()) {
-    auto sym_it = resolve_.uses.find(call.callee->span.offset);
-    if (sym_it != resolve_.uses.end() && sym_it->second->kind == SymbolKind::Function &&
-        sym_it->second->decl != nullptr) {
-      const auto* fn_decl = sym_it->second->decl_as_decl();
+  if (call.callee->is<IdentifierExpr>() || call.callee->is<QualifiedName>()) {
+    const auto* callee_sym = symbol_for_use(call.callee);
+    if (callee_sym != nullptr && callee_sym->kind == SymbolKind::Function &&
+        callee_sym->decl != nullptr) {
+      const auto* fn_decl = callee_sym->decl_as_decl();
       if (fn_decl->is<FunctionDecl>()) {
         callee_is_extern = fn_decl->as<FunctionDecl>().is_extern;
       }
@@ -2073,20 +2125,21 @@ auto TypeChecker::check_call(const Expr* expr) -> const Type* {
   std::unordered_map<uint32_t, const Type*> type_bindings;
 
   // Populate bindings from explicit type arguments: f<i32, f64>(x).
-  if (!call.type_args.empty() && call.callee->is<IdentifierExpr>()) {
-    auto sym_it = resolve_.uses.find(call.callee->span.offset);
-    if (sym_it != resolve_.uses.end() && sym_it->second->kind == SymbolKind::Function) {
+  if (!call.type_args.empty() &&
+      (call.callee->is<IdentifierExpr>() || call.callee->is<QualifiedName>())) {
+    const auto* callee_sym = symbol_for_use(call.callee);
+    if (callee_sym != nullptr && callee_sym->kind == SymbolKind::Function) {
       // Determine expected type param count.
       size_t expected_count = 0;
-      if (sym_it->second->decl != nullptr) {
-        const auto* fn_decl = sym_it->second->decl_as_decl();
+      if (callee_sym->decl != nullptr) {
+        const auto* fn_decl = callee_sym->decl_as_decl();
         if (fn_decl->is<FunctionDecl>()) {
           expected_count = fn_decl->as<FunctionDecl>().type_params.size();
           // For class methods (no own type params), use the enclosing
           // class's type params when invoked via Type<Args>::method().
-          if (expected_count == 0 && sym_it->second->name.find('.') != std::string_view::npos) {
+          if (expected_count == 0 && callee_sym->name.find('.') != std::string_view::npos) {
             // Find the enclosing ClassDecl by checking file declarations.
-            auto class_name = sym_it->second->name.substr(0, sym_it->second->name.find('.'));
+            auto class_name = callee_sym->name.substr(0, callee_sym->name.find('.'));
             for (const auto* file_decl : all_decls_) {
               if (file_decl->kind() == NodeKind::ClassDecl &&
                   file_decl->as<ClassDecl>().name == class_name) {
@@ -2810,7 +2863,23 @@ auto typecheck(std::span<const FileNode* const> files, const ResolveResult& reso
 
 auto typecheck(const Program& program, const ResolveResult& resolve, TypeContext& types)
     -> TypeCheckResult {
-  auto nodes = program.file_nodes();
+  // Prelude modules first: they are every module's environment without
+  // being import edges, and a module's declarations must be registered
+  // before a generic of theirs is instantiated in another module's
+  // signature.  Then the remaining modules in topological order.
+  std::vector<const FileNode*> nodes;
+  for (bool prelude : {true, false}) {
+    for (const auto* module : program.topo_order) {
+      if (module->is_prelude == prelude) {
+        nodes.push_back(module->file->parse.file);
+      }
+    }
+  }
+  for (const auto& file : program.files) {
+    if (file->parse.file != nullptr && file->module == nullptr) {
+      nodes.push_back(file->parse.file);
+    }
+  }
   return typecheck(nodes, resolve, types);
 }
 

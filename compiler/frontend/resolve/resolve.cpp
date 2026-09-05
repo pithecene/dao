@@ -1073,6 +1073,40 @@ private:
 
   // --- Types ---
 
+  /// `b::T` in type position (CONTRACT_MODULE_SYSTEM.md §6): the binding
+  /// is recorded at the head and the exported type at `T`'s own offset,
+  /// where the type checker reads it.  A head that is not a module
+  /// binding is left undiagnosed, as unknown names in type position are.
+  void resolve_qualified_type(const QualifiedPath& path, Scope* scope) {
+    auto first_seg = path.segments.front();
+    auto* binding = scope->lookup(first_seg);
+    if (binding == nullptr || binding->kind != SymbolKind::Module) {
+      return;
+    }
+    uses_[path.span.offset] = binding;
+    const auto* target = binding->decl_as_module();
+    if (target == nullptr) {
+      return; // no program, or an import the graph already reported missing
+    }
+    if (path.segments.size() > 2) {
+      diagnostics_.push_back(Diagnostic::error(
+          path.span, "'" + module_display(path.segments) + "': a type path through import binding '" +
+                         std::string(first_seg) + "' has one more segment (imports bind one segment)"));
+      return;
+    }
+    auto name = path.segments[1];
+    auto name_offset = path.span.offset + static_cast<uint32_t>(first_seg.size()) + 2;
+    const auto* exports = target->is_prelude ? prelude_ : target->scope;
+    auto* exported = exports->lookup_local(name);
+    if (exported == nullptr || exported->kind == SymbolKind::Module) {
+      diagnostics_.push_back(Diagnostic::error(
+          Span{.offset = name_offset, .length = static_cast<uint32_t>(name.size())},
+          "module '" + target->display + "' has no export '" + std::string(name) + "'"));
+      return;
+    }
+    uses_[name_offset] = exported;
+  }
+
   void resolve_type(const TypeNode& type, Scope* scope) {
     switch (type.kind()) {
     case NodeKind::NamedType: {
@@ -1092,16 +1126,7 @@ private:
           uses_[path.span.offset] = sym;
         }
       } else {
-        // Multi-segment type: resolve leading segment as module reference.
-        // Only Module symbols are valid as leading segments of qualified
-        // type paths — other kinds are silently ignored (type-position
-        // references are not diagnosed for unknown names).
-        auto first_seg = path.segments.front();
-        auto* sym = scope->lookup(first_seg);
-        if (sym != nullptr && sym->kind == SymbolKind::Module) {
-          uses_[path.span.offset] = sym;
-        }
-        // Trailing segments are unresolvable without cross-file resolution.
+        resolve_qualified_type(path, scope);
       }
 
       // Resolve type arguments recursively.
