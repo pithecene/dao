@@ -1,4 +1,5 @@
 #include "frontend/resolve/resolve.h"
+#include "frontend/module/module_graph.h"
 
 #include <algorithm>
 #include <span>
@@ -69,25 +70,93 @@ constexpr std::string_view kBuiltinFunctions[] = {
 
 class Resolver {
 public:
+  /// Per-module resolution over a program (spec §11.2): prelude modules
+  /// declare into the prelude scope, every other module into a scope of
+  /// its own, in topological order.
+  auto run(Program& program) -> ResolveResult {
+    std::vector<Unit> units;
+    for (auto* module : program.topo_order) {
+      units.push_back({.file = module->file->parse.file,
+                       .module = module,
+                       .is_prelude = module->is_prelude});
+    }
+    // A file with no module declaration (already a parse error) still
+    // resolves, in a scope of its own, so analysis keeps working.
+    for (const auto& file : program.files) {
+      if (file->parse.file != nullptr && file->module == nullptr) {
+        units.push_back({.file = file->parse.file, .module = nullptr, .is_prelude = file->is_prelude});
+      }
+    }
+    return run_units(std::move(units));
+  }
+
+  /// Resolution without a program: each file is its own module and the
+  /// source map decides prelude membership.
   auto run(std::span<const FileNode* const> files, const SourceMap* source_map)
       -> ResolveResult {
-    source_map_ = source_map;
+    std::vector<Unit> units;
+    for (const auto* file : files) {
+      units.push_back({.file = file,
+                       .module = nullptr,
+                       .is_prelude = source_map != nullptr &&
+                                     source_map->is_prelude(file->span.offset)});
+    }
+    return run_units(std::move(units));
+  }
 
-    // Create the shared file scope spanning every file's offset range
-    // and pre-populate builtins.
-    file_scope_ = ctx_.make_scope(ScopeKind::File, nullptr);
-    file_scope_->set_range(covering_span(files));
+private:
+  /// One file being resolved: its module (null without a program) and
+  /// the scope its top-level names go into.
+  struct Unit {
+    const FileNode* file = nullptr;
+    ModuleInfo* module = nullptr;
+    bool is_prelude = false;
+    Scope* scope = nullptr;
+  };
+
+  ResolveContext ctx_;
+  Scope* builtins_ = nullptr;
+  Scope* prelude_ = nullptr;
+  const Unit* current_ = nullptr; // the unit being declared or resolved
+  std::unordered_map<uint32_t, Symbol*> uses_;
+  std::vector<Diagnostic> diagnostics_;
+
+  auto run_units(std::vector<Unit> units) -> ResolveResult {
+    // Scope shape (spec §7.6): builtins, then the prelude group as one
+    // namespace, then one scope per module.  Builtins and prelude are
+    // the lexical environment of every module, so both span the whole
+    // program: offset-based scope lookup descends through them to the
+    // module scope that contains a position.
+    const auto program_span = covering_span(units);
+    builtins_ = ctx_.make_scope(ScopeKind::Builtins, nullptr);
+    builtins_->set_range(program_span);
+    prelude_ = ctx_.make_scope(ScopeKind::Prelude, builtins_);
+    prelude_->set_range(program_span);
     populate_builtins();
 
-    // Pass 1: Collect top-level declarations and imports, in load order.
-    for (const auto* file : files) {
-      collect_top_level(*file);
+    for (auto& unit : units) {
+      if (unit.is_prelude) {
+        unit.scope = prelude_;
+      } else {
+        unit.scope = ctx_.make_scope(ScopeKind::Module, prelude_);
+        unit.scope->set_range(unit.file->span);
+      }
+      if (unit.module != nullptr) {
+        unit.module->scope = unit.scope;
+      }
     }
 
-    // Pass 2: Resolve bodies.
-    for (const auto* file : files) {
-      resolve_bodies(*file);
+    // Pass 1: declare top-level names and bind imports.
+    for (const auto& unit : units) {
+      current_ = &unit;
+      collect_top_level(unit);
     }
+    // Pass 2: resolve bodies.
+    for (const auto& unit : units) {
+      current_ = &unit;
+      resolve_bodies(unit);
+    }
+    current_ = nullptr;
 
     return ResolveResult{
         .context = std::move(ctx_),
@@ -96,62 +165,56 @@ public:
     };
   }
 
-private:
-  ResolveContext ctx_;
-  Scope* file_scope_ = nullptr;
-  std::unordered_map<uint32_t, Symbol*> uses_;
-  const SourceMap* source_map_ = nullptr;
-  std::vector<Diagnostic> diagnostics_;
-
-  // Smallest span covering every file (files occupy disjoint ranges of
-  // one program-wide offset space).
-  static auto covering_span(std::span<const FileNode* const> files) -> Span {
-    if (files.empty()) {
-      return Span{};
+  // Smallest span covering the units' files (files occupy disjoint
+  // ranges of one program-wide offset space).
+  static auto covering_span(const std::vector<Unit>& units) -> Span {
+    bool any = false;
+    uint32_t begin = 0;
+    uint32_t end = 0;
+    for (const auto& unit : units) {
+      auto span = unit.file->span;
+      if (!any) {
+        begin = span.offset;
+        end = span.offset + span.length;
+        any = true;
+      } else {
+        begin = std::min(begin, span.offset);
+        end = std::max(end, span.offset + span.length);
+      }
     }
-    uint32_t begin = files.front()->span.offset;
-    uint32_t end = begin;
-    for (const auto* file : files) {
-      begin = std::min(begin, file->span.offset);
-      end = std::max(end, file->span.offset + file->span.length);
-    }
-    return Span{.offset = begin, .length = end - begin};
+    return any ? Span{.offset = begin, .length = end - begin} : Span{};
   }
 
-  // True if the declaration at `span` belongs to the prelude group and
-  // is therefore allowed to use reserved runtime-hook names.
-  [[nodiscard]] auto in_prelude(Span span) const -> bool {
-    return source_map_ != nullptr && source_map_->is_prelude(span.offset);
+  /// A symbol owned by the module being resolved.
+  auto new_symbol(SymbolKind kind, std::string_view name, Span decl_span, const void* decl)
+      -> Symbol* {
+    auto* sym = ctx_.make_symbol(kind, name, decl_span, decl);
+    sym->module = current_ != nullptr ? current_->module : nullptr;
+    return sym;
   }
 
   // --- Builtin population ---
 
   void populate_builtins() {
     for (auto name : kBuiltinTypes) {
-      auto* sym = ctx_.make_symbol(SymbolKind::Builtin, name, Span{}, nullptr);
-      file_scope_->declare(name, sym);
+      builtins_->declare(name, ctx_.make_symbol(SymbolKind::Builtin, name, Span{}, nullptr));
     }
     for (auto name : kPredeclaredTypes) {
-      auto* sym = ctx_.make_symbol(SymbolKind::Predeclared, name, Span{}, nullptr);
-      file_scope_->declare(name, sym);
+      builtins_->declare(name, ctx_.make_symbol(SymbolKind::Predeclared, name, Span{}, nullptr));
     }
     for (auto name : kBuiltinFunctions) {
-      auto* sym = ctx_.make_symbol(SymbolKind::Function, name, Span{}, nullptr);
-      file_scope_->declare(name, sym);
+      builtins_->declare(name, ctx_.make_symbol(SymbolKind::Function, name, Span{}, nullptr));
     }
   }
 
   // --- Pass 1: Collect top-level declarations ---
 
-  void collect_top_level(const FileNode& file) {
-    // Register imports.
-    for (const auto* imp : file.imports) {
-      collect_import(*imp);
-    }
-
-    // Register top-level declarations.
-    for (const auto* decl : file.declarations) {
+  void collect_top_level(const Unit& unit) {
+    for (const auto* decl : unit.file->declarations) {
       collect_decl(*decl);
+    }
+    for (const auto* imp : unit.file->imports) {
+      collect_import(*imp);
     }
   }
 
@@ -172,14 +235,23 @@ private:
     }
     Span binding_span{.offset = offset, .length = binding_len};
 
-    if (file_scope_->lookup_local(binding_name) != nullptr) {
+    if (current_->scope->lookup_local(binding_name) != nullptr ||
+        builtins_->lookup_local(binding_name) != nullptr) {
       diagnostics_.push_back(Diagnostic::error(
           binding_span,
           "duplicate top-level declaration '" + std::string(binding_name) + "'"));
-    } else {
-      auto* sym = ctx_.make_symbol(SymbolKind::Module, binding_name, binding_span, &node);
-      file_scope_->declare(binding_name, sym);
+      return;
     }
+    // The binding's target is the module the graph resolved this import
+    // to; null without a program or when the graph reported it missing.
+    const ModuleInfo* target = nullptr;
+    if (current_->module != nullptr) {
+      auto identity = module_display(path.segments);
+      auto it = std::ranges::find(current_->module->imports, identity, &ModuleInfo::display);
+      target = it == current_->module->imports.end() ? nullptr : *it;
+    }
+    auto* sym = new_symbol(SymbolKind::Module, binding_name, binding_span, target);
+    current_->scope->declare(binding_name, sym);
   }
 
   void collect_decl(const Decl& decl) {
@@ -231,10 +303,19 @@ private:
       return;
     }
 
-    // Reject user-code declarations that use the reserved __dao_ prefix.
-    // Prelude (stdlib) declarations are exempt — they legitimately declare
-    // runtime hooks under this prefix (CONTRACT_MODULE_SYSTEM.md §7.7).
-    if (name.starts_with("__dao_") && !in_prelude(name_span)) {
+    // Builtins and predeclared names cannot be redeclared by any module,
+    // prelude included (CONTRACT_MODULE_SYSTEM.md §7.6).  Scope::declare
+    // checks only its own scope, so the outer builtins scope is checked
+    // here explicitly.
+    if (builtins_->lookup_local(name) != nullptr) {
+      diagnostics_.push_back(Diagnostic::error(
+          name_span, "duplicate top-level declaration '" + std::string(name) + "'"));
+      return;
+    }
+
+    // The reserved __dao_ prefix belongs to prelude modules, which
+    // declare runtime hooks under it (CONTRACT_MODULE_SYSTEM.md §7.7).
+    if (name.starts_with("__dao_") && !current_->is_prelude) {
       diagnostics_.push_back(Diagnostic::error(
           name_span,
           "'" + std::string(name) +
@@ -242,7 +323,8 @@ private:
       return;
     }
 
-    auto* existing = file_scope_->lookup_local(name);
+    auto* scope = current_->scope;
+    auto* existing = scope->lookup_local(name);
     if (existing != nullptr) {
       // Allow arity-based function overloading: same name, different
       // parameter counts. Both must be functions.
@@ -265,18 +347,18 @@ private:
           // Register the new overload with a mangled internal name.
           auto mangled = ctx_.intern(
               std::string(name) + "$" + std::to_string(new_arity));
-          auto* sym = ctx_.make_symbol(kind, mangled, name_span, &decl);
-          file_scope_->declare_overload(name, mangled, sym);
+          auto* sym = new_symbol(kind, mangled, name_span, &decl);
+          scope->declare_overload(name, mangled, sym);
 
           // Bootstrap the overload set with the original declaration
           // if this is the first overload being added.
-          if (file_scope_->lookup_overloads(name) != nullptr &&
-              file_scope_->lookup_overloads(name)->size() == 1) {
+          if (scope->lookup_overloads(name) != nullptr &&
+              scope->lookup_overloads(name)->size() == 1) {
             size_t orig_arity =
                 existing_decl->as<FunctionDecl>().params.size();
             auto orig_mangled = ctx_.intern(
                 std::string(name) + "$" + std::to_string(orig_arity));
-            file_scope_->declare_overload(name, orig_mangled, existing);
+            scope->declare_overload(name, orig_mangled, existing);
           }
           return;
         }
@@ -285,8 +367,24 @@ private:
           name_span,
           "duplicate top-level declaration '" + std::string(name) + "'"));
     } else {
-      auto* sym = ctx_.make_symbol(kind, name, name_span, &decl);
-      file_scope_->declare(name, sym);
+      auto* sym = new_symbol(kind, name, name_span, &decl);
+      scope->declare(name, sym);
+    }
+    if (decl.is<ClassDecl>()) {
+      declare_class_methods(decl.as<ClassDecl>(), scope);
+    }
+  }
+
+  /// A class's direct methods are top-level names in mangled form
+  /// ("Vector.push"): HIR method desugaring and `Type::method` calls
+  /// find them by name, from any module, so they are declared in pass 1
+  /// with the class rather than when its body is resolved.
+  void declare_class_methods(const ClassDecl& st, Scope* scope) {
+    for (const auto* method : st.methods) {
+      const auto& fn_decl = method->as<FunctionDecl>();
+      auto mangled_name = ctx_.intern(std::string(st.name) + "." + std::string(fn_decl.name));
+      auto* method_sym = new_symbol(SymbolKind::Function, mangled_name, fn_decl.name_span, method);
+      scope->declare(mangled_name, method_sym);
     }
   }
 
@@ -294,7 +392,7 @@ private:
 
   /// Check if any overload of `name` has the given parameter count.
   auto overload_has_arity(std::string_view name, size_t arity) -> bool {
-    const auto* overloads = file_scope_->lookup_overloads(name);
+    const auto* overloads = current_->scope->lookup_overloads(name);
     if (overloads != nullptr) {
       for (const auto* sym : *overloads) {
         if (sym->decl != nullptr) {
@@ -349,9 +447,9 @@ private:
 
   // --- Pass 2: Resolve bodies ---
 
-  void resolve_bodies(const FileNode& file) {
-    for (const auto* decl : file.declarations) {
-      resolve_decl(*decl, file_scope_);
+  void resolve_bodies(const Unit& unit) {
+    for (const auto* decl : unit.file->declarations) {
+      resolve_decl(*decl, unit.scope);
     }
   }
 
@@ -402,7 +500,7 @@ private:
             tp.name_span,
             "duplicate type parameter '" + std::string(tp.name) + "'"));
       } else {
-        auto* sym = ctx_.make_symbol(
+        auto* sym = new_symbol(
             SymbolKind::GenericParam, tp.name, tp.name_span, &decl);
         scope->declare(tp.name, sym);
       }
@@ -428,7 +526,7 @@ private:
             param.name_span,
             "duplicate parameter '" + std::string(param.name) + "'"));
       } else {
-        auto* sym = ctx_.make_symbol(SymbolKind::Param, param.name, param.name_span, &decl);
+        auto* sym = new_symbol(SymbolKind::Param, param.name, param.name_span, &decl);
         fn_scope->declare(param.name, sym);
       }
 
@@ -472,7 +570,7 @@ private:
             "duplicate declaration '" + std::string(field->name) + "'"));
       } else {
         auto* sym =
-            ctx_.make_symbol(SymbolKind::Field, field->name, field->name_span, field);
+            new_symbol(SymbolKind::Field, field->name, field->name_span, field);
         struct_scope->declare(field->name, sym);
       }
 
@@ -481,19 +579,9 @@ private:
       }
     }
 
-    // Resolve direct class methods and create Function symbols with
-    // mangled names (e.g. "Vector.push") so HIR method desugaring
-    // can find them — same pattern as extend method symbols.
-    // Also declare in file scope for static method calls (Type::method()).
+    // Method bodies; their symbols were declared with the class in pass 1.
     for (const auto* method : st.methods) {
       resolve_function(*method, struct_scope);
-      const auto& fn_decl = method->as<FunctionDecl>();
-      auto mangled_name = ctx_.intern(
-          std::string(st.name) + "." + std::string(fn_decl.name));
-      auto* method_sym = ctx_.make_symbol(SymbolKind::Function,
-                                          mangled_name,
-                                          fn_decl.name_span, method);
-      file_scope_->declare(mangled_name, method_sym);
     }
 
     // Resolve conformance blocks — concept name + method signatures.
@@ -602,7 +690,7 @@ private:
         const auto& fn_decl = method->as<FunctionDecl>();
         auto mangled_name = ctx_.intern(
             target_name + "." + std::string(fn_decl.name));
-        ctx_.make_symbol(SymbolKind::Function, mangled_name,
+        new_symbol(SymbolKind::Function, mangled_name,
                          fn_decl.name_span, method);
       }
     }
@@ -630,7 +718,7 @@ private:
             "duplicate declaration '" + std::string(let_stmt.name) + "'"));
       } else {
         auto* sym =
-            ctx_.make_symbol(SymbolKind::Local, let_stmt.name, let_stmt.name_span, &stmt);
+            new_symbol(SymbolKind::Local, let_stmt.name, let_stmt.name_span, &stmt);
         scope->declare(let_stmt.name, sym);
       }
       break;
@@ -690,7 +778,7 @@ private:
       // Create block scope for the loop body; declare the loop variable.
       auto* for_scope = ctx_.make_scope(ScopeKind::Block, scope);
       for_scope->set_range(stmt.span);
-      auto* sym = ctx_.make_symbol(
+      auto* sym = new_symbol(
           SymbolKind::Local, for_stmt.var, for_stmt.var_span, &stmt);
       for_scope->declare(for_stmt.var, sym);
 
@@ -737,14 +825,14 @@ private:
         auto* arm_scope = ctx_.make_scope(ScopeKind::Block, scope);
         // Register destructuring bindings as locals in the arm scope.
         for (size_t i = 0; i < arm.bindings.size(); ++i) {
-          auto* sym = ctx_.make_symbol(
+          auto* sym = new_symbol(
               SymbolKind::Local, arm.bindings[i], arm.binding_spans[i],
               nullptr);
           arm_scope->declare(arm.bindings[i], sym);
         }
         // Register `as` binding: `Pattern as name:` binds the whole value.
         if (!arm.as_binding.empty()) {
-          auto* as_sym = ctx_.make_symbol(
+          auto* as_sym = new_symbol(
               SymbolKind::Local, arm.as_binding, arm.as_binding_span,
               nullptr);
           arm_scope->declare(arm.as_binding, as_sym);
@@ -763,6 +851,63 @@ private:
     default:
       break;
     }
+  }
+
+  /// `b::name`, `b::E::V`, and `b::T::m` through an import binding
+  /// (CONTRACT_MODULE_SYSTEM.md §6).  The binding is recorded at the
+  /// head segment and each resolved segment at its own offset, so
+  /// tooling paints the segments and the type checker finds the export.
+  void resolve_through_binding(const Expr& expr, const QualifiedName& qn, Symbol* binding) {
+    uses_[expr.span.offset] = binding;
+    const auto* target = binding->decl_as_module();
+    if (target == nullptr) {
+      return; // no program, or an import the graph already reported missing
+    }
+    auto path_text = [&] {
+      std::string text;
+      for (auto segment : qn.segments) {
+        text += (text.empty() ? "" : "::") + std::string(segment);
+      }
+      return text;
+    };
+    if (qn.segments.size() > 3) {
+      diagnostics_.push_back(Diagnostic::error(
+          expr.span, "'" + path_text() + "': a path through import binding '" +
+                         std::string(binding->name) +
+                         "' reaches at most a type's member (imports bind one segment)"));
+      return;
+    }
+
+    // Prelude modules share one namespace; their export table is the
+    // prelude scope.  Import bindings are not re-exported (§3.2).
+    const auto* exports = target->is_prelude ? prelude_ : target->scope;
+    auto name = qn.segments[1];
+    auto name_offset = expr.span.offset + static_cast<uint32_t>(qn.segments[0].size()) + 2;
+    auto* exported = exports->lookup_local(name);
+    if (exported == nullptr || exported->kind == SymbolKind::Module) {
+      diagnostics_.push_back(Diagnostic::error(
+          Span{.offset = name_offset, .length = static_cast<uint32_t>(name.size())},
+          "module '" + target->display + "' has no export '" + std::string(name) + "'"));
+      return;
+    }
+    uses_[name_offset] = exported;
+    if (qn.segments.size() == 2) {
+      return;
+    }
+
+    // b::T::m is a static method of exported type T; b::E::V an enum
+    // variant, recorded as the type for the checker to validate.
+    auto member = qn.segments[2];
+    auto member_offset = name_offset + static_cast<uint32_t>(name.size()) + 2;
+    if (exported->kind != SymbolKind::Type) {
+      diagnostics_.push_back(Diagnostic::error(
+          Span{.offset = member_offset, .length = static_cast<uint32_t>(member.size())},
+          "'" + std::string(name) + "' of module '" + target->display + "' is not a type"));
+      return;
+    }
+    auto mangled = ctx_.intern(std::string(name) + "." + std::string(member));
+    auto* method = exports->lookup_local(mangled);
+    uses_[member_offset] = method != nullptr ? method : exported;
   }
 
   // --- Expressions ---
@@ -805,7 +950,7 @@ private:
         // (the type checker handles enum variant resolution).
         auto mangled_name = ctx_.intern(
             std::string(qn.segments[0]) + "." + std::string(qn.segments[1]));
-        auto* method_sym = file_scope_->lookup(mangled_name);
+        auto* method_sym = scope->lookup(mangled_name);
         if (method_sym != nullptr) {
           uses_[expr.span.offset] = method_sym;
         } else {
@@ -818,10 +963,7 @@ private:
             seg_span,
             "'" + std::string(first_seg) + "' is not a module"));
       } else {
-        // Record the first segment's resolution.
-        uses_[expr.span.offset] = sym;
-        // Trailing segments are unresolvable in Task 6 (no cross-file
-        // module resolution) — left without entries in the uses table.
+        resolve_through_binding(expr, qn, sym);
       }
       break;
     }
@@ -904,7 +1046,7 @@ private:
               span,
               "duplicate parameter '" + std::string(name) + "'"));
         } else {
-          auto* sym = ctx_.make_symbol(SymbolKind::LambdaParam, name, span, &expr);
+          auto* sym = new_symbol(SymbolKind::LambdaParam, name, span, &expr);
           lam_scope->declare(name, sym);
         }
       }
@@ -999,9 +1141,9 @@ auto resolve(std::span<const FileNode* const> files, const SourceMap* source_map
   return resolver.run(files, source_map);
 }
 
-auto resolve(const Program& program) -> ResolveResult {
-  auto nodes = program.file_nodes();
-  return resolve(nodes, &program.source_map);
+auto resolve(Program& program) -> ResolveResult {
+  Resolver resolver;
+  return resolver.run(program);
 }
 
 auto resolve(const FileNode& file) -> ResolveResult {

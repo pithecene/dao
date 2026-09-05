@@ -13,7 +13,9 @@
 namespace dao {
 
 enum class ScopeKind : std::uint8_t {
-  File,     // top-level file scope
+  Builtins, // compiler builtins and predeclared names; the root
+  Prelude,  // the prelude group's declarations, one namespace
+  Module,   // one non-prelude module's declarations and import bindings
   Function, // function body
   Block,    // if/while/for/mode/resource body
   Struct,   // struct member scope

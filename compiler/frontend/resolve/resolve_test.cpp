@@ -5,8 +5,12 @@
 
 #include <boost/ut.hpp>
 
+#include <algorithm>
 #include <filesystem>
+#include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace boost::ut;
 using namespace dao;
@@ -85,6 +89,258 @@ auto find_offset(const ResolvedSource& result, const std::string& text, size_t n
   return static_cast<uint32_t>(pos);
 }
 
+
+// ---------------------------------------------------------------------------
+// Multi-module programs (Task 31 D2): files named `stdlib/...` form the
+// prelude group; the rest are user modules.
+// ---------------------------------------------------------------------------
+
+struct ResolvedProgram {
+  Program program;
+  ResolveResult result;
+};
+
+using NamedSource = std::pair<std::string, std::string>;
+
+auto resolve_program(std::vector<NamedSource> files) -> ResolvedProgram {
+  std::vector<SourceInput> inputs;
+  for (auto& [display, text] : files) {
+    inputs.push_back({.display_path = display, .text = text,
+                      .is_prelude = display.starts_with("stdlib/")});
+  }
+  ResolvedProgram resolved{.program = build_program(std::move(inputs)), .result = {}};
+  resolved.result = resolve(resolved.program);
+  return resolved;
+}
+
+auto file_named(const ResolvedProgram& resolved, std::string_view display) -> const SourceFile& {
+  for (const auto& file : resolved.program.files) {
+    if (file->display_path == display) {
+      return *file;
+    }
+  }
+  throw std::runtime_error("no file " + std::string(display));
+}
+
+/// Program offset of the n-th occurrence of `text` in a file.
+auto offset_in(const ResolvedProgram& resolved, std::string_view display, std::string_view text,
+               size_t occurrence = 0) -> uint32_t {
+  const auto& file = file_named(resolved, display);
+  auto contents = file.buffer.contents();
+  size_t pos = std::string::npos;
+  for (size_t i = 0, from = 0; i <= occurrence; ++i, from = pos + 1) {
+    pos = contents.find(text, from);
+    if (pos == std::string::npos) {
+      throw std::runtime_error("no occurrence of " + std::string(text));
+    }
+  }
+  return file.base_offset + static_cast<uint32_t>(pos);
+}
+
+auto use_in(const ResolvedProgram& resolved, std::string_view display, std::string_view text,
+            size_t occurrence = 0) -> const Symbol* {
+  auto it = resolved.result.uses.find(offset_in(resolved, display, text, occurrence));
+  return it == resolved.result.uses.end() ? nullptr : it->second;
+}
+
+auto messages_of(const ResolvedProgram& resolved) -> std::vector<std::string> {
+  std::vector<std::string> out;
+  for (const auto& diag : resolved.result.diagnostics) {
+    out.push_back(diag.message);
+  }
+  return out;
+}
+
+auto joined(const std::vector<std::string>& items) -> std::string {
+  std::string out;
+  for (const auto& item : items) {
+    out += item + " | ";
+  }
+  return out;
+}
+
+// Literals, not std::string objects: boost.ut runs suites after main
+// returns, when namespace-scope objects are already destroyed.
+constexpr const char* kMathModule =
+    "module app::math\n"
+    "import app::util\n"
+    "fn add(a: i32, b: i32): i32 -> a + b\n"
+    "class Point:\n"
+    "  x: i32\n"
+    "  fn origin(): Point -> Point(0)\n"
+    "enum Color:\n"
+    "  Red\n"
+    "  Green\n";
+
+constexpr const char* kUtilModule = "module app::util\nfn one(): i32 -> 1\n";
+
+} // namespace
+
+suite<"resolve_modules"> resolve_modules = [] {
+  "qualified_function_resolves_through_the_import"_test = [] {
+    auto resolved = resolve_program({
+        {"main.dao", "module app::main\nimport app::math\nfn main(): i32 -> math::add(1, 2)\n"},
+        {"math.dao", kMathModule},
+        {"util.dao", kUtilModule},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+    const auto* head = use_in(resolved, "main.dao", "math::add");
+    expect(head != nullptr && head->kind == SymbolKind::Module);
+    expect(head != nullptr && head->decl_as_module()->display == "app::math");
+    const auto* add = use_in(resolved, "main.dao", "add(1");
+    expect(add != nullptr && add->kind == SymbolKind::Function && add->name == "add");
+    expect(add != nullptr && add->module != nullptr && add->module->display == "app::math");
+  };
+
+  "qualified_static_method_and_variant"_test = [] {
+    auto resolved = resolve_program({
+        {"main.dao", "module app::main\nimport app::math\n"
+                     "fn main(): i32\n  let p: i32 = math::Point::origin()\n"
+                     "  let c: i32 = math::Color::Red\n  return 0\n"},
+        {"math.dao", kMathModule},
+        {"util.dao", kUtilModule},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+    const auto* point = use_in(resolved, "main.dao", "Point::origin");
+    expect(point != nullptr && point->kind == SymbolKind::Type && point->name == "Point");
+    const auto* origin = use_in(resolved, "main.dao", "origin()");
+    expect(origin != nullptr && origin->name == "Point.origin") << "static method by mangled name";
+    const auto* red = use_in(resolved, "main.dao", "Red");
+    expect(red != nullptr && red->kind == SymbolKind::Type && red->name == "Color")
+        << "variant recorded as its enum for the checker";
+  };
+
+  "unknown_export_is_diagnosed"_test = [] {
+    auto resolved = resolve_program({
+        {"main.dao", "module app::main\nimport app::math\nfn main(): i32 -> math::nope()\n"},
+        {"math.dao", kMathModule},
+        {"util.dao", kUtilModule},
+    });
+    expect(messages_of(resolved) == std::vector<std::string>{"module 'app::math' has no export 'nope'"})
+        << joined(messages_of(resolved));
+  };
+
+  "import_bindings_are_not_reexported"_test = [] {
+    auto resolved = resolve_program({
+        {"main.dao", "module app::main\nimport app::math\nfn main(): i32 -> math::util::one()\n"},
+        {"math.dao", kMathModule},
+        {"util.dao", kUtilModule},
+    });
+    expect(messages_of(resolved) == std::vector<std::string>{"module 'app::math' has no export 'util'"})
+        << joined(messages_of(resolved));
+  };
+
+  "deeper_path_through_a_binding_is_an_error"_test = [] {
+    auto resolved = resolve_program({
+        {"main.dao", "module app::main\nimport app::math\nfn main(): i32 -> math::Point::origin::x()\n"},
+        {"math.dao", kMathModule},
+        {"util.dao", kUtilModule},
+    });
+    expect(!messages_of(resolved).empty() &&
+           messages_of(resolved)[0].starts_with("'math::Point::origin::x': a path through import binding"))
+        << joined(messages_of(resolved));
+  };
+
+  "import_binding_collides_with_a_declaration"_test = [] {
+    auto resolved = resolve_program({
+        {"main.dao", "module app::main\nimport app::math\nfn math(): i32 -> 0\nfn main(): i32 -> 0\n"},
+        {"math.dao", kMathModule},
+        {"util.dao", kUtilModule},
+    });
+    expect(messages_of(resolved) == std::vector<std::string>{"duplicate top-level declaration 'math'"})
+        << joined(messages_of(resolved));
+  };
+
+  "import_binding_collides_with_an_import"_test = [] {
+    auto resolved = resolve_program({
+        {"main.dao", "module app::main\nimport app::math\nimport other::math\nfn main(): i32 -> 0\n"},
+        {"math.dao", kMathModule},
+        {"util.dao", kUtilModule},
+        {"other.dao", "module other::math\n"},
+    });
+    expect(messages_of(resolved) == std::vector<std::string>{"duplicate top-level declaration 'math'"})
+        << joined(messages_of(resolved));
+  };
+
+  "prelude_names_are_visible_unqualified_and_shadowable"_test = [] {
+    auto resolved = resolve_program({
+        {"stdlib/core/helper.dao", "module core::helper\nfn helper(): i32 -> 1\nfn shared(): i32 -> 2\n"},
+        {"main.dao", "module app::main\nfn shared(): i32 -> 3\n"
+                     "fn main(): i32 -> helper() + shared()\n"},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+    const auto* helper = use_in(resolved, "main.dao", "helper()");
+    expect(helper != nullptr && helper->module != nullptr && helper->module->is_prelude);
+    const auto* shared = use_in(resolved, "main.dao", "shared()", 1); // 0 is the declaration
+    expect(shared != nullptr && shared->module != nullptr && shared->module->display == "app::main")
+        << "the module's own declaration shadows the prelude's";
+  };
+
+  "prelude_symbols_resolve_through_an_import_too"_test = [] {
+    auto resolved = resolve_program({
+        {"stdlib/core/vec.dao", "module core::vec\nclass Vec:\n  n: i32\n  fn make(): Vec -> Vec(0)\n"},
+        {"main.dao", "module app::main\nimport core::vec\n"
+                     "fn main(): i32\n  let a: i32 = vec::Vec::make()\n  let b: i32 = Vec::make()\n  return 0\n"},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+    const auto* qualified = use_in(resolved, "main.dao", "make()");   // recorded at the member
+    const auto* unqualified = use_in(resolved, "main.dao", "Vec::make", 1); // recorded at the head
+    expect(qualified != nullptr && qualified == unqualified && qualified->name == "Vec.make")
+        << "one prelude symbol either way";
+  };
+
+  "prelude_class_methods_resolve_regardless_of_module_order"_test = [] {
+    // `aaa` sorts before `core::vec` and imports nothing, so its bodies
+    // resolve before the prelude's; method names must already be declared.
+    auto resolved = resolve_program({
+        {"stdlib/core/vec.dao", "module core::vec\nclass Vec:\n  n: i32\n  fn make(): Vec -> Vec(0)\n"},
+        {"aaa.dao", "module aaa\nfn main(): i32\n  let v: i32 = Vec::make()\n  return 0\n"},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+    const auto* make = use_in(resolved, "aaa.dao", "Vec::make");
+    expect(make != nullptr && make->name == "Vec.make");
+  };
+
+  "builtins_cannot_be_redeclared_anywhere"_test = [] {
+    auto resolved = resolve_program({
+        {"stdlib/core/bad.dao", "module core::bad\nfn null_ptr(): i32 -> 0\n"},
+        {"main.dao", "module app::main\nimport app::lib\nclass string:\n  n: i32\nfn main(): i32 -> 0\n"},
+        {"lib.dao", "module app::lib\nclass bool:\n  n: i32\n"},
+    });
+    auto messages = messages_of(resolved);
+    std::sort(messages.begin(), messages.end());
+    expect(messages == std::vector<std::string>{"duplicate top-level declaration 'bool'",
+                                                "duplicate top-level declaration 'null_ptr'",
+                                                "duplicate top-level declaration 'string'"})
+        << joined(messages);
+  };
+
+  "reserved_prefix_is_keyed_on_the_prelude_group"_test = [] {
+    auto resolved = resolve_program({
+        {"stdlib/core/hooks.dao", "module core::hooks\nextern fn __dao_x(): i32\n"},
+        {"main.dao", "module app::main\nfn __dao_y(): i32 -> 0\nfn main(): i32 -> 0\n"},
+    });
+    expect(messages_of(resolved) == std::vector<std::string>{
+                                        "'__dao_y': the '__dao_' prefix is reserved for compiler/runtime use"})
+        << joined(messages_of(resolved));
+  };
+
+  "modules_own_their_scopes_and_symbols"_test = [] {
+    auto resolved = resolve_program({
+        {"main.dao", "module app::main\nimport app::util\nfn main(): i32\n  let n: i32 = util::one()\n  return n\n"},
+        {"util.dao", kUtilModule},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+    const auto* util = resolved.program.module_named("app::util");
+    expect(util != nullptr && util->scope != nullptr && util->scope->lookup_local("one") != nullptr);
+    expect(util != nullptr && util->scope->lookup_local("main") == nullptr) << "scopes are per module";
+    const auto* n = use_in(resolved, "main.dao", "n\n", 1); // 0 ends `module app::main`
+    expect(n != nullptr && n->kind == SymbolKind::Local && n->module != nullptr &&
+           n->module->display == "app::main");
+  };
+};
+
+namespace {
 } // namespace
 
 // NOLINTBEGIN(readability-magic-numbers)
