@@ -526,9 +526,9 @@ See `docs/task_specs/TASK_30_BOOTSTRAP_LLVM_BACKEND.md` and
 
 ### Task 31 — Host Multi-file Compilation
 
-Status: **in progress** — D0 (program-wide source map; prelude loaded
+Status: **complete** — D0 (program-wide source map; prelude loaded
 as separate files; `prelude_bytes` machinery and `blank_leading_module`
-removed; `compiler/frontend/module/` created) and D1 (`ModuleInfo`,
+removed; `compiler/frontend/module/` created), D1 (`ModuleInfo`,
 module graph with import edges, lexical Kahn ordering and cycle traces,
 entry selection per §7.7, root-file discovery with the §8.3 mapping
 rule, lexical file-id order per §8.4, `--module-root` / `--stdlib-root`
@@ -541,7 +541,12 @@ checked in topological order) and D4 (`HirProgram` of per-module
 `HirModule`s, MIR flattened in program order, `llvm_function_name` by
 symbol identity with `<module>::<name>` mangling and the entry-module
 `main` rule, intrinsic and hook recognition gated on identity, the
-first multi-file executable) landed.  D5–D6 follow.
+first multi-file executable), D5 (analysis and the playground on the
+program's in-memory mode; `daoc tokens` / `resolve` dumps select user
+modules by `is_prelude`; cross-file hover and definition covered) and
+D6 (`docs/building.md` driver usage; this entry) landed.  Explicit
+deferrals stay as the spec lists them: Task 32 (import forms,
+`assemble.sh` retirement) and Task 33 (bootstrap module-system parity).
 
 **Objective**: make the C++ host compiler compile a program spanning
 multiple Dao source files with real module identity, import-driven

@@ -87,18 +87,21 @@ void cmd_ast(const dao::ProgramRequest& request) {
 // printed.
 void cmd_tokens(const dao::ProgramRequest& request) {
   auto program = dao::load_program(request);
-  const auto& user = *program.user_files().front();
 
   // Run name resolution for resolve-driven classifications.
   auto resolve_result = dao::resolve(program);
 
-  auto sem_tokens =
-      dao::classify_tokens(user.lex.tokens, user.file(), &resolve_result);
-
-  for (const auto& tok : sem_tokens) {
-    auto loc = program.source_map.locate(tok.span.offset);
-    auto text = program.source_map.text(tok.span);
-    std::cout << loc.line << ":" << loc.col << " " << tok.kind << " " << text << "\n";
+  // Every user module; prelude tokens are not the user's concern.
+  for (const auto* user : program.user_files()) {
+    if (program.user_files().size() > 1) {
+      std::cout << "== " << user->display_path << "\n";
+    }
+    auto sem_tokens = dao::classify_tokens(user->lex.tokens, user->file(), &resolve_result);
+    for (const auto& tok : sem_tokens) {
+      auto loc = program.source_map.locate(tok.span.offset);
+      auto text = program.source_map.text(tok.span);
+      std::cout << loc.line << ":" << loc.col << " " << tok.kind << " " << text << "\n";
+    }
   }
 }
 
