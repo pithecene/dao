@@ -6,7 +6,11 @@ Keep them small and human-readable.
 Every file is a complete program: it must build with `daoc build` and
 run.  The playground lists this directory, and each file is a
 regression input, so a new language feature should land with an
-example that exercises it.
+example that exercises it.  `playground_service_test` compiles and
+runs every file, compares its output with `testdata/examples/<name>.out`
+(`task update-example-goldens` rewrites them), and requires every token
+to be classified; files the compiler cannot build yet are listed with a
+reason in `testdata/examples/known_failures.txt`.
 
 | File | Demonstrates |
 |------|--------------|

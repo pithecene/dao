@@ -621,6 +621,12 @@ private:
       for (const auto* arg : call.args) {
         visit_expr(*arg);
       }
+      // Named-argument labels name the callee's fields or parameters.
+      for (const auto& label : call.arg_name_spans) {
+        if (label.length > 0) {
+          classify(label, "use.field");
+        }
+      }
       break;
     }
     case NodeKind::IndexExpr: {

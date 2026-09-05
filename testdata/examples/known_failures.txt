@@ -1,0 +1,3 @@
+# Examples the compiler cannot build yet, one per line: <file> <reason>.
+# playground_service_test expects each to fail and flags it once it builds.
+raw_memory.dao MIR concreteness invariant violation during monomorphization of the prelude allocation surface

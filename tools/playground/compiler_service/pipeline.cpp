@@ -37,9 +37,35 @@ auto build_playground_program(const std::filesystem::path& repo_root,
   return prog;
 }
 
+auto run_frontend_pipeline(const std::filesystem::path& repo_root, std::string user_source)
+    -> FrontendPipeline {
+  FrontendPipeline pipe;
+  pipe.prog = build_playground_program(repo_root, std::move(user_source));
+  if (pipe.prog.user == nullptr || !pipe.prog.program.diagnostics.empty() ||
+      !pipe.prog.program.lexed_and_parsed_cleanly()) {
+    return pipe;
+  }
+  pipe.resolve_result = resolve(pipe.prog.program);
+  pipe.check_result = typecheck(pipe.prog.program, pipe.resolve_result, pipe.types);
+  pipe.ok = true;
+  return pipe;
+}
+
+auto token_start_at(uint32_t offset, const LexResult& lex) -> uint32_t {
+  auto it = std::ranges::find_if(lex.tokens, [offset](const Token& tok) -> bool {
+    return tok.span.offset <= offset && offset < tok.span.offset + tok.span.length;
+  });
+  return it == lex.tokens.end() ? offset : it->span.offset;
+}
+
+auto has_error_severity(const std::vector<Diagnostic>& diags) -> bool {
+  return std::ranges::any_of(
+      diags, [](const Diagnostic& diag) -> bool { return diag.severity == Severity::Error; });
+}
+
 auto has_user_error(const std::vector<Diagnostic>& diags, const PlaygroundProgram& prog) -> bool {
-  return std::ranges::any_of(diags, [&prog](const auto& diag) -> bool {
-    return prog.in_user_file(diag.span.offset);
+  return std::ranges::any_of(diags, [&prog](const Diagnostic& diag) -> bool {
+    return diag.severity == Severity::Error && prog.in_user_file(diag.span.offset);
   });
 }
 

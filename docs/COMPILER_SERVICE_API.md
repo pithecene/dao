@@ -75,6 +75,16 @@ Document symbols should report:
 - selection span
 - parent-child nesting where applicable
 
+## Concrete Surface
+
+The recommendations above are realised, for the playground transport, by
+the tables in `compiler/analysis/tooling_surface.h`: token kinds, lexical
+categories, diagnostic severities, payload shapes, and routes.  That
+header is the machine-checked definition — the frontend's TypeScript is
+generated from it and `ctest` verifies the service's replies against it
+(see `docs/PLAYGROUND_ARCHITECTURE.md`, "Sync Discipline").  This
+document explains intent; the header says what is served today.
+
 ## Principle
 
 The playground and LSP should consume these payloads without needing their

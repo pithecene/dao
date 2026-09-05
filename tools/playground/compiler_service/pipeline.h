@@ -2,8 +2,12 @@
 #define DAO_PLAYGROUND_PIPELINE_H
 
 #include "frontend/diagnostics/diagnostic.h"
+#include "frontend/lexer/lexer.h"
 #include "frontend/module/program.h"
 #include "frontend/module/source_map.h"
+#include "frontend/resolve/resolve.h"
+#include "frontend/typecheck/type_checker.h"
+#include "frontend/types/type_context.h"
 
 #include <nlohmann/json.hpp>
 
@@ -46,6 +50,10 @@ struct PlaygroundProgram {
   [[nodiscard]] auto in_user_file(uint32_t program_offset) const -> bool {
     return program.source_map.file_for(program_offset) == user;
   }
+  /// True if the offset lies in the editor buffer past the synthetic header.
+  [[nodiscard]] auto in_editor_text(uint32_t program_offset) const -> bool {
+    return in_user_file(program_offset) && user->local_offset(program_offset) >= header_bytes;
+  }
   /// Editor line of a program offset inside the user file.
   [[nodiscard]] auto editor_line(uint32_t program_offset) const -> uint32_t {
     auto line = program.source_map.locate(program_offset).line;
@@ -58,7 +66,28 @@ struct PlaygroundProgram {
 auto build_playground_program(const std::filesystem::path& repo_root,
                               std::string user_source) -> PlaygroundProgram;
 
-/// True if any diagnostic originates in the editor buffer.
+/// lex → parse → resolve → typecheck over the whole program: the input
+/// to every navigation and completion query.  `ok` is false when any
+/// file failed to lex or parse; the later results are then unset.
+struct FrontendPipeline {
+  PlaygroundProgram prog;
+  ResolveResult resolve_result;
+  TypeCheckResult check_result;
+  TypeContext types;
+  bool ok = false;
+};
+
+auto run_frontend_pipeline(const std::filesystem::path& repo_root, std::string user_source)
+    -> FrontendPipeline;
+
+/// Start offset of the token containing `offset`, or `offset` itself
+/// when no token does.
+auto token_start_at(uint32_t offset, const LexResult& lex) -> uint32_t;
+
+/// True if any diagnostic has error severity.
+auto has_error_severity(const std::vector<Diagnostic>& diags) -> bool;
+
+/// True if any error-severity diagnostic originates in the editor buffer.
 auto has_user_error(const std::vector<Diagnostic>& diags, const PlaygroundProgram& prog) -> bool;
 
 /// Append editor-buffer diagnostics to a JSON array with buffer-local

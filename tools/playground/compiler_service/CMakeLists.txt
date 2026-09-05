@@ -1,24 +1,60 @@
 find_package(httplib REQUIRED)
 find_package(nlohmann_json REQUIRED)
+find_package(ut REQUIRED)
 
-add_executable(dao_playground
-  main.cpp
+# Transport-free service: every route as a JSON function.  Shared by the
+# HTTP server and the service test.
+add_library(dao_playground_service STATIC
   analyze.cpp
+  completions.cpp
   examples.cpp
+  navigation.cpp
   pipeline.cpp
   run.cpp
+  service.cpp
 )
 
-target_link_libraries(dao_playground PRIVATE
+target_include_directories(dao_playground_service PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_link_libraries(dao_playground_service PUBLIC
   dao_analysis
   dao_backend_llvm
   dao_ir
   dao_frontend
-  httplib::httplib
   nlohmann_json::nlohmann_json
+)
+
+target_compile_definitions(dao_playground_service PRIVATE
+  DAO_RUNTIME_LIB="$<TARGET_FILE:dao_runtime>"
+)
+
+add_executable(dao_playground
+  main.cpp
+)
+
+target_link_libraries(dao_playground PRIVATE
+  dao_playground_service
+  httplib::httplib
 )
 
 target_compile_definitions(dao_playground PRIVATE
   DAO_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
-  DAO_RUNTIME_LIB="$<TARGET_FILE:dao_runtime>"
 )
+
+# Drives every route over every example in-process: response shapes,
+# full token classification, navigation answers, and run goldens.
+add_executable(service_test
+  service_test.cpp
+)
+
+target_link_libraries(service_test PRIVATE dao_playground_service Boost::ut)
+
+target_compile_definitions(service_test PRIVATE
+  DAO_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+
+include(CTest)
+add_test(NAME playground_service_test COMMAND service_test)
+set_tests_properties(playground_service_test PROPERTIES TIMEOUT 900)

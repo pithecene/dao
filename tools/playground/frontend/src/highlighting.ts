@@ -4,14 +4,18 @@ import {
   ViewPlugin,
   type ViewUpdate,
 } from "@codemirror/view";
-import type { SemanticToken } from "./types";
+import {
+  TOKEN_GROUP,
+  type SemanticToken,
+  type TokenKind,
+} from "./generated/tooling_surface";
 
 // Module-private token state. Updated by setTokens(), read by the plugin.
 let currentTokens: SemanticToken[] = [];
 
 /**
  * Replace the current token set and force a decoration rebuild.
- * Call this after receiving new semantic tokens from /api/analyze.
+ * Call this after receiving new semantic tokens from the analyze route.
  */
 export function setTokens(tokens: SemanticToken[], view: EditorView): void {
   currentTokens = tokens;
@@ -20,26 +24,13 @@ export function setTokens(tokens: SemanticToken[], view: EditorView): void {
 }
 
 /**
- * Map semantic token kinds from CONTRACT_LANGUAGE_TOOLING.md to CSS classes.
- * Prefix groups share a class so highlighting degrades gracefully.
+ * CSS class of a token kind: `dao-<group>` from the generated surface.
+ * A kind this build of the frontend does not know (a newer service)
+ * is left unstyled rather than mis-styled.
  */
-function semanticKindToClass(kind: string): string | null {
-  if (kind.startsWith("keyword.")) return "dao-keyword";
-  if (kind.startsWith("decl.variable.")) return "dao-variable";
-  if (kind === "decl.module" || kind === "use.module") return "dao-module";
-  if (kind === "decl.field" || kind === "use.field" || kind === "use.variant") return "dao-field";
-  if (kind.startsWith("decl.")) return "dao-decl";
-  if (kind.startsWith("type.") || kind === "use.type") return "dao-type";
-  if (kind.startsWith("use.variable.")) return "dao-variable";
-  if (kind === "use.function") return "dao-decl";
-  if (kind.startsWith("mode.")) return "dao-mode";
-  if (kind.startsWith("resource.")) return "dao-resource";
-  if (kind === "lambda.param") return "dao-lambda-param";
-  if (kind === "literal.number" || kind === "literal.bool") return "dao-literal-number";
-  if (kind === "literal.string") return "dao-literal-string";
-  if (kind.startsWith("operator.")) return "dao-operator";
-  if (kind === "punctuation") return "dao-punctuation";
-  return null;
+function cssClass(kind: string): string | null {
+  const group = TOKEN_GROUP[kind as TokenKind];
+  return group ? `dao-${group}` : null;
 }
 
 function buildDecorations(view: EditorView) {
@@ -51,7 +42,7 @@ function buildDecorations(view: EditorView) {
     const to = tok.offset + tok.length;
     if (from >= docLength || to > docLength || from >= to) continue;
 
-    const cls = semanticKindToClass(tok.kind);
+    const cls = cssClass(tok.kind);
     if (!cls) continue;
 
     decorations.push(Decoration.mark({ class: cls }).range(from, to));

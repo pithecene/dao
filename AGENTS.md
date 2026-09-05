@@ -60,6 +60,19 @@ explicit syntax revision task.
 - `testdata/` holds fixtures for future parser/compiler tests
 - `ai/skills/` holds Bonsai skills only
 
+## Tooling Sync Discipline
+
+`compiler/analysis/tooling_surface.h` is the single source of truth for
+what the compiler exposes to editors: token kinds, payload shapes, and
+service routes.  Agents must:
+- edit the table, not a consumer, when adding a kind, field, or route
+- regenerate `tools/playground/frontend/src/generated/tooling_surface.ts`
+  (`task gen-tooling-surface`) in the same change
+- land the frontend side of a new route or kind in the same PR
+- add or update an example under `examples/` when a language feature
+  lands; `playground_service_test` keeps every example runnable and
+  fully classified
+
 ## Code Quality Discipline
 
 Every diff must be evaluated in context of the larger project, not
