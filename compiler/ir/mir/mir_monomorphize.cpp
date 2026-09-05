@@ -654,6 +654,7 @@ auto specialize_call_site(
   new_sym->name = std::string_view(*name_str);
   new_sym->decl_span = git->second->symbol->decl_span;
   new_sym->decl = git->second->symbol->decl;
+  new_sym->module = git->second->symbol->module; // an instantiation belongs to its template's module
 
   // Clone the generic function with type substitution.
   auto* specialized =

@@ -27,37 +27,50 @@ HirBuilder::HirBuilder(HirContext& ctx, const ResolveResult& resolve,
 // Top-level
 // ---------------------------------------------------------------------------
 
-auto HirBuilder::build(std::span<const FileNode* const> files) -> HirBuildResult {
-  std::vector<HirDecl*> decls;
-  Span module_span{};
-  bool first = true;
-  for (const auto* file : files) {
-    // The module span covers every file (disjoint ranges of one
-    // program-wide offset space).
-    if (first) {
-      module_span = file->span;
-      first = false;
-    } else {
-      auto begin = std::min(module_span.offset, file->span.offset);
-      auto end = std::max(module_span.offset + module_span.length,
-                          file->span.offset + file->span.length);
-      module_span = Span{.offset = begin, .length = end - begin};
-    }
-    for (const auto* decl : file->declarations) {
-      auto* hir_decl = lower_decl(decl);
-      if (hir_decl != nullptr) {
-        decls.push_back(hir_decl);
+auto HirBuilder::build(const Program& program) -> HirBuildResult {
+  std::vector<HirModule*> modules;
+  for (bool prelude : {true, false}) {
+    for (const auto* module : program.topo_order) {
+      if (module->is_prelude == prelude) {
+        modules.push_back(lower_file(*module->file->parse.file, module));
       }
     }
   }
+  for (const auto& file : program.files) {
+    if (file->parse.file != nullptr && file->module == nullptr) {
+      modules.push_back(lower_file(*file->parse.file, nullptr));
+    }
+  }
+  return finish(std::move(modules));
+}
 
-  // Append extend methods lowered as standalone functions.
+auto HirBuilder::build(std::span<const FileNode* const> files) -> HirBuildResult {
+  std::vector<HirModule*> modules;
+  for (const auto* file : files) {
+    modules.push_back(lower_file(*file, nullptr));
+  }
+  return finish(std::move(modules));
+}
+
+auto HirBuilder::lower_file(const FileNode& file, const ModuleInfo* module) -> HirModule* {
+  std::vector<HirDecl*> decls;
+  for (const auto* decl : file.declarations) {
+    auto* hir_decl = lower_decl(decl);
+    if (hir_decl != nullptr) {
+      decls.push_back(hir_decl);
+    }
+  }
+  // The file's extend methods, lowered as standalone functions.
   for (auto* ext_decl : extend_decls_) {
     decls.push_back(ext_decl);
   }
+  extend_decls_.clear();
+  return ctx_.alloc<HirModule>(file.span, module, std::move(decls));
+}
 
-  auto* mod = ctx_.alloc<HirModule>(module_span, std::move(decls));
-  return {.module = mod, .diagnostics = std::move(diagnostics_)};
+auto HirBuilder::finish(std::vector<HirModule*> modules) -> HirBuildResult {
+  auto* program = ctx_.alloc<HirProgram>(std::move(modules));
+  return {.program = program, .diagnostics = std::move(diagnostics_)};
 }
 
 // ---------------------------------------------------------------------------
@@ -500,7 +513,7 @@ auto HirBuilder::lower_expr(const Expr* expr) -> HirExpr* {
   }
 
   case NodeKind::Identifier: {
-    const auto* sym = find_symbol_at_use(expr->span.offset);
+    const auto* sym = symbol_for(*expr);
     return ctx_.alloc<HirExpr>(span, type, HirSymbolRef{sym});
   }
 
@@ -520,7 +533,7 @@ auto HirBuilder::lower_expr(const Expr* expr) -> HirExpr* {
         }
       }
     }
-    const auto* sym = find_symbol_at_use(expr->span.offset);
+    const auto* sym = symbol_for(*expr);
     return ctx_.alloc<HirExpr>(span, type, HirSymbolRef{sym});
   }
 
@@ -545,8 +558,8 @@ auto HirBuilder::lower_expr(const Expr* expr) -> HirExpr* {
     // struct, not any expression that happens to have struct type.
     const auto* callee_type = expr_type(call.callee);
     if (callee_type != nullptr && callee_type->kind() == TypeKind::Struct &&
-        call.callee->is<IdentifierExpr>()) {
-      const auto* sym = find_symbol_at_use(call.callee->span.offset);
+        (call.callee->is<IdentifierExpr>() || call.callee->is<QualifiedName>())) {
+      const auto* sym = symbol_for(*call.callee);
       if (sym != nullptr && sym->kind == SymbolKind::Type) {
         const auto* struct_type =
             static_cast<const TypeStruct*>(callee_type);
@@ -752,9 +765,8 @@ auto HirBuilder::find_symbol_at_decl(uint32_t offset) -> const Symbol* {
   return it != decl_symbols_.end() ? it->second : nullptr;
 }
 
-auto HirBuilder::find_symbol_at_use(uint32_t offset) -> const Symbol* {
-  auto it = resolve_.uses.find(offset);
-  return it != resolve_.uses.end() ? it->second : nullptr;
+auto HirBuilder::symbol_for(const Expr& expr) -> const Symbol* {
+  return resolve_.symbol_for(expr);
 }
 
 auto HirBuilder::expr_type(const Expr* expr) -> const Type* {
@@ -779,8 +791,8 @@ auto build_hir(std::span<const FileNode* const> files, const ResolveResult& reso
 auto build_hir(const Program& program, const ResolveResult& resolve,
                const TypeCheckResult& typed, HirContext& ctx)
     -> HirBuildResult {
-  auto nodes = program.file_nodes();
-  return build_hir(nodes, resolve, typed, ctx);
+  HirBuilder builder(ctx, resolve, typed);
+  return builder.build(program);
 }
 
 auto build_hir(const FileNode& file, const ResolveResult& resolve,

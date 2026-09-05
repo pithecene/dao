@@ -192,7 +192,7 @@ void handle_analyze(const httplib::Request& req, httplib::Response& res,
     auto hir_result = build_hir(prog.program, resolve_result, check_result, hir_ctx);
     collect_diagnostics(diagnostics, prog, hir_result.diagnostics);
 
-    if (hir_result.module == nullptr) {
+    if (hir_result.program == nullptr) {
       if (!has_user_error(hir_result.diagnostics, prog)) {
         diagnostics.push_back(
             make_internal_error("HIR lowering failed (possible prelude error)"));
@@ -201,12 +201,12 @@ void handle_analyze(const httplib::Request& req, httplib::Response& res,
     }
 
     std::ostringstream hir_out;
-    print_hir(hir_out, *hir_result.module);
+    print_hir(hir_out, *hir_result.program);
     hir_text = hir_out.str();
 
     // --- MIR ---
     MirContext mir_ctx;
-    auto mir_result = build_mir(*hir_result.module, mir_ctx, types);
+    auto mir_result = build_mir(*hir_result.program, mir_ctx, types);
     collect_diagnostics(diagnostics, prog, mir_result.diagnostics);
 
     if (mir_result.module == nullptr) {
@@ -237,7 +237,8 @@ void handle_analyze(const httplib::Request& req, httplib::Response& res,
     // --- LLVM IR ---
     llvm::LLVMContext llvm_ctx;
     LlvmBackend llvm_backend(llvm_ctx);
-    auto llvm_result = llvm_backend.lower(*mir_result.module, &prog.program.source_map);
+    auto llvm_result =
+        llvm_backend.lower(*mir_result.module, &prog.program.source_map, prog.program.entry);
     collect_diagnostics(diagnostics, prog, llvm_result.diagnostics);
 
     if (llvm_result.module != nullptr &&

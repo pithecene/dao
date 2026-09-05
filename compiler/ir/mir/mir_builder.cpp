@@ -149,13 +149,28 @@ auto hir_function_is_generic(const HirFunction& fn) -> bool {
 // Top-level
 // ---------------------------------------------------------------------------
 
-auto MirBuilder::build(const HirModule& module) -> MirBuildResult {
+namespace {
+
+/// Smallest span covering both (disjoint ranges of one offset space).
+auto covering(Span lhs, Span rhs) -> Span {
+  auto begin = std::min(lhs.offset, rhs.offset);
+  auto end = std::max(lhs.offset + lhs.length, rhs.offset + rhs.length);
+  return Span{.offset = begin, .length = end - begin};
+}
+
+} // namespace
+
+auto MirBuilder::build(const HirProgram& program) -> MirBuildResult {
   auto* mir_mod = ctx_.alloc<MirModule>();
-  mir_mod->span = module.span;
   current_module_ = mir_mod;
   generic_templates_.clear();
 
-  for (const auto* decl : module.declarations) {
+  // Every module's functions, in program order, into one MirModule.
+  // Generic templates are keyed by symbol and so are program-wide.
+  for (const auto* hir_module : program.modules) {
+    mir_mod->span = mir_mod->span.length == 0 ? hir_module->span
+                                               : covering(mir_mod->span, hir_module->span);
+    for (const auto* decl : hir_module->declarations) {
     if (decl->is<HirFunction>()) {
       const auto& hir_fn = decl->as<HirFunction>();
 
@@ -181,6 +196,7 @@ auto MirBuilder::build(const HirModule& module) -> MirBuildResult {
       }
     }
     // ClassDecl: no MIR function to produce; skip.
+    }
   }
 
   return {.module = mir_mod,
@@ -842,10 +858,10 @@ void MirBuilder::error(Span span, std::string message) {
 // Free-function entry point
 // ---------------------------------------------------------------------------
 
-auto build_mir(const HirModule& module, MirContext& ctx,
+auto build_mir(const HirProgram& program, MirContext& ctx,
                TypeContext& types) -> MirBuildResult {
   MirBuilder builder(ctx, types);
-  return builder.build(module);
+  return builder.build(program);
 }
 
 } // namespace dao

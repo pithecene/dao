@@ -131,7 +131,7 @@ void handle_run(const httplib::Request& req, httplib::Response& res,
   HirContext hir_ctx;
   auto hir_result = build_hir(prog.program, resolve_result, check_result, hir_ctx);
   collect_diagnostics(diagnostics, prog, hir_result.diagnostics);
-  if (hir_result.module == nullptr) {
+  if (hir_result.program == nullptr) {
     if (diagnostics.empty()) {
       diagnostics.push_back(
           make_internal_error("HIR lowering failed (possible prelude error)"));
@@ -141,7 +141,7 @@ void handle_run(const httplib::Request& req, httplib::Response& res,
   }
 
   MirContext mir_ctx;
-  auto mir_result = build_mir(*hir_result.module, mir_ctx, types);
+  auto mir_result = build_mir(*hir_result.program, mir_ctx, types);
   collect_diagnostics(diagnostics, prog, mir_result.diagnostics);
   bool mono_has_errors = false;
   if (mir_result.module != nullptr) {
@@ -166,7 +166,8 @@ void handle_run(const httplib::Request& req, httplib::Response& res,
   // LLVM lowering.
   llvm::LLVMContext llvm_ctx;
   LlvmBackend backend(llvm_ctx);
-  auto llvm_result = backend.lower(*mir_result.module, &prog.program.source_map);
+  auto llvm_result =
+      backend.lower(*mir_result.module, &prog.program.source_map, prog.program.entry);
 
   // Filter prelude-origin warnings (same as driver).
   std::vector<Diagnostic> user_diags;

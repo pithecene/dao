@@ -167,8 +167,8 @@ void cmd_check(const dao::ProgramRequest& request) {
 // Build and print HIR. Output is deterministic.
 void cmd_hir(const dao::ProgramRequest& request) {
   auto result = dao::run_through_hir(request);
-  if (result.hir.module != nullptr) {
-    dao::print_hir(std::cout, *result.hir.module);
+  if (result.hir.program != nullptr) {
+    dao::print_hir(std::cout, *result.hir.program);
   }
 }
 

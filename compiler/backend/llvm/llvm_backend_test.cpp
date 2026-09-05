@@ -1,4 +1,5 @@
 #include "backend/llvm/llvm_backend.h"
+#include "backend/llvm/llvm_names.h"
 #include "backend/llvm/llvm_runtime_hooks.h"
 #include "backend/llvm/llvm_type_lowering.h"
 #include "frontend/diagnostics/source.h"
@@ -20,6 +21,8 @@
 #include <algorithm>
 #include <sstream>
 #include <string>
+#include <utility>
+#include <optional>
 
 using namespace boost::ut;
 using namespace dao;
@@ -57,11 +60,11 @@ struct LlvmTestPipeline {
     resolve_result = resolve(program);
     check_result = typecheck(program, resolve_result, types);
     hir_result = build_hir(program, resolve_result, check_result, hir_ctx);
-    if (hir_result.module != nullptr) {
-      mir_result = build_mir(*hir_result.module, mir_ctx, types);
+    if (hir_result.program != nullptr) {
+      mir_result = build_mir(*hir_result.program, mir_ctx, types);
       if (mir_result.module != nullptr) {
         LlvmBackend backend(llvm_ctx);
-        llvm_result = backend.lower(*mir_result.module, &program.source_map);
+        llvm_result = backend.lower(*mir_result.module, &program.source_map, program.entry);
       }
     }
   }
@@ -92,6 +95,138 @@ auto contains(const std::string& haystack, std::string_view needle) -> bool {
 // ---------------------------------------------------------------------------
 // Type lowering
 // ---------------------------------------------------------------------------
+
+
+/// The same pipeline over an explicit multi-module program: files named
+/// `stdlib/...` form the prelude group, the rest are user modules, and
+/// the entry is `entry` or the unique `fn main`.
+struct LlvmProgramPipeline {
+  Program program;
+  ResolveResult resolve_result;
+  TypeContext types;
+  TypeCheckResult check_result;
+  HirContext hir_ctx;
+  HirBuildResult hir_result;
+  MirContext mir_ctx;
+  MirBuildResult mir_result;
+  llvm::LLVMContext llvm_ctx;
+  LlvmBackendResult llvm_result;
+
+  explicit LlvmProgramPipeline(std::vector<std::pair<std::string, std::string>> files,
+                               std::optional<std::string> entry = {}) {
+    std::vector<SourceInput> inputs;
+    for (auto& [display, text] : files) {
+      inputs.push_back({.display_path = display, .text = text,
+                        .is_prelude = display.starts_with("stdlib/")});
+    }
+    program = build_program(std::move(inputs), std::move(entry));
+    if (!program.lexed_and_parsed_cleanly() || !program.diagnostics.empty()) {
+      return;
+    }
+    resolve_result = resolve(program);
+    check_result = typecheck(program, resolve_result, types);
+    hir_result = build_hir(program, resolve_result, check_result, hir_ctx);
+    if (hir_result.program != nullptr) {
+      mir_result = build_mir(*hir_result.program, mir_ctx, types);
+      if (mir_result.module != nullptr) {
+        LlvmBackend backend(llvm_ctx);
+        llvm_result = backend.lower(*mir_result.module, &program.source_map, program.entry);
+      }
+    }
+  }
+
+  [[nodiscard]] auto ir() const -> std::string {
+    std::ostringstream out;
+    if (llvm_result.module != nullptr) {
+      LlvmBackend::print_ir(out, *llvm_result.module);
+    }
+    return out.str();
+  }
+
+  [[nodiscard]] auto function(const std::string& name) const -> llvm::Function* {
+    return llvm_result.module == nullptr ? nullptr : llvm_result.module->getFunction(name);
+  }
+
+  /// Every stage's diagnostics, for failure messages.
+  [[nodiscard]] auto problems() const -> std::string {
+    std::string out;
+    auto add = [&](const char* stage, const std::vector<Diagnostic>& diags) {
+      for (const auto& diag : diags) {
+        out += std::string("[") + stage + "] " + diag.message + " | ";
+      }
+    };
+    add("program", program.diagnostics);
+    for (const auto& file : program.files) {
+      add("lex", file->lex.diagnostics);
+      add("parse", file->parse.diagnostics);
+    }
+    add("resolve", resolve_result.diagnostics);
+    add("check", check_result.diagnostics);
+    add("hir", hir_result.diagnostics);
+    add("mir", mir_result.diagnostics);
+    add("llvm", llvm_result.diagnostics);
+    return out;
+  }
+};
+
+
+suite<"module_naming"> module_naming = [] {
+  "names_follow_symbol_identity"_test = [] {
+    ModuleInfo lib{.display = "app::lib", .is_prelude = false};
+    ModuleInfo entry{.display = "app::main", .is_prelude = false};
+    ModuleInfo prelude{.display = "core::x", .is_prelude = true};
+    Symbol plain{.kind = SymbolKind::Function, .name = "f", .decl_span = {}, .decl = nullptr, .module = &lib};
+    Symbol lib_main{.kind = SymbolKind::Function, .name = "main", .decl_span = {}, .decl = nullptr, .module = &lib};
+    Symbol entry_main{.kind = SymbolKind::Function, .name = "main", .decl_span = {}, .decl = nullptr, .module = &entry};
+    Symbol builtin{.kind = SymbolKind::Function, .name = "null_ptr", .decl_span = {}, .decl = nullptr, .module = nullptr};
+    Symbol method{.kind = SymbolKind::Function, .name = "Vec.push$i32", .decl_span = {}, .decl = nullptr, .module = &prelude};
+    expect(llvm_function_name(plain, &entry) == "app::lib::f");
+    expect(llvm_function_name(lib_main, &entry) == "app::lib::main") << "main elsewhere is not main";
+    expect(llvm_function_name(entry_main, &entry) == "main");
+    expect(llvm_function_name(builtin, &entry) == "null_ptr") << "no owning module: as written";
+    expect(llvm_function_name(method, &entry) == "core::x::Vec.push$i32") << "method and instantiation mangling kept";
+  };
+
+  "intrinsics_are_recognised_by_identity"_test = [] {
+    ModuleInfo user{.display = "app::main", .is_prelude = false};
+    ModuleInfo prelude{.display = "core::builtins", .is_prelude = true};
+    Symbol user_size_of{.kind = SymbolKind::Function, .name = "size_of", .decl_span = {}, .decl = nullptr, .module = &user};
+    Symbol prelude_size_of{.kind = SymbolKind::Function, .name = "size_of$i32", .decl_span = {}, .decl = nullptr, .module = &prelude};
+    Symbol builtin{.kind = SymbolKind::Function, .name = "ptr_cast", .decl_span = {}, .decl = nullptr, .module = nullptr};
+    Symbol prelude_other{.kind = SymbolKind::Function, .name = "size_offset", .decl_span = {}, .decl = nullptr, .module = &prelude};
+    expect(!is_builtin_intrinsic(user_size_of)) << "a user module's size_of is an ordinary function";
+    expect(is_builtin_intrinsic(prelude_size_of));
+    expect(is_builtin_intrinsic(builtin));
+    expect(!is_builtin_intrinsic(prelude_other)) << "prefix alone is not a match";
+  };
+
+  "two_modules_may_declare_the_same_function"_test = [] {
+    LlvmProgramPipeline pipe({
+        {"x.dao", "module a::x\nfn add(p: i32, q: i32): i32 -> p + q\n"},
+        {"y.dao", "module a::y\nfn add(p: i32, q: i32): i32 -> p * q\n"},
+        {"main.dao", "module a::main\nimport a::x\nimport a::y\nfn main(): i32 -> x::add(2, 3) + y::add(2, 3)\n"},
+    });
+    expect(pipe.llvm_result.module != nullptr) << "lowering failed: " << pipe.problems();
+    expect(pipe.function("a::x::add") != nullptr && pipe.function("a::y::add") != nullptr)
+        << "both add functions lowered under module-qualified names";
+    expect(pipe.function("main") != nullptr);
+    auto ir = pipe.ir();
+    expect(ir.find("call i32 @\"a::x::add\"") != std::string::npos &&
+           ir.find("call i32 @\"a::y::add\"") != std::string::npos)
+        << "main calls each module's add";
+  };
+
+  "main_outside_the_entry_module_is_an_ordinary_function"_test = [] {
+    LlvmProgramPipeline pipe({
+        {"lib.dao", "module a::lib\nfn main(): i32 -> 7\n"},
+        {"app.dao", "module a::app\nimport a::lib\nfn main(): i32 -> lib::main()\n"},
+    }, "a::app");
+    expect(pipe.llvm_result.module != nullptr) << "lowering failed: " << pipe.problems();
+    expect(pipe.function("main") != nullptr);
+    expect(pipe.function("a::lib::main") != nullptr) << "the other main is module-qualified";
+    expect(pipe.ir().find("call i32 @\"a::lib::main\"") != std::string::npos);
+  };
+};
 
 suite<"type_lowering"> type_lowering = [] {
   "builtin scalars lower correctly"_test = [] {
@@ -169,7 +304,7 @@ suite<"simple_functions"> simple_functions = [] {
         "  return 42\n");
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
-    expect(contains(ir, "define i32 @answer()")) << ir;
+    expect(contains(ir, "define i32 @\"test::answer\"()")) << ir;
     expect(contains(ir, "ret i32 42")) << ir;
   };
 
@@ -179,7 +314,7 @@ suite<"simple_functions"> simple_functions = [] {
         "  return\n");
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
-    expect(contains(ir, "define void @noop()")) << ir;
+    expect(contains(ir, "define void @\"test::noop\"()")) << ir;
     expect(contains(ir, "ret void")) << ir;
   };
 
@@ -189,7 +324,7 @@ suite<"simple_functions"> simple_functions = [] {
         "  return a + b\n");
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
-    expect(contains(ir, "define i32 @add(i32 %a, i32 %b)")) << ir;
+    expect(contains(ir, "define i32 @\"test::add\"(i32 %a, i32 %b)")) << ir;
     expect(contains(ir, "add")) << ir;
     expect(contains(ir, "ret i32")) << ir;
   };
@@ -386,7 +521,7 @@ suite<"calls"> calls = [] {
         "  return double(21)\n");
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
-    expect(contains(ir, "call i32 @double")) << ir;
+    expect(contains(ir, "call i32 @\"test::double\"")) << ir;
   };
 };
 
@@ -403,7 +538,7 @@ suite<"externs"> externs = [] {
         "  return 0\n");
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
-    expect(contains(ir, "declare void @print")) << ir;
+    expect(contains(ir, "declare void @print")) << ir; // extern: as written
   };
 
   "extern fn with struct param uses ABI-coerced types"_test = [] {
@@ -557,8 +692,8 @@ suite<"module_structure"> module_structure = [] {
         "  return 2\n");
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
-    expect(contains(ir, "@foo")) << ir;
-    expect(contains(ir, "@bar")) << ir;
+    expect(contains(ir, "@\"test::foo\"")) << ir;
+    expect(contains(ir, "@\"test::bar\"")) << ir;
   };
 };
 
@@ -811,7 +946,7 @@ suite<"construction"> construction = [] {
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
     expect(contains(ir, "%dao.Point")) << ir;
-    expect(contains(ir, "call i32 @get_x")) << ir;
+    expect(contains(ir, "call i32 @\"test::get_x\"")) << ir;
   };
 
   "construction with non-constant args uses insertvalue"_test = [] {
@@ -1044,9 +1179,9 @@ suite<"generators"> generators = [] {
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
     // Init function: returns a generator fat pair.
-    expect(contains(ir, "define %dao.generator @single()")) << ir;
+    expect(contains(ir, "define %dao.generator @\"test::single\"()")) << ir;
     // Resume function: takes ptr, returns void.
-    expect(contains(ir, "define void @single.resume(ptr")) << ir;
+    expect(contains(ir, "define void @\"test::single.resume\"(ptr")) << ir;
   };
 
   "generator init allocates frame"_test = [] {
@@ -1139,7 +1274,7 @@ suite<"generators"> generators = [] {
     // Alignment is computed via GEP-from-null offsetof trick, not
     // hardcoded.  LLVM constant-folds the GEP to a ConstantExpr,
     // so we check for the { i8, %frame } wrapper struct pattern.
-    expect(contains(ir, "{ i8, %dao.gen.single }")) << ir;
+    expect(contains(ir, "{ i8, %\"dao.gen.test::single\" }")) << ir;
   };
 
   "range generator with params"_test = [] {
@@ -1158,11 +1293,11 @@ suite<"generators"> generators = [] {
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
     // Init function takes params.
-    expect(contains(ir, "define %dao.generator @range(i32 %start, i32 %end)")) << ir;
+    expect(contains(ir, "define %dao.generator @\"test::range\"(i32 %start, i32 %end)")) << ir;
     // Resume function.
-    expect(contains(ir, "define void @range.resume(ptr")) << ir;
+    expect(contains(ir, "define void @\"test::range.resume\"(ptr")) << ir;
     // Frame type exists.
-    expect(contains(ir, "dao.gen.range")) << ir;
+    expect(contains(ir, "dao.gen.test::range")) << ir;
   };
 
   "generator through storage"_test = [] {

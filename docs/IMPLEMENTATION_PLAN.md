@@ -537,7 +537,11 @@ rule, lexical file-id order per §8.4, `--module-root` / `--stdlib-root`
 resolution of qualified names, builtins unshadowable, prelude shadowing)
 and D3 (qualified forms type-check through the resolver's per-segment
 entries: `b::f`, `b::T` in type position, `b::T::m`, `b::E::V`; modules
-checked in topological order) landed.  D4–D6 follow.
+checked in topological order) and D4 (`HirProgram` of per-module
+`HirModule`s, MIR flattened in program order, `llvm_function_name` by
+symbol identity with `<module>::<name>` mangling and the entry-module
+`main` rule, intrinsic and hook recognition gated on identity, the
+first multi-file executable) landed.  D5–D6 follow.
 
 **Objective**: make the C++ host compiler compile a program spanning
 multiple Dao source files with real module identity, import-driven

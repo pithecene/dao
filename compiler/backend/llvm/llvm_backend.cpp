@@ -6,6 +6,7 @@
 //   - `id`  = MIR value identifier
 
 #include "backend/llvm/llvm_backend.h"
+#include "backend/llvm/llvm_names.h"
 
 #include "backend/llvm/llvm_abi.h"
 #include "backend/llvm/llvm_runtime_hooks.h"
@@ -39,9 +40,11 @@ namespace dao {
 
 LlvmBackend::LlvmBackend(llvm::LLVMContext& ctx) : ctx_(ctx), types_(ctx) {}
 
-auto LlvmBackend::lower(const MirModule& mir_module, const SourceMap* source_map)
+auto LlvmBackend::lower(const MirModule& mir_module, const SourceMap* source_map,
+                        const ModuleInfo* entry)
     -> LlvmBackendResult {
   module_ = std::make_unique<llvm::Module>("dao_module", ctx_);
+  entry_ = entry;
   diagnostics_.clear();
 
   // Set the target triple and data layout early so that ABI-sensitive
@@ -108,7 +111,7 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
 
     // Runtime hooks are already declared by LlvmRuntimeHooks with
     // canonical signatures — skip re-declaration from MIR externs.
-    if (LlvmRuntimeHooks::is_runtime_hook(mir_fn->symbol->name)) {
+    if (mir_fn->is_extern && LlvmRuntimeHooks::is_runtime_hook(mir_fn->symbol->name)) {
       continue;
     }
 
@@ -195,7 +198,7 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
         llvm::FunctionType::get(lowered_ret, param_types, /*isVarArg=*/false);
     auto* llvm_fn = llvm::Function::Create(
         fn_type, llvm::Function::ExternalLinkage,
-        std::string(mir_fn->symbol->name), module_.get());
+        fn_name(*mir_fn->symbol), module_.get());
 
     // Add byval attributes for indirect struct params.
     if (mir_fn->is_extern) {
@@ -255,7 +258,7 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
           llvm::FunctionType::get(void_type, {ptr_type}, /*isVarArg=*/false);
       llvm::Function::Create(
           resume_fn_type, llvm::Function::ExternalLinkage,
-          std::string(mir_fn->symbol->name) + ".resume", module_.get());
+          fn_name(*mir_fn->symbol) + ".resume", module_.get());
     }
   }
 }
@@ -280,7 +283,7 @@ void LlvmBackend::lower_bodies(const MirModule& mir_module,
         // with a clear undefined-reference error.
         if (mir_fn->symbol != nullptr) {
           auto* llvm_fn =
-              module_->getFunction(std::string(mir_fn->symbol->name));
+              module_->getFunction(fn_name(*mir_fn->symbol));
           if (llvm_fn != nullptr && !llvm_fn->empty()) {
             llvm_fn->deleteBody();
           }
@@ -365,7 +368,7 @@ auto LlvmBackend::lower_function(const MirFunction& fn) -> bool {
     return true; // skip anonymous functions (lambdas handled separately)
   }
 
-  auto* llvm_fn = module_->getFunction(std::string(fn.symbol->name));
+  auto* llvm_fn = module_->getFunction(fn_name(*fn.symbol));
   if (llvm_fn == nullptr) {
     emit_diagnostic(fn.span, "function not declared: " + std::string(fn.symbol->name));
     return false;
@@ -1239,17 +1242,8 @@ auto LlvmBackend::lower_field_access(const MirFieldAccess& p,
 // Function reference and calls
 // ---------------------------------------------------------------------------
 
-// Check if a function name is a compiler builtin intrinsic.
-// Matches both unmangled names (size_of) and mangled (size_of$i32).
-static auto is_builtin_intrinsic(std::string_view name) -> bool {
-  // Check for exact name or mangled variant (name$type).
-  for (auto base : {"size_of", "align_of", "null_ptr",
-                     "ptr_offset", "ptr_cast"}) {
-    if (name == base || name.starts_with(std::string(base) + "$")) {
-      return true;
-    }
-  }
-  return false;
+auto LlvmBackend::fn_name(const Symbol& sym) const -> std::string {
+  return llvm_function_name(sym, entry_);
 }
 
 auto LlvmBackend::lower_fn_ref(const MirFnRef& p, const MirInst& inst,
@@ -1261,14 +1255,14 @@ auto LlvmBackend::lower_fn_ref(const MirFnRef& p, const MirInst& inst,
 
   // Compiler builtin intrinsics don't have LLVM function declarations.
   // Store a nullptr marker; lower_call will generate inline IR.
-  if (is_builtin_intrinsic(p.symbol->name)) {
+  if (is_builtin_intrinsic(*p.symbol)) {
     state.values[inst.result.id] = nullptr;
     state.value_types[inst.result.id] = inst.type;
     state.builtin_names[inst.result.id] = p.symbol->name;
     return true;
   }
 
-  auto* fn = module_->getFunction(std::string(p.symbol->name));
+  auto* fn = module_->getFunction(fn_name(*p.symbol));
   if (fn == nullptr) {
     emit_diagnostic(inst.span,
                     "function not found: " + std::string(p.symbol->name));
@@ -1754,7 +1748,7 @@ auto LlvmBackend::is_generator_function(const MirFunction& fn) -> bool {
 
 auto LlvmBackend::create_generator_frame_type(const MirFunction& fn)
     -> llvm::StructType* {
-  auto frame_name = "dao.gen." + std::string(fn.symbol->name);
+  auto frame_name = "dao.gen." + fn_name(*fn.symbol);
 
   // Return cached type if already created.
   auto* existing = llvm::StructType::getTypeByName(ctx_, frame_name);
@@ -1794,7 +1788,7 @@ auto LlvmBackend::lower_generator_init(const MirFunction& fn) -> bool {
     return true;
   }
 
-  auto* init_fn = module_->getFunction(std::string(fn.symbol->name));
+  auto* init_fn = module_->getFunction(fn_name(*fn.symbol));
   if (init_fn == nullptr) {
     emit_diagnostic(fn.span, "generator init function not declared");
     return false;
@@ -1863,7 +1857,7 @@ auto LlvmBackend::lower_generator_init(const MirFunction& fn) -> bool {
 
   // Build the generator fat pair: { ptr frame, ptr resume_fn }.
   auto* resume_fn =
-      module_->getFunction(std::string(fn.symbol->name) + ".resume");
+      module_->getFunction(fn_name(*fn.symbol) + ".resume");
   auto* gen_type = types_.generator_type();
   llvm::Value* gen_val = llvm::UndefValue::get(gen_type);
   gen_val =
@@ -1885,7 +1879,7 @@ auto LlvmBackend::lower_generator_resume(const MirFunction& fn) -> bool {
     return true;
   }
 
-  auto resume_name = std::string(fn.symbol->name) + ".resume";
+  auto resume_name = fn_name(*fn.symbol) + ".resume";
   auto* resume_fn = module_->getFunction(resume_name);
   if (resume_fn == nullptr) {
     emit_diagnostic(fn.span,

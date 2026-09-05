@@ -7,3 +7,9 @@ target_compile_definitions(daoc PRIVATE
   DAO_RUNTIME_LIB="$<TARGET_FILE:dao_runtime>"
   DAO_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
+
+# End-to-end multi-file builds: discovery mode, explicit mode, and
+# input-order determinism (compiler/driver/multifile_build_test.sh).
+include(CTest)
+add_test(NAME multifile_build_test
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/multifile_build_test.sh $<TARGET_FILE:daoc> ${CMAKE_SOURCE_DIR})

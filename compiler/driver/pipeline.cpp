@@ -167,7 +167,7 @@ auto run_through_hir(const ProgramRequest& request) -> HirResult {
   auto hir = build_hir(frontend.program, frontend.resolve, frontend.typecheck, hir_ctx);
 
   bool has_errors = print_error_diagnostics(frontend.program.source_map, hir.diagnostics);
-  if (hir.module == nullptr || has_errors) {
+  if (hir.program == nullptr || has_errors) {
     std::exit(EXIT_FAILURE);
   }
 
@@ -180,7 +180,7 @@ auto run_through_mir(const ProgramRequest& request) -> MirResult {
   auto hir_result = run_through_hir(request);
   const auto& source_map = hir_result.frontend.program.source_map;
   MirContext mir_ctx;
-  auto mir = build_mir(*hir_result.hir.module, mir_ctx, hir_result.frontend.types);
+  auto mir = build_mir(*hir_result.hir.program, mir_ctx, hir_result.frontend.types);
 
   bool has_errors = print_error_diagnostics(source_map, mir.diagnostics);
   if (mir.module == nullptr || has_errors) {
@@ -209,7 +209,7 @@ auto run_through_mir(const ProgramRequest& request) -> MirResult {
 auto lower_to_llvm(const MirResult& mir, llvm::LLVMContext& llvm_ctx) -> LlvmBackendResult {
   const auto& source_map = mir.hir_result.frontend.program.source_map;
   LlvmBackend backend(llvm_ctx);
-  auto result = backend.lower(*mir.mir.module, &source_map);
+  auto result = backend.lower(*mir.mir.module, &source_map, mir.hir_result.frontend.program.entry);
 
   // Prelude warnings (dropped bodies of prelude functions that use
   // unsupported constructs) are not the user's concern.
