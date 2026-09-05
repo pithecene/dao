@@ -36,6 +36,7 @@ auto run_reply(std::string stdout_text, std::string stderr_text, int exit_code,
                nlohmann::json diagnostics) -> Reply {
   return {.status = http_status::ok,
           .body = {
+              {"file", kDocumentPath},
               {"stdout", std::move(stdout_text)},
               {"stderr", std::move(stderr_text)},
               {"exit_code", exit_code},
@@ -123,15 +124,7 @@ auto run(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
   LlvmBackend backend(llvm_ctx);
   auto llvm_result = backend.lower(*mir_result.module, &prog.program.source_map);
 
-  // Prelude-origin warnings are the driver's concern, not the user's.
-  std::vector<Diagnostic> user_diags;
-  for (const auto& diag : llvm_result.diagnostics) {
-    if (diag.severity == Severity::Warning &&
-        prog.program.source_map.is_prelude(diag.span.offset)) {
-      continue;
-    }
-    user_diags.push_back(diag);
-  }
+  auto user_diags = without_prelude_warnings(llvm_result.diagnostics, prog);
   collect_diagnostics(diagnostics, prog, user_diags);
   if (llvm_result.module == nullptr || has_error_severity(user_diags)) {
     return compile_failed(std::move(diagnostics));

@@ -105,4 +105,29 @@ auto render_typescript() -> std::string {
   return out.str();
 }
 
+auto render_capability_matrix() -> std::string {
+  std::ostringstream out;
+  out << "# Tooling Capabilities — Dao\n\n"
+         "Generated from `compiler/analysis/tooling_surface.h` by `tooling_surface_dump`;\n"
+         "do not edit by hand (`task gen-tooling-surface`).  `tooling_surface_test` fails\n"
+         "while this file and the table disagree.\n\n"
+         "One row per capability the compiler exposes to tooling and the surfaces that\n"
+         "serve it.  \"—\" means no surface of that kind serves it.  The LSP column names\n"
+         "the method each capability maps to; `tools/lsp` is not implemented, so none is\n"
+         "served over LSP yet.\n\n"
+         "| Capability | Compiler entry point | Playground route | `daoc` command | LSP method |\n"
+         "|---|---|---|---|---|\n";
+  auto cell = [](std::string_view value, bool code) -> std::string {
+    if (value.empty()) {
+      return "—";
+    }
+    return code ? std::format("`{}`", value) : std::string(value);
+  };
+  for (const auto& cap : kCapabilities) {
+    out << std::format("| {} | {} | {} | {} | {} |\n", cap.name, cell(cap.analysis, true),
+                       cell(cap.playground, true), cell(cap.cli, true), cell(cap.lsp, true));
+  }
+  return out.str();
+}
+
 } // namespace dao::tooling

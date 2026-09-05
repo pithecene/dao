@@ -2,6 +2,7 @@
 #include "support/module_utils.h"
 
 #include <algorithm>
+#include <iterator>
 #include <utility>
 
 namespace dao::playground {
@@ -29,7 +30,7 @@ auto build_playground_program(const std::filesystem::path& repo_root,
   }
 
   auto inputs = load_prelude_inputs(repo_root / "stdlib");
-  inputs.push_back({.display_path = "<playground>",
+  inputs.push_back({.display_path = std::string(kDocumentPath),
                     .text = std::move(user_source),
                     .is_prelude = false});
   prog.program = build_program(std::move(inputs));
@@ -69,27 +70,51 @@ auto has_user_error(const std::vector<Diagnostic>& diags, const PlaygroundProgra
   });
 }
 
+void add_position(nlohmann::json& out, const PlaygroundProgram& prog, uint32_t program_offset) {
+  const auto* file = prog.program.source_map.file_for(program_offset);
+  if (file == nullptr) {
+    out["file"] = "";
+    out["offset"] = 0;
+    out["line"] = 1;
+    out["col"] = 1;
+    return;
+  }
+  auto loc = prog.program.source_map.locate(program_offset);
+  const bool in_document = file == prog.user;
+  out["file"] = file->display_path;
+  out["offset"] = in_document ? prog.to_editor_offset(program_offset)
+                              : file->local_offset(program_offset);
+  out["line"] = in_document ? prog.editor_line(program_offset) : loc.line;
+  out["col"] = loc.col;
+}
+
+auto without_prelude_warnings(const std::vector<Diagnostic>& diags, const PlaygroundProgram& prog)
+    -> std::vector<Diagnostic> {
+  std::vector<Diagnostic> kept;
+  std::ranges::copy_if(diags, std::back_inserter(kept), [&prog](const Diagnostic& diag) -> bool {
+    return !(diag.severity == Severity::Warning &&
+             prog.program.source_map.is_prelude(diag.span.offset));
+  });
+  return kept;
+}
+
 void collect_diagnostics(nlohmann::json& out, const PlaygroundProgram& prog,
                          const std::vector<Diagnostic>& diags) {
   for (const auto& diag : diags) {
-    if (!prog.in_user_file(diag.span.offset)) {
-      continue;
-    }
-    auto loc = prog.program.source_map.locate(diag.span.offset);
-    out.push_back({
+    nlohmann::json entry = {
         {"severity", diag.severity == Severity::Warning ? "warning" : "error"},
-        {"offset", prog.to_editor_offset(diag.span.offset)},
         {"length", diag.span.length},
-        {"line", prog.editor_line(diag.span.offset)},
-        {"col", loc.col},
         {"message", diag.message},
-    });
+    };
+    add_position(entry, prog, diag.span.offset);
+    out.push_back(std::move(entry));
   }
 }
 
 auto make_internal_error(const std::string& message) -> nlohmann::json {
   return {
       {"severity", "error"},
+      {"file", ""},
       {"offset", 0},
       {"length", 0},
       {"line", 1},

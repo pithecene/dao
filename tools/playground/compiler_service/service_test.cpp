@@ -10,6 +10,7 @@
 //     except those listed with a reason in
 //     testdata/examples/known_failures.txt
 
+#include "pipeline.h"
 #include "run.h"
 #include "service.h"
 
@@ -309,6 +310,33 @@ suite<"playground_service"> playground_service_suite = [] {
         }
       }
     }
+  };
+
+  "positions_carry_file_identity"_test = [] {
+    // hello.dao: `print` is declared in the prelude, `main` in the buffer.
+    auto hello = call("example", {{"name", "hello.dao"}}).body["source"].get<std::string>();
+    auto analysis = call("analyze", {{"source", hello}});
+    expect(analysis.body["file"].get<std::string>() == kDocumentPath);
+    expect(analysis.body["module"].get<std::string>() == "hello")
+        << "module: " << analysis.body["module"].dump();
+
+    auto print_use = static_cast<uint32_t>(hello.find("print("));
+    auto definition = call("gotoDef", {{"source", hello}, {"offset", print_use}});
+    expect(!definition.body.is_null()) << "print has no definition";
+    if (!definition.body.is_null()) {
+      auto file = definition.body["file"].get<std::string>();
+      expect(file.starts_with("stdlib/")) << "print defined in " << file;
+    }
+
+    auto main_decl = static_cast<uint32_t>(hello.find("fn main") + 3);
+    auto refs = call("references", {{"source", hello}, {"offset", main_decl}});
+    for (const auto& ref : refs.body) {
+      expect(ref["file"].get<std::string>() == kDocumentPath) << ref.dump();
+    }
+
+    // A scratch buffer takes the synthetic module identity.
+    auto scratch = call("analyze", {{"source", "fn main(): i32\n  return 0\n"}});
+    expect(scratch.body["module"].get<std::string>() == "playground");
   };
 
   "examples_run_to_their_goldens"_test = [] {

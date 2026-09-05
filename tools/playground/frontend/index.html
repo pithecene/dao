@@ -9,6 +9,7 @@
   <header>
     <h1>Dao Playground</h1>
     <div class="controls">
+      <span id="nav-notice" hidden></span>
       <span id="service-status" hidden>compiler restarting…</span>
       <select id="example-select">
         <option value="">— load example —</option>
@@ -18,7 +19,7 @@
   </header>
   <main>
     <div id="editor-panel">
-      <div class="panel-header">Source <span class="panel-hint">Ctrl+click: definition · Alt+click: references · Ctrl+Space: complete</span></div>
+      <div class="panel-header">Source <span id="module-label"></span><span class="panel-hint">Ctrl+click: definition · Alt+click: references · Ctrl+Space: complete</span></div>
       <div id="editor-container"></div>
     </div>
     <div id="right-panels">

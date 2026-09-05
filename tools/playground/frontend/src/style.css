@@ -415,3 +415,21 @@ main {
   background: rgba(249, 226, 175, 0.28);
   border-radius: 2px;
 }
+
+/* Navigation notices (definition elsewhere, reference counts) */
+#nav-notice {
+  color: var(--fg);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+#module-label {
+  margin-left: 12px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--accent);
+}

@@ -3,6 +3,7 @@ import { api } from "./api";
 import { setTokens } from "./highlighting";
 import { renderDiagnostics } from "./diagnostics";
 import { renderOutline } from "./outline";
+import { setDocument } from "./document";
 import { getSource } from "./editor";
 
 let analyzeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -44,6 +45,7 @@ export async function doAnalyze(): Promise<void> {
     ]);
     if (seq !== analyzeSeq) return; // a newer edit superseded this request
 
+    setDocument(data.file, data.module);
     setTokens(data.semanticTokens, editorView);
 
     setText("ast-output", data.ast);

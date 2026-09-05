@@ -61,6 +61,10 @@ struct PlaygroundProgram {
   }
 };
 
+/// Display path of the editor buffer inside the program: the `file`
+/// every reply reports for positions in the buffer.
+inline constexpr std::string_view kDocumentPath = "<playground>";
+
 /// Assemble the prelude group under <repo_root>/stdlib plus the editor
 /// buffer, and lex/parse everything.
 auto build_playground_program(const std::filesystem::path& repo_root,
@@ -90,13 +94,23 @@ auto has_error_severity(const std::vector<Diagnostic>& diags) -> bool;
 /// True if any error-severity diagnostic originates in the editor buffer.
 auto has_user_error(const std::vector<Diagnostic>& diags, const PlaygroundProgram& prog) -> bool;
 
-/// Append editor-buffer diagnostics to a JSON array with buffer-local
-/// offsets and lines.  Prelude-origin diagnostics are skipped.
+/// Set `file`, `offset`, `line`, `col` on a JSON object for a program
+/// offset: the file's display path with file-local position, editor
+/// adjusted when the file is the buffer.
+void add_position(nlohmann::json& out, const PlaygroundProgram& prog, uint32_t program_offset);
+
+/// Diagnostics minus prelude-origin warnings, which concern the stdlib
+/// maintainers rather than the person editing the buffer.
+auto without_prelude_warnings(const std::vector<Diagnostic>& diags, const PlaygroundProgram& prog)
+    -> std::vector<Diagnostic>;
+
+/// Append diagnostics to a JSON array with file identity and file-local
+/// positions.
 void collect_diagnostics(nlohmann::json& out, const PlaygroundProgram& prog,
                          const std::vector<Diagnostic>& diags);
 
-/// Build a synthetic error diagnostic entry for when a phase fails
-/// with no user-visible diagnostics (possible prelude error).
+/// Build a synthetic error diagnostic entry (no location) for when a
+/// phase fails without reporting where.
 auto make_internal_error(const std::string& message) -> nlohmann::json;
 
 } // namespace dao::playground

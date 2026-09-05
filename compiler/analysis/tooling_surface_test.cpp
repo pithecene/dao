@@ -132,6 +132,31 @@ suite<"tooling_surface"> tooling_surface_suite = [] {
     expect(unlisted.empty()) << "emitted but not in the table: " << difference(unlisted, {});
   };
 
+  "capability_surfaces_exist"_test = [] {
+    // `daoc` subcommands: the driver's command table plus `build`,
+    // which it dispatches before the table.
+    auto driver = read_file(repo_root() / "compiler" / "driver" / "main.cpp");
+    static const std::regex command_pattern(R"re(Command\{\.name = "([a-z-]+)")re");
+    std::set<std::string> commands{"build"};
+    for (std::sregex_iterator it(driver.begin(), driver.end(), command_pattern), last; it != last;
+         ++it) {
+      commands.insert((*it)[1].str());
+    }
+    for (const auto& cap : kCapabilities) {
+      expect(cap.playground.empty() || find_route(cap.playground) != nullptr)
+          << cap.name << " names unknown route " << cap.playground;
+      expect(cap.cli.empty() || commands.contains(std::string(cap.cli)))
+          << cap.name << " names unknown daoc command " << cap.cli;
+    }
+  };
+
+  "capability_matrix_is_current"_test = [] {
+    auto matrix = repo_root() / "docs" / "tooling_capabilities.md";
+    expect(std::filesystem::exists(matrix)) << matrix.string() << " is missing";
+    expect(read_file(matrix) == render_capability_matrix())
+        << matrix.string() << " is stale: run `task gen-tooling-surface`";
+  };
+
   "generated_typescript_is_current"_test = [] {
     auto generated = repo_root() / "tools" / "playground" / "frontend" / "src" / "generated" /
                      "tooling_surface.ts";

@@ -76,6 +76,7 @@ tasks:
     cmds:
       - cmake --build {{.BUILD_DIR}} --target tooling_surface_dump -- -j${DAO_BUILD_JOBS:-4}
       - "{{.BUILD_DIR}}/compiler/analysis/tooling_surface_dump > tools/playground/frontend/src/generated/tooling_surface.ts"
+      - "{{.BUILD_DIR}}/compiler/analysis/tooling_surface_dump --matrix > docs/tooling_capabilities.md"
 
   update-example-goldens:
     desc: Rewrite testdata/examples/*.out from the current compiler's output

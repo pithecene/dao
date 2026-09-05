@@ -159,6 +159,7 @@ export interface SemanticToken {
 
 export interface Diagnostic {
   severity: DiagnosticSeverity;
+  file: string;
   offset: number;
   length: number;
   line: number;
@@ -185,6 +186,8 @@ export interface ExampleName {
 }
 
 export interface AnalyzeResponse {
+  file: string;
+  module: string;
   tokens: LexToken[];
   semanticTokens: SemanticToken[];
   ast: string;
@@ -195,6 +198,7 @@ export interface AnalyzeResponse {
 }
 
 export interface RunResponse {
+  file: string;
   stdout: string;
   stderr: string;
   exit_code: number;
@@ -208,6 +212,7 @@ export interface Hover {
 }
 
 export interface Definition {
+  file: string;
   offset: number;
   length: number;
   line: number;
@@ -223,8 +228,11 @@ export interface DocumentSymbol {
 }
 
 export interface Reference {
+  file: string;
   offset: number;
   length: number;
+  line: number;
+  col: number;
   isDefinition: boolean;
 }
 

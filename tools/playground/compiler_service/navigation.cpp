@@ -61,20 +61,15 @@ auto goto_definition(const nlohmann::json& request, const ServiceContext& ctx) -
     return null_reply();
   }
   auto result = query_definition(query.token_offset, query.pipe.resolve_result);
-  // A definition outside the editor buffer (prelude) is not navigable
-  // in the user's source.
-  if (!result || !query.pipe.prog.in_user_file(result->offset)) {
+  if (!result) {
     return null_reply();
   }
-  const auto& prog = query.pipe.prog;
-  auto loc = prog.program.source_map.locate(result->offset);
-  return {.status = http_status::ok,
-          .body = {
-              {"offset", prog.to_editor_offset(result->offset)},
-              {"length", result->length},
-              {"line", prog.editor_line(result->offset)},
-              {"col", loc.col},
-          }};
+  // The definition may live in another file of the program (the
+  // prelude today); the reply says which, and the consumer decides
+  // whether it can show it.
+  nlohmann::json body = {{"length", result->length}};
+  add_position(body, query.pipe.prog, result->offset);
+  return {.status = http_status::ok, .body = std::move(body)};
 }
 
 auto document_symbols(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
@@ -110,17 +105,11 @@ auto references(const nlohmann::json& request, const ServiceContext& ctx) -> Rep
   if (!query.pipe.ok) {
     return list_reply(nlohmann::json::array());
   }
-  const auto& prog = query.pipe.prog;
   nlohmann::json refs = nlohmann::json::array();
   for (const auto& ref : query_references(query.token_offset, query.pipe.resolve_result)) {
-    if (!prog.in_user_file(ref.span.offset)) {
-      continue; // prelude references are not navigable from the buffer
-    }
-    refs.push_back({
-        {"offset", prog.to_editor_offset(ref.span.offset)},
-        {"length", ref.span.length},
-        {"isDefinition", ref.is_definition},
-    });
+    nlohmann::json entry = {{"length", ref.span.length}, {"isDefinition", ref.is_definition}};
+    add_position(entry, query.pipe.prog, ref.span.offset);
+    refs.push_back(std::move(entry));
   }
   return list_reply(std::move(refs));
 }

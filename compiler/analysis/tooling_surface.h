@@ -155,6 +155,12 @@ inline constexpr std::array kDiagnosticSeverities{
 // `number`, `boolean`, one of the enumerations above (`TokenKind`,
 // `LexicalCategory`, `DiagnosticSeverity`), a shape name, or a shape
 // name followed by `[]`.  Optional fields may be absent from a request.
+//
+// Positions carry file identity: `file` is the display path of the
+// file a span lies in (`""` for a message without a location), and
+// `offset`/`line`/`col` are local to that file.  Replies about the
+// document being edited report its path in a top-level `file` field so
+// a consumer can tell which positions are in the buffer it shows.
 // ---------------------------------------------------------------------------
 
 struct FieldSpec {
@@ -182,9 +188,10 @@ inline constexpr std::array kSemanticTokenFields{
 };
 
 inline constexpr std::array kDiagnosticFields{
-    FieldSpec{"severity", "DiagnosticSeverity"}, FieldSpec{"offset", "number"},
-    FieldSpec{"length", "number"},               FieldSpec{"line", "number"},
-    FieldSpec{"col", "number"},                  FieldSpec{"message", "string"},
+    FieldSpec{"severity", "DiagnosticSeverity"}, FieldSpec{"file", "string"},
+    FieldSpec{"offset", "number"},               FieldSpec{"length", "number"},
+    FieldSpec{"line", "number"},                 FieldSpec{"col", "number"},
+    FieldSpec{"message", "string"},
 };
 
 inline constexpr std::array kSourceRequestFields{
@@ -202,6 +209,8 @@ inline constexpr std::array kPositionRequestFields{
 };
 
 inline constexpr std::array kAnalyzeResponseFields{
+    FieldSpec{"file", "string"},
+    FieldSpec{"module", "string"},
     FieldSpec{"tokens", "LexToken[]"},
     FieldSpec{"semanticTokens", "SemanticToken[]"},
     FieldSpec{"ast", "string"},
@@ -212,6 +221,7 @@ inline constexpr std::array kAnalyzeResponseFields{
 };
 
 inline constexpr std::array kRunResponseFields{
+    FieldSpec{"file", "string"},
     FieldSpec{"stdout", "string"},
     FieldSpec{"stderr", "string"},
     FieldSpec{"exit_code", "number"},
@@ -225,8 +235,9 @@ inline constexpr std::array kHoverFields{
 };
 
 inline constexpr std::array kDefinitionFields{
-    FieldSpec{"offset", "number"}, FieldSpec{"length", "number"},
-    FieldSpec{"line", "number"},   FieldSpec{"col", "number"},
+    FieldSpec{"file", "string"},   FieldSpec{"offset", "number"},
+    FieldSpec{"length", "number"}, FieldSpec{"line", "number"},
+    FieldSpec{"col", "number"},
 };
 
 inline constexpr std::array kDocumentSymbolFields{
@@ -236,8 +247,11 @@ inline constexpr std::array kDocumentSymbolFields{
 };
 
 inline constexpr std::array kReferenceFields{
+    FieldSpec{"file", "string"},
     FieldSpec{"offset", "number"},
     FieldSpec{"length", "number"},
+    FieldSpec{"line", "number"},
+    FieldSpec{"col", "number"},
     FieldSpec{"isDefinition", "boolean"},
 };
 
@@ -319,10 +333,53 @@ inline constexpr std::array kRoutes{
 
 auto find_route(std::string_view name) -> const RouteSpec*;
 
+// ---------------------------------------------------------------------------
+// Capabilities and the surfaces that serve them.
+//
+// The status of record for what tooling can do: one row per capability
+// with the compiler entry point behind it and the playground route,
+// `daoc` command, and LSP method that expose it (empty when none does).
+// Rendered as docs/tooling_capabilities.md; tests check the route and
+// command names against the route table and the driver.
+// ---------------------------------------------------------------------------
+
+struct CapabilitySpec {
+  std::string_view name;
+  std::string_view analysis;   // compiler entry point
+  std::string_view playground; // a kRoutes name, or ""
+  std::string_view cli;        // a `daoc` subcommand, or ""
+  std::string_view lsp;        // the LSP method it maps to, or ""
+};
+
+inline constexpr std::array kCapabilities{
+    CapabilitySpec{"Diagnostics", "Diagnostic", "analyze", "check",
+                   "textDocument/publishDiagnostics"},
+    CapabilitySpec{"Semantic tokens", "classify_tokens", "analyze", "tokens",
+                   "textDocument/semanticTokens/full"},
+    CapabilitySpec{"Hover", "query_hover", "hover", "", "textDocument/hover"},
+    CapabilitySpec{"Go to definition", "query_definition", "gotoDef", "",
+                   "textDocument/definition"},
+    CapabilitySpec{"References", "query_references", "references", "",
+                   "textDocument/references"},
+    CapabilitySpec{"Document symbols", "query_document_symbols", "documentSymbols", "",
+                   "textDocument/documentSymbol"},
+    CapabilitySpec{"Completion", "query_completions", "completions", "",
+                   "textDocument/completion"},
+    CapabilitySpec{"AST dump", "print_ast", "analyze", "ast", ""},
+    CapabilitySpec{"HIR dump", "print_hir", "analyze", "hir", ""},
+    CapabilitySpec{"MIR dump", "print_mir", "analyze", "mir", ""},
+    CapabilitySpec{"LLVM IR dump", "LlvmBackend::print_ir", "analyze", "llvm-ir", ""},
+    CapabilitySpec{"Native build and run", "LlvmBackend::emit_object", "run", "build", ""},
+};
+
 /// The TypeScript module the playground frontend compiles against.
 /// `tooling_surface_dump` writes it; a test asserts the checked-in
 /// file equals it.
 auto render_typescript() -> std::string;
+
+/// The capability matrix as Markdown (docs/tooling_capabilities.md);
+/// same generate-and-verify rule as the TypeScript.
+auto render_capability_matrix() -> std::string;
 
 } // namespace dao::tooling
 

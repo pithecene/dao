@@ -89,6 +89,21 @@ silently unstyled token.
   except those listed with a reason in `testdata/examples/known_failures.txt`.
 - `npm run build` runs `tsc --noEmit` before bundling.
 
+**File identity.** Every position a reply carries names its file
+(`file`, the display path) with file-local offset and line, and replies
+about the document report its path at the top level.  Definitions and
+references therefore reach into the prelude today and into other user
+modules once Task 31 lands; the single-document UI names positions it
+cannot open (a notice for a prelude definition, a count for references
+elsewhere) instead of the service hiding them.  That is what keeps the
+multi-file workspace (Task 31 D5) a UI change rather than an API change.
+
+**Capability matrix.** `docs/tooling_capabilities.md` is generated from
+the surface's capability table — compiler entry point, playground route,
+`daoc` command, LSP method per capability — and `tooling_surface_test`
+checks the route and command names against the route table and the
+driver.  READMEs point at it rather than restating it.
+
 **The rule.** A change to a token kind, a payload field, a route, or a
 diagnostic severity edits the table, regenerates the TypeScript, and
 lands with the frontend change in the same PR.  A language feature lands

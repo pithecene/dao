@@ -33,6 +33,7 @@ struct AnalyzeOutput {
   nlohmann::json tokens = nlohmann::json::array();
   nlohmann::json semantic_tokens = nlohmann::json::array();
   nlohmann::json diagnostics = nlohmann::json::array();
+  std::string module; // the buffer's module name, once parsed
   std::string ast;
   std::string hir;
   std::string mir;
@@ -41,6 +42,8 @@ struct AnalyzeOutput {
   [[nodiscard]] auto reply() const -> Reply {
     return {.status = http_status::ok,
             .body = {
+                {"file", kDocumentPath},
+                {"module", module},
                 {"tokens", tokens},
                 {"semanticTokens", semantic_tokens},
                 {"ast", ast},
@@ -132,6 +135,21 @@ auto user_function_filter(const MirModule& user_mir) -> std::function<bool(std::
   };
 }
 
+/// `a::b` for the buffer's module declaration, or "" when it has none.
+auto module_name(const FileNode& file) -> std::string {
+  std::string name;
+  if (file.module_decl == nullptr) {
+    return name;
+  }
+  for (auto segment : file.module_decl->path.segments) {
+    if (!name.empty()) {
+      name += "::";
+    }
+    name += segment;
+  }
+  return name;
+}
+
 template <typename Printable>
 auto printed(Printable&& print) -> std::string {
   std::ostringstream out;
@@ -173,6 +191,7 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
     return out.reply();
   }
   const bool has_parse_errors = !prog.user->parse.diagnostics.empty();
+  out.module = module_name(*prog.user->file());
 
   // Always emit the partial AST when a file was produced, even with
   // parse errors — error recovery nodes appear as placeholders and the
@@ -258,7 +277,7 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   llvm::LLVMContext llvm_ctx;
   LlvmBackend llvm_backend(llvm_ctx);
   auto llvm_result = llvm_backend.lower(*mir_result.module, &prog.program.source_map);
-  collect_diagnostics(out.diagnostics, prog, llvm_result.diagnostics);
+  collect_diagnostics(out.diagnostics, prog, without_prelude_warnings(llvm_result.diagnostics, prog));
 
   if (llvm_result.module != nullptr && !has_user_error(llvm_result.diagnostics, prog)) {
     out.llvm_ir = printed([&](std::ostream& os) {
