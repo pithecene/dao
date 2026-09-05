@@ -22,20 +22,25 @@ TypeChecker::TypeChecker(TypeContext& types, const ResolveResult& resolve)
 // Top-level entry
 // ---------------------------------------------------------------------------
 
-auto TypeChecker::check(const FileNode& file) -> TypeCheckResult {
-  file_ = &file;
+auto TypeChecker::check(std::span<const FileNode* const> files) -> TypeCheckResult {
+  all_decls_.clear();
+  for (const auto* file : files) {
+    for (const auto* decl : file->declarations) {
+      all_decls_.push_back(decl);
+    }
+  }
 
   // Pass 1: register all top-level declaration types.
-  register_declarations(file);
+  register_declarations();
 
   // Pass 1c: compute derived conformances for all classes.
-  compute_derived_conformances(file);
+  compute_derived_conformances();
 
   // Pass 1d: build pre-computed method lookup table.
-  build_method_table(file);
+  build_method_table();
 
   // Pass 2: check all declaration bodies.
-  for (const auto* decl : file.declarations) {
+  for (const auto* decl : all_decls_) {
     check_declaration(decl);
   }
 
@@ -358,18 +363,18 @@ auto TypeChecker::resolve_symbol_type_for_type_decl(const Symbol* sym) -> const 
 // Pass 1: register declaration types
 // ---------------------------------------------------------------------------
 
-void TypeChecker::register_declarations(const FileNode& file) {
+void TypeChecker::register_declarations() {
   pending_classes_.clear(); // Reset pass-local state for this file.
-  register_type_names(file);
-  register_enum_variants(file);
-  register_struct_fields(file);
-  register_signatures(file);
+  register_type_names();
+  register_enum_variants();
+  register_struct_fields();
+  register_signatures();
 }
 
-void TypeChecker::register_type_names(const FileNode& file) {
+void TypeChecker::register_type_names() {
   // Pass 1a: register type aliases first so that functions and structs
   // can reference them regardless of source order.
-  for (const auto* decl : file.declarations) {
+  for (const auto* decl : all_decls_) {
     if (decl->kind() != NodeKind::AliasDecl) {
       continue;
     }
@@ -398,7 +403,7 @@ void TypeChecker::register_type_names(const FileNode& file) {
   // before any field types are resolved, enabling forward references
   // between classes (e.g. class Diagnostic with a Span field where
   // Span is defined later in the source).
-  for (const auto* decl : file.declarations) {
+  for (const auto* decl : all_decls_) {
     if (decl->kind() == NodeKind::ClassDecl) {
       const auto& st = decl->as<ClassDecl>();
       auto decl_it = decl_symbols_.find(st.name_span.offset);
@@ -415,13 +420,13 @@ void TypeChecker::register_type_names(const FileNode& file) {
   }
 }
 
-void TypeChecker::register_enum_variants(const FileNode& file) {
+void TypeChecker::register_enum_variants() {
   // Register enum types with resolved variant payload types.
   // Unresolved types are kept as nullptr to preserve arity — the
   // primary diagnostic comes from resolve_type_node; dropping the
   // slot would silently mutate the variant shape and produce
   // misleading secondary errors.
-  for (const auto* decl : file.declarations) {
+  for (const auto* decl : all_decls_) {
     if (decl->kind() != NodeKind::EnumDecl) {
       continue;
     }
@@ -459,7 +464,7 @@ void TypeChecker::register_enum_variants(const FileNode& file) {
   }
 }
 
-void TypeChecker::register_struct_fields(const FileNode& /*file*/) {
+void TypeChecker::register_struct_fields() {
   // Sub-pass 1b-ii: resolve class field types now that all type
   // shells (classes and enums) are registered in symbol_types_.
   // Unresolved types are kept as nullptr to preserve arity — same
@@ -477,11 +482,11 @@ void TypeChecker::register_struct_fields(const FileNode& /*file*/) {
   }
 }
 
-void TypeChecker::register_signatures(const FileNode& file) {
+void TypeChecker::register_signatures() {
   // Pass 1c: register function signatures, class method signatures,
   // and extend method signatures. All type shells from pass 1b are
   // available, so return types like Option<V> resolve correctly.
-  for (const auto* decl : file.declarations) {
+  for (const auto* decl : all_decls_) {
     switch (decl->kind()) {
     case NodeKind::FunctionDecl: {
       const auto& fn = decl->as<FunctionDecl>();
@@ -588,7 +593,7 @@ void TypeChecker::register_signatures(const FileNode& file) {
   }
 
   // Pass 1c-prep: collect derived concept declarations.
-  for (const auto* decl : file.declarations) {
+  for (const auto* decl : all_decls_) {
     if (decl->kind() == NodeKind::ConceptDecl) {
       const auto& cpt = decl->as<ConceptDecl>();
       if (cpt.is_derived) {
@@ -632,9 +637,9 @@ auto TypeChecker::type_conforms_to(const Type* type, const Decl* concept_decl) -
   }
 
   // Check extend declarations.
-  if (file_ != nullptr) {
+  if (!all_decls_.empty()) {
     const auto& cpt_name = concept_decl->as<ConceptDecl>().name;
-    for (const auto* decl : file_->declarations) {
+    for (const auto* decl : all_decls_) {
       if (decl->kind() != NodeKind::ExtendDecl) {
         continue;
       }
@@ -659,7 +664,7 @@ auto TypeChecker::type_conforms_to(const Type* type, const Decl* concept_decl) -
   return false;
 }
 
-void TypeChecker::compute_derived_conformances(const FileNode& file) {
+void TypeChecker::compute_derived_conformances() {
   if (derived_concepts_.empty()) {
     return;
   }
@@ -671,7 +676,7 @@ void TypeChecker::compute_derived_conformances(const FileNode& file) {
     const Type* struct_type;
   };
   std::vector<ClassEntry> classes;
-  for (const auto* decl : file.declarations) {
+  for (const auto* decl : all_decls_) {
     if (decl->kind() != NodeKind::ClassDecl) {
       continue;
     }
@@ -2082,7 +2087,7 @@ auto TypeChecker::check_call(const Expr* expr) -> const Type* {
           if (expected_count == 0 && sym_it->second->name.find('.') != std::string_view::npos) {
             // Find the enclosing ClassDecl by checking file declarations.
             auto class_name = sym_it->second->name.substr(0, sym_it->second->name.find('.'));
-            for (const auto* file_decl : file_->declarations) {
+            for (const auto* file_decl : all_decls_) {
               if (file_decl->kind() == NodeKind::ClassDecl &&
                   file_decl->as<ClassDecl>().name == class_name) {
                 expected_count = file_decl->as<ClassDecl>().type_params.size();
@@ -2429,9 +2434,9 @@ auto TypeChecker::build_method_fn_type(const FunctionDecl& method) -> const Type
 // Called once after compute_derived_conformances().
 // ---------------------------------------------------------------------------
 
-void TypeChecker::build_method_table(const FileNode& file) {
+void TypeChecker::build_method_table() {
   // 1. Struct conformance block methods.
-  for (const auto* decl : file.declarations) {
+  for (const auto* decl : all_decls_) {
     if (decl->kind() != NodeKind::ClassDecl) {
       continue;
     }
@@ -2467,7 +2472,7 @@ void TypeChecker::build_method_table(const FileNode& file) {
   }
 
   // 2. Top-level extend declarations.
-  for (const auto* decl : file.declarations) {
+  for (const auto* decl : all_decls_) {
     if (decl->kind() != NodeKind::ExtendDecl) {
       continue;
     }
@@ -2503,7 +2508,7 @@ void TypeChecker::build_method_table(const FileNode& file) {
         const auto* fn_type = build_method_fn_type(method);
         // Find the concrete extend implementation for HIR lowering.
         const Decl* impl_decl = nullptr;
-        for (const auto* decl : file.declarations) {
+        for (const auto* decl : all_decls_) {
           if (decl->kind() != NodeKind::ExtendDecl)
             continue;
           const auto& ext = decl->as<ExtendDecl>();
@@ -2797,10 +2802,22 @@ auto TypeChecker::resolve_builtin_function_type(std::string_view name) -> const 
 // Free-function entry point
 // ---------------------------------------------------------------------------
 
+auto typecheck(std::span<const FileNode* const> files, const ResolveResult& resolve,
+               TypeContext& types) -> TypeCheckResult {
+  TypeChecker checker(types, resolve);
+  return checker.check(files);
+}
+
+auto typecheck(const Program& program, const ResolveResult& resolve, TypeContext& types)
+    -> TypeCheckResult {
+  auto nodes = program.file_nodes();
+  return typecheck(nodes, resolve, types);
+}
+
 auto typecheck(const FileNode& file, const ResolveResult& resolve, TypeContext& types)
     -> TypeCheckResult {
-  TypeChecker checker(types, resolve);
-  return checker.check(file);
+  const FileNode* files[] = {&file};
+  return typecheck(std::span<const FileNode* const>(files), resolve, types);
 }
 
 } // namespace dao

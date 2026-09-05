@@ -526,6 +526,10 @@ See `docs/task_specs/TASK_30_BOOTSTRAP_LLVM_BACKEND.md` and
 
 ### Task 31 — Host Multi-file Compilation
 
+Status: **in progress** — D0 (program-wide source map; prelude loaded
+as separate files; `prelude_bytes` machinery and `blank_leading_module`
+removed; `compiler/frontend/module/` created) landed.  D1–D6 follow.
+
 **Objective**: make the C++ host compiler compile a program spanning
 multiple Dao source files with real module identity, import-driven
 discovery, and cross-module resolution, type checking, and lowering —

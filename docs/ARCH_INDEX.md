@@ -63,6 +63,7 @@ Shared low-level utilities used across compiler subsystems.
 Source-facing compiler pipeline.
 
 - `lexer/` — indentation-aware tokenization and lexical rules
+- `module/` — program assembly: `SourceFile`/`SourceMap` (program-wide offset space with per-file base offsets and reserved EOF positions), `Program` construction from inputs, prelude-group loading (`CONTRACT_MODULE_SYSTEM.md`; Task 31)
 - `parser/` — parsing and surface grammar ingestion
 - `ast/` — syntax tree / declaration and expression representation
 - `diagnostics/` — spans, reporting, and source diagnostics plumbing

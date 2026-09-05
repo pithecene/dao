@@ -27,7 +27,6 @@ struct ResolvedSource {
 // leading `module ...` line (e.g. the corpus tests below) pass
 // `synthetic_module = false`.
 auto resolve_source(const std::string& name, std::string contents,
-                    uint32_t prelude_bytes = 0,
                     bool synthetic_module = true) -> ResolvedSource {
   if (synthetic_module) {
     std::string wrapped = "module test\n";
@@ -42,7 +41,7 @@ auto resolve_source(const std::string& name, std::string contents,
   if (lex_result.diagnostics.empty()) {
     parse_result = parse(lex_result.tokens);
     if (parse_result.file != nullptr) {
-      resolve_result = resolve(*parse_result.file, prelude_bytes);
+      resolve_result = resolve(*parse_result.file);
     }
   }
 
@@ -50,30 +49,6 @@ auto resolve_source(const std::string& name, std::string contents,
           std::move(lex_result),
           std::move(parse_result),
           std::move(resolve_result)};
-}
-
-// Load stdlib/core/*.dao as a single synthetic prelude compilation
-// unit. Per-file `module` headers are stripped; the caller is
-// responsible for prepending its own `module` line to the combined
-// source before passing it to the parser. Real multi-file resolution
-// is exercised by Task 25+ infrastructure, not this corpus test.
-auto load_prelude() -> std::string {
-  std::filesystem::path root(DAO_SOURCE_DIR);
-  auto stdlib_core = root / "stdlib" / "core";
-  std::string prelude;
-  if (!std::filesystem::exists(stdlib_core)) {
-    return prelude;
-  }
-  for (const auto& entry : std::filesystem::directory_iterator(stdlib_core)) {
-    if (entry.path().extension() != ".dao") {
-      continue;
-    }
-    auto contents = read_file(entry.path());
-    auto stripped = strip_leading_module(contents);
-    prelude.append(stripped);
-    prelude += '\n';
-  }
-  return prelude;
 }
 
 auto has_diagnostic_containing(const ResolveResult& result, const std::string& text) -> bool {
@@ -381,32 +356,22 @@ suite<"resolve_corpus"> resolve_corpus = [] {
   "all examples resolve without spurious diagnostics"_test = [] {
     std::filesystem::path root(DAO_SOURCE_DIR);
     auto examples_dir = root / "examples";
-    // Synthetic combined source: single leading `module test` line,
-    // followed by the stripped prelude, followed by each example with
-    // its own `module` line stripped. The whole thing is treated as
-    // one file for corpus resolution.
-    auto prelude_body = load_prelude();
+    // Each example is resolved as the user file of a program whose
+    // prelude group is the real stdlib, exactly as the driver builds it.
+    auto prelude = stdlib_prelude_sources(root);
 
     for (const auto& entry : std::filesystem::directory_iterator(examples_dir)) {
       if (entry.path().extension() != ".dao") {
         continue;
       }
 
-      std::string contents = "module test\n";
-      contents.append(prelude_body);
-      auto example = read_file(entry.path());
-      auto example_body = strip_leading_module(example);
-      auto prelude_bytes = static_cast<uint32_t>(contents.size());
-      contents.append(example_body);
-
-      auto result =
-          resolve_source(entry.path().filename().string(),
-                         std::move(contents), prelude_bytes, /*synthetic_module=*/false);
+      auto program = make_test_program(read_file(entry.path()), prelude);
+      auto resolve_result = resolve(program);
 
       // No value-position diagnostics should fire on example files.
       // Skip prelude-origin diagnostics.
-      for (const auto& diag : result.resolve_result.diagnostics) {
-        if (diag.span.offset < prelude_bytes) {
+      for (const auto& diag : resolve_result.diagnostics) {
+        if (program.source_map.is_prelude(diag.span.offset)) {
           continue;
         }
         expect(false) << entry.path().filename().string() << ": " << diag.message;
@@ -429,8 +394,7 @@ suite<"resolve_corpus"> resolve_corpus = [] {
       auto contents = read_file(entry.path());
       auto result =
           resolve_source(entry.path().filename().string(),
-                         std::move(contents), /*prelude_bytes=*/0,
-                         /*synthetic_module=*/false);
+                         std::move(contents), /*synthetic_module=*/false);
 
       for (const auto& diag : result.resolve_result.diagnostics) {
         expect(false) << entry.path().filename().string() << ": " << diag.message;
@@ -558,21 +522,27 @@ suite<"reserved_prefix"> reserved_prefix = [] {
         << "error message mentions __dao_";
   };
 
-  "reserved __dao_ prefix allowed in prelude region"_test = [] {
-    // Simulate prelude: the extern declaration is within the prelude region.
-    std::string source =
-        "extern fn __dao_eq_i32(a: i32, b: i32): bool\n"
-        "fn main(): void\n"
-        "  return\n";
-    SourceBuffer buf("test.dao", std::string(source));
-    auto lex_result = lex(buf);
-    auto parse_result = parse(lex_result.tokens);
-    // prelude_bytes covers the extern declaration line (45 chars + newline).
-    auto resolve_result = resolve(*parse_result.file, 46);
+  "reserved __dao_ prefix allowed in prelude files"_test = [] {
+    // The extern declaration lives in a prelude-group file; the user
+    // file only calls it.
+    std::vector<std::string> prelude = {
+        "module core::equality\n"
+        "extern fn __dao_eq_i32(a: i32, b: i32): bool\n"};
+    auto program = make_test_program("fn main(): void\n  return\n", prelude);
+    auto resolve_result = resolve(program);
     for (const auto& diag : resolve_result.diagnostics) {
       expect(diag.message.find("__dao_") == std::string::npos)
           << "prelude __dao_ should not be rejected: " << diag.message;
     }
+  };
+
+  "reserved __dao_ prefix rejected in user file even with a prelude"_test = [] {
+    std::vector<std::string> prelude = {"module core::probe\nfn zero(): i32 -> 0\n"};
+    auto program = make_test_program(
+        "extern fn __dao_mine(a: i32): bool\nfn main(): void\n  return\n", prelude);
+    auto resolve_result = resolve(program);
+    expect(has_diagnostic_containing(resolve_result, "__dao_"))
+        << "user __dao_ declaration must be rejected";
   };
 };
 

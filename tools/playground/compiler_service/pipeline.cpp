@@ -2,72 +2,59 @@
 #include "support/module_utils.h"
 
 #include <algorithm>
-#include <fstream>
+#include <utility>
 
 namespace dao::playground {
 
-void blank_user_leading_module(std::string& src) {
-  blank_leading_module(src);
+namespace {
+
+constexpr const char* kSyntheticHeader = "module playground\n";
+
+} // namespace
+
+auto build_playground_program(const std::filesystem::path& repo_root,
+                              std::string user_source) -> PlaygroundProgram {
+  PlaygroundProgram prog;
+
+  // Per CONTRACT_SYNTAX_SURFACE.md every source file begins with one
+  // `module` declaration.  A scratch buffer usually has none; give it
+  // a synthetic identity and remember how many bytes/lines to subtract
+  // when reporting positions back to the editor.
+  if (!starts_with_module(user_source)) {
+    std::string with_header = kSyntheticHeader;
+    prog.header_bytes = static_cast<uint32_t>(with_header.size());
+    prog.header_lines = 1;
+    with_header.append(user_source);
+    user_source = std::move(with_header);
+  }
+
+  auto inputs = load_prelude_inputs(repo_root / "stdlib");
+  inputs.push_back({.display_path = "<playground>",
+                    .text = std::move(user_source),
+                    .is_prelude = false});
+  prog.program = build_program(std::move(inputs));
+  prog.user = prog.program.files.empty() ? nullptr : prog.program.files.back().get();
+  return prog;
 }
 
-auto load_prelude(const std::filesystem::path& repo_root) -> std::string {
-  auto stdlib_core = repo_root / "stdlib" / "core";
-  std::string prelude;
-  if (!std::filesystem::exists(stdlib_core)) {
-    return prelude;
-  }
-  // Collect and sort entries so prelude loading order is stable
-  // and dependency-aware (e.g. option.dao before overflow.dao).
-  std::vector<std::filesystem::path> paths;
-  for (const auto& entry :
-       std::filesystem::directory_iterator(stdlib_core)) {
-    if (entry.path().extension() == ".dao") {
-      paths.push_back(entry.path());
-    }
-  }
-  std::sort(paths.begin(), paths.end());
-  for (const auto& p : paths) {
-    std::ifstream file(p);
-    if (!file) {
-      continue;
-    }
-    std::string contents{std::istreambuf_iterator<char>(file),
-                         std::istreambuf_iterator<char>()};
-    blank_leading_module(contents);
-    prelude.append(contents);
-    prelude += '\n';
-  }
-  return prelude;
-}
-
-auto count_lines(const std::string& text) -> uint32_t {
-  return static_cast<uint32_t>(
-      std::count(text.begin(), text.end(), '\n'));
-}
-
-auto has_user_error(const std::vector<Diagnostic>& diags,
-                    uint32_t prelude_bytes) -> bool {
-  return std::ranges::any_of(diags, [prelude_bytes](const auto& diag) {
-    return diag.span.offset >= prelude_bytes;
+auto has_user_error(const std::vector<Diagnostic>& diags, const PlaygroundProgram& prog) -> bool {
+  return std::ranges::any_of(diags, [&prog](const auto& diag) -> bool {
+    return prog.in_user_file(diag.span.offset);
   });
 }
 
-void collect_diagnostics(nlohmann::json& out, const SourceBuffer& source,
-                         const std::vector<Diagnostic>& diags,
-                         uint32_t prelude_bytes, uint32_t prelude_lines) {
+void collect_diagnostics(nlohmann::json& out, const PlaygroundProgram& prog,
+                         const std::vector<Diagnostic>& diags) {
   for (const auto& diag : diags) {
-    if (diag.span.offset < prelude_bytes) {
+    if (!prog.in_user_file(diag.span.offset)) {
       continue;
     }
-    auto loc = source.line_col(diag.span.offset);
-    auto line =
-        loc.line > prelude_lines ? loc.line - prelude_lines : loc.line;
+    auto loc = prog.program.source_map.locate(diag.span.offset);
     out.push_back({
-        {"severity",
-         diag.severity == Severity::Warning ? "warning" : "error"},
-        {"offset", diag.span.offset - prelude_bytes},
+        {"severity", diag.severity == Severity::Warning ? "warning" : "error"},
+        {"offset", prog.to_editor_offset(diag.span.offset)},
         {"length", diag.span.length},
-        {"line", line},
+        {"line", prog.editor_line(diag.span.offset)},
         {"col", loc.col},
         {"message", diag.message},
     });

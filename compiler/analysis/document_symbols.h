@@ -21,9 +21,9 @@ struct DocumentSymbol {
 /// Collect document symbols from the AST.
 /// Returns a hierarchical tree of declarations with their children
 /// (e.g. class fields, concept methods).
-auto query_document_symbols(const FileNode& file,
-                             uint32_t prelude_bytes)
-    -> std::vector<DocumentSymbol>;
+/// Symbols declared in one file.  Callers pass the user's file; prelude
+/// files are separate FileNodes and are simply not queried.
+auto query_document_symbols(const FileNode& file) -> std::vector<DocumentSymbol>;
 
 } // namespace dao
 

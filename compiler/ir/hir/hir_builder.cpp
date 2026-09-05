@@ -2,6 +2,7 @@
 
 #include "frontend/types/type_printer.h"
 
+#include <algorithm>
 #include <charconv>
 #include <cstdlib>
 #include <string>
@@ -26,12 +27,27 @@ HirBuilder::HirBuilder(HirContext& ctx, const ResolveResult& resolve,
 // Top-level
 // ---------------------------------------------------------------------------
 
-auto HirBuilder::build(const FileNode& file) -> HirBuildResult {
+auto HirBuilder::build(std::span<const FileNode* const> files) -> HirBuildResult {
   std::vector<HirDecl*> decls;
-  for (const auto* decl : file.declarations) {
-    auto* hir_decl = lower_decl(decl);
-    if (hir_decl != nullptr) {
-      decls.push_back(hir_decl);
+  Span module_span{};
+  bool first = true;
+  for (const auto* file : files) {
+    // The module span covers every file (disjoint ranges of one
+    // program-wide offset space).
+    if (first) {
+      module_span = file->span;
+      first = false;
+    } else {
+      auto begin = std::min(module_span.offset, file->span.offset);
+      auto end = std::max(module_span.offset + module_span.length,
+                          file->span.offset + file->span.length);
+      module_span = Span{.offset = begin, .length = end - begin};
+    }
+    for (const auto* decl : file->declarations) {
+      auto* hir_decl = lower_decl(decl);
+      if (hir_decl != nullptr) {
+        decls.push_back(hir_decl);
+      }
     }
   }
 
@@ -40,7 +56,7 @@ auto HirBuilder::build(const FileNode& file) -> HirBuildResult {
     decls.push_back(ext_decl);
   }
 
-  auto* mod = ctx_.alloc<HirModule>(file.span, std::move(decls));
+  auto* mod = ctx_.alloc<HirModule>(module_span, std::move(decls));
   return {.module = mod, .diagnostics = std::move(diagnostics_)};
 }
 
@@ -753,11 +769,25 @@ void HirBuilder::error(Span span, std::string message) {
 // Free-function entry point
 // ---------------------------------------------------------------------------
 
-auto build_hir(const FileNode& file, const ResolveResult& resolve,
+auto build_hir(std::span<const FileNode* const> files, const ResolveResult& resolve,
                const TypeCheckResult& typed, HirContext& ctx)
     -> HirBuildResult {
   HirBuilder builder(ctx, resolve, typed);
-  return builder.build(file);
+  return builder.build(files);
+}
+
+auto build_hir(const Program& program, const ResolveResult& resolve,
+               const TypeCheckResult& typed, HirContext& ctx)
+    -> HirBuildResult {
+  auto nodes = program.file_nodes();
+  return build_hir(nodes, resolve, typed, ctx);
+}
+
+auto build_hir(const FileNode& file, const ResolveResult& resolve,
+               const TypeCheckResult& typed, HirContext& ctx)
+    -> HirBuildResult {
+  const FileNode* files[] = {&file};
+  return build_hir(std::span<const FileNode* const>(files), resolve, typed, ctx);
 }
 
 } // namespace dao

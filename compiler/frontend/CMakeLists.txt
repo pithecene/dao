@@ -2,6 +2,8 @@ add_library(dao_frontend STATIC
   ast/ast.cpp
   ast/ast_printer.cpp
   lexer/lexer.cpp
+  module/program.cpp
+  module/source_map.cpp
   parser/parser.cpp
   resolve/resolve.cpp
   types/type.cpp
@@ -86,3 +88,15 @@ target_compile_definitions(typecheck_test PRIVATE
 )
 
 add_test(NAME typecheck_test COMMAND typecheck_test)
+
+add_executable(source_map_test
+  module/source_map_test.cpp
+)
+
+target_link_libraries(source_map_test PRIVATE dao_frontend Boost::ut)
+
+target_compile_definitions(source_map_test PRIVATE
+  DAO_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+
+add_test(NAME source_map_test COMMAND source_map_test)

@@ -1,12 +1,16 @@
 #ifndef DAO_SUPPORT_TEST_UTILS_H
 #define DAO_SUPPORT_TEST_UTILS_H
 
+#include "frontend/module/program.h"
 #include "support/module_utils.h"
 
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace dao {
 
@@ -31,6 +35,42 @@ inline auto wrap_with_test_module(std::string_view src) -> std::string {
   std::string wrapped = kTestModulePrefix;
   wrapped.append(src);
   return wrapped;
+}
+
+/// Build a Program from prelude sources (each a real stdlib file with its
+/// own `module` line, marked as prelude group) followed by one user
+/// source (wrapped with `module test` if it lacks a module line).  The
+/// user file is always the last file of the program.
+inline auto make_test_program(std::string_view user_source,
+                              std::span<const std::string> prelude_sources = {})
+    -> Program {
+  std::vector<SourceInput> inputs;
+  inputs.reserve(prelude_sources.size() + 1);
+  for (size_t i = 0; i < prelude_sources.size(); ++i) {
+    inputs.push_back({.display_path = "prelude" + std::to_string(i) + ".dao",
+                      .text = prelude_sources[i],
+                      .is_prelude = true});
+  }
+  inputs.push_back({.display_path = "test.dao",
+                    .text = wrap_with_test_module(user_source),
+                    .is_prelude = false});
+  return build_program(std::move(inputs));
+}
+
+/// The stdlib prelude group as source strings (stdlib/core then
+/// stdlib/io, sorted) under the given repository root.
+inline auto stdlib_prelude_sources(const std::filesystem::path& repo_root)
+    -> std::vector<std::string> {
+  std::vector<std::string> sources;
+  for (auto& input : load_prelude_inputs(repo_root / "stdlib")) {
+    sources.push_back(std::move(input.text));
+  }
+  return sources;
+}
+
+/// The user file of a program built by make_test_program.
+inline auto user_file(const Program& program) -> const SourceFile& {
+  return *program.files.back();
 }
 
 } // namespace dao

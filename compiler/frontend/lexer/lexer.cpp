@@ -57,7 +57,8 @@ namespace {
 
 class LexerImpl {
 public:
-  explicit LexerImpl(const SourceBuffer& source) : source_(source), src_(source.contents()) {
+  LexerImpl(const SourceBuffer& source, uint32_t base_offset)
+      : source_(source), src_(source.contents()), base_(base_offset) {
   }
 
   auto run() -> LexResult {
@@ -106,6 +107,7 @@ public:
 private:
   const SourceBuffer& source_;
   std::string_view src_;
+  uint32_t base_; // added to every emitted span; buffer-local offsets stay internal
   uint32_t pos_ = 0;
   std::vector<uint32_t> indent_stack_ = {0};
   uint32_t paren_depth_ = 0;
@@ -113,16 +115,17 @@ private:
   std::vector<Token> tokens_;
   std::vector<Diagnostic> diagnostics_;
 
+  // `offset` and `length` are buffer-local; the recorded span is program-wide.
   void emit(TokenKind kind, uint32_t offset, uint32_t length) {
     tokens_.push_back({.kind = kind,
-                       .span = {.offset = offset, .length = length},
+                       .span = {.offset = base_ + offset, .length = length},
                        .text = src_.substr(offset, length)});
   }
 
   void emit_error(uint32_t offset, uint32_t length, std::string message) {
     emit(TokenKind::Error, offset, length);
-    diagnostics_.push_back(
-        Diagnostic::error({.offset = offset, .length = length}, std::move(message)));
+    diagnostics_.push_back(Diagnostic::error(
+        {.offset = base_ + offset, .length = length}, std::move(message)));
   }
 
   [[nodiscard]] auto peek() const -> char {
@@ -490,8 +493,8 @@ private:
 
 } // namespace
 
-auto lex(const SourceBuffer& source) -> LexResult {
-  LexerImpl lexer(source);
+auto lex(const SourceBuffer& source, uint32_t base_offset) -> LexResult {
+  LexerImpl lexer(source, base_offset);
   return lexer.run();
 }
 

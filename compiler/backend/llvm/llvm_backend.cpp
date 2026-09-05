@@ -39,7 +39,7 @@ namespace dao {
 
 LlvmBackend::LlvmBackend(llvm::LLVMContext& ctx) : ctx_(ctx), types_(ctx) {}
 
-auto LlvmBackend::lower(const MirModule& mir_module, uint32_t prelude_bytes)
+auto LlvmBackend::lower(const MirModule& mir_module, const SourceMap* source_map)
     -> LlvmBackendResult {
   module_ = std::make_unique<llvm::Module>("dao_module", ctx_);
   diagnostics_.clear();
@@ -72,8 +72,8 @@ auto LlvmBackend::lower(const MirModule& mir_module, uint32_t prelude_bytes)
   LlvmRuntimeHooks hooks(*module_, types_);
   hooks.declare_all();
 
-  declare_functions(mir_module, prelude_bytes);
-  lower_bodies(mir_module, prelude_bytes);
+  declare_functions(mir_module, source_map);
+  lower_bodies(mir_module, source_map);
 
   // Kill the module if any hard errors remain.
   bool has_errors = false;
@@ -94,9 +94,13 @@ auto LlvmBackend::lower(const MirModule& mir_module, uint32_t prelude_bytes)
 // Declaration pass — forward-declare all functions.
 // ---------------------------------------------------------------------------
 
+auto LlvmBackend::in_prelude(const MirFunction& fn, const SourceMap* source_map) -> bool {
+  return source_map != nullptr && source_map->is_prelude(fn.span.offset);
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void LlvmBackend::declare_functions(const MirModule& mir_module,
-                                     uint32_t prelude_bytes) {
+                                     const SourceMap* source_map) {
   for (const auto* mir_fn : mir_module.functions) {
     if (mir_fn->symbol == nullptr) {
       continue;
@@ -115,7 +119,7 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
       emit_diagnostic(mir_fn->span,
                       "cannot lower return type: " + types_.error());
       // Downgrade to warning for prelude functions.
-      if (mir_fn->span.offset < prelude_bytes) {
+      if (in_prelude(*mir_fn, source_map)) {
         diagnostics_[diag_idx].severity = Severity::Warning;
       }
       continue;
@@ -261,14 +265,14 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
 // ---------------------------------------------------------------------------
 
 void LlvmBackend::lower_bodies(const MirModule& mir_module,
-                                uint32_t prelude_bytes) {
+                                const SourceMap* source_map) {
   for (const auto* mir_fn : mir_module.functions) {
     size_t diag_before = diagnostics_.size();
     bool fn_ok = is_generator_function(*mir_fn)
         ? lower_generator_init(*mir_fn) && lower_generator_resume(*mir_fn)
         : lower_function(*mir_fn);
     if (!fn_ok) {
-      bool is_prelude = mir_fn->span.offset < prelude_bytes;
+      bool is_prelude = in_prelude(*mir_fn, source_map);
       if (is_prelude) {
         // Prelude function body failed — remove body so it becomes a
         // declaration. The rest of the module can still compile; if

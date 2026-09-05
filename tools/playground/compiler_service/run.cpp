@@ -3,8 +3,6 @@
 #include "run.h"
 
 #include "backend/llvm/llvm_backend.h"
-#include "frontend/lexer/lexer.h"
-#include "frontend/parser/parser.h"
 #include "frontend/resolve/resolve.h"
 #include "frontend/typecheck/type_checker.h"
 #include "frontend/types/type_context.h"
@@ -18,6 +16,7 @@
 #include <llvm/Support/Program.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <filesystem>
@@ -25,10 +24,6 @@
 #include <string>
 
 namespace dao::playground {
-
-// ---------------------------------------------------------------------------
-// Prelude loading (mirrors driver logic)
-// ---------------------------------------------------------------------------
 
 namespace {
 
@@ -40,6 +35,21 @@ auto slurp(const std::filesystem::path& path) -> std::string {
   }
   return {std::istreambuf_iterator<char>(file),
           std::istreambuf_iterator<char>()};
+}
+
+void respond_failure(httplib::Response& res, const nlohmann::json& diagnostics) {
+  nlohmann::json response = {
+      {"stdout", ""},
+      {"stderr", ""},
+      {"exit_code", -1},
+      {"diagnostics", diagnostics},
+  };
+  res.set_content(response.dump(), "application/json");
+}
+
+auto has_error_severity(const std::vector<Diagnostic>& diags) -> bool {
+  return std::ranges::any_of(
+      diags, [](const auto& diag) -> bool { return diag.severity == Severity::Error; });
 }
 
 } // namespace
@@ -70,190 +80,104 @@ void handle_run(const httplib::Request& req, httplib::Response& res,
 
   nlohmann::json diagnostics = nlohmann::json::array();
 
-  // Per CONTRACT_SYNTAX_SURFACE.md every source file must begin with
-  // exactly one `module` declaration. The playground wraps the
-  // combined (prelude + user) source with a single synthetic
-  // `module playground` declaration. Both the synthetic module line
-  // and the stdlib prelude are folded into `prelude_bytes` so that
-  // user-visible diagnostic offsets remain zero-based from the user's
-  // code. Any `module` header the user supplied (e.g. by loading one
-  // of the migrated example files) is blanked in place — the bytes
-  // become spaces so the parser ignores them, but the user source's
-  // total byte count and every offset past the blanked region stay
-  // identical to the frontend editor buffer. This keeps hover,
-  // go-to-definition, completions, references, semantic tokens, and
-  // diagnostic positions aligned with the editor. Real multi-file
-  // compilation lands with Task 25+.
-  const std::string module_header = "module playground\n";
-  auto prelude_source = load_prelude(repo_root);
-  auto user_source = request["source"].get<std::string>();
-  blank_user_leading_module(user_source);
-
-  std::string combined;
-  combined.reserve(module_header.size() + prelude_source.size() +
-                   user_source.size());
-  combined.append(module_header);
-  combined.append(prelude_source);
-  auto prelude_bytes = static_cast<uint32_t>(combined.size());
-  auto prelude_lines = count_lines(combined);
-  combined.append(user_source);
-
-  SourceBuffer source("<playground>", std::move(combined));
-  auto lex_result = lex(source);
-
-  collect_diagnostics(diagnostics, source, lex_result.diagnostics,
-                      prelude_bytes, prelude_lines);
-  if (has_user_error(lex_result.diagnostics, prelude_bytes)) {
-    nlohmann::json response = {
-        {"stdout", ""},
-        {"stderr", ""},
-        {"exit_code", -1},
-        {"diagnostics", diagnostics},
-    };
-    res.set_content(response.dump(), "application/json");
+  auto prog = build_playground_program(repo_root, request["source"].get<std::string>());
+  if (prog.user == nullptr || !prog.program.diagnostics.empty()) {
+    for (const auto& diag : prog.program.diagnostics) {
+      diagnostics.push_back(make_internal_error(diag.message));
+    }
+    respond_failure(res, diagnostics);
     return;
   }
 
-  auto parse_result = parse(lex_result.tokens);
-  collect_diagnostics(diagnostics, source, parse_result.diagnostics,
-                      prelude_bytes, prelude_lines);
-  if (has_user_error(parse_result.diagnostics, prelude_bytes) ||
-      parse_result.file == nullptr) {
-    nlohmann::json response = {
-        {"stdout", ""},
-        {"stderr", ""},
-        {"exit_code", -1},
-        {"diagnostics", diagnostics},
-    };
-    res.set_content(response.dump(), "application/json");
+  // Lex/parse diagnostics of every file; only the editor buffer's are
+  // reported, but any file failing to parse stops the run.
+  bool lex_parse_failed = false;
+  for (const auto& file : prog.program.files) {
+    collect_diagnostics(diagnostics, prog, file->lex.diagnostics);
+    collect_diagnostics(diagnostics, prog, file->parse.diagnostics);
+    lex_parse_failed |= !file->lex.diagnostics.empty() ||
+                        !file->parse.diagnostics.empty() || file->parse.file == nullptr;
+  }
+  if (lex_parse_failed) {
+    if (diagnostics.empty()) {
+      diagnostics.push_back(make_internal_error("prelude failed to parse"));
+    }
+    respond_failure(res, diagnostics);
     return;
   }
 
-  auto resolve_result = resolve(*parse_result.file, prelude_bytes);
-  collect_diagnostics(diagnostics, source, resolve_result.diagnostics,
-                      prelude_bytes, prelude_lines);
-  if (has_user_error(resolve_result.diagnostics, prelude_bytes)) {
-    nlohmann::json response = {
-        {"stdout", ""},
-        {"stderr", ""},
-        {"exit_code", -1},
-        {"diagnostics", diagnostics},
-    };
-    res.set_content(response.dump(), "application/json");
+  auto resolve_result = resolve(prog.program);
+  collect_diagnostics(diagnostics, prog, resolve_result.diagnostics);
+  if (has_user_error(resolve_result.diagnostics, prog)) {
+    respond_failure(res, diagnostics);
     return;
   }
 
   TypeContext types;
-  auto check_result =
-      typecheck(*parse_result.file, resolve_result, types);
-  bool has_errors = false;
-  for (const auto& diag : check_result.diagnostics) {
-    if (diag.span.offset >= prelude_bytes &&
-        diag.severity == Severity::Error) {
-      has_errors = true;
-    }
-  }
-  collect_diagnostics(diagnostics, source, check_result.diagnostics,
-                      prelude_bytes, prelude_lines);
-  if (has_errors) {
-    nlohmann::json response = {
-        {"stdout", ""},
-        {"stderr", ""},
-        {"exit_code", -1},
-        {"diagnostics", diagnostics},
-    };
-    res.set_content(response.dump(), "application/json");
+  auto check_result = typecheck(prog.program, resolve_result, types);
+  collect_diagnostics(diagnostics, prog, check_result.diagnostics);
+  bool has_user_type_errors =
+      std::ranges::any_of(check_result.diagnostics, [&prog](const auto& diag) -> bool {
+        return prog.in_user_file(diag.span.offset) && diag.severity == Severity::Error;
+      });
+  if (has_user_type_errors) {
+    respond_failure(res, diagnostics);
     return;
   }
 
   HirContext hir_ctx;
-  auto hir_result = build_hir(*parse_result.file, resolve_result,
-                               check_result, hir_ctx);
-  collect_diagnostics(diagnostics, source, hir_result.diagnostics,
-                      prelude_bytes, prelude_lines);
+  auto hir_result = build_hir(prog.program, resolve_result, check_result, hir_ctx);
+  collect_diagnostics(diagnostics, prog, hir_result.diagnostics);
   if (hir_result.module == nullptr) {
     if (diagnostics.empty()) {
       diagnostics.push_back(
           make_internal_error("HIR lowering failed (possible prelude error)"));
     }
-    nlohmann::json response = {
-        {"stdout", ""},
-        {"stderr", ""},
-        {"exit_code", -1},
-        {"diagnostics", diagnostics},
-    };
-    res.set_content(response.dump(), "application/json");
+    respond_failure(res, diagnostics);
     return;
   }
 
   MirContext mir_ctx;
-  auto mir_result =
-      build_mir(*hir_result.module, mir_ctx, types);
-  collect_diagnostics(diagnostics, source, mir_result.diagnostics,
-                      prelude_bytes, prelude_lines);
+  auto mir_result = build_mir(*hir_result.module, mir_ctx, types);
+  collect_diagnostics(diagnostics, prog, mir_result.diagnostics);
   bool mono_has_errors = false;
   if (mir_result.module != nullptr) {
     auto mono = monomorphize(*mir_result.module, mir_ctx, types,
                              mir_result.generic_templates);
-    collect_diagnostics(diagnostics, source, mono.diagnostics,
-                        prelude_bytes, prelude_lines);
+    collect_diagnostics(diagnostics, prog, mono.diagnostics);
     // Halt before LLVM lowering on mono errors (e.g. MIR
     // concreteness invariant violations — Task 28 §14.2).
     // Allowing generic residue through surfaces as an opaque LLVM
     // DataLayout assertion.
-    for (const auto& diag : mono.diagnostics) {
-      if (diag.severity == Severity::Error) {
-        mono_has_errors = true;
-        break;
-      }
-    }
+    mono_has_errors = has_error_severity(mono.diagnostics);
   }
   if (mir_result.module == nullptr || mono_has_errors) {
     if (diagnostics.empty()) {
       diagnostics.push_back(
           make_internal_error("MIR lowering failed (possible prelude error)"));
     }
-    nlohmann::json response = {
-        {"stdout", ""},
-        {"stderr", ""},
-        {"exit_code", -1},
-        {"diagnostics", diagnostics},
-    };
-    res.set_content(response.dump(), "application/json");
+    respond_failure(res, diagnostics);
     return;
   }
 
   // LLVM lowering.
   llvm::LLVMContext llvm_ctx;
   LlvmBackend backend(llvm_ctx);
-  auto llvm_result = backend.lower(*mir_result.module, prelude_bytes);
+  auto llvm_result = backend.lower(*mir_result.module, &prog.program.source_map);
 
   // Filter prelude-origin warnings (same as driver).
   std::vector<Diagnostic> user_diags;
   for (const auto& diag : llvm_result.diagnostics) {
     if (diag.severity == Severity::Warning &&
-        diag.span.offset < prelude_bytes) {
+        prog.program.source_map.is_prelude(diag.span.offset)) {
       continue;
     }
     user_diags.push_back(diag);
   }
-  collect_diagnostics(diagnostics, source, user_diags, prelude_bytes,
-                      prelude_lines);
+  collect_diagnostics(diagnostics, prog, user_diags);
 
-  has_errors = false;
-  for (const auto& diag : user_diags) {
-    if (diag.severity == Severity::Error) {
-      has_errors = true;
-    }
-  }
-  if (llvm_result.module == nullptr || has_errors) {
-    nlohmann::json response = {
-        {"stdout", ""},
-        {"stderr", ""},
-        {"exit_code", -1},
-        {"diagnostics", diagnostics},
-    };
-    res.set_content(response.dump(), "application/json");
+  if (llvm_result.module == nullptr || has_error_severity(user_diags)) {
+    respond_failure(res, diagnostics);
     return;
   }
 
@@ -269,21 +193,8 @@ void handle_run(const httplib::Request& req, httplib::Response& res,
   std::string emit_error;
   if (!LlvmBackend::emit_object(*llvm_result.module,
                                  obj_path.string(), emit_error)) {
-    diagnostics.push_back({
-        {"severity", "error"},
-        {"offset", 0},
-        {"length", 0},
-        {"line", 1},
-        {"col", 1},
-        {"message", "emit object failed: " + emit_error},
-    });
-    nlohmann::json response = {
-        {"stdout", ""},
-        {"stderr", ""},
-        {"exit_code", -1},
-        {"diagnostics", diagnostics},
-    };
-    res.set_content(response.dump(), "application/json");
+    diagnostics.push_back(make_internal_error("emit object failed: " + emit_error));
+    respond_failure(res, diagnostics);
     return;
   }
 
@@ -291,21 +202,8 @@ void handle_run(const httplib::Request& req, httplib::Response& res,
   auto cc_path = llvm::sys::findProgramByName("cc");
   if (!cc_path) {
     std::filesystem::remove(obj_path);
-    diagnostics.push_back({
-        {"severity", "error"},
-        {"offset", 0},
-        {"length", 0},
-        {"line", 1},
-        {"col", 1},
-        {"message", "cannot find 'cc' linker"},
-    });
-    nlohmann::json response = {
-        {"stdout", ""},
-        {"stderr", ""},
-        {"exit_code", -1},
-        {"diagnostics", diagnostics},
-    };
-    res.set_content(response.dump(), "application/json");
+    diagnostics.push_back(make_internal_error("cannot find 'cc' linker"));
+    respond_failure(res, diagnostics);
     return;
   }
 
@@ -328,21 +226,8 @@ void handle_run(const httplib::Request& req, httplib::Response& res,
     if (!link_error.empty()) {
       msg += ": " + link_error;
     }
-    diagnostics.push_back({
-        {"severity", "error"},
-        {"offset", 0},
-        {"length", 0},
-        {"line", 1},
-        {"col", 1},
-        {"message", msg},
-    });
-    nlohmann::json response = {
-        {"stdout", ""},
-        {"stderr", ""},
-        {"exit_code", -1},
-        {"diagnostics", diagnostics},
-    };
-    res.set_content(response.dump(), "application/json");
+    diagnostics.push_back(make_internal_error(msg));
+    respond_failure(res, diagnostics);
     return;
   }
 
