@@ -83,10 +83,10 @@ auto print_diagnostics(const SourceMap& source_map,
 
 auto lex_file(const std::filesystem::path& path) -> LexedFile {
   auto contents = read_file(path);
-  SourceBuffer source(path.filename().string(), std::move(contents));
+  SourceBuffer source(path.generic_string(), std::move(contents));
   auto lex_result = lex(source);
 
-  if (print_error_diagnostics(path.filename().string(), source, lex_result.diagnostics)) {
+  if (print_error_diagnostics(source.filename(), source, lex_result.diagnostics)) {
     std::exit(EXIT_FAILURE);
   }
 
@@ -97,8 +97,7 @@ auto lex_and_parse(const std::filesystem::path& path) -> ParsedFile {
   auto lexed = lex_file(path);
   auto parse_result = parse(lexed.lex_result.tokens);
 
-  if (print_error_diagnostics(path.filename().string(), lexed.source,
-                              parse_result.diagnostics)) {
+  if (print_error_diagnostics(lexed.source.filename(), lexed.source, parse_result.diagnostics)) {
     std::exit(EXIT_FAILURE);
   }
 

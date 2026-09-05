@@ -58,9 +58,11 @@ auto SourceMap::locate(uint32_t offset) const -> SourceLocation {
 
 auto SourceMap::text(Span span) const -> std::string_view {
   const auto* file = file_for(span.offset);
-  if (file == nullptr) {
-    return {};
-  }
+  // A span that starts in no file, or runs past its file's EOF, is a
+  // broken program-wide span; returning truncated or empty text would
+  // hide it behind plausible output.
+  assert(file != nullptr && "span starts outside every file");
+  assert(span.offset + span.length <= file->eof_offset() && "span crosses its file's EOF");
   return file->buffer.text({.offset = file->local_offset(span.offset), .length = span.length});
 }
 

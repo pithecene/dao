@@ -742,8 +742,9 @@ Each slice lands green and behaviour-preserving unless noted.
 - `base_n` equals the sum over files `< n` of `size + 1`
 - position budget, as a pure function of injected sizes (no real
   allocation): `{2^32 − 2, 0}` fits (Σ = 2^32); `{2^32 − 1, 0}` is
-  rejected; `{2^32 − 1}` alone is rejected; five empty files consume
-  five positions; rejection happens before any base is assigned
+  rejected (Σ = 2^32 + 1); `{2^32 − 1}` alone fits (Σ = 2^32) and
+  `{2^32}` alone is rejected; five empty files consume five
+  positions; rejection happens before any base is assigned
 - `locate` round-trips for the first byte, last byte, and EOF position
   of every file; `file_for(base_n + size_n)` is file *n*, not *n+1*
 - an empty file between two non-empty files: its EOF locates to itself

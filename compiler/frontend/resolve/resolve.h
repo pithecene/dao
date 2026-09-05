@@ -21,8 +21,8 @@ struct ResolveResult {
 };
 
 // Run name resolution over every parsed file of a program.  All files
-// are declared into one shared file scope, in load order (Task 31 D0;
-// per-module scopes arrive in D2).  The Program must outlive the
+// are declared into one shared file scope, in load order; per-module
+// scopes are not implemented yet.  The Program must outlive the
 // result: symbol names are string_views into its source buffers.
 // The source map decides which declarations belong to the prelude
 // group and are therefore exempt from user-code naming restrictions

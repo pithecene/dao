@@ -15,11 +15,11 @@ namespace dao {
 // ---------------------------------------------------------------------------
 // Program — the set of source files compiled together.
 //
-// Task 31 D0 shape: files are lexed and parsed into one program-wide
-// offset space (source_map.h).  Module identity, the import graph, and
-// per-module scopes arrive in later slices; until then every file is
-// declared into one shared scope, exactly as the concatenated buffer
-// was, so behaviour is unchanged.
+// Files are lexed and parsed into one program-wide offset space
+// (source_map.h).  Module identity, the import graph, and per-module
+// scopes are not implemented yet: every file is declared into one
+// shared scope, which is what the former concatenated buffer gave the
+// passes, so behaviour is unchanged.
 // ---------------------------------------------------------------------------
 
 struct SourceInput {
@@ -52,17 +52,23 @@ struct Program {
 
 /// Lex and parse every input into a Program.  Inputs are placed in the
 /// offset space in the given order; the position budget is checked
-/// before any base offset is assigned (Task 31 §9.6).  Does not read
-/// the filesystem.
+/// before any base offset is assigned (position_budget_fits).  Does not
+/// read the filesystem.
 auto build_program(std::vector<SourceInput> inputs) -> Program;
 
-/// Read a file into a SourceInput.  Exits the process with a message if
-/// the file cannot be opened, matching the driver's historical behaviour.
-auto read_source_input(const std::filesystem::path& path, bool is_prelude) -> SourceInput;
+/// Read a file into a SourceInput.  The display path is the path as
+/// given, or — when `display_root` is non-empty and contains it — the
+/// path relative to that root, so diagnostics stay unambiguous across
+/// files and stable across machines.  Exits the process with a message
+/// if the file cannot be opened, matching the driver's historical
+/// behaviour.
+auto read_source_input(const std::filesystem::path& path, bool is_prelude,
+                       const std::filesystem::path& display_root = {}) -> SourceInput;
 
 /// The prelude group (CONTRACT_MODULE_SYSTEM.md §7): every .dao file
 /// under <stdlib_root>/core then <stdlib_root>/io, each directory in
-/// sorted path order.  Missing directories are skipped.
+/// sorted path order, displayed relative to the stdlib root's parent
+/// (e.g. `stdlib/core/vector.dao`).  Missing directories are skipped.
 auto load_prelude_inputs(const std::filesystem::path& stdlib_root) -> std::vector<SourceInput>;
 
 } // namespace dao

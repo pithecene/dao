@@ -14,7 +14,7 @@
 namespace dao {
 
 // ---------------------------------------------------------------------------
-// Program-wide offset space (CONTRACT_MODULE_SYSTEM.md; Task 31 §9).
+// Program-wide offset space (CONTRACT_MODULE_SYSTEM.md).
 //
 // Every source file of a program occupies a closed range of positions
 // [base_offset, base_offset + size] in one uint32_t offset space: its
@@ -90,7 +90,10 @@ public:
   /// (1:1 for an empty file).  Asserts if no file owns the offset.
   [[nodiscard]] auto locate(uint32_t offset) const -> SourceLocation;
 
-  /// Text covered by a span (must lie within one file).
+  /// Text covered by a span.  Spans produced by the lexer and parser
+  /// always lie within one file; a span that starts in no file or runs
+  /// past its file's EOF is an internal error and asserts rather than
+  /// returning empty or truncated text.
   [[nodiscard]] auto text(Span span) const -> std::string_view;
 
   /// True if `offset` lies in a prelude-group file.

@@ -37,8 +37,8 @@ public:
   HirBuilder(HirContext& ctx, const ResolveResult& resolve,
              const TypeCheckResult& typed);
 
-  // Lower every file's declarations into one HirModule, in load order
-  // (Task 31 D0; per-module HIR arrives in D4).
+  // Lower every file's declarations into one HirModule, in load order.
+  // Per-module HIR is not implemented yet.
   auto build(std::span<const FileNode* const> files) -> HirBuildResult;
 
 private:

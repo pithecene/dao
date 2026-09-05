@@ -30,7 +30,7 @@ namespace {
 // relied upon by tests, tooling, or documentation.
 void cmd_lex(const std::filesystem::path& path) {
   auto contents = dao::read_file(path);
-  dao::SourceBuffer source(path.filename().string(), std::move(contents));
+  dao::SourceBuffer source(path.generic_string(), std::move(contents));
   auto result = dao::lex(source);
 
   for (const auto& tok : result.tokens) {
@@ -47,8 +47,7 @@ void cmd_lex(const std::filesystem::path& path) {
     std::cout << "\n";
   }
 
-  if (dao::print_error_diagnostics(path.filename().string(), source,
-                              result.diagnostics)) {
+  if (dao::print_error_diagnostics(source.filename(), source, result.diagnostics)) {
     std::exit(EXIT_FAILURE);
   }
 }

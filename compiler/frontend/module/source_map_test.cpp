@@ -3,6 +3,7 @@
 
 #include <boost/ut.hpp>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -140,6 +141,28 @@ suite<"source_map_layout"> source_map_layout = [] {
     const auto& second = *program.files[1];
     Span name{.offset = second.base_offset + 7, .length = 3};
     expect(program.source_map.text(name) == "bee");
+  };
+
+  "display path is the given path, or relative to a display root"_test = [] {
+    std::filesystem::path repo(DAO_SOURCE_DIR);
+    auto stdlib_file = repo / "stdlib" / "core" / "option.dao";
+
+    auto relative = read_source_input(stdlib_file, /*is_prelude=*/true, repo);
+    expect(relative.display_path == "stdlib/core/option.dao") << relative.display_path;
+
+    auto as_given = read_source_input(stdlib_file, /*is_prelude=*/false);
+    expect(as_given.display_path == stdlib_file.generic_string()) << as_given.display_path;
+
+    // A root that does not contain the file falls back to the path as given.
+    auto outside = read_source_input(stdlib_file, /*is_prelude=*/false, repo / "examples");
+    expect(outside.display_path == stdlib_file.generic_string()) << outside.display_path;
+
+    // The prelude loader displays every file relative to the repository.
+    auto prelude = load_prelude_inputs(repo / "stdlib");
+    expect(!prelude.empty());
+    for (const auto& input : prelude) {
+      expect(input.display_path.starts_with("stdlib/")) << input.display_path;
+    }
   };
 
   "is_prelude follows the input flag"_test = [] {

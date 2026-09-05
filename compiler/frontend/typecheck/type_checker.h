@@ -63,8 +63,8 @@ public:
   TypeChecker(TypeContext& types, const ResolveResult& resolve);
 
   // Check every file's declarations as one program: register all
-  // declarations first, then check all bodies (Task 31 D0; per-module
-  // checking arrives in D3).
+  // declarations first, then check all bodies.  Per-module checking is
+  // not implemented yet.
   auto check(std::span<const FileNode* const> files) -> TypeCheckResult;
 
 private:

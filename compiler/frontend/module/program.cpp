@@ -77,19 +77,36 @@ auto build_program(std::vector<SourceInput> inputs) -> Program {
   return program;
 }
 
-auto read_source_input(const std::filesystem::path& path, bool is_prelude) -> SourceInput {
+namespace {
+
+auto display_path_for(const std::filesystem::path& path,
+                      const std::filesystem::path& display_root) -> std::string {
+  if (!display_root.empty()) {
+    auto relative = path.lexically_relative(display_root);
+    if (!relative.empty() && *relative.begin() != "..") {
+      return relative.generic_string();
+    }
+  }
+  return path.generic_string();
+}
+
+} // namespace
+
+auto read_source_input(const std::filesystem::path& path, bool is_prelude,
+                       const std::filesystem::path& display_root) -> SourceInput {
   std::ifstream file(path);
   if (!file) {
     std::cerr << "error: could not open: " << path << "\n";
     std::exit(EXIT_FAILURE);
   }
-  return {.display_path = path.filename().string(),
+  return {.display_path = display_path_for(path, display_root),
           .text = {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()},
           .is_prelude = is_prelude};
 }
 
 auto load_prelude_inputs(const std::filesystem::path& stdlib_root) -> std::vector<SourceInput> {
   std::vector<SourceInput> inputs;
+  const auto display_root = stdlib_root.parent_path();
   const std::filesystem::path dirs[] = {stdlib_root / "core", stdlib_root / "io"};
   for (const auto& dir : dirs) {
     if (!std::filesystem::exists(dir)) {
@@ -103,7 +120,7 @@ auto load_prelude_inputs(const std::filesystem::path& stdlib_root) -> std::vecto
     }
     std::sort(paths.begin(), paths.end());
     for (const auto& path : paths) {
-      inputs.push_back(read_source_input(path, /*is_prelude=*/true));
+      inputs.push_back(read_source_input(path, /*is_prelude=*/true, display_root));
     }
   }
   return inputs;
