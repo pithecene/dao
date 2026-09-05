@@ -108,7 +108,14 @@ tasks:
       - "{{.BUILD_DIR}}/compiler/driver/daoc build bootstrap/typecheck/typecheck.gen.dao && ./bootstrap/typecheck/typecheck.gen"
       - "{{.BUILD_DIR}}/compiler/driver/daoc build bootstrap/hir/hir.gen.dao && ./bootstrap/hir/hir.gen"
       - "{{.BUILD_DIR}}/compiler/driver/daoc build bootstrap/mir/mir.gen.dao && ./bootstrap/mir/mir.gen"
+      - mkdir -p bootstrap/llvm/out
       - "{{.BUILD_DIR}}/compiler/driver/daoc build bootstrap/llvm/llvm.gen.dao && ./bootstrap/llvm/llvm.gen"
+      - bash bootstrap/validate_ir.sh {{.BUILD_DIR}}
+
+  bootstrap-validate-ir:
+    desc: Compile, link, and run the IR the bootstrap LLVM suite emitted (bootstrap/llvm/out)
+    cmds:
+      - bash bootstrap/validate_ir.sh {{.BUILD_DIR}}
 
   format:
     desc: Run clang-format on all source files

@@ -52,3 +52,6 @@ mise.local.toml
 .claude/worktrees/
 .codex
 .codex-worktrees/
+
+# IR emitted by the bootstrap LLVM suite for bootstrap/validate_ir.sh
+bootstrap/llvm/out/

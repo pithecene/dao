@@ -524,6 +524,20 @@ Narrow upstream fix landed alongside:
 See `docs/task_specs/TASK_30_BOOTSTRAP_LLVM_BACKEND.md` and
 `bootstrap/llvm/impl.dao`.
 
+### Task 30.5 — Mechanical LLVM Validation
+
+Status: **complete**
+
+The bootstrap LLVM suite (`bootstrap/llvm/impl.dao`) writes the IR of
+every fixture it lowers to `bootstrap/llvm/out/<test>.ll`, plus a
+`<test>.exit` file where the program's result is known.
+`bootstrap/validate_ir.sh` proves each artifact is accepted by LLVM
+(`clang -c -x ir`), links the ones with an expectation against the
+runtime, runs them, and compares exit codes; `task bootstrap-test` runs
+it after the suite.  Invalid IR from the bootstrap backend is a test
+failure rather than a manual discovery — the follow-up Task 30 §14.3
+called for, ahead of the Tier B backend slices.
+
 ### Task 31 — Host Multi-file Compilation
 
 Status: **in progress** — D0 (program-wide source map; prelude loaded

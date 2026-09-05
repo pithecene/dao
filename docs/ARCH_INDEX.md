@@ -132,6 +132,8 @@ Self-hosting compiler subsystems written in Dao.
   into `*.gen.dao` files via `assemble.sh`
 - `assemble.sh` — concatenates `shared/base.dao` with subsystem sources
   to produce compilable `*.gen.dao` outputs (gitignored build artifacts)
+- `validate_ir.sh` — compiles, links, and runs the IR the LLVM suite
+  emits under `llvm/out/` (gitignored), comparing exit codes
 - `lexer/` — indentation-aware lexer matching the host compiler's token
   surface; tests in `tests.dao` (Task 20)
 - `parser/` — recursive-descent parser producing arena-indexed AST for

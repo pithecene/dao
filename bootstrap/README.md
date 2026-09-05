@@ -291,6 +291,16 @@ expressions, break/continue, LLVM C API integration,
 
 ```sh
 bash bootstrap/assemble.sh && daoc build bootstrap/llvm/llvm.gen.dao && ./bootstrap/llvm/llvm.gen
+bash bootstrap/validate_ir.sh build/debug
+```
+
+The suite writes the IR of every fixture it lowers to
+`bootstrap/llvm/out/<test>.ll` (and `<test>.exit` where the program's
+result is known); `validate_ir.sh` compiles each with `clang`, links the
+ones with an expectation against the runtime, runs them, and compares
+exit codes (Task 30.5).  `task bootstrap-test` runs both steps.
+
+```
 ```
 
 ## Module-system contract parity
@@ -325,6 +335,5 @@ probe. The probe is retained as a historical artifact.
 ## What comes next
 
 - Tier B expansion (generics, concepts, extend, mode/resource)
-- `llc`/`clang` validation of emitted LLVM IR (Task 30.5)
 - Diagnostic formatting integration
 - Multi-file compilation (eliminate assembly workaround)
