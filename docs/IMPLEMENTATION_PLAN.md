@@ -538,6 +538,34 @@ it after the suite.  Invalid IR from the bootstrap backend is a test
 failure rather than a manual discovery — the follow-up Task 30 §14.3
 called for, ahead of the Tier B backend slices.
 
+### Task 34 — Bootstrap Closure Audit
+
+Status: **complete** (first audit) — `task bootstrap-audit` regenerates
+`docs/bootstrap_closure.md` after every bootstrap slice.
+
+**Objective**: define Tier B-Bootstrap — enough Tier B to compile Dao's
+compiler — from measurement rather than from the Tier B backlog.  See
+`docs/task_specs/TASK_34_BOOTSTRAP_CLOSURE_AUDIT.md`.  Three mechanical
+sources: the host AST printer's construct inventory over every assembled
+bootstrap program, the prelude functions the host instantiates for the
+largest program, and the bootstrap pipeline's own diagnostics per stage
+over its own programs (an opt-in probe in `bootstrap/llvm/impl.dao`).
+The first blocking diagnostic per program names what to implement next.
+
+First audit: the corpus uses classes, payload enums with `match`,
+`if`/`while`/`break`, generics through `Vector<T>` and its methods,
+strings, and generators via `range` — no lambdas, `for`, modes,
+resources, pipelines, or concepts.  The blocker is capacity, not a
+construct: the bootstrap needs 11–14 GiB and 30–40 s to bring its three
+smallest programs (3–4k lines) to the LLVM stage, where it panics on an
+out-of-bounds token index, and exhausts 16 GiB in `hir`/`mir` on the
+larger ones.  Per stage, `lex` is clean, the bootstrap parser rejects 46–285 sites
+per program ("expected expression"), `mir` rejects 16–57, and `llvm`
+panics where reached.  Tier B-Bootstrap therefore starts with the
+bootstrap's memory behaviour (value-threaded state copying its vectors
+at every step), then the parser's coverage of the corpus, then the
+MIR and LLVM rejections the histograms name.
+
 ### Task 31 — Host Multi-file Compilation
 
 Status: **in progress** — D0 (program-wide source map; prelude loaded

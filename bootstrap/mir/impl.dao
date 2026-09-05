@@ -366,10 +366,16 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
   let node: HirNode = br.ms.hir_nodes.get(hir_node_idx)
   match node:
     HirNode.HirIntLit(tok, type_idx):
+      if tok < to_i64(0) or tok >= br.ms.toks.length():
+        br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "unsupported in Tier A MIR lowering: integer literal without a source token (synthesized HIR)")
+        return br_emit_value(br, MirNode.MirErrorExpr(to_i64(0)))
       let tk: Token = br.ms.toks.get(tok)
       let lex: string = substring(br.ms.src, tk.offset, tk.len)
       return br_emit_value(br, MirNode.MirConstInt(parse_i64_literal(lex), type_idx))
     HirNode.HirBoolLit(tok, type_idx):
+      if tok < to_i64(0) or tok >= br.ms.toks.length():
+        br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)")
+        return br_emit_value(br, MirNode.MirErrorExpr(to_i64(0)))
       let tk: Token = br.ms.toks.get(tok)
       let lex: string = substring(br.ms.src, tk.offset, tk.len)
       let v: i64 = to_i64(0)
