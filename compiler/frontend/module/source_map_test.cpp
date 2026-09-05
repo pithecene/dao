@@ -4,6 +4,7 @@
 #include <boost/ut.hpp>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -141,6 +142,43 @@ suite<"source_map_layout"> source_map_layout = [] {
     const auto& second = *program.files[1];
     Span name{.offset = second.base_offset + 7, .length = 3};
     expect(program.source_map.text(name) == "bee");
+  };
+
+  "span ownership is overflow-safe at the top of the offset space"_test = [] {
+    // Two files hand-placed just below UINT32_MAX (no 4 GiB program is
+    // needed to exercise the boundary): `high` occupies
+    // [max-6, max-3], `top` occupies [max-2, max].
+    constexpr uint32_t max = std::numeric_limits<uint32_t>::max();
+    SourceFile high{.file_id = 0,
+                    .display_path = "high.dao",
+                    .buffer = SourceBuffer("high.dao", "abc"),
+                    .base_offset = max - 6,
+                    .is_prelude = false};
+    SourceFile top{.file_id = 1,
+                   .display_path = "top.dao",
+                   .buffer = SourceBuffer("top.dao", "xy"),
+                   .base_offset = max - 2,
+                   .is_prelude = false};
+    SourceMap map;
+    map.add(&high);
+    map.add(&top);
+
+    // Legitimate spans up to and including each file's EOF position.
+    expect(map.owner_of({.offset = max - 6, .length = 3}) == &high);
+    expect(map.owner_of({.offset = max - 2, .length = 2}) == &top);
+    expect(map.owner_of({.offset = max, .length = 0}) == &top); // EOF of the last file
+    expect(map.text({.offset = max - 2, .length = 2}) == "xy");
+
+    // A span whose uint32_t end would wrap around (max-3 + 10 -> 6) is
+    // not inside `high`, even though the wrapped end is tiny.
+    expect(map.owner_of({.offset = max - 3, .length = 10}) == nullptr);
+    expect(!high.contains_span({.offset = max - 3, .length = 10}));
+    // Wrapping exactly to zero.
+    expect(map.owner_of({.offset = max - 1, .length = 2}) == nullptr);
+    // Cross-file span: starts in `high`, ends inside `top`.
+    expect(map.owner_of({.offset = max - 5, .length = 4}) == nullptr);
+    // One past a file's EOF.
+    expect(map.owner_of({.offset = max - 6, .length = 4}) == nullptr);
   };
 
   "display path is the given path, or relative to a display root"_test = [] {

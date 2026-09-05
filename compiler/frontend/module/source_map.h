@@ -45,6 +45,13 @@ struct SourceFile {
   [[nodiscard]] auto contains(uint32_t offset) const -> bool {
     return offset >= base_offset && offset <= eof_offset();
   }
+  /// True if the whole span lies within this file.  The span's end is
+  /// computed in 64 bits: offsets run up to 2^32 − 1, so a uint32_t
+  /// `offset + length` could wrap and admit an out-of-file span.
+  [[nodiscard]] auto contains_span(Span span) const -> bool {
+    const uint64_t end = uint64_t{span.offset} + span.length;
+    return span.offset >= base_offset && end <= eof_offset();
+  }
   /// Convert a program-wide offset inside this file to a buffer-local one.
   [[nodiscard]] auto local_offset(uint32_t offset) const -> uint32_t {
     return offset - base_offset;
@@ -90,10 +97,14 @@ public:
   /// (1:1 for an empty file).  Asserts if no file owns the offset.
   [[nodiscard]] auto locate(uint32_t offset) const -> SourceLocation;
 
+  /// The file that wholly contains `span`, or nullptr if the span starts
+  /// in no file or runs past its file's EOF (overflow-safe).
+  [[nodiscard]] auto owner_of(Span span) const -> const SourceFile*;
+
   /// Text covered by a span.  Spans produced by the lexer and parser
-  /// always lie within one file; a span that starts in no file or runs
-  /// past its file's EOF is an internal error and asserts rather than
-  /// returning empty or truncated text.
+  /// always lie within one file; a span with no owner (see owner_of) is
+  /// an internal error and asserts rather than returning empty or
+  /// truncated text.
   [[nodiscard]] auto text(Span span) const -> std::string_view;
 
   /// True if `offset` lies in a prelude-group file.
