@@ -78,17 +78,10 @@ auto symbol_for_alias(const AliasDecl& alias, Span decl_span)
 
 } // namespace
 
-auto query_document_symbols(const FileNode& file,
-                             uint32_t prelude_bytes)
-    -> std::vector<DocumentSymbol> {
+auto query_document_symbols(const FileNode& file) -> std::vector<DocumentSymbol> {
   std::vector<DocumentSymbol> symbols;
 
   for (const auto* decl : file.declarations) {
-    // Skip prelude declarations — only show user code.
-    if (decl->span.offset < prelude_bytes) {
-      continue;
-    }
-
     switch (decl->kind()) {
     case NodeKind::FunctionDecl:
       symbols.push_back(

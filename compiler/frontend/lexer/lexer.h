@@ -14,7 +14,11 @@ struct LexResult {
   std::vector<Diagnostic> diagnostics;
 };
 
-auto lex(const SourceBuffer& source) -> LexResult;
+// Lex a source buffer. Every emitted span (tokens and diagnostics) is
+// offset by `base_offset`, which places this buffer inside a
+// program-wide offset space (CONTRACT_MODULE_SYSTEM.md; Task 31 §9).
+// Token text views still point into `source`.
+auto lex(const SourceBuffer& source, uint32_t base_offset = 0) -> LexResult;
 
 } // namespace dao
 

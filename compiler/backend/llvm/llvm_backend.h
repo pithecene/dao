@@ -5,6 +5,7 @@
 #include "backend/llvm/llvm_type_lowering.h"
 #include "frontend/diagnostics/diagnostic.h"
 #include "frontend/diagnostics/source.h"
+#include "frontend/module/source_map.h"
 #include "ir/mir/mir.h"
 
 #include <llvm/IR/IRBuilder.h>
@@ -39,12 +40,12 @@ class LlvmBackend {
 public:
   explicit LlvmBackend(llvm::LLVMContext& ctx);
 
-  // Lower a MirModule to LLVM IR. prelude_bytes indicates the byte
-  // offset boundary: functions whose source span starts before this
-  // offset are prelude functions and may have their bodies dropped
-  // (with a warning) if they use unsupported constructs. Functions
-  // beyond this offset are user code and produce hard errors.
-  auto lower(const MirModule& mir_module, uint32_t prelude_bytes = 0)
+  // Lower a MirModule to LLVM IR. The source map (when given) decides
+  // which functions belong to the prelude group: those may have their
+  // bodies dropped with a warning if they use unsupported constructs,
+  // while user functions produce hard errors. Without a source map
+  // every function is user code.
+  auto lower(const MirModule& mir_module, const SourceMap* source_map = nullptr)
       -> LlvmBackendResult;
 
   // Emit textual LLVM IR to a stream.
@@ -111,8 +112,11 @@ private:
   };
 
   // Top-level lowering phases (called by lower()).
-  void declare_functions(const MirModule& mir_module, uint32_t prelude_bytes);
-  void lower_bodies(const MirModule& mir_module, uint32_t prelude_bytes);
+  void declare_functions(const MirModule& mir_module, const SourceMap* source_map);
+  void lower_bodies(const MirModule& mir_module, const SourceMap* source_map);
+
+  // True if the function's declaration lies in a prelude-group file.
+  static auto in_prelude(const MirFunction& fn, const SourceMap* source_map) -> bool;
 
   auto lower_block(const MirBlock& block,
                     FunctionState& state) -> bool;

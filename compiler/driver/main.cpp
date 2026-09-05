@@ -70,95 +70,78 @@ void cmd_ast(const std::filesystem::path& path) {
   }
 }
 
-// Emit semantic token classification. Output is deterministic.
+// Emit semantic token classification for the user file. Output is
+// deterministic. Prelude files are separate program files and are not
+// printed.
 void cmd_tokens(const std::filesystem::path& path) {
-  auto result = dao::lex_and_parse_with_prelude(path);
+  auto program = dao::load_program(path);
+  const auto& user = *program.user_files().front();
 
   // Run name resolution for resolve-driven classifications.
-  dao::ResolveResult resolve_result;
-  if (result.parsed.parse_result.file != nullptr) {
-    resolve_result = dao::resolve(*result.parsed.parse_result.file,
-                                    result.prelude_bytes);
-  }
+  auto resolve_result = dao::resolve(program);
 
-  auto sem_tokens = dao::classify_tokens(result.parsed.lex_result.tokens,
-                                         result.parsed.parse_result.file,
-                                         &resolve_result);
+  auto sem_tokens =
+      dao::classify_tokens(user.lex.tokens, user.file(), &resolve_result);
 
   for (const auto& tok : sem_tokens) {
-    if (tok.span.offset < result.prelude_bytes) {
-      continue;
-    }
-    auto loc = result.parsed.source.line_col(tok.span.offset);
-    auto line = loc.line > result.prelude_lines ? loc.line - result.prelude_lines : loc.line;
-    auto text = result.parsed.source.text(tok.span);
-    std::cout << line << ":" << loc.col << " " << tok.kind << " " << text << "\n";
+    auto loc = program.source_map.locate(tok.span.offset);
+    auto text = program.source_map.text(tok.span);
+    std::cout << loc.line << ":" << loc.col << " " << tok.kind << " " << text << "\n";
   }
 }
 
-// Run name resolution and print results.
+// Run name resolution and print results for the user file.
 void cmd_resolve(const std::filesystem::path& path) {
-  auto result = dao::lex_and_parse_with_prelude(path);
-  if (result.parsed.parse_result.file == nullptr) {
-    return;
-  }
+  auto program = dao::load_program(path);
+  const auto& source_map = program.source_map;
+  auto resolve_result = dao::resolve(program);
 
-  auto resolve_result = dao::resolve(*result.parsed.parse_result.file,
-                                     result.prelude_bytes);
-
-  // Print declared symbols (user region only).
+  // Print declared symbols (user files only).
   std::cout << "Symbols:\n";
   for (const auto& sym : resolve_result.context.symbols()) {
-    if (sym->decl_span.offset < result.prelude_bytes) {
+    // Builtins have no span; prelude declarations are not the user's.
+    if (sym->decl_span.length == 0 || source_map.is_prelude(sym->decl_span.offset)) {
       continue;
     }
     std::cout << "  " << dao::symbol_kind_name(sym->kind) << " " << sym->name;
     if (sym->decl_span.length > 0) {
-      auto decl_loc = result.parsed.source.line_col(sym->decl_span.offset);
-      auto line = decl_loc.line > result.prelude_lines
-                      ? decl_loc.line - result.prelude_lines
-                      : decl_loc.line;
-      std::cout << " [" << line << ":" << decl_loc.col << "]";
+      auto decl_loc = source_map.locate(sym->decl_span.offset);
+      std::cout << " [" << decl_loc.line << ":" << decl_loc.col << "]";
     }
     std::cout << "\n";
   }
 
-  // Print uses in user region (resolved references).
+  // Print uses in user files (resolved references).
   std::cout << "\nUses:\n";
   for (const auto& [offset, sym] : resolve_result.uses) {
-    if (offset < result.prelude_bytes) {
+    if (source_map.is_prelude(offset)) {
       continue;
     }
-    auto loc = result.parsed.source.line_col(offset);
-    auto line = loc.line > result.prelude_lines ? loc.line - result.prelude_lines : loc.line;
-    std::cout << "  " << line << ":" << loc.col << " "
-              << result.parsed.source.text(
+    auto loc = source_map.locate(offset);
+    std::cout << "  " << loc.line << ":" << loc.col << " "
+              << source_map.text(
                      dao::Span{.offset = offset,
                                .length = static_cast<uint32_t>(sym->name.size())})
               << " -> " << dao::symbol_kind_name(sym->kind) << " " << sym->name;
     if (sym->decl_span.length > 0) {
-      auto decl_loc = result.parsed.source.line_col(sym->decl_span.offset);
-      auto decl_line = decl_loc.line > result.prelude_lines
-                           ? decl_loc.line - result.prelude_lines
-                           : decl_loc.line;
-      std::cout << " [" << decl_line << ":" << decl_loc.col << "]";
+      auto decl_loc = source_map.locate(sym->decl_span.offset);
+      std::cout << " [" << decl_loc.line << ":" << decl_loc.col << "]";
     }
     std::cout << "\n";
   }
 
-  // Print diagnostics in user region (to stdout -- this is a debug dump command).
+  // Print diagnostics in user files (to stdout -- this is a debug dump command).
   bool has_user_diags = false;
   for (const auto& diag : resolve_result.diagnostics) {
-    if (diag.span.offset < result.prelude_bytes) {
+    if (source_map.is_prelude(diag.span.offset)) {
       continue;
     }
     if (!has_user_diags) {
       std::cout << "\nDiagnostics:\n";
       has_user_diags = true;
     }
-    auto loc = result.parsed.source.line_col(diag.span.offset);
-    auto line = loc.line > result.prelude_lines ? loc.line - result.prelude_lines : loc.line;
-    std::cout << "  " << path.filename().string() << ":" << line << ":" << loc.col
+    auto loc = source_map.locate(diag.span.offset);
+    std::cout << "  " << loc.file->display_path << ":" << loc.line << ":" << loc.col
               << ": error: " << diag.message << "\n";
   }
 }
@@ -193,7 +176,7 @@ void cmd_llvm_ir(const std::filesystem::path& path) {
 
   auto mir = dao::run_through_mir(path);
   llvm::LLVMContext llvm_ctx;
-  auto llvm_result = dao::lower_to_llvm(mir, llvm_ctx, path);
+  auto llvm_result = dao::lower_to_llvm(mir, llvm_ctx);
   dao::LlvmBackend::print_ir(std::cout, *llvm_result.module);
 }
 
@@ -208,7 +191,7 @@ void cmd_build(const std::filesystem::path& path,
 
   auto mir = dao::run_through_mir(path);
   llvm::LLVMContext llvm_ctx;
-  auto llvm_result = dao::lower_to_llvm(mir, llvm_ctx, path);
+  auto llvm_result = dao::lower_to_llvm(mir, llvm_ctx);
 
   auto obj_path = std::filesystem::temp_directory_path() /
                   (path.stem().string() + ".o");

@@ -3,11 +3,13 @@
 
 #include "frontend/ast/ast.h"
 #include "frontend/diagnostics/diagnostic.h"
+#include "frontend/module/program.h"
 #include "frontend/resolve/resolve.h"
 #include "frontend/typecheck/typed_results.h"
 #include "frontend/types/type_context.h"
 #include "frontend/types/type_printer.h"
 
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -60,12 +62,15 @@ class TypeChecker {
 public:
   TypeChecker(TypeContext& types, const ResolveResult& resolve);
 
-  auto check(const FileNode& file) -> TypeCheckResult;
+  // Check every file's declarations as one program: register all
+  // declarations first, then check all bodies (Task 31 D0; per-module
+  // checking arrives in D3).
+  auto check(std::span<const FileNode* const> files) -> TypeCheckResult;
 
 private:
   TypeContext& types_;
   const ResolveResult& resolve_;
-  const FileNode* file_ = nullptr;
+  std::vector<const Decl*> all_decls_; // every file's top-level declarations, load order
   TypedResults typed_;
   std::vector<Diagnostic> diagnostics_;
   CheckContext ctx_;
@@ -158,7 +163,7 @@ private:
   };
   std::vector<PendingClass> pending_classes_;
 
-  void build_method_table(const FileNode& file);
+  void build_method_table();
   auto build_method_fn_type(const FunctionDecl& method) -> const Type*;
 
   // --- TypeNode -> Type* bridge ---
@@ -175,12 +180,12 @@ private:
 
   // --- Declaration checking ---
 
-  void register_declarations(const FileNode& file);
-  void register_type_names(const FileNode& file);
-  void register_struct_fields(const FileNode& file);
-  void register_enum_variants(const FileNode& file);
-  void register_signatures(const FileNode& file);
-  void compute_derived_conformances(const FileNode& file);
+  void register_declarations();
+  void register_type_names();
+  void register_struct_fields();
+  void register_enum_variants();
+  void register_signatures();
+  void compute_derived_conformances();
   auto type_conforms_to(const Type* type, const Decl* concept_decl) -> bool;
   void check_declaration(const Decl* decl);
   void check_function(const Decl* decl);
@@ -253,6 +258,12 @@ private:
 // Top-level entry point.
 // ---------------------------------------------------------------------------
 
+auto typecheck(const Program& program, const ResolveResult& resolve, TypeContext& types)
+    -> TypeCheckResult;
+auto typecheck(std::span<const FileNode* const> files, const ResolveResult& resolve,
+               TypeContext& types) -> TypeCheckResult;
+
+// Single-file convenience for tests.
 auto typecheck(const FileNode& file, const ResolveResult& resolve, TypeContext& types)
     -> TypeCheckResult;
 

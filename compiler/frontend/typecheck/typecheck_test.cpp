@@ -28,35 +28,18 @@ auto check_source(const std::string& source) -> TypeCheckResult {
   return typecheck(*parse_result.file, resolve_result, types);
 }
 
-/// Check user source with prelude source strings prepended.
-/// Uses source concatenation (same approach as the driver).
-/// The prelude byte offset is passed to resolve so __dao_ prefixed
-/// names in the prelude are not rejected as user code.
-///
-/// Prelude sources are expected to already carry their own `module`
-/// declarations (they are real stdlib files). For the synthetic
-/// single-file test build used here, we strip each prelude file's
-/// leading `module` line and inject a single `module test` header at
-/// the top of the combined source. See resolve_test.cpp for the same
-/// pattern.
+/// Check user source as the user file of a program whose prelude group
+/// is the given sources (real stdlib files, each with its own `module`
+/// line), exactly as the driver assembles it.  Prelude-group files are
+/// exempt from the `__dao_` naming restriction.
 auto check_with_prelude(const std::string& user_source,
                         std::span<const std::string> prelude_sources)
     -> TypeCheckResult {
-  std::string combined = "module test\n";
-  for (const auto& pre : prelude_sources) {
-    combined.append(strip_leading_module(pre));
-    combined += '\n';
-  }
-  auto prelude_bytes = static_cast<uint32_t>(combined.size());
-  combined += user_source;
-
-  SourceBuffer buf("test.dao", std::string(combined));
-  auto lex_result = lex(buf);
-  auto parse_result = parse(lex_result.tokens);
-  auto resolve_result = resolve(*parse_result.file, prelude_bytes);
+  auto program = make_test_program(user_source, prelude_sources);
+  auto resolve_result = resolve(program);
 
   TypeContext types;
-  return typecheck(*parse_result.file, resolve_result, types);
+  return typecheck(program, resolve_result, types);
 }
 
 /// Returns true if any diagnostic message contains the substring.

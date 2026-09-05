@@ -1,5 +1,7 @@
 #include "frontend/resolve/resolve.h"
 
+#include <algorithm>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -67,18 +69,25 @@ constexpr std::string_view kBuiltinFunctions[] = {
 
 class Resolver {
 public:
-  auto run(const FileNode& file, uint32_t prelude_bytes) -> ResolveResult {
-    // Create the file scope and pre-populate builtins.
+  auto run(std::span<const FileNode* const> files, const SourceMap* source_map)
+      -> ResolveResult {
+    source_map_ = source_map;
+
+    // Create the shared file scope spanning every file's offset range
+    // and pre-populate builtins.
     file_scope_ = ctx_.make_scope(ScopeKind::File, nullptr);
-    file_scope_->set_range(file.span);
-    prelude_bytes_ = prelude_bytes;
+    file_scope_->set_range(covering_span(files));
     populate_builtins();
 
-    // Pass 1: Collect top-level declarations and imports.
-    collect_top_level(file);
+    // Pass 1: Collect top-level declarations and imports, in load order.
+    for (const auto* file : files) {
+      collect_top_level(*file);
+    }
 
     // Pass 2: Resolve bodies.
-    resolve_bodies(file);
+    for (const auto* file : files) {
+      resolve_bodies(*file);
+    }
 
     return ResolveResult{
         .context = std::move(ctx_),
@@ -91,8 +100,29 @@ private:
   ResolveContext ctx_;
   Scope* file_scope_ = nullptr;
   std::unordered_map<uint32_t, Symbol*> uses_;
-  uint32_t prelude_bytes_ = 0;
+  const SourceMap* source_map_ = nullptr;
   std::vector<Diagnostic> diagnostics_;
+
+  // Smallest span covering every file (files occupy disjoint ranges of
+  // one program-wide offset space).
+  static auto covering_span(std::span<const FileNode* const> files) -> Span {
+    if (files.empty()) {
+      return Span{};
+    }
+    uint32_t begin = files.front()->span.offset;
+    uint32_t end = begin;
+    for (const auto* file : files) {
+      begin = std::min(begin, file->span.offset);
+      end = std::max(end, file->span.offset + file->span.length);
+    }
+    return Span{.offset = begin, .length = end - begin};
+  }
+
+  // True if the declaration at `span` belongs to the prelude group and
+  // is therefore allowed to use reserved runtime-hook names.
+  [[nodiscard]] auto in_prelude(Span span) const -> bool {
+    return source_map_ != nullptr && source_map_->is_prelude(span.offset);
+  }
 
   // --- Builtin population ---
 
@@ -203,8 +233,8 @@ private:
 
     // Reject user-code declarations that use the reserved __dao_ prefix.
     // Prelude (stdlib) declarations are exempt — they legitimately declare
-    // runtime hooks under this prefix.
-    if (name.starts_with("__dao_") && name_span.offset >= prelude_bytes_) {
+    // runtime hooks under this prefix (CONTRACT_MODULE_SYSTEM.md §7.7).
+    if (name.starts_with("__dao_") && !in_prelude(name_span)) {
       diagnostics_.push_back(Diagnostic::error(
           name_span,
           "'" + std::string(name) +
@@ -963,9 +993,20 @@ private:
 // Public API
 // ---------------------------------------------------------------------------
 
-auto resolve(const FileNode& file, uint32_t prelude_bytes) -> ResolveResult {
+auto resolve(std::span<const FileNode* const> files, const SourceMap* source_map)
+    -> ResolveResult {
   Resolver resolver;
-  return resolver.run(file, prelude_bytes);
+  return resolver.run(files, source_map);
+}
+
+auto resolve(const Program& program) -> ResolveResult {
+  auto nodes = program.file_nodes();
+  return resolve(nodes, &program.source_map);
+}
+
+auto resolve(const FileNode& file) -> ResolveResult {
+  const FileNode* files[] = {&file};
+  return resolve(std::span<const FileNode* const>(files), nullptr);
 }
 
 } // namespace dao

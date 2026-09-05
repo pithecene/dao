@@ -2,54 +2,73 @@
 #define DAO_PLAYGROUND_PIPELINE_H
 
 #include "frontend/diagnostics/diagnostic.h"
-#include "frontend/diagnostics/source.h"
+#include "frontend/module/program.h"
+#include "frontend/module/source_map.h"
 
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
 #include <filesystem>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace dao::playground {
 
 // ---------------------------------------------------------------------------
-// Shared prelude and diagnostic utilities for playground endpoints.
+// Program assembly and diagnostic serialization shared by the endpoints.
+//
+// The playground compiles the stdlib prelude group plus the editor buffer
+// as one Program (frontend/module).  The editor buffer is the program's
+// last file; JSON offsets are buffer-local, i.e. program offsets minus
+// that file's base offset, so the frontend needs no knowledge of the
+// prelude at all.  When the buffer lacks a leading `module` declaration
+// (a fresh scratch buffer), a synthetic `module playground` header is
+// prepended and its length is subtracted from every reported offset so
+// positions still line up with the editor.
 // ---------------------------------------------------------------------------
 
-/// Load all .dao files from stdlib/core/ and concatenate them.
-auto load_prelude(const std::filesystem::path& repo_root) -> std::string;
+struct PlaygroundProgram {
+  Program program;
+  const SourceFile* user = nullptr; // the editor buffer's file
+  uint32_t header_bytes = 0;        // synthetic module header length, 0 if the user wrote one
+  uint32_t header_lines = 0;
 
-/// Count newlines in a string.
-auto count_lines(const std::string& text) -> uint32_t;
+  /// Program offset of an editor-buffer offset.
+  [[nodiscard]] auto to_program_offset(uint32_t editor_offset) const -> uint32_t {
+    return user->base_offset + header_bytes + editor_offset;
+  }
+  /// Editor-buffer offset of a program offset inside the user file.
+  [[nodiscard]] auto to_editor_offset(uint32_t program_offset) const -> uint32_t {
+    auto local = user->local_offset(program_offset);
+    return local >= header_bytes ? local - header_bytes : 0;
+  }
+  /// True if the offset lies in the editor buffer (not prelude, not gap).
+  [[nodiscard]] auto in_user_file(uint32_t program_offset) const -> bool {
+    return program.source_map.file_for(program_offset) == user;
+  }
+  /// Editor line of a program offset inside the user file.
+  [[nodiscard]] auto editor_line(uint32_t program_offset) const -> uint32_t {
+    auto line = program.source_map.locate(program_offset).line;
+    return line > header_lines ? line - header_lines : line;
+  }
+};
 
-/// True if any diagnostic has span offset >= prelude_bytes.
-auto has_user_error(const std::vector<Diagnostic>& diags,
-                    uint32_t prelude_bytes) -> bool;
+/// Assemble the prelude group under <repo_root>/stdlib plus the editor
+/// buffer, and lex/parse everything.
+auto build_playground_program(const std::filesystem::path& repo_root,
+                              std::string user_source) -> PlaygroundProgram;
 
-/// Append user-visible diagnostics to a JSON array, adjusting spans
-/// for prelude offset. Skips prelude-origin diagnostics.
-void collect_diagnostics(nlohmann::json& out, const SourceBuffer& source,
-                         const std::vector<Diagnostic>& diags,
-                         uint32_t prelude_bytes, uint32_t prelude_lines);
+/// True if any diagnostic originates in the editor buffer.
+auto has_user_error(const std::vector<Diagnostic>& diags, const PlaygroundProgram& prog) -> bool;
+
+/// Append editor-buffer diagnostics to a JSON array with buffer-local
+/// offsets and lines.  Prelude-origin diagnostics are skipped.
+void collect_diagnostics(nlohmann::json& out, const PlaygroundProgram& prog,
+                         const std::vector<Diagnostic>& diags);
 
 /// Build a synthetic error diagnostic entry for when a phase fails
 /// with no user-visible diagnostics (possible prelude error).
 auto make_internal_error(const std::string& message) -> nlohmann::json;
-
-/// Blank a leading `module <path>` declaration in place — overwrite
-/// the `module` keyword and its path segments with spaces while
-/// preserving the terminating newline, total byte count, and every
-/// offset past the blanked region. Used by the run/analyze handlers
-/// to fold any user-authored module header into the single synthetic
-/// `module playground` header injected at the top of the combined
-/// compilation unit. Blanking (rather than stripping) is load-bearing
-/// for the playground: frontend editor offsets and backend source
-/// offsets must stay byte-identical so hover/goto/completion/
-/// references/diagnostics positions line up with the editor buffer.
-/// Real multi-file support lands with Task 25+.
-void blank_user_leading_module(std::string& src);
 
 } // namespace dao::playground
 

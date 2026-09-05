@@ -3,12 +3,14 @@
 
 #include "frontend/ast/ast.h"
 #include "frontend/diagnostics/diagnostic.h"
+#include "frontend/module/program.h"
 #include "frontend/resolve/resolve.h"
 #include "frontend/typecheck/type_checker.h"
 #include "frontend/types/type_context.h"
 #include "ir/hir/hir.h"
 #include "ir/hir/hir_context.h"
 
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -35,7 +37,9 @@ public:
   HirBuilder(HirContext& ctx, const ResolveResult& resolve,
              const TypeCheckResult& typed);
 
-  auto build(const FileNode& file) -> HirBuildResult;
+  // Lower every file's declarations into one HirModule, in load order
+  // (Task 31 D0; per-module HIR arrives in D4).
+  auto build(std::span<const FileNode* const> files) -> HirBuildResult;
 
 private:
   HirContext& ctx_;
@@ -76,6 +80,14 @@ private:
 // Top-level entry point.
 // ---------------------------------------------------------------------------
 
+auto build_hir(const Program& program, const ResolveResult& resolve,
+               const TypeCheckResult& typed, HirContext& ctx)
+    -> HirBuildResult;
+auto build_hir(std::span<const FileNode* const> files, const ResolveResult& resolve,
+               const TypeCheckResult& typed, HirContext& ctx)
+    -> HirBuildResult;
+
+// Single-file convenience for tests.
 auto build_hir(const FileNode& file, const ResolveResult& resolve,
                const TypeCheckResult& typed, HirContext& ctx)
     -> HirBuildResult;

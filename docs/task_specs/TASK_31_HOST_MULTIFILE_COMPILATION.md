@@ -372,24 +372,24 @@ one of them.
 ### 9.2 Decision
 
 Keep `Span` unchanged.  Give each file a **base offset** in one
-program-wide offset space, with one reserved position after every file
-so that a file's end-of-file offset is its own:
+program-wide offset space, with one reserved end-of-file position per
+file so that a file's EOF offset is its own:
 
 ```
-file 0 (prelude core::builtins)   [0,       size0]        EOF at size0
-                                   size0+1  reserved — never a position of any file
+file 0 (prelude core::builtins)   [0,       size0]        bytes [0, size0), EOF at size0
 file 1 (prelude core::comparable) [base1,   base1+size1]  base1 = size0 + 1
 …
 file n (user app::main)           [base_n,  base_n+size_n]
 ```
 
-Each range is closed: `base + size` is the file's EOF position, the
-offset at which the lexer already emits its zero-length `Eof` token
-(`lexer.cpp`: `emit(TokenKind::Eof, pos_, 0)`) and at which
-unexpected-end diagnostics are reported.  Because
-`base_{n+1} = base_n + size_n + 1`, the EOF position of file *n* is
-never the first byte of file *n+1*, and an empty file (`size = 0`) has
-the single representable position `base`.  Base offsets are assigned
+Each range is closed: `base + size` is the file's reserved EOF
+position — no byte lives there; it is the offset at which the lexer
+already emits its zero-length `Eof` token (`lexer.cpp`:
+`emit(TokenKind::Eof, pos_, 0)`) and at which unexpected-end
+diagnostics are reported.  The next file begins immediately after that
+slot, `base_{n+1} = base_n + size_n + 1`, so the EOF position of file
+*n* is never the first byte of file *n+1*, and an empty file
+(`size = 0`) has the single representable position `base`.  Base offsets are assigned
 only after the whole file set is loaded and the position budget in
 §9.6 has been checked.
 
@@ -415,8 +415,8 @@ class SourceMap {
 ```
 
 `file_for(o)` returns file *n* iff `base_n <= o <= base_n + size_n`
-(closed range, §9.2); an offset in a reserved gap is a programming
-error and asserts.  `locate(base_n + size_n)` is the EOF location of
+(closed range, §9.2); the only unowned offsets lie past the last file's
+EOF, and locating one is a programming error that asserts.  `locate(base_n + size_n)` is the EOF location of
 file *n*: its last line, column one past the last character (`1:1` for
 an empty file) — the same answer `SourceBuffer::line_col(size)` gives
 today for a single file.

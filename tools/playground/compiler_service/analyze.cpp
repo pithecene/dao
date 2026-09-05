@@ -9,16 +9,14 @@
 #include "analysis/hover.h"
 #include "analysis/references.h"
 #include "analysis/semantic_tokens.h"
+#include "backend/llvm/llvm_backend.h"
 #include "frontend/ast/ast_printer.h"
-#include "frontend/lexer/lexer.h"
-#include "frontend/parser/parser.h"
 #include "frontend/resolve/resolve.h"
 #include "frontend/typecheck/type_checker.h"
 #include "frontend/types/type_context.h"
 #include "ir/hir/hir_builder.h"
 #include "ir/hir/hir_context.h"
 #include "ir/hir/hir_printer.h"
-#include "backend/llvm/llvm_backend.h"
 #include "ir/mir/mir_builder.h"
 #include "ir/mir/mir_context.h"
 #include "ir/mir/mir_monomorphize.h"
@@ -26,32 +24,31 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <sstream>
 #include <string>
 
 namespace dao::playground {
 
 // ---------------------------------------------------------------------------
-// Token serialization (user-visible tokens only, prelude filtered)
+// Token serialization (editor buffer only; prelude files are not serialized)
 // ---------------------------------------------------------------------------
 
 namespace {
 
-void build_token_array(nlohmann::json& out, const LexResult& lex_result,
-                       const SourceBuffer& source, uint32_t prelude_bytes,
-                       uint32_t prelude_lines) {
-  for (const auto& tok : lex_result.tokens) {
-    if (is_synthetic_token(tok.kind) || tok.span.offset < prelude_bytes) {
-      continue;
+void build_token_array(nlohmann::json& out, const PlaygroundProgram& prog) {
+  for (const auto& tok : prog.user->lex.tokens) {
+    if (is_synthetic_token(tok.kind) || !prog.in_user_file(tok.span.offset) ||
+        prog.user->local_offset(tok.span.offset) < prog.header_bytes) {
+      continue; // synthetic tokens and the synthetic module header
     }
-    auto loc = source.line_col(tok.span.offset);
-    auto line = loc.line > prelude_lines ? loc.line - prelude_lines : loc.line;
+    auto loc = prog.program.source_map.locate(tok.span.offset);
     out.push_back({
         {"kind", token_kind_name(tok.kind)},
         {"category", token_category(tok.kind)},
-        {"offset", tok.span.offset - prelude_bytes},
+        {"offset", prog.to_editor_offset(tok.span.offset)},
         {"length", tok.span.length},
-        {"line", line},
+        {"line", prog.editor_line(tok.span.offset)},
         {"col", loc.col},
         {"text", std::string(tok.text)},
     });
@@ -60,22 +57,26 @@ void build_token_array(nlohmann::json& out, const LexResult& lex_result,
 
 void build_semantic_tokens(nlohmann::json& out,
                            const std::vector<SemanticToken>& sem_tokens,
-                           const SourceBuffer& source,
-                           uint32_t prelude_bytes, uint32_t prelude_lines) {
+                           const PlaygroundProgram& prog) {
   for (const auto& stok : sem_tokens) {
-    if (stok.span.offset < prelude_bytes) {
+    if (!prog.in_user_file(stok.span.offset) ||
+        prog.user->local_offset(stok.span.offset) < prog.header_bytes) {
       continue;
     }
-    auto loc = source.line_col(stok.span.offset);
-    auto line = loc.line > prelude_lines ? loc.line - prelude_lines : loc.line;
+    auto loc = prog.program.source_map.locate(stok.span.offset);
     out.push_back({
         {"kind", stok.kind},
-        {"offset", stok.span.offset - prelude_bytes},
+        {"offset", prog.to_editor_offset(stok.span.offset)},
         {"length", stok.span.length},
-        {"line", line},
+        {"line", prog.editor_line(stok.span.offset)},
         {"col", loc.col},
     });
   }
+}
+
+auto has_error_severity(const std::vector<Diagnostic>& diags) -> bool {
+  return std::ranges::any_of(
+      diags, [](const auto& diag) -> bool { return diag.severity == Severity::Error; });
 }
 
 } // namespace
@@ -101,31 +102,6 @@ void handle_analyze(const httplib::Request& req, httplib::Response& res,
     return;
   }
 
-  // --- Setup ---
-  // Per CONTRACT_SYNTAX_SURFACE.md every source file must begin with
-  // exactly one `module` declaration. The playground injects a
-  // synthetic `module playground` header; both it and the stdlib
-  // prelude are folded into `prelude_bytes` so user-visible diagnostic
-  // offsets remain zero-based from the user's code. Any `module`
-  // header the user supplied (e.g. by loading one of the migrated
-  // example files) is blanked in place — the bytes become spaces so
-  // the parser ignores them, but the user source's total byte count
-  // and every offset past the blanked region stay identical to the
-  // frontend editor buffer. This keeps semantic token and diagnostic
-  // positions aligned with the editor.
-  const std::string module_header = "module playground\n";
-  auto prelude_source = load_prelude(repo_root);
-  std::string combined_header;
-  combined_header.reserve(module_header.size() + prelude_source.size());
-  combined_header.append(module_header);
-  combined_header.append(prelude_source);
-  auto prelude_bytes = static_cast<uint32_t>(combined_header.size());
-  auto prelude_lines = count_lines(combined_header);
-
-  auto user_source = request["source"].get<std::string>();
-  blank_user_leading_module(user_source);
-  SourceBuffer source("<playground>", combined_header + user_source);
-
   // --- Response accumulators ---
   nlohmann::json tokens = nlohmann::json::array();
   nlohmann::json diagnostics = nlohmann::json::array();
@@ -135,52 +111,54 @@ void handle_analyze(const httplib::Request& req, httplib::Response& res,
   std::string mir_text;
   std::string llvm_ir_text;
 
-  // --- Lex ---
-  auto lex_result = lex(source);
-  build_token_array(tokens, lex_result, source, prelude_bytes, prelude_lines);
-  collect_diagnostics(diagnostics, source, lex_result.diagnostics,
-                      prelude_bytes, prelude_lines);
+  // --- Lex + parse (every file of the program) ---
+  auto prog = build_playground_program(repo_root, request["source"].get<std::string>());
+  if (prog.user == nullptr || !prog.program.diagnostics.empty()) {
+    for (const auto& diag : prog.program.diagnostics) {
+      diagnostics.push_back(make_internal_error(diag.message));
+    }
+    goto respond; // NOLINT(cppcoreguidelines-avoid-goto)
+  }
 
-  if (has_user_error(lex_result.diagnostics, prelude_bytes)) {
+  build_token_array(tokens, prog);
+  for (const auto& file : prog.program.files) {
+    collect_diagnostics(diagnostics, prog, file->lex.diagnostics);
+  }
+  if (!prog.user->lex.diagnostics.empty()) {
     goto respond; // NOLINT(cppcoreguidelines-avoid-goto)
   }
 
   {
-    // --- Parse ---
-    auto parse_result = parse(lex_result.tokens);
-    collect_diagnostics(diagnostics, source, parse_result.diagnostics,
-                        prelude_bytes, prelude_lines);
-
-    if (parse_result.file == nullptr) {
+    for (const auto& file : prog.program.files) {
+      collect_diagnostics(diagnostics, prog, file->parse.diagnostics);
+    }
+    if (prog.user->file() == nullptr) {
       goto respond; // NOLINT(cppcoreguidelines-avoid-goto)
     }
 
-    bool has_parse_errors =
-        has_user_error(parse_result.diagnostics, prelude_bytes);
+    bool has_parse_errors = !prog.user->parse.diagnostics.empty();
 
     // Always emit the partial AST when a file was produced, even if
     // there are parse errors — error recovery nodes appear as
     // placeholders and the user can see the surviving structure.
     {
       std::ostringstream ast_out;
-      print_ast(ast_out, *parse_result.file);
+      print_ast(ast_out, *prog.user->file());
       ast_text = ast_out.str();
     }
 
     // --- Resolve ---
     // Continue even with parse errors — error recovery nodes are
     // tolerated by the resolver and produce partial results.
-    auto resolve_result = resolve(*parse_result.file, prelude_bytes);
-    collect_diagnostics(diagnostics, source, resolve_result.diagnostics,
-                        prelude_bytes, prelude_lines);
+    auto resolve_result = resolve(prog.program);
+    collect_diagnostics(diagnostics, prog, resolve_result.diagnostics);
 
     // Semantic tokens — always classify when lex/parse succeeded.
     auto sem_tokens =
-        classify_tokens(lex_result.tokens, parse_result.file, &resolve_result);
-    build_semantic_tokens(semantic_tokens_json, sem_tokens, source,
-                          prelude_bytes, prelude_lines);
+        classify_tokens(prog.user->lex.tokens, prog.user->file(), &resolve_result);
+    build_semantic_tokens(semantic_tokens_json, sem_tokens, prog);
 
-    if (has_user_error(resolve_result.diagnostics, prelude_bytes)) {
+    if (has_user_error(resolve_result.diagnostics, prog)) {
       goto respond; // NOLINT(cppcoreguidelines-avoid-goto)
     }
 
@@ -188,18 +166,13 @@ void handle_analyze(const httplib::Request& req, httplib::Response& res,
     // Continue even with parse errors — the type checker skips error
     // nodes silently, producing partial type information.
     TypeContext types;
-    auto check_result =
-        typecheck(*parse_result.file, resolve_result, types);
-    collect_diagnostics(diagnostics, source, check_result.diagnostics,
-                        prelude_bytes, prelude_lines);
+    auto check_result = typecheck(prog.program, resolve_result, types);
+    collect_diagnostics(diagnostics, prog, check_result.diagnostics);
 
-    bool has_tc_errors = false;
-    for (const auto& diag : check_result.diagnostics) {
-      if (diag.span.offset >= prelude_bytes &&
-          diag.severity == Severity::Error) {
-        has_tc_errors = true;
-      }
-    }
+    bool has_tc_errors =
+        std::ranges::any_of(check_result.diagnostics, [&prog](const auto& diag) -> bool {
+          return prog.in_user_file(diag.span.offset) && diag.severity == Severity::Error;
+        });
     if (has_tc_errors) {
       goto respond; // NOLINT(cppcoreguidelines-avoid-goto)
     }
@@ -213,13 +186,11 @@ void handle_analyze(const httplib::Request& req, httplib::Response& res,
 
     // --- HIR ---
     HirContext hir_ctx;
-    auto hir_result = build_hir(*parse_result.file, resolve_result,
-                                check_result, hir_ctx);
-    collect_diagnostics(diagnostics, source, hir_result.diagnostics,
-                        prelude_bytes, prelude_lines);
+    auto hir_result = build_hir(prog.program, resolve_result, check_result, hir_ctx);
+    collect_diagnostics(diagnostics, prog, hir_result.diagnostics);
 
     if (hir_result.module == nullptr) {
-      if (!has_user_error(hir_result.diagnostics, prelude_bytes)) {
+      if (!has_user_error(hir_result.diagnostics, prog)) {
         diagnostics.push_back(
             make_internal_error("HIR lowering failed (possible prelude error)"));
       }
@@ -233,11 +204,10 @@ void handle_analyze(const httplib::Request& req, httplib::Response& res,
     // --- MIR ---
     MirContext mir_ctx;
     auto mir_result = build_mir(*hir_result.module, mir_ctx, types);
-    collect_diagnostics(diagnostics, source, mir_result.diagnostics,
-                        prelude_bytes, prelude_lines);
+    collect_diagnostics(diagnostics, prog, mir_result.diagnostics);
 
     if (mir_result.module == nullptr) {
-      if (!has_user_error(mir_result.diagnostics, prelude_bytes)) {
+      if (!has_user_error(mir_result.diagnostics, prog)) {
         diagnostics.push_back(
             make_internal_error("MIR lowering failed (possible prelude error)"));
       }
@@ -246,8 +216,7 @@ void handle_analyze(const httplib::Request& req, httplib::Response& res,
 
     auto mono_result = monomorphize(*mir_result.module, mir_ctx, types,
                                     mir_result.generic_templates);
-    collect_diagnostics(diagnostics, source, mono_result.diagnostics,
-                        prelude_bytes, prelude_lines);
+    collect_diagnostics(diagnostics, prog, mono_result.diagnostics);
 
     std::ostringstream mir_out;
     print_mir(mir_out, *mir_result.module);
@@ -256,31 +225,20 @@ void handle_analyze(const httplib::Request& req, httplib::Response& res,
     // Stop before LLVM lowering on any mono error, including those
     // originating in the prelude.  MIR concreteness invariant
     // violations (Task 28 §14.2) are internal errors that must halt
-    // unconditionally — their span reflects the offending function's
-    // source location, which may legitimately fall inside the prelude
-    // if the regression is in prelude lowering, but the LLVM
-    // DataLayout assertion would fire all the same.  MIR dump is
-    // still produced above for inspection.
-    bool mono_has_error = false;
-    for (const auto& diag : mono_result.diagnostics) {
-      if (diag.severity == Severity::Error) {
-        mono_has_error = true;
-        break;
-      }
-    }
-    if (mono_has_error) {
+    // unconditionally — the LLVM DataLayout assertion would fire all
+    // the same.  MIR dump is still produced above for inspection.
+    if (has_error_severity(mono_result.diagnostics)) {
       goto respond; // NOLINT(cppcoreguidelines-avoid-goto)
     }
 
     // --- LLVM IR ---
     llvm::LLVMContext llvm_ctx;
     LlvmBackend llvm_backend(llvm_ctx);
-    auto llvm_result = llvm_backend.lower(*mir_result.module, prelude_bytes);
-    collect_diagnostics(diagnostics, source, llvm_result.diagnostics,
-                        prelude_bytes, prelude_lines);
+    auto llvm_result = llvm_backend.lower(*mir_result.module, &prog.program.source_map);
+    collect_diagnostics(diagnostics, prog, llvm_result.diagnostics);
 
     if (llvm_result.module != nullptr &&
-        !has_user_error(llvm_result.diagnostics, prelude_bytes)) {
+        !has_user_error(llvm_result.diagnostics, prog)) {
       std::ostringstream llvm_out;
       LlvmBackend::print_ir(llvm_out, *llvm_result.module);
       llvm_ir_text = llvm_out.str();
@@ -308,60 +266,30 @@ respond:
 namespace {
 
 struct LightPipeline {
-  SourceBuffer source;
-  LexResult lex_result;
-  ParseResult parse_result;
+  PlaygroundProgram prog;
   ResolveResult resolve_result;
   TypeCheckResult check_result;
   TypeContext types;
-  uint32_t prelude_bytes = 0;
   bool ok = false;
 };
 
 auto run_light_pipeline(const nlohmann::json& request,
                         const std::filesystem::path& repo_root)
     -> LightPipeline {
-  LightPipeline pipe{SourceBuffer("", ""), {}, {}, {}, {}, {}, 0, false};
-
-  // See the `handle_analyze` comment above for the synthetic
-  // `module playground` injection rationale. User-authored module
-  // headers are blanked (not stripped) so editor offsets and backend
-  // offsets stay byte-identical — the offset rebasing used by hover,
-  // goto-definition, references, and completions (pipe.prelude_bytes
-  // + user_offset) relies on this invariant.
-  const std::string module_header = "module playground\n";
-  auto prelude_source = load_prelude(repo_root);
-  std::string combined_header;
-  combined_header.reserve(module_header.size() + prelude_source.size());
-  combined_header.append(module_header);
-  combined_header.append(prelude_source);
-  pipe.prelude_bytes = static_cast<uint32_t>(combined_header.size());
-
-  auto user_source = request["source"].get<std::string>();
-  blank_user_leading_module(user_source);
-  pipe.source =
-      SourceBuffer("<playground>", combined_header + user_source);
-  pipe.lex_result = lex(pipe.source);
-
-  if (!pipe.lex_result.diagnostics.empty()) {
+  LightPipeline pipe;
+  pipe.prog = build_playground_program(repo_root, request["source"].get<std::string>());
+  if (pipe.prog.user == nullptr || !pipe.prog.program.diagnostics.empty() ||
+      !pipe.prog.program.lexed_and_parsed_cleanly()) {
     return pipe;
   }
 
-  pipe.parse_result = parse(pipe.lex_result.tokens);
-  if (pipe.parse_result.file == nullptr) {
-    return pipe;
-  }
-
-  pipe.resolve_result = resolve(*pipe.parse_result.file, pipe.prelude_bytes);
-
-  pipe.check_result =
-      typecheck(*pipe.parse_result.file, pipe.resolve_result, pipe.types);
-
+  pipe.resolve_result = resolve(pipe.prog.program);
+  pipe.check_result = typecheck(pipe.prog.program, pipe.resolve_result, pipe.types);
   pipe.ok = true;
   return pipe;
 }
 
-/// Find the token span offset that contains the given byte offset.
+/// Find the token span offset that contains the given program offset.
 /// Returns the token's span.offset, or the offset itself if no token found.
 auto find_token_offset(uint32_t offset, const LexResult& lex_result)
     -> uint32_t {
@@ -407,8 +335,8 @@ void handle_hover(const httplib::Request& req, httplib::Response& res,
   }
 
   // Find the token at this offset and use its span start for lookup.
-  auto absolute_offset = pipe.prelude_bytes + user_offset;
-  auto token_offset = find_token_offset(absolute_offset, pipe.lex_result);
+  auto absolute_offset = pipe.prog.to_program_offset(user_offset);
+  auto token_offset = find_token_offset(absolute_offset, pipe.prog.user->lex);
 
   auto result = dao::query_hover(token_offset, pipe.resolve_result,
                                  pipe.check_result);
@@ -455,8 +383,8 @@ void handle_goto_def(const httplib::Request& req, httplib::Response& res,
     return;
   }
 
-  auto absolute_offset = pipe.prelude_bytes + user_offset;
-  auto token_offset = find_token_offset(absolute_offset, pipe.lex_result);
+  auto absolute_offset = pipe.prog.to_program_offset(user_offset);
+  auto token_offset = find_token_offset(absolute_offset, pipe.prog.user->lex);
 
   auto result = dao::query_definition(token_offset, pipe.resolve_result);
   if (!result) {
@@ -464,24 +392,18 @@ void handle_goto_def(const httplib::Request& req, httplib::Response& res,
     return;
   }
 
-  // If the definition is inside the prelude, it's not navigable
+  // A definition outside the editor buffer (prelude) is not navigable
   // in the user's source — return null.
-  if (result->offset < pipe.prelude_bytes) {
+  if (!pipe.prog.in_user_file(result->offset)) {
     res.set_content("null", "application/json");
     return;
   }
 
-  auto user_def_offset = result->offset - pipe.prelude_bytes;
-  auto loc = pipe.source.line_col(result->offset);
-  auto prelude_text = std::string(
-      pipe.source.contents().substr(0, pipe.prelude_bytes));
-  auto prelude_lines = count_lines(prelude_text);
-  auto line = loc.line > prelude_lines ? loc.line - prelude_lines : loc.line;
-
+  auto loc = pipe.prog.program.source_map.locate(result->offset);
   nlohmann::json response = {
-      {"offset", user_def_offset},
+      {"offset", pipe.prog.to_editor_offset(result->offset)},
       {"length", result->length},
-      {"line", line},
+      {"line", pipe.prog.editor_line(result->offset)},
       {"col", loc.col},
   };
   res.set_content(response.dump(), "application/json");
@@ -511,20 +433,16 @@ void handle_document_symbols(const httplib::Request& req,
 
   auto pipe = run_light_pipeline(request, repo_root);
 
-  if (!pipe.ok || pipe.parse_result.file == nullptr) {
+  if (!pipe.ok || pipe.prog.user->file() == nullptr) {
     res.set_content("[]", "application/json");
     return;
   }
 
-  auto symbols = dao::query_document_symbols(*pipe.parse_result.file,
-                                              pipe.prelude_bytes);
+  auto symbols = dao::query_document_symbols(*pipe.prog.user->file());
 
   // Build JSON response.
   std::function<nlohmann::json(const dao::DocumentSymbol&)> to_json;
   to_json = [&](const dao::DocumentSymbol& sym) -> nlohmann::json {
-    auto user_offset = sym.span.offset >= pipe.prelude_bytes
-                           ? sym.span.offset - pipe.prelude_bytes
-                           : sym.span.offset;
     nlohmann::json children = nlohmann::json::array();
     for (const auto& child : sym.children) {
       children.push_back(to_json(child));
@@ -532,7 +450,7 @@ void handle_document_symbols(const httplib::Request& req,
     return {
         {"name", sym.name},
         {"kind", sym.kind},
-        {"offset", user_offset},
+        {"offset", pipe.prog.to_editor_offset(sym.span.offset)},
         {"length", sym.span.length},
         {"children", children},
     };
@@ -575,20 +493,19 @@ void handle_references(const httplib::Request& req, httplib::Response& res,
     return;
   }
 
-  auto absolute_offset = pipe.prelude_bytes + user_offset;
-  auto token_offset = find_token_offset(absolute_offset, pipe.lex_result);
+  auto absolute_offset = pipe.prog.to_program_offset(user_offset);
+  auto token_offset = find_token_offset(absolute_offset, pipe.prog.user->lex);
 
   auto results = dao::query_references(token_offset, pipe.resolve_result);
 
   nlohmann::json response = nlohmann::json::array();
   for (const auto& ref : results) {
-    // Skip references inside the prelude.
-    if (ref.span.offset < pipe.prelude_bytes) {
+    // Skip references outside the editor buffer (prelude).
+    if (!pipe.prog.in_user_file(ref.span.offset)) {
       continue;
     }
-    auto ref_user_offset = ref.span.offset - pipe.prelude_bytes;
     response.push_back({
-        {"offset", ref_user_offset},
+        {"offset", pipe.prog.to_editor_offset(ref.span.offset)},
         {"length", ref.span.length},
         {"isDefinition", ref.is_definition},
     });
@@ -600,8 +517,9 @@ void handle_references(const httplib::Request& req, httplib::Response& res,
 // Completions
 // ---------------------------------------------------------------------------
 
-/// Scan backward from offset to find the non-whitespace character.
-/// Returns the position (1-indexed into contents), or 0 if none found.
+/// Scan backward from a buffer-local offset to find the non-whitespace
+/// character.  Returns the position (1-indexed into contents), or 0 if
+/// none found.
 auto scan_back_past_whitespace(std::string_view contents, uint32_t offset)
     -> uint32_t {
   auto pos = offset;
@@ -647,9 +565,9 @@ auto resolve_receiver_type(const dao::Symbol* sym,
 }
 
 /// Try to find the type of the expression ending just before dot_pos
-/// by scanning the typed expression map. This handles general
-/// expressions like make_point()., p.x., and arr[i]. where the
-/// receiver is not a simple identifier in the symbol table.
+/// (a program offset) by scanning the typed expression map. This
+/// handles general expressions like make_point()., p.x., and arr[i].
+/// where the receiver is not a simple identifier in the symbol table.
 auto find_expr_type_before_dot(uint32_t dot_pos,
                                  const dao::TypeCheckResult& typed)
     -> const dao::Type* {
@@ -671,17 +589,19 @@ auto find_expr_type_before_dot(uint32_t dot_pos,
   return best;
 }
 
-/// Try to detect and resolve dot completion at the given offset.
+/// Try to detect and resolve dot completion at the given program offset.
 /// Returns the receiver type if a dot trigger is found, or nullptr.
 auto try_resolve_dot_receiver(uint32_t absolute_offset,
                                const LightPipeline& pipe)
     -> const dao::Type* {
-  auto contents = pipe.source.contents();
-  if (absolute_offset == 0 || absolute_offset > contents.size()) {
+  const auto& user = *pipe.prog.user;
+  auto contents = user.buffer.contents();
+  if (!user.contains(absolute_offset) || absolute_offset == user.base_offset) {
     return nullptr;
   }
+  auto local = user.local_offset(absolute_offset);
 
-  auto pos = scan_back_past_whitespace(contents, absolute_offset);
+  auto pos = scan_back_past_whitespace(contents, local);
   if (pos == 0 || contents[pos - 1] != '.') {
     return nullptr;
   }
@@ -689,7 +609,7 @@ auto try_resolve_dot_receiver(uint32_t absolute_offset,
   // Fast path: simple identifier receiver (locals, params).
   auto pre_dot = scan_back_past_whitespace(contents, pos - 1);
   auto token_off = find_token_offset(
-      pre_dot > 0 ? pre_dot - 1 : 0, pipe.lex_result);
+      user.base_offset + (pre_dot > 0 ? pre_dot - 1 : 0), user.lex);
 
   auto use_it = pipe.resolve_result.uses.find(token_off);
   if (use_it != pipe.resolve_result.uses.end()) {
@@ -702,7 +622,7 @@ auto try_resolve_dot_receiver(uint32_t absolute_offset,
 
   // Slow path: scan typed expressions for one ending at the dot.
   // Handles call expressions, field chains, index expressions, etc.
-  auto dot_pos = pos - 1;
+  auto dot_pos = user.base_offset + (pos - 1);
   return find_expr_type_before_dot(dot_pos, pipe.check_result);
 }
 
@@ -732,7 +652,7 @@ void handle_completions(const httplib::Request& req, httplib::Response& res,
     return;
   }
 
-  auto absolute_offset = pipe.prelude_bytes + user_offset;
+  auto absolute_offset = pipe.prog.to_program_offset(user_offset);
   std::vector<dao::CompletionItem> items;
 
   const auto* receiver = try_resolve_dot_receiver(absolute_offset, pipe);

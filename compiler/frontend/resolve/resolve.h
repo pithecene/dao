@@ -3,9 +3,12 @@
 
 #include "frontend/ast/ast.h"
 #include "frontend/diagnostics/diagnostic.h"
+#include "frontend/module/program.h"
+#include "frontend/module/source_map.h"
 #include "frontend/resolve/resolve_context.h"
 
 #include <cstdint>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -17,13 +20,19 @@ struct ResolveResult {
   std::vector<Diagnostic> diagnostics;
 };
 
-// Run name resolution over a parsed file.
-// The FileNode must remain valid for the lifetime of the returned result
-// (symbol name string_views point into the AST's source buffer).
-// prelude_bytes indicates the byte offset boundary: declarations whose
-// source span starts before this offset are prelude (stdlib) code and
-// are exempt from user-code naming restrictions.
-auto resolve(const FileNode& file, uint32_t prelude_bytes = 0) -> ResolveResult;
+// Run name resolution over every parsed file of a program.  All files
+// are declared into one shared file scope, in load order (Task 31 D0;
+// per-module scopes arrive in D2).  The Program must outlive the
+// result: symbol names are string_views into its source buffers.
+// The source map decides which declarations belong to the prelude
+// group and are therefore exempt from user-code naming restrictions
+// (CONTRACT_MODULE_SYSTEM.md §7.7).
+auto resolve(const Program& program) -> ResolveResult;
+auto resolve(std::span<const FileNode* const> files, const SourceMap* source_map)
+    -> ResolveResult;
+
+// Single-file convenience for tests: one file, no prelude group.
+auto resolve(const FileNode& file) -> ResolveResult;
 
 } // namespace dao
 

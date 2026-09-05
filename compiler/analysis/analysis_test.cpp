@@ -50,7 +50,7 @@ struct AnalysisPipeline {
 suite<"document_symbols"> document_symbols = [] {
   "functions appear as top-level symbols"_test = [] {
     AnalysisPipeline pipe("fn add(a: i32, b: i32): i32 -> a + b\n");
-    auto symbols = query_document_symbols(*pipe.parse_result.file, 0);
+    auto symbols = query_document_symbols(*pipe.parse_result.file);
     expect(symbols.size() == 1_ul);
     expect(symbols[0].name == "add");
     expect(symbols[0].kind == "function");
@@ -65,7 +65,7 @@ suite<"document_symbols"> document_symbols = [] {
         "class Point:\n"
         "  x: i32\n"
         "  y: i32\n");
-    auto symbols = query_document_symbols(*pipe.parse_result.file, 0);
+    auto symbols = query_document_symbols(*pipe.parse_result.file);
     expect(symbols.size() == 1_ul);
     expect(symbols[0].name == "Point");
     expect(symbols[0].kind == "class");
@@ -79,7 +79,7 @@ suite<"document_symbols"> document_symbols = [] {
     AnalysisPipeline pipe(
         "concept Printable:\n"
         "  fn to_string(self): string\n");
-    auto symbols = query_document_symbols(*pipe.parse_result.file, 0);
+    auto symbols = query_document_symbols(*pipe.parse_result.file);
     expect(symbols.size() == 1_ul);
     expect(symbols[0].name == "Printable");
     expect(symbols[0].kind == "concept");
@@ -89,20 +89,18 @@ suite<"document_symbols"> document_symbols = [] {
   };
 
   "prelude declarations are filtered"_test = [] {
-    AnalysisPipeline pipe(
-        "fn prelude_fn(): i32 -> 0\n"
-        "fn user_fn(): i32 -> 1\n");
-    // Treat first 26 bytes of the raw fixture as prelude (rebased for
-    // the synthetic `module test` header via AnalysisPipeline::at).
-    auto symbols =
-        query_document_symbols(*pipe.parse_result.file, AnalysisPipeline::at(26));
+    // Prelude files are separate program files; querying the user
+    // file's symbols never sees them.
+    std::vector<std::string> prelude = {"module core::probe\nfn prelude_fn(): i32 -> 0\n"};
+    auto program = make_test_program("fn user_fn(): i32 -> 1\n", prelude);
+    auto symbols = query_document_symbols(*user_file(program).file());
     expect(symbols.size() == 1_ul);
     expect(symbols[0].name == "user_fn");
   };
 
   "aliases appear as symbols"_test = [] {
     AnalysisPipeline pipe("type NodeId = i32\n");
-    auto symbols = query_document_symbols(*pipe.parse_result.file, 0);
+    auto symbols = query_document_symbols(*pipe.parse_result.file);
     expect(symbols.size() == 1_ul);
     expect(symbols[0].name == "NodeId");
     expect(symbols[0].kind == "alias");
@@ -110,7 +108,7 @@ suite<"document_symbols"> document_symbols = [] {
 
   "extern functions appear"_test = [] {
     AnalysisPipeline pipe("extern fn sqrt(x: f64): f64\n");
-    auto symbols = query_document_symbols(*pipe.parse_result.file, 0);
+    auto symbols = query_document_symbols(*pipe.parse_result.file);
     expect(symbols.size() == 1_ul);
     expect(symbols[0].name == "sqrt");
     expect(symbols[0].kind == "extern_function");
