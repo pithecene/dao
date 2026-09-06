@@ -214,7 +214,7 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   add_semantic_tokens(
       out, classify_tokens(prog.user->lex.tokens, prog.user->file(), &resolve_result), prog);
 
-  if (has_user_error(resolve_result.diagnostics, prog)) {
+  if (has_error_severity(resolve_result.diagnostics)) {
     return out.reply();
   }
 
@@ -224,7 +224,7 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   TypeContext types;
   auto check_result = typecheck(prog.program, resolve_result, types);
   collect_diagnostics(out.diagnostics, prog, check_result.diagnostics);
-  if (has_user_error(check_result.diagnostics, prog)) {
+  if (has_error_severity(check_result.diagnostics)) {
     return out.reply();
   }
 
@@ -239,9 +239,8 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   auto hir_result = build_hir(prog.program, resolve_result, check_result, hir_ctx);
   collect_diagnostics(out.diagnostics, prog, hir_result.diagnostics);
   if (hir_result.module == nullptr) {
-    if (!has_user_error(hir_result.diagnostics, prog)) {
-      out.diagnostics.push_back(
-          make_internal_error("HIR lowering failed (possible prelude error)"));
+    if (!has_error_severity(hir_result.diagnostics)) {
+      out.diagnostics.push_back(make_internal_error("HIR lowering failed without a diagnostic"));
     }
     return out.reply();
   }
@@ -255,9 +254,8 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   auto mir_result = build_mir(*hir_result.module, mir_ctx, types);
   collect_diagnostics(out.diagnostics, prog, mir_result.diagnostics);
   if (mir_result.module == nullptr) {
-    if (!has_user_error(mir_result.diagnostics, prog)) {
-      out.diagnostics.push_back(
-          make_internal_error("MIR lowering failed (possible prelude error)"));
+    if (!has_error_severity(mir_result.diagnostics)) {
+      out.diagnostics.push_back(make_internal_error("MIR lowering failed without a diagnostic"));
     }
     return out.reply();
   }
@@ -284,7 +282,7 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   collect_diagnostics(
       out.diagnostics, prog, without_prelude_warnings(llvm_result.diagnostics, prog));
 
-  if (llvm_result.module != nullptr && !has_user_error(llvm_result.diagnostics, prog)) {
+  if (llvm_result.module != nullptr && !has_error_severity(llvm_result.diagnostics)) {
     out.llvm_ir = printed([&](std::ostream& os) {
       if (include_prelude) {
         LlvmBackend::print_ir(os, *llvm_result.module);

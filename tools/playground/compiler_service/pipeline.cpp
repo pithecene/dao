@@ -99,12 +99,6 @@ auto has_error_severity(const std::vector<Diagnostic>& diags) -> bool {
       diags, [](const Diagnostic& diag) -> bool { return diag.severity == Severity::Error; });
 }
 
-auto has_user_error(const std::vector<Diagnostic>& diags, const PlaygroundProgram& prog) -> bool {
-  return std::ranges::any_of(diags, [&prog](const Diagnostic& diag) -> bool {
-    return diag.severity == Severity::Error && prog.in_user_file(diag.span.offset);
-  });
-}
-
 void add_position(nlohmann::json& out, const PlaygroundProgram& prog, uint32_t program_offset) {
   const auto* file = prog.program.source_map.file_for(program_offset);
   if (file == nullptr) {

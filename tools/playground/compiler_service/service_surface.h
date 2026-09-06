@@ -178,12 +178,18 @@ struct CapabilitySpec {
   std::string_view lsp;        // the LSP method it maps to, or ""
 };
 
-// Diagnostics come from every phase that can reject a program.
+// Diagnostics come from every phase that can reject a program: each
+// header under compiler/ that declares a `diagnostics` vector must be
+// here (service_test walks them), so an omitted producer fails the test.
 inline constexpr std::array kDiagnosticEntryPoints{
+    EntryPoint{"lex", "frontend/lexer/lexer.h"},
+    EntryPoint{"parse", "frontend/parser/parser.h"},
+    EntryPoint{"build_program", "frontend/module/program.h"},
     EntryPoint{"resolve", "frontend/resolve/resolve.h"},
     EntryPoint{"typecheck", "frontend/typecheck/type_checker.h"},
     EntryPoint{"build_hir", "ir/hir/hir_builder.h"},
     EntryPoint{"build_mir", "ir/mir/mir_builder.h"},
+    EntryPoint{"monomorphize", "ir/mir/mir_monomorphize.h"},
     EntryPoint{"LlvmBackend::lower", "backend/llvm/llvm_backend.h"},
 };
 inline constexpr std::array kSemanticTokenEntryPoints{

@@ -14,7 +14,7 @@ the file they lie in; token entries inherit the file of the reply.
 
 | Capability | Compiler entry points | Playground route | `daoc` command | LSP method |
 |---|---|---|---|---|
-| Diagnostics | `resolve`, `typecheck`, `build_hir`, `build_mir`, `LlvmBackend::lower` | `analyze` | `check` | `textDocument/publishDiagnostics` |
+| Diagnostics | `lex`, `parse`, `build_program`, `resolve`, `typecheck`, `build_hir`, `build_mir`, `monomorphize`, `LlvmBackend::lower` | `analyze` | `check` | `textDocument/publishDiagnostics` |
 | Semantic tokens | `classify_tokens` | `analyze` | `tokens` | `textDocument/semanticTokens/full` |
 | Hover | `query_hover` | `hover` | — | `textDocument/hover` |
 | Go to definition | `query_definition` | `gotoDef` | — | `textDocument/definition` |

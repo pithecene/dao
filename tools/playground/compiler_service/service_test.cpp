@@ -284,6 +284,23 @@ suite<"playground_service"> playground_service_suite = [] {
         << "a document that is not one of the files must be rejected";
   };
 
+  "malformed nested request entries are rejected, not dereferenced"_test = [] {
+    // Every element of `files` is validated against SourceInput before the
+    // pipeline reads it; an empty entry used to abort the process.
+    const json malformed[] = {
+        {{"files", json::array({json::object()})}, {"document", "x"}, {"offset", 0}},
+        {{"files", json::array({{{"path", 1}, {"source", ""}}})}, {"document", "x"}, {"offset", 0}},
+        {{"files", json::array({{{"path", "x"}}})}, {"document", "x"}, {"offset", 0}},
+        {{"files", "x"}, {"document", "x"}, {"offset", 0}},
+        {{"files", json::array({"x"})}, {"document", "x"}, {"offset", 0}},
+    };
+    for (const auto& request : malformed) {
+      auto reply = dispatch("hover", request, service_context());
+      expect(reply.status == http_status::bad_request)
+          << request.dump() << " -> " << reply.status << " " << reply.body.dump();
+    }
+  };
+
   "examples_analyze_with_every_token_classified"_test = [] {
     auto known_failures = load_known_failures();
     for (const auto& example : load_examples()) {
@@ -433,7 +450,8 @@ suite<"playground_service"> playground_service_suite = [] {
       expect(sym["file"].get<std::string>() == kTestDocument) << sym.dump();
     }
 
-    // A diagnostic in the other file names that file.
+    // A diagnostic in the other file names that file, and an error there
+    // stops lowering and execution just as one in the document would.
     json broken = request;
     broken["files"][0]["source"] = "module lib\n\nfn helper(): i32\n  return true\n";
     auto analysis = call("analyze", broken);
@@ -442,6 +460,13 @@ suite<"playground_service"> playground_service_suite = [] {
       named = named || diag["file"].get<std::string>() == "lib.dao";
     }
     expect(named) << "no diagnostic names lib.dao: " << analysis.body["diagnostics"].dump();
+    expect(analysis.body["hir"].get<std::string>().empty() &&
+           analysis.body["mir"].get<std::string>().empty() &&
+           analysis.body["llvm_ir"].get<std::string>().empty())
+        << "lowered a program with an error in lib.dao";
+    auto run = call("run", broken);
+    expect(run.body["exit_code"].get<int>() == -1)
+        << "ran a program with an error in lib.dao: " << run.body.dump();
   };
 
   "capability_surfaces_exist"_test = [] {
@@ -476,6 +501,33 @@ suite<"playground_service"> playground_service_suite = [] {
         expect(lsp_methods.insert(std::string(cap.lsp)).second)
             << cap.name << " repeats LSP method " << cap.lsp;
       }
+    }
+  };
+
+  "every_diagnostic_producer_is_in_the_matrix"_test = [] {
+    // A compiler header that declares a diagnostics vector is a phase that
+    // can reject a program; the Diagnostics row must name it.
+    std::set<std::string> listed;
+    for (const auto& cap : kCapabilities) {
+      if (cap.name != "Diagnostics") {
+        continue;
+      }
+      for (const auto& entry : cap.analysis) {
+        listed.insert(std::string(entry.header));
+      }
+    }
+    auto compiler = repo_root() / "compiler";
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(compiler)) {
+      if (!entry.is_regular_file() || entry.path().extension() != ".h") {
+        continue;
+      }
+      if (dao::read_file(entry.path()).find("std::vector<Diagnostic> diagnostics") ==
+          std::string::npos) {
+        continue;
+      }
+      auto header = std::filesystem::relative(entry.path(), compiler).generic_string();
+      expect(listed.contains(header))
+          << header << " produces diagnostics but is not in the Diagnostics row";
     }
   };
 

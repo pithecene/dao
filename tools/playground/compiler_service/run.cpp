@@ -88,14 +88,14 @@ auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
 
   auto resolve_result = resolve(prog.program);
   collect_diagnostics(diagnostics, prog, resolve_result.diagnostics);
-  if (has_user_error(resolve_result.diagnostics, prog)) {
+  if (has_error_severity(resolve_result.diagnostics)) {
     return compile_failed(std::move(diagnostics));
   }
 
   TypeContext types;
   auto check_result = typecheck(prog.program, resolve_result, types);
   collect_diagnostics(diagnostics, prog, check_result.diagnostics);
-  if (has_user_error(check_result.diagnostics, prog)) {
+  if (has_error_severity(check_result.diagnostics)) {
     return compile_failed(std::move(diagnostics));
   }
 
@@ -103,7 +103,7 @@ auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
   auto hir_result = build_hir(prog.program, resolve_result, check_result, hir_ctx);
   collect_diagnostics(diagnostics, prog, hir_result.diagnostics);
   if (hir_result.module == nullptr) {
-    return compile_failed(std::move(diagnostics), "HIR lowering failed (possible prelude error)");
+    return compile_failed(std::move(diagnostics), "HIR lowering failed without a diagnostic");
   }
 
   MirContext mir_ctx;
@@ -119,7 +119,7 @@ auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
     mono_has_errors = has_error_severity(mono.diagnostics);
   }
   if (mir_result.module == nullptr || mono_has_errors) {
-    return compile_failed(std::move(diagnostics), "MIR lowering failed (possible prelude error)");
+    return compile_failed(std::move(diagnostics), "MIR lowering failed without a diagnostic");
   }
 
   // LLVM lowering.

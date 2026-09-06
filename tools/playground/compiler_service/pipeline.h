@@ -101,9 +101,6 @@ auto token_start_at(uint32_t offset, const LexResult& lex) -> uint32_t;
 /// True if any diagnostic has error severity.
 auto has_error_severity(const std::vector<Diagnostic>& diags) -> bool;
 
-/// True if any error-severity diagnostic originates in the editor buffer.
-auto has_user_error(const std::vector<Diagnostic>& diags, const PlaygroundProgram& prog) -> bool;
-
 /// Set `file`, `offset`, `line`, `col` on a JSON object for a program
 /// offset: the file's display path with file-local position, editor
 /// adjusted when the file is the buffer.
