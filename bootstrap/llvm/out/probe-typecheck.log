@@ -1,0 +1,60 @@
+probe: typecheck stage=lex
+probe: typecheck lex=0
+probe: typecheck stage=parse
+probe: typecheck parse=246
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected RParen, got Identifier
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected expression
+probe: typecheck diag parse: expected RParen, got Identifier
+probe: typecheck diag parse: expected RParen, got Identifier
+probe: typecheck diag parse: expected expression
+probe: typecheck first=parse: expected expression
+probe: typecheck stage=hir
+probe: typecheck hir=0
+probe: typecheck stage=mir
+dao panic: allocation failed (size=262144, align=8)
+timeout: the monitored command dumped core

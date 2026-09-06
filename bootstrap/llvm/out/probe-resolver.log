@@ -1,0 +1,112 @@
+probe: resolver stage=lex
+probe: resolver lex=0
+probe: resolver stage=parse
+probe: resolver parse=132
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected RParen, got Identifier
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected expression
+probe: resolver diag parse: expected RParen, got Identifier
+probe: resolver diag parse: expected RParen, got Identifier
+probe: resolver diag parse: expected expression
+probe: resolver first=parse: expected expression
+probe: resolver stage=hir
+probe: resolver hir=0
+probe: resolver stage=mir
+probe: resolver mir=57
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported statement kind in Tier A MIR lowering: HirBreak
+probe: resolver diag mir: unsupported statement kind in Tier A MIR lowering: HirBreak
+probe: resolver diag mir: unsupported statement kind in Tier A MIR lowering: HirBreak
+probe: resolver diag mir: unsupported statement kind in Tier A MIR lowering: HirBreak
+probe: resolver diag mir: unsupported statement kind in Tier A MIR lowering: HirBreak
+probe: resolver diag mir: unsupported statement kind in Tier A MIR lowering: HirBreak
+probe: resolver diag mir: unsupported statement kind in Tier A MIR lowering: HirBreak
+probe: resolver diag mir: unsupported statement kind in Tier A MIR lowering: HirBreak
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported assignment target
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported assignment target
+probe: resolver diag mir: unsupported assignment target
+probe: resolver diag mir: unsupported assignment target
+probe: resolver diag mir: unsupported assignment target
+probe: resolver diag mir: unsupported assignment target
+probe: resolver diag mir: unsupported assignment target
+probe: resolver diag mir: unsupported assignment target
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported assignment target
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver diag mir: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+probe: resolver stage=llvm
+dao panic: allocation failed (size=65536, align=4)
+timeout: the monitored command dumped core

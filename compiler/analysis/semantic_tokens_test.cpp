@@ -47,6 +47,12 @@ auto classify_source_resolved(const std::string& name, std::string contents) -> 
       resolve_result = resolve(*parse_result.file);
     }
   }
+  // Fixtures must be valid Dao: the parser recovers from errors, so an
+  // invalid fixture would still classify and the test would prove nothing.
+  expect(lex_result.diagnostics.empty() && parse_result.diagnostics.empty())
+      << "fixture does not parse: "
+      << (!lex_result.diagnostics.empty() ? lex_result.diagnostics[0].message
+          : !parse_result.diagnostics.empty() ? parse_result.diagnostics[0].message : "");
   auto sem_tokens = classify_tokens(lex_result.tokens, parse_result.file, &resolve_result);
   return {std::move(source), std::move(lex_result), std::move(parse_result),
           std::move(resolve_result), std::move(sem_tokens)};
@@ -360,36 +366,40 @@ suite<"expansion_classification"> expansion_classification = [] {
   "for binders and match bindings are declaration sites"_test = [] {
     auto result = classify_source_resolved(
         "test.dao",
-        "enum Shape:\n"
+        "enum class Shape:\n"
         "    Dot\n"
-        "    Circle(i32)\n"
+        "    Circle(radius: i32)\n"
         "fn main(): i32\n"
         "    let s: Shape = Shape.Dot\n"
         "    match s:\n"
-        "        Shape.Circle(r):\n"
-        "            return r\n"
+        "        Shape.Circle(radius):\n"
+        "            return radius\n"
         "        Shape.Dot:\n"
         "            return 0\n"
         "    return 1\n");
-    expect(find_token_at(result, "decl.variable.local", "r") != nullptr);
+    expect(find_token_at(result, "decl.variable.local", "radius") != nullptr);
     expect(count_tokens(result.tokens, "use.variant") == 3_ul)
         << "Shape.Dot (expr), Shape.Circle and Shape.Dot (patterns)";
     expect(find_token_at(result, "use.type", "Shape") != nullptr)
         << "enum head used as a value";
-    expect(find_token_at(result, "use.variable.local", "r") != nullptr)
+    expect(find_token_at(result, "use.variable.local", "radius") != nullptr)
         << "binding used in the arm body";
   };
 
   "operators receive their expansion categories"_test = [] {
     auto result = classify_source_resolved(
         "test.dao",
-        "fn f(p: *i32, x: i32): bool\n"
+        "enum class Pair:\n"
+        "    Both(a: i32, b: i32)\n"
+        "fn f(p: *i32, x: i32, pair: Pair): bool\n"
         "    let y: i32 = x + 1 - 2 * 3 / 4 % 5\n"
         "    let q: i32 = *p\n"
-        "    let r: i32 = 0..3\n"
+        "    match pair:\n"
+        "        Pair.Both(a, ..):\n"
+        "            return a == x\n"
         "    return (y == x) and (y != x) or !(y < x) or y >= x\n");
     expect(count_tokens(result.tokens, "operator.arithmetic") == 5_ul);
-    expect(count_tokens(result.tokens, "operator.comparison") == 4_ul);
+    expect(count_tokens(result.tokens, "operator.comparison") == 5_ul);
     expect(count_tokens(result.tokens, "operator.logical") == 4_ul) << "and, or, !, or";
     expect(count_tokens(result.tokens, "operator.address") == 2_ul)
         << "pointer type `*i32` and deref `*p`";
