@@ -1,8 +1,0 @@
-lexer	peak_mb=13711	seconds=39	lex=0	parse=46	hir=0	mir=16	first=parse: expected expression; then in llvm: panic: Vector.get: index out of bounds
-parser	peak_mb=12306	seconds=34	lex=0	parse=52	hir=0	mir=19	first=parse: expected expression; then in llvm: panic: Vector.get: index out of bounds
-graph	peak_mb=11093	seconds=31	lex=0	parse=57	hir=0	mir=16	first=parse: expected expression; then in llvm: panic: Vector.get: index out of bounds
-resolver	peak_mb=15413	seconds=51	lex=0	parse=132	hir=0	mir=57	first=parse: expected expression; then in llvm: panic: allocation failed (size=65536, align=4)
-typecheck	peak_mb=16269	seconds=54	lex=0	parse=246	hir=0	first=parse: expected expression; then in mir: panic: allocation failed (size=262144, align=8)
-hir	peak_mb=16231	seconds=53	lex=0	parse=253	hir=0	first=parse: expected expression; then in mir: panic: allocation failed (size=65536, align=4)
-mir	peak_mb=16267	seconds=54	lex=0	parse=285	first=parse: expected expression; then in hir: panic: allocation failed (size=262144, align=8)
-llvm	peak_mb=20	seconds=0	first=in lex: process died (status 139; memory bound 16 GiB)
