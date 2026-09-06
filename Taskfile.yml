@@ -71,11 +71,11 @@ tasks:
       - DAO_BUILD_DIR={{.BUILD_DIR}} bash tools/playground/dev.sh
 
   gen-tooling-surface:
-    desc: Regenerate the playground's TypeScript tooling surface from compiler/analysis/tooling_surface.h
+    desc: Regenerate the playground's TypeScript from the analysis surface (compiler/analysis) and the service surface (compiler_service)
     deps: [configure]
     cmds:
-      - cmake --build {{.BUILD_DIR}} --target tooling_surface_dump -- -j${DAO_BUILD_JOBS:-4}
-      - "{{.BUILD_DIR}}/compiler/analysis/tooling_surface_dump > tools/playground/frontend/src/generated/tooling_surface.ts"
+      - cmake --build {{.BUILD_DIR}} --target service_surface_dump -- -j${DAO_BUILD_JOBS:-4}
+      - "{{.BUILD_DIR}}/tools/playground/compiler_service/service_surface_dump > tools/playground/frontend/src/generated/tooling_surface.ts"
 
   update-example-goldens:
     desc: Rewrite testdata/examples/*.out from the current compiler's output

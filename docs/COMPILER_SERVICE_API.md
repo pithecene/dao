@@ -77,13 +77,16 @@ Document symbols should report:
 
 ## Concrete Surface
 
-The recommendations above are realised, for the playground transport, by
-the tables in `compiler/analysis/tooling_surface.h`: token kinds, lexical
-categories, diagnostic severities, payload shapes, and routes.  That
-header is the machine-checked definition — the frontend's TypeScript is
-generated from it and `ctest` verifies the service's replies against it
-(see `docs/PLAYGROUND_ARCHITECTURE.md`, "Sync Discipline").  This
-document explains intent; the header says what is served today.
+The recommendations above are realised by two tables with one owner
+each: `compiler/analysis/tooling_surface.h` (token kinds, lexical
+categories, diagnostic severities, and the analysis payload shapes —
+the compiler's semantic truth) and
+`tools/playground/compiler_service/service_surface.h` (the playground's
+routes, request envelopes, and response shapes — its transport).  The
+frontend's TypeScript is generated from both and `ctest` verifies the
+service's replies against them (see `docs/PLAYGROUND_ARCHITECTURE.md`,
+"Sync Discipline").  This document explains intent; the headers say
+what is served today.
 
 ## Principle
 

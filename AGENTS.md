@@ -43,8 +43,12 @@ explicit syntax revision task.
 
 ## Dependency Discipline
 
-- All dependencies are managed via **Conan 2.x** in manifest mode
-  (`conanfile.txt` or `conanfile.py`).
+- Native dependencies are managed via **Conan 2.x** in manifest mode
+  (`conanfile.txt` or `conanfile.py`).  The playground frontend's
+  JavaScript dependencies are declared in its `package.json` and pinned
+  by `package-lock.json`, installed with `npm ci --ignore-scripts`; a
+  dependency the frontend imports must be declared there, never used
+  through hoisting.
 - Agents must **never** install, suggest, or attempt to install system
   packages (e.g. via `zypper`, `apt`, `dnf`, `brew`, or any other
   system package manager). No exceptions.
@@ -62,10 +66,19 @@ explicit syntax revision task.
 
 ## Tooling Sync Discipline
 
-`compiler/analysis/tooling_surface.h` is the single source of truth for
-what the compiler exposes to editors: token kinds, payload shapes, and
-service routes.  Agents must:
-- edit the table, not a consumer, when adding a kind, field, or route
+Two tables, one owner each (CONTRACT_COMPILER_PHASES.md "Analysis
+Responsibilities"; CONTRACT_LANGUAGE_TOOLING.md "Shared Analysis
+Ownership"):
+- `compiler/analysis/tooling_surface.h` — semantic truth: token kinds and
+  groups, lexical categories, diagnostic severities, and the payload
+  shapes of the analysis results
+- `tools/playground/compiler_service/service_surface.h` — transport: the
+  playground's routes, request envelopes, and its own response shapes
+
+Agents must:
+- edit the owning table, not a consumer, when adding a kind, field, or
+  route; a compiler change never edits the service table and a
+  transport change never edits the analysis table
 - regenerate `tools/playground/frontend/src/generated/tooling_surface.ts`
   (`task gen-tooling-surface`) in the same change
 - land the frontend side of a new route or kind in the same PR

@@ -1,7 +1,6 @@
-// The tooling surface table must agree with the contract that freezes
-// it, with what the emitter actually produces, and with the TypeScript
-// the playground compiles against.  These tests are the fence that keeps
-// the three from drifting apart.
+// The analysis surface must agree with the contract that freezes it and
+// with what the emitter actually produces.  (The playground's service_test
+// checks the generated TypeScript and the routes, which are transport.)
 
 #include "analysis/semantic_tokens.h"
 #include "analysis/tooling_surface.h"
@@ -23,7 +22,9 @@ using namespace dao::tooling;
 
 namespace {
 
-auto repo_root() -> std::filesystem::path { return DAO_SOURCE_DIR; }
+auto repo_root() -> std::filesystem::path {
+  return DAO_SOURCE_DIR;
+}
 
 auto table_kinds() -> std::set<std::string> {
   std::set<std::string> kinds;
@@ -65,8 +66,7 @@ auto dao_files_in(const std::filesystem::path& dir) -> std::vector<std::filesyst
   return files;
 }
 
-auto difference(const std::set<std::string>& lhs, const std::set<std::string>& rhs)
-    -> std::string {
+auto difference(const std::set<std::string>& lhs, const std::set<std::string>& rhs) -> std::string {
   std::string out;
   for (const auto& item : lhs) {
     if (!rhs.contains(item)) {
@@ -103,10 +103,6 @@ suite<"tooling_surface"> tooling_surface_suite = [] {
         expect(known) << shape.name << "." << field.name << " has unknown type " << field.type;
       }
     }
-    for (const auto& route : kRoutes) {
-      expect(route.request == "void" || find_shape(route.request) != nullptr)
-          << route.name << " requests unknown shape " << route.request;
-    }
   };
 
   "emitter_kinds_over_the_corpus_are_in_the_table"_test = [] {
@@ -130,14 +126,6 @@ suite<"tooling_surface"> tooling_surface_suite = [] {
       }
     }
     expect(unlisted.empty()) << "emitted but not in the table: " << difference(unlisted, {});
-  };
-
-  "generated_typescript_is_current"_test = [] {
-    auto generated = repo_root() / "tools" / "playground" / "frontend" / "src" / "generated" /
-                     "tooling_surface.ts";
-    expect(std::filesystem::exists(generated)) << generated.string() << " is missing";
-    expect(read_file(generated) == render_typescript())
-        << generated.string() << " is stale: run `task gen-tooling-surface`";
   };
 };
 

@@ -12,8 +12,8 @@ constexpr const char* kSyntheticHeader = "module playground\n";
 
 } // namespace
 
-auto build_playground_program(const std::filesystem::path& repo_root,
-                              std::string user_source) -> PlaygroundProgram {
+auto build_playground_program(const std::filesystem::path& repo_root, std::string user_source)
+    -> PlaygroundProgram {
   PlaygroundProgram prog;
 
   // Per CONTRACT_SYNTAX_SURFACE.md every source file begins with one
@@ -29,9 +29,8 @@ auto build_playground_program(const std::filesystem::path& repo_root,
   }
 
   auto inputs = load_prelude_inputs(repo_root / "stdlib");
-  inputs.push_back({.display_path = "<playground>",
-                    .text = std::move(user_source),
-                    .is_prelude = false});
+  inputs.push_back(
+      {.display_path = "<playground>", .text = std::move(user_source), .is_prelude = false});
   prog.program = build_program(std::move(inputs));
   prog.user = prog.program.files.empty() ? nullptr : prog.program.files.back().get();
   return prog;
@@ -41,9 +40,21 @@ auto run_frontend_pipeline(const std::filesystem::path& repo_root, std::string u
     -> FrontendPipeline {
   FrontendPipeline pipe;
   pipe.prog = build_playground_program(repo_root, std::move(user_source));
-  if (pipe.prog.user == nullptr || !pipe.prog.program.diagnostics.empty() ||
-      !pipe.prog.program.lexed_and_parsed_cleanly()) {
+  if (pipe.prog.user == nullptr || !pipe.prog.program.diagnostics.empty()) {
     return pipe;
+  }
+  // The buffer is whatever the user has typed so far and usually does
+  // not parse; the parser recovers and the resolver and checker work on
+  // the partial tree, so navigation and completion answer while typing.
+  // Only a buffer that produced no tree, or a prelude file that failed,
+  // stops the pipeline.
+  for (const auto& file : pipe.prog.program.files) {
+    bool broken =
+        file->parse.file == nullptr ||
+        (file->is_prelude && (!file->lex.diagnostics.empty() || !file->parse.diagnostics.empty()));
+    if (broken) {
+      return pipe;
+    }
   }
   pipe.resolve_result = resolve(pipe.prog.program);
   pipe.check_result = typecheck(pipe.prog.program, pipe.resolve_result, pipe.types);
@@ -69,7 +80,8 @@ auto has_user_error(const std::vector<Diagnostic>& diags, const PlaygroundProgra
   });
 }
 
-void collect_diagnostics(nlohmann::json& out, const PlaygroundProgram& prog,
+void collect_diagnostics(nlohmann::json& out,
+                         const PlaygroundProgram& prog,
                          const std::vector<Diagnostic>& diags) {
   for (const auto& diag : diags) {
     if (!prog.in_user_file(diag.span.offset)) {

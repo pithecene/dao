@@ -12,6 +12,7 @@ add_library(dao_playground_service STATIC
   pipeline.cpp
   run.cpp
   service.cpp
+  service_surface.cpp
 )
 
 target_include_directories(dao_playground_service PUBLIC
@@ -29,6 +30,17 @@ target_link_libraries(dao_playground_service PUBLIC
 target_compile_definitions(dao_playground_service PRIVATE
   DAO_RUNTIME_LIB="$<TARGET_FILE:dao_runtime>"
 )
+
+# The run route links produced objects against the runtime at request
+# time; building the service alone must build the runtime too.
+add_dependencies(dao_playground_service dao_runtime)
+
+# Emits the TypeScript the playground frontend compiles against.
+add_executable(service_surface_dump
+  service_surface_dump.cpp
+)
+
+target_link_libraries(service_surface_dump PRIVATE dao_playground_service)
 
 add_executable(dao_playground
   main.cpp

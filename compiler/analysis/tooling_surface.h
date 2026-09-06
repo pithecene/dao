@@ -2,30 +2,26 @@
 #define DAO_ANALYSIS_TOOLING_SURFACE_H
 
 #include <array>
+#include <iosfwd>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 
 // ---------------------------------------------------------------------------
-// Tooling surface — the single source of truth for what the compiler
-// exposes to editors: semantic token kinds, lexical categories,
-// diagnostic severities, JSON payload shapes, and service routes.
+// Analysis surface — the compiler-owned part of what tooling sees:
+// semantic token kinds and their visual groups, lexical categories,
+// diagnostic severities, and the payload shapes of the analysis results
+// (CONTRACT_COMPILER_PHASES.md "Analysis Responsibilities",
+// CONTRACT_LANGUAGE_TOOLING.md "Shared Analysis Ownership").
 //
-// Everything downstream derives from these tables instead of restating
-// them:
-//   - the playground frontend's TypeScript types are generated from
-//     them (`tooling_surface_dump`, checked in under
-//     tools/playground/frontend/src/generated/)
-//   - the compiler service registers routes from them and validates
-//     request bodies against the request shapes
-//   - tests assert the token kinds equal the taxonomy listed in
-//     CONTRACT_LANGUAGE_TOOLING.md, that every kind the emitter produces
-//     over the corpus is listed here, that every route dispatches, and
-//     that every response matches its declared shape
-//
-// Adding a kind, field, or route means adding it here; the tests fail
-// until the contract and the generated TypeScript agree.
+// Transport is not here.  Routes, request envelopes, and the playground's
+// own response shapes live with the playground
+// (tools/playground/compiler_service/service_surface.h), which renders
+// this surface into the frontend's generated TypeScript together with
+// its own.  Tests assert the token kinds equal the taxonomy listed in
+// CONTRACT_LANGUAGE_TOOLING.md and that every kind the emitter produces
+// over the corpus is listed here.
 // ---------------------------------------------------------------------------
 
 namespace dao::tooling {
@@ -43,12 +39,18 @@ struct TokenKindSpec {
 };
 
 inline constexpr std::array kTokenGroups{
-    std::string_view{"keyword"},        std::string_view{"mode"},
-    std::string_view{"resource"},       std::string_view{"type"},
-    std::string_view{"decl"},           std::string_view{"variable"},
-    std::string_view{"field"},          std::string_view{"module"},
-    std::string_view{"lambda-param"},   std::string_view{"literal-number"},
-    std::string_view{"literal-string"}, std::string_view{"operator"},
+    std::string_view{"keyword"},
+    std::string_view{"mode"},
+    std::string_view{"resource"},
+    std::string_view{"type"},
+    std::string_view{"decl"},
+    std::string_view{"variable"},
+    std::string_view{"field"},
+    std::string_view{"module"},
+    std::string_view{"lambda-param"},
+    std::string_view{"literal-number"},
+    std::string_view{"literal-string"},
+    std::string_view{"operator"},
     std::string_view{"punctuation"},
 };
 
@@ -136,11 +138,16 @@ auto token_group(std::string_view kind) -> std::optional<std::string_view>;
 // ---------------------------------------------------------------------------
 
 inline constexpr std::array kLexicalCategories{
-    std::string_view{"keyword"},        std::string_view{"identifier"},
-    std::string_view{"literal.number"}, std::string_view{"literal.string"},
-    std::string_view{"literal.bool"},   std::string_view{"operator"},
-    std::string_view{"punctuation"},    std::string_view{"synthetic"},
-    std::string_view{"error"},          std::string_view{"unknown"},
+    std::string_view{"keyword"},
+    std::string_view{"identifier"},
+    std::string_view{"literal.number"},
+    std::string_view{"literal.string"},
+    std::string_view{"literal.bool"},
+    std::string_view{"operator"},
+    std::string_view{"punctuation"},
+    std::string_view{"synthetic"},
+    std::string_view{"error"},
+    std::string_view{"unknown"},
 };
 
 inline constexpr std::array kDiagnosticSeverities{
@@ -149,7 +156,7 @@ inline constexpr std::array kDiagnosticSeverities{
 };
 
 // ---------------------------------------------------------------------------
-// JSON payload shapes.
+// Analysis payload shapes.
 //
 // A field type is a TypeScript type expression drawn from: `string`,
 // `number`, `boolean`, one of the enumerations above (`TokenKind`,
@@ -169,53 +176,30 @@ struct ShapeSpec {
 };
 
 inline constexpr std::array kLexTokenFields{
-    FieldSpec{"kind", "string"},   FieldSpec{"category", "LexicalCategory"},
-    FieldSpec{"offset", "number"}, FieldSpec{"length", "number"},
-    FieldSpec{"line", "number"},   FieldSpec{"col", "number"},
+    FieldSpec{"kind", "string"},
+    FieldSpec{"category", "LexicalCategory"},
+    FieldSpec{"offset", "number"},
+    FieldSpec{"length", "number"},
+    FieldSpec{"line", "number"},
+    FieldSpec{"col", "number"},
     FieldSpec{"text", "string"},
 };
 
 inline constexpr std::array kSemanticTokenFields{
-    FieldSpec{"kind", "TokenKind"}, FieldSpec{"offset", "number"},
-    FieldSpec{"length", "number"},  FieldSpec{"line", "number"},
+    FieldSpec{"kind", "TokenKind"},
+    FieldSpec{"offset", "number"},
+    FieldSpec{"length", "number"},
+    FieldSpec{"line", "number"},
     FieldSpec{"col", "number"},
 };
 
 inline constexpr std::array kDiagnosticFields{
-    FieldSpec{"severity", "DiagnosticSeverity"}, FieldSpec{"offset", "number"},
-    FieldSpec{"length", "number"},               FieldSpec{"line", "number"},
-    FieldSpec{"col", "number"},                  FieldSpec{"message", "string"},
-};
-
-inline constexpr std::array kSourceRequestFields{
-    FieldSpec{"source", "string"},
-};
-
-inline constexpr std::array kAnalyzeRequestFields{
-    FieldSpec{"source", "string"},
-    FieldSpec{"includePrelude", "boolean", /*optional=*/true},
-};
-
-inline constexpr std::array kPositionRequestFields{
-    FieldSpec{"source", "string"},
+    FieldSpec{"severity", "DiagnosticSeverity"},
     FieldSpec{"offset", "number"},
-};
-
-inline constexpr std::array kAnalyzeResponseFields{
-    FieldSpec{"tokens", "LexToken[]"},
-    FieldSpec{"semanticTokens", "SemanticToken[]"},
-    FieldSpec{"ast", "string"},
-    FieldSpec{"hir", "string"},
-    FieldSpec{"mir", "string"},
-    FieldSpec{"llvm_ir", "string"},
-    FieldSpec{"diagnostics", "Diagnostic[]"},
-};
-
-inline constexpr std::array kRunResponseFields{
-    FieldSpec{"stdout", "string"},
-    FieldSpec{"stderr", "string"},
-    FieldSpec{"exit_code", "number"},
-    FieldSpec{"diagnostics", "Diagnostic[]"},
+    FieldSpec{"length", "number"},
+    FieldSpec{"line", "number"},
+    FieldSpec{"col", "number"},
+    FieldSpec{"message", "string"},
 };
 
 inline constexpr std::array kHoverFields{
@@ -225,13 +209,17 @@ inline constexpr std::array kHoverFields{
 };
 
 inline constexpr std::array kDefinitionFields{
-    FieldSpec{"offset", "number"}, FieldSpec{"length", "number"},
-    FieldSpec{"line", "number"},   FieldSpec{"col", "number"},
+    FieldSpec{"offset", "number"},
+    FieldSpec{"length", "number"},
+    FieldSpec{"line", "number"},
+    FieldSpec{"col", "number"},
 };
 
 inline constexpr std::array kDocumentSymbolFields{
-    FieldSpec{"name", "string"},   FieldSpec{"kind", "string"},
-    FieldSpec{"offset", "number"}, FieldSpec{"length", "number"},
+    FieldSpec{"name", "string"},
+    FieldSpec{"kind", "string"},
+    FieldSpec{"offset", "number"},
+    FieldSpec{"length", "number"},
     FieldSpec{"children", "DocumentSymbol[]"},
 };
 
@@ -247,82 +235,26 @@ inline constexpr std::array kCompletionFields{
     FieldSpec{"type", "string"},
 };
 
-inline constexpr std::array kExampleEntryFields{
-    FieldSpec{"name", "string"},
-};
-
-inline constexpr std::array kExamplesListFields{
-    FieldSpec{"examples", "ExampleEntry[]"},
-};
-
-inline constexpr std::array kExampleSourceFields{
-    FieldSpec{"name", "string"},
-    FieldSpec{"source", "string"},
-};
-
-inline constexpr std::array kErrorReplyFields{
-    FieldSpec{"error", "string"},
-};
-
 inline constexpr std::array kShapes{
     ShapeSpec{"LexToken", kLexTokenFields},
     ShapeSpec{"SemanticToken", kSemanticTokenFields},
     ShapeSpec{"Diagnostic", kDiagnosticFields},
-    ShapeSpec{"SourceRequest", kSourceRequestFields},
-    ShapeSpec{"AnalyzeRequest", kAnalyzeRequestFields},
-    ShapeSpec{"PositionRequest", kPositionRequestFields},
-    ShapeSpec{"ExampleName", kExampleEntryFields},
-    ShapeSpec{"AnalyzeResponse", kAnalyzeResponseFields},
-    ShapeSpec{"RunResponse", kRunResponseFields},
     ShapeSpec{"Hover", kHoverFields},
     ShapeSpec{"Definition", kDefinitionFields},
     ShapeSpec{"DocumentSymbol", kDocumentSymbolFields},
     ShapeSpec{"Reference", kReferenceFields},
     ShapeSpec{"Completion", kCompletionFields},
-    ShapeSpec{"ExampleEntry", kExampleEntryFields},
-    ShapeSpec{"ExamplesList", kExamplesListFields},
-    ShapeSpec{"ExampleSource", kExampleSourceFields},
-    ShapeSpec{"ErrorReply", kErrorReplyFields},
 };
 
 auto find_shape(std::string_view name) -> const ShapeSpec*;
 
-// ---------------------------------------------------------------------------
-// Service routes.
-//
-// `request` names the shape a POST body must satisfy (`void` for a
-// GET without a body; `ExampleName` for the path parameter of
-// `/api/examples/:name`).  `response` is a TypeScript type expression
-// over the shapes: a shape, `Shape[]`, or `Shape | null`.
-// ---------------------------------------------------------------------------
+/// The analysis part of the frontend's generated TypeScript: token
+/// kinds, groups, categories, severities, and the shapes above.  A
+/// transport (the playground service) renders its envelopes after it.
+auto render_analysis_typescript() -> std::string;
 
-struct RouteSpec {
-  std::string_view name;
-  std::string_view method;
-  std::string_view path;
-  std::string_view request;
-  std::string_view response;
-};
-
-inline constexpr std::array kRoutes{
-    RouteSpec{"analyze", "POST", "/api/analyze", "AnalyzeRequest", "AnalyzeResponse"},
-    RouteSpec{"run", "POST", "/api/run", "SourceRequest", "RunResponse"},
-    RouteSpec{"hover", "POST", "/api/hover", "PositionRequest", "Hover | null"},
-    RouteSpec{"gotoDef", "POST", "/api/goto-def", "PositionRequest", "Definition | null"},
-    RouteSpec{"documentSymbols", "POST", "/api/document-symbols", "SourceRequest",
-              "DocumentSymbol[]"},
-    RouteSpec{"references", "POST", "/api/references", "PositionRequest", "Reference[]"},
-    RouteSpec{"completions", "POST", "/api/completions", "PositionRequest", "Completion[]"},
-    RouteSpec{"examples", "GET", "/api/examples", "void", "ExamplesList"},
-    RouteSpec{"example", "GET", "/api/examples/:name", "ExampleName", "ExampleSource"},
-};
-
-auto find_route(std::string_view name) -> const RouteSpec*;
-
-/// The TypeScript module the playground frontend compiles against.
-/// `tooling_surface_dump` writes it; a test asserts the checked-in
-/// file equals it.
-auto render_typescript() -> std::string;
+/// One shape as a TypeScript interface.
+void render_shape_typescript(std::ostream& out, const ShapeSpec& shape);
 
 } // namespace dao::tooling
 

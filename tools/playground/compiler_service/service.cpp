@@ -6,7 +6,7 @@
 #include "navigation.h"
 #include "run.h"
 
-#include "analysis/tooling_surface.h"
+#include "service_surface.h"
 
 #include <algorithm>
 #include <array>
@@ -19,11 +19,11 @@ namespace {
 using RouteFn = auto (*)(const nlohmann::json&, const ServiceContext&) -> Reply;
 
 struct RouteBinding {
-  std::string_view name; // a tooling::kRoutes name
+  std::string_view name; // a kRoutes name (service_surface.h)
   RouteFn handler;
 };
 
-// One binding per route in tooling::kRoutes; the service test asserts
+// One binding per route in kRoutes; the service test asserts
 // the two lists agree.
 constexpr std::array kBindings{
     RouteBinding{"analyze", analyze},
@@ -59,12 +59,11 @@ auto error_reply(int status, std::string message) -> Reply {
   return {.status = status, .body = {{"error", std::move(message)}}};
 }
 
-auto validate_request(const nlohmann::json& request, std::string_view shape_name)
-    -> std::string {
+auto validate_request(const nlohmann::json& request, std::string_view shape_name) -> std::string {
   if (shape_name == "void") {
     return {};
   }
-  const auto* shape = tooling::find_shape(shape_name);
+  const auto* shape = find_service_shape(shape_name);
   if (shape == nullptr) {
     return std::format("unknown request shape '{}'", shape_name);
   }
@@ -86,9 +85,9 @@ auto validate_request(const nlohmann::json& request, std::string_view shape_name
   return {};
 }
 
-auto dispatch(std::string_view route_name, const nlohmann::json& request,
-              const ServiceContext& ctx) -> Reply {
-  const auto* route = tooling::find_route(route_name);
+auto dispatch(std::string_view route_name, const nlohmann::json& request, const ServiceContext& ctx)
+    -> Reply {
+  const auto* route = find_route(route_name);
   auto binding = std::ranges::find(kBindings, route_name, &RouteBinding::name);
   if (route == nullptr || binding == kBindings.end()) {
     return error_reply(http_status::not_found, std::format("unknown route '{}'", route_name));

@@ -7,3 +7,6 @@ target_compile_definitions(daoc PRIVATE
   DAO_RUNTIME_LIB="$<TARGET_FILE:dao_runtime>"
   DAO_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
+
+# `daoc build` links against the runtime; building daoc alone must build it.
+add_dependencies(daoc dao_runtime)

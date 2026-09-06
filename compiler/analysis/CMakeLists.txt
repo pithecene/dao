@@ -43,13 +43,6 @@ target_compile_definitions(tooling_surface_test PRIVATE
   DAO_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
-# Emits the TypeScript the playground frontend compiles against.
-add_executable(tooling_surface_dump
-  tooling_surface_dump.cpp
-)
-
-target_link_libraries(tooling_surface_dump PRIVATE dao_analysis)
-
 include(CTest)
 add_test(NAME semantic_tokens_test COMMAND semantic_tokens_test)
 add_test(NAME analysis_test COMMAND analysis_test)
