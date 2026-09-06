@@ -68,25 +68,29 @@ private:
   /// Report `expected <what>, got <the token here>`: the token's lexeme
   /// when it has one, else words for the layout tokens the lexer makes.
   void expected(std::string_view what) {
-    error("expected " + std::string(what) + ", got " + found());
-  }
-
-  auto found() -> std::string {
     const auto& tok = peek();
+    std::string found;
     switch (tok.kind) {
     case TokenKind::Newline:
-      return "end of line";
+      found = "end of line";
+      break;
     case TokenKind::Indent:
-      return "an indented block";
+      found = "an indented block";
+      break;
     case TokenKind::Dedent:
-      return "end of block";
+      found = "end of block";
+      break;
     case TokenKind::Eof:
-      return "end of input";
+      found = "end of input";
+      break;
     case TokenKind::Error:
-      return "an invalid token";
+      found = "an invalid token";
+      break;
     default:
-      return "'" + std::string(tok.text) + "'";
+      found = "'" + std::string(tok.text) + "'";
+      break;
     }
+    error("expected " + std::string(what) + ", got " + found);
   }
 
   auto match(TokenKind kind) -> bool {
