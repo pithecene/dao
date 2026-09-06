@@ -3,10 +3,13 @@
 Illustrative Dao programs live here.
 Keep them small and human-readable.
 
-Every file is a complete program: it must build with `daoc build` and
+Every file is a complete program meant to build with `daoc build` and
 run.  The playground lists this directory, and each file is a
 regression input, so a new language feature should land with an
-example that exercises it.
+example that exercises it.  One file does not build today:
+`raw_memory.dao` trips a MIR concreteness invariant in the host
+compiler (pre-existing); it stays here as the regression input for
+that fix.
 
 | File | Demonstrates |
 |------|--------------|
