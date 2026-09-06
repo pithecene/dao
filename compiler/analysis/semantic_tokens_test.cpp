@@ -415,6 +415,14 @@ suite<"expansion_classification"> expansion_classification = [] {
         "    return p.x\n");
     expect(find_token(result.tokens, "operator.member") != nullptr);
     expect(find_token_at(result, "use.field", "x") != nullptr);
+
+    auto propagated = classify_source_resolved("test.dao",
+                                               "fn g(): Result<i32, string>\n"
+                                               "    return Result::Ok(value = 1)\n"
+                                               "fn h(): Result<i32, string>\n"
+                                               "    let v: i32 = g()?\n"
+                                               "    return Result::Ok(value = v)\n");
+    expect(find_token(propagated.tokens, "operator.try") != nullptr);
   };
 
   "generic brackets are punctuation, comparisons stay comparisons"_test = [] {
