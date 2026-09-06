@@ -563,7 +563,9 @@ larger ones.  Per stage, `lex` is clean, the bootstrap parser rejects 46–285 s
 per program ("expected expression"), `mir` rejects 16–57, and `llvm`
 panics where reached.  Tier B-Bootstrap therefore starts with the
 bootstrap's memory behaviour (value-threaded state copying its vectors
-at every step), then the parser's coverage of the corpus, then the
+at every step), then one parser construct — generic arguments on a
+qualified name in expression position (`Vector<i64>::new()`), which
+accounts for every parse-stage rejection in the corpus — then the
 MIR and LLVM rejections the histograms name.
 
 ### Task 31 — Host Multi-file Compilation

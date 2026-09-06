@@ -36,6 +36,10 @@ hand):
    largest program, listing every `core::` function it instantiates and
    how often.  This is the stdlib the bootstrap must be able to compile
    for itself; it is what makes generics and methods the first vertical.
+   Prelude functions are told apart by their module-qualified LLVM
+   names, which the backend emits from Task 31 D4 on; with an earlier
+   backend a full run stops rather than write an empty table, and
+   `--report-only` keeps the last measured one.
 3. **Self-compile matrix.**  The bootstrap pipeline over its own eight
    programs, stage by stage — `lex`, `parse`, `hir` (resolve, typecheck,
    and HIR lowering together), `mir`, `llvm` — recording the diagnostic
@@ -49,7 +53,16 @@ hand):
    6 GiB and 600 s by default) so a runaway run is recorded as such
    rather than exhausting the machine.  The probe announces each stage
    on stderr, which is unbuffered, so a killed process still shows the
-   stage it died in.
+   stage it died in.  `--report-only` rewrites the document from the
+   last run's outputs without re-running the probes, for changes to
+   what the document says rather than to what was measured.
+
+The probe also answers narrower questions cheaply: name any program
+under `bootstrap/<name>/<name>.gen.dao` in the marker file and it is
+fed through the pipeline the same way, so a one-construct program
+measures what one construct costs at each stage, and a source file cut
+into one program per top-level declaration locates a stage's failures
+by function.
 
 The first blocking diagnostic per program names the construct to
 implement next for that stage.  Diagnostics are the bootstrap's own,
@@ -68,11 +81,18 @@ sharpening a message sharpens the audit.
   every lowering step, copying its vectors) is the first item of
   Tier B-Bootstrap, ahead of any language construct.
 - **Then the stages in order.**  The first audit's parser column shows
-  the bootstrap parser rejecting dozens of sites in every program
-  ("expected expression") — syntax the compiler's own code uses that
-  Tier A parsing does not cover — before any lowering question arises;
-  the document's per-stage histograms name the messages.
-- **Tier B-Bootstrap** = that capacity work, the parser gaps, then
+  the bootstrap parser rejecting 46–285 sites per program ("expected
+  expression").  Probing one-construct programs and each top-level
+  declaration of `typecheck/impl.dao` separately attributes every one of
+  them to a single construct: generic arguments on a qualified name in
+  expression position (`Vector<i64>::new()`, `Option<T>::None` — 150
+  sites in the largest program), which the Tier A parser reads as a
+  comparison and abandons at `::`; one diagnostic per site at statement
+  level, two for nested arguments, three in an argument list.  The
+  document's "Parse-stage attribution" table sets the sites against the
+  parse column and reaches zero when the parser closes it.  Nothing
+  else the corpus writes fails to parse.
+- **Tier B-Bootstrap** = that capacity work, that one parser construct, then
   constructs in the inventory that the self-compile matrix rejects at
   `mir`/`llvm`, plus forced prelude functions the bootstrap cannot yet
   compile.

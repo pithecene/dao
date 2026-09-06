@@ -285,6 +285,29 @@ named, not inferred.
 - `parse` ×47: expected expression
 - `parse` ×3: expected RParen, got Identifier
 
+### Parse-stage attribution
+
+Every parse-stage rejection in the first audit is one construct: generic
+arguments on a qualified name in expression position
+(`Vector<i64>::new()`, `HashMap<i64>::new()`, `Option<T>::None`).
+The bootstrap parser reads `Vector<i64>` as the comparison
+`Vector < i64 > ...` and stops at `::` with "expected expression";
+one diagnostic per site at statement level, two for nested arguments,
+three inside an argument list (the "expected RParen, got Identifier"
+lines) — measured by feeding one-construct programs through the probe.
+Sites per program against the parse column above:
+
+| Program | `Type<Args>::` sites | parse diagnostics |
+|---|---|---|
+| lexer | 42 | 46 |
+| parser | 44 | 52 |
+| graph | 53 | 57 |
+| resolver | 85 | 132 |
+| typecheck | 124 | 246 |
+| hir | 137 | 253 |
+| mir | 150 | 285 |
+| llvm | 184 | — |
+
 ## 4. Reading the matrix
 
 - **Tier B-Bootstrap** is the set of constructs in §1 whose lowering the

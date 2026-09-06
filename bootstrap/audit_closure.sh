@@ -13,8 +13,18 @@
 #      (bootstrap/llvm/llvm.gen with the closure probe enabled) — where
 #      the bootstrap stops today and on what
 #
-#   bootstrap/audit_closure.sh <build dir>
+#   bootstrap/audit_closure.sh [--report-only] <build dir>
+#
+# --report-only rewrites the document from the last run's probe outputs
+# under bootstrap/llvm/out without re-running the probes (pass the same
+# AUDIT_MEMORY_KB / AUDIT_SECONDS the run used, so the document states
+# its bounds correctly); the inventory and instantiations are recomputed.
 set -u
+REPORT_ONLY=0
+if [ "${1:-}" = "--report-only" ]; then
+  REPORT_ONLY=1
+  shift
+fi
 BUILD_DIR="${1:-build/debug}"
 DAOC="$BUILD_DIR/compiler/driver/daoc"
 OUT="bootstrap/llvm/out"
@@ -28,19 +38,34 @@ mkdir -p "$OUT"
 INVENTORY="$(for p in $PROGRAMS; do "$DAOC" ast "bootstrap/$p/$p.gen.dao" 2>/dev/null; done \
   | grep -oE '^\s*[A-Z][A-Za-z]+' | sed 's/^\s*//' | sort | uniq -c | sort -rn)"
 
-# 2. Prelude instantiations forced by the largest program.
+# 2. Prelude instantiations forced by the largest program.  Prelude
+#    functions are told apart by their module-qualified LLVM names
+#    (`core::...`), which the backend emits from Task 31 D4 on; an
+#    earlier backend names everything bare, and this section cannot be
+#    measured with it.
 INSTANCES="$("$DAOC" llvm-ir bootstrap/llvm/llvm.gen.dao 2>/dev/null \
   | grep -oE 'define [^@]*@"core::[^"]*"' | sed -E 's/.*@"//; s/"$//; s/\$.*//' | sort | uniq -c | sort -rn)"
+INSTANCES_TABLE="$(echo "$INSTANCES" | awk 'NF {printf "| `%s` | %s |\n", $2, $1}')"
+if [ -z "$INSTANCES_TABLE" ]; then
+  if [ "$REPORT_ONLY" -eq 1 ] && [ -f "$DOC" ]; then
+    # Keep what the last run measured rather than publish an empty table.
+    INSTANCES_TABLE="$(awk '/^## 2\./ {f=1; next} /^## 3\./ {f=0} f && /^\| `/' "$DOC")"
+    echo "audit: this backend does not name prelude functions; keeping the last measured §2" >&2
+  else
+    echo "audit: no core:: functions in the IR — §2 needs the module-qualified backend (Task 31 D4)"; exit 1
+  fi
+fi
 
 # 3. Self-compile probe: one process per program, because a Dao panic
 #    aborts the process; a program that panics gets a line naming the
 #    stage it died in and the panic message.
-"$DAOC" build bootstrap/llvm/llvm.gen.dao > /dev/null || { echo "audit: building llvm.gen failed"; exit 1; }
-rm -f "$OUT/closure.txt"
 # Each probe is bounded (virtual memory and wall time) so a runaway
 # bootstrap run is recorded as such instead of exhausting the machine.
 LIMIT_KB="${AUDIT_MEMORY_KB:-6291456}"   # 6 GiB
 LIMIT_S="${AUDIT_SECONDS:-600}"
+if [ "$REPORT_ONLY" -eq 0 ]; then
+"$DAOC" build bootstrap/llvm/llvm.gen.dao > /dev/null || { echo "audit: building llvm.gen failed"; exit 1; }
+rm -f "$OUT/closure.txt"
 for p in $PROGRAMS; do
   printf '%s' "$p" > "$OUT/.closure_probe"
   start=$SECONDS
@@ -68,6 +93,18 @@ for p in $PROGRAMS; do
   fi
 done
 rm -f "$OUT/.closure_probe"
+fi
+[ -f "$OUT/closure.txt" ] || { echo "audit: no probe outputs under $OUT to report on"; exit 1; }
+
+# Sites of the one construct behind every parse-stage rejection in the
+# first audit: generic arguments on a qualified name in expression
+# position (`Vector<i64>::new()`, `Option<T>::None`).  The bootstrap
+# parser reads `Vector<i64>` as the comparison `Vector < i64 > ...` and
+# stops at `::`.  Counted per assembled program to set against the
+# parse column; the parse column reaches zero when the parser closes it.
+generic_qualified_sites() {
+  grep -o -E '[A-Z][A-Za-z]*<[^;()=]*>::' "bootstrap/$1/$1.gen.dao" 2>/dev/null | wc -l
+}
 
 {
   echo "# Bootstrap Closure — Dao"
@@ -92,7 +129,7 @@ rm -f "$OUT/.closure_probe"
   echo
   echo "| Function | Instantiations |"
   echo "|---|---|"
-  echo "$INSTANCES" | awk '{printf "| `%s` | %s |\n", $2, $1}'
+  echo "$INSTANCES_TABLE"
   echo
   echo "## 3. The bootstrap pipeline over its own programs"
   echo
@@ -136,6 +173,25 @@ rm -f "$OUT/.closure_probe"
       echo
     fi
   done
+  echo "### Parse-stage attribution"
+  echo
+  echo "Every parse-stage rejection in the first audit is one construct: generic"
+  echo "arguments on a qualified name in expression position"
+  echo "(\`Vector<i64>::new()\`, \`HashMap<i64>::new()\`, \`Option<T>::None\`)."
+  echo "The bootstrap parser reads \`Vector<i64>\` as the comparison"
+  echo "\`Vector < i64 > ...\` and stops at \`::\` with \"expected expression\";"
+  echo "one diagnostic per site at statement level, two for nested arguments,"
+  echo "three inside an argument list (the \"expected RParen, got Identifier\""
+  echo "lines) — measured by feeding one-construct programs through the probe."
+  echo "Sites per program against the parse column above:"
+  echo
+  echo "| Program | \`Type<Args>::\` sites | parse diagnostics |"
+  echo "|---|---|---|"
+  for p in $PROGRAMS; do
+    parse="$(grep "^$p	" "$OUT/closure.txt" | grep -oE '	parse=[0-9]+' | sed 's/.*=//')"
+    echo "| $p | $(generic_qualified_sites "$p") | ${parse:-—} |"
+  done
+  echo
   echo "## 4. Reading the matrix"
   echo
   echo "- **Tier B-Bootstrap** is the set of constructs in §1 whose lowering the"
