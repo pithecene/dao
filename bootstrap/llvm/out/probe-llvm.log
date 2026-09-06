@@ -1,0 +1,2 @@
+probe: llvm stage=lex
+timeout: the monitored command dumped core

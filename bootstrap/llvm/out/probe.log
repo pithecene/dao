@@ -1,0 +1,22 @@
+=== bootstrap/llvm: Tier A LLVM backend ===
+
+PASS minimal_define
+PASS let_store_load
+PASS int_arithmetic
+PASS int_comparison
+PASS param_seeding
+PASS extern_declare
+PASS call_extern
+PASS if_else_cfg
+PASS while_cfg
+PASS string_global
+PASS deterministic_repeat
+PASS struct_field_read
+PASS struct_construction
+PASS struct_call_arg
+PASS struct_return
+PASS nested_struct_registration
+PASS write_ll_artifact (lowering ok)
+
+=== closure probe: the bootstrap pipeline over its own programs ===
+dao panic: Vector.get: index out of bounds
