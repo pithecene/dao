@@ -4,10 +4,12 @@
 #include "support/test_utils.h"
 
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/Support/Process.h>
 #include <llvm/Support/Program.h>
 
 #include <boost/ut.hpp>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -16,15 +18,24 @@ using namespace boost::ut;
 
 namespace {
 
+/// A directory of this invocation's own: two driver_test processes (say
+/// from two build trees) must not share or delete each other's fixtures.
 auto scratch_dir(std::string_view name) -> std::filesystem::path {
-  auto dir = std::filesystem::temp_directory_path() / "dao_driver_test" / name;
+  auto root = std::filesystem::temp_directory_path() /
+              std::format("dao_driver_test-{}", llvm::sys::Process::getProcessId());
+  auto dir = root / name;
   std::filesystem::remove_all(dir);
   std::filesystem::create_directories(dir);
   return dir;
 }
 
+/// Write a fixture, or fail the test naming the path: a fixture that did
+/// not land would otherwise surface as a misleading build error later.
 void write(const std::filesystem::path& path, std::string_view text) {
-  std::ofstream(path) << text;
+  std::ofstream out(path);
+  out << text;
+  out.close();
+  expect(out.good()) << "cannot write fixture " << path.string();
 }
 
 /// Start `daoc build <source>` without waiting for it.
