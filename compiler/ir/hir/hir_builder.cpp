@@ -350,15 +350,8 @@ void HirBuilder::lower_match_into(const Stmt* stmt,
   // Build the if/else chain from last arm to first.
   HirStmt* chain = nullptr;
   for (auto it = match.arms.rbegin(); it != match.arms.rend(); ++it) {
-    auto* pattern = lower_expr(it->pattern);
-
-    // For payload-bearing enums, the pattern is already an integer
-    // (variant index) from lower_expr on the FieldExpr.
-    auto arm_body = lower_body(it->body);
-
-    // Prepend payload extraction let-bindings for arms with bindings.
-    // Extract the variant name from either FieldExpr (Enum.Variant) or
-    // QualifiedName (Enum::Variant) patterns.
+    // The variant an arm names, from `Enum.Variant`, `Enum::Variant`, or
+    // either form applied to bindings.
     std::string_view pattern_variant_name;
     if (it->pattern->is<FieldExpr>()) {
       pattern_variant_name = it->pattern->as<FieldExpr>().field;
@@ -379,6 +372,20 @@ void HirBuilder::lower_match_into(const Stmt* stmt,
         }
       }
     }
+
+    // A payload-bearing enum is matched on its discriminant, so an arm
+    // naming a variant compares against that variant's tag; the value
+    // form of the variant (a construction) is not comparable to it.
+    HirExpr* pattern = nullptr;
+    if (has_payload_variants && !pattern_variant_name.empty()) {
+      pattern = variant_tag(enum_type, pattern_variant_name, it->pattern->span);
+    }
+    if (pattern == nullptr) {
+      pattern = lower_expr(it->pattern);
+    }
+    auto arm_body = lower_body(it->body);
+
+    // Prepend payload extraction let-bindings for arms with bindings.
     if (!it->bindings.empty() && enum_type != nullptr &&
         !pattern_variant_name.empty()) {
       for (size_t vi = 0; vi < enum_type->variants().size(); ++vi) {
@@ -465,6 +472,19 @@ void HirBuilder::lower_match_into(const Stmt* stmt,
 /// null if the enum has no such variant.  A classification enum's value is
 /// its tag; a payload-bearing enum is a tagged struct, so even a fieldless
 /// variant is a construction with no payload.
+/// The tag of the variant named `variant_name`, as the integer a
+/// discriminant compares against, or null if the enum has no such variant.
+auto HirBuilder::variant_tag(const TypeEnum* enum_type, std::string_view variant_name, Span span)
+    -> HirExpr* {
+  const auto& variants = enum_type->variants();
+  for (size_t i = 0; i < variants.size(); ++i) {
+    if (variants[i].name == variant_name) {
+      return ctx_.alloc<HirExpr>(span, enum_type, HirIntLiteral{static_cast<int64_t>(i)});
+    }
+  }
+  return nullptr;
+}
+
 auto HirBuilder::variant_value(const TypeEnum* enum_type, std::string_view variant_name, Span span)
     -> HirExpr* {
   const auto& variants = enum_type->variants();
@@ -476,7 +496,7 @@ auto HirBuilder::variant_value(const TypeEnum* enum_type, std::string_view varia
       return ctx_.alloc<HirExpr>(
           span, enum_type, HirEnumConstruct{enum_type, static_cast<uint32_t>(i), {}});
     }
-    return ctx_.alloc<HirExpr>(span, enum_type, HirIntLiteral{static_cast<int64_t>(i)});
+    return variant_tag(enum_type, variant_name, span);
   }
   return nullptr;
 }

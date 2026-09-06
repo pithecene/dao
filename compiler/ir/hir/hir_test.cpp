@@ -82,6 +82,22 @@ suite<"hir_enum_variant_values"> hir_enum_variant_values = [] {
     expect(!contains(dump, "EnumConstruct")) << dump;
   };
 
+  "match arms on a payload-bearing enum compare tags, not constructions"_test = [] {
+    HirTestPipeline p("enum class K:\n"
+                      "  A(v: i64)\n"
+                      "  B\n"
+                      "fn pick(k: K): i64\n"
+                      "  match k:\n"
+                      "    K.A(v):\n"
+                      "      return v\n"
+                      "    K.B:\n"
+                      "      return 0\n");
+    auto dump = p.dump();
+    expect(contains(dump, "EnumDiscriminant")) << dump;
+    expect(contains(dump, "IntLiteral 1")) << dump;
+    expect(!contains(dump, "EnumConstruct")) << dump;
+  };
+
   "fieldless variant of a payload-bearing enum is constructed"_test = [] {
     HirTestPipeline p("enum class K:\n"
                       "  A(v: i64)\n"

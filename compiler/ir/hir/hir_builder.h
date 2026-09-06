@@ -68,6 +68,7 @@ private:
   auto lower_expr(const Expr* expr) -> HirExpr*;
   auto variant_value(const TypeEnum* enum_type, std::string_view variant_name, Span span)
       -> HirExpr*;
+  auto variant_tag(const TypeEnum* enum_type, std::string_view variant_name, Span span) -> HirExpr*;
 
   // --- Helpers ---
 

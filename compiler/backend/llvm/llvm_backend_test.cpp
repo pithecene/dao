@@ -189,6 +189,21 @@ suite<"simple_functions"> simple_functions = [] {
     expect(contains(ir, "define")) << ir;
   };
 
+  "match on a payload-bearing enum with a fieldless arm lowers"_test = [] {
+    LlvmTestPipeline pipe("enum class K:\n"
+                          "  A(v: i64)\n"
+                          "  B\n"
+                          "fn pick(k: K): i64\n"
+                          "  match k:\n"
+                          "    K.A(v):\n"
+                          "      return v\n"
+                          "    K.B:\n"
+                          "      return 0\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << ir;
+    expect(contains(ir, "icmp eq")) << ir;
+  };
+
   "void function"_test = [] {
     LlvmTestPipeline pipe(
         "fn noop(): void\n"
