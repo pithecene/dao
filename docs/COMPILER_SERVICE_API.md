@@ -21,6 +21,10 @@ One compiler analysis surface should power all interactive tooling.
 The exact transport is intentionally not frozen. The service may begin as an
 in-process library API and later gain a JSON, IPC, or daemon boundary.
 
+Requests are program-shaped: the files of the program and which of them
+the request is about, with offsets local to that document.  Replies name
+the file of every position they carry.
+
 Recommended request families:
 - analyze document
 - semantic tokens

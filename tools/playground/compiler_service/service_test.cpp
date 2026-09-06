@@ -24,9 +24,11 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <regex>
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace boost::ut;
@@ -38,6 +40,17 @@ namespace {
 auto repo_root() -> std::filesystem::path {
   return DAO_SOURCE_DIR;
 }
+/// The path the tests give their one document; replies about it name it.
+constexpr std::string_view kTestDocument = "main.dao";
+
+/// A program-shaped request carrying one document, plus any extra fields.
+auto document_request(const std::string& source, json extra = json::object()) -> json {
+  json request = {{"files", json::array({{{"path", kTestDocument}, {"source", source}}})},
+                  {"document", kTestDocument}};
+  request.update(extra);
+  return request;
+}
+
 auto golden_dir() -> std::filesystem::path {
   return repo_root() / "testdata" / "examples";
 }
@@ -233,7 +246,11 @@ auto minimal_request(std::string_view shape_name) -> json {
     if (field.optional) {
       continue;
     }
-    if (field.type == "string") {
+    if (field.type == "SourceInput[]") {
+      request[std::string(field.name)] = json::array({{{"path", kTestDocument}, {"source", ""}}});
+    } else if (field.name == "document") {
+      request[std::string(field.name)] = kTestDocument;
+    } else if (field.type == "string") {
       request[std::string(field.name)] = "";
     } else if (field.type == "number") {
       request[std::string(field.name)] = 0;
@@ -259,15 +276,18 @@ suite<"playground_service"> playground_service_suite = [] {
     }
     expect(dispatch("nonexistent", json::object(), service_context()).status ==
            http_status::not_found);
-    expect(dispatch("hover", {{"source", "x"}, {"offset", "0"}}, service_context()).status ==
+    expect(dispatch("hover", document_request("x", {{"offset", "0"}}), service_context()).status ==
            http_status::bad_request)
         << "a string offset must be rejected";
+    auto unnamed = document_request("x", {{"document", "elsewhere.dao"}, {"offset", 0}});
+    expect(dispatch("hover", unnamed, service_context()).status == http_status::bad_request)
+        << "a document that is not one of the files must be rejected";
   };
 
   "examples_analyze_with_every_token_classified"_test = [] {
     auto known_failures = load_known_failures();
     for (const auto& example : load_examples()) {
-      auto reply = call("analyze", {{"source", example.source}});
+      auto reply = call("analyze", document_request(example.source));
       const auto& body = reply.body;
 
       std::set<uint32_t> classified;
@@ -295,20 +315,20 @@ suite<"playground_service"> playground_service_suite = [] {
     constexpr size_t kUsesPerExample = 3;
     constexpr size_t kDeclsPerExample = 2;
     for (const auto& example : load_examples()) {
-      auto analysis = call("analyze", {{"source", example.source}});
+      auto analysis = call("analyze", document_request(example.source));
       const auto& semantic_tokens = analysis.body["semanticTokens"];
 
-      call("documentSymbols", {{"source", example.source}});
+      call("documentSymbols", document_request(example.source));
 
       auto uses = sample_offsets(semantic_tokens, "use.", kUsesPerExample);
       auto decls = sample_offsets(semantic_tokens, "decl.function", kDeclsPerExample);
       for (auto offset : uses) {
-        json request = {{"source", example.source}, {"offset", offset}};
+        json request = document_request(example.source, {{"offset", offset}});
         call("hover", request);
         call("gotoDef", request);
       }
       for (auto offset : decls) {
-        call("references", {{"source", example.source}, {"offset", offset}});
+        call("references", document_request(example.source, {{"offset", offset}}));
       }
       // `main` is declared in every example and its references include
       // the declaration itself.  (Concept requirements and extension
@@ -316,7 +336,7 @@ suite<"playground_service"> playground_service_suite = [] {
       // only shape-checked above.)
       auto main_refs =
           call("references",
-               {{"source", example.source}, {"offset", example.source.find("fn main") + 3}});
+               document_request(example.source, {{"offset", example.source.find("fn main") + 3}}));
       expect(!main_refs.body.empty()) << example.name << ": no references for main";
 
       // Scope completion at the end of the buffer, and member completion
@@ -324,11 +344,11 @@ suite<"playground_service"> playground_service_suite = [] {
       // receivers (structs.dao's first `.` reads a field); builtin
       // receivers offer none yet.
       auto end = static_cast<uint32_t>(example.source.size());
-      call("completions", {{"source", example.source}, {"offset", end}});
+      call("completions", document_request(example.source, {{"offset", end}}));
       auto dots = sample_offsets(semantic_tokens, "operator.member", 1);
       if (!dots.empty()) {
         auto members =
-            call("completions", {{"source", example.source}, {"offset", dots.front() + 1}});
+            call("completions", document_request(example.source, {{"offset", dots.front() + 1}}));
         if (example.name == "structs.dao") {
           expect(!members.body.empty()) << example.name << ": no members offered after `.`";
         }
@@ -339,13 +359,13 @@ suite<"playground_service"> playground_service_suite = [] {
   "positions_carry_file_identity"_test = [] {
     // hello.dao: `print` is declared in the prelude, `main` in the buffer.
     auto hello = call("example", {{"name", "hello.dao"}}).body["source"].get<std::string>();
-    auto analysis = call("analyze", {{"source", hello}});
-    expect(analysis.body["file"].get<std::string>() == kDocumentPath);
+    auto analysis = call("analyze", document_request(hello));
+    expect(analysis.body["file"].get<std::string>() == kTestDocument);
     expect(analysis.body["module"].get<std::string>() == "hello")
         << "module: " << analysis.body["module"].dump();
 
     auto print_use = static_cast<uint32_t>(hello.find("print("));
-    auto definition = call("gotoDef", {{"source", hello}, {"offset", print_use}});
+    auto definition = call("gotoDef", document_request(hello, {{"offset", print_use}}));
     expect(!definition.body.is_null()) << "print has no definition";
     if (!definition.body.is_null()) {
       auto file = definition.body["file"].get<std::string>();
@@ -353,14 +373,16 @@ suite<"playground_service"> playground_service_suite = [] {
     }
 
     auto main_decl = static_cast<uint32_t>(hello.find("fn main") + 3);
-    auto refs = call("references", {{"source", hello}, {"offset", main_decl}});
+    auto refs = call("references", document_request(hello, {{"offset", main_decl}}));
     for (const auto& ref : refs.body) {
-      expect(ref["file"].get<std::string>() == kDocumentPath) << ref.dump();
+      expect(ref["file"].get<std::string>() == kTestDocument) << ref.dump();
     }
 
     // A scratch buffer takes the synthetic module identity.
-    auto scratch = call("analyze", {{"source", "fn main(): i32\n  return 0\n"}});
+    auto scratch = call("analyze", document_request("fn main(): i32\n  return 0\n"));
     expect(scratch.body["module"].get<std::string>() == "playground");
+  };
+
   "generated_typescript_is_current"_test = [] {
     auto generated = repo_root() / "tools" / "playground" / "frontend" / "src" / "generated" /
                      "tooling_surface.ts";
@@ -375,7 +397,8 @@ suite<"playground_service"> playground_service_suite = [] {
     std::string typing = "module t\nclass P:\n  x: i32\n  y: i32\nfn main(): i32\n"
                          "  let p: P = P(1, 2)\n  return p.";
     auto members =
-        call("completions", {{"source", typing}, {"offset", static_cast<uint32_t>(typing.size())}});
+        call("completions",
+             document_request(typing, {{"offset", static_cast<uint32_t>(typing.size())}}));
     std::vector<std::string> labels;
     for (const auto& item : members.body) {
       labels.push_back(item["label"].get<std::string>());
@@ -384,13 +407,92 @@ suite<"playground_service"> playground_service_suite = [] {
         << "offered: " << members.body.dump();
   };
 
+  "positions_in_a_two_file_program_name_their_files"_test = [] {
+    // The document calls into another file of the program; the reply
+    // says where the definition is, in that file's own coordinates.
+    const std::string lib = "module lib\n\nfn helper(): i32\n  return 41\n";
+    const std::string main = "module app\n\nfn main(): i32\n  return helper() + 1\n";
+    json request = {{"files",
+                     json::array({{{"path", "lib.dao"}, {"source", lib}},
+                                  {{"path", kTestDocument}, {"source", main}}})},
+                    {"document", kTestDocument}};
+
+    auto call_site = static_cast<uint32_t>(main.find("helper()"));
+    json position = request;
+    position["offset"] = call_site;
+    auto definition = call("gotoDef", position);
+    expect(!definition.body.is_null()) << "helper has no definition";
+    if (!definition.body.is_null()) {
+      expect(definition.body["file"].get<std::string>() == "lib.dao") << definition.body.dump();
+      expect(definition.body["line"].get<uint32_t>() == 3) << definition.body.dump();
+    }
+
+    auto symbols = call("documentSymbols", request);
+    expect(!symbols.body.empty()) << "no symbols for the document";
+    for (const auto& sym : symbols.body) {
+      expect(sym["file"].get<std::string>() == kTestDocument) << sym.dump();
+    }
+
+    // A diagnostic in the other file names that file.
+    json broken = request;
+    broken["files"][0]["source"] = "module lib\n\nfn helper(): i32\n  return true\n";
+    auto analysis = call("analyze", broken);
+    bool named = false;
+    for (const auto& diag : analysis.body["diagnostics"]) {
+      named = named || diag["file"].get<std::string>() == "lib.dao";
+    }
+    expect(named) << "no diagnostic names lib.dao: " << analysis.body["diagnostics"].dump();
+  };
+
+  "capability_surfaces_exist"_test = [] {
+    // `daoc` subcommands: the driver's command table plus `build`,
+    // which it dispatches before the table.
+    auto driver = dao::read_file(repo_root() / "compiler" / "driver" / "main.cpp");
+    static const std::regex command_pattern(R"re(Command\{\.name = "([a-z-]+)")re");
+    std::set<std::string> commands{"build"};
+    for (std::sregex_iterator it(driver.begin(), driver.end(), command_pattern), last; it != last;
+         ++it) {
+      commands.insert((*it)[1].str());
+    }
+    static const std::regex lsp_method(R"re(textDocument/[A-Za-z]+(/[A-Za-z]+)*)re");
+    std::set<std::string> lsp_methods;
+    for (const auto& cap : kCapabilities) {
+      for (const auto& entry : cap.analysis) {
+        auto header = repo_root() / "compiler" / entry.header;
+        expect(std::filesystem::exists(header)) << cap.name << " names missing " << entry.header;
+        // `LlvmBackend::lower` is declared as `lower(` inside the class.
+        auto symbol = std::string(entry.symbol.substr(entry.symbol.rfind(':') + 1));
+        expect(std::filesystem::exists(header) &&
+               dao::read_file(header).find(symbol + "(") != std::string::npos)
+            << cap.name << ": " << entry.symbol << " is not declared in " << entry.header;
+      }
+      expect(cap.playground.empty() || find_route(cap.playground) != nullptr)
+          << cap.name << " names unknown route " << cap.playground;
+      expect(cap.cli.empty() || commands.contains(std::string(cap.cli)))
+          << cap.name << " names unknown daoc command " << cap.cli;
+      if (!cap.lsp.empty()) {
+        expect(std::regex_match(std::string(cap.lsp), lsp_method))
+            << cap.name << " has a malformed LSP method " << cap.lsp;
+        expect(lsp_methods.insert(std::string(cap.lsp)).second)
+            << cap.name << " repeats LSP method " << cap.lsp;
+      }
+    }
+  };
+
+  "capability_matrix_is_current"_test = [] {
+    auto matrix = repo_root() / "docs" / "tooling_capabilities.md";
+    expect(std::filesystem::exists(matrix)) << matrix.string() << " is missing";
+    expect(dao::read_file(matrix) == render_capability_matrix())
+        << matrix.string() << " is stale: run `task gen-tooling-surface`";
+  };
+
   "examples_run_to_their_goldens"_test = [] {
     init_run_support();
     const bool update = std::getenv("DAO_UPDATE_GOLDENS") != nullptr;
     auto known_failures = load_known_failures();
 
     for (const auto& example : load_examples()) {
-      auto reply = call("run", {{"source", example.source}});
+      auto reply = call("run", document_request(example.source));
       auto exit_code = reply.body["exit_code"].get<int>();
       auto stdout_text = reply.body["stdout"].get<std::string>();
 

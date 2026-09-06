@@ -32,11 +32,12 @@ auto slurp(const std::filesystem::path& path) -> std::string {
   return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
 }
 
-auto run_reply(std::string stdout_text, std::string stderr_text, int exit_code,
+auto run_reply(std::string stdout_text,
+               std::string stderr_text,
+               int exit_code,
                nlohmann::json diagnostics) -> Reply {
   return {.status = http_status::ok,
           .body = {
-              {"file", kDocumentPath},
               {"stdout", std::move(stdout_text)},
               {"stderr", std::move(stderr_text)},
               {"exit_code", exit_code},
@@ -57,12 +58,14 @@ auto compile_failed(nlohmann::json diagnostics, const std::string& fallback_mess
 
 } // namespace
 
-void init_run_support() { LlvmBackend::initialize_targets(); }
+void init_run_support() {
+  LlvmBackend::initialize_targets();
+}
 
-auto run(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
+auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
   nlohmann::json diagnostics = nlohmann::json::array();
 
-  auto prog = build_playground_program(ctx.repo_root, request["source"].get<std::string>());
+  auto prog = build_playground_program(ctx.repo_root, std::move(inputs));
   if (prog.user == nullptr || !prog.program.diagnostics.empty()) {
     for (const auto& diag : prog.program.diagnostics) {
       diagnostics.push_back(make_internal_error(diag.message));
@@ -157,9 +160,13 @@ auto run(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
   std::vector<llvm::StringRef> link_args = {*cc_path, obj_str, DAO_RUNTIME_LIB, "-o", exe_str};
 
   std::string link_error;
-  int link_status =
-      llvm::sys::ExecuteAndWait(*cc_path, link_args, /*Env=*/std::nullopt, /*Redirects=*/{},
-                                /*SecondsToWait=*/30, /*MemoryLimit=*/0, &link_error);
+  int link_status = llvm::sys::ExecuteAndWait(*cc_path,
+                                              link_args,
+                                              /*Env=*/std::nullopt,
+                                              /*Redirects=*/{},
+                                              /*SecondsToWait=*/30,
+                                              /*MemoryLimit=*/0,
+                                              &link_error);
   std::filesystem::remove(obj_path);
 
   if (link_status != 0) {
@@ -187,9 +194,13 @@ auto run(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
   }};
 
   std::string exec_error;
-  int exit_code = llvm::sys::ExecuteAndWait(exe_str, {exe_str}, /*Env=*/std::nullopt, redirects,
+  int exit_code = llvm::sys::ExecuteAndWait(exe_str,
+                                            {exe_str},
+                                            /*Env=*/std::nullopt,
+                                            redirects,
                                             /*SecondsToWait=*/5,
-                                            /*MemoryLimit=*/256 * 1024 * 1024, &exec_error);
+                                            /*MemoryLimit=*/256 * 1024 * 1024,
+                                            &exec_error);
 
   auto stdout_text = slurp(stdout_path);
   auto stderr_text = slurp(stderr_path);
@@ -205,8 +216,19 @@ auto run(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
   std::error_code ec;
   std::filesystem::remove_all(tmp_dir, ec);
 
-  return run_reply(std::move(stdout_text), std::move(stderr_text), exit_code,
-                   std::move(diagnostics));
+  return run_reply(
+      std::move(stdout_text), std::move(stderr_text), exit_code, std::move(diagnostics));
+}
+
+auto run(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
+  auto inputs = parse_program_request(request);
+  if (!inputs) {
+    return error_reply(http_status::bad_request, inputs.error());
+  }
+  auto document = inputs->document;
+  auto reply = run_program(std::move(*inputs), ctx);
+  reply.body["file"] = std::move(document);
+  return reply;
 }
 
 } // namespace dao::playground

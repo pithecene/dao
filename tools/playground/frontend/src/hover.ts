@@ -1,3 +1,4 @@
+import { programRequest } from "./document";
 import { EditorView } from "@codemirror/view";
 import { api } from "./api";
 import { getSource } from "./editor";
@@ -31,7 +32,7 @@ async function doHover(view: EditorView, e: MouseEvent): Promise<void> {
   const seq = ++hoverSeq;
 
   try {
-    const data = await api("hover", { source: getSource(), offset: pos });
+    const data = await api("hover", { ...programRequest(getSource()), offset: pos });
     if (seq !== hoverSeq) return; // a newer mouse position superseded this
     if (!data) {
       hideTooltip();

@@ -49,4 +49,38 @@ auto render_service_typescript() -> std::string {
   return out.str();
 }
 
+auto render_capability_matrix() -> std::string {
+  std::ostringstream out;
+  out << "# Tooling Capabilities — Dao\n\n"
+         "Generated from `tools/playground/compiler_service/service_surface.h` by\n"
+         "`service_surface_dump`; do not edit by hand (`task gen-tooling-surface`).\n"
+         "`playground_service_test` fails while this file and the table disagree, and\n"
+         "checks that every entry point is declared in the header it names, every\n"
+         "route is served, and every `daoc` command exists.\n\n"
+         "One row per capability the compiler exposes to tooling and the surfaces that\n"
+         "serve it.  \"—\" means no surface of that kind serves it.  The LSP column names\n"
+         "the method each capability maps to; `tools/lsp` is not implemented, so none is\n"
+         "served over LSP yet.  Positions in navigation replies and diagnostics carry\n"
+         "the file they lie in; token entries inherit the file of the reply.\n\n"
+         "| Capability | Compiler entry points | Playground route | `daoc` command | LSP method |\n"
+         "|---|---|---|---|---|\n";
+  auto cell = [](std::string_view value) -> std::string {
+    return value.empty() ? "—" : std::format("`{}`", value);
+  };
+  for (const auto& cap : kCapabilities) {
+    std::string entry_points;
+    for (const auto& entry : cap.analysis) {
+      entry_points += entry_points.empty() ? "" : ", ";
+      entry_points += std::format("`{}`", entry.symbol);
+    }
+    out << std::format("| {} | {} | {} | {} | {} |\n",
+                       cap.name,
+                       entry_points,
+                       cell(cap.playground),
+                       cell(cap.cli),
+                       cell(cap.lsp));
+  }
+  return out.str();
+}
+
 } // namespace dao::playground

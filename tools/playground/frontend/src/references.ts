@@ -1,7 +1,7 @@
 import { StateEffect, StateField } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
 import { api } from "./api";
-import { inDocument } from "./document";
+import { inDocument, programRequest } from "./document";
 import { getSource } from "./editor";
 import { showNotice } from "./notice";
 
@@ -35,7 +35,7 @@ export function initReferences(view: EditorView): void {
     if (pos === null) return;
 
     try {
-      const refs = await api("references", { source: getSource(), offset: pos });
+      const refs = await api("references", { ...programRequest(getSource()), offset: pos });
       const docLength = view.state.doc.length;
       const here = refs.filter(
         (r) => inDocument(r.file) && r.length > 0 && r.offset + r.length <= docLength,

@@ -163,6 +163,7 @@ export interface SemanticToken {
 
 export interface Diagnostic {
   severity: DiagnosticSeverity;
+  file: string;
   offset: number;
   length: number;
   line: number;
@@ -177,6 +178,7 @@ export interface Hover {
 }
 
 export interface Definition {
+  file: string;
   offset: number;
   length: number;
   line: number;
@@ -186,14 +188,18 @@ export interface Definition {
 export interface DocumentSymbol {
   name: string;
   kind: string;
+  file: string;
   offset: number;
   length: number;
   children: DocumentSymbol[];
 }
 
 export interface Reference {
+  file: string;
   offset: number;
   length: number;
+  line: number;
+  col: number;
   isDefinition: boolean;
 }
 
@@ -205,17 +211,25 @@ export interface Completion {
 
 // ---- Service envelopes ----
 
-export interface SourceRequest {
+export interface SourceInput {
+  path: string;
   source: string;
 }
 
+export interface ProgramRequest {
+  files: SourceInput[];
+  document: string;
+}
+
 export interface AnalyzeRequest {
-  source: string;
+  files: SourceInput[];
+  document: string;
   includePrelude?: boolean;
 }
 
 export interface PositionRequest {
-  source: string;
+  files: SourceInput[];
+  document: string;
   offset: number;
 }
 
@@ -224,6 +238,8 @@ export interface ExampleName {
 }
 
 export interface AnalyzeResponse {
+  file: string;
+  module: string;
   tokens: LexToken[];
   semanticTokens: SemanticToken[];
   ast: string;
@@ -234,6 +250,7 @@ export interface AnalyzeResponse {
 }
 
 export interface RunResponse {
+  file: string;
   stdout: string;
   stderr: string;
   exit_code: number;
@@ -274,10 +291,10 @@ export type RouteName = keyof typeof ROUTES;
 /** Request body and response type of every route. */
 export interface RouteTypes {
   analyze: { request: AnalyzeRequest; response: AnalyzeResponse };
-  run: { request: SourceRequest; response: RunResponse };
+  run: { request: ProgramRequest; response: RunResponse };
   hover: { request: PositionRequest; response: Hover | null };
   gotoDef: { request: PositionRequest; response: Definition | null };
-  documentSymbols: { request: SourceRequest; response: DocumentSymbol[] };
+  documentSymbols: { request: ProgramRequest; response: DocumentSymbol[] };
   references: { request: PositionRequest; response: Reference[] };
   completions: { request: PositionRequest; response: Completion[] };
   examples: { request: void; response: ExamplesList };

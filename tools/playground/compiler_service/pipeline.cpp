@@ -2,6 +2,7 @@
 #include "support/module_utils.h"
 
 #include <algorithm>
+#include <format>
 #include <iterator>
 #include <utility>
 
@@ -13,35 +14,57 @@ constexpr const char* kSyntheticHeader = "module playground\n";
 
 } // namespace
 
-auto build_playground_program(const std::filesystem::path& repo_root, std::string user_source)
+auto parse_program_request(const nlohmann::json& request)
+    -> std::expected<ProgramRequest, std::string> {
+  ProgramRequest parsed;
+  parsed.document = request["document"].get<std::string>();
+  for (const auto& file : request["files"]) {
+    parsed.files.push_back({.display_path = file["path"].get<std::string>(),
+                            .text = file["source"].get<std::string>(),
+                            .is_prelude = false});
+  }
+  const bool named = std::ranges::any_of(parsed.files, [&](const SourceInput& file) -> bool {
+    return file.display_path == parsed.document;
+  });
+  if (!named) {
+    return std::unexpected(std::format("document '{}' is not one of the files", parsed.document));
+  }
+  return parsed;
+}
+
+auto build_playground_program(const std::filesystem::path& repo_root, ProgramRequest request)
     -> PlaygroundProgram {
   PlaygroundProgram prog;
 
-  // Per CONTRACT_SYNTAX_SURFACE.md every source file begins with one
-  // `module` declaration.  A scratch buffer usually has none; give it
-  // a synthetic identity and remember how many bytes/lines to subtract
-  // when reporting positions back to the editor.
-  if (!starts_with_module(user_source)) {
-    std::string with_header = kSyntheticHeader;
-    prog.header_bytes = static_cast<uint32_t>(with_header.size());
-    prog.header_lines = 1;
-    with_header.append(user_source);
-    user_source = std::move(with_header);
-  }
-
   auto inputs = load_prelude_inputs(repo_root / "stdlib");
-  inputs.push_back({.display_path = std::string(kDocumentPath),
-                    .text = std::move(user_source),
-                    .is_prelude = false});
+  for (auto& file : request.files) {
+    // Per CONTRACT_SYNTAX_SURFACE.md every source file begins with one
+    // `module` declaration.  A scratch document usually has none; give
+    // it a synthetic identity and remember how many bytes/lines to
+    // subtract when reporting positions back to the editor.  Other
+    // files of the program are taken as written.
+    if (file.display_path == request.document && !starts_with_module(file.text)) {
+      std::string with_header = kSyntheticHeader;
+      prog.header_bytes = static_cast<uint32_t>(with_header.size());
+      prog.header_lines = 1;
+      with_header.append(file.text);
+      file.text = std::move(with_header);
+    }
+    inputs.push_back(std::move(file));
+  }
   prog.program = build_program(std::move(inputs));
-  prog.user = prog.program.files.empty() ? nullptr : prog.program.files.back().get();
+  for (const auto& file : prog.program.files) {
+    if (!file->is_prelude && file->display_path == request.document) {
+      prog.user = file.get();
+    }
+  }
   return prog;
 }
 
-auto run_frontend_pipeline(const std::filesystem::path& repo_root, std::string user_source)
+auto run_frontend_pipeline(const std::filesystem::path& repo_root, ProgramRequest request)
     -> FrontendPipeline {
   FrontendPipeline pipe;
-  pipe.prog = build_playground_program(repo_root, std::move(user_source));
+  pipe.prog = build_playground_program(repo_root, std::move(request));
   if (pipe.prog.user == nullptr || !pipe.prog.program.diagnostics.empty()) {
     return pipe;
   }
@@ -94,8 +117,8 @@ void add_position(nlohmann::json& out, const PlaygroundProgram& prog, uint32_t p
   auto loc = prog.program.source_map.locate(program_offset);
   const bool in_document = file == prog.user;
   out["file"] = file->display_path;
-  out["offset"] = in_document ? prog.to_editor_offset(program_offset)
-                              : file->local_offset(program_offset);
+  out["offset"] =
+      in_document ? prog.to_editor_offset(program_offset) : file->local_offset(program_offset);
   out["line"] = in_document ? prog.editor_line(program_offset) : loc.line;
   out["col"] = loc.col;
 }
@@ -110,7 +133,8 @@ auto without_prelude_warnings(const std::vector<Diagnostic>& diags, const Playgr
   return kept;
 }
 
-void collect_diagnostics(nlohmann::json& out, const PlaygroundProgram& prog,
+void collect_diagnostics(nlohmann::json& out,
+                         const PlaygroundProgram& prog,
                          const std::vector<Diagnostic>& diags) {
   for (const auto& diag : diags) {
     nlohmann::json entry = {

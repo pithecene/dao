@@ -98,7 +98,11 @@ auto dot_receiver(uint32_t absolute_offset, const FrontendPipeline& pipe) -> con
 } // namespace
 
 auto completions(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
-  auto pipe = run_frontend_pipeline(ctx.repo_root, request["source"].get<std::string>());
+  auto inputs = parse_program_request(request);
+  if (!inputs) {
+    return error_reply(http_status::bad_request, inputs.error());
+  }
+  auto pipe = run_frontend_pipeline(ctx.repo_root, std::move(*inputs));
   if (!pipe.ok) {
     return {.status = http_status::ok, .body = nlohmann::json::array()};
   }

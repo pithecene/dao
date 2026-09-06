@@ -1,6 +1,6 @@
 import type { EditorView } from "@codemirror/view";
 import { api } from "./api";
-import { inDocument } from "./document";
+import { inDocument, programRequest } from "./document";
 import { getSource } from "./editor";
 import { showNotice } from "./notice";
 
@@ -18,7 +18,7 @@ export function initGotoDef(view: EditorView): void {
     if (pos === null) return;
 
     try {
-      const target = await api("gotoDef", { source: getSource(), offset: pos });
+      const target = await api("gotoDef", { ...programRequest(getSource()), offset: pos });
       if (!target) return;
       if (!inDocument(target.file)) {
         showNotice(`defined in ${target.file}:${target.line}:${target.col}`);

@@ -3,7 +3,7 @@ import { api } from "./api";
 import { setTokens } from "./highlighting";
 import { renderDiagnostics } from "./diagnostics";
 import { renderOutline } from "./outline";
-import { setDocument } from "./document";
+import { setDocument, programRequest } from "./document";
 import { getSource } from "./editor";
 
 let analyzeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -40,8 +40,8 @@ export async function doAnalyze(): Promise<void> {
 
   try {
     const [data, symbols] = await Promise.all([
-      api("analyze", { source, includePrelude: includePrelude() }),
-      api("documentSymbols", { source }),
+      api("analyze", { ...programRequest(source), includePrelude: includePrelude() }),
+      api("documentSymbols", programRequest(source)),
     ]);
     if (seq !== analyzeSeq) return; // a newer edit superseded this request
 
