@@ -337,12 +337,7 @@ void HirBuilder::lower_match_into(const Stmt* stmt,
   if (scrutinee_type != nullptr &&
       scrutinee_type->kind() == TypeKind::Enum) {
     enum_type = static_cast<const TypeEnum*>(scrutinee_type);
-    for (const auto& variant : enum_type->variants()) {
-      if (!variant.payload_types.empty()) {
-        has_payload_variants = true;
-        break;
-      }
-    }
+    has_payload_variants = enum_type->has_payload_variants();
   }
 
   // For payload-bearing enums, compare against extracted discriminant.
@@ -466,6 +461,26 @@ void HirBuilder::lower_match_into(const Stmt* stmt,
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
+/// The value of a variant named as `Enum.Variant` / `Enum::Variant`, or
+/// null if the enum has no such variant.  A classification enum's value is
+/// its tag; a payload-bearing enum is a tagged struct, so even a fieldless
+/// variant is a construction with no payload.
+auto HirBuilder::variant_value(const TypeEnum* enum_type, std::string_view variant_name, Span span)
+    -> HirExpr* {
+  const auto& variants = enum_type->variants();
+  for (size_t i = 0; i < variants.size(); ++i) {
+    if (variants[i].name != variant_name) {
+      continue;
+    }
+    if (enum_type->has_payload_variants()) {
+      return ctx_.alloc<HirExpr>(
+          span, enum_type, HirEnumConstruct{enum_type, static_cast<uint32_t>(i), {}});
+    }
+    return ctx_.alloc<HirExpr>(span, enum_type, HirIntLiteral{static_cast<int64_t>(i)});
+  }
+  return nullptr;
+}
+
 auto HirBuilder::lower_expr(const Expr* expr) -> HirExpr* {
   if (expr == nullptr) {
     return nullptr;
@@ -511,13 +526,9 @@ auto HirBuilder::lower_expr(const Expr* expr) -> HirExpr* {
     const auto& qn = expr->as<QualifiedName>();
     if (type != nullptr && type->kind() == TypeKind::Enum &&
         qn.segments.size() >= 2) {
-      const auto* enum_type = static_cast<const TypeEnum*>(type);
-      auto variant_name = qn.segments.back();
-      for (size_t i = 0; i < enum_type->variants().size(); ++i) {
-        if (enum_type->variants()[i].name == variant_name) {
-          return ctx_.alloc<HirExpr>(
-              span, type, HirIntLiteral{static_cast<int64_t>(i)});
-        }
+      if (auto* value =
+              variant_value(static_cast<const TypeEnum*>(type), qn.segments.back(), span)) {
+        return value;
       }
     }
     const auto* sym = find_symbol_at_use(expr->span.offset);
@@ -687,14 +698,10 @@ auto HirBuilder::lower_expr(const Expr* expr) -> HirExpr* {
 
   case NodeKind::FieldExpr: {
     const auto& field = expr->as<FieldExpr>();
-    // Enum variant access: lower to integer constant with enum type.
+    // `Enum.Variant` names a value of the enum, not a field of an object.
     if (type != nullptr && type->kind() == TypeKind::Enum) {
-      const auto* enum_type = static_cast<const TypeEnum*>(type);
-      for (size_t i = 0; i < enum_type->variants().size(); ++i) {
-        if (enum_type->variants()[i].name == field.field) {
-          return ctx_.alloc<HirExpr>(span, type,
-                                      HirIntLiteral{static_cast<int64_t>(i)});
-        }
+      if (auto* value = variant_value(static_cast<const TypeEnum*>(type), field.field, span)) {
+        return value;
       }
     }
     auto* object = lower_expr(field.object);
