@@ -67,12 +67,13 @@ inline constexpr std::string_view kDocumentPath = "<playground>";
 
 /// Assemble the prelude group under <repo_root>/stdlib plus the editor
 /// buffer, and lex/parse everything.
-auto build_playground_program(const std::filesystem::path& repo_root,
-                              std::string user_source) -> PlaygroundProgram;
+auto build_playground_program(const std::filesystem::path& repo_root, std::string user_source)
+    -> PlaygroundProgram;
 
 /// lex → parse → resolve → typecheck over the whole program: the input
-/// to every navigation and completion query.  `ok` is false when any
-/// file failed to lex or parse; the later results are then unset.
+/// to every navigation and completion query.  Parse errors in the
+/// buffer are tolerated (it is being typed); `ok` is false only when the
+/// buffer produced no tree or a prelude file failed.
 struct FrontendPipeline {
   PlaygroundProgram prog;
   ResolveResult resolve_result;

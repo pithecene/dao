@@ -14,7 +14,7 @@
 #include "run.h"
 #include "service.h"
 
-#include "analysis/tooling_surface.h"
+#include "service_surface.h"
 #include "support/test_utils.h"
 
 #include <boost/ut.hpp>
@@ -35,8 +35,12 @@ using nlohmann::json;
 
 namespace {
 
-auto repo_root() -> std::filesystem::path { return DAO_SOURCE_DIR; }
-auto golden_dir() -> std::filesystem::path { return repo_root() / "testdata" / "examples"; }
+auto repo_root() -> std::filesystem::path {
+  return DAO_SOURCE_DIR;
+}
+auto golden_dir() -> std::filesystem::path {
+  return repo_root() / "testdata" / "examples";
+}
 auto service_context() -> ServiceContext {
   return {.repo_root = repo_root(), .examples_dir = repo_root() / "examples"};
 }
@@ -47,10 +51,14 @@ auto service_context() -> ServiceContext {
 
 using Problems = std::vector<std::string>;
 
-void check_value(const json& value, std::string_view type, const std::string& path,
+void check_value(const json& value,
+                 std::string_view type,
+                 const std::string& path,
                  Problems& problems);
 
-void check_shape(const json& value, const dao::tooling::ShapeSpec& shape, const std::string& path,
+void check_shape(const json& value,
+                 const ShapeSpec& shape,
+                 const std::string& path,
                  Problems& problems) {
   if (!value.is_object()) {
     problems.push_back(path + ": expected object " + std::string(shape.name));
@@ -75,7 +83,9 @@ void check_shape(const json& value, const dao::tooling::ShapeSpec& shape, const 
   }
 }
 
-void check_value(const json& value, std::string_view type, const std::string& path,
+void check_value(const json& value,
+                 std::string_view type,
+                 const std::string& path,
                  Problems& problems) {
   using namespace dao::tooling;
   if (type.ends_with(" | null")) {
@@ -120,7 +130,7 @@ void check_value(const json& value, std::string_view type, const std::string& pa
     expect_enum(kLexicalCategories);
   } else if (type == "DiagnosticSeverity") {
     expect_enum(kDiagnosticSeverities);
-  } else if (const auto* shape = find_shape(type)) {
+  } else if (const auto* shape = find_service_shape(type)) {
     check_shape(value, *shape, path, problems);
   } else {
     problems.push_back(path + ": surface declares unknown type " + std::string(type));
@@ -138,7 +148,7 @@ auto joined(const Problems& problems) -> std::string {
 /// Dispatch a route and assert the reply matches the surface's response
 /// type for it.
 auto call(std::string_view route_name, const json& request) -> Reply {
-  const auto* route = dao::tooling::find_route(route_name);
+  const auto* route = find_route(route_name);
   expect(route != nullptr) << "no such route " << route_name;
   auto reply = dispatch(route_name, request, service_context());
   expect(reply.status == http_status::ok)
@@ -169,7 +179,9 @@ auto load_examples() -> std::vector<Example> {
   return examples;
 }
 
-/// `<name>.dao <reason>` per line; blank lines and `#` comments ignored.
+/// `<name>.dao<TAB><expected diagnostic substring>` per line; blank lines
+/// and `#` comments ignored.  The substring is what the compiler must
+/// report for the failure to count as the known one.
 auto load_known_failures() -> std::map<std::string, std::string> {
   std::map<std::string, std::string> failures;
   std::ifstream file(golden_dir() / "known_failures.txt");
@@ -177,11 +189,21 @@ auto load_known_failures() -> std::map<std::string, std::string> {
     if (line.empty() || line.starts_with('#')) {
       continue;
     }
-    auto split = line.find(' ');
-    failures[line.substr(0, split)] =
-        split == std::string::npos ? "" : line.substr(split + 1);
+    auto split = line.find('\t');
+    expect(split != std::string::npos) << "known_failures.txt: no expected diagnostic on: " << line;
+    failures[line.substr(0, split)] = split == std::string::npos ? "" : line.substr(split + 1);
   }
   return failures;
+}
+
+/// True if any diagnostic message of a reply contains `needle`.
+auto reports(const json& reply, const std::string& needle) -> bool {
+  for (const auto& diag : reply["diagnostics"]) {
+    if (diag["message"].get<std::string>().find(needle) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /// Offsets of the first `count` semantic tokens whose kind starts with `prefix`.
@@ -207,7 +229,7 @@ auto minimal_request(std::string_view shape_name) -> json {
     return {{"name", "hello.dao"}};
   }
   json request = json::object();
-  for (const auto& field : dao::tooling::find_shape(shape_name)->fields) {
+  for (const auto& field : find_service_shape(shape_name)->fields) {
     if (field.optional) {
       continue;
     }
@@ -226,7 +248,7 @@ auto minimal_request(std::string_view shape_name) -> json {
 
 suite<"playground_service"> playground_service_suite = [] {
   "every_route_is_bound_and_validates_its_request"_test = [] {
-    for (const auto& route : dao::tooling::kRoutes) {
+    for (const auto& route : kRoutes) {
       auto reply = dispatch(route.name, minimal_request(route.request), service_context());
       expect(reply.status != http_status::not_found) << route.name << " is not bound";
       if (route.request != "void") {
@@ -235,7 +257,8 @@ suite<"playground_service"> playground_service_suite = [] {
             << route.name << " accepted an empty request body";
       }
     }
-    expect(dispatch("nonexistent", json::object(), service_context()).status == http_status::not_found);
+    expect(dispatch("nonexistent", json::object(), service_context()).status ==
+           http_status::not_found);
     expect(dispatch("hover", {{"source", "x"}, {"offset", "0"}}, service_context()).status ==
            http_status::bad_request)
         << "a string offset must be rejected";
@@ -291,8 +314,9 @@ suite<"playground_service"> playground_service_suite = [] {
       // the declaration itself.  (Concept requirements and extension
       // methods do not answer references yet, so other declarations are
       // only shape-checked above.)
-      auto main_refs = call("references", {{"source", example.source},
-                                           {"offset", example.source.find("fn main") + 3}});
+      auto main_refs =
+          call("references",
+               {{"source", example.source}, {"offset", example.source.find("fn main") + 3}});
       expect(!main_refs.body.empty()) << example.name << ": no references for main";
 
       // Scope completion at the end of the buffer, and member completion
@@ -337,6 +361,27 @@ suite<"playground_service"> playground_service_suite = [] {
     // A scratch buffer takes the synthetic module identity.
     auto scratch = call("analyze", {{"source", "fn main(): i32\n  return 0\n"}});
     expect(scratch.body["module"].get<std::string>() == "playground");
+  "generated_typescript_is_current"_test = [] {
+    auto generated = repo_root() / "tools" / "playground" / "frontend" / "src" / "generated" /
+                     "tooling_surface.ts";
+    expect(std::filesystem::exists(generated)) << generated.string() << " is missing";
+    expect(dao::read_file(generated) == render_service_typescript())
+        << generated.string() << " is stale: run `task gen-tooling-surface`";
+  };
+
+  "member_completion_works_while_typing"_test = [] {
+    // The buffer a user has at the moment they type `.`: it does not
+    // parse.  Members of the receiver must still be offered.
+    std::string typing = "module t\nclass P:\n  x: i32\n  y: i32\nfn main(): i32\n"
+                         "  let p: P = P(1, 2)\n  return p.";
+    auto members =
+        call("completions", {{"source", typing}, {"offset", static_cast<uint32_t>(typing.size())}});
+    std::vector<std::string> labels;
+    for (const auto& item : members.body) {
+      labels.push_back(item["label"].get<std::string>());
+    }
+    expect(std::ranges::contains(labels, "x") && std::ranges::contains(labels, "y"))
+        << "offered: " << members.body.dump();
   };
 
   "examples_run_to_their_goldens"_test = [] {
@@ -353,6 +398,11 @@ suite<"playground_service"> playground_service_suite = [] {
         expect(exit_code == -1) << example.name << " now builds (exit " << exit_code
                                 << "); remove it from known_failures.txt (" << failure->second
                                 << ")";
+        // The failure must be the recorded one, not a fresh regression
+        // hiding behind the same exit code.
+        expect(reports(reply.body, failure->second))
+            << example.name << " failed for a different reason than known_failures.txt records ('"
+            << failure->second << "'): " << reply.body["diagnostics"].dump();
         continue;
       }
 

@@ -61,14 +61,18 @@ the token taxonomy in the contract, the kinds the emitter produces, the
 CSS mapping in the frontend; the routes the service registers and the
 routes the frontend calls.  One table and three fences keep them equal.
 
-**One table.** `compiler/analysis/tooling_surface.h` lists every token
-kind with its visual group, the lexical categories and diagnostic
-severities, every JSON payload shape, and every service route with its
-request and response shapes.  It is C++ so the compiler is the source of
-truth and nothing parses a manifest at runtime.
+**Two tables, one owner each.** `compiler/analysis/tooling_surface.h`
+is the compiler's: every token kind with its visual group, the lexical
+categories and diagnostic severities, and the payload shapes of the
+analysis results — semantic truth, which the phase and tooling
+contracts assign to `compiler/analysis`.
+`tools/playground/compiler_service/service_surface.h` is the
+playground's: its routes with methods and paths, its request envelopes,
+and its own response shapes — transport, which those contracts leave to
+the playground.  Both are C++ so nothing parses a manifest at runtime.
 
-**Generated frontend types.** `tooling_surface_dump` renders the table
-as `tools/playground/frontend/src/generated/tooling_surface.ts`
+**Generated frontend types.** `service_surface_dump` renders both
+tables as `tools/playground/frontend/src/generated/tooling_surface.ts`
 (`task gen-tooling-surface`).  The frontend's typed client (`src/api.ts`)
 takes route names, request bodies, and response types from it, and the
 highlighter maps `TokenKind` to `dao-<group>` through the generated
@@ -76,17 +80,20 @@ highlighter maps `TokenKind` to `dao-<group>` through the generated
 silently unstyled token.
 
 **Fences (all in `ctest`).**
-- `tooling_surface_test` — the table equals the taxonomy in
+- `tooling_surface_test` — the analysis table equals the taxonomy in
   `CONTRACT_LANGUAGE_TOOLING.md`; every kind the emitter produces over
-  `examples/` and `spec/syntax_probes/` is in the table; the checked-in
-  TypeScript equals what the dump tool renders.
+  `examples/` and `spec/syntax_probes/` is in the table.
 - `playground_service_test` — drives every route through `dispatch`
   (no HTTP) over every example: each route is bound and validates its
-  request; each reply matches its declared shape; every lexical token
-  of every example gets a semantic token; hover, definition, references,
-  symbols, and completions answer; every example runs and prints its
-  golden `testdata/examples/<name>.out` (`task update-example-goldens`),
-  except those listed with a reason in `testdata/examples/known_failures.txt`.
+  request; each reply matches its declared shape; the checked-in
+  TypeScript equals what `service_surface_dump` renders; every lexical
+  token of every example gets a semantic token; hover, definition,
+  references, symbols, and completions answer — including member
+  completion on a buffer that does not parse, the state a user is in
+  when they type `.`; every example runs and prints its golden
+  `testdata/examples/<name>.out` (`task update-example-goldens`), except
+  those listed in `testdata/examples/known_failures.txt` with the
+  diagnostic the compiler must report for the failure to count.
 - `npm run build` runs `tsc --noEmit` before bundling.
 
 **File identity.** Every position a reply carries names its file

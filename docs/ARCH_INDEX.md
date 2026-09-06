@@ -104,10 +104,10 @@ CLI, playground, and LSP.
 - `completion.h` / `completion.cpp` — scope-aware symbol completion at cursor offset
 - `document_symbols.h` / `document_symbols.cpp` — hierarchical symbol tree from AST
 - `references.h` / `references.cpp` — find all use-sites of a symbol
-- `tooling_surface.h` / `tooling_surface.cpp` — single source of truth for
-  token kinds, payload shapes, and service routes; renders the frontend's
-  TypeScript (`tooling_surface_dump.cpp`); `tooling_surface_test.cpp`
-  checks it against the contract, the emitter, and the generated file
+- `tooling_surface.h` / `tooling_surface.cpp` — the compiler's tooling
+  surface: token kinds and groups, lexical categories, diagnostic
+  severities, and analysis payload shapes; `tooling_surface_test.cpp`
+  checks it against the contract and the emitter
 
 ## `runtime/`
 
@@ -188,9 +188,12 @@ Developer-surface tooling built on compiler analysis.
 - `playground/` — first-class web playground and future web-IDE surface
   - `compiler_service/` — the service as JSON route functions behind
     `dispatch` (`service.h/.cpp`; `analyze`, `navigation`, `completions`,
-    `run`, `examples`), program assembly in `pipeline.h/.cpp`, the HTTP
-    adapter in `main.cpp` (cpp-httplib + nlohmann/json), and
-    `service_test.cpp` driving every route over every example
+    `run`, `examples`), its transport surface (`service_surface.h/.cpp`:
+    routes, request envelopes, response shapes; `service_surface_dump`
+    renders the frontend's TypeScript from it and the analysis surface),
+    program assembly in `pipeline.h/.cpp`, the HTTP adapter in `main.cpp`
+    (cpp-httplib + nlohmann/json), and `service_test.cpp` driving every
+    route over every example
   - `frontend/` — Vite + TypeScript with CodeMirror 6; `src/generated/`
     holds the TypeScript rendered from the tooling surface; dev mode uses
     HMR with API proxy, prod builds to `dist/` served by the compiler service

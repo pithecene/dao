@@ -4,7 +4,7 @@
 #include "run.h"
 #include "service.h"
 
-#include "analysis/tooling_surface.h"
+#include "service_surface.h"
 
 #include <httplib.h>
 
@@ -32,7 +32,7 @@ void register_routes(httplib::Server& svr, const dao::playground::ServiceContext
   using dao::playground::error_reply;
 
   // NOLINTBEGIN(modernize-use-trailing-return-type)
-  for (const auto& route : dao::tooling::kRoutes) {
+  for (const auto& route : dao::playground::kRoutes) {
     std::string name(route.name);
     std::string path(route.path);
     if (route.method == "POST") {
