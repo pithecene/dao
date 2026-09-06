@@ -284,6 +284,25 @@ suite<"playground_service"> playground_service_suite = [] {
         << "a document that is not one of the files must be rejected";
   };
 
+  "document offsets are range checked"_test = [] {
+    const std::string source = "module t\nfn main(): i32\n  return 0\n";
+    const auto length = static_cast<int64_t>(source.size());
+    const json rejected[] = {json(-1), json(3.5), json(length + 1), json("0")};
+    for (const auto& offset : rejected) {
+      for (const char* route : {"hover", "gotoDef", "references", "completions"}) {
+        auto reply =
+            dispatch(route, document_request(source, {{"offset", offset}}), service_context());
+        expect(reply.status == http_status::bad_request)
+            << route << " accepted offset " << offset.dump() << ": " << reply.body.dump();
+      }
+    }
+    for (const char* route : {"hover", "gotoDef", "references", "completions"}) {
+      auto at_end =
+          dispatch(route, document_request(source, {{"offset", length}}), service_context());
+      expect(at_end.status == http_status::ok) << route << " rejected the end of the document";
+    }
+  };
+
   "malformed nested request entries are rejected, not dereferenced"_test = [] {
     // Every element of `files` is validated against SourceInput before the
     // pipeline reads it; an empty entry used to abort the process.
@@ -467,6 +486,26 @@ suite<"playground_service"> playground_service_suite = [] {
     auto run = call("run", broken);
     expect(run.body["exit_code"].get<int>() == -1)
         << "ran a program with an error in lib.dao: " << run.body.dump();
+
+    // A lexer or parser error in the other file stops lowering and
+    // execution just the same.
+    for (const char* bad_lib : {"module lib\n\nfn helper(): i32\n  return @\n",
+                                "module lib\n\nfn helper(: i32\n  return 41\n"}) {
+      json unlexable = request;
+      unlexable["files"][0]["source"] = bad_lib;
+      auto reply = call("analyze", unlexable);
+      bool names_lib = false;
+      for (const auto& diag : reply.body["diagnostics"]) {
+        names_lib = names_lib || diag["file"].get<std::string>() == "lib.dao";
+      }
+      expect(names_lib) << reply.body["diagnostics"].dump();
+      expect(reply.body["hir"].get<std::string>().empty() &&
+             reply.body["mir"].get<std::string>().empty() &&
+             reply.body["llvm_ir"].get<std::string>().empty())
+          << "lowered past a lex/parse error in lib.dao: " << reply.body["diagnostics"].dump();
+      expect(call("run", unlexable).body["exit_code"].get<int>() == -1)
+          << "ran past a lex/parse error in lib.dao";
+    }
   };
 
   "capability_surfaces_exist"_test = [] {

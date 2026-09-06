@@ -196,7 +196,10 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   if (prog.user->file() == nullptr) {
     return out.reply();
   }
-  const bool has_parse_errors = !prog.user->parse.diagnostics.empty();
+  // Lowering needs every file lexed and parsed cleanly; the document's
+  // own parse errors are tolerated up to here so its AST, tokens, and
+  // partial resolution still answer.
+  const bool has_parse_errors = !prog.program.lexed_and_parsed_cleanly();
   out.module = module_name(*prog.user->file());
 
   // Always emit the partial AST when a file was produced, even with
@@ -238,7 +241,9 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   HirContext hir_ctx;
   auto hir_result = build_hir(prog.program, resolve_result, check_result, hir_ctx);
   collect_diagnostics(out.diagnostics, prog, hir_result.diagnostics);
-  if (hir_result.module == nullptr) {
+  // A builder may hand back a module alongside error diagnostics; that
+  // module is not lowered further.
+  if (hir_result.module == nullptr || has_error_severity(hir_result.diagnostics)) {
     if (!has_error_severity(hir_result.diagnostics)) {
       out.diagnostics.push_back(make_internal_error("HIR lowering failed without a diagnostic"));
     }
@@ -253,7 +258,7 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   MirContext mir_ctx;
   auto mir_result = build_mir(*hir_result.module, mir_ctx, types);
   collect_diagnostics(out.diagnostics, prog, mir_result.diagnostics);
-  if (mir_result.module == nullptr) {
+  if (mir_result.module == nullptr || has_error_severity(mir_result.diagnostics)) {
     if (!has_error_severity(mir_result.diagnostics)) {
       out.diagnostics.push_back(make_internal_error("MIR lowering failed without a diagnostic"));
     }

@@ -35,9 +35,16 @@ auto query_at(const nlohmann::json& request, const ServiceContext& ctx) -> Offse
     return {.error = inputs.error()};
   }
   OffsetQuery query{.pipe = run_frontend_pipeline(ctx.repo_root, std::move(*inputs))};
-  if (query.pipe.ok) {
-    auto absolute = query.pipe.prog.to_program_offset(request["offset"].get<uint32_t>());
-    query.token_offset = token_start_at(absolute, query.pipe.prog.user->lex);
+  if (query.pipe.prog.user != nullptr) {
+    auto offset = document_offset(request, query.pipe.prog);
+    if (!offset) {
+      query.error = offset.error();
+      return query;
+    }
+    if (query.pipe.ok) {
+      auto absolute = query.pipe.prog.to_program_offset(*offset);
+      query.token_offset = token_start_at(absolute, query.pipe.prog.user->lex);
+    }
   }
   return query;
 }

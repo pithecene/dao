@@ -103,11 +103,16 @@ auto completions(const nlohmann::json& request, const ServiceContext& ctx) -> Re
     return error_reply(http_status::bad_request, inputs.error());
   }
   auto pipe = run_frontend_pipeline(ctx.repo_root, std::move(*inputs));
+  if (pipe.prog.user != nullptr) {
+    if (auto offset = document_offset(request, pipe.prog); !offset) {
+      return error_reply(http_status::bad_request, offset.error());
+    }
+  }
   if (!pipe.ok) {
     return {.status = http_status::ok, .body = nlohmann::json::array()};
   }
 
-  auto absolute_offset = pipe.prog.to_program_offset(request["offset"].get<uint32_t>());
+  auto absolute_offset = pipe.prog.to_program_offset(*document_offset(request, pipe.prog));
   const auto* receiver = dot_receiver(absolute_offset, pipe);
   auto items = receiver != nullptr
                    ? query_dot_completions(receiver, pipe.check_result)

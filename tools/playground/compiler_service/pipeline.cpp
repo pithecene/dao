@@ -94,6 +94,29 @@ auto token_start_at(uint32_t offset, const LexResult& lex) -> uint32_t {
   return it == lex.tokens.end() ? offset : it->span.offset;
 }
 
+auto document_offset(const nlohmann::json& request, const PlaygroundProgram& prog)
+    -> std::expected<uint32_t, std::string> {
+  const auto& value = request["offset"];
+  const auto length = prog.document_length();
+  auto reject = [&]() -> std::unexpected<std::string> {
+    return std::unexpected(
+        std::format("'offset' must be an integer from 0 to {} (the document's length)", length));
+  };
+  if (!value.is_number_integer()) {
+    return reject();
+  }
+  if (value.is_number_unsigned()) {
+    return value.get<uint64_t>() <= length
+               ? std::expected<uint32_t, std::string>(static_cast<uint32_t>(value.get<uint64_t>()))
+               : reject();
+  }
+  const auto signed_value = value.get<int64_t>();
+  if (signed_value < 0 || signed_value > static_cast<int64_t>(length)) {
+    return reject();
+  }
+  return static_cast<uint32_t>(signed_value);
+}
+
 auto has_error_severity(const std::vector<Diagnostic>& diags) -> bool {
   return std::ranges::any_of(
       diags, [](const Diagnostic& diag) -> bool { return diag.severity == Severity::Error; });

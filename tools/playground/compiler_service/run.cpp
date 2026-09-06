@@ -102,7 +102,7 @@ auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
   HirContext hir_ctx;
   auto hir_result = build_hir(prog.program, resolve_result, check_result, hir_ctx);
   collect_diagnostics(diagnostics, prog, hir_result.diagnostics);
-  if (hir_result.module == nullptr) {
+  if (hir_result.module == nullptr || has_error_severity(hir_result.diagnostics)) {
     return compile_failed(std::move(diagnostics), "HIR lowering failed without a diagnostic");
   }
 
@@ -118,7 +118,8 @@ auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
     // DataLayout assertion instead of a diagnostic.
     mono_has_errors = has_error_severity(mono.diagnostics);
   }
-  if (mir_result.module == nullptr || mono_has_errors) {
+  if (mir_result.module == nullptr || has_error_severity(mir_result.diagnostics) ||
+      mono_has_errors) {
     return compile_failed(std::move(diagnostics), "MIR lowering failed without a diagnostic");
   }
 

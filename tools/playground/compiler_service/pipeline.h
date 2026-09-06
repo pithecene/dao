@@ -39,7 +39,13 @@ struct PlaygroundProgram {
   uint32_t header_bytes = 0;        // synthetic module header length, 0 if the user wrote one
   uint32_t header_lines = 0;
 
-  /// Program offset of an editor-buffer offset.
+  /// Length of the document as the editor sees it (without the
+  /// synthetic module header).
+  [[nodiscard]] auto document_length() const -> uint32_t {
+    return static_cast<uint32_t>(user->buffer.size()) - header_bytes;
+  }
+  /// Program offset of an editor-buffer offset, which must be at most
+  /// document_length() (document_offset checks a request's).
   [[nodiscard]] auto to_program_offset(uint32_t editor_offset) const -> uint32_t {
     return user->base_offset + header_bytes + editor_offset;
   }
@@ -78,6 +84,11 @@ auto parse_program_request(const nlohmann::json& request)
 /// request's files, and lex/parse everything.
 auto build_playground_program(const std::filesystem::path& repo_root, ProgramRequest request)
     -> PlaygroundProgram;
+
+/// The document-local offset a position request names, or why it is
+/// unusable: an integer from 0 to the document's length, inclusive.
+auto document_offset(const nlohmann::json& request, const PlaygroundProgram& prog)
+    -> std::expected<uint32_t, std::string>;
 
 /// lex → parse → resolve → typecheck over the whole program: the input
 /// to every navigation and completion query.  Parse errors in the
