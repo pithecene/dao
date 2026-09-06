@@ -933,6 +933,29 @@ suite<"static_method_tests"> static_method_tests = [] {
   };
 };
 
+/// The parse diagnostics of a fixture, messages only.
+auto messages(std::string_view src) -> std::vector<std::string> {
+  std::vector<std::string> out;
+  for (const auto& diag : parse_string(src).parse_result.diagnostics) {
+    out.push_back(diag.message);
+  }
+  return out;
+}
+
+suite<"diagnostic_wording_tests"> diagnostic_wording_tests = [] {
+  "an expected-token error names the token it found"_test = [] {
+    auto found = messages("fn f(): i32\n  let x: i32 = )\n  return x\n");
+    expect(!found.empty() && found.front() == "expected expression, got ')'")
+        << (found.empty() ? "no diagnostic" : found.front());
+  };
+
+  "layout tokens are named in words"_test = [] {
+    auto found = messages("fn f(): i32 ->\n");
+    expect(!found.empty() && found.front() == "expected expression, got end of line")
+        << (found.empty() ? "no diagnostic" : found.front());
+  };
+};
+
 // NOLINTEND(readability-function-cognitive-complexity,readability-magic-numbers,modernize-use-trailing-return-type)
 
 } // namespace
