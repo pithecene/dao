@@ -14,7 +14,9 @@
 #include <llvm/IR/Module.h>
 
 #include <memory>
+#include <functional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -54,6 +56,11 @@ public:
 
   // Emit textual LLVM IR to a stream.
   static void print_ir(std::ostream& out, const llvm::Module& module);
+
+  // Emit the module's globals, every function declaration, and only the
+  // function definitions `keep_function` accepts by name.
+  static void print_ir(std::ostream& out, const llvm::Module& module,
+                       const std::function<bool(std::string_view)>& keep_function);
 
   // Initialize LLVM target machinery (call once per process).
   static void initialize_targets();

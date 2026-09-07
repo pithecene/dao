@@ -303,6 +303,29 @@ void LlvmBackend::print_ir(std::ostream& out, const llvm::Module& module) {
   module.print(llvm_out, nullptr);
 }
 
+void LlvmBackend::print_ir(std::ostream& out, const llvm::Module& module,
+                           const std::function<bool(std::string_view)>& keep_function) {
+  llvm::raw_os_ostream llvm_out(out);
+  for (const auto& global : module.globals()) {
+    global.print(llvm_out);
+    llvm_out << '\n';
+  }
+  if (!module.global_empty()) {
+    llvm_out << '\n';
+  }
+  for (const auto& fn : module.functions()) {
+    if (!fn.isDeclaration() && keep_function(std::string_view(fn.getName()))) {
+      fn.print(llvm_out);
+      llvm_out << '\n';
+    }
+  }
+  for (const auto& fn : module.functions()) {
+    if (fn.isDeclaration()) {
+      fn.print(llvm_out);
+    }
+  }
+}
+
 void LlvmBackend::initialize_targets() {
   llvm::InitializeAllTargetInfos();
   llvm::InitializeAllTargets();
