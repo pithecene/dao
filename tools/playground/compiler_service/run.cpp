@@ -51,7 +51,7 @@ auto compile_failed(nlohmann::json diagnostics) -> Reply {
 
 auto compile_failed(nlohmann::json diagnostics, const std::string& fallback_message) -> Reply {
   if (diagnostics.empty()) {
-    diagnostics.push_back(make_internal_error(fallback_message));
+    diagnostics.push_back(make_unlocated_diagnostic(fallback_message));
   }
   return compile_failed(std::move(diagnostics));
 }
@@ -151,7 +151,7 @@ auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
 
   std::string emit_error;
   if (!LlvmBackend::emit_object(*llvm_result.module, obj_path.string(), emit_error)) {
-    diagnostics.push_back(make_internal_error("emit object failed: " + emit_error));
+    diagnostics.push_back(make_unlocated_diagnostic("emit object failed: " + emit_error));
     return compile_failed(std::move(diagnostics));
   }
 
@@ -159,7 +159,7 @@ auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
   auto cc_path = llvm::sys::findProgramByName("cc");
   if (!cc_path) {
     std::filesystem::remove(obj_path);
-    diagnostics.push_back(make_internal_error("cannot find 'cc' linker"));
+    diagnostics.push_back(make_unlocated_diagnostic("cannot find 'cc' linker"));
     return compile_failed(std::move(diagnostics));
   }
 
@@ -183,7 +183,7 @@ auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
     if (!link_error.empty()) {
       msg += ": " + link_error;
     }
-    diagnostics.push_back(make_internal_error(msg));
+    diagnostics.push_back(make_unlocated_diagnostic(msg));
     return compile_failed(std::move(diagnostics));
   }
 

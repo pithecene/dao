@@ -164,7 +164,7 @@ void collect_program_diagnostics(nlohmann::json& out, const PlaygroundProgram& p
   std::vector<Diagnostic> located;
   for (const auto& diag : prog.program.diagnostics) {
     if (diag.span.length == 0) {
-      out.push_back(make_internal_error(diag.message));
+      out.push_back(make_unlocated_diagnostic(diag.message, diag.severity));
     } else {
       located.push_back(diag);
     }
@@ -186,9 +186,9 @@ void collect_diagnostics(nlohmann::json& out,
   }
 }
 
-auto make_internal_error(const std::string& message) -> nlohmann::json {
+auto make_unlocated_diagnostic(const std::string& message, Severity severity) -> nlohmann::json {
   return {
-      {"severity", "error"},
+      {"severity", severity == Severity::Warning ? "warning" : "error"},
       {"file", ""},
       {"offset", 0},
       {"length", 0},
