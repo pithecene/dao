@@ -265,6 +265,11 @@ suite<"typecheck_qualified_bounds"> typecheck_qualified_bounds = [] {
   };
 
   "another module's extend does not satisfy a bound"_test = [kTraits] {
+    // `app::ext` conforms `Shown` to the BOUND'S OWN concept, naming it
+    // qualified so the conformance genuinely registers — and `app::main`
+    // still must not see it, because the extension is another module's
+    // (§5).  Written unqualified this would pass for the wrong reason:
+    // the bare name resolves to nothing in `app::ext`.
     auto checked = check_program({
         {"main.dao",
          "module app::main\nimport app::traits\n"
@@ -273,10 +278,11 @@ suite<"typecheck_qualified_bounds"> typecheck_qualified_bounds = [] {
          "fn main(): i32\n  let s: Shown = Shown(1)\n  return show(s)\n"},
         {"traits.dao", kTraits},
         {"ext.dao",
-         "module app::ext\nimport app::main\n"
-         "extend main::Shown as Reveal:\n  fn reveal(self): i32 -> 1\n"},
+         "module app::ext\nimport app::main\nimport app::traits\n"
+         "extend main::Shown as traits::Reveal:\n  fn reveal(self): i32 -> 1\n"},
     });
-    expect(!is_ok(checked.result)) << all_messages(checked);
+    expect(has_error_containing(checked.result, "does not satisfy concept"))
+        << all_messages(checked);
   };
 };
 
@@ -309,6 +315,28 @@ suite<"typecheck_nominal_concepts"> typecheck_nominal_concepts = [] {
     });
     expect(has_error_containing(checked.result, "both conforms to and denies"))
         << all_messages(checked);
+  };
+};
+
+suite<"typecheck_nominal_identity"> typecheck_nominal_identity = [] {
+  // Two modules each declaring `C` must not answer for one another where
+  // the checker substitutes a concept's self type or reaches a class by
+  // a method's name (CONTRACT_TYPE_SYSTEM_FOUNDATIONS.md §11).
+  "an invisible extension does not suppress a derived method"_test = [] {
+    // `app::other` extends i32 with `show`; `app::main` derives Show for
+    // P through its OWN extension.  The invisible one must not stand in
+    // for the visible one and leave P with no method at all.
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\n"
+         "derived concept Show:\n  fn show(self): i32\n"
+         "extend i32 as Show:\n  fn show(self): i32 -> self\n"
+         "class P:\n  x: i32\n"
+         "fn use_it<T: Show>(v: T): i32 -> v.show()\n"
+         "fn main(): i32\n  let p: P = P(1)\n  return use_it(p)\n"},
+        {"other.dao", "module app::other\nextend i32 as Other:\n  fn show(self): i32 -> 9\n"},
+    });
+    expect(clean(checked)) << all_messages(checked);
   };
 };
 

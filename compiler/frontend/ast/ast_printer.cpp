@@ -175,7 +175,7 @@ private:
     }
     for (const auto& conf : node.conformances) {
       indent();
-      out_ << "Conformance " << conf.concept_name << "\n";
+      out_ << "Conformance " << conf.target.concept_name << "\n";
       Scope conf_scope(depth_);
       for (const auto* method : conf.methods) {
         print_decl(*method);
@@ -183,7 +183,7 @@ private:
     }
     for (const auto& deny : node.denials) {
       indent();
-      out_ << "Deny " << deny.concept_name << "\n";
+      out_ << "Deny " << deny.target.concept_name << "\n";
     }
   }
 
@@ -222,7 +222,7 @@ private:
     indent();
     out_ << "ExtendDecl ";
     print_type_inline(*node.target_type);
-    out_ << " as " << node.concept_name << "\n";
+    out_ << " as " << node.target.concept_name << "\n";
     Scope scope(depth_);
     for (const auto* method : node.methods) {
       print_decl(*method);

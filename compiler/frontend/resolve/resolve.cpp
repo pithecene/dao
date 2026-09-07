@@ -355,10 +355,16 @@ private:
     if (existing != nullptr) {
       // Allow arity-based function overloading: same name, different
       // parameter counts. Both must be functions.
-      if (kind == SymbolKind::Function &&
-          existing->kind == SymbolKind::Function &&
-          decl.kind() == NodeKind::FunctionDecl &&
-          existing->decl != nullptr) {
+      // An `extern fn` names a C symbol exactly as written
+      // (CONTRACT_C_ABI_INTEROP.md §3), so it can never take the `$N`
+      // name arity overloading gives: two externs of one name are one
+      // symbol, and a second declaration is a duplicate, not an overload.
+      const bool either_extern =
+          (decl.is<FunctionDecl>() && decl.as<FunctionDecl>().is_extern) ||
+          (existing->decl != nullptr && existing->decl_as_decl()->is<FunctionDecl>() &&
+           existing->decl_as_decl()->as<FunctionDecl>().is_extern);
+      if (kind == SymbolKind::Function && existing->kind == SymbolKind::Function &&
+          decl.kind() == NodeKind::FunctionDecl && existing->decl != nullptr && !either_extern) {
         size_t new_arity = decl.as<FunctionDecl>().params.size();
         const auto* existing_decl = existing->decl_as_decl();
 
@@ -412,11 +418,26 @@ private:
     }
   }
 
+  /// Publish an overload into the unit's declaration scope and, when the
+  /// module's export table is a separate scope (a prelude module), into
+  /// that too — but only for a symbol THIS module declared.  The
+  /// bootstrap step re-publishes the original declaration, which in a
+  /// shared scope may belong to another module; exporting it would put
+  /// one prelude module's function in another's export table.  The base
+  /// name is exported beside the mangled one so `b::f` resolves to this
+  /// module's own declaration before arity selection refines it.
   void
   publish_overload(Scope* scope, std::string_view base, std::string_view mangled, Symbol* sym) {
     scope->declare_overload(base, mangled, sym);
-    if (current_ != nullptr && current_->exports != nullptr && current_->exports != scope) {
-      current_->exports->declare_overload(base, mangled, sym);
+    if (current_ == nullptr || current_->exports == nullptr || current_->exports == scope) {
+      return;
+    }
+    if (sym->module != nullptr && sym->module != current_->module) {
+      return; // another module's declaration is not this module's export
+    }
+    current_->exports->declare_overload(base, mangled, sym);
+    if (current_->exports->lookup_local(base) == nullptr) {
+      current_->exports->declare(base, sym);
     }
   }
 
@@ -677,7 +698,7 @@ private:
 
     // Resolve conformance blocks — concept name + method signatures.
     for (const auto& conf : st.conformances) {
-      resolve_conformance_target(conf, parent);
+      resolve_conformance_target(conf.target, parent);
       for (const auto* method : conf.methods) {
         resolve_function(*method, struct_scope);
       }
@@ -685,7 +706,7 @@ private:
 
     // Resolve deny specs — concept name lookup only.
     for (const auto& deny : st.denials) {
-      resolve_conformance_target(deny, parent);
+      resolve_conformance_target(deny.target, parent);
     }
   }
 
@@ -693,7 +714,7 @@ private:
   /// its own segment, so the checker compares concepts by identity.
   /// `b::Concept` reaches the binding's module exports; an unqualified
   /// name is looked up in scope (CONTRACT_MODULE_SYSTEM.md §6).
-  template <typename Target> void resolve_conformance_target(const Target& target, Scope* scope) {
+  void resolve_conformance_target(const ConformanceTarget& target, Scope* scope) {
     if (target.module_binding.empty()) {
       if (auto* sym = scope->lookup(target.concept_name)) {
         uses_[target.concept_span.offset] = sym;
@@ -751,7 +772,7 @@ private:
       resolve_type(*ext.target_type, parent);
     }
 
-    resolve_conformance_target(ext, parent);
+    resolve_conformance_target(ext.target, parent);
 
     // Extract target type name for method symbol mangling.
     // Must include type arguments to match print_type() output used

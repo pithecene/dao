@@ -79,6 +79,13 @@ private:
 
   /// LLVM name of a function symbol (llvm_names.h) for this program.
   [[nodiscard]] auto fn_name(const Symbol& sym) const -> std::string;
+
+  /// A MIR function's source-level signature, for comparing two
+  /// declarations of one C symbol without LLVM's type erasure.
+  [[nodiscard]] static auto mir_signature(const MirFunction& fn) -> std::string;
+
+  /// The source signature each extern was first declared with.
+  std::unordered_map<std::string, std::string> extern_signatures_;
   std::vector<Diagnostic> diagnostics_;
 
   void emit_diagnostic(Span span, const std::string& message);

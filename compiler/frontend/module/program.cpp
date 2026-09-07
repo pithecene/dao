@@ -101,13 +101,23 @@ auto assemble(std::vector<SourceInput> inputs, const GraphInputs& graph) -> Prog
 
 auto display_path_for(const std::filesystem::path& path,
                       const std::filesystem::path& display_root) -> std::string {
+  // Files are ordered by display path (§8.4), so the path must be
+  // NORMALIZED first: `./a.dao`, `b/../a.dao`, and `a.dao` name one
+  // file and must sort as one spelling, or the same set supplied two
+  // ways orders differently and the output differs with it.
+  std::error_code ec;
+  auto absolute = std::filesystem::weakly_canonical(path, ec);
+  const auto& normalized = ec ? path.lexically_normal() : absolute;
   if (!display_root.empty()) {
-    auto relative = path.lexically_relative(display_root);
+    std::error_code root_ec;
+    auto root_abs = std::filesystem::weakly_canonical(display_root, root_ec);
+    const auto& base = root_ec ? display_root.lexically_normal() : root_abs;
+    auto relative = normalized.lexically_relative(base);
     if (!relative.empty() && *relative.begin() != "..") {
       return relative.generic_string();
     }
   }
-  return path.generic_string();
+  return normalized.generic_string();
 }
 
 auto canonical_or_self(const std::filesystem::path& path) -> std::filesystem::path {
