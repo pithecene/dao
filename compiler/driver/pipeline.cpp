@@ -128,12 +128,16 @@ auto load_program(const ProgramRequest& request) -> Program {
       located.push_back(diag);
     }
   }
-  has_errors |= print_error_diagnostics(program.source_map, located);
-
+  // §8.4: located diagnostics are emitted in file order, then offset
+  // order — not grouped by the phase that produced them.  Files occupy
+  // disjoint, ascending ranges of the program's offset space, so sorting
+  // by offset is exactly that order.
   for (const auto& file : program.files) {
-    has_errors |= print_error_diagnostics(program.source_map, file->lex.diagnostics);
-    has_errors |= print_error_diagnostics(program.source_map, file->parse.diagnostics);
+    located.insert(located.end(), file->lex.diagnostics.begin(), file->lex.diagnostics.end());
+    located.insert(located.end(), file->parse.diagnostics.begin(), file->parse.diagnostics.end());
   }
+  std::ranges::stable_sort(located, {}, [](const Diagnostic& diag) { return diag.span.offset; });
+  has_errors |= print_error_diagnostics(program.source_map, located);
   if (has_errors || !program.lexed_and_parsed_cleanly()) {
     std::exit(EXIT_FAILURE);
   }
