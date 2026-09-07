@@ -308,6 +308,37 @@ suite<"simple_functions"> simple_functions = [] {
     expect(contains(ir, "ret i32 42")) << ir;
   };
 
+  "fieldless variant of a payload-bearing enum passes inline as an argument"_test = [] {
+    // The value is a tagged struct; spelled as a bare tag it tripped LLVM's
+    // aggregate-initializer check when folded into a constant construct.
+    LlvmTestPipeline pipe("enum class K:\n"
+                          "  A(v: i64)\n"
+                          "  B\n"
+                          "class Inst:\n"
+                          "  kind: K\n"
+                          "  name: string\n"
+                          "fn make(): Inst\n"
+                          "  return Inst(K.B, \"\")\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << ir;
+    expect(contains(ir, "define")) << ir;
+  };
+
+  "match on a payload-bearing enum with a fieldless arm lowers"_test = [] {
+    LlvmTestPipeline pipe("enum class K:\n"
+                          "  A(v: i64)\n"
+                          "  B\n"
+                          "fn pick(k: K): i64\n"
+                          "  match k:\n"
+                          "    K.A(v):\n"
+                          "      return v\n"
+                          "    K.B:\n"
+                          "      return 0\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << ir;
+    expect(contains(ir, "icmp eq")) << ir;
+  };
+
   "void function"_test = [] {
     LlvmTestPipeline pipe(
         "fn noop(): void\n"

@@ -8,8 +8,17 @@ target_compile_definitions(daoc PRIVATE
   DAO_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
+# Process-level tests: run daoc as users do (concurrent builds, outputs).
+find_package(ut REQUIRED)
+add_executable(driver_test driver_test.cpp)
+target_link_libraries(driver_test PRIVATE dao_backend_llvm dao_frontend Boost::ut)
+target_compile_definitions(driver_test PRIVATE DAO_DAOC="$<TARGET_FILE:daoc>")
+add_dependencies(driver_test daoc)
+
+include(CTest)
+add_test(NAME driver_test COMMAND driver_test)
+
 # End-to-end multi-file builds: discovery mode, explicit mode, and
 # input-order determinism (compiler/driver/multifile_build_test.sh).
-include(CTest)
 add_test(NAME multifile_build_test
   COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/multifile_build_test.sh $<TARGET_FILE:daoc> ${CMAKE_SOURCE_DIR})
