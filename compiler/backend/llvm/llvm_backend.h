@@ -82,10 +82,25 @@ private:
 
   /// A MIR function's source-level signature, for comparing two
   /// declarations of one C symbol without LLVM's type erasure.
-  [[nodiscard]] static auto mir_signature(const MirFunction& fn) -> std::string;
+  /// An extern's parameter types followed by its return type, held by
+  /// identity: two declarations agree when they name the same types,
+  /// which their printed forms cannot decide — two distinct classes
+  /// named `Payload` print alike.
+  using ExternSignature = std::vector<const Type*>;
+
+  /// One declaration of a C symbol: its types and the module that
+  /// wrote it.  The module is what makes a diagnostic legible when the
+  /// two signatures print the same, which is exactly the case identity
+  /// comparison exists to catch.
+  struct ExternDeclaration {
+    ExternSignature types;
+    std::string module;
+  };
+  [[nodiscard]] static auto mir_signature(const MirFunction& fn) -> ExternSignature;
+  [[nodiscard]] static auto render_signature(const ExternSignature& signature) -> std::string;
 
   /// The source signature each extern was first declared with.
-  std::unordered_map<std::string, std::string> extern_signatures_;
+  std::unordered_map<std::string, ExternDeclaration> extern_signatures_;
   std::vector<Diagnostic> diagnostics_;
 
   void emit_diagnostic(Span span, const std::string& message);
