@@ -192,6 +192,55 @@ auto load_examples() -> std::vector<Example> {
   return examples;
 }
 
+/// One multi-file example: every `.dao` file of a directory under
+/// `examples/` whose files declare a single `fn main` between them,
+/// which makes them ONE program rather than several.  A directory of
+/// independent programs — `bootstrap_probe/`, where every file has its
+/// own `fn main` — is not one, and is skipped.  The example routes list
+/// single files only, so these are read from disk; the service sees
+/// them as the program-shaped request any editor would send.
+struct MultifileExample {
+  std::string name; // the directory's name
+  json files = json::array();
+  std::string document; // the file declaring `fn main`
+};
+
+auto load_multifile_examples() -> std::vector<MultifileExample> {
+  std::vector<MultifileExample> examples;
+  auto dir = repo_root() / "examples";
+  if (!std::filesystem::exists(dir)) {
+    return examples;
+  }
+  for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+    if (!entry.is_directory()) {
+      continue;
+    }
+    MultifileExample example{.name = entry.path().filename().string()};
+    std::vector<std::filesystem::path> paths;
+    for (const auto& file : std::filesystem::directory_iterator(entry.path())) {
+      if (file.path().extension() == ".dao") {
+        paths.push_back(file.path());
+      }
+    }
+    std::ranges::sort(paths);
+    size_t entries = 0;
+    for (const auto& path : paths) {
+      auto source = dao::read_file(path);
+      auto name = example.name + "/" + path.filename().string();
+      if (source.find("fn main(") != std::string::npos) {
+        example.document = name;
+        ++entries;
+      }
+      example.files.push_back({{"path", name}, {"source", source}});
+    }
+    if (entries == 1) {
+      examples.push_back(std::move(example));
+    }
+  }
+  std::ranges::sort(examples, {}, &MultifileExample::name);
+  return examples;
+}
+
 /// `<name>.dao<TAB><expected diagnostic substring>` per line; blank lines
 /// and `#` comments ignored.  The substring is what the compiler must
 /// report for the failure to count as the known one.
@@ -708,6 +757,65 @@ suite<"playground_service"> playground_service_suite = [] {
     expect(std::filesystem::exists(matrix)) << matrix.string() << " is missing";
     expect(dao::read_file(matrix) == render_capability_matrix())
         << matrix.string() << " is stale: run `task gen-tooling-surface`";
+  };
+
+  "diagnostics_come_back_in_program_order"_test = [] {
+    // Phases are collected one after another, so without a final sort a
+    // resolve error in the first file follows a parse error in the
+    // second.  Program order is by file, then by offset within it
+    // (CONTRACT_MODULE_SYSTEM.md §8.4).
+    json files = json::array({
+        {{"path", "a.dao"}, {"source", "module a\nfn uses_missing(): i32 -> nowhere()\n"}},
+        {{"path", "b.dao"}, {"source", "module b\nfn broken(): i32\n  return @\n"}},
+    });
+    for (const auto& route : {"analyze", "run"}) {
+      auto reply = call(route, json{{"files", files}, {"document", "a.dao"}});
+      std::vector<std::pair<std::string, uint32_t>> seen;
+      for (const auto& diag : reply.body["diagnostics"]) {
+        seen.emplace_back(diag.value("file", std::string{}), diag.value("offset", 0U));
+      }
+      expect(seen.size() > 1_ul) << route << ": expected diagnostics from both files";
+      expect(std::ranges::is_sorted(seen))
+          << route << " diagnostics are out of program order: " << reply.body["diagnostics"].dump();
+    }
+  };
+
+  "multifile_examples_analyze_and_run_as_one_program"_test = [] {
+    // A directory of examples is one program: every file analyzes with
+    // its own diagnostics, and the set builds and runs together.
+    init_run_support();
+    const bool update = std::getenv("DAO_UPDATE_GOLDENS") != nullptr;
+
+    for (const auto& example : load_multifile_examples()) {
+      for (const auto& file : example.files) {
+        json request = {{"files", example.files}, {"document", file["path"]}};
+        auto analyzed = call("analyze", request);
+        expect(analyzed.status == http_status::ok) << example.name << ": analyze failed";
+        for (const auto& diag : analyzed.body["diagnostics"]) {
+          expect(diag["severity"] != "error")
+              << example.name << "/" << file["path"] << ": " << diag["message"];
+        }
+      }
+
+      auto reply = call("run", json{{"files", example.files}, {"document", example.document}});
+      auto exit_code = reply.body["exit_code"].get<int>();
+      expect(exit_code == 0) << example.name << " exited " << exit_code << ": "
+                             << reply.body["stderr"].get<std::string>()
+                             << reply.body["diagnostics"].dump();
+
+      auto stdout_text = reply.body["stdout"].get<std::string>();
+      auto golden_path = golden_dir() / (example.name + ".out");
+      if (update) {
+        std::ofstream(golden_path, std::ios::binary) << stdout_text;
+        continue;
+      }
+      expect(std::filesystem::exists(golden_path))
+          << golden_path.string() << " is missing; run with DAO_UPDATE_GOLDENS=1";
+      if (std::filesystem::exists(golden_path)) {
+        expect(dao::read_file(golden_path) == stdout_text)
+            << example.name << " output differs from " << golden_path.filename().string();
+      }
+    }
   };
 
   "examples_run_to_their_goldens"_test = [] {

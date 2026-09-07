@@ -1,0 +1,15 @@
+module main
+// The entry module: the one that declares `fn main`.  Building this
+// directory as one program compiles all three files together.
+
+import shapes
+import report
+
+fn main(): i32
+  let square = shapes::Rect(3, 3)
+  let oblong = shapes::Rect(4, 2)
+  print(shapes::area(square))
+  print(shapes::area(oblong))
+  print(report::describe(square))
+  print(report::describe(oblong))
+  return 0

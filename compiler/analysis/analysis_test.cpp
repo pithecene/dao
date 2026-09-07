@@ -47,7 +47,7 @@ struct AnalysisPipeline {
 };
 
 // ---------------------------------------------------------------------------
-// Cross-module navigation (Task 31 D5): hover and definition follow a
+// Cross-module navigation: hover and definition follow a
 // qualified name into the module that declares it.
 // ---------------------------------------------------------------------------
 

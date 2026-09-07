@@ -36,6 +36,7 @@ auto run_reply(std::string stdout_text,
                std::string stderr_text,
                int exit_code,
                nlohmann::json diagnostics) -> Reply {
+  sort_diagnostics(diagnostics);
   return {.status = http_status::ok,
           .body = {
               {"stdout", std::move(stdout_text)},

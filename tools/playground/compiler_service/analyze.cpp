@@ -41,7 +41,8 @@ struct AnalyzeOutput {
   std::string mir;
   std::string llvm_ir;
 
-  [[nodiscard]] auto reply() const -> Reply {
+  [[nodiscard]] auto reply() -> Reply {
+    sort_diagnostics(diagnostics);
     return {.status = http_status::ok,
             .body = {
                 {"file", file},

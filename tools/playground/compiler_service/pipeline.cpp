@@ -186,6 +186,21 @@ void collect_diagnostics(nlohmann::json& out,
   }
 }
 
+void sort_diagnostics(nlohmann::json& diagnostics) {
+  if (!diagnostics.is_array()) {
+    return;
+  }
+  auto& entries = diagnostics.get_ref<nlohmann::json::array_t&>();
+  std::ranges::stable_sort(entries, [](const nlohmann::json& a, const nlohmann::json& b) {
+    auto file_a = a.value("file", std::string{});
+    auto file_b = b.value("file", std::string{});
+    if (file_a != file_b) {
+      return file_a < file_b;
+    }
+    return a.value("offset", 0U) < b.value("offset", 0U);
+  });
+}
+
 auto make_unlocated_diagnostic(const std::string& message, Severity severity) -> nlohmann::json {
   return {
       {"severity", severity == Severity::Warning ? "warning" : "error"},

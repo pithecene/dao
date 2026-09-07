@@ -847,7 +847,7 @@ declared in one module instantiated from another (Task 28 §21.2).
 8. Output is deterministic under input-order permutation for a fixed
    file set and entry selection.
 9. The one behaviour change (prelude shadowing, §7.6) is covered by a
-   test and called out in the changelog.
+   test and called out in the changelog (`CHANGELOG.md`, Unreleased).
 10. Every rule in §7 is stated in `CONTRACT_MODULE_SYSTEM.md`; the
     implementation cites the contract, not this spec.
 
