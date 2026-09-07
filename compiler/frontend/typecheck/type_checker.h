@@ -22,11 +22,21 @@ namespace dao {
 // TypeCheckResult — output of the type-checking pass.
 // ---------------------------------------------------------------------------
 
+/// Whether a method introduced by `extend` in `owner` participates in
+/// lookup from `from`: within the declaring module, and everywhere when
+/// that module is in the prelude (CONTRACT_MODULE_SYSTEM.md §5).  A
+/// method that travels with its type carries no owner and is always
+/// visible.  The checker and the tooling that mirrors it share this.
+inline auto extend_visible_from(const ModuleInfo* owner, const ModuleInfo* from) -> bool {
+  return owner == nullptr || owner == from || owner->is_prelude;
+}
+
 /// A method available on a type via concept/extend.
 struct MethodInfo {
   const Type* receiver_type;
   std::string_view method_name;
-  const Type* method_type; // function type (self removed)
+  const Type* method_type;                   // function type (self removed)
+  const ModuleInfo* extend_module = nullptr; // set only for `extend` methods
 };
 
 struct TypeCheckResult {
@@ -218,7 +228,7 @@ private:
   /// True if an `extend` method declared in `owner` is in scope for the
   /// module being checked.
   [[nodiscard]] auto extend_is_visible(const ModuleInfo* owner) const -> bool {
-    return owner == nullptr || owner == current_module_ || owner->is_prelude;
+    return extend_visible_from(owner, current_module_);
   }
 
   /// The module a top-level declaration belongs to, or null when

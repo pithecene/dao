@@ -67,7 +67,7 @@ auto TypeChecker::check(std::span<const FileNode* const> files) -> TypeCheckResu
   std::vector<MethodInfo> methods;
   for (const auto& [key, entries] : method_table_) {
     for (const auto& entry : entries) {
-      methods.push_back({key.type, key.name, entry.fn_type});
+      methods.push_back({key.type, key.name, entry.fn_type, entry.extend_module});
     }
   }
 

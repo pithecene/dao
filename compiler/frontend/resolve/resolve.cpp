@@ -613,10 +613,7 @@ private:
 
     // Resolve conformance blocks — concept name + method signatures.
     for (const auto& conf : st.conformances) {
-      auto* sym = parent->lookup(conf.concept_name);
-      if (sym != nullptr) {
-        uses_[conf.concept_span.offset] = sym;
-      }
+      resolve_conformance_target(conf, parent);
       for (const auto* method : conf.methods) {
         resolve_function(*method, struct_scope);
       }
@@ -624,11 +621,41 @@ private:
 
     // Resolve deny specs — concept name lookup only.
     for (const auto& deny : st.denials) {
-      auto* sym = parent->lookup(deny.concept_name);
-      if (sym != nullptr) {
-        uses_[deny.concept_span.offset] = sym;
-      }
+      resolve_conformance_target(deny, parent);
     }
+  }
+
+  /// Resolve the concept a conformance position names and record it at
+  /// its own segment, so the checker compares concepts by identity.
+  /// `b::Concept` reaches the binding's module exports; an unqualified
+  /// name is looked up in scope (CONTRACT_MODULE_SYSTEM.md §6).
+  template <typename Target> void resolve_conformance_target(const Target& target, Scope* scope) {
+    if (target.module_binding.empty()) {
+      if (auto* sym = scope->lookup(target.concept_name)) {
+        uses_[target.concept_span.offset] = sym;
+      }
+      return;
+    }
+    auto* binding = scope->lookup(target.module_binding);
+    if (binding == nullptr || binding->kind != SymbolKind::Module) {
+      diagnostics_.push_back(Diagnostic::error(target.binding_span,
+                                               "'" + std::string(target.module_binding) +
+                                                   "' is not an imported module"));
+      return;
+    }
+    uses_[target.binding_span.offset] = binding;
+    const auto* module = binding->decl_as_module();
+    if (module == nullptr || module->exports == nullptr) {
+      return; // no program, or an import the graph already reported missing
+    }
+    auto* exported = module->exports->lookup_local(target.concept_name);
+    if (exported == nullptr || exported->kind != SymbolKind::Concept) {
+      diagnostics_.push_back(Diagnostic::error(target.concept_span,
+                                               "module '" + module->display + "' has no concept '" +
+                                                   std::string(target.concept_name) + "'"));
+      return;
+    }
+    uses_[target.concept_span.offset] = exported;
   }
 
   void resolve_alias(const Decl& decl, Scope* scope) {
@@ -660,11 +687,7 @@ private:
       resolve_type(*ext.target_type, parent);
     }
 
-    // Resolve the concept name as a type-position reference.
-    auto* sym = parent->lookup(ext.concept_name);
-    if (sym != nullptr) {
-      uses_[ext.concept_span.offset] = sym;
-    }
+    resolve_conformance_target(ext, parent);
 
     // Extract target type name for method symbol mangling.
     // Must include type arguments to match print_type() output used
