@@ -111,7 +111,8 @@ private:
     const FileNode* file = nullptr;
     ModuleInfo* module = nullptr;
     bool is_prelude = false;
-    Scope* scope = nullptr;
+    Scope* scope = nullptr;   // where the file's top-level names are declared
+    Scope* exports = nullptr; // what `m::name` reaches; differs only for a prelude unit
   };
 
   ResolveContext ctx_;
@@ -137,12 +138,20 @@ private:
     for (auto& unit : units) {
       if (unit.is_prelude) {
         unit.scope = prelude_;
+        // Prelude modules share one lexical namespace (§7.3) but keep
+        // their own identities: `import core::vector` reaches what
+        // `core::vector` declares, not the whole prelude (§7.5).  The
+        // export table is therefore a scope of its own, carrying no
+        // range so it never takes part in positional lookup.
+        unit.exports = ctx_.make_scope(ScopeKind::Module, prelude_);
       } else {
         unit.scope = ctx_.make_scope(ScopeKind::Module, prelude_);
         unit.scope->set_range(unit.file->span);
+        unit.exports = unit.scope;
       }
       if (unit.module != nullptr) {
         unit.module->scope = unit.scope;
+        unit.module->exports = unit.exports;
       }
     }
 
@@ -348,7 +357,7 @@ private:
           auto mangled = ctx_.intern(
               std::string(name) + "$" + std::to_string(new_arity));
           auto* sym = new_symbol(kind, mangled, name_span, &decl);
-          scope->declare_overload(name, mangled, sym);
+          publish_overload(scope, name, mangled, sym);
 
           // Bootstrap the overload set with the original declaration
           // if this is the first overload being added.
@@ -358,7 +367,7 @@ private:
                 existing_decl->as<FunctionDecl>().params.size();
             auto orig_mangled = ctx_.intern(
                 std::string(name) + "$" + std::to_string(orig_arity));
-            scope->declare_overload(name, orig_mangled, existing);
+            publish_overload(scope, name, orig_mangled, existing);
           }
           return;
         }
@@ -368,10 +377,28 @@ private:
           "duplicate top-level declaration '" + std::string(name) + "'"));
     } else {
       auto* sym = new_symbol(kind, name, name_span, &decl);
-      scope->declare(name, sym);
+      publish(scope, name, sym);
     }
     if (decl.is<ClassDecl>()) {
       declare_class_methods(decl.as<ClassDecl>(), scope);
+    }
+  }
+
+  /// Declare a top-level name into the unit's lexical scope and into its
+  /// module's export table.  The two are the same scope except in a
+  /// prelude module, which declares into the shared prelude scope.
+  void publish(Scope* scope, std::string_view name, Symbol* sym) {
+    scope->declare(name, sym);
+    if (current_ != nullptr && current_->exports != nullptr && current_->exports != scope) {
+      current_->exports->declare(name, sym);
+    }
+  }
+
+  void
+  publish_overload(Scope* scope, std::string_view base, std::string_view mangled, Symbol* sym) {
+    scope->declare_overload(base, mangled, sym);
+    if (current_ != nullptr && current_->exports != nullptr && current_->exports != scope) {
+      current_->exports->declare_overload(base, mangled, sym);
     }
   }
 
@@ -384,7 +411,7 @@ private:
       const auto& fn_decl = method->as<FunctionDecl>();
       auto mangled_name = ctx_.intern(std::string(st.name) + "." + std::string(fn_decl.name));
       auto* method_sym = new_symbol(SymbolKind::Function, mangled_name, fn_decl.name_span, method);
-      scope->declare(mangled_name, method_sym);
+      publish(scope, mangled_name, method_sym);
     }
   }
 
@@ -878,9 +905,11 @@ private:
       return;
     }
 
-    // Prelude modules share one namespace; their export table is the
-    // prelude scope.  Import bindings are not re-exported (§3.2).
-    const auto* exports = target->is_prelude ? prelude_ : target->scope;
+    // A module's export table is its own declarations, prelude module
+    // included: `import core::vector` reaches what `core::vector`
+    // declares, not what the prelude as a whole does (§7.5).  Import
+    // bindings are not re-exported (§3.2).
+    const auto* exports = target->exports;
     auto name = qn.segments[1];
     auto name_offset = expr.span.offset + static_cast<uint32_t>(qn.segments[0].size()) + 2;
     auto* exported = exports->lookup_local(name);
@@ -1092,16 +1121,28 @@ private:
           uses_[path.span.offset] = sym;
         }
       } else {
-        // Multi-segment type: resolve leading segment as module reference.
-        // Only Module symbols are valid as leading segments of qualified
-        // type paths — other kinds are silently ignored (type-position
-        // references are not diagnosed for unknown names).
+        // Multi-segment type: the leading segment is a module binding.
+        // Only Module symbols are valid there — other kinds are silently
+        // ignored (type-position references are not diagnosed for
+        // unknown names).
         auto first_seg = path.segments.front();
         auto* sym = scope->lookup(first_seg);
         if (sym != nullptr && sym->kind == SymbolKind::Module) {
           uses_[path.span.offset] = sym;
+          // The named type itself is that module's export, recorded at
+          // its own offset: `m::T` in type position is the same symbol
+          // `m::T` in expression position resolves to, and a consumer
+          // (a concept bound, say) needs the type, not the module.
+          const auto* target = sym->decl_as_module();
+          if (target != nullptr && target->exports != nullptr) {
+            auto name = path.segments[1];
+            auto name_offset = path.span.offset + static_cast<uint32_t>(first_seg.size()) + 2;
+            if (auto* exported = target->exports->lookup_local(name);
+                exported != nullptr && exported->kind != SymbolKind::Module) {
+              uses_[name_offset] = exported;
+            }
+          }
         }
-        // Trailing segments are unresolvable without cross-file resolution.
       }
 
       // Resolve type arguments recursively.

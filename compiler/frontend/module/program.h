@@ -47,7 +47,10 @@ struct ModuleInfo {
   bool is_prelude = false;
   bool declares_main = false;       // a top-level `fn main`
   std::vector<ModuleInfo*> imports; // resolved edges in declaration order, duplicates removed
-  Scope* scope = nullptr;           // set by the resolver; its local declarations are the export table
+  Scope* scope = nullptr;           // set by the resolver: the module's lexical scope
+  Scope* exports = nullptr;         // its own declarations — what a qualified path reaches (§7.5).
+                                    // Same scope as `scope` except for a prelude module, whose
+                                    // declarations live in the shared prelude scope (§7.2, §7.3)
 };
 
 /// Options common to the loaders that read the filesystem.

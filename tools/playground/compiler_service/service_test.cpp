@@ -470,13 +470,16 @@ suite<"playground_service"> playground_service_suite = [] {
     // The document calls into another file of the program; the reply
     // says where the definition is, in that file's own coordinates.
     const std::string lib = "module lib\n\nfn helper(): i32\n  return 41\n";
-    const std::string main = "module app\n\nfn main(): i32\n  return helper() + 1\n";
+    // `import lib` binds `lib` locally (CONTRACT_MODULE_SYSTEM): a module
+    // reaches another module's functions through that binding.
+    const std::string main =
+        "module app\nimport lib\n\nfn main(): i32\n  return lib::helper() + 1\n";
     json request = {{"files",
                      json::array({{{"path", "lib.dao"}, {"source", lib}},
                                   {{"path", kTestDocument}, {"source", main}}})},
                     {"document", kTestDocument}};
 
-    auto call_site = static_cast<uint32_t>(main.find("helper()"));
+    auto call_site = static_cast<uint32_t>(main.find("lib::helper()") + 5);
     json position = request;
     position["offset"] = call_site;
     auto definition = call("gotoDef", position);
