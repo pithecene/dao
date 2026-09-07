@@ -1,0 +1,6 @@
+module duplicate
+import dup::first
+import dup::second
+
+fn main(): i32
+  return 0

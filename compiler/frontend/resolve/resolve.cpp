@@ -539,6 +539,19 @@ private:
     }
   }
 
+  /// Resolve what a call of `arity` arguments calls: an unqualified
+  /// name picks the overload of that arity, a qualified one is rebound
+  /// to the export of that arity.  A pipeline is a call of one
+  /// argument, so `x |> f` must select what `f(x)` selects.
+  void resolve_callee(const Expr& callee, size_t arity, Scope* scope) {
+    if (callee.is<IdentifierExpr>() &&
+        try_resolve_overload(callee, callee.as<IdentifierExpr>().name, arity, scope)) {
+      return;
+    }
+    resolve_expr(callee, scope);
+    rebind_qualified_overload(callee, arity, scope);
+  }
+
   /// Try to resolve an identifier to an overloaded function by arity.
   /// If the name is overloaded and a match is found, records the use
   /// and returns true. Otherwise returns false (caller should fall
@@ -1135,16 +1148,7 @@ private:
       const auto& call = expr.as<CallExpr>();
       // For overloaded functions, select the overload matching the
       // argument count. Falls through to normal resolution otherwise.
-      bool resolved = false;
-      if (call.callee->is<IdentifierExpr>()) {
-        resolved = try_resolve_overload(
-            *call.callee, call.callee->as<IdentifierExpr>().name,
-            call.args.size(), scope);
-      }
-      if (!resolved) {
-        resolve_expr(*call.callee, scope);
-        rebind_qualified_overload(*call.callee, call.args.size(), scope);
-      }
+      resolve_callee(*call.callee, call.args.size(), scope);
       for (const auto* arg : call.args) {
         resolve_expr(*arg, scope);
       }
@@ -1172,15 +1176,7 @@ private:
       const auto& pipe = expr.as<PipeExpr>();
       resolve_expr(*pipe.left, scope);
       // Pipe passes the LHS as a single argument → effective arity 1.
-      bool resolved = false;
-      if (pipe.right->is<IdentifierExpr>()) {
-        resolved = try_resolve_overload(
-            *pipe.right, pipe.right->as<IdentifierExpr>().name,
-            1, scope);
-      }
-      if (!resolved) {
-        resolve_expr(*pipe.right, scope);
-      }
+      resolve_callee(*pipe.right, 1, scope);
       break;
     }
     case NodeKind::TryExpr: {

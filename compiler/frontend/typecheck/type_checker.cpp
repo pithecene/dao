@@ -428,16 +428,22 @@ auto TypeChecker::resolve_symbol_type_for_type_decl(const Symbol* sym) -> const 
 void TypeChecker::register_declarations() {
   pending_classes_.clear(); // Reset pass-local state for this file.
   register_type_names();
-  // Aliases come after the class shells they may name and are tried
-  // again after the enums, which may in turn name an alias.
-  register_type_aliases(/*report_failures=*/false);
+  // Aliases come after the class shells they may name, and repeat until
+  // a pass registers nothing new: one alias may name another to any
+  // depth, in any order.  Enums are registered in between because their
+  // payloads may name an alias, and aliases may in turn name an enum.
+  while (register_type_aliases(/*report_failures=*/false) > 0) {
+  }
   register_enum_variants();
+  while (register_type_aliases(/*report_failures=*/false) > 0) {
+  }
   register_type_aliases(/*report_failures=*/true);
   register_struct_fields();
   register_signatures();
 }
 
-void TypeChecker::register_type_aliases(bool report_failures) {
+auto TypeChecker::register_type_aliases(bool report_failures) -> size_t {
+  size_t registered = 0;
   for (const auto* decl : all_decls_) {
     if (decl->kind() != NodeKind::AliasDecl) {
       continue;
@@ -459,6 +465,7 @@ void TypeChecker::register_type_aliases(bool report_failures) {
     if (aliased_type != nullptr) {
       symbol_types_[sym] = aliased_type;
       typed_.set_decl_type(decl, aliased_type);
+      ++registered;
       continue;
     }
     if (!report_failures) {
@@ -475,6 +482,7 @@ void TypeChecker::register_type_aliases(bool report_failures) {
             "cannot resolve the type aliased by '" + std::string(alias.name) + "'");
     }
   }
+  return registered;
 }
 
 void TypeChecker::register_type_names() {
@@ -2671,24 +2679,48 @@ void TypeChecker::build_method_table() {
         }
         const auto* fn_type = build_method_fn_type(method);
         // Find the concrete extend implementation for HIR lowering.
+        // Matching the target type and the method's spelling is not
+        // enough: an extension is module-local (§5), and one written
+        // for a DIFFERENT concept that happens to name a method the
+        // same way does not implement this one.
         const Decl* impl_decl = nullptr;
+        const ModuleInfo* impl_module = nullptr;
         for (const auto* decl : all_decls_) {
-          if (decl->kind() != NodeKind::ExtendDecl)
+          if (decl->kind() != NodeKind::ExtendDecl) {
             continue;
+          }
           const auto& ext = decl->as<ExtendDecl>();
-          const auto* target = resolve_type_node(ext.target_type);
-          if (target != type)
+          if (resolve_type_node(ext.target_type) != type) {
             continue;
+          }
+          const auto* owner = declaring_module(decl);
+          if (!extend_is_visible(owner)) {
+            continue;
+          }
+          // An unconstrained `extend T:` supplies methods to anyone; a
+          // conforming one supplies them for its own concept only.
+          const auto* conforms_to = concept_named_at(ext.target.concept_span);
+          if (!ext.target.concept_name.empty() && conforms_to != concept_decl) {
+            continue;
+          }
           for (const auto* ext_method : ext.methods) {
             if (ext_method->as<FunctionDecl>().name == method.name) {
               impl_decl = ext_method;
+              impl_module = owner;
               break;
             }
           }
-          if (impl_decl != nullptr)
+          if (impl_decl != nullptr) {
             break;
+          }
         }
-        add_method(key, {fn_type, impl_decl != nullptr ? impl_decl : cpt_method_decl});
+        // A concept method with no concrete implementation is what the
+        // derivation itself provides, and is available wherever the
+        // type is; a concrete one carries the module that wrote it.
+        add_method(key,
+                   {fn_type,
+                    impl_decl != nullptr ? impl_decl : cpt_method_decl,
+                    impl_decl != nullptr ? impl_module : nullptr});
       }
     }
   }
