@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <map>
+#include <optional>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
@@ -31,7 +32,14 @@ using ModuleSet = std::set<ModuleInfo*, ByDisplay>;
 
 auto declares_main(const FileNode& file) -> bool {
   return std::ranges::any_of(file.declarations, [](const Decl* decl) -> bool {
-    return decl->is<FunctionDecl>() && decl->as<FunctionDecl>().name == "main";
+    if (!decl->is<FunctionDecl>()) {
+      return false;
+    }
+    // `extern fn main` names an entry defined somewhere else and has no
+    // body of its own, so it cannot be the program's (§8).  Counting it
+    // would let a program with no entry at all reach the linker.
+    const auto& fn = decl->as<FunctionDecl>();
+    return fn.name == "main" && !fn.is_extern;
   });
 }
 
@@ -68,6 +76,17 @@ void register_modules(Program& program) {
 // ---------------------------------------------------------------------------
 // Edges: each import resolves to a module of the program or is diagnosed.
 // ---------------------------------------------------------------------------
+
+/// The module identity a file declares, taken from the file itself.
+/// A file that lost registration to a duplicate has no ModuleInfo, so
+/// asking the graph would answer "no module" for a file that plainly
+/// declares one (§2.3 wants both identities named).
+auto declared_identity(const SourceFile* file) -> std::optional<std::string> {
+  if (file == nullptr || file->parse.file == nullptr || file->parse.file->module_decl == nullptr) {
+    return std::nullopt;
+  }
+  return module_display(file->parse.file->module_decl->path.segments);
+}
 
 /// The files discovery loaded, by the import identity it went looking
 /// for and by display path.  Built once per graph: an unresolved import
@@ -125,13 +144,11 @@ void resolve_edges(Program& program, const GraphInputs& inputs) {
         // Root-file mode may have loaded a file for this import that
         // turned out to declare something else (§8.3).
         if (const auto* display = located.display_for(identity)) {
-          const auto* file = located.file_at(*display);
-          auto declared =
-              file != nullptr && file->module != nullptr ? file->module->display : "no module";
+          auto declared = declared_identity(located.file_at(*display));
           program.diagnostics.push_back(Diagnostic::error(
-              import->span, *display + " was found for import '" + identity +
-                                "' but declares " +
-                                (file->module != nullptr ? "module '" + declared + "'" : declared)));
+              import->span,
+              *display + " was found for import '" + identity + "' but declares " +
+                  (declared ? "module '" + *declared + "'" : "no module")));
         } else {
           program.diagnostics.push_back(
               Diagnostic::error(import->span, not_found_message(inputs, identity)));
