@@ -291,7 +291,9 @@ private:
   /// once before the enums and once after.  The final run reports the
   /// aliases that never resolved; the first stays quiet, since a target
   /// it cannot see yet may still arrive.
-  void register_type_aliases(bool report_failures);
+  /// Returns how many aliases this pass registered, so the caller can
+  /// repeat until a pass adds nothing.
+  auto register_type_aliases(bool report_failures) -> size_t;
   void register_struct_fields();
   void register_enum_variants();
   void register_signatures();

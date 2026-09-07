@@ -417,6 +417,23 @@ suite<"typecheck_alias_registration"> typecheck_alias_registration = [] {
     expect(clean(checked)) << all_messages(checked);
   };
 
+  "an alias chain resolves to any depth in any order"_test = [] {
+    // A alias-of-alias-of-alias, declared before everything it names:
+    // registration repeats until nothing new resolves, so depth and
+    // source order both stop mattering (§4.3).
+    auto checked = check_program({{"main.dao",
+                                   "module app::main\n"
+                                   "type A = B\n"
+                                   "type B = C\n"
+                                   "type C = Holder\n"
+                                   "class Holder:\n  value: i32\n"
+                                   "fn take(a: A): i32 -> a.value\n"
+                                   "fn main(): i32\n"
+                                   "  let h: A = Holder(5)\n"
+                                   "  return take(h)\n"}});
+    expect(clean(checked)) << all_messages(checked);
+  };
+
   "an alias whose target never resolves is reported"_test = [] {
     // Two aliases naming each other: neither ever has a type, and
     // saying nothing would leave both silently unusable.
