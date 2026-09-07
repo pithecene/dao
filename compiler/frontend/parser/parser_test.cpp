@@ -741,6 +741,7 @@ suite<"extend_tests"> extend_tests = [] {
     expect(decl->kind() == NodeKind::ExtendDecl);
     const auto& ext = decl->as<ExtendDecl>();
     expect(ext.concept_name == "Printable");
+    expect(ext.module_binding.empty()) << "an unqualified conformance names no module";
     expect(ext.target_type != nullptr);
     expect(ext.methods.size() == 1_u);
   };
@@ -951,6 +952,38 @@ suite<"diagnostic_wording_tests"> diagnostic_wording_tests = [] {
 // NOLINTEND(readability-function-cognitive-complexity,readability-magic-numbers,modernize-use-trailing-return-type)
 
 } // namespace
+
+// ---------------------------------------------------------------------------
+// Conformance positions may name the concept through an import binding
+// (CONTRACT_MODULE_SYSTEM.md §6): `as b::C:`, `deny b::C`, `extend T as b::C:`.
+// ---------------------------------------------------------------------------
+
+suite<"qualified_conformance"> qualified_conformance = [] {
+  "as names a concept through a binding"_test = [] {
+    auto output =
+        parse_string("class P:\n  x: i32\n  as fmt::Printable:\n    fn show(self): i32 -> 1\n");
+    expect(output.parse_result.diagnostics.empty()) << "parses";
+    const auto& cls = output.parse_result.file->declarations[0]->as<ClassDecl>();
+    expect(cls.conformances[0].module_binding == "fmt");
+    expect(cls.conformances[0].concept_name == "Printable");
+  };
+
+  "deny names a concept through a binding"_test = [] {
+    auto output = parse_string("class P:\n  x: i32\n  deny fmt::Printable\n");
+    expect(output.parse_result.diagnostics.empty()) << "parses";
+    const auto& cls = output.parse_result.file->declarations[0]->as<ClassDecl>();
+    expect(cls.denials[0].module_binding == "fmt");
+    expect(cls.denials[0].concept_name == "Printable");
+  };
+
+  "extend names a concept through a binding"_test = [] {
+    auto output = parse_string("extend i32 as fmt::Printable:\n  fn show(self): i32 -> 1\n");
+    expect(output.parse_result.diagnostics.empty()) << "parses";
+    const auto& ext = output.parse_result.file->declarations[0]->as<ExtendDecl>();
+    expect(ext.module_binding == "fmt");
+    expect(ext.concept_name == "Printable");
+  };
+};
 
 auto main() -> int {
 } // NOLINT(readability-named-parameter)

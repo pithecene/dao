@@ -196,15 +196,31 @@ struct FieldSpec {
 // Conformance and denial specifiers — used inside class bodies.
 // ---------------------------------------------------------------------------
 
-// Conformance block inside a class: `as ConceptName:`
+// The concept a conformance position names: `Concept` or, through an
+// import binding, `b::Concept` (CONTRACT_MODULE_SYSTEM.md §6).
+// `concept_name` and `concept_span` are always the concept's own
+// segment, so a consumer that only wants the concept reads them
+// unchanged; `module_binding` is empty for the unqualified form.
+struct ConformanceTarget {
+  std::string_view module_binding;
+  Span binding_span;
+  std::string_view concept_name;
+  Span concept_span;
+};
+
+// Conformance block inside a class: `as ConceptName:` / `as b::Concept:`
 struct ConformanceBlock {
+  std::string_view module_binding;
+  Span binding_span;
   std::string_view concept_name;
   Span concept_span;
   std::vector<Decl*> methods; // FunctionDecl nodes
 };
 
-// Deny statement inside a class: `deny ConceptName`
+// Deny statement inside a class: `deny ConceptName` / `deny b::Concept`
 struct DenySpec {
+  std::string_view module_binding;
+  Span binding_span;
   std::string_view concept_name;
   Span concept_span;
 };
@@ -270,6 +286,8 @@ struct ConceptDecl {
 
 struct ExtendDecl {
   TypeNode* target_type;
+  std::string_view module_binding;
+  Span binding_span;
   std::string_view concept_name;
   Span concept_span;
   std::vector<Decl*> methods; // FunctionDecl nodes
