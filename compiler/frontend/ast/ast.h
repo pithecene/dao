@@ -210,19 +210,13 @@ struct ConformanceTarget {
 
 // Conformance block inside a class: `as ConceptName:` / `as b::Concept:`
 struct ConformanceBlock {
-  std::string_view module_binding;
-  Span binding_span;
-  std::string_view concept_name;
-  Span concept_span;
+  ConformanceTarget target;
   std::vector<Decl*> methods; // FunctionDecl nodes
 };
 
 // Deny statement inside a class: `deny ConceptName` / `deny b::Concept`
 struct DenySpec {
-  std::string_view module_binding;
-  Span binding_span;
-  std::string_view concept_name;
-  Span concept_span;
+  ConformanceTarget target;
 };
 
 // ---------------------------------------------------------------------------
@@ -286,10 +280,7 @@ struct ConceptDecl {
 
 struct ExtendDecl {
   TypeNode* target_type;
-  std::string_view module_binding;
-  Span binding_span;
-  std::string_view concept_name;
-  Span concept_span;
+  ConformanceTarget target;
   std::vector<Decl*> methods; // FunctionDecl nodes
 };
 

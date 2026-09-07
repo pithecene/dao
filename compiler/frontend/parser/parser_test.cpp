@@ -696,7 +696,7 @@ suite<"conformance_tests"> conformance_tests = [] {
     expect(cls.name == "Point");
     expect(cls.fields.size() == 2_u);
     expect(cls.conformances.size() == 1_u);
-    expect(cls.conformances[0].concept_name == "Printable");
+    expect(cls.conformances[0].target.concept_name == "Printable");
     expect(cls.conformances[0].methods.size() == 1_u);
   };
 
@@ -707,7 +707,7 @@ suite<"conformance_tests"> conformance_tests = [] {
     expect(output.parse_result.diagnostics.empty()) << "no parse errors";
     const auto& cls = output.parse_result.file->declarations[0]->as<ClassDecl>();
     expect(cls.denials.size() == 1_u);
-    expect(cls.denials[0].concept_name == "Printable");
+    expect(cls.denials[0].target.concept_name == "Printable");
   };
 
   "class with multiple conformances"_test = [] {
@@ -720,8 +720,8 @@ suite<"conformance_tests"> conformance_tests = [] {
     expect(output.parse_result.diagnostics.empty()) << "no parse errors";
     const auto& cls = output.parse_result.file->declarations[0]->as<ClassDecl>();
     expect(cls.conformances.size() == 2_u);
-    expect(cls.conformances[0].concept_name == "Printable");
-    expect(cls.conformances[1].concept_name == "Equatable");
+    expect(cls.conformances[0].target.concept_name == "Printable");
+    expect(cls.conformances[1].target.concept_name == "Equatable");
   };
 };
 
@@ -740,8 +740,8 @@ suite<"extend_tests"> extend_tests = [] {
     auto* decl = file->declarations[0];
     expect(decl->kind() == NodeKind::ExtendDecl);
     const auto& ext = decl->as<ExtendDecl>();
-    expect(ext.concept_name == "Printable");
-    expect(ext.module_binding.empty()) << "an unqualified conformance names no module";
+    expect(ext.target.concept_name == "Printable");
+    expect(ext.target.module_binding.empty()) << "an unqualified conformance names no module";
     expect(ext.target_type != nullptr);
     expect(ext.methods.size() == 1_u);
   };
@@ -965,14 +965,15 @@ suite<"qualified_conformance"> qualified_conformance = [] {
     expect(output.parse_result.diagnostics.empty()) << "parses";
     const auto& cls = output.parse_result.file->declarations[0]->as<ClassDecl>();
     const auto& conf = cls.conformances[0];
-    expect(conf.module_binding == "fmt");
-    expect(conf.concept_name == "Printable");
+    expect(conf.target.module_binding == "fmt");
+    expect(conf.target.concept_name == "Printable");
     // The spans point at the segments themselves: tooling paints them
     // and a diagnostic about the module underlines the binding.
     auto text = output.source->contents();
-    expect(text.substr(conf.binding_span.offset, conf.binding_span.length) == "fmt")
+    expect(text.substr(conf.target.binding_span.offset, conf.target.binding_span.length) == "fmt")
         << "binding_span must cover `fmt`";
-    expect(text.substr(conf.concept_span.offset, conf.concept_span.length) == "Printable")
+    expect(text.substr(conf.target.concept_span.offset, conf.target.concept_span.length) ==
+           "Printable")
         << "concept_span must cover `Printable`";
   };
 
@@ -981,14 +982,15 @@ suite<"qualified_conformance"> qualified_conformance = [] {
     expect(output.parse_result.diagnostics.empty()) << "parses";
     const auto& cls = output.parse_result.file->declarations[0]->as<ClassDecl>();
     const auto& deny = cls.denials[0];
-    expect(deny.module_binding == "fmt");
-    expect(deny.concept_name == "Printable");
+    expect(deny.target.module_binding == "fmt");
+    expect(deny.target.concept_name == "Printable");
     // The spans point at the segments themselves: tooling paints them
     // and a diagnostic about the module underlines the binding.
     auto text = output.source->contents();
-    expect(text.substr(deny.binding_span.offset, deny.binding_span.length) == "fmt")
+    expect(text.substr(deny.target.binding_span.offset, deny.target.binding_span.length) == "fmt")
         << "binding_span must cover `fmt`";
-    expect(text.substr(deny.concept_span.offset, deny.concept_span.length) == "Printable")
+    expect(text.substr(deny.target.concept_span.offset, deny.target.concept_span.length) ==
+           "Printable")
         << "concept_span must cover `Printable`";
   };
 
@@ -996,14 +998,15 @@ suite<"qualified_conformance"> qualified_conformance = [] {
     auto output = parse_string("extend i32 as fmt::Printable:\n  fn show(self): i32 -> 1\n");
     expect(output.parse_result.diagnostics.empty()) << "parses";
     const auto& ext = output.parse_result.file->declarations[0]->as<ExtendDecl>();
-    expect(ext.module_binding == "fmt");
-    expect(ext.concept_name == "Printable");
+    expect(ext.target.module_binding == "fmt");
+    expect(ext.target.concept_name == "Printable");
     // The spans point at the segments themselves: tooling paints them
     // and a diagnostic about the module underlines the binding.
     auto text = output.source->contents();
-    expect(text.substr(ext.binding_span.offset, ext.binding_span.length) == "fmt")
+    expect(text.substr(ext.target.binding_span.offset, ext.target.binding_span.length) == "fmt")
         << "binding_span must cover `fmt`";
-    expect(text.substr(ext.concept_span.offset, ext.concept_span.length) == "Printable")
+    expect(text.substr(ext.target.concept_span.offset, ext.target.concept_span.length) ==
+           "Printable")
         << "concept_span must cover `Printable`";
   };
 };

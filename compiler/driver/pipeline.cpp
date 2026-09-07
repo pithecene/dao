@@ -151,13 +151,20 @@ auto load_program(const ProgramRequest& request) -> Program {
 auto run_frontend(const ProgramRequest& request) -> FrontendResult {
   auto program = load_program(request);
 
+  // §8.4: diagnostics are emitted in file order, then offset order —
+  // across the whole frontend, not per phase.  Resolution and type
+  // checking are both run, then their diagnostics are merged and sorted
+  // by program offset, which is exactly that order.
   auto resolve_result = resolve(program);
-  bool has_errors =
-      print_error_diagnostics(program.source_map, resolve_result.diagnostics);
-
   TypeContext types;
   auto check_result = typecheck(program, resolve_result, types);
-  has_errors |= print_diagnostics(program.source_map, check_result.diagnostics);
+
+  std::vector<Diagnostic> frontend_diagnostics = resolve_result.diagnostics;
+  frontend_diagnostics.insert(
+      frontend_diagnostics.end(), check_result.diagnostics.begin(), check_result.diagnostics.end());
+  std::ranges::stable_sort(
+      frontend_diagnostics, {}, [](const Diagnostic& diag) { return diag.span.offset; });
+  bool has_errors = print_diagnostics(program.source_map, frontend_diagnostics);
 
   if (has_errors) {
     std::exit(EXIT_FAILURE);

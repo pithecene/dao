@@ -129,20 +129,24 @@ private:
   // When set, resolve_type_node substitutes the concept name with the
   // conforming type (§3.2: concept name in type position means the
   // conforming type).
-  std::unordered_map<std::string_view, const Type*> concept_self_map_;
+  // Keyed by the concept DECLARATION, not its spelling: two modules may
+  // each declare a concept named `C`, and substituting for the wrong one
+  // silently retypes an expression (CONTRACT_TYPE_SYSTEM_FOUNDATIONS.md §11).
+  std::unordered_map<const Decl*, const Type*> concept_self_map_;
 
   // RAII guard that saves and restores a single key in concept_self_map_.
   // Each guard scope inserts exactly one concept→type binding; on
   // destruction the prior state of that key is restored. O(1) instead
   // of copying the entire map.
   struct ConceptSelfMapGuard {
-    using Map = std::unordered_map<std::string_view, const Type*>;
+    using Map = std::unordered_map<const Decl*, const Type*>;
     Map& map;
-    std::string_view key;
+    const Decl* key;
     const Type* old_value = nullptr;
     bool had_key = false;
 
-    ConceptSelfMapGuard(Map& m, std::string_view k) : map(m), key(k) { // NOLINT(readability-identifier-length)
+    ConceptSelfMapGuard(Map& m, const Decl* k)
+        : map(m), key(k) { // NOLINT(readability-identifier-length)
       auto iter = map.find(key);
       if (iter != map.end()) {
         had_key = true;

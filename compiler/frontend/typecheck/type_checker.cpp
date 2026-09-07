@@ -183,8 +183,8 @@ auto TypeChecker::resolve_type_node(const TypeNode* node) -> const Type* {
       }
       // Concept name in type position: substitute the conforming type
       // when inside a context that has set concept_self_map_ (§3.2).
-      if (sym->kind == SymbolKind::Concept) {
-        auto csm = concept_self_map_.find(sym->name);
+      if (sym->kind == SymbolKind::Concept && sym->decl != nullptr) {
+        auto csm = concept_self_map_.find(sym->decl_as_decl());
         if (csm != concept_self_map_.end()) {
           return csm->second;
         }
@@ -650,14 +650,14 @@ auto TypeChecker::type_conforms_to(const Type* type, const Decl* concept_decl) -
         // conform regardless of explicit `as` blocks. (Having both
         // is a compile error diagnosed in check_class.)
         for (const auto& deny : cls.denials) {
-          if (concept_named_at(deny.concept_span) == concept_decl) {
+          if (concept_named_at(deny.target.concept_span) == concept_decl) {
             return false;
           }
         }
 
         // Check explicit conformance.
         for (const auto& conf : cls.conformances) {
-          if (concept_named_at(conf.concept_span) == concept_decl) {
+          if (concept_named_at(conf.target.concept_span) == concept_decl) {
             return true;
           }
         }
@@ -680,7 +680,7 @@ auto TypeChecker::type_conforms_to(const Type* type, const Decl* concept_decl) -
         continue;
       }
       const auto* target = resolve_type_node(ext.target_type);
-      if (target == type && concept_named_at(ext.concept_span) == concept_decl) {
+      if (target == type && concept_named_at(ext.target.concept_span) == concept_decl) {
         return true;
       }
     }
@@ -744,7 +744,7 @@ void TypeChecker::compute_derived_conformances() {
         // since two modules may each declare one named the same.
         bool has_explicit = false;
         for (const auto& conf : entry.cls->conformances) {
-          if (concept_named_at(conf.concept_span) == concept_decl) {
+          if (concept_named_at(conf.target.concept_span) == concept_decl) {
             has_explicit = true;
             break;
           }
@@ -755,7 +755,7 @@ void TypeChecker::compute_derived_conformances() {
 
         bool denied = false;
         for (const auto& deny : entry.cls->denials) {
-          if (concept_named_at(deny.concept_span) == concept_decl) {
+          if (concept_named_at(deny.target.concept_span) == concept_decl) {
             denied = true;
             break;
           }
@@ -830,18 +830,19 @@ void TypeChecker::check_declaration(const Decl* decl) {
       if (dnode != nullptr) {
         if (dnode->is<ClassDecl>()) {
           for (const auto& deny : dnode->as<ClassDecl>().denials) {
-            const auto* denied_concept = concept_named_at(deny.concept_span);
-            if (denied_concept != nullptr && denied_concept == concept_named_at(ext.concept_span)) {
-              error(ext.concept_span,
+            const auto* denied_concept = concept_named_at(deny.target.concept_span);
+            if (denied_concept != nullptr &&
+                denied_concept == concept_named_at(ext.target.concept_span)) {
+              error(ext.target.concept_span,
                     "cannot extend '" + std::string(st->name()) + "' as '" +
-                        std::string(ext.concept_name) + "' because the type denies it");
+                        std::string(ext.target.concept_name) + "' because the type denies it");
             }
           }
         }
       }
     }
     for (const auto* method : ext.methods) {
-      validate_receiver(method, ext.concept_span);
+      validate_receiver(method, ext.target.concept_span);
       const auto& fn = method->as<FunctionDecl>();
       if (!fn.body.empty() || fn.expr_body != nullptr) {
         check_function(method);
@@ -941,12 +942,13 @@ void TypeChecker::check_class(const Decl* decl) {
   // by declaration identity: `as a::C` alongside `deny b::C` names two
   // concepts and is not a contradiction.
   for (const auto& deny : cls.denials) {
-    const auto* denied_concept = concept_named_at(deny.concept_span);
+    const auto* denied_concept = concept_named_at(deny.target.concept_span);
     for (const auto& conf : cls.conformances) {
-      if (denied_concept != nullptr && denied_concept == concept_named_at(conf.concept_span)) {
-        error(deny.concept_span,
+      if (denied_concept != nullptr &&
+          denied_concept == concept_named_at(conf.target.concept_span)) {
+        error(deny.target.concept_span,
               "'" + std::string(cls.name) + "' both conforms to and denies '" +
-                  std::string(deny.concept_name) + "'");
+                  std::string(deny.target.concept_name) + "'");
       }
     }
   }
@@ -966,7 +968,7 @@ void TypeChecker::check_class(const Decl* decl) {
   // Validate and check conformance-block methods.
   for (const auto& conf : cls.conformances) {
     for (const auto* method : conf.methods) {
-      validate_receiver(method, conf.concept_span);
+      validate_receiver(method, conf.target.concept_span);
       const auto& fn = method->as<FunctionDecl>();
       if (!fn.body.empty() || fn.expr_body != nullptr) {
         check_function(method);
@@ -2188,14 +2190,22 @@ auto TypeChecker::check_call(const Expr* expr) -> const Type* {
           // For class methods (no own type params), use the enclosing
           // class's type params when invoked via Type<Args>::method().
           if (expected_count == 0 && callee_sym->name.find('.') != std::string_view::npos) {
-            // Find the enclosing ClassDecl by checking file declarations.
+            // The enclosing class of a method symbol `T.m`.  Two modules
+            // may each declare a `T`, so the class must come from the
+            // METHOD'S OWN module, not from the first same-named
+            // declaration in the program
+            // (CONTRACT_TYPE_SYSTEM_FOUNDATIONS.md §11).
             auto class_name = callee_sym->name.substr(0, callee_sym->name.find('.'));
             for (const auto* file_decl : all_decls_) {
-              if (file_decl->kind() == NodeKind::ClassDecl &&
-                  file_decl->as<ClassDecl>().name == class_name) {
-                expected_count = file_decl->as<ClassDecl>().type_params.size();
-                break;
+              if (file_decl->kind() != NodeKind::ClassDecl ||
+                  file_decl->as<ClassDecl>().name != class_name) {
+                continue;
               }
+              if (declaring_module(file_decl) != callee_sym->module) {
+                continue;
+              }
+              expected_count = file_decl->as<ClassDecl>().type_params.size();
+              break;
             }
           }
         }
@@ -2592,12 +2602,17 @@ void TypeChecker::build_method_table() {
   for (const auto& [type, concepts] : derived_conformances_) {
     for (const auto* concept_decl : concepts) {
       const auto& cpt = concept_decl->as<ConceptDecl>();
-      ConceptSelfMapGuard guard(concept_self_map_, cpt.name);
-      concept_self_map_[cpt.name] = type;
+      ConceptSelfMapGuard guard(concept_self_map_, concept_decl);
+      concept_self_map_[concept_decl] = type;
       for (const auto* cpt_method_decl : cpt.methods) {
         const auto& method = cpt_method_decl->as<FunctionDecl>();
         MethodKey key{type, method.name};
-        if (method_table_.find(key) != method_table_.end()) {
+        // Skip only when a method already VISIBLE from this module
+        // answers the name.  An extension another module declared sits
+        // in the table but answers nothing here (§5), so treating its
+        // presence as coverage left the type with no method at all.
+        if (auto it = method_table_.find(key);
+            it != method_table_.end() && visible_entry(it->second) != nullptr) {
           continue;
         }
         const auto* fn_type = build_method_fn_type(method);
@@ -2710,8 +2725,8 @@ auto TypeChecker::lookup_method(const Type* obj_type,
           for (const auto* concept_method : cpt.methods) {
             const auto& method = concept_method->as<FunctionDecl>();
             if (method.name == name) {
-              ConceptSelfMapGuard guard(concept_self_map_, cpt.name);
-              concept_self_map_[cpt.name] = obj_type;
+              ConceptSelfMapGuard guard(concept_self_map_, cpt_decl);
+              concept_self_map_[cpt_decl] = obj_type;
               if (resolved_decl != nullptr) {
                 *resolved_decl = concept_method;
               }
