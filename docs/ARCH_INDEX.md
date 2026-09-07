@@ -37,6 +37,7 @@ Contracts and explanatory material.
 - `IDE_AND_TOOLING.md` — explanatory posture for semantic tooling, LSP, and why some tooling decisions are contract-level while others stay freestanding
 - `COMPILER_SERVICE_API.md` — explanatory shared analysis payloads for CLI, playground, and LSP
 - `building.md` — build prerequisites, parallelism cap (`DAO_BUILD_JOBS`), and override instructions
+- `tooling_capabilities.md` — generated capability matrix (compiler entry points × playground route × `daoc` command × LSP method) from `tools/playground/compiler_service/service_surface.h`; verified by `playground_service_test`
 - `language_vision.md` — explanatory design doctrine, stdlib posture, module/namespace design, and GPU strategy
 
 ## `spec/`
@@ -103,6 +104,10 @@ CLI, playground, and LSP.
 - `completion.h` / `completion.cpp` — scope-aware symbol completion at cursor offset
 - `document_symbols.h` / `document_symbols.cpp` — hierarchical symbol tree from AST
 - `references.h` / `references.cpp` — find all use-sites of a symbol
+- `tooling_surface.h` / `tooling_surface.cpp` — the compiler's tooling
+  surface: token kinds and groups, lexical categories, diagnostic
+  severities, and analysis payload shapes; `tooling_surface_test.cpp`
+  checks it against the contract and the emitter
 
 ## `runtime/`
 
@@ -171,6 +176,9 @@ Fixtures and golden inputs/outputs for parser/compiler tests.
   (`smoke/`: transitive imports and a prelude import; `mismatch/`: a
   located file declaring a different module; `roots/`: a second module
   root)
+- `examples/` — golden stdout of every runnable example (`<name>.out`)
+  and `known_failures.txt` naming the examples the compiler cannot build
+  yet, checked by `playground_service_test`
 - `bootstrap/multifile/` — on-disk multi-file test fixtures for the
   bootstrap program pipeline (Task 27 D9/D10)
   - `smoke/` — three-module import graph (core::fmt, app::math, app::main)
@@ -182,8 +190,18 @@ Fixtures and golden inputs/outputs for parser/compiler tests.
 Developer-surface tooling built on compiler analysis.
 
 - `playground/` — first-class web playground and future web-IDE surface
-  - `compiler_service/` — HTTP server wrapping the compiler frontend (cpp-httplib + nlohmann/json); shared pipeline utilities in `pipeline.h/.cpp`
-  - `frontend/` — Vite + TypeScript with CodeMirror 6; dev mode uses HMR with API proxy, prod builds to `dist/` served by the compiler service
+  - `compiler_service/` — the service as JSON route functions behind
+    `dispatch` (`service.h/.cpp`; `analyze`, `navigation`, `completions`,
+    `run`, `examples`), its transport surface (`service_surface.h/.cpp`:
+    routes, request envelopes, response shapes; `service_surface_dump`
+    renders the frontend's TypeScript from it and the analysis surface),
+    program assembly in `pipeline.h/.cpp`, the HTTP adapter in `main.cpp`
+    (cpp-httplib + nlohmann/json), and `service_test.cpp` driving every
+    route over every example
+  - `frontend/` — Vite + TypeScript with CodeMirror 6; `src/generated/`
+    holds the TypeScript rendered from the tooling surface; dev mode uses
+    HMR with API proxy, prod builds to `dist/` served by the compiler service
+  - `dev.sh` — development loop: service restarted on rebuild, Vite with HMR
 - `lsp/` — reserved LSP root (not yet implemented; the analysis APIs it will wrap live in `compiler/analysis/`)
 - `formatter/` — reserved canonical formatter root
 - `diagnostics/` — presentation and diagnostics tooling experiments

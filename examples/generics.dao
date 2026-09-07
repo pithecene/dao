@@ -1,0 +1,50 @@
+module generics
+// generics.dao — generic functions and classes, bounds, inference,
+// explicit type arguments, and generic enums from the prelude.
+
+// Unbounded: works for any T.
+fn identity<T>(x: T): T -> x
+
+// Bounded: T must satisfy Numeric, which provides less_than.
+fn largest<T: Numeric>(a: T, b: T): T
+  if a.less_than(b):
+    return b
+  return a
+
+// Generic class with a method; T is inferred from the constructor.
+class Box<T>:
+  item: T
+
+  fn get(self): T -> self.item
+
+// Option<T> is a generic enum class from the prelude; payload fields
+// are named in construction and destructured in match.
+fn first_even(a: i32, b: i32): Option<i32>
+  if a % 2 == 0:
+    return Option::Some(value = a)
+  if b % 2 == 0:
+    return Option::Some(value = b)
+  return Option::None
+
+fn describe(o: Option<i32>): string
+  match o:
+    Option::Some(value):
+      return "even: " + value.to_string()
+    Option::None:
+      return "no even number"
+
+fn main(): i32
+  // Inferred and explicit instantiation.
+  print(identity(7))
+  print(identity<string>("seven"))
+
+  // The same function over two numeric types.
+  print(largest(3, 9))
+  print(largest(2.5, 1.5))
+
+  let b = Box(41)
+  print(b.get() + 1)
+
+  print(describe(first_even(3, 8)))
+  print(describe(first_even(3, 5)))
+  return 0

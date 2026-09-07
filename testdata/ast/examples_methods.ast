@@ -1,0 +1,186 @@
+File
+  Module methods
+  ClassDecl Counter
+    Field n: i32
+    FunctionDecl zero
+      ReturnType: Counter
+      ExprBody
+        CallExpr
+          Callee
+            Identifier Counter
+          Args
+            IntLiteral 0
+    FunctionDecl bump
+      Param self
+      ReturnType: Counter
+      ExprBody
+        CallExpr
+          Callee
+            Identifier Counter
+          Args
+            BinaryExpr +
+              FieldExpr .n
+                Identifier self
+              IntLiteral 1
+    FunctionDecl add
+      Param self
+      Param k: i32
+      ReturnType: Counter
+      ExprBody
+        CallExpr
+          Callee
+            Identifier Counter
+          Args
+            BinaryExpr +
+              FieldExpr .n
+                Identifier self
+              Identifier k
+    FunctionDecl value
+      Param self
+      ReturnType: i32
+      ExprBody
+        FieldExpr .n
+          Identifier self
+  ClassDecl Stack<T>
+    Field items: Vector<T>
+    FunctionDecl empty
+      ReturnType: Stack<T>
+      ExprBody
+        CallExpr
+          Callee
+            Identifier Stack
+          Args
+            CallExpr
+              Callee
+                Identifier Vector.new
+              TypeArgs
+                T
+    FunctionDecl push
+      Param self
+      Param x: T
+      ReturnType: Stack<T>
+      ExprBody
+        CallExpr
+          Callee
+            Identifier Stack
+          Args
+            CallExpr
+              Callee
+                FieldExpr .push
+                  FieldExpr .items
+                    Identifier self
+              Args
+                Identifier x
+    FunctionDecl size
+      Param self
+      ReturnType: i64
+      ExprBody
+        CallExpr
+          Callee
+            FieldExpr .length
+              FieldExpr .items
+                Identifier self
+    FunctionDecl top
+      Param self
+      ReturnType: T
+      ExprBody
+        CallExpr
+          Callee
+            FieldExpr .get
+              FieldExpr .items
+                Identifier self
+          Args
+            BinaryExpr -
+              CallExpr
+                Callee
+                  FieldExpr .length
+                    FieldExpr .items
+                      Identifier self
+              IntLiteral 1
+  FunctionDecl main
+    ReturnType: i32
+    LetStatement c
+      CallExpr
+        Callee
+          FieldExpr .add
+            CallExpr
+              Callee
+                FieldExpr .bump
+                  CallExpr
+                    Callee
+                      FieldExpr .bump
+                        CallExpr
+                          Callee
+                            QualifiedName Counter::zero
+        Args
+          IntLiteral 40
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .value
+                Identifier c
+    LetStatement s
+      CallExpr
+        Callee
+          FieldExpr .push
+            CallExpr
+              Callee
+                FieldExpr .push
+                  CallExpr
+                    Callee
+                      FieldExpr .push
+                        CallExpr
+                          Callee
+                            Identifier Stack.empty
+                          TypeArgs
+                            i32
+                    Args
+                      IntLiteral 1
+              Args
+                IntLiteral 2
+        Args
+          IntLiteral 3
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .size
+                Identifier s
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .top
+                Identifier s
+    LetStatement words
+      CallExpr
+        Callee
+          FieldExpr .push
+            CallExpr
+              Callee
+                Identifier Stack.empty
+              TypeArgs
+                string
+        Args
+          StringLiteral "dao"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .top
+                Identifier words
+    ReturnStatement
+      IntLiteral 0

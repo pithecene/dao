@@ -1327,7 +1327,8 @@ private:
   // Parse call arguments: (expr, name = expr, ..)
   // Returns args and fills arg_names (empty string_view = positional,
   // ".." for rest marker). Caller must have already consumed '('.
-  auto parse_call_args(std::vector<std::string_view>& arg_names) -> std::vector<Expr*> {
+  auto parse_call_args(std::vector<std::string_view>& arg_names,
+                       std::vector<Span>& arg_name_spans) -> std::vector<Expr*> {
     std::vector<Expr*> args;
     if (peek_kind() == TokenKind::RParen) {
       return args;
@@ -1337,6 +1338,7 @@ private:
       if (peek_kind() == TokenKind::DotDot) {
         advance();
         arg_names.push_back("..");
+        arg_name_spans.push_back({});
         return true; // signals rest was seen; no more args after this
       }
       // Lookahead for `Identifier =` (but NOT `==`).
@@ -1347,6 +1349,7 @@ private:
         if (peek_kind() == TokenKind::Eq) {
           advance(); // consume '='
           arg_names.push_back(name_tok.text);
+          arg_name_spans.push_back(name_tok.span);
           args.push_back(parse_expression());
           return false;
         }
@@ -1355,6 +1358,7 @@ private:
         diagnostics_.resize(saved_diag_size);
       }
       arg_names.push_back(std::string_view{});
+      arg_name_spans.push_back({});
       args.push_back(parse_expression());
       return false;
     };
@@ -1460,14 +1464,16 @@ private:
         // Call: expr(args) — supports named arguments (name = expr).
         advance(); // (
         std::vector<std::string_view> arg_names;
-        auto args = parse_call_args(arg_names);
+        std::vector<Span> arg_name_spans;
+        auto args = parse_call_args(arg_names, arg_name_spans);
         const auto& rparen = consume(TokenKind::RParen);
         Span span = {.offset = expr->span.offset,
                      .length = (rparen.span.offset + rparen.span.length) - expr->span.offset};
         expr = ctx_.alloc<Expr>(span,
                                 CallExpr{.callee = expr,
                                          .args = std::move(args),
-                                         .arg_names = std::move(arg_names)});
+                                         .arg_names = std::move(arg_names),
+                                         .arg_name_spans = std::move(arg_name_spans)});
       } else if (peek_kind() == TokenKind::Dot) {
         // Field access: expr.field
         advance(); // .

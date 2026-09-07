@@ -1,4 +1,4 @@
-import type { ExamplesListResponse, ExampleSourceResponse } from "./types";
+import { api } from "./api";
 import { setSource } from "./editor";
 import { doAnalyze } from "./analysis";
 
@@ -19,15 +19,7 @@ export async function loadExamples(): Promise<void> {
   ) as HTMLSelectElement;
 
   try {
-    const resp = await fetch("/api/examples");
-    if (!resp.ok) {
-      setSource(FALLBACK_SOURCE);
-      doAnalyze();
-      return;
-    }
-
-    const data: ExamplesListResponse = await resp.json();
-    const examples = data.examples || [];
+    const { examples } = await api("examples", undefined);
 
     for (const example of examples) {
       const option = document.createElement("option");
@@ -36,10 +28,8 @@ export async function loadExamples(): Promise<void> {
       select.appendChild(option);
     }
 
-    // Auto-load hello.dao or first example.
     const defaultName =
-      examples.find((e) => e.name === "hello.dao")?.name ??
-      examples[0]?.name;
+      examples.find((e) => e.name === "hello.dao")?.name ?? examples[0]?.name;
 
     if (defaultName) {
       await loadExample(defaultName, select);
@@ -48,7 +38,6 @@ export async function loadExamples(): Promise<void> {
       doAnalyze();
     }
 
-    // Wire change handler for user selection.
     select.addEventListener("change", async () => {
       const name = select.value;
       if (!name) return;
@@ -66,9 +55,7 @@ async function loadExample(
   select: HTMLSelectElement,
 ): Promise<void> {
   try {
-    const resp = await fetch(`/api/examples/${encodeURIComponent(name)}`);
-    if (!resp.ok) return;
-    const data: ExampleSourceResponse = await resp.json();
+    const data = await api("example", { name });
     setSource(data.source);
     select.value = name;
     doAnalyze();
