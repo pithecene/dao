@@ -60,10 +60,37 @@ private:
 
   auto consume(TokenKind kind) -> const Token& {
     if (peek_kind() != kind) {
-      error("expected " + std::string(token_kind_name(kind)) + ", got " +
-            std::string(token_kind_name(peek_kind())));
+      expected(token_kind_name(kind));
     }
     return advance();
+  }
+
+  /// Report `expected <what>, got <the token here>`: the token's lexeme
+  /// when it has one, else words for the layout tokens the lexer makes.
+  void expected(std::string_view what) {
+    const auto& tok = peek();
+    std::string found;
+    switch (tok.kind) {
+    case TokenKind::Newline:
+      found = "end of line";
+      break;
+    case TokenKind::Indent:
+      found = "an indented block";
+      break;
+    case TokenKind::Dedent:
+      found = "end of block";
+      break;
+    case TokenKind::Eof:
+      found = "end of input";
+      break;
+    case TokenKind::Error:
+      found = "an invalid token";
+      break;
+    default:
+      found = "'" + std::string(tok.text) + "'";
+      break;
+    }
+    error("expected " + std::string(what) + ", got " + found);
   }
 
   auto match(TokenKind kind) -> bool {
@@ -155,7 +182,7 @@ private:
       module_decl = parse_module_decl();
       skip_newlines();
     } else {
-      error("expected 'module' declaration at start of file");
+      expected("'module' declaration at start of file");
     }
 
     std::vector<ImportNode*> imports;
@@ -280,7 +307,7 @@ private:
                                           .conformances = {},
                                           .denials = {}});
       }
-      error("expected declaration (fn, extern, class, enum, concept, extend, or type)");
+      expected("declaration (fn, extern, class, enum, concept, extend, or type)");
       advance(); // skip problematic token
       return nullptr;
     }
@@ -289,7 +316,7 @@ private:
   auto parse_extern_decl() -> Decl* {
     advance(); // consume 'extern'
     if (peek_kind() != TokenKind::KwFn) {
-      error("expected 'fn' after 'extern'");
+      expected("'fn' after 'extern'");
       return nullptr;
     }
     return parse_function_decl(/*is_extern=*/true);
@@ -367,7 +394,7 @@ private:
         consume(TokenKind::Dedent);
       } else {
         // Non-extern function without a body is an error.
-        error("expected function body (indented block or -> expression)");
+        expected("function body (indented block or -> expression)");
       }
     }
 
@@ -484,7 +511,7 @@ private:
         break;
       }
       if (peek_kind() != TokenKind::Identifier) {
-        error("expected variant name in enum body");
+        expected("variant name in enum body");
         advance();
         continue;
       }
@@ -567,7 +594,7 @@ private:
         break;
       }
       if (peek_kind() != TokenKind::KwFn) {
-        error("expected 'fn' in method list");
+        expected("'fn' in method list");
         advance();
         continue;
       }
@@ -812,7 +839,7 @@ private:
       advance(); // =
       init = parse_expression();
     } else {
-      error("expected ':' or '=' after let binding name");
+      expected("':' or '=' after let binding name");
     }
 
     // If the initializer is an error placeholder, promote the whole
@@ -1524,7 +1551,7 @@ private:
     }
     default: {
       auto err_span = peek().span;
-      error("expected expression");
+      expected("expression");
       advance(); // skip the offending token to guarantee progress
       return ctx_.alloc<Expr>(err_span, ErrorExprNode{});
     }

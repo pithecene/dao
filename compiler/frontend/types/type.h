@@ -4,6 +4,7 @@
 #include "frontend/types/type_builtin.h"
 #include "frontend/types/type_kind.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -186,6 +187,15 @@ public:
   [[nodiscard]] auto variants() const -> const std::vector<EnumVariant>& {
     return variants_;
   }
+  /// True if any variant carries a payload: the enum is then lowered as a
+  /// tagged struct and every value of it, fieldless variants included, is
+  /// constructed rather than spelled as its tag.
+  [[nodiscard]] auto has_payload_variants() const -> bool {
+    return std::ranges::any_of(variants_, [](const EnumVariant& variant) -> bool {
+      return !variant.payload_types.empty();
+    });
+  }
+
 private:
   const Decl* decl_id_;
   std::string_view name_;
