@@ -114,7 +114,7 @@ auto user_declarations(const HirProgram& program,
     std::ranges::copy_if(
         module->declarations,
         std::back_inserter(view.declarations),
-        [&prog](const HirDecl* decl) -> bool { return prog.in_user_file(decl->span.offset); });
+        [&prog](const HirDecl* decl) -> bool { return prog.in_request_files(decl->span.offset); });
     if (!view.declarations.empty()) {
       storage.push_back(std::move(view));
     }
@@ -132,7 +132,7 @@ auto user_functions(const MirModule& module, const PlaygroundProgram& prog) -> M
   MirModule view{.functions = {}, .span = module.span};
   std::ranges::copy_if(
       module.functions, std::back_inserter(view.functions), [&prog](const MirFunction* fn) -> bool {
-        return prog.in_user_file(fn->span.offset);
+        return prog.in_request_files(fn->span.offset);
       });
   return view;
 }

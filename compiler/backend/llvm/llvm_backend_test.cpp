@@ -339,6 +339,26 @@ suite<"simple_functions"> simple_functions = [] {
     expect(contains(ir, "icmp eq")) << ir;
   };
 
+  "two modules declaring one extern emit one declaration"_test = [] {
+    // An extern keeps its C symbol name exactly as written, so the same
+    // extern in two modules is the same symbol — declared once.
+    LlvmTestPipeline pipe("extern fn puts(s: string): i32\n"
+                          "fn a(): i32 -> puts(\"x\")\n"
+                          "fn b(): i32 -> puts(\"y\")\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << ir;
+    size_t declarations = 0;
+    for (size_t at = ir.find("declare"); at != std::string::npos; at = ir.find("declare", at + 1)) {
+      auto line = ir.substr(at, ir.find('\n', at) - at);
+      if (line.find("@puts(") != std::string::npos) {
+        ++declarations;
+      }
+    }
+    expect(declarations == 1_ul) << "expected one @puts declaration, got " << declarations << "\n"
+                                 << ir;
+    expect(ir.find("@puts.1") == std::string::npos) << "a renamed duplicate:\n" << ir;
+  };
+
   "void function"_test = [] {
     LlvmTestPipeline pipe(
         "fn noop(): void\n"

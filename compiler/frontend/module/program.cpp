@@ -40,10 +40,8 @@ auto Program::lexed_and_parsed_cleanly() const -> bool {
 }
 
 auto Program::module_named(std::string_view display) const -> ModuleInfo* {
-  auto it = std::ranges::find(modules, display, [](const auto& module) -> std::string_view {
-    return module->display;
-  });
-  return it == modules.end() ? nullptr : it->get();
+  auto it = by_display.find(display);
+  return it == by_display.end() ? nullptr : it->second;
 }
 
 namespace {

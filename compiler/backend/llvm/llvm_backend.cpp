@@ -196,9 +196,26 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
     }
     auto* fn_type =
         llvm::FunctionType::get(lowered_ret, param_types, /*isVarArg=*/false);
-    auto* llvm_fn = llvm::Function::Create(
-        fn_type, llvm::Function::ExternalLinkage,
-        fn_name(*mir_fn->symbol), module_.get());
+
+    // An `extern fn` keeps the C symbol name exactly as written
+    // (CONTRACT_C_ABI_INTEROP.md §3), so two modules declaring the same
+    // one name the same symbol.  Declaring it twice would let LLVM
+    // rename the second (`puts.1`) and leave later lookups by that name
+    // bound to whichever came first; one declaration is emitted and a
+    // disagreeing signature is a diagnostic rather than a silent pick.
+    auto name = fn_name(*mir_fn->symbol);
+    if (auto* existing = module_->getFunction(name)) {
+      if (existing->getFunctionType() != fn_type) {
+        emit_diagnostic(mir_fn->span,
+                        "extern '" + name +
+                            "' is declared with conflicting signatures in this program");
+      }
+      // Later lookups go through module_->getFunction(name), which
+      // now finds the one declaration.
+      continue;
+    }
+    auto* llvm_fn =
+        llvm::Function::Create(fn_type, llvm::Function::ExternalLinkage, name, module_.get());
 
     // Add byval attributes for indirect struct params.
     if (mir_fn->is_extern) {
