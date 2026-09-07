@@ -44,6 +44,12 @@ auto Program::module_named(std::string_view display) const -> ModuleInfo* {
   return it == by_display.end() ? nullptr : it->second;
 }
 
+auto canonical_or_self(const std::filesystem::path& path) -> std::filesystem::path {
+  std::error_code ec;
+  auto canonical = std::filesystem::weakly_canonical(path, ec);
+  return ec ? path.lexically_normal() : canonical;
+}
+
 namespace {
 
 // ---------------------------------------------------------------------------
@@ -105,25 +111,14 @@ auto display_path_for(const std::filesystem::path& path,
   // NORMALIZED first: `./a.dao`, `b/../a.dao`, and `a.dao` name one
   // file and must sort as one spelling, or the same set supplied two
   // ways orders differently and the output differs with it.
-  std::error_code ec;
-  auto absolute = std::filesystem::weakly_canonical(path, ec);
-  const auto& normalized = ec ? path.lexically_normal() : absolute;
+  auto normalized = canonical_or_self(path);
   if (!display_root.empty()) {
-    std::error_code root_ec;
-    auto root_abs = std::filesystem::weakly_canonical(display_root, root_ec);
-    const auto& base = root_ec ? display_root.lexically_normal() : root_abs;
-    auto relative = normalized.lexically_relative(base);
+    auto relative = normalized.lexically_relative(canonical_or_self(display_root));
     if (!relative.empty() && *relative.begin() != "..") {
       return relative.generic_string();
     }
   }
   return normalized.generic_string();
-}
-
-auto canonical_or_self(const std::filesystem::path& path) -> std::filesystem::path {
-  std::error_code ec;
-  auto canonical = std::filesystem::weakly_canonical(path, ec);
-  return ec ? path.lexically_normal() : canonical;
 }
 
 // ---------------------------------------------------------------------------
@@ -248,8 +243,12 @@ auto load_program_from_root(const std::filesystem::path& root_file, const Progra
                  canonical_or_self(*path).generic_string())});
         continue;
       }
+      // The display path read_source_input derived is kept as it is:
+      // overwriting it with the search spelling would key a discovered
+      // file by how the invocation happened to reach it, so the same
+      // program ordered files differently under a relative root than an
+      // absolute one (CONTRACT_MODULE_SYSTEM.md §8.4).
       auto found = read_source_input(*path, /*is_prelude=*/false);
-      found.display_path = path->lexically_normal().generic_string();
       discovery.graph.located.push_back({.identity = identity, .display_path = found.display_path});
       pending.push_back(found);
       discovery.add(*path, std::move(found));
@@ -272,15 +271,28 @@ auto load_program_from_files(const std::vector<std::filesystem::path>& files,
   return assemble(std::move(discovery.inputs), discovery.graph);
 }
 
-auto read_source_input(const std::filesystem::path& path, bool is_prelude,
-                       const std::filesystem::path& display_root) -> SourceInput {
+auto read_text_file(const std::filesystem::path& path) -> std::string {
+  // Checked before the open, not after: opening a directory succeeds and
+  // throws on the first read, which terminates the process instead of
+  // reporting anything the caller can act on.
+  std::error_code unused;
+  if (!std::filesystem::is_regular_file(path, unused)) {
+    std::cerr << "error: not a source file: " << path << "\n";
+    std::exit(EXIT_FAILURE);
+  }
   std::ifstream file(path);
   if (!file) {
     std::cerr << "error: could not open: " << path << "\n";
     std::exit(EXIT_FAILURE);
   }
+  return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+}
+
+auto read_source_input(const std::filesystem::path& path,
+                       bool is_prelude,
+                       const std::filesystem::path& display_root) -> SourceInput {
   return {.display_path = display_path_for(path, display_root),
-          .text = {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()},
+          .text = read_text_file(path),
           .is_prelude = is_prelude};
 }
 
