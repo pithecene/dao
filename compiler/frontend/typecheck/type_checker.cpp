@@ -733,13 +733,18 @@ void TypeChecker::compute_derived_conformances() {
   while (changed) {
     changed = false;
     for (const auto& entry : classes) {
+      // Derivation asks whether the fields conform, and that question is
+      // asked FROM the class's module: an `extend` of its own module is
+      // in scope, another module's is not (§5).  Without this the whole
+      // pass ran with no current module, which made every non-prelude
+      // extension invisible — including the class's own.
+      current_module_ = declaring_module(entry.decl);
       for (const auto* concept_decl : derived_concepts_) {
-        const auto& cpt = concept_decl->as<ConceptDecl>();
-
-        // Skip if explicit conformance or deny exists.
+        // Explicit conformance or denial of THIS concept — by identity,
+        // since two modules may each declare one named the same.
         bool has_explicit = false;
         for (const auto& conf : entry.cls->conformances) {
-          if (conf.concept_name == cpt.name) {
+          if (concept_named_at(conf.concept_span) == concept_decl) {
             has_explicit = true;
             break;
           }
@@ -750,7 +755,7 @@ void TypeChecker::compute_derived_conformances() {
 
         bool denied = false;
         for (const auto& deny : entry.cls->denials) {
-          if (deny.concept_name == cpt.name) {
+          if (concept_named_at(deny.concept_span) == concept_decl) {
             denied = true;
             break;
           }
@@ -791,6 +796,7 @@ void TypeChecker::compute_derived_conformances() {
       }
     }
   }
+  current_module_ = nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -824,7 +830,8 @@ void TypeChecker::check_declaration(const Decl* decl) {
       if (dnode != nullptr) {
         if (dnode->is<ClassDecl>()) {
           for (const auto& deny : dnode->as<ClassDecl>().denials) {
-            if (deny.concept_name == ext.concept_name) {
+            const auto* denied_concept = concept_named_at(deny.concept_span);
+            if (denied_concept != nullptr && denied_concept == concept_named_at(ext.concept_span)) {
               error(ext.concept_span,
                     "cannot extend '" + std::string(st->name()) + "' as '" +
                         std::string(ext.concept_name) + "' because the type denies it");
@@ -930,10 +937,13 @@ void TypeChecker::check_class(const Decl* decl) {
     ctx_.self_type = resolve_symbol_type(decl_it->second);
   }
 
-  // Diagnose conflicting as + deny for the same concept.
+  // Diagnose conflicting as + deny for the same concept — the same one,
+  // by declaration identity: `as a::C` alongside `deny b::C` names two
+  // concepts and is not a contradiction.
   for (const auto& deny : cls.denials) {
+    const auto* denied_concept = concept_named_at(deny.concept_span);
     for (const auto& conf : cls.conformances) {
-      if (conf.concept_name == deny.concept_name) {
+      if (denied_concept != nullptr && denied_concept == concept_named_at(conf.concept_span)) {
         error(deny.concept_span,
               "'" + std::string(cls.name) + "' both conforms to and denies '" +
                   std::string(deny.concept_name) + "'");
@@ -1492,6 +1502,26 @@ done_generic_check:
 // ---------------------------------------------------------------------------
 // Identifier
 // ---------------------------------------------------------------------------
+
+/// True if `expr` names a type rather than something reached through one:
+/// a bare identifier, or a qualified path whose last segment is the type
+/// itself (`m::T`).  `T::m` and `m::T::m` name a member (§6), so a call on
+/// them is a static-method call, never a construction.
+auto TypeChecker::names_a_type(const Expr* expr) const -> bool {
+  if (expr->is<IdentifierExpr>()) {
+    return true;
+  }
+  if (!expr->is<QualifiedName>()) {
+    return false;
+  }
+  const auto& qn = expr->as<QualifiedName>();
+  if (qn.segments.size() != 2) {
+    return false; // `m::T::member` — and a single segment is not qualified
+  }
+  // `m::T` only when `m` is an import binding; `T::m` is a member of T.
+  auto head_it = resolve_.uses.find(expr->span.offset);
+  return head_it != resolve_.uses.end() && head_it->second->kind == SymbolKind::Module;
+}
 
 auto TypeChecker::symbol_for_use(const Expr* expr) const -> const Symbol* {
   auto at = [&](uint32_t offset) -> const Symbol* {
@@ -2116,11 +2146,13 @@ auto TypeChecker::check_call(const Expr* expr) -> const Type* {
     }
   }
 
-  // Constructor call: callee must be an identifier that resolves to a
-  // Type symbol (e.g. `Point`), not merely any expression whose type
-  // happens to be a struct (e.g. `p` where `p: Point`).
-  if (callee_type->kind() == TypeKind::Struct &&
-      (call.callee->is<IdentifierExpr>() || call.callee->is<QualifiedName>())) {
+  // Constructor call: the callee must NAME the type — `Point` or `m::Point`
+  // — not merely any expression whose type happens to be a struct (`p`
+  // where `p: Point`), and not a path whose last segment is a member of
+  // it.  `m::T::missing(...)` denotes a static member that does not
+  // exist; reading it as a construction of `T` hides the error whenever
+  // the arguments happen to match `T`'s fields.
+  if (callee_type->kind() == TypeKind::Struct && names_a_type(call.callee)) {
     const auto* callee_sym = symbol_for_use(call.callee);
     if (callee_sym != nullptr && callee_sym->kind == SymbolKind::Type) {
       return check_construct(expr, static_cast<const TypeStruct*>(callee_type));

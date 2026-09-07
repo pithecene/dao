@@ -699,7 +699,8 @@ edited by neither task.
 Where the two compilers diverge from the contract today is recorded
 in `CONTRACT_MODULE_SYSTEM.md` §12 and `bootstrap/README.md`: the
 bootstrap conforms to §2–§5 and to the `b::f` / `b::T` / `b::E::V`
-forms of §6, rejects `b::T::m` until it has methods, has no prelude
+forms of §6, rejects `b::C` in conformance positions and `b::T::m`
+until it has concepts and methods, has no prelude
 (§7) and no entry-module selection (§8), and verifies determinism at
 graph level only (§9).  Task 33 closes those gaps on the bootstrap
 side; Task 31 closes the host side.

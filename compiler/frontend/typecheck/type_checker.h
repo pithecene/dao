@@ -109,6 +109,10 @@ private:
   /// last segment; null when the bound resolves to nothing.
   [[nodiscard]] auto concept_for_constraint(const TypeNode* constraint) const -> const Symbol*;
 
+  /// True if the expression names a type rather than a member reached
+  /// through one (`T` or `m::T`, never `T::m` or `m::T::m`).
+  [[nodiscard]] auto names_a_type(const Expr* expr) const -> bool;
+
   /// The concept declaration named at `span` (an `as`, `deny`, or
   /// `extend ... as` clause), or null when the name resolves to no
   /// concept.  Two modules may each declare a concept called `Reveal`,
