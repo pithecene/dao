@@ -172,6 +172,100 @@ constexpr const char* kMathModule =
 
 } // namespace
 
+suite<"typecheck_qualified_bounds"> typecheck_qualified_bounds = [] {
+  // A bound written `m::Concept` records the import binding at the head
+  // of the path and the concept at its last segment, so reading only the
+  // head left the bound unenforced.
+  const std::string kTraits = "module app::traits\nconcept Reveal:\n  fn reveal(self): i32\n";
+
+  "a qualified concept bound rejects a type that does not conform"_test = [kTraits] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::traits\n"
+         "class Plain:\n  x: i32\n"
+         "fn show<T: traits::Reveal>(v: T): i32 -> v.reveal()\n"
+         "fn main(): i32\n  let p: Plain = Plain(1)\n  return show(p)\n"},
+        {"traits.dao", kTraits},
+    });
+    expect(has_error_containing(checked.result, "does not satisfy concept"))
+        << all_messages(checked);
+  };
+
+  "a qualified concept bound accepts a conforming type"_test = [kTraits] {
+    // Conformance is declared by an `extend` in the using module: §6
+    // freezes four qualified forms and a conformance block is not among
+    // them, so `as traits::Reveal:` is not expressible today.
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::traits\n"
+         "class Shown:\n  x: i32\n"
+         "extend Shown as Reveal:\n  fn reveal(self): i32 -> self.x\n"
+         "fn show<T: traits::Reveal>(v: T): i32 -> v.reveal()\n"
+         "fn main(): i32\n  let s: Shown = Shown(1)\n  return show(s)\n"},
+        {"traits.dao", kTraits},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "another module's extend does not satisfy a bound"_test = [kTraits] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::traits\n"
+         "class Shown:\n  x: i32\n"
+         "fn show<T: traits::Reveal>(v: T): i32 -> v.reveal()\n"
+         "fn main(): i32\n  let s: Shown = Shown(1)\n  return show(s)\n"},
+        {"traits.dao", kTraits},
+        {"ext.dao",
+         "module app::ext\nimport app::main\n"
+         "extend main::Shown as Reveal:\n  fn reveal(self): i32 -> 1\n"},
+    });
+    expect(!is_ok(checked.result)) << all_messages(checked);
+  };
+};
+
+suite<"typecheck_extend_scoping"> typecheck_extend_scoping = [] {
+  // CONTRACT_MODULE_SYSTEM.md §5: `extend` methods participate in
+  // method-set lookup within the declaring module; importing a module
+  // does not import them; the prelude is the sole exception.
+  const std::string kExtension =
+      "module app::ext\nextend i32 as Secret:\n  fn secret(self): i32 -> 42\n";
+
+  "an extend method is not visible in another module"_test = [kExtension] {
+    auto checked = check_program({
+        {"main.dao", "module app::main\nfn main(): i32\n  let v: i32 = 1\n  return v.secret()\n"},
+        {"ext.dao", kExtension},
+    });
+    expect(!is_ok(checked.result)) << all_messages(checked);
+  };
+
+  "importing the module still does not import its extend methods"_test = [kExtension] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::ext\n"
+         "fn main(): i32\n  let v: i32 = 1\n  return v.secret()\n"},
+        {"ext.dao", kExtension},
+    });
+    expect(!is_ok(checked.result)) << all_messages(checked);
+  };
+
+  "an extend method is visible in its own module"_test = [] {
+    auto checked = check_program({
+        {"ext.dao",
+         "module app::ext\nextend i32 as Secret:\n  fn secret(self): i32 -> 42\n"
+         "fn use_it(): i32\n  let v: i32 = 1\n  return v.secret()\n"},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "a prelude extend method is visible everywhere"_test = [] {
+    std::vector<std::string> prelude = {
+        "module core::secret\nextend i32 as Secret:\n  fn secret(self): i32 -> 42\n"};
+    auto checked =
+        check_with_prelude("fn use_it(): i32\n  let v: i32 = 1\n  return v.secret()\n", prelude);
+    expect(is_ok(checked)) << "prelude extend methods reach every module (§5.3)";
+  };
+};
+
 suite<"typecheck_modules"> typecheck_modules = [] {
   "cross_module_call_checks_arity_and_argument_types"_test = [] {
     auto arity = check_program({

@@ -38,8 +38,9 @@ auto parse_program_request(const nlohmann::json& request)
   return parsed;
 }
 
-auto build_playground_program(const std::filesystem::path& repo_root, ProgramRequest request)
-    -> PlaygroundProgram {
+auto build_playground_program(const std::filesystem::path& repo_root,
+                              ProgramRequest request,
+                              EntryPolicy entry_policy) -> PlaygroundProgram {
   PlaygroundProgram prog;
 
   // Exactly one file carries the document's path (parse_program_request
@@ -61,7 +62,7 @@ auto build_playground_program(const std::filesystem::path& repo_root, ProgramReq
     }
     inputs.push_back(std::move(file));
   }
-  prog.program = build_program(std::move(inputs));
+  prog.program = build_program(std::move(inputs), {}, entry_policy);
   for (const auto& file : prog.program.files) {
     if (!file->is_prelude && file->display_path == request.document) {
       prog.user = file.get();
@@ -157,6 +158,18 @@ auto without_prelude_warnings(const std::vector<Diagnostic>& diags, const Playgr
              prog.program.source_map.is_prelude(diag.span.offset));
   });
   return kept;
+}
+
+void collect_program_diagnostics(nlohmann::json& out, const PlaygroundProgram& prog) {
+  std::vector<Diagnostic> located;
+  for (const auto& diag : prog.program.diagnostics) {
+    if (diag.span.length == 0) {
+      out.push_back(make_internal_error(diag.message));
+    } else {
+      located.push_back(diag);
+    }
+  }
+  collect_diagnostics(out, prog, located);
 }
 
 void collect_diagnostics(nlohmann::json& out,

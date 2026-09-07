@@ -174,22 +174,23 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
     return error_reply(http_status::bad_request, inputs.error());
   }
   out.file = inputs->document;
-  auto prog = build_playground_program(ctx.repo_root, std::move(*inputs));
-  if (prog.user == nullptr || !prog.program.diagnostics.empty()) {
-    std::vector<Diagnostic> located;
-    for (const auto& diag : prog.program.diagnostics) {
-      // A program-assembly failure either points at a file (a module
-      // declaration that disagrees with its path) or has nowhere to
-      // point (an import cycle, a missing root).
-      if (diag.span.length == 0) {
-        out.diagnostics.push_back(make_internal_error(diag.message));
-      } else {
-        located.push_back(diag);
-      }
+  // Advisory: a buffer with no `fn main` is analysable, and the warning
+  // is why Run will not work.
+  auto prog = build_playground_program(ctx.repo_root, std::move(*inputs), EntryPolicy::Advisory);
+  if (prog.user == nullptr || has_error_severity(prog.program.diagnostics)) {
+    // Report what each file said first: a module that is "not found" is
+    // usually a file that did not parse, and that parse error is the
+    // diagnostic worth showing.
+    for (const auto& file : prog.program.files) {
+      collect_diagnostics(out.diagnostics, prog, file->lex.diagnostics);
+      collect_diagnostics(out.diagnostics, prog, file->parse.diagnostics);
     }
-    collect_diagnostics(out.diagnostics, prog, located);
+    collect_program_diagnostics(out.diagnostics, prog);
     return out.reply();
   }
+  // Assembly succeeded but may still have something to say (no entry
+  // module, for one), and that must not be lost.
+  collect_program_diagnostics(out.diagnostics, prog);
 
   add_lexical_tokens(out, prog);
   for (const auto& file : prog.program.files) {

@@ -95,6 +95,10 @@ private:
   // §6).  Null when unresolved.
   [[nodiscard]] auto symbol_for_use(const Expr* expr) const -> const Symbol*;
 
+  /// The concept a generic bound names, reading a qualified bound at its
+  /// last segment; null when the bound resolves to nothing.
+  [[nodiscard]] auto concept_for_constraint(const TypeNode* constraint) const -> const Symbol*;
+
   // decl_span.offset -> Symbol* for finding symbols at declaration sites.
   std::unordered_map<uint32_t, const Symbol*> decl_symbols_;
 
@@ -143,6 +147,11 @@ private:
   struct MethodEntry {
     const Type* fn_type;     // method function type (self removed)
     const Decl* method_decl; // the FunctionDecl node for HIR resolution
+    // Set only for a method introduced by `extend`, which participates
+    // in lookup within its declaring module and, if that module is in
+    // the prelude, everywhere (CONTRACT_MODULE_SYSTEM.md §5).  A class's
+    // own methods travel with the type and leave this null.
+    const ModuleInfo* extend_module = nullptr;
   };
 
   struct MethodKey {
@@ -160,6 +169,36 @@ private:
   };
 
   std::unordered_map<MethodKey, MethodEntry, MethodKeyHash> method_table_;
+
+  // Which module each top-level declaration came from, and the one whose
+  // body is being checked.  Empty outside a program (single-file
+  // checking), where every declaration is equally visible.
+  std::unordered_map<const Decl*, const ModuleInfo*> decl_module_;
+  const ModuleInfo* current_module_ = nullptr;
+
+  /// True if an `extend` method declared in `owner` is in scope for the
+  /// module being checked.
+  [[nodiscard]] auto extend_is_visible(const ModuleInfo* owner) const -> bool {
+    return owner == nullptr || owner == current_module_ || owner->is_prelude;
+  }
+
+  /// The module a top-level declaration belongs to, or null when
+  /// checking outside a program.
+  [[nodiscard]] auto declaring_module(const Decl* decl) const -> const ModuleInfo* {
+    auto it = decl_module_.find(decl);
+    return it == decl_module_.end() ? nullptr : it->second;
+  }
+
+public:
+  /// Record which module each file belongs to, so `extend` scoping and
+  /// diagnostics can name it.  Called before check() by the Program
+  /// entry point; single-file checking leaves it empty.
+  void set_file_modules(std::unordered_map<const FileNode*, const ModuleInfo*> file_modules) {
+    file_modules_ = std::move(file_modules);
+  }
+
+private:
+  std::unordered_map<const FileNode*, const ModuleInfo*> file_modules_;
 
   // Pending class shells awaiting field resolution (populated by
   // register_type_names, consumed by register_struct_fields).
