@@ -32,7 +32,9 @@ auto slurp(const std::filesystem::path& path) -> std::string {
   return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
 }
 
-auto run_reply(std::string stdout_text, std::string stderr_text, int exit_code,
+auto run_reply(std::string stdout_text,
+               std::string stderr_text,
+               int exit_code,
                nlohmann::json diagnostics) -> Reply {
   return {.status = http_status::ok,
           .body = {
@@ -56,12 +58,14 @@ auto compile_failed(nlohmann::json diagnostics, const std::string& fallback_mess
 
 } // namespace
 
-void init_run_support() { LlvmBackend::initialize_targets(); }
+void init_run_support() {
+  LlvmBackend::initialize_targets();
+}
 
-auto run(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
+auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
   nlohmann::json diagnostics = nlohmann::json::array();
 
-  auto prog = build_playground_program(ctx.repo_root, request["source"].get<std::string>());
+  auto prog = build_playground_program(ctx.repo_root, std::move(inputs));
   if (prog.user == nullptr || !prog.program.diagnostics.empty()) {
     for (const auto& diag : prog.program.diagnostics) {
       diagnostics.push_back(make_internal_error(diag.message));
@@ -84,22 +88,22 @@ auto run(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
 
   auto resolve_result = resolve(prog.program);
   collect_diagnostics(diagnostics, prog, resolve_result.diagnostics);
-  if (has_user_error(resolve_result.diagnostics, prog)) {
+  if (has_error_severity(resolve_result.diagnostics)) {
     return compile_failed(std::move(diagnostics));
   }
 
   TypeContext types;
   auto check_result = typecheck(prog.program, resolve_result, types);
   collect_diagnostics(diagnostics, prog, check_result.diagnostics);
-  if (has_user_error(check_result.diagnostics, prog)) {
+  if (has_error_severity(check_result.diagnostics)) {
     return compile_failed(std::move(diagnostics));
   }
 
   HirContext hir_ctx;
   auto hir_result = build_hir(prog.program, resolve_result, check_result, hir_ctx);
   collect_diagnostics(diagnostics, prog, hir_result.diagnostics);
-  if (hir_result.module == nullptr) {
-    return compile_failed(std::move(diagnostics), "HIR lowering failed (possible prelude error)");
+  if (hir_result.module == nullptr || has_error_severity(hir_result.diagnostics)) {
+    return compile_failed(std::move(diagnostics), "HIR lowering failed without a diagnostic");
   }
 
   MirContext mir_ctx;
@@ -114,8 +118,9 @@ auto run(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
     // DataLayout assertion instead of a diagnostic.
     mono_has_errors = has_error_severity(mono.diagnostics);
   }
-  if (mir_result.module == nullptr || mono_has_errors) {
-    return compile_failed(std::move(diagnostics), "MIR lowering failed (possible prelude error)");
+  if (mir_result.module == nullptr || has_error_severity(mir_result.diagnostics) ||
+      mono_has_errors) {
+    return compile_failed(std::move(diagnostics), "MIR lowering failed without a diagnostic");
   }
 
   // LLVM lowering.
@@ -123,15 +128,7 @@ auto run(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
   LlvmBackend backend(llvm_ctx);
   auto llvm_result = backend.lower(*mir_result.module, &prog.program.source_map);
 
-  // Prelude-origin warnings are the driver's concern, not the user's.
-  std::vector<Diagnostic> user_diags;
-  for (const auto& diag : llvm_result.diagnostics) {
-    if (diag.severity == Severity::Warning &&
-        prog.program.source_map.is_prelude(diag.span.offset)) {
-      continue;
-    }
-    user_diags.push_back(diag);
-  }
+  auto user_diags = without_prelude_warnings(llvm_result.diagnostics, prog);
   collect_diagnostics(diagnostics, prog, user_diags);
   if (llvm_result.module == nullptr || has_error_severity(user_diags)) {
     return compile_failed(std::move(diagnostics));
@@ -164,9 +161,13 @@ auto run(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
   std::vector<llvm::StringRef> link_args = {*cc_path, obj_str, DAO_RUNTIME_LIB, "-o", exe_str};
 
   std::string link_error;
-  int link_status =
-      llvm::sys::ExecuteAndWait(*cc_path, link_args, /*Env=*/std::nullopt, /*Redirects=*/{},
-                                /*SecondsToWait=*/30, /*MemoryLimit=*/0, &link_error);
+  int link_status = llvm::sys::ExecuteAndWait(*cc_path,
+                                              link_args,
+                                              /*Env=*/std::nullopt,
+                                              /*Redirects=*/{},
+                                              /*SecondsToWait=*/30,
+                                              /*MemoryLimit=*/0,
+                                              &link_error);
   std::filesystem::remove(obj_path);
 
   if (link_status != 0) {
@@ -194,9 +195,13 @@ auto run(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
   }};
 
   std::string exec_error;
-  int exit_code = llvm::sys::ExecuteAndWait(exe_str, {exe_str}, /*Env=*/std::nullopt, redirects,
+  int exit_code = llvm::sys::ExecuteAndWait(exe_str,
+                                            {exe_str},
+                                            /*Env=*/std::nullopt,
+                                            redirects,
                                             /*SecondsToWait=*/5,
-                                            /*MemoryLimit=*/256 * 1024 * 1024, &exec_error);
+                                            /*MemoryLimit=*/256 * 1024 * 1024,
+                                            &exec_error);
 
   auto stdout_text = slurp(stdout_path);
   auto stderr_text = slurp(stderr_path);
@@ -212,8 +217,19 @@ auto run(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
   std::error_code ec;
   std::filesystem::remove_all(tmp_dir, ec);
 
-  return run_reply(std::move(stdout_text), std::move(stderr_text), exit_code,
-                   std::move(diagnostics));
+  return run_reply(
+      std::move(stdout_text), std::move(stderr_text), exit_code, std::move(diagnostics));
+}
+
+auto run(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
+  auto inputs = parse_program_request(request);
+  if (!inputs) {
+    return error_reply(http_status::bad_request, inputs.error());
+  }
+  auto document = inputs->document;
+  auto reply = run_program(std::move(*inputs), ctx);
+  reply.body["file"] = std::move(document);
+  return reply;
 }
 
 } // namespace dao::playground

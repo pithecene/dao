@@ -37,20 +37,51 @@ constexpr std::array kBindings{
     RouteBinding{"example", example_source},
 };
 
-auto json_type_matches(const nlohmann::json& value, std::string_view type) -> bool {
-  if (type == "string") {
-    return value.is_string();
-  }
-  if (type == "number") {
-    return value.is_number();
-  }
-  if (type == "boolean") {
-    return value.is_boolean();
+/// Why `value` does not satisfy `type` (a scalar, a shape, or `Shape[]`),
+/// else empty.  `path` names the value in the message.
+auto validate_value(const nlohmann::json& value, std::string_view type, const std::string& path)
+    -> std::string {
+  if (type == "string" || type == "number" || type == "boolean") {
+    const bool ok = (type == "string" && value.is_string()) ||
+                    (type == "number" && value.is_number()) ||
+                    (type == "boolean" && value.is_boolean());
+    return ok ? "" : std::format("'{}' must be a {}", path, type);
   }
   if (type.ends_with("[]")) {
-    return value.is_array();
+    if (!value.is_array()) {
+      return std::format("'{}' must be an array", path);
+    }
+    auto element_type = type.substr(0, type.size() - 2);
+    for (size_t i = 0; i < value.size(); ++i) {
+      if (auto why = validate_value(value[i], element_type, std::format("{}[{}]", path, i));
+          !why.empty()) {
+        return why;
+      }
+    }
+    return "";
   }
-  return value.is_object();
+  const auto* shape = find_service_shape(type);
+  if (shape == nullptr) {
+    return std::format("'{}' has unknown type {}", path, type);
+  }
+  if (!value.is_object()) {
+    return std::format("'{}' must be an object", path);
+  }
+  for (const auto& field : shape->fields) {
+    auto it = value.find(std::string(field.name));
+    auto field_path =
+        path.empty() ? std::string(field.name) : std::format("{}.{}", path, field.name);
+    if (it == value.end()) {
+      if (field.optional) {
+        continue;
+      }
+      return std::format("missing '{}' field", field_path);
+    }
+    if (auto why = validate_value(*it, field.type, field_path); !why.empty()) {
+      return why;
+    }
+  }
+  return "";
 }
 
 } // namespace
@@ -63,26 +94,13 @@ auto validate_request(const nlohmann::json& request, std::string_view shape_name
   if (shape_name == "void") {
     return {};
   }
-  const auto* shape = find_service_shape(shape_name);
-  if (shape == nullptr) {
+  if (find_service_shape(shape_name) == nullptr) {
     return std::format("unknown request shape '{}'", shape_name);
   }
   if (!request.is_object()) {
     return "request body must be a JSON object";
   }
-  for (const auto& field : shape->fields) {
-    auto it = request.find(std::string(field.name));
-    if (it == request.end()) {
-      if (field.optional) {
-        continue;
-      }
-      return std::format("missing '{}' field", field.name);
-    }
-    if (!json_type_matches(*it, field.type)) {
-      return std::format("'{}' must be a {}", field.name, field.type);
-    }
-  }
-  return {};
+  return validate_value(request, shape_name, "");
 }
 
 auto dispatch(std::string_view route_name, const nlohmann::json& request, const ServiceContext& ctx)

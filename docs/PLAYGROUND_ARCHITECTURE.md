@@ -73,6 +73,7 @@ the playground.  Both are C++ so nothing parses a manifest at runtime.
 
 **Generated frontend types.** `service_surface_dump` renders both
 tables as `tools/playground/frontend/src/generated/tooling_surface.ts`
+and the capability matrix as `docs/tooling_capabilities.md`
 (`task gen-tooling-surface`).  The frontend's typed client (`src/api.ts`)
 takes route names, request bodies, and response types from it, and the
 highlighter maps `TokenKind` to `dao-<group>` through the generated
@@ -95,6 +96,29 @@ silently unstyled token.
   those listed in `testdata/examples/known_failures.txt` with the
   diagnostic the compiler must report for the failure to count.
 - `npm run build` runs `tsc --noEmit` before bundling.
+
+**Program-shaped requests, file identity on replies.** A request
+carries the files of the program and names the one it is about
+(`files`, `document`; offsets are local to the document).  This UI
+sends one file; a workspace sends them all, and the service is the
+same.  Every position a reply carries names its file (`file`, the
+display path) with file-local offset and line — diagnostics, symbols,
+definitions, references — and replies about the document report its
+path and module at the top level; token entries inherit the file of
+the reply.  Definitions and references therefore reach into the
+prelude today and into other user files as sent; the single-document
+UI names positions it cannot open (a notice for a prelude definition,
+a count for references elsewhere) instead of the service hiding them.
+That is what keeps the multi-file workspace (Task 31 D5) a UI change
+rather than an API change.
+
+**Capability matrix.** `docs/tooling_capabilities.md` is generated from
+the service surface's capability table — compiler entry points,
+playground route, `daoc` command, LSP method per capability — and
+`playground_service_test` checks that each entry point is declared in
+the header the table names, each route is in the route table, each
+command is in the driver, and LSP methods are well-formed and unique.
+READMEs point at it rather than restating it.
 
 **The rule.** A change to a token kind, a payload field, a route, or a
 diagnostic severity edits the table, regenerates the TypeScript, and

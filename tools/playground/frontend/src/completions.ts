@@ -1,3 +1,4 @@
+import { programRequest } from "./document";
 import {
   autocompletion,
   type Completion,
@@ -46,7 +47,7 @@ async function daoCompletionSource(
   if (!ctx.explicit && !word && !afterDot) return null;
 
   const items = await api("completions", {
-    source: ctx.state.doc.toString(),
+    ...programRequest(ctx.state.doc.toString()),
     offset: from,
   });
   if (ctx.aborted || items.length === 0) return null;

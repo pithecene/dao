@@ -13,7 +13,9 @@ namespace dao::playground {
 
 namespace {
 
-auto null_reply() -> Reply { return {.status = http_status::ok, .body = nullptr}; }
+auto null_reply() -> Reply {
+  return {.status = http_status::ok, .body = nullptr};
+}
 
 auto list_reply(nlohmann::json items) -> Reply {
   return {.status = http_status::ok, .body = std::move(items)};
@@ -24,13 +26,25 @@ auto list_reply(nlohmann::json items) -> Reply {
 struct OffsetQuery {
   FrontendPipeline pipe;
   uint32_t token_offset = 0;
+  std::string error; // why the request was unusable, else empty
 };
 
 auto query_at(const nlohmann::json& request, const ServiceContext& ctx) -> OffsetQuery {
-  OffsetQuery query{.pipe = run_frontend_pipeline(ctx.repo_root, request["source"].get<std::string>())};
-  if (query.pipe.ok) {
-    auto absolute = query.pipe.prog.to_program_offset(request["offset"].get<uint32_t>());
-    query.token_offset = token_start_at(absolute, query.pipe.prog.user->lex);
+  auto inputs = parse_program_request(request);
+  if (!inputs) {
+    return {.error = inputs.error()};
+  }
+  OffsetQuery query{.pipe = run_frontend_pipeline(ctx.repo_root, std::move(*inputs))};
+  if (query.pipe.prog.user != nullptr) {
+    auto offset = document_offset(request, query.pipe.prog);
+    if (!offset) {
+      query.error = offset.error();
+      return query;
+    }
+    if (query.pipe.ok) {
+      auto absolute = query.pipe.prog.to_program_offset(*offset);
+      query.token_offset = token_start_at(absolute, query.pipe.prog.user->lex);
+    }
   }
   return query;
 }
@@ -39,11 +53,13 @@ auto query_at(const nlohmann::json& request, const ServiceContext& ctx) -> Offse
 
 auto hover(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
   auto query = query_at(request, ctx);
+  if (!query.error.empty()) {
+    return error_reply(http_status::bad_request, query.error);
+  }
   if (!query.pipe.ok) {
     return null_reply();
   }
-  auto result =
-      query_hover(query.token_offset, query.pipe.resolve_result, query.pipe.check_result);
+  auto result = query_hover(query.token_offset, query.pipe.resolve_result, query.pipe.check_result);
   if (!result) {
     return null_reply();
   }
@@ -57,28 +73,30 @@ auto hover(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
 
 auto goto_definition(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
   auto query = query_at(request, ctx);
+  if (!query.error.empty()) {
+    return error_reply(http_status::bad_request, query.error);
+  }
   if (!query.pipe.ok) {
     return null_reply();
   }
   auto result = query_definition(query.token_offset, query.pipe.resolve_result);
-  // A definition outside the editor buffer (prelude) is not navigable
-  // in the user's source.
-  if (!result || !query.pipe.prog.in_user_file(result->offset)) {
+  if (!result) {
     return null_reply();
   }
-  const auto& prog = query.pipe.prog;
-  auto loc = prog.program.source_map.locate(result->offset);
-  return {.status = http_status::ok,
-          .body = {
-              {"offset", prog.to_editor_offset(result->offset)},
-              {"length", result->length},
-              {"line", prog.editor_line(result->offset)},
-              {"col", loc.col},
-          }};
+  // The definition may live in another file of the program (the
+  // prelude today); the reply says which, and the consumer decides
+  // whether it can show it.
+  nlohmann::json body = {{"length", result->length}};
+  add_position(body, query.pipe.prog, result->offset);
+  return {.status = http_status::ok, .body = std::move(body)};
 }
 
 auto document_symbols(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
-  auto pipe = run_frontend_pipeline(ctx.repo_root, request["source"].get<std::string>());
+  auto inputs = parse_program_request(request);
+  if (!inputs) {
+    return error_reply(http_status::bad_request, inputs.error());
+  }
+  auto pipe = run_frontend_pipeline(ctx.repo_root, std::move(*inputs));
   if (!pipe.ok || pipe.prog.user->file() == nullptr) {
     return list_reply(nlohmann::json::array());
   }
@@ -92,6 +110,7 @@ auto document_symbols(const nlohmann::json& request, const ServiceContext& ctx) 
     return {
         {"name", sym.name},
         {"kind", sym.kind},
+        {"file", pipe.prog.user->display_path},
         {"offset", pipe.prog.to_editor_offset(sym.span.offset)},
         {"length", sym.span.length},
         {"children", children},
@@ -107,20 +126,17 @@ auto document_symbols(const nlohmann::json& request, const ServiceContext& ctx) 
 
 auto references(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {
   auto query = query_at(request, ctx);
+  if (!query.error.empty()) {
+    return error_reply(http_status::bad_request, query.error);
+  }
   if (!query.pipe.ok) {
     return list_reply(nlohmann::json::array());
   }
-  const auto& prog = query.pipe.prog;
   nlohmann::json refs = nlohmann::json::array();
   for (const auto& ref : query_references(query.token_offset, query.pipe.resolve_result)) {
-    if (!prog.in_user_file(ref.span.offset)) {
-      continue; // prelude references are not navigable from the buffer
-    }
-    refs.push_back({
-        {"offset", prog.to_editor_offset(ref.span.offset)},
-        {"length", ref.span.length},
-        {"isDefinition", ref.is_definition},
-    });
+    nlohmann::json entry = {{"length", ref.span.length}, {"isDefinition", ref.is_definition}};
+    add_position(entry, query.pipe.prog, ref.span.offset);
+    refs.push_back(std::move(entry));
   }
   return list_reply(std::move(refs));
 }

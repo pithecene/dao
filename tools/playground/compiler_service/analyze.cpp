@@ -33,6 +33,8 @@ struct AnalyzeOutput {
   nlohmann::json tokens = nlohmann::json::array();
   nlohmann::json semantic_tokens = nlohmann::json::array();
   nlohmann::json diagnostics = nlohmann::json::array();
+  std::string file;   // the document's path, as the request named it
+  std::string module; // the document's module name, once parsed
   std::string ast;
   std::string hir;
   std::string mir;
@@ -41,6 +43,8 @@ struct AnalyzeOutput {
   [[nodiscard]] auto reply() const -> Reply {
     return {.status = http_status::ok,
             .body = {
+                {"file", file},
+                {"module", module},
                 {"tokens", tokens},
                 {"semanticTokens", semantic_tokens},
                 {"ast", ast},
@@ -74,7 +78,8 @@ void add_lexical_tokens(AnalyzeOutput& out, const PlaygroundProgram& prog) {
   }
 }
 
-void add_semantic_tokens(AnalyzeOutput& out, const std::vector<SemanticToken>& sem_tokens,
+void add_semantic_tokens(AnalyzeOutput& out,
+                         const std::vector<SemanticToken>& sem_tokens,
                          const PlaygroundProgram& prog) {
   for (const auto& stok : sem_tokens) {
     if (!prog.in_editor_text(stok.span.offset)) {
@@ -99,19 +104,19 @@ void add_semantic_tokens(AnalyzeOutput& out, const std::vector<SemanticToken>& s
 
 auto user_declarations(const HirModule& module, const PlaygroundProgram& prog) -> HirModule {
   HirModule view{.span = module.span, .declarations = {}};
-  std::ranges::copy_if(module.declarations, std::back_inserter(view.declarations),
-                       [&prog](const HirDecl* decl) -> bool {
-                         return prog.in_user_file(decl->span.offset);
-                       });
+  std::ranges::copy_if(
+      module.declarations,
+      std::back_inserter(view.declarations),
+      [&prog](const HirDecl* decl) -> bool { return prog.in_user_file(decl->span.offset); });
   return view;
 }
 
 auto user_functions(const MirModule& module, const PlaygroundProgram& prog) -> MirModule {
   MirModule view{.functions = {}, .span = module.span};
-  std::ranges::copy_if(module.functions, std::back_inserter(view.functions),
-                       [&prog](const MirFunction* fn) -> bool {
-                         return prog.in_user_file(fn->span.offset);
-                       });
+  std::ranges::copy_if(
+      module.functions, std::back_inserter(view.functions), [&prog](const MirFunction* fn) -> bool {
+        return prog.in_user_file(fn->span.offset);
+      });
   return view;
 }
 
@@ -132,8 +137,22 @@ auto user_function_filter(const MirModule& user_mir) -> std::function<bool(std::
   };
 }
 
-template <typename Printable>
-auto printed(Printable&& print) -> std::string {
+/// `a::b` for the buffer's module declaration, or "" when it has none.
+auto module_name(const FileNode& file) -> std::string {
+  std::string name;
+  if (file.module_decl == nullptr) {
+    return name;
+  }
+  for (auto segment : file.module_decl->path.segments) {
+    if (!name.empty()) {
+      name += "::";
+    }
+    name += segment;
+  }
+  return name;
+}
+
+template <typename Printable> auto printed(Printable&& print) -> std::string {
   std::ostringstream out;
   print(out);
   return out.str();
@@ -150,7 +169,12 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   const bool include_prelude = request.value("includePrelude", false);
 
   // --- Lex + parse (every file of the program) ---
-  auto prog = build_playground_program(ctx.repo_root, request["source"].get<std::string>());
+  auto inputs = parse_program_request(request);
+  if (!inputs) {
+    return error_reply(http_status::bad_request, inputs.error());
+  }
+  out.file = inputs->document;
+  auto prog = build_playground_program(ctx.repo_root, std::move(*inputs));
   if (prog.user == nullptr || !prog.program.diagnostics.empty()) {
     for (const auto& diag : prog.program.diagnostics) {
       out.diagnostics.push_back(make_internal_error(diag.message));
@@ -172,7 +196,11 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   if (prog.user->file() == nullptr) {
     return out.reply();
   }
-  const bool has_parse_errors = !prog.user->parse.diagnostics.empty();
+  // Lowering needs every file lexed and parsed cleanly; the document's
+  // own parse errors are tolerated up to here so its AST, tokens, and
+  // partial resolution still answer.
+  const bool has_parse_errors = !prog.program.lexed_and_parsed_cleanly();
+  out.module = module_name(*prog.user->file());
 
   // Always emit the partial AST when a file was produced, even with
   // parse errors — error recovery nodes appear as placeholders and the
@@ -186,10 +214,10 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   collect_diagnostics(out.diagnostics, prog, resolve_result.diagnostics);
 
   // Semantic tokens — always classified once lex/parse produced a file.
-  add_semantic_tokens(out, classify_tokens(prog.user->lex.tokens, prog.user->file(), &resolve_result),
-                      prog);
+  add_semantic_tokens(
+      out, classify_tokens(prog.user->lex.tokens, prog.user->file(), &resolve_result), prog);
 
-  if (has_user_error(resolve_result.diagnostics, prog)) {
+  if (has_error_severity(resolve_result.diagnostics)) {
     return out.reply();
   }
 
@@ -199,7 +227,7 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   TypeContext types;
   auto check_result = typecheck(prog.program, resolve_result, types);
   collect_diagnostics(out.diagnostics, prog, check_result.diagnostics);
-  if (has_user_error(check_result.diagnostics, prog)) {
+  if (has_error_severity(check_result.diagnostics)) {
     return out.reply();
   }
 
@@ -213,38 +241,36 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   HirContext hir_ctx;
   auto hir_result = build_hir(prog.program, resolve_result, check_result, hir_ctx);
   collect_diagnostics(out.diagnostics, prog, hir_result.diagnostics);
-  if (hir_result.module == nullptr) {
-    if (!has_user_error(hir_result.diagnostics, prog)) {
-      out.diagnostics.push_back(
-          make_internal_error("HIR lowering failed (possible prelude error)"));
+  // A builder may hand back a module alongside error diagnostics; that
+  // module is not lowered further.
+  if (hir_result.module == nullptr || has_error_severity(hir_result.diagnostics)) {
+    if (!has_error_severity(hir_result.diagnostics)) {
+      out.diagnostics.push_back(make_internal_error("HIR lowering failed without a diagnostic"));
     }
     return out.reply();
   }
   out.hir = printed([&](std::ostream& os) {
-    print_hir(os, include_prelude ? *hir_result.module
-                                  : user_declarations(*hir_result.module, prog));
+    print_hir(os,
+              include_prelude ? *hir_result.module : user_declarations(*hir_result.module, prog));
   });
 
   // --- MIR ---
   MirContext mir_ctx;
   auto mir_result = build_mir(*hir_result.module, mir_ctx, types);
   collect_diagnostics(out.diagnostics, prog, mir_result.diagnostics);
-  if (mir_result.module == nullptr) {
-    if (!has_user_error(mir_result.diagnostics, prog)) {
-      out.diagnostics.push_back(
-          make_internal_error("MIR lowering failed (possible prelude error)"));
+  if (mir_result.module == nullptr || has_error_severity(mir_result.diagnostics)) {
+    if (!has_error_severity(mir_result.diagnostics)) {
+      out.diagnostics.push_back(make_internal_error("MIR lowering failed without a diagnostic"));
     }
     return out.reply();
   }
 
-  auto mono_result =
-      monomorphize(*mir_result.module, mir_ctx, types, mir_result.generic_templates);
+  auto mono_result = monomorphize(*mir_result.module, mir_ctx, types, mir_result.generic_templates);
   collect_diagnostics(out.diagnostics, prog, mono_result.diagnostics);
 
   auto user_mir = user_functions(*mir_result.module, prog);
-  out.mir = printed([&](std::ostream& os) {
-    print_mir(os, include_prelude ? *mir_result.module : user_mir);
-  });
+  out.mir = printed(
+      [&](std::ostream& os) { print_mir(os, include_prelude ? *mir_result.module : user_mir); });
 
   // Stop before LLVM lowering on any monomorphization error, including
   // prelude-origin ones: a MIR concreteness violation is an internal
@@ -258,9 +284,10 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   llvm::LLVMContext llvm_ctx;
   LlvmBackend llvm_backend(llvm_ctx);
   auto llvm_result = llvm_backend.lower(*mir_result.module, &prog.program.source_map);
-  collect_diagnostics(out.diagnostics, prog, llvm_result.diagnostics);
+  collect_diagnostics(
+      out.diagnostics, prog, without_prelude_warnings(llvm_result.diagnostics, prog));
 
-  if (llvm_result.module != nullptr && !has_user_error(llvm_result.diagnostics, prog)) {
+  if (llvm_result.module != nullptr && !has_error_severity(llvm_result.diagnostics)) {
     out.llvm_ir = printed([&](std::ostream& os) {
       if (include_prelude) {
         LlvmBackend::print_ir(os, *llvm_result.module);

@@ -162,6 +162,12 @@ inline constexpr std::array kDiagnosticSeverities{
 // `number`, `boolean`, one of the enumerations above (`TokenKind`,
 // `LexicalCategory`, `DiagnosticSeverity`), a shape name, or a shape
 // name followed by `[]`.  Optional fields may be absent from a request.
+//
+// Every position names its file: `file` is the display path of the
+// file the position lies in, and `offset`/`line`/`col` are local to
+// that file.  A definition or reference may therefore lie outside the
+// document that was queried (in the prelude, or in another file of the
+// program); the consumer decides whether it can show it.
 // ---------------------------------------------------------------------------
 
 struct FieldSpec {
@@ -195,6 +201,7 @@ inline constexpr std::array kSemanticTokenFields{
 
 inline constexpr std::array kDiagnosticFields{
     FieldSpec{"severity", "DiagnosticSeverity"},
+    FieldSpec{"file", "string"},
     FieldSpec{"offset", "number"},
     FieldSpec{"length", "number"},
     FieldSpec{"line", "number"},
@@ -209,6 +216,7 @@ inline constexpr std::array kHoverFields{
 };
 
 inline constexpr std::array kDefinitionFields{
+    FieldSpec{"file", "string"},
     FieldSpec{"offset", "number"},
     FieldSpec{"length", "number"},
     FieldSpec{"line", "number"},
@@ -218,14 +226,18 @@ inline constexpr std::array kDefinitionFields{
 inline constexpr std::array kDocumentSymbolFields{
     FieldSpec{"name", "string"},
     FieldSpec{"kind", "string"},
+    FieldSpec{"file", "string"},
     FieldSpec{"offset", "number"},
     FieldSpec{"length", "number"},
     FieldSpec{"children", "DocumentSymbol[]"},
 };
 
 inline constexpr std::array kReferenceFields{
+    FieldSpec{"file", "string"},
     FieldSpec{"offset", "number"},
     FieldSpec{"length", "number"},
+    FieldSpec{"line", "number"},
+    FieldSpec{"col", "number"},
     FieldSpec{"isDefinition", "boolean"},
 };
 

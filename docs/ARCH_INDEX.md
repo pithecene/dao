@@ -37,6 +37,7 @@ Contracts and explanatory material.
 - `IDE_AND_TOOLING.md` — explanatory posture for semantic tooling, LSP, and why some tooling decisions are contract-level while others stay freestanding
 - `COMPILER_SERVICE_API.md` — explanatory shared analysis payloads for CLI, playground, and LSP
 - `building.md` — build prerequisites, parallelism cap (`DAO_BUILD_JOBS`), and override instructions
+- `tooling_capabilities.md` — generated capability matrix (compiler entry points × playground route × `daoc` command × LSP method) from `tools/playground/compiler_service/service_surface.h`; verified by `playground_service_test`
 - `language_vision.md` — explanatory design doctrine, stdlib posture, module/namespace design, and GPU strategy
 
 ## `spec/`

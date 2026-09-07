@@ -1,3 +1,4 @@
+import { programRequest } from "./document";
 import { api } from "./api";
 import { getSource } from "./editor";
 import { renderDiagnostics } from "./diagnostics";
@@ -17,7 +18,7 @@ export async function doRun(): Promise<void> {
   output.textContent = "Compiling…";
 
   try {
-    const data = await api("run", { source: getSource() });
+    const data = await api("run", programRequest(getSource()));
 
     // Always update diagnostics (clears stale errors on success).
     renderDiagnostics(data.diagnostics);
