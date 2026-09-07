@@ -1055,11 +1055,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64): LowerStepR
           // The checker proved every path of a non-void function returns
           // a value, so a block that falls off the end is unreachable;
           // `ret void` there is invalid IR (Task 30.5 found this).
-          // Bound first: the host compiler's LLVM backend asserts on a
-          // fieldless enum-class variant written inline as a class
-          // constructor argument (`LlInst(LlInstKind.LlUnreachable, "")`).
-          let dead_kind: LlInstKind = LlInstKind.LlUnreachable
-          let dead: LlInst = LlInst(dead_kind, "")
+          let dead: LlInst = LlInst(LlInstKind.LlUnreachable, "")
           insts = insts.push(dead)
       return LowerStepR(bs, insts)
 
