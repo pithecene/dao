@@ -12,6 +12,7 @@
 #include "ir/hir/hir_context.h"
 #include "ir/mir/mir_builder.h"
 #include "ir/mir/mir_context.h"
+#include "ir/mir/mir_monomorphize.h"
 #include "support/test_utils.h"
 
 #include <llvm/IR/LLVMContext.h>
@@ -48,6 +49,7 @@ struct LlvmTestPipeline {
   HirBuildResult hir_result;
   MirContext mir_ctx;
   MirBuildResult mir_result;
+  MonomorphizeResult mono_result;
   llvm::LLVMContext llvm_ctx;
   LlvmBackendResult llvm_result;
 
@@ -63,6 +65,11 @@ struct LlvmTestPipeline {
     if (hir_result.program != nullptr) {
       mir_result = build_mir(*hir_result.program, mir_ctx, types);
       if (mir_result.module != nullptr) {
+        // The driver monomorphizes between MIR and the backend, so the
+        // backend never sees a generic template; a helper that skipped
+        // it would test a pipeline no build runs.
+        mono_result =
+            monomorphize(*mir_result.module, mir_ctx, types, mir_result.generic_templates);
         LlvmBackend backend(llvm_ctx);
         llvm_result = backend.lower(*mir_result.module, &program.source_map, program.entry);
       }
@@ -109,6 +116,7 @@ struct LlvmProgramPipeline {
   HirBuildResult hir_result;
   MirContext mir_ctx;
   MirBuildResult mir_result;
+  MonomorphizeResult mono_result;
   llvm::LLVMContext llvm_ctx;
   LlvmBackendResult llvm_result;
 
@@ -129,6 +137,11 @@ struct LlvmProgramPipeline {
     if (hir_result.program != nullptr) {
       mir_result = build_mir(*hir_result.program, mir_ctx, types);
       if (mir_result.module != nullptr) {
+        // The driver monomorphizes between MIR and the backend, so the
+        // backend never sees a generic template; a helper that skipped
+        // it would test a pipeline no build runs.
+        mono_result =
+            monomorphize(*mir_result.module, mir_ctx, types, mir_result.generic_templates);
         LlvmBackend backend(llvm_ctx);
         llvm_result = backend.lower(*mir_result.module, &program.source_map, program.entry);
       }
@@ -164,6 +177,7 @@ struct LlvmProgramPipeline {
     add("check", check_result.diagnostics);
     add("hir", hir_result.diagnostics);
     add("mir", mir_result.diagnostics);
+    add("mono", mono_result.diagnostics);
     add("llvm", llvm_result.diagnostics);
     return out;
   }
@@ -339,15 +353,57 @@ suite<"simple_functions"> simple_functions = [] {
     expect(contains(ir, "icmp eq")) << ir;
   };
 
+  "one generic serves same-named types from two modules"_test = [] {
+    // Distinct declarations are distinct types (§11), so their
+    // specializations cannot share a symbol: one definition would then
+    // be called with the other's struct type.
+    LlvmProgramPipeline pipe({
+        {"lib.dao", "module app::lib\nfn ident<T>(v: T): T -> v\n"},
+        {"a.dao",
+         "module app::a\n"
+         "class Box:\n  value: i32\n"},
+        {"main.dao",
+         "module app::main\n"
+         "import app::lib\n"
+         "import app::a\n"
+         "class Box:\n  tag: i32\n"
+         "fn main(): i32\n"
+         "  let mine = lib::ident(Box(2))\n"
+         "  let theirs = lib::ident(a::Box(3))\n"
+         "  return mine.tag + theirs.value\n"},
+    });
+    auto ir = pipe.ir();
+    size_t definitions = 0;
+    for (size_t at = ir.find("define"); at != std::string::npos; at = ir.find("define", at + 1)) {
+      auto line = ir.substr(at, ir.find('\n', at) - at);
+      if (line.find("ident$") != std::string::npos) {
+        ++definitions;
+      }
+    }
+    expect(definitions == 2_ul) << "expected two specializations, got " << definitions << "\n"
+                                << pipe.problems() << ir;
+  };
+
   "externs differing only in pointee type are diagnosed"_test = [] {
     // `*i32` and `*f64` both lower to LLVM's opaque `ptr`, so comparing
-    // lowered types would call these compatible; the source signatures
-    // are what decide (CONTRACT_C_ABI_INTEROP.md §5).
-    LlvmTestPipeline pipe("extern fn take(p: *i32): i32\n"
-                          "fn a(): i32 -> take(null_ptr<i32>())\n");
-    auto ir = pipe.ir();
-    expect(!pipe.has_errors()) << ir;
-    expect(ir.find("declare") != std::string::npos) << ir;
+    // lowered types calls these compatible and lets one declaration
+    // answer for the other; the source signatures are what decide
+    // (CONTRACT_C_ABI_INTEROP.md §5).  It takes two modules, since one
+    // module cannot declare the same name twice.
+    LlvmProgramPipeline pipe({
+        {"a.dao",
+         "module app::a\n"
+         "extern fn take(p: *i32): i32\n"
+         "fn use_a(p: *i32): i32 -> take(p)\n"},
+        {"main.dao",
+         "module app::main\n"
+         "extern fn take(p: *f64): i32\n"
+         "fn use_main(p: *f64): i32 -> take(p)\n"
+         "fn main(): i32\n"
+         "  return 0\n"},
+    });
+    expect(contains(pipe.problems(), "conflicting signatures"))
+        << "conflicting extern accepted: " << pipe.problems();
   };
 
   "two modules declaring one extern emit one declaration"_test = [] {

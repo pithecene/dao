@@ -208,18 +208,42 @@ auto is_generic_function(const MirFunction* fn) -> bool {
 // Mangled name for specializations: "name$i32" or "name$i32_f64".
 // ---------------------------------------------------------------------------
 
-auto mangle_name(std::string_view base,
-                 const std::vector<const Type*>& type_args) -> std::string {
-  std::string result(base);
-  result += '$';
-  for (size_t i = 0; i < type_args.size(); ++i) {
-    if (i > 0) {
-      result += '_';
+/// Spellings for the type arguments in a specialization's name.  Two
+/// distinct types can print alike — a `Box` declared in each of two
+/// modules, which §11 of the type-system contract keeps distinct, or
+/// `Vector<i32>` and `Vector<f64>`, which both print as the bare name
+/// — and one symbol for both would let a definition answer a call it
+/// does not match.  The first type to claim a spelling keeps it and
+/// later ones are numbered; claiming follows specialization order,
+/// which the program's file order fixes (§8.4).
+class MangledTypeNames {
+public:
+  auto mangle(std::string_view base, const std::vector<const Type*>& type_args) -> std::string {
+    std::string result(base);
+    result += '$';
+    for (size_t i = 0; i < type_args.size(); ++i) {
+      if (i > 0) {
+        result += '_';
+      }
+      result += spelling_of(type_args[i]);
     }
-    result += print_type(type_args[i]);
+    return result;
   }
-  return result;
-}
+
+private:
+  auto spelling_of(const Type* type) -> const std::string& {
+    auto [it, inserted] = spelling_.try_emplace(type, std::string{});
+    if (inserted) {
+      auto base = print_type(type);
+      auto taken = claims_[base]++;
+      it->second = taken == 0 ? base : base + "." + std::to_string(taken);
+    }
+    return it->second;
+  }
+
+  std::unordered_map<const Type*, std::string> spelling_;
+  std::unordered_map<std::string, size_t> claims_;
+};
 
 // ---------------------------------------------------------------------------
 // Specialization key for deduplication.
@@ -242,6 +266,13 @@ struct SpecKeyHash {
     }
     return h;
   }
+};
+
+/// What one monomorphization run accumulates: the specializations it
+/// has already made, and the spellings their names give type arguments.
+struct SpecializationState {
+  std::unordered_map<SpecKey, MirFunction*, SpecKeyHash> cache;
+  MangledTypeNames names;
 };
 
 // ---------------------------------------------------------------------------
@@ -597,13 +628,16 @@ auto build_value_types(const MirFunction* fn)
 // Returns true if a new specialization was created.
 // ---------------------------------------------------------------------------
 
-auto specialize_call_site(
-    MirInst* inst, MirFnRef* fn_ref, const MirBlock* block,
-    size_t inst_idx,
-    const std::unordered_map<uint32_t, const Type*>& value_types,
-    const std::unordered_map<const Symbol*, MirFunction*>& generic_fns,
-    std::unordered_map<SpecKey, MirFunction*, SpecKeyHash>& spec_cache,
-    MirModule& module, MirContext& ctx, TypeContext& types) -> bool {
+auto specialize_call_site(MirInst* inst,
+                          MirFnRef* fn_ref,
+                          const MirBlock* block,
+                          size_t inst_idx,
+                          const std::unordered_map<uint32_t, const Type*>& value_types,
+                          const std::unordered_map<const Symbol*, MirFunction*>& generic_fns,
+                          SpecializationState& state,
+                          MirModule& module,
+                          MirContext& ctx,
+                          TypeContext& types) -> bool {
 
   auto git = generic_fns.find(fn_ref->symbol);
   if (git == generic_fns.end()) {
@@ -654,8 +688,8 @@ auto specialize_call_site(
   SpecKey key{git->second, type_args};
 
   // Check cache.
-  auto cache_it = spec_cache.find(key);
-  if (cache_it != spec_cache.end()) {
+  auto cache_it = state.cache.find(key);
+  if (cache_it != state.cache.end()) {
     // Rewrite the FnRef to point at the cached specialization.
     fn_ref->symbol = cache_it->second->symbol;
     inst->type = substitute_type(inst->type, subst, types);
@@ -664,8 +698,7 @@ auto specialize_call_site(
 
   // Create mangled symbol.
   // Allocate name string on arena so it outlives this scope.
-  auto* name_str = ctx.alloc<std::string>(
-      mangle_name(git->second->symbol->name, type_args));
+  auto* name_str = ctx.alloc<std::string>(state.names.mangle(git->second->symbol->name, type_args));
 
   auto* new_sym = ctx.alloc<Symbol>();
   new_sym->kind = SymbolKind::Function;
@@ -682,7 +715,7 @@ auto specialize_call_site(
   fixup_method_calls(specialized, module, ctx, types);
 
   // Register in cache and add to module.
-  spec_cache[key] = specialized;
+  state.cache[key] = specialized;
   module.functions.push_back(specialized);
 
   // Rewrite the FnRef.
@@ -714,7 +747,7 @@ auto monomorphize(
   const bool has_templates = !generic_templates.empty();
 
   // Specialization cache: (generic fn, type args) → specialized fn.
-  std::unordered_map<SpecKey, MirFunction*, SpecKeyHash> spec_cache;
+  SpecializationState state;
 
   // Phase 2+3+4: iterate until no new specializations are produced.
   // Use index-based iteration because specialize_call_site() may
@@ -739,9 +772,16 @@ auto monomorphize(
             continue;
           }
 
-          if (specialize_call_site(inst, fn_ref, block, inst_idx,
-                                   value_types, generic_templates,
-                                   spec_cache, module, ctx, types)) {
+          if (specialize_call_site(inst,
+                                   fn_ref,
+                                   block,
+                                   inst_idx,
+                                   value_types,
+                                   generic_templates,
+                                   state,
+                                   module,
+                                   ctx,
+                                   types)) {
             changed = true;
           }
         }
