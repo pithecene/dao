@@ -267,13 +267,24 @@ void select_entry(Program& program, const GraphInputs& inputs) {
   }
   if (candidates.size() == 1) {
     program.entry = candidates.front();
-  } else if (candidates.size() > 1) {
+  } else if (candidates.empty()) {
+    // A program built into an executable has exactly one entry module
+    // (CONTRACT_MODULE_SYSTEM.md §8.1, §8.3); saying so here is what
+    // keeps a library file from reaching the linker as `undefined
+    // main`.  How loudly depends on what the caller is compiling.
+    const std::string message = "no entry module: no module declares 'fn main' (use --entry)";
+    if (inputs.entry_policy == EntryPolicy::Required) {
+      program.diagnostics.push_back(Diagnostic::error(Span{}, message));
+    } else if (inputs.entry_policy == EntryPolicy::Advisory) {
+      program.diagnostics.push_back(Diagnostic::warning(Span{}, message));
+    }
+  } else {
     std::string names;
     for (const auto* candidate : candidates) {
       names += (names.empty() ? "" : ", ") + candidate->display;
     }
     program.diagnostics.push_back(Diagnostic::error(
-        Span{}, "several modules declare `fn main` (" + names + "); select one with --entry"));
+        Span{}, "ambiguous entry module: 'fn main' declared in " + names + " (use --entry)"));
   }
 }
 
