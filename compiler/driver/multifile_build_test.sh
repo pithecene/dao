@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# End-to-end multi-file compilation (Task 31 acceptance §19.1, §19.2,
-# §19.8): root-file discovery and explicit file lists build to
-# executables with the expected exit code, and the emitted IR of an
+# End-to-end multi-file compilation: root-file discovery and explicit
+# file lists build to executables with the expected exit code, and the emitted IR of an
 # explicit set is byte-identical under input-order permutation.
 #   multifile_build_test.sh <daoc> <repo root>
 set -u
@@ -34,7 +33,7 @@ else
   fail "bootstrap smoke: daoc build failed"
 fi
 
-# The other two shared fixtures (Task 31 §16.4): both compilers read them,
+# The other two shared fixtures: both compilers read them,
 # neither task edits them.  Each is a library set with no `fn main`, so it
 # is CHECKED rather than built — a missing entry is a warning for analysis
 # and an error only when producing an executable.
@@ -49,7 +48,7 @@ for fixture in cross_module_enum extend_isolation; do
   grep -q 'error:' "$WORK/$fixture.txt" && fail "$fixture: reported an error: $(grep -m1 'error:' "$WORK/$fixture.txt")"
 done
 
-# Link inputs pass through unchanged (Task 31 §13), dash-led ones included,
+# Link inputs pass through unchanged, dash-led ones included,
 # and `--` ends option parsing.  A bad link input reaches the linker, which
 # is where it is diagnosed — the driver does not reject it.
 out=$("$DAOC" build --source "$BM/app_main.dao" --source "$BM/app_math.dao" --source "$BM/core_fmt.dao" -Wl,--no-such-option 2>&1) || true
@@ -70,6 +69,25 @@ second_line=$(grep -n 'second.dao' "$WORK/order.txt" | head -1 | cut -d: -f1)
 if [ -n "$first_line" ] && [ -n "$second_line" ] && [ "$first_line" -gt "$second_line" ]; then
   fail "diagnostics are not in file order: first.dao reported after second.dao"
 fi
+
+# A directory where a source file belongs is reported, not crashed on:
+# opening one succeeds and only the first read fails.
+"$DAOC" check --source "$BM" > "$WORK/dir.txt" 2>&1 && fail "check accepted a directory as a source"
+grep -q 'not a source file' "$WORK/dir.txt" || fail "a directory input was not reported: $(head -1 "$WORK/dir.txt")"
+grep -q 'terminate called' "$WORK/dir.txt" && fail "a directory input crashed the driver"
+
+# The default output name is a function of the file set, not of the
+# order the files are given in or the way their paths are spelled.
+build_out() {
+  "$DAOC" build "$@" > "$WORK/named.txt" || fail "build failed: $(tail -2 "$WORK/named.txt")"
+  realpath "$(tail -1 "$WORK/named.txt")"
+}
+plain=$(build_out --source "$BM/app_main.dao" --source "$BM/app_math.dao" --source "$BM/core_fmt.dao")
+permuted=$(build_out --source "$BM/core_fmt.dao" --source "$BM/app_math.dao" --source "$BM/app_main.dao")
+detour=$(build_out --source "$BM/../smoke/app_main.dao" --source "$BM/app_math.dao" --source "$BM/core_fmt.dao")
+[ "$plain" = "$permuted" ] || fail "output name changed with input order: $plain vs $permuted"
+[ "$plain" = "$detour" ] || fail "output name changed with path spelling: $plain vs $detour"
+rm -f "$plain"
 
 # Determinism: the same explicit set in two orders emits identical IR.
 "$DAOC" llvm-ir --source "$BM/app_main.dao" --source "$BM/app_math.dao" --source "$BM/core_fmt.dao" > "$WORK/a.ll" || fail "llvm-ir (order 1) failed"

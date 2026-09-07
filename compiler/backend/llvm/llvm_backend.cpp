@@ -205,26 +205,24 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
     // bound to whichever came first; one declaration is emitted and a
     // disagreeing signature is a diagnostic rather than a silent pick.
     auto name = fn_name(*mir_fn->symbol);
-    if (auto* existing = module_->getFunction(name)) {
+    if (mir_fn->is_extern) {
       // Compare the DAO signature, not the lowered one: `*i32` and
       // `*f64` are both an opaque `ptr` in LLVM, so equal LLVM types
-      // would let two incompatible declarations of one C symbol through
-      // (CONTRACT_C_ABI_INTEROP.md §5).  The declaration that arrived
-      // first is remembered by its source signature and every later one
-      // is compared against that.
+      // would call two incompatible declarations of one C symbol
+      // identical (CONTRACT_C_ABI_INTEROP.md §5).  Every declaration
+      // records its source signature, including the first, which is
+      // what later ones are compared against.
       auto signature = mir_signature(*mir_fn);
-      auto [known, inserted] = extern_signatures_.try_emplace(name, signature);
-      if (!inserted && known->second != signature) {
+      auto [known, first] = extern_signatures_.try_emplace(name, signature);
+      if (!first && known->second != signature) {
         emit_diagnostic(mir_fn->span,
                         "extern '" + name + "' is declared with conflicting signatures: '" +
                             known->second + "' and '" + signature + "'");
-      } else if (existing->getFunctionType() != fn_type) {
-        emit_diagnostic(mir_fn->span,
-                        "extern '" + name +
-                            "' is declared with conflicting signatures in this program");
       }
-      // Later lookups go through module_->getFunction(name), which
-      // now finds the one declaration.
+    }
+    if (module_->getFunction(name) != nullptr) {
+      // Already declared: later lookups go through
+      // module_->getFunction(name) and find the one declaration.
       continue;
     }
     auto* llvm_fn =

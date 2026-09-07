@@ -321,7 +321,8 @@ auto main(int argc, char* argv[]) -> int {
   }
   std::string_view command(argv[1]);
 
-  // daoc <file> -- read and exit (Task 0 compat)
+  // `daoc <file>` with no command reads the file and exits, as it
+  // did before there were commands.
   const bool known_command =
       command == "build" || std::ranges::any_of(commands, [&](const Command& c) {
         return c.name == command;
@@ -364,7 +365,7 @@ auto main(int argc, char* argv[]) -> int {
       break;
     } else if (arg.starts_with("--")) {
       // `daoc build <inputs> [link-inputs...]` passes its trailing
-      // arguments to the linker unchanged (Task 31 §13), and linker
+      // arguments to the linker unchanged, and linker
       // options lead with a dash.  Only the analysis commands, which
       // have nothing to pass anything to, reject an unknown option.
       if (command != "build") {

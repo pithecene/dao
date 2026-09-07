@@ -1,5 +1,7 @@
 #include "frontend/typecheck/type_checker.h"
 
+#include "frontend/module/module_graph.h"
+
 #include "frontend/typecheck/type_conversion.h"
 
 namespace dao {
@@ -118,6 +120,27 @@ auto TypeChecker::instantiate_generic(const Type* base_type, std::string_view na
   return nullptr;
 }
 
+/// Null when a symbol of this kind may name a type; otherwise what to
+/// call it in a diagnostic.  Named types, aliases, builtins, generic
+/// parameters, and concepts are all legitimate in a type position;
+/// these kinds never are.
+auto not_a_type(SymbolKind kind) -> const char* {
+  switch (kind) {
+  case SymbolKind::Function:
+    return "a function";
+  case SymbolKind::Param:
+  case SymbolKind::Local:
+  case SymbolKind::LambdaParam:
+    return "a value";
+  case SymbolKind::Field:
+    return "a field";
+  case SymbolKind::Module:
+    return "a module";
+  default:
+    return nullptr;
+  }
+}
+
 auto TypeChecker::resolve_type_node(const TypeNode* node) -> const Type* {
   if (node == nullptr) {
     return nullptr;
@@ -188,6 +211,15 @@ auto TypeChecker::resolve_type_node(const TypeNode* node) -> const Type* {
         if (csm != concept_self_map_.end()) {
           return csm->second;
         }
+      }
+      // A type position takes a type.  Without this, a function symbol
+      // yields its own function type and a value symbol its value type,
+      // so `p: helper` or `p: lib::helper` typechecks silently as
+      // whatever the name happens to denote
+      // (CONTRACT_TYPE_SYSTEM_FOUNDATIONS.md §11).
+      if (const auto* what = not_a_type(sym->kind)) {
+        error(node->span, "'" + module_display(path.segments) + "' is " + what + ", not a type");
+        return nullptr;
       }
       const auto* base_type = resolve_symbol_type(sym);
 
@@ -396,14 +428,16 @@ auto TypeChecker::resolve_symbol_type_for_type_decl(const Symbol* sym) -> const 
 void TypeChecker::register_declarations() {
   pending_classes_.clear(); // Reset pass-local state for this file.
   register_type_names();
+  // Aliases come after the class shells they may name and are tried
+  // again after the enums, which may in turn name an alias.
+  register_type_aliases(/*report_failures=*/false);
   register_enum_variants();
+  register_type_aliases(/*report_failures=*/true);
   register_struct_fields();
   register_signatures();
 }
 
-void TypeChecker::register_type_names() {
-  // Pass 1a: register type aliases first so that functions and structs
-  // can reference them regardless of source order.
+void TypeChecker::register_type_aliases(bool report_failures) {
   for (const auto* decl : all_decls_) {
     if (decl->kind() != NodeKind::AliasDecl) {
       continue;
@@ -414,16 +448,36 @@ void TypeChecker::register_type_names() {
       continue;
     }
     const auto* sym = decl_it->second;
+    if (symbol_types_.contains(sym)) {
+      continue; // registered by an earlier run
+    }
 
     // Resolve the aliased type and cache it so later lookups of the
     // alias name transparently return the underlying type.
+    auto before = diagnostics_.size();
     const auto* aliased_type = resolve_type_node(alias.type);
     if (aliased_type != nullptr) {
       symbol_types_[sym] = aliased_type;
       typed_.set_decl_type(decl, aliased_type);
+      continue;
+    }
+    if (!report_failures) {
+      // The target may simply not be registered yet; anything said now
+      // would be said again by the final run.
+      diagnostics_.resize(before);
+      continue;
+    }
+    if (diagnostics_.size() == before) {
+      // The name resolved to a symbol whose type never materialized —
+      // one alias naming another that names it back, say.  Left
+      // unsaid, the alias is silently unusable everywhere it appears.
+      error(alias.name_span,
+            "cannot resolve the type aliased by '" + std::string(alias.name) + "'");
     }
   }
+}
 
+void TypeChecker::register_type_names() {
   // Pass 1b: register type shells (enums and class structs) so that
   // function signatures processed in pass 1c can reference them
   // regardless of source order.

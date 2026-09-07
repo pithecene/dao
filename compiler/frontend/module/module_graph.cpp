@@ -69,11 +69,33 @@ void register_modules(Program& program) {
 // Edges: each import resolves to a module of the program or is diagnosed.
 // ---------------------------------------------------------------------------
 
-auto located_display(const GraphInputs& inputs, const std::string& identity)
-    -> const std::string* {
-  auto it = std::ranges::find(inputs.located, identity, &LocatedImport::identity);
-  return it == inputs.located.end() ? nullptr : &it->display_path;
-}
+/// The files discovery loaded, by the import identity it went looking
+/// for and by display path.  Built once per graph: an unresolved import
+/// asks both, and rescanning the whole input set for each one is
+/// quadratic in programs where several imports fail together.
+struct LocatedIndex {
+  std::unordered_map<std::string_view, const std::string*> display_by_identity;
+  std::unordered_map<std::string_view, const SourceFile*> file_by_display;
+
+  LocatedIndex(const GraphInputs& inputs, const Program& program) {
+    for (const auto& located : inputs.located) {
+      display_by_identity.try_emplace(located.identity, &located.display_path);
+    }
+    for (const auto& file : program.files) {
+      file_by_display.try_emplace(file->display_path, file.get());
+    }
+  }
+
+  [[nodiscard]] auto display_for(const std::string& identity) const -> const std::string* {
+    auto it = display_by_identity.find(identity);
+    return it == display_by_identity.end() ? nullptr : it->second;
+  }
+
+  [[nodiscard]] auto file_at(const std::string& display) const -> const SourceFile* {
+    auto it = file_by_display.find(display);
+    return it == file_by_display.end() ? nullptr : it->second;
+  }
+};
 
 auto not_found_message(const GraphInputs& inputs, const std::string& identity) -> std::string {
   std::string message = "imported module '" + identity + "' not found";
@@ -88,6 +110,7 @@ auto not_found_message(const GraphInputs& inputs, const std::string& identity) -
 }
 
 void resolve_edges(Program& program, const GraphInputs& inputs) {
+  const LocatedIndex located(inputs, program);
   for (auto& module : program.modules) {
     std::unordered_set<ModuleInfo*> seen;
     for (const auto* import : module->file->parse.file->imports) {
@@ -101,11 +124,10 @@ void resolve_edges(Program& program, const GraphInputs& inputs) {
       if (target == nullptr) {
         // Root-file mode may have loaded a file for this import that
         // turned out to declare something else (§8.3).
-        if (const auto* display = located_display(inputs, identity)) {
-          const auto* file = std::ranges::find_if(program.files, [&](const auto& f) {
-                               return f->display_path == *display;
-                             })->get();
-          auto declared = file->module != nullptr ? file->module->display : "no module";
+        if (const auto* display = located.display_for(identity)) {
+          const auto* file = located.file_at(*display);
+          auto declared =
+              file != nullptr && file->module != nullptr ? file->module->display : "no module";
           program.diagnostics.push_back(Diagnostic::error(
               import->span, *display + " was found for import '" + identity +
                                 "' but declares " +
@@ -176,18 +198,38 @@ auto topological_order(Program& program) -> ModuleSet /* modules left unordered:
 // ---------------------------------------------------------------------------
 
 void strip_acyclic_dependents(ModuleSet& remaining) {
-  for (bool changed = true; changed;) {
-    changed = false;
-    for (auto it = remaining.begin(); it != remaining.end();) {
-      auto* candidate = *it;
-      bool depended_on = std::ranges::any_of(remaining, [&](const ModuleInfo* other) {
-        return std::ranges::contains(other->imports, candidate);
-      });
-      if (depended_on) {
-        ++it;
-      } else {
-        it = remaining.erase(it);
-        changed = true;
+  // Each module counts how many remaining modules import it; dropping
+  // one decrements its imports' counts, so the whole strip costs one
+  // pass over the edges rather than a rescan of the set per candidate.
+  std::unordered_map<const ModuleInfo*, size_t> dependents;
+  for (const auto* module : remaining) {
+    dependents.try_emplace(module, 0);
+  }
+  for (const auto* module : remaining) {
+    for (const auto* imported : module->imports) {
+      if (auto it = dependents.find(imported); it != dependents.end()) {
+        ++it->second;
+      }
+    }
+  }
+
+  // Seeded in display order so the trace a cycle report walks is the
+  // same on every run; the set that survives is order-independent.
+  std::vector<ModuleInfo*> unneeded;
+  for (auto* module : remaining) {
+    if (dependents.at(module) == 0) {
+      unneeded.push_back(module);
+    }
+  }
+  while (!unneeded.empty()) {
+    auto* dropped = unneeded.back();
+    unneeded.pop_back();
+    remaining.erase(dropped);
+    for (auto* imported : dropped->imports) {
+      auto it = dependents.find(imported);
+      if (it != dependents.end() && it->second > 0 && --it->second == 0 &&
+          remaining.contains(imported)) {
+        unneeded.push_back(imported);
       }
     }
   }

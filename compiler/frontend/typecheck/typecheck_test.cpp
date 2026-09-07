@@ -114,7 +114,7 @@ struct TypecheckPipeline {
 };
 
 // ---------------------------------------------------------------------------
-// Multi-module programs (Task 31 D3): files named `stdlib/...` form the
+// Multi-module programs: files named `stdlib/...` form the
 // prelude group; the rest are user modules.
 // ---------------------------------------------------------------------------
 
@@ -337,6 +337,96 @@ suite<"typecheck_nominal_identity"> typecheck_nominal_identity = [] {
         {"other.dao", "module app::other\nextend i32 as Other:\n  fn show(self): i32 -> 9\n"},
     });
     expect(clean(checked)) << all_messages(checked);
+  };
+};
+
+suite<"typecheck_type_positions"> typecheck_type_positions = [] {
+  // A type position takes a type.  A name that resolves to something
+  // else is reported there, rather than quietly becoming whatever type
+  // that name happens to denote (CONTRACT_TYPE_SYSTEM_FOUNDATIONS.md
+  // §11).
+  "a qualified function is not a type"_test = [] {
+    auto checked = check_program({
+        {"lib.dao", "module app::lib\nfn helper(): i32 -> 1\n"},
+        {"main.dao",
+         "module app::main\n"
+         "import app::lib\n"
+         "fn takes(p: lib::helper): i32 -> 0\n"
+         "fn main(): i32\n  return 0\n"},
+    });
+    expect(all_messages(checked).find("'lib::helper' is a function, not a type") !=
+           std::string::npos)
+        << all_messages(checked);
+  };
+
+  "a local function is not a type"_test = [] {
+    auto checked = check_program({{"main.dao",
+                                   "module app::main\n"
+                                   "fn helper(): i32 -> 1\n"
+                                   "fn takes(p: helper): i32 -> 0\n"
+                                   "fn main(): i32\n  return 0\n"}});
+    expect(all_messages(checked).find("'helper' is a function, not a type") != std::string::npos)
+        << all_messages(checked);
+  };
+
+  "qualified classes and enums stay accepted"_test = [] {
+    auto checked = check_program({
+        {"lib.dao", "module app::lib\nclass Holder:\n  value: i32\nenum Colour:\n  Red\n"},
+        {"main.dao",
+         "module app::main\n"
+         "import app::lib\n"
+         "fn take(h: lib::Holder): i32 -> h.value\n"
+         "fn pick(c: lib::Colour): i32 -> 0\n"
+         "fn main(): i32\n  return take(lib::Holder(1)) + pick(lib::Colour::Red)\n"},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+};
+
+suite<"typecheck_alias_registration"> typecheck_alias_registration = [] {
+  // An alias names a type that may be declared after it, and the types
+  // it names may themselves name an alias, so neither order can decide
+  // whether the alias registers at all.
+  "aliases resolve to classes and enums declared later"_test = [] {
+    auto checked = check_program({{"main.dao",
+                                   "module app::main\n"
+                                   "type Boxed = Holder\n"
+                                   "type Choice = Colour\n"
+                                   "class Holder:\n  value: i32\n"
+                                   "enum Colour:\n  Red\n  Green\n"
+                                   "fn take(b: Boxed): i32 -> b.value\n"
+                                   "fn pick(c: Choice): i32 -> 0\n"
+                                   "fn main(): i32\n"
+                                   "  let h: Boxed = Holder(7)\n"
+                                   "  return take(h) + pick(Colour::Red)\n"}});
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "an alias to another module's class is usable across the import"_test = [] {
+    auto checked = check_program({
+        {"lib.dao",
+         "module app::lib\n"
+         "type Boxed = Holder\n"
+         "class Holder:\n  value: i32\n"},
+        {"main.dao",
+         "module app::main\n"
+         "import app::lib\n"
+         "fn take(b: lib::Boxed): i32 -> b.value\n"
+         "fn main(): i32\n  return take(lib::Holder(3))\n"},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "an alias whose target never resolves is reported"_test = [] {
+    // Two aliases naming each other: neither ever has a type, and
+    // saying nothing would leave both silently unusable.
+    auto checked = check_program({{"main.dao",
+                                   "module app::main\n"
+                                   "type A = B\n"
+                                   "type B = A\n"
+                                   "fn main(): i32\n  return 0\n"}});
+    expect(all_messages(checked).find("cannot resolve the type aliased by") != std::string::npos)
+        << all_messages(checked);
   };
 };
 

@@ -276,6 +276,13 @@ private:
 
   void register_declarations();
   void register_type_names();
+  /// Register every alias whose target now resolves.  Aliases and the
+  /// types they name depend on each other in both directions — an alias
+  /// may name an enum, an enum payload may name an alias — so this runs
+  /// once before the enums and once after.  The final run reports the
+  /// aliases that never resolved; the first stays quiet, since a target
+  /// it cannot see yet may still arrive.
+  void register_type_aliases(bool report_failures);
   void register_struct_fields();
   void register_enum_variants();
   void register_signatures();
