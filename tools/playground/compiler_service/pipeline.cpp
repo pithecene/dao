@@ -186,16 +186,29 @@ void collect_diagnostics(nlohmann::json& out,
   }
 }
 
-void sort_diagnostics(nlohmann::json& diagnostics) {
+void sort_diagnostics(nlohmann::json& diagnostics, const PlaygroundProgram& prog) {
   if (!diagnostics.is_array()) {
     return;
   }
+  // The program lays its files out prelude-group first, then by display
+  // path (§8.4), so ordering by the path alone would put a user file
+  // before a prelude file that holds the earlier offsets.  The file's
+  // own position in the program is the key.
+  std::unordered_map<std::string_view, size_t> position;
+  for (size_t i = 0; i < prog.program.files.size(); ++i) {
+    position.emplace(prog.program.files[i]->display_path, i + 1);
+  }
+  auto file_rank = [&position](const nlohmann::json& entry) {
+    auto file = entry.value("file", std::string{});
+    auto it = position.find(file);
+    return it == position.end() ? size_t{0} : it->second; // unlocated sorts first
+  };
   auto& entries = diagnostics.get_ref<nlohmann::json::array_t&>();
-  std::ranges::stable_sort(entries, [](const nlohmann::json& a, const nlohmann::json& b) {
-    auto file_a = a.value("file", std::string{});
-    auto file_b = b.value("file", std::string{});
-    if (file_a != file_b) {
-      return file_a < file_b;
+  std::ranges::stable_sort(entries, [&](const nlohmann::json& a, const nlohmann::json& b) {
+    auto rank_a = file_rank(a);
+    auto rank_b = file_rank(b);
+    if (rank_a != rank_b) {
+      return rank_a < rank_b;
     }
     return a.value("offset", 0U) < b.value("offset", 0U);
   });

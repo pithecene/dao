@@ -40,9 +40,12 @@ struct AnalyzeOutput {
   std::string hir;
   std::string mir;
   std::string llvm_ir;
+  const PlaygroundProgram* program = nullptr; // set once assembly succeeds
 
   [[nodiscard]] auto reply() -> Reply {
-    sort_diagnostics(diagnostics);
+    if (program != nullptr) {
+      sort_diagnostics(diagnostics, *program);
+    }
     return {.status = http_status::ok,
             .body = {
                 {"file", file},
@@ -201,6 +204,7 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   // Advisory: a buffer with no `fn main` is analysable, and the warning
   // is why Run will not work.
   auto prog = build_playground_program(ctx.repo_root, std::move(*inputs), EntryPolicy::Advisory);
+  out.program = &prog;
   if (prog.user == nullptr || has_error_severity(prog.program.diagnostics)) {
     // Report what each file said first: a module that is "not found" is
     // usually a file that did not parse, and that parse error is the
