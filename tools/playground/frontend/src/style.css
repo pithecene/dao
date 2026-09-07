@@ -144,23 +144,33 @@ main {
   border-bottom: 1px solid var(--border);
 }
 
-#ir-panel {
+#ir-panel,
+#outline-panel {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 
-#ir-body {
+.collapsible-body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
   transition: max-height 0.2s ease;
+  max-height: 0;
+}
+
+.collapsible.expanded .collapsible-body {
   max-height: 50vh;
 }
 
-#ir-body.collapsed {
-  max-height: 0;
+#outline-output {
+  overflow: auto;
+  font-size: 13px;
+}
+
+.collapsible.expanded #outline-output {
+  max-height: 30vh;
 }
 
 .collapsible-header {
@@ -184,16 +194,8 @@ main {
   display: inline-block;
 }
 
-#ir-panel.expanded .collapse-arrow {
+.collapsible.expanded .collapse-arrow {
   transform: rotate(90deg);
-}
-
-#ir-panel.expanded #ir-body {
-  max-height: 50vh;
-}
-
-#ir-panel:not(.expanded) #ir-body {
-  max-height: 0;
 }
 
 .panel-header {
@@ -331,4 +333,85 @@ main {
 .hover-type {
   color: var(--accent);
   font-family: "JetBrains Mono", "Fira Code", monospace;
+}
+
+/* Header hints and service status */
+.panel-hint {
+  float: right;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--fg-dim);
+}
+
+#service-status {
+  color: var(--bg-header);
+  background: var(--warning, #f9e2af);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* IR panel options */
+.ir-option {
+  margin-left: auto;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--fg-dim);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+/* Outline */
+.outline-list {
+  list-style: none;
+  padding-left: 0;
+}
+
+.outline-list .outline-list {
+  padding-left: 16px;
+}
+
+.outline-row {
+  background: none;
+  border: none;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 2px 12px;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+}
+
+.outline-row:hover {
+  background: var(--bg-header);
+}
+
+.outline-kind {
+  color: var(--fg-dim);
+  font-style: italic;
+  min-width: 64px;
+}
+
+.no-symbols {
+  padding: 8px 12px;
+  color: var(--fg-dim);
+  font-style: italic;
+}
+
+/* Reference highlights (Alt+click) */
+.dao-reference {
+  background: rgba(137, 180, 250, 0.2);
+  border-radius: 2px;
+}
+
+.dao-reference-def {
+  background: rgba(249, 226, 175, 0.28);
+  border-radius: 2px;
 }

@@ -209,6 +209,15 @@ public:
   auto qualified_expressions() const -> const QualifiedSpans& {
     return qualified_;
   }
+
+  /// A named-argument label and the call's callee.
+  struct NamedLabel {
+    Span label;
+    const Expr* callee;
+  };
+  auto named_labels() const -> const std::vector<NamedLabel>& {
+    return named_labels_;
+  }
   auto field_objects() const -> const FieldObjects& {
     return field_objects_;
   }
@@ -229,6 +238,7 @@ private:
   SpanMap map_;
   QualifiedSpans qualified_;
   FieldObjects field_objects_;
+  std::vector<NamedLabel> named_labels_;
 
   void classify(Span span, std::string_view kind) {
     map_[span.offset] = kind;
@@ -621,6 +631,14 @@ private:
       for (const auto* arg : call.args) {
         visit_expr(*arg);
       }
+      // Named-argument labels name fields when the callee is a type
+      // (an enum-class variant or class constructor); that is decided
+      // once the callee is resolved.
+      for (const auto& label : call.arg_name_spans) {
+        if (label.length > 0) {
+          named_labels_.push_back({.label = label, .callee = call.callee});
+        }
+      }
       break;
     }
     case NodeKind::IndexExpr: {
@@ -797,18 +815,19 @@ auto paint_qualified(const Symbol& head_symbol) -> QualifiedPainting {
 
 auto classify_tokens(const std::vector<Token>& tokens,
                      const FileNode* file,
-                     const ResolveResult* resolve_result)
-    -> std::vector<SemanticToken> {
+                     const ResolveResult* resolve_result) -> std::vector<SemanticToken> {
   // Step 1: Collect structural classifications from AST.
   AstClassifier::SpanMap ast_map;
   AstClassifier::QualifiedSpans qualified;
   AstClassifier::FieldObjects field_objects;
+  std::vector<AstClassifier::NamedLabel> named_labels;
   if (file != nullptr) {
     AstClassifier classifier;
     classifier.visit_file(*file);
     ast_map = classifier.classifications();
     qualified = classifier.qualified_expressions();
     field_objects = classifier.field_objects();
+    named_labels = classifier.named_labels();
   }
 
   // The resolver's symbol for an identifier token, if any.
@@ -828,6 +847,16 @@ auto classify_tokens(const std::vector<Token>& tokens,
   // Categories decided for later tokens by an earlier one: trailing
   // segments of a qualified name painted from its resolved head.
   std::unordered_map<uint32_t, std::string_view> pending;
+
+  // A named-argument label is a field only when the callee is a type;
+  // a label on an ordinary call names nothing the checker recognises
+  // and is left unclassified rather than mislabelled.
+  for (const auto& named : named_labels) {
+    const auto* callee = resolved_symbol(named.callee->span.offset);
+    if (callee != nullptr && callee->kind == SymbolKind::Type) {
+      pending[named.label.offset] = "use.field";
+    }
+  }
   // Nesting depth of generic `<...>` lists, so their brackets are
   // punctuation rather than comparisons.
   uint32_t generic_depth = 0;

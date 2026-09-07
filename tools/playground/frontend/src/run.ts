@@ -1,4 +1,4 @@
-import type { RunResponse } from "./types";
+import { api } from "./api";
 import { getSource } from "./editor";
 import { renderDiagnostics } from "./diagnostics";
 
@@ -16,38 +16,22 @@ export async function doRun(): Promise<void> {
   output.className = "";
   output.textContent = "Compiling…";
 
-  const source = getSource();
-
   try {
-    const resp = await fetch("/api/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source }),
-    });
-
-    if (!resp.ok) {
-      output.className = "console-error";
-      output.textContent = `Server error: ${resp.status}`;
-      return;
-    }
-
-    const data: RunResponse = await resp.json();
+    const data = await api("run", { source: getSource() });
 
     // Always update diagnostics (clears stale errors on success).
-    renderDiagnostics(data.diagnostics || []);
+    renderDiagnostics(data.diagnostics);
 
     if (data.exit_code === -1) {
       output.className = "console-error";
       output.textContent =
-        data.diagnostics && data.diagnostics.length > 0
+        data.diagnostics.length > 0
           ? "Compilation failed. See diagnostics."
           : "Compilation failed (internal error).";
       return;
     }
 
-    // Build console text.
-    let text = "";
-    if (data.stdout) text += data.stdout;
+    let text = data.stdout;
     if (data.stderr) {
       if (text) text += "\n";
       text += data.stderr;

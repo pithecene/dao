@@ -1,19 +1,15 @@
 #ifndef DAO_PLAYGROUND_EXAMPLES_H
 #define DAO_PLAYGROUND_EXAMPLES_H
 
-#include <httplib.h>
-
-#include <filesystem>
+#include "service.h"
 
 namespace dao::playground {
 
-void handle_examples_list(const httplib::Request& req,
-                          httplib::Response& res,
-                          const std::filesystem::path& examples_dir);
+/// The `.dao` files directly under the examples directory, sorted by name.
+auto examples_list(const nlohmann::json& request, const ServiceContext& ctx) -> Reply;
 
-void handle_example_get(const httplib::Request& req,
-                        httplib::Response& res,
-                        const std::filesystem::path& examples_dir);
+/// Source of one example by file name (`request["name"]`).
+auto example_source(const nlohmann::json& request, const ServiceContext& ctx) -> Reply;
 
 } // namespace dao::playground
 

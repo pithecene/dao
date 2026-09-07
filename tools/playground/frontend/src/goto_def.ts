@@ -1,44 +1,22 @@
 import type { EditorView } from "@codemirror/view";
+import { api } from "./api";
 import { getSource } from "./editor";
 
-interface GotoDefResponse {
-  offset: number;
-  length: number;
-  line: number;
-  col: number;
-}
-
+/** Ctrl+click (Cmd+click on Mac) jumps to the symbol's declaration. */
 export function initGotoDef(view: EditorView): void {
   view.dom.addEventListener("click", async (e: MouseEvent) => {
-    // Ctrl+Click (or Cmd+Click on Mac) for go-to-definition.
     if (!e.ctrlKey && !e.metaKey) return;
-
     e.preventDefault();
 
     const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
     if (pos === null) return;
 
-    const source = getSource();
-
     try {
-      const resp = await fetch("/api/goto-def", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source, offset: pos }),
-      });
-
-      if (!resp.ok) return;
-
-      const data: GotoDefResponse | null = await resp.json();
-      if (!data) return;
-
-      // Move cursor to the definition and scroll it into view.
-      view.dispatch({
-        selection: { anchor: data.offset },
-        scrollIntoView: true,
-      });
-    } catch {
-      // Silently ignore errors.
+      const target = await api("gotoDef", { source: getSource(), offset: pos });
+      if (!target) return; // no declaration in the buffer (prelude symbol or none)
+      view.dispatch({ selection: { anchor: target.offset }, scrollIntoView: true });
+    } catch (err) {
+      console.error("go to definition failed:", err);
     }
   });
 }

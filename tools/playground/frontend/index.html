@@ -9,6 +9,7 @@
   <header>
     <h1>Dao Playground</h1>
     <div class="controls">
+      <span id="service-status" hidden>compiler restarting…</span>
       <select id="example-select">
         <option value="">— load example —</option>
       </select>
@@ -17,7 +18,7 @@
   </header>
   <main>
     <div id="editor-panel">
-      <div class="panel-header">Source</div>
+      <div class="panel-header">Source <span class="panel-hint">Ctrl+click: definition · Alt+click: references · Ctrl+Space: complete</span></div>
       <div id="editor-container"></div>
     </div>
     <div id="right-panels">
@@ -29,16 +30,25 @@
         <div class="panel-header">Diagnostics</div>
         <div id="diagnostics-output"></div>
       </div>
-      <div id="ir-panel">
-        <button id="ir-toggle" class="panel-header collapsible-header">
+      <div id="outline-panel" class="collapsible">
+        <button class="panel-header collapsible-header">
+          <span class="collapse-arrow">▶</span> Outline
+        </button>
+        <div id="outline-output" class="collapsible-body"></div>
+      </div>
+      <div id="ir-panel" class="collapsible">
+        <button class="panel-header collapsible-header">
           <span class="collapse-arrow">▶</span> Compiler IR
         </button>
-        <div id="ir-body" class="collapsed">
+        <div id="ir-body" class="collapsible-body">
           <div class="panel-tabs">
             <button class="tab active" data-tab="ast">AST</button>
             <button class="tab" data-tab="hir">HIR</button>
             <button class="tab" data-tab="mir">MIR</button>
             <button class="tab" data-tab="llvm-ir">LLVM IR</button>
+            <label class="ir-option" title="Show the stdlib prelude's HIR/MIR/LLVM alongside the buffer's">
+              <input type="checkbox" id="include-prelude"> include prelude
+            </label>
           </div>
           <pre id="ast-output" class="tab-content active"></pre>
           <pre id="hir-output" class="tab-content"></pre>

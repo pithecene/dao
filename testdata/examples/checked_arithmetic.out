@@ -1,0 +1,20 @@
+=== checked i32 arithmetic ===
+
+checked_add(10, 20) = Some(30)
+checked_sub(100, 42) = Some(58)
+checked_mul(7, 6) = Some(42)
+checked_add(2147483647, 1) = None (overflow)
+checked_sub(-2147483648, 1) = None (overflow)
+checked_mul(2147483647, 2) = None (overflow)
+checked_add(0, 0) = Some(0)
+checked_mul(0, 2147483647) = Some(0)
+
+=== checked i64 arithmetic ===
+
+checked_add_i64(100, 200) = Some(300)
+checked_sub_i64(50, 30) = Some(20)
+checked_mul_i64(1000, 1000) = Some(1000000)
+checked_add_i64(max64, max64) = Some(17179869182)
+checked_mul_i64(max64, max64) = None (overflow)
+checked_mul_i64(-1, 42) = Some(-42)
+checked_mul_i64(0, 999) = Some(0)

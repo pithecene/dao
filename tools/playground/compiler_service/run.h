@@ -1,17 +1,17 @@
 #ifndef DAO_PLAYGROUND_RUN_H
 #define DAO_PLAYGROUND_RUN_H
 
-#include <httplib.h>
-
-#include <filesystem>
+#include "service.h"
 
 namespace dao::playground {
 
-// Initialize LLVM targets. Must be called once before handle_run().
+// Initialize LLVM targets. Must be called once before run().
 void init_run_support();
 
-void handle_run(const httplib::Request& req, httplib::Response& res,
-                const std::filesystem::path& repo_root);
+/// Compile the editor buffer to a native executable, run it with a
+/// timeout, and report its output.  A failed compile replies with
+/// `exit_code` -1 and the diagnostics.
+auto run(const nlohmann::json& request, const ServiceContext& ctx) -> Reply;
 
 } // namespace dao::playground
 

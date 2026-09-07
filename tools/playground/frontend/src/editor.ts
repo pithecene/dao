@@ -3,6 +3,8 @@ import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { tokenHighlighter } from "./highlighting";
+import { daoCompletions } from "./completions";
+import { referenceHighlights } from "./references";
 
 let editorInstance: EditorView | null = null;
 
@@ -18,6 +20,8 @@ export function createEditor(onDocChange: () => void): EditorView {
         basicSetup,
         oneDark,
         tokenHighlighter,
+        daoCompletions,
+        referenceHighlights,
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             onDocChange();

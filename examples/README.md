@@ -6,10 +6,13 @@ Keep them small and human-readable.
 Every file is a complete program meant to build with `daoc build` and
 run.  The playground lists this directory, and each file is a
 regression input, so a new language feature should land with an
-example that exercises it.  One file does not build today:
-`raw_memory.dao` trips a MIR concreteness invariant in the host
-compiler (pre-existing); it stays here as the regression input for
-that fix.
+example that exercises it.  `playground_service_test` compiles and
+runs every file, compares its output with `testdata/examples/<name>.out`
+(`task update-example-goldens` rewrites them), and requires every token
+to be classified.  One file does not build today: `raw_memory.dao`
+trips a MIR concreteness invariant in the host compiler (pre-existing);
+it stays here as the regression input for that fix and is listed in
+`testdata/examples/known_failures.txt` with that diagnostic.
 
 | File | Demonstrates |
 |------|--------------|

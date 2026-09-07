@@ -1,8 +1,8 @@
-import type { DiagnosticEntry } from "./types";
+import type { Diagnostic } from "./generated/tooling_surface";
 import { escapeHtml } from "./util";
 
 /** Render diagnostics into the diagnostics panel. */
-export function renderDiagnostics(diagnostics: DiagnosticEntry[]): void {
+export function renderDiagnostics(diagnostics: Diagnostic[]): void {
   const container = document.getElementById("diagnostics-output")!;
 
   if (diagnostics.length === 0) {
