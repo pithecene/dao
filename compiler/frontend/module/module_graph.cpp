@@ -41,14 +41,13 @@ auto declares_main(const FileNode& file) -> bool {
 // ---------------------------------------------------------------------------
 
 void register_modules(Program& program) {
-  std::unordered_map<std::string, ModuleInfo*> by_display;
   for (const auto& file : program.files) {
     const auto* node = file->parse.file;
     if (node == nullptr || node->module_decl == nullptr) {
       continue; // a missing module declaration is already a parse error
     }
     auto display = module_display(node->module_decl->path.segments);
-    if (auto existing = by_display.find(display); existing != by_display.end()) {
+    if (auto existing = program.by_display.find(display); existing != program.by_display.end()) {
       program.diagnostics.push_back(Diagnostic::error(
           node->module_decl->span, "module '" + display + "' is already declared by " +
                                        existing->second->file->display_path));
@@ -61,7 +60,7 @@ void register_modules(Program& program) {
         .declares_main = declares_main(*node),
     });
     file->module = module.get();
-    by_display.emplace(display, module.get());
+    program.by_display.emplace(module->display, module.get());
     program.modules.push_back(std::move(module));
   }
 }
