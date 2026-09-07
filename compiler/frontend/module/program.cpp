@@ -82,7 +82,6 @@ auto assemble(std::vector<SourceInput> inputs, const GraphInputs& graph) -> Prog
     auto& input = inputs[idx];
     auto base = base_offset_for(std::span<const uint64_t>(sizes).first(idx));
     auto file = std::make_unique<SourceFile>(SourceFile{
-        .file_id = static_cast<uint32_t>(idx),
         .display_path = input.display_path,
         .buffer = SourceBuffer(input.display_path, std::move(input.text)),
         .base_offset = base,
@@ -221,6 +220,9 @@ auto load_program_from_root(const std::filesystem::path& root_file, const Progra
   std::deque<SourceInput> pending;
   pending.push_back(read_source_input(root_file, /*is_prelude=*/false));
   discovery.graph.root_display = pending.front().display_path;
+  // A root file names a program the driver was asked to compile, exactly
+  // as an explicit file set does, so it owes the same entry point (§8.1).
+  discovery.graph.entry_policy = EntryPolicy::Required;
   discovery.add(root_file, pending.front());
 
   while (!pending.empty()) {

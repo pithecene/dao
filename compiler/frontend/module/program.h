@@ -40,9 +40,11 @@ struct SourceInput {
 };
 
 struct ModuleInfo {
-  uint32_t module_id = 0;
-  std::vector<std::string_view> segments; // canonical identity, viewing the declaring file's buffer
-  std::string display;                    // "a::b::c" — diagnostics and, later, symbol mangling
+  // The module's identity is its display name: `module_display` builds it
+  // from the declaration's segments, and every consumer — the graph, the
+  // resolver, diagnostics, symbol mangling — asks for it by that name.  An
+  // id and a second copy of the segments had no reader.
+  std::string display; // "a::b::c"
   SourceFile* file = nullptr;
   bool is_prelude = false;
   bool declares_main = false;       // a top-level `fn main`
@@ -61,8 +63,8 @@ struct ProgramOptions {
 };
 
 struct Program {
-  std::vector<std::unique_ptr<SourceFile>> files;   // file_id order: prelude group, then lexical by display path
-  std::vector<std::unique_ptr<ModuleInfo>> modules; // module_id order: file_id order of declaring files
+  std::vector<std::unique_ptr<SourceFile>> files;   // prelude group, then lexical by display path
+  std::vector<std::unique_ptr<ModuleInfo>> modules; // the order their files appear in `files`
   std::vector<ModuleInfo*> topo_order;              // imported modules before importers
   ModuleInfo* entry = nullptr;                      // §7.7; null when no rule selects one
   SourceMap source_map;
@@ -75,10 +77,10 @@ struct Program {
   auto operator=(Program&&) noexcept -> Program& = default;
   ~Program() = default;
 
-  /// Parsed roots of every file that produced one, in file_id order.
+  /// Parsed roots of every file that produced one, in `files` order.
   [[nodiscard]] auto file_nodes() const -> std::vector<const FileNode*>;
 
-  /// The non-prelude files, in file_id order.
+  /// The non-prelude files, in `files` order.
   [[nodiscard]] auto user_files() const -> std::vector<const SourceFile*>;
 
   /// True when no file produced a lex or parse diagnostic.
