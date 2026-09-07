@@ -194,6 +194,32 @@ suite<"entry_selection"> entry_selection_suite = [] {
     expect(program.diagnostics.empty()) << joined(messages(program));
   };
 
+  "a named entry module without main is an error"_test = [] {
+    // The entry module's `fn main` is the program entry (§8.5): selecting
+    // a module by name does not excuse it from declaring one, even when
+    // another module in the program does.
+    auto program = build_program(
+        {{.display_path = "lib.dao", .text = "module lib\nfn f(): i32 -> 1\n", .is_prelude = false},
+         {.display_path = "app.dao", .text = "module app\n" + kMain, .is_prelude = false}},
+        "lib",
+        EntryPolicy::Required);
+    expect(messages(program) ==
+           std::vector<std::string>{"entry module 'lib' (--entry) declares no 'fn main'"})
+        << joined(messages(program));
+  };
+
+  "a root file without main is an error"_test = [] {
+    // Root-file mode takes the root's module as the entry (§8.2); the
+    // same requirement applies to it.
+    auto program =
+        load_program_from_root(fixtures() / "smoke" / "app" / "util.dao", {.stdlib_root = {}});
+    bool named = false;
+    for (const auto& diag : program.diagnostics) {
+      named = named || diag.message.find("declares no 'fn main'") != std::string::npos;
+    }
+    expect(named) << joined(messages(program));
+  };
+
   "an explicit file set without main is an error"_test = [] {
     // A library compiled on its own would otherwise reach the linker
     // and fail there with an undefined `main`.
