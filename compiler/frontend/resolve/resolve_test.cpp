@@ -840,5 +840,64 @@ suite<"prelude_qualified_exports"> prelude_qualified_exports_suite = [] {
   };
 };
 
+// ---------------------------------------------------------------------------
+// Qualified forms reach the right export (CONTRACT_MODULE_SYSTEM.md §6):
+// an overload set is selected by the call's arity, and a static member that
+// does not exist is not silently answered with its type.
+// ---------------------------------------------------------------------------
+
+suite<"qualified_export_selection"> qualified_export_selection_suite = [] {
+  const std::vector<std::string> prelude = {};
+
+  "a qualified call binds the overload its arity names"_test = [] {
+    // Three arity-distinct overloads; each call must reach its own.
+    const std::string lib = "module lib\nfn f(): i32 -> 0\nfn f(a: i32): i32 -> a\n"
+                            "fn f(a: i32, b: i32): i32 -> a + b\n";
+    const std::string app = "module app\nimport lib\n"
+                            "fn use_all(): i32\n  return lib::f() + lib::f(1) + lib::f(1, 2)\n";
+    for (bool lib_first : {true, false}) {
+      std::vector<SourceInput> inputs;
+      if (lib_first) {
+        inputs = {{.display_path = "lib.dao", .text = lib, .is_prelude = false},
+                  {.display_path = "app.dao", .text = app, .is_prelude = false}};
+      } else {
+        inputs = {{.display_path = "app.dao", .text = app, .is_prelude = false},
+                  {.display_path = "lib.dao", .text = lib, .is_prelude = false}};
+      }
+      auto program = build_program(std::move(inputs));
+      auto resolved = resolve(program);
+      // Each call site resolves to a function of the matching arity.
+      std::vector<size_t> arities;
+      for (const auto& [offset, sym] : resolved.uses) {
+        if (sym == nullptr || sym->decl == nullptr || sym->name.substr(0, 1) != "f") {
+          continue;
+        }
+        const auto* decl = sym->decl_as_decl();
+        if (decl->is<FunctionDecl>()) {
+          arities.push_back(decl->as<FunctionDecl>().params.size());
+        }
+      }
+      std::ranges::sort(arities);
+      arities.erase(std::unique(arities.begin(), arities.end()), arities.end());
+      expect(arities == std::vector<size_t>{0, 1, 2})
+          << "declaration order " << (lib_first ? "lib first" : "app first") << " reached arities "
+          << arities.size();
+    }
+  };
+
+  "an unknown static member of an imported type is diagnosed"_test = [] {
+    auto program = build_program(
+        {{.display_path = "lib.dao",
+          .text = "module lib\nclass P:\n  x: i32\n",
+          .is_prelude = false},
+         {.display_path = "app.dao",
+          .text = "module app\nimport lib\nfn f(): lib::P\n  return lib::P::missing(1)\n",
+          .is_prelude = false}});
+    auto resolved = resolve(program);
+    expect(has_diagnostic_containing(resolved, "has no static member 'missing'"))
+        << "a missing static member must not resolve to its type";
+  };
+};
+
 auto main() -> int {
 }

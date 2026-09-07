@@ -122,8 +122,12 @@ auto load_program(const ProgramRequest& request) -> Program {
   std::vector<Diagnostic> located;
   for (const auto& diag : program.diagnostics) {
     if (diag.span.length == 0) {
-      std::cerr << "error: " << diag.message << "\n";
-      has_errors = true;
+      // An unlocated diagnostic keeps its severity: an advisory (a
+      // library set with no entry point) is a warning and does not stop
+      // the command, exactly as a located warning does not.
+      const bool fatal = diag.severity == Severity::Error;
+      std::cerr << (fatal ? "error: " : "warning: ") << diag.message << "\n";
+      has_errors |= fatal;
     } else {
       located.push_back(diag);
     }

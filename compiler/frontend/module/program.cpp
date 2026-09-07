@@ -82,7 +82,6 @@ auto assemble(std::vector<SourceInput> inputs, const GraphInputs& graph) -> Prog
     auto& input = inputs[idx];
     auto base = base_offset_for(std::span<const uint64_t>(sizes).first(idx));
     auto file = std::make_unique<SourceFile>(SourceFile{
-        .file_id = static_cast<uint32_t>(idx),
         .display_path = input.display_path,
         .buffer = SourceBuffer(input.display_path, std::move(input.text)),
         .base_offset = base,
@@ -221,6 +220,7 @@ auto load_program_from_root(const std::filesystem::path& root_file, const Progra
   std::deque<SourceInput> pending;
   pending.push_back(read_source_input(root_file, /*is_prelude=*/false));
   discovery.graph.root_display = pending.front().display_path;
+  discovery.graph.entry_policy = options.entry_policy;
   discovery.add(root_file, pending.front());
 
   while (!pending.empty()) {
@@ -258,7 +258,7 @@ auto load_program_from_files(const std::vector<std::filesystem::path>& files,
     discovery.add(path, read_source_input(path, /*is_prelude=*/false));
   }
   discovery.graph.entry = options.entry;
-  discovery.graph.entry_policy = EntryPolicy::Required;
+  discovery.graph.entry_policy = options.entry_policy;
   return assemble(std::move(discovery.inputs), discovery.graph);
 }
 

@@ -280,6 +280,95 @@ suite<"typecheck_qualified_bounds"> typecheck_qualified_bounds = [] {
   };
 };
 
+suite<"typecheck_nominal_concepts"> typecheck_nominal_concepts = [] {
+  // Two modules may each declare a concept named `C`; every decision about
+  // conformance is about WHICH one (CONTRACT_TYPE_SYSTEM_FOUNDATIONS.md §11).
+  const std::string kA = "module app::a\nconcept C:\n  fn c(self): i32\n";
+  const std::string kB = "module app::b\nconcept C:\n  fn c(self): i32\n";
+
+  "denying one module's concept does not deny another's"_test = [kA, kB] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::a\nimport app::b\n"
+         "class P:\n  x: i32\n  deny a::C\n  as b::C:\n    fn c(self): i32 -> self.x\n"
+         "fn use_it<T: b::C>(v: T): i32 -> v.c()\n"
+         "fn main(): i32\n  let p: P = P(1)\n  return use_it(p)\n"},
+        {"a.dao", kA},
+        {"b.dao", kB},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "as and deny of the same concept is still a contradiction"_test = [kA] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::a\n"
+         "class P:\n  x: i32\n  deny a::C\n  as a::C:\n    fn c(self): i32 -> self.x\n"
+         "fn main(): i32 -> 0\n"},
+        {"a.dao", kA},
+    });
+    expect(has_error_containing(checked.result, "both conforms to and denies"))
+        << all_messages(checked);
+  };
+};
+
+suite<"typecheck_derived_visibility"> typecheck_derived_visibility = [] {
+  // Derivation asks whether the fields conform, FROM the deriving class's
+  // module: its own `extend` counts, another module's does not (§5).
+  "a class derives through an extension in its own module"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\n"
+         "derived concept Show:\n  fn show(self): i32\n"
+         "extend i32 as Show:\n  fn show(self): i32 -> self\n"
+         "class P:\n  x: i32\n"
+         "fn use_it<T: Show>(v: T): i32 -> v.show()\n"
+         "fn main(): i32\n  let p: P = P(1)\n  return use_it(p)\n"},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "another module's extension does not make a class derive"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::show\n"
+         "class P:\n  x: i32\n"
+         "fn use_it<T: show::Show>(v: T): i32 -> v.show()\n"
+         "fn main(): i32\n  let p: P = P(1)\n  return use_it(p)\n"},
+        {"show.dao",
+         "module app::show\nderived concept Show:\n  fn show(self): i32\n"
+         "extend i32 as Show:\n  fn show(self): i32 -> self\n"},
+    });
+    expect(!is_ok(checked.result)) << all_messages(checked);
+  };
+};
+
+suite<"typecheck_qualified_members"> typecheck_qualified_members = [] {
+  "a missing static member is not a construction"_test = [] {
+    // Arguments that would make `P(1)` valid must not turn
+    // `lib::P::missing(1)` into a construction of `P`.
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::lib\n"
+         "fn f(): lib::P\n  return lib::P::missing(1)\n"
+         "fn main(): i32 -> 0\n"},
+        {"lib.dao", "module app::lib\nclass P:\n  x: i32\n"},
+    });
+    expect(!clean(checked)) << all_messages(checked);
+  };
+
+  "a qualified type name still constructs"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::lib\n"
+         "fn f(): lib::P\n  return lib::P(1)\n"
+         "fn main(): i32 -> 0\n"},
+        {"lib.dao", "module app::lib\nclass P:\n  x: i32\n"},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+};
+
 suite<"typecheck_extend_scoping"> typecheck_extend_scoping = [] {
   // CONTRACT_MODULE_SYSTEM.md §5: `extend` methods participate in
   // method-set lookup within the declaring module; importing a module

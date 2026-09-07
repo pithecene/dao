@@ -1,6 +1,7 @@
 // NOLINTBEGIN(readability-magic-numbers,readability-identifier-length)
 #include "ir/mir/mir_monomorphize.h"
 
+#include "frontend/module/program.h"
 #include "frontend/types/type.h"
 #include "frontend/types/type_printer.h"
 
@@ -362,12 +363,19 @@ void fixup_method_calls(MirFunction* fn, const MirModule& module,
     const Symbol* symbol;
     const MirFunction* mir_fn;
   };
-  std::unordered_map<std::string, FnEntry> fn_by_name;
+  // Keyed by name, but a name is not unique across a program: two modules
+  // may each extend `i32` with `local`, and one entry per name let a later
+  // module's method answer for an earlier one's call.  Every candidate is
+  // kept and the visible one is chosen per call site (§5).
+  std::unordered_map<std::string, std::vector<FnEntry>> fn_by_name;
   for (const auto* mod_fn : module.functions) {
     if (mod_fn->symbol != nullptr) {
-      fn_by_name[std::string(mod_fn->symbol->name)] = {mod_fn->symbol, mod_fn};
+      fn_by_name[std::string(mod_fn->symbol->name)].push_back({mod_fn->symbol, mod_fn});
     }
   }
+  // The module whose body is being rewritten: an `extend` of another
+  // module is not in scope for it.
+  const auto* from_module = fn->symbol == nullptr ? nullptr : fn->symbol->module;
 
   // Build value-type index: MirValueId.id → Type* for O(1) lookups.
   std::unordered_map<uint32_t, const Type*> value_types;
@@ -416,10 +424,20 @@ void fixup_method_calls(MirFunction* fn, const MirModule& module,
       if (sym_it == fn_by_name.end()) {
         continue;
       }
+      const FnEntry* visible = nullptr;
+      for (const auto& candidate : sym_it->second) {
+        if (extend_visible_from(candidate.symbol->module, from_module)) {
+          visible = &candidate;
+          break;
+        }
+      }
+      if (visible == nullptr) {
+        continue;
+      }
 
       // Save the object value before replacing the payload.
       auto object_val = field->object;
-      const auto& entry = sym_it->second;
+      const auto& entry = *visible;
 
       // Replace FieldAccess with FnRef to the extend method.
       // Update the instruction type to the method's function type,

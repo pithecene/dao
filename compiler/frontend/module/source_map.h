@@ -32,7 +32,6 @@ namespace dao {
 struct ModuleInfo;
 
 struct SourceFile {
-  uint32_t file_id = 0;
   std::string display_path;  // shown in diagnostics
   SourceBuffer buffer;
   uint32_t base_offset = 0;

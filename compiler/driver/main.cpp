@@ -385,6 +385,9 @@ auto main(int argc, char* argv[]) -> int {
   }
 
   if (command == "build") {
+    // Building produces an executable, so the program must have an entry
+    // point; the analysis commands report a missing one as a warning.
+    request.options.entry_policy = dao::EntryPolicy::Required;
     cmd_build(request, extras);
     return EXIT_SUCCESS;
   }

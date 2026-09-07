@@ -22,15 +22,6 @@ namespace dao {
 // TypeCheckResult — output of the type-checking pass.
 // ---------------------------------------------------------------------------
 
-/// Whether a method introduced by `extend` in `owner` participates in
-/// lookup from `from`: within the declaring module, and everywhere when
-/// that module is in the prelude (CONTRACT_MODULE_SYSTEM.md §5).  A
-/// method that travels with its type carries no owner and is always
-/// visible.  The checker and the tooling that mirrors it share this.
-inline auto extend_visible_from(const ModuleInfo* owner, const ModuleInfo* from) -> bool {
-  return owner == nullptr || owner == from || owner->is_prelude;
-}
-
 /// A method available on a type via concept/extend.
 struct MethodInfo {
   const Type* receiver_type;
@@ -108,6 +99,10 @@ private:
   /// The concept a generic bound names, reading a qualified bound at its
   /// last segment; null when the bound resolves to nothing.
   [[nodiscard]] auto concept_for_constraint(const TypeNode* constraint) const -> const Symbol*;
+
+  /// True if the expression names a type rather than a member reached
+  /// through one (`T` or `m::T`, never `T::m` or `m::T::m`).
+  [[nodiscard]] auto names_a_type(const Expr* expr) const -> bool;
 
   /// The concept declaration named at `span` (an `as`, `deny`, or
   /// `extend ... as` clause), or null when the name resolves to no
