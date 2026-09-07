@@ -111,7 +111,9 @@ private:
     const FileNode* file = nullptr;
     ModuleInfo* module = nullptr;
     bool is_prelude = false;
-    Scope* scope = nullptr;   // where the file's top-level names are declared
+    Scope* scope = nullptr;   // the file's own lexical scope: its import bindings live here
+    Scope* decls = nullptr;   // where its top-level names are declared; the shared prelude
+                              // scope for a prelude unit, its own scope otherwise
     Scope* exports = nullptr; // what `m::name` reaches; differs only for a prelude unit
   };
 
@@ -120,6 +122,8 @@ private:
   Scope* prelude_ = nullptr;
   const Unit* current_ = nullptr; // the unit being declared or resolved
   std::unordered_map<uint32_t, Symbol*> uses_;
+  // The current unit's resolved import edges, by display name.
+  std::unordered_map<std::string, const ModuleInfo*> imports_by_display_;
   std::vector<Diagnostic> diagnostics_;
 
   auto run_units(std::vector<Unit> units) -> ResolveResult {
@@ -136,17 +140,23 @@ private:
     populate_builtins();
 
     for (auto& unit : units) {
+      // Every file has a lexical scope of its own.  An import binds a
+      // name in the importing module and nowhere else (§3.1-§3.3), so
+      // even a prelude file's imports are private to it — sharing the
+      // prelude scope for them would publish one prelude module's
+      // binding to every module in the program.
+      unit.scope = ctx_.make_scope(ScopeKind::Module, prelude_);
+      unit.scope->set_range(unit.file->span);
       if (unit.is_prelude) {
-        unit.scope = prelude_;
-        // Prelude modules share one lexical namespace (§7.3) but keep
-        // their own identities: `import core::vector` reaches what
-        // `core::vector` declares, not the whole prelude (§7.5).  The
-        // export table is therefore a scope of its own, carrying no
-        // range so it never takes part in positional lookup.
+        // Prelude modules share one namespace for their DECLARATIONS
+        // (§7.2, §7.3), so those go into the prelude scope, which is
+        // every module's environment.  Their qualified exports stay
+        // their own (§7.5), in a table carrying no range so it never
+        // takes part in positional lookup.
+        unit.decls = prelude_;
         unit.exports = ctx_.make_scope(ScopeKind::Module, prelude_);
       } else {
-        unit.scope = ctx_.make_scope(ScopeKind::Module, prelude_);
-        unit.scope->set_range(unit.file->span);
+        unit.decls = unit.scope;
         unit.exports = unit.scope;
       }
       if (unit.module != nullptr) {
@@ -222,9 +232,18 @@ private:
     for (const auto* decl : unit.file->declarations) {
       collect_decl(*decl);
     }
+    // The graph resolved this module's edges; index them once rather
+    // than scanning the list for every import in the file.
+    imports_by_display_.clear();
+    if (unit.module != nullptr) {
+      for (const auto* imported : unit.module->imports) {
+        imports_by_display_.emplace(imported->display, imported);
+      }
+    }
     for (const auto* imp : unit.file->imports) {
       collect_import(*imp);
     }
+    imports_by_display_.clear();
   }
 
   void collect_import(const ImportNode& node) {
@@ -255,9 +274,8 @@ private:
     // to; null without a program or when the graph reported it missing.
     const ModuleInfo* target = nullptr;
     if (current_->module != nullptr) {
-      auto identity = module_display(path.segments);
-      auto it = std::ranges::find(current_->module->imports, identity, &ModuleInfo::display);
-      target = it == current_->module->imports.end() ? nullptr : *it;
+      auto it = imports_by_display_.find(module_display(path.segments));
+      target = it == imports_by_display_.end() ? nullptr : it->second;
     }
     auto* sym = new_symbol(SymbolKind::Module, binding_name, binding_span, target);
     current_->scope->declare(binding_name, sym);
@@ -332,7 +350,7 @@ private:
       return;
     }
 
-    auto* scope = current_->scope;
+    auto* scope = current_->decls;
     auto* existing = scope->lookup_local(name);
     if (existing != nullptr) {
       // Allow arity-based function overloading: same name, different
@@ -419,7 +437,7 @@ private:
 
   /// Check if any overload of `name` has the given parameter count.
   auto overload_has_arity(std::string_view name, size_t arity) -> bool {
-    const auto* overloads = current_->scope->lookup_overloads(name);
+    const auto* overloads = current_->decls->lookup_overloads(name);
     if (overloads != nullptr) {
       for (const auto* sym : *overloads) {
         if (sym->decl != nullptr) {

@@ -811,6 +811,44 @@ suite<"reserved_prefix"> reserved_prefix = [] {
 // only what the named module itself declares.
 // ---------------------------------------------------------------------------
 
+suite<"import_binding_locality"> import_binding_locality_suite = [] {
+  // An import binds a name in the importing module and nowhere else
+  // (CONTRACT_MODULE_SYSTEM.md §3.1-§3.3) — including when the importing
+  // module is in the prelude, whose declarations are shared but whose
+  // bindings are not.
+  const std::vector<std::string> prelude = {
+      "module core::a\nimport core::dep\nfn ua(): i32 -> dep::d()\n",
+      "module core::b\nfn ub(): i32 -> 0\n",
+      "module core::dep\nfn d(): i32 -> 1\n",
+  };
+
+  "one prelude module's import is not visible in another"_test = [prelude] {
+    // core::b never imported `dep`, so naming it there is unresolved.
+    auto program = make_test_program("fn f(): i32 -> 0\n", prelude);
+    auto resolved = resolve(program);
+    for (const auto& diag : resolved.diagnostics) {
+      expect(diag.severity != Severity::Error) << diag.message;
+    }
+    auto user = make_test_program("fn f(): i32 -> dep::d()\n", prelude);
+    auto user_resolved = resolve(user);
+    expect(has_diagnostic_containing(user_resolved, "dep"))
+        << "a prelude module's import binding must not reach a user module";
+  };
+
+  "two modules may bind the same import name independently"_test = [] {
+    // Both bind `dep`; neither collides with the other.
+    std::vector<std::string> prelude = {
+        "module core::x\nimport core::dep\nfn ux(): i32 -> dep::d()\n",
+        "module core::y\nimport core::dep\nfn uy(): i32 -> dep::d()\n",
+        "module core::dep\nfn d(): i32 -> 1\n",
+    };
+    auto program = make_test_program("fn f(): i32 -> 0\n", prelude);
+    auto resolved = resolve(program);
+    expect(!has_diagnostic_containing(resolved, "duplicate top-level declaration"))
+        << "each module binds `dep` in its own scope";
+  };
+};
+
 suite<"prelude_qualified_exports"> prelude_qualified_exports_suite = [] {
   const std::vector<std::string> prelude = {
       "module core::vector\nfn make(): i32 -> 1\n",
