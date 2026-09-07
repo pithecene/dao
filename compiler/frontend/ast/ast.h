@@ -404,6 +404,7 @@ struct CallExpr {
   std::vector<Expr*> args;
   std::vector<TypeNode*> type_args;          // Explicit type arguments: f<i32>(x)
   std::vector<std::string_view> arg_names;   // parallel to args; empty string = positional
+  std::vector<Span> arg_name_spans;          // parallel to args; zero-length unless named
 };
 
 struct IndexExpr {

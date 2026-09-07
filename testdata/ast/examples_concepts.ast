@@ -1,0 +1,120 @@
+File
+  Module concepts
+  ConceptDecl Describe
+    FunctionDecl describe
+      Param self
+      ReturnType: string
+  ExtendDecl i32 as Describe
+    FunctionDecl describe
+      Param self
+      ReturnType: string
+      ExprBody
+        BinaryExpr +
+          StringLiteral "i32 "
+          CallExpr
+            Callee
+              FieldExpr .to_string
+                Identifier self
+  ExtendDecl f64 as Describe
+    FunctionDecl describe
+      Param self
+      ReturnType: string
+      ExprBody
+        BinaryExpr +
+          StringLiteral "f64 "
+          CallExpr
+            Callee
+              FieldExpr .to_string
+                Identifier self
+  ExtendDecl bool as Describe
+    FunctionDecl describe
+      Param self
+      ReturnType: string
+      IfStatement
+        Condition
+          Identifier self
+        Then
+          ReturnStatement
+            StringLiteral "bool yes"
+      ReturnStatement
+        StringLiteral "bool no"
+  ExtendDecl string as Describe
+    FunctionDecl describe
+      Param self
+      ReturnType: string
+      ExprBody
+        BinaryExpr +
+          BinaryExpr +
+            StringLiteral "string \""
+            Identifier self
+          StringLiteral "\""
+  FunctionDecl show<T: Describe>
+    Param x: T
+    ReturnType: void
+    ExprBody
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .describe
+                Identifier x
+  ConceptDecl Doubled
+    FunctionDecl doubled
+      Param self
+      ReturnType: i32
+  ExtendDecl i32 as Doubled
+    FunctionDecl doubled
+      Param self
+      ReturnType: i32
+      ExprBody
+        BinaryExpr *
+          Identifier self
+          IntLiteral 2
+  FunctionDecl twice_then_describe<T: Doubled>
+    Param x: T
+    ReturnType: void
+    ExprBody
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .doubled
+                Identifier x
+  FunctionDecl main
+    ReturnType: i32
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          IntLiteral 42
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          FloatLiteral 2.5
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          BoolLiteral true
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "hi"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier twice_then_describe
+        Args
+          IntLiteral 21
+    ReturnStatement
+      IntLiteral 0

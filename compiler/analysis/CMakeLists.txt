@@ -5,6 +5,7 @@ add_library(dao_analysis STATIC
   hover.cpp
   references.cpp
   semantic_tokens.cpp
+  tooling_surface.cpp
 )
 
 target_include_directories(dao_analysis PUBLIC
@@ -32,6 +33,17 @@ add_executable(analysis_test
 
 target_link_libraries(analysis_test PRIVATE dao_analysis Boost::ut)
 
+add_executable(tooling_surface_test
+  tooling_surface_test.cpp
+)
+
+target_link_libraries(tooling_surface_test PRIVATE dao_analysis Boost::ut)
+
+target_compile_definitions(tooling_surface_test PRIVATE
+  DAO_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+
 include(CTest)
 add_test(NAME semantic_tokens_test COMMAND semantic_tokens_test)
 add_test(NAME analysis_test COMMAND analysis_test)
+add_test(NAME tooling_surface_test COMMAND tooling_surface_test)

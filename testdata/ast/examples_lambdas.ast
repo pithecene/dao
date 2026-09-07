@@ -1,0 +1,112 @@
+File
+  Module lambdas
+  FunctionDecl apply
+    Param f: fn(i32): i32
+    Param x: i32
+    ReturnType: i32
+    ExprBody
+      CallExpr
+        Callee
+          Identifier f
+        Args
+          Identifier x
+  FunctionDecl twice
+    Param f: fn(i32): i32
+    Param x: i32
+    ReturnType: i32
+    ExprBody
+      CallExpr
+        Callee
+          Identifier f
+        Args
+          CallExpr
+            Callee
+              Identifier f
+            Args
+              Identifier x
+  FunctionDecl compose_apply
+    Param f: fn(i32): i32
+    Param g: fn(i32): i32
+    Param x: i32
+    ReturnType: i32
+    ExprBody
+      CallExpr
+        Callee
+          Identifier g
+        Args
+          CallExpr
+            Callee
+              Identifier f
+            Args
+              Identifier x
+  FunctionDecl double
+    Param x: i32
+    ReturnType: i32
+    ExprBody
+      BinaryExpr *
+        Identifier x
+        IntLiteral 2
+  FunctionDecl increment
+    Param x: i32
+    ReturnType: i32
+    ExprBody
+      BinaryExpr +
+        Identifier x
+        IntLiteral 1
+  FunctionDecl square
+    Param x: i32
+    ReturnType: i32
+    ExprBody
+      BinaryExpr *
+        Identifier x
+        Identifier x
+  FunctionDecl main
+    ReturnType: i32
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier apply
+            Args
+              Identifier double
+              IntLiteral 21
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier twice
+            Args
+              Identifier increment
+              IntLiteral 40
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier compose_apply
+            Args
+              Identifier increment
+              Identifier square
+              IntLiteral 6
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          PipeExpr
+            PipeExpr
+              PipeExpr
+                IntLiteral 4
+                Identifier double
+              Identifier double
+            Identifier increment
+    ReturnStatement
+      IntLiteral 0
