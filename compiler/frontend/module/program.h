@@ -5,6 +5,7 @@
 #include "frontend/diagnostics/diagnostic.h"
 #include "frontend/module/source_map.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -84,13 +85,24 @@ struct Program {
   [[nodiscard]] auto module_named(std::string_view display) const -> ModuleInfo*;
 };
 
+/// How much a program cares that no module declares `fn main`.
+/// A delivered file set must have an entry (CONTRACT_MODULE_SYSTEM.md
+/// §8.3); an editor buffer wants to be told why it cannot be run; a
+/// fragment lowered for a test or for tooling does not care.
+enum class EntryPolicy : std::uint8_t {
+  Optional, // a fragment: no diagnostic
+  Advisory, // an editor buffer: a warning, which does not stop analysis
+  Required, // an explicit file set: an error
+};
+
 /// In-memory mode (§8.1): lex, parse, and build the module graph over
 /// exactly these inputs; imports of modules outside the set are
 /// diagnosed, never searched.  The entry module is `entry` when given,
 /// else the unique non-prelude module declaring `fn main` (§7.7).  Does
 /// not read the filesystem.
-auto build_program(std::vector<SourceInput> inputs, std::optional<std::string> entry = {})
-    -> Program;
+auto build_program(std::vector<SourceInput> inputs,
+                   std::optional<std::string> entry = {},
+                   EntryPolicy entry_policy = EntryPolicy::Optional) -> Program;
 
 /// Root-file mode (§8.1–§8.3): the prelude group, the root file, and
 /// every module reachable from it by imports.  `import a::b::c` is

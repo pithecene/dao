@@ -174,22 +174,16 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
     return error_reply(http_status::bad_request, inputs.error());
   }
   out.file = inputs->document;
-  auto prog = build_playground_program(ctx.repo_root, std::move(*inputs));
-  if (prog.user == nullptr || !prog.program.diagnostics.empty()) {
-    std::vector<Diagnostic> located;
-    for (const auto& diag : prog.program.diagnostics) {
-      // A program-assembly failure either points at a file (a module
-      // declaration that disagrees with its path) or has nowhere to
-      // point (an import cycle, a missing root).
-      if (diag.span.length == 0) {
-        out.diagnostics.push_back(make_internal_error(diag.message));
-      } else {
-        located.push_back(diag);
-      }
-    }
-    collect_diagnostics(out.diagnostics, prog, located);
+  // Advisory: a buffer with no `fn main` is analysable, and the warning
+  // is why Run will not work.
+  auto prog = build_playground_program(ctx.repo_root, std::move(*inputs), EntryPolicy::Advisory);
+  if (prog.user == nullptr || has_error_severity(prog.program.diagnostics)) {
+    collect_program_diagnostics(out.diagnostics, prog);
     return out.reply();
   }
+  // Assembly succeeded but may still have something to say (no entry
+  // module, for one), and that must not be lost.
+  collect_program_diagnostics(out.diagnostics, prog);
 
   add_lexical_tokens(out, prog);
   for (const auto& file : prog.program.files) {
