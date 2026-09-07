@@ -9,6 +9,8 @@
 #include "ir/hir/hir_printer.h"
 #include "ir/mir/mir_printer.h"
 
+#include <llvm/ADT/SmallString.h>
+#include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Program.h>
 
 #include <array>
@@ -192,12 +194,19 @@ void cmd_build(const std::filesystem::path& path,
   llvm::LLVMContext llvm_ctx;
   auto llvm_result = dao::lower_to_llvm(mir, llvm_ctx);
 
-  auto obj_path = std::filesystem::temp_directory_path() /
-                  (path.stem().string() + ".o");
+  // A uniquely named object per build: concurrent builds of same-named
+  // files (a test suite, two shells) must not overwrite each other's.
+  llvm::SmallString<128> obj_buffer;
+  if (auto ec = llvm::sys::fs::createTemporaryFile(path.stem().string(), "o", obj_buffer)) {
+    std::cerr << "error: cannot create temporary object file: " << ec.message() << "\n";
+    std::exit(EXIT_FAILURE);
+  }
+  std::filesystem::path obj_path(obj_buffer.str().str());
   std::string emit_error;
   if (!dao::LlvmBackend::emit_object(*llvm_result.module,
                                       obj_path.string(), emit_error)) {
     std::cerr << "error: " << emit_error << "\n";
+    std::filesystem::remove(obj_path);
     std::exit(EXIT_FAILURE);
   }
 
