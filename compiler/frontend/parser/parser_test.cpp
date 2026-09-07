@@ -964,16 +964,32 @@ suite<"qualified_conformance"> qualified_conformance = [] {
         parse_string("class P:\n  x: i32\n  as fmt::Printable:\n    fn show(self): i32 -> 1\n");
     expect(output.parse_result.diagnostics.empty()) << "parses";
     const auto& cls = output.parse_result.file->declarations[0]->as<ClassDecl>();
-    expect(cls.conformances[0].module_binding == "fmt");
-    expect(cls.conformances[0].concept_name == "Printable");
+    const auto& conf = cls.conformances[0];
+    expect(conf.module_binding == "fmt");
+    expect(conf.concept_name == "Printable");
+    // The spans point at the segments themselves: tooling paints them
+    // and a diagnostic about the module underlines the binding.
+    auto text = output.source->contents();
+    expect(text.substr(conf.binding_span.offset, conf.binding_span.length) == "fmt")
+        << "binding_span must cover `fmt`";
+    expect(text.substr(conf.concept_span.offset, conf.concept_span.length) == "Printable")
+        << "concept_span must cover `Printable`";
   };
 
   "deny names a concept through a binding"_test = [] {
     auto output = parse_string("class P:\n  x: i32\n  deny fmt::Printable\n");
     expect(output.parse_result.diagnostics.empty()) << "parses";
     const auto& cls = output.parse_result.file->declarations[0]->as<ClassDecl>();
-    expect(cls.denials[0].module_binding == "fmt");
-    expect(cls.denials[0].concept_name == "Printable");
+    const auto& deny = cls.denials[0];
+    expect(deny.module_binding == "fmt");
+    expect(deny.concept_name == "Printable");
+    // The spans point at the segments themselves: tooling paints them
+    // and a diagnostic about the module underlines the binding.
+    auto text = output.source->contents();
+    expect(text.substr(deny.binding_span.offset, deny.binding_span.length) == "fmt")
+        << "binding_span must cover `fmt`";
+    expect(text.substr(deny.concept_span.offset, deny.concept_span.length) == "Printable")
+        << "concept_span must cover `Printable`";
   };
 
   "extend names a concept through a binding"_test = [] {
@@ -982,6 +998,13 @@ suite<"qualified_conformance"> qualified_conformance = [] {
     const auto& ext = output.parse_result.file->declarations[0]->as<ExtendDecl>();
     expect(ext.module_binding == "fmt");
     expect(ext.concept_name == "Printable");
+    // The spans point at the segments themselves: tooling paints them
+    // and a diagnostic about the module underlines the binding.
+    auto text = output.source->contents();
+    expect(text.substr(ext.binding_span.offset, ext.binding_span.length) == "fmt")
+        << "binding_span must cover `fmt`";
+    expect(text.substr(ext.concept_span.offset, ext.concept_span.length) == "Printable")
+        << "concept_span must cover `Printable`";
   };
 };
 
