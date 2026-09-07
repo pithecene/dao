@@ -94,8 +94,11 @@ void cmd_tokens(const dao::ProgramRequest& request) {
   auto resolve_result = dao::resolve(program);
 
   // Every user module; prelude tokens are not the user's concern.
-  for (const auto* user : program.user_files()) {
-    if (program.user_files().size() > 1) {
+  // Collected once: user_files() builds a vector by scanning every file,
+  // so asking again per iteration would be quadratic.
+  const auto user_files = program.user_files();
+  for (const auto* user : user_files) {
+    if (user_files.size() > 1) {
       std::cout << "== " << user->display_path << "\n";
     }
     auto sem_tokens = dao::classify_tokens(user->lex.tokens, user->file(), &resolve_result);
