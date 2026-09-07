@@ -1,0 +1,4 @@
+5 |> double |> increment:
+11
+3 |> double |> negate:
+-6

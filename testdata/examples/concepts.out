@@ -1,0 +1,5 @@
+i32 42
+f64 2.5
+bool yes
+string "hi"
+42

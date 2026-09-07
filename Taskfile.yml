@@ -64,14 +64,25 @@ tasks:
       - "{{.BUILD_DIR}}/tools/playground/compiler_service/dao_playground {{.CLI_ARGS}}"
 
   playground-dev:
-    desc: Start playground in dev mode (Vite HMR on :5173, backend on :8090)
+    desc: Start playground in dev mode (Vite HMR on :5173, backend on :8090, backend restarts on rebuild)
     deps: [build]
     cmds:
       - cd tools/playground/frontend && npm ci --ignore-scripts
-      - defer: pkill -xf '{{.BUILD_DIR}}/tools/playground/compiler_service/dao_playground' 2>/dev/null || true
-      - |
-        {{.BUILD_DIR}}/tools/playground/compiler_service/dao_playground &
-        cd tools/playground/frontend && npx vite
+      - DAO_BUILD_DIR={{.BUILD_DIR}} bash tools/playground/dev.sh
+
+  gen-tooling-surface:
+    desc: Regenerate the playground's TypeScript and docs/tooling_capabilities.md from the analysis and service surfaces
+    deps: [configure]
+    cmds:
+      - cmake --build {{.BUILD_DIR}} --target service_surface_dump -- -j${DAO_BUILD_JOBS:-4}
+      - "{{.BUILD_DIR}}/tools/playground/compiler_service/service_surface_dump > tools/playground/frontend/src/generated/tooling_surface.ts"
+      - "{{.BUILD_DIR}}/tools/playground/compiler_service/service_surface_dump --matrix > docs/tooling_capabilities.md"
+
+  update-example-goldens:
+    desc: Rewrite testdata/examples/*.out from the current compiler's output
+    deps: [build]
+    cmds:
+      - DAO_UPDATE_GOLDENS=1 {{.BUILD_DIR}}/tools/playground/compiler_service/service_test
 
   bootstrap-assemble:
     desc: Assemble bootstrap .gen.dao files from shared base + subsystem sources

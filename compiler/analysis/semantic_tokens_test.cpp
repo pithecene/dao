@@ -47,6 +47,12 @@ auto classify_source_resolved(const std::string& name, std::string contents) -> 
       resolve_result = resolve(*parse_result.file);
     }
   }
+  // Fixtures must be valid Dao: the parser recovers from errors, so an
+  // invalid fixture would still classify and the test would prove nothing.
+  expect(lex_result.diagnostics.empty() && parse_result.diagnostics.empty())
+      << "fixture does not parse: "
+      << (!lex_result.diagnostics.empty() ? lex_result.diagnostics[0].message
+          : !parse_result.diagnostics.empty() ? parse_result.diagnostics[0].message : "");
   auto sem_tokens = classify_tokens(lex_result.tokens, parse_result.file, &resolve_result);
   return {std::move(source), std::move(lex_result), std::move(parse_result),
           std::move(resolve_result), std::move(sem_tokens)};
@@ -224,17 +230,16 @@ suite<"module_classification"> module_classification = [] {
 };
 
 suite<"variable_classification"> variable_classification = [] {
-  "param binder is not classified as use.variable.param"_test = [] {
-    // Parameter binders are declaration sites. use.variable.param is
-    // for references, which require name resolution (Task 6).
+  "param binder is a declaration site, not a use"_test = [] {
     auto result = classify_source("test.dao", "fn f(x: i32): i32\n    0\n");
     expect(find_token(result.tokens, "use.variable.param") == nullptr);
+    expect(find_token_at(result, "decl.variable.param", "x") != nullptr);
   };
 
-  "let binder is not classified as use.variable.local"_test = [] {
-    // Let binders are declaration sites — same reasoning as params.
+  "let binder is a declaration site, not a use"_test = [] {
     auto result = classify_source("test.dao", "fn main(): i32\n    let x = 1\n    0\n");
     expect(find_token(result.tokens, "use.variable.local") == nullptr);
+    expect(find_token_at(result, "decl.variable.local", "x") != nullptr);
   };
 
   "use.field on field access"_test = [] {
@@ -340,6 +345,160 @@ suite<"taxonomy_coverage"> taxonomy_coverage = [] {
     expect(categories.contains("type.builtin")) << "missing type.builtin";
     expect(categories.contains("punctuation")) << "missing punctuation";
     expect(categories.contains("operator.context")) << "missing operator.context";
+  };
+};
+
+suite<"expansion_classification"> expansion_classification = [] {
+  "parameters and let binders are declaration sites"_test = [] {
+    auto result = classify_source_resolved(
+        "test.dao",
+        "fn add(a: i32, b: i32): i32\n"
+        "    let total: i32 = a + b\n"
+        "    return total\n");
+    expect(find_token_at(result, "decl.variable.param", "a") != nullptr);
+    expect(find_token_at(result, "decl.variable.param", "b") != nullptr);
+    expect(find_token_at(result, "decl.variable.local", "total") != nullptr);
+    // Uses keep their use categories.
+    expect(find_token_at(result, "use.variable.param", "a") != nullptr);
+    expect(find_token_at(result, "use.variable.local", "total") != nullptr);
+  };
+
+  "for binders and match bindings are declaration sites"_test = [] {
+    auto result = classify_source_resolved(
+        "test.dao",
+        "enum class Shape:\n"
+        "    Dot\n"
+        "    Circle(radius: i32)\n"
+        "fn main(): i32\n"
+        "    let s: Shape = Shape.Dot\n"
+        "    match s:\n"
+        "        Shape.Circle(radius):\n"
+        "            return radius\n"
+        "        Shape.Dot:\n"
+        "            return 0\n"
+        "    return 1\n");
+    expect(find_token_at(result, "decl.variable.local", "radius") != nullptr);
+    expect(count_tokens(result.tokens, "use.variant") == 3_ul)
+        << "Shape.Dot (expr), Shape.Circle and Shape.Dot (patterns)";
+    expect(find_token_at(result, "use.type", "Shape") != nullptr)
+        << "enum head used as a value";
+    expect(find_token_at(result, "use.variable.local", "radius") != nullptr)
+        << "binding used in the arm body";
+  };
+
+  "operators receive their expansion categories"_test = [] {
+    auto result = classify_source_resolved(
+        "test.dao",
+        "enum class Pair:\n"
+        "    Both(a: i32, b: i32)\n"
+        "fn f(p: *i32, x: i32, pair: Pair): bool\n"
+        "    let y: i32 = x + 1 - 2 * 3 / 4 % 5\n"
+        "    let q: i32 = *p\n"
+        "    match pair:\n"
+        "        Pair.Both(a, ..):\n"
+        "            return a == x\n"
+        "    return (y == x) and (y != x) or !(y < x) or y >= x\n");
+    expect(count_tokens(result.tokens, "operator.arithmetic") == 5_ul);
+    expect(count_tokens(result.tokens, "operator.comparison") == 5_ul);
+    expect(count_tokens(result.tokens, "operator.logical") == 4_ul) << "and, or, !, or";
+    expect(count_tokens(result.tokens, "operator.address") == 2_ul)
+        << "pointer type `*i32` and deref `*p`";
+    expect(find_token(result.tokens, "operator.range") != nullptr);
+  };
+
+  "member access and try are operators"_test = [] {
+    auto result = classify_source_resolved(
+        "test.dao",
+        "class P:\n"
+        "    x: i32\n"
+        "fn g(p: P): i32\n"
+        "    return p.x\n");
+    expect(find_token(result.tokens, "operator.member") != nullptr);
+    expect(find_token_at(result, "use.field", "x") != nullptr);
+
+    auto propagated = classify_source_resolved("test.dao",
+                                               "fn g(): Result<i32, string>\n"
+                                               "    return Result::Ok(value = 1)\n"
+                                               "fn h(): Result<i32, string>\n"
+                                               "    let v: i32 = g()?\n"
+                                               "    return Result::Ok(value = v)\n");
+    expect(find_token(propagated.tokens, "operator.try") != nullptr);
+  };
+
+  "generic brackets are punctuation, comparisons stay comparisons"_test = [] {
+    auto result = classify_source_resolved(
+        "test.dao",
+        "class Box<T>:\n"
+        "    item: T\n"
+        "fn first<T>(b: Box<T>): T -> b.item\n"
+        "fn cmp(a: i32, b: i32): bool -> a < b\n");
+    // `<T>` on the class, `<T>` on the function, `<T>` in the parameter
+    // type: three opening brackets, three closing.
+    expect(count_tokens(result.tokens, "punctuation") >= 6_ul);
+    expect(count_tokens(result.tokens, "operator.comparison") == 1_ul) << "only `a < b`";
+    expect(find_token_at(result, "decl.type", "T") != nullptr) << "type parameter declaration";
+  };
+
+  "bool literals are literals"_test = [] {
+    auto result = classify_source("test.dao", "fn t(): bool -> true and false\n");
+    expect(count_tokens(result.tokens, "literal.bool") == 2_ul);
+  };
+
+  "types used as values are type uses"_test = [] {
+    auto result = classify_source_resolved(
+        "test.dao",
+        "class Point:\n"
+        "    x: i32\n"
+        "    y: i32\n"
+        "fn origin(): Point -> Point(0, 0)\n");
+    expect(find_token_at(result, "use.type", "Point") != nullptr) << "constructor call";
+    expect(find_token_at(result, "type.nominal", "Point") != nullptr) << "return type";
+  };
+
+  "static method calls paint the type and the method"_test = [] {
+    auto result = classify_source_resolved(
+        "test.dao",
+        "class Counter<T>:\n"
+        "    n: i32\n"
+        "    fn zero(): Counter<T> -> Counter(0)\n"
+        "fn main(): i32\n"
+        "    let c = Counter<i32>::zero()\n"
+        "    return c.n\n");
+    expect(find_token_at(result, "use.type", "Counter") != nullptr) << "static receiver";
+    expect(find_token_at(result, "use.function", "zero") != nullptr) << "static method";
+    expect(find_token_at(result, "type.builtin", "i32") != nullptr) << "explicit type argument";
+    expect(find_token_at(result, "decl.function", "zero") != nullptr)
+        << "class methods are walked";
+  };
+
+  "qualified enum variants paint the enum and the variant"_test = [] {
+    auto result = classify_source_resolved(
+        "test.dao",
+        "enum Color:\n"
+        "    Red\n"
+        "    Green\n"
+        "fn pick(): Color -> Color::Red\n");
+    expect(find_token_at(result, "use.type", "Color") != nullptr);
+    expect(find_token_at(result, "use.variant", "Red") != nullptr);
+  };
+
+  "conformance and extend bodies are walked"_test = [] {
+    auto result = classify_source_resolved(
+        "test.dao",
+        "concept Shout:\n"
+        "    fn shout(self): string\n"
+        "class Dog:\n"
+        "    name: string\n"
+        "    as Shout:\n"
+        "        fn shout(self): string -> self.name\n"
+        "extend i32 as Shout:\n"
+        "    fn shout(self): string -> \"i32\"\n");
+    expect(count_tokens(result.tokens, "decl.function") == 3_ul)
+        << "concept signature, conformance method, extend method";
+    expect(count_tokens(result.tokens, "use.type") >= 2_ul)
+        << "`as Shout` in the class and in the extend block";
+    expect(find_token_at(result, "use.field", "name") != nullptr)
+        << "field access inside a conformance method body";
   };
 };
 
