@@ -353,6 +353,28 @@ suite<"simple_functions"> simple_functions = [] {
     expect(contains(ir, "icmp eq")) << ir;
   };
 
+  "a pipeline selects its target's one-argument overload"_test = [] {
+    // `x |> lib::f` is a call of one argument.  Binding the
+    // two-argument overload and calling it with one is an LLVM
+    // signature assertion, so the selection has to happen before
+    // lowering, qualified target included.
+    LlvmProgramPipeline pipe({
+        {"lib.dao",
+         "module app::lib\n"
+         "fn f(a: i32, b: i32): i32 -> a + b\n"
+         "fn f(a: i32): i32 -> a * 10\n"},
+        {"main.dao",
+         "module app::main\n"
+         "import app::lib\n"
+         "fn main(): i32\n"
+         "  return 1 |> lib::f\n"},
+    });
+    auto ir = pipe.ir();
+    expect(contains(ir, "call i32 @\"app::lib::f$1\"(i32 1)"))
+        << "the pipeline did not call the one-argument overload:\n"
+        << pipe.problems() << ir;
+  };
+
   "one generic serves same-named types from two modules"_test = [] {
     // Distinct declarations are distinct types (§11), so their
     // specializations cannot share a symbol: one definition would then
@@ -382,6 +404,30 @@ suite<"simple_functions"> simple_functions = [] {
     }
     expect(definitions == 2_ul) << "expected two specializations, got " << definitions << "\n"
                                 << pipe.problems() << ir;
+  };
+
+  "externs whose types merely print alike are diagnosed"_test = [] {
+    // Each module declares its own `Payload`, and both print as
+    // `Payload`: comparing the rendered signature would call them one
+    // type.  Distinct declarations are distinct types (§11), so the
+    // comparison is by identity and the message names the modules.
+    LlvmProgramPipeline pipe({
+        {"a.dao",
+         "module app::a\n"
+         "class Payload:\n  value: i32\n"
+         "extern fn consume(p: Payload): i32\n"
+         "fn use_a(p: Payload): i32 -> consume(p)\n"},
+        {"main.dao",
+         "module app::main\n"
+         "class Payload:\n  other: i32\n"
+         "extern fn consume(p: Payload): i32\n"
+         "fn use_main(p: Payload): i32 -> consume(p)\n"
+         "fn main(): i32\n  return 0\n"},
+    });
+    auto said = pipe.problems();
+    expect(contains(said, "conflicting signatures")) << "accepted two Payloads: " << said;
+    expect(contains(said, "app::a") && contains(said, "app::main"))
+        << "the message does not say which module declared which: " << said;
   };
 
   "externs differing only in pointee type are diagnosed"_test = [] {

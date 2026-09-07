@@ -22,13 +22,14 @@ namespace {
 
 using NamedSource = std::pair<std::string, std::string>; // display path, text
 
-auto program_of(std::vector<NamedSource> sources, std::optional<std::string> entry = {})
-    -> Program {
+auto program_of(std::vector<NamedSource> sources,
+                std::optional<std::string> entry = {},
+                EntryPolicy policy = EntryPolicy::Optional) -> Program {
   std::vector<SourceInput> inputs;
   for (auto& [display, text] : sources) {
     inputs.push_back({.display_path = display, .text = text, .is_prelude = false});
   }
-  return build_program(std::move(inputs), std::move(entry));
+  return build_program(std::move(inputs), std::move(entry), policy);
 }
 
 auto displays(const std::vector<ModuleInfo*>& modules) -> std::vector<std::string> {
@@ -176,6 +177,17 @@ suite<"entry_selection"> entry_selection_suite = [] {
     expect(program.entry == program.module_named("b"));
   };
 
+  "an extern main declares no entry"_test = [] {
+    // `extern fn main` names an entry defined elsewhere and lowers to a
+    // declaration with no body, so a program holding only that one has
+    // no entry to build (§8).
+    auto program = program_of(
+        {{"a.dao", "module a\nextern fn main(): i32\n"}}, std::nullopt, EntryPolicy::Required);
+    expect(program.entry == nullptr);
+    expect(joined(messages(program)).find("no module declares 'fn main'") != std::string::npos)
+        << joined(messages(program));
+  };
+
   "several_mains_without_entry_is_an_error"_test = [] {
     auto program = program_of({{"a.dao", "module a\n" + kMain}, {"b.dao", "module b\n" + kMain}});
     expect(program.entry == nullptr);
@@ -320,6 +332,18 @@ suite<"root_file_discovery"> root_file_discovery_suite = [] {
         "lib/util.dao was found for import 'lib::util' but declares module 'lib::other'"))
         << messages(program)[0];
     expect(program.module_named("mismatch")->imports.empty());
+  };
+
+  "a duplicate identity is still named by the mismatch it causes"_test = [] {
+    // `dup/second.dao` declares an identity `dup/first.dao` already
+    // registered, so it owns no module of the graph.  The mismatch for
+    // the import that found it must still say what it declares (§2.3),
+    // not "no module", which is what asking the graph would answer.
+    auto program = load_program_from_root(fixtures() / "duplicate" / "main.dao", {});
+    auto said = joined(messages(program));
+    expect(said.find("declares module 'dup::first'") != std::string::npos) << said;
+    expect(said.find("declares no module") == std::string::npos) << said;
+    expect(said.find("is already declared by") != std::string::npos) << said;
   };
 
   "module_roots_are_searched_after_the_root_directory"_test = [] {

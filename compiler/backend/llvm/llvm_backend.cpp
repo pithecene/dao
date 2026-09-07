@@ -7,6 +7,7 @@
 
 #include "backend/llvm/llvm_backend.h"
 #include "backend/llvm/llvm_names.h"
+#include "frontend/module/program.h"
 #include "frontend/types/type_printer.h"
 
 #include "backend/llvm/llvm_abi.h"
@@ -206,18 +207,26 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
     // disagreeing signature is a diagnostic rather than a silent pick.
     auto name = fn_name(*mir_fn->symbol);
     if (mir_fn->is_extern) {
-      // Compare the DAO signature, not the lowered one: `*i32` and
-      // `*f64` are both an opaque `ptr` in LLVM, so equal LLVM types
-      // would call two incompatible declarations of one C symbol
-      // identical (CONTRACT_C_ABI_INTEROP.md §5).  Every declaration
-      // records its source signature, including the first, which is
-      // what later ones are compared against.
-      auto signature = mir_signature(*mir_fn);
-      auto [known, first] = extern_signatures_.try_emplace(name, signature);
-      if (!first && known->second != signature) {
+      // Compare the DAO types by identity, not the lowered ones and
+      // not their printed form: `*i32` and `*f64` are both an opaque
+      // `ptr` in LLVM, and two distinct classes named `Payload` print
+      // alike, so either comparison would call incompatible
+      // declarations of one C symbol identical
+      // (CONTRACT_C_ABI_INTEROP.md §5).  Every declaration records its
+      // signature, including the first, which is what later ones are
+      // compared against.
+      ExternDeclaration declared{
+          .types = mir_signature(*mir_fn),
+          .module = mir_fn->symbol->module != nullptr ? mir_fn->symbol->module->display : ""};
+      auto [known, first] = extern_signatures_.try_emplace(name, declared);
+      if (!first && known->second.types != declared.types) {
+        auto describe = [](const ExternDeclaration& one) {
+          return "'" + render_signature(one.types) + "'" +
+                 (one.module.empty() ? "" : " (in " + one.module + ")");
+        };
         emit_diagnostic(mir_fn->span,
-                        "extern '" + name + "' is declared with conflicting signatures: '" +
-                            known->second + "' and '" + signature + "'");
+                        "extern '" + name + "' is declared with conflicting signatures: " +
+                            describe(known->second) + " and " + describe(declared));
       }
     }
     if (module_->getFunction(name) != nullptr) {
@@ -1297,17 +1306,26 @@ auto LlvmBackend::lower_field_access(const MirFieldAccess& p,
 /// then the return type, printed from the Dao types rather than their
 /// lowering, so distinctions LLVM erases (every pointer is `ptr`)
 /// survive the comparison.
-auto LlvmBackend::mir_signature(const MirFunction& fn) -> std::string {
-  std::string rendered;
+auto LlvmBackend::mir_signature(const MirFunction& fn) -> ExternSignature {
+  ExternSignature signature;
   for (const auto& local : fn.locals) {
     if (!local.is_param) {
       break; // parameters come first
     }
-    rendered += print_type(local.type);
+    signature.push_back(local.type);
+  }
+  signature.push_back(fn.return_type);
+  return signature;
+}
+
+auto LlvmBackend::render_signature(const ExternSignature& signature) -> std::string {
+  std::string rendered;
+  for (size_t i = 0; i + 1 < signature.size(); ++i) {
+    rendered += print_type(signature[i]);
     rendered += ',';
   }
   rendered += "->";
-  rendered += print_type(fn.return_type);
+  rendered += signature.empty() ? "?" : print_type(signature.back());
   return rendered;
 }
 
