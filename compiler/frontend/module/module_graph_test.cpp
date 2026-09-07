@@ -1,4 +1,4 @@
-// Module graph construction (Task 31 D1): registration, edges, order,
+// Module graph construction: registration, edges, order,
 // cycles, entry selection, and root-file discovery.  Mirrors the
 // bootstrap graph tests and adds the host-only path/declaration
 // mismatch.
@@ -227,6 +227,35 @@ suite<"entry_selection"> entry_selection_suite = [] {
     expect(messages(program) ==
            std::vector<std::string>{"entry module 'lib' (--entry) declares no 'fn main'"})
         << joined(messages(program));
+  };
+
+  "the same root under two spellings gives one program"_test = [] {
+    // Files are ordered and named by the file each path names, not by
+    // how the invocation reached it (§8.4), so a `..` detour and a
+    // relative spelling must give the same layout as the plain path —
+    // discovered imports included, since those keep their own display
+    // paths.
+    auto root = fixtures() / "smoke" / "main.dao";
+    auto layout = [](const Program& program) {
+      std::vector<std::string> out;
+      for (const auto& file : program.files) {
+        out.push_back(file->display_path + "@" + std::to_string(file->base_offset));
+      }
+      return out;
+    };
+    auto plain = layout(load_program_from_root(root, {.stdlib_root = {}}));
+    expect(plain.size() > 1_ul) << "fixture no longer discovers imports";
+
+    auto detour = fixtures() / "smoke" / "app" / ".." / "main.dao";
+    expect(layout(load_program_from_root(detour, {.stdlib_root = {}})) == plain)
+        << joined(layout(load_program_from_root(detour, {.stdlib_root = {}})));
+
+    std::error_code ec;
+    auto relative = std::filesystem::relative(root, ec);
+    if (!ec && !relative.empty()) {
+      expect(layout(load_program_from_root(relative, {.stdlib_root = {}})) == plain)
+          << joined(layout(load_program_from_root(relative, {.stdlib_root = {}})));
+    }
   };
 
   "a root file without main is an error"_test = [] {

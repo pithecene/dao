@@ -18,12 +18,7 @@ namespace dao {
 // ---------------------------------------------------------------------------
 
 auto read_file(const std::filesystem::path& path) -> std::string {
-  std::ifstream file(path);
-  if (!file) {
-    std::cerr << "error: could not open: " << path << "\n";
-    std::exit(EXIT_FAILURE);
-  }
-  return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+  return read_text_file(path);
 }
 
 // ---------------------------------------------------------------------------

@@ -123,6 +123,17 @@ auto load_program_from_root(const std::filesystem::path& root_file, const Progra
 auto load_program_from_files(const std::vector<std::filesystem::path>& files,
                              const ProgramOptions& options) -> Program;
 
+/// A path reduced to the file it names: symlinks and `.`/`..` resolved
+/// where the file exists, lexically normalized where it does not.  Two
+/// spellings of one file reduce to one string.
+auto canonical_or_self(const std::filesystem::path& path) -> std::filesystem::path;
+
+/// Read a whole file.  Exits the process with a message if the path is
+/// not a readable regular file: a directory opens as a stream and only
+/// fails on the first read, which would otherwise escape as an
+/// unhandled exception rather than a diagnostic.
+auto read_text_file(const std::filesystem::path& path) -> std::string;
+
 /// Read a file into a SourceInput.  The display path is the path as
 /// given, or — when `display_root` is non-empty and contains it — the
 /// path relative to that root, so diagnostics stay unambiguous across
