@@ -16,6 +16,47 @@ Dao should be built in stages that preserve feedback loops:
 - treat the playground, semantic highlighting, and IntelliSense as core
   hardening loops rather than as late polish
 
+## Delivery Sequence
+
+"Tier B complete" and "bootstrappable compiler" are different milestones.
+The bootstrap happens as soon as the Dao compiler can compile the actual
+Dao compiler source corpus, even while broader Tier B features remain
+unsupported; parity work then continues with the self-hosted compiler
+participating in its own development.  That gives two named targets:
+
+- **Tier B-Bootstrap** — enough Tier B to compile Dao's compiler
+- **Tier B-Parity** — every feature promised for the tier
+
+and a mechanical definition of "bootstrapped":
+
+- Stage 1: the C++ `daoc` compiles the multi-file Dao compiler sources
+- Stage 2: that Dao-built compiler compiles the same sources
+- Stage 3: the Stage-2 compiler does it again
+
+with every bootstrap semantic suite passing under Stage 2, native
+compilation succeeding at each generation, deterministic outputs where
+the contracts promise determinism, and Stage 2 → 3 fixed-point
+equivalence.
+
+| Order | Work | Exit condition |
+|---|---|---|
+| 0 | Bounded playground/analysis synchronization interlude | compiler changes cannot silently leave the playground or its API stale |
+| 1 | Finish Task 31 D1 → D6 | the host compiler builds a genuine multi-file Dao executable |
+| 2 | Task 30.5: mechanical LLVM/native validation | every bootstrap LLVM test proves its IR is accepted by LLVM/clang |
+| 3 | Bootstrap closure audit | exact list of language features and stdlib instantiations the compiler corpus needs, per pipeline stage |
+| 4 | Tier B core: methods + generics + monomorphization | `Vector<T>`, `HashMap<T>`, compiler methods and generic calls survive HIR → MIR → LLVM |
+| 5 | Compiler-self execution surface | pointers, `mode unsafe`, intrinsics/runtime hooks, plus whichever enum/control-flow pieces the audit proves necessary |
+| 6 | Task 32 + Task 33 convergence | bootstrap sources are real modules; the bootstrap compiler obeys the host's module/prelude/entry rules |
+| 7 | Stage-2 / Stage-3 bootstrap harness | host builds A → A builds B → B builds C; tests and outputs reach fixed-point parity |
+| 8 | Remaining Tier B parity | features that were not bootstrap blockers |
+
+Order 0 is deliberately narrow: harden the compiler ↔ tooling seam
+against the program model D0 introduced (one shared analysis pipeline,
+file identity on every position, a generated and tested C++ → JSON →
+TypeScript boundary, one capability matrix) without building the
+multi-file workspace UI, which waits for D1–D4 to define the semantic
+program.
+
 ## Phase 0 — Constitutional Baseline
 
 Status: **complete**
@@ -85,6 +126,10 @@ Exit criteria:
 - the playground can load and edit local examples
 - compiler-produced diagnostics and semantic token streams are visible in
   the browser once frontend analysis is available
+
+Both are now enforced rather than observed: `playground_service_test`
+runs every example to its golden output and requires every token to be
+classified (see `docs/PLAYGROUND_ARCHITECTURE.md`, "Sync Discipline").
 
 ## Phase 2 — Semantic Frontend + HIR
 
@@ -299,6 +344,11 @@ compiler analysis with playground HTTP endpoints.
 - completion ✓ (scope-aware identifier completion with type info)
 - symbol identity hardening across compiler sessions — deferred
   (not blocking; identity is stable within a single session)
+
+The status of record for which surface serves each capability is the
+generated `docs/tooling_capabilities.md`; the playground consumes these
+APIs through the tooling surface (`compiler/analysis/tooling_surface.h`),
+whose tests keep the frontend from drifting from the compiler.
 
 ### Tooling T3 — Web IDE North Star
 - AST / HIR / MIR panes

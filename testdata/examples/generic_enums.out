@@ -1,0 +1,9 @@
+=== Option<T> ===
+unwrap Some(42): 42
+unwrap None:     -1
+first positive:  7
+none found:      0
+
+=== Result<T, E> ===
+20 / 4 = 5
+error: division by zero

@@ -1,30 +1,15 @@
 #ifndef DAO_PLAYGROUND_ANALYZE_H
 #define DAO_PLAYGROUND_ANALYZE_H
 
-#include <httplib.h>
-
-#include <filesystem>
+#include "service.h"
 
 namespace dao::playground {
 
-void handle_analyze(const httplib::Request& req, httplib::Response& res,
-                    const std::filesystem::path& repo_root);
-
-void handle_hover(const httplib::Request& req, httplib::Response& res,
-                  const std::filesystem::path& repo_root);
-
-void handle_goto_def(const httplib::Request& req, httplib::Response& res,
-                     const std::filesystem::path& repo_root);
-
-void handle_document_symbols(const httplib::Request& req,
-                              httplib::Response& res,
-                              const std::filesystem::path& repo_root);
-
-void handle_references(const httplib::Request& req, httplib::Response& res,
-                        const std::filesystem::path& repo_root);
-
-void handle_completions(const httplib::Request& req, httplib::Response& res,
-                         const std::filesystem::path& repo_root);
+/// Full pipeline over the editor buffer: lexical and semantic tokens,
+/// diagnostics, and the AST/HIR/MIR/LLVM dumps.  The IR dumps cover
+/// the editor buffer's declarations only unless the request sets
+/// `includePrelude`.
+auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply;
 
 } // namespace dao::playground
 

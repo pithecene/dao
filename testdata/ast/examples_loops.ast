@@ -1,0 +1,113 @@
+File
+  Module loops
+  FunctionDecl first_square_over
+    Param limit: i32
+    ReturnType: i32
+    LetStatement i: i32
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BoolLiteral true
+      IfStatement
+        Condition
+          BinaryExpr >
+            BinaryExpr *
+              Identifier i
+              Identifier i
+            Identifier limit
+        Then
+          BreakStatement
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            IntLiteral 1
+    ReturnStatement
+      Identifier i
+  FunctionDecl sum_to
+    Param n: i32
+    ReturnType: i32
+    LetStatement total: i32
+      IntLiteral 0
+    ForStatement k
+      Iterable
+        CallExpr
+          Callee
+            Identifier range
+          Args
+            IntLiteral 0
+            BinaryExpr +
+              Identifier n
+              IntLiteral 1
+      Assignment
+        Target
+          Identifier total
+        Value
+          BinaryExpr +
+            Identifier total
+            Identifier k
+    ReturnStatement
+      Identifier total
+  FunctionDecl main
+    ReturnType: i32
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier first_square_over
+            Args
+              IntLiteral 50
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier sum_to
+            Args
+              IntLiteral 10
+    LetStatement rows: i32
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BoolLiteral true
+      IfStatement
+        Condition
+          BinaryExpr ==
+            Identifier rows
+            IntLiteral 3
+        Then
+          BreakStatement
+      ForStatement col
+        Iterable
+          CallExpr
+            Callee
+              Identifier range
+            Args
+              IntLiteral 0
+              IntLiteral 2
+        ExpressionStatement
+          CallExpr
+            Callee
+              Identifier print
+            Args
+              BinaryExpr +
+                BinaryExpr *
+                  Identifier rows
+                  IntLiteral 10
+                Identifier col
+      Assignment
+        Target
+          Identifier rows
+        Value
+          BinaryExpr +
+            Identifier rows
+            IntLiteral 1
+    ReturnStatement
+      IntLiteral 0
