@@ -220,9 +220,7 @@ auto load_program_from_root(const std::filesystem::path& root_file, const Progra
   std::deque<SourceInput> pending;
   pending.push_back(read_source_input(root_file, /*is_prelude=*/false));
   discovery.graph.root_display = pending.front().display_path;
-  // A root file names a program the driver was asked to compile, exactly
-  // as an explicit file set does, so it owes the same entry point (§8.1).
-  discovery.graph.entry_policy = EntryPolicy::Required;
+  discovery.graph.entry_policy = options.entry_policy;
   discovery.add(root_file, pending.front());
 
   while (!pending.empty()) {
@@ -260,7 +258,7 @@ auto load_program_from_files(const std::vector<std::filesystem::path>& files,
     discovery.add(path, read_source_input(path, /*is_prelude=*/false));
   }
   discovery.graph.entry = options.entry;
-  discovery.graph.entry_policy = EntryPolicy::Required;
+  discovery.graph.entry_policy = options.entry_policy;
   return assemble(std::move(discovery.inputs), discovery.graph);
 }
 
