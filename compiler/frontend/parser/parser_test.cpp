@@ -933,6 +933,21 @@ suite<"static_method_tests"> static_method_tests = [] {
   };
 };
 
+suite<"diagnostic_wording_tests"> diagnostic_wording_tests = [] {
+  "an expected-token error names the token it found"_test = [] {
+    const auto& diags =
+        parse_string("fn f(): i32\n  let x: i32 = )\n  return x\n").parse_result.diagnostics;
+    expect(!diags.empty() && diags.front().message == "expected expression, got ')'")
+        << (diags.empty() ? "no diagnostic" : diags.front().message);
+  };
+
+  "layout tokens are named in words"_test = [] {
+    const auto& diags = parse_string("fn f(): i32 ->\n").parse_result.diagnostics;
+    expect(!diags.empty() && diags.front().message == "expected expression, got end of line")
+        << (diags.empty() ? "no diagnostic" : diags.front().message);
+  };
+};
+
 // NOLINTEND(readability-function-cognitive-complexity,readability-magic-numbers,modernize-use-trailing-return-type)
 
 } // namespace
