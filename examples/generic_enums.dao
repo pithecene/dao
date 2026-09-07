@@ -21,8 +21,8 @@ fn unwrap_i64_or(opt: Option<i64>, default_val: i64): i64
 
 fn safe_divide(a: i64, b: i64): Result<i64, string>
   if b == to_i64(0):
-    return Result::Err("division by zero")
-  return Result::Ok(a / b)
+    return Result::Err(error = "division by zero")
+  return Result::Ok(value = a / b)
 
 fn find_first_positive(a: i64, b: i64, c: i64): Option<i64>
   if a > to_i64(0):

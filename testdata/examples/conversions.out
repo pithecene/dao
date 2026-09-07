@@ -1,0 +1,10 @@
+i32 42 as f64:
+42
+i32 42 as i64:
+42
+f64 3.14 as i32 (truncated):
+3
+f64 -2.71 as i32 (truncated toward zero):
+-2
+i64 100 as i32:
+100

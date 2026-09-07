@@ -332,6 +332,13 @@ boundary) is complete — see below.  Task 29 (bootstrap MIR Tier A)
 is complete — see below.  Task 30 (bootstrap LLVM backend Tier A)
 is complete — see below.
 
+From here the order of work is the delivery sequence in
+`docs/ROADMAP.md`: finish Task 31, then Task 30.5, then the bootstrap
+closure audit (Task 34) that defines **Tier B-Bootstrap** (enough Tier B
+to compile Dao's compiler) as distinct from **Tier B-Parity** (every
+feature promised for the tier).  "Bootstrapped" is the executable
+Stage 1 → 2 → 3 fixed point defined there, not a status label.
+
 ### Task 25 — Bootstrap Multi-file Compilation + Imports (v1)
 
 Status: **complete**
@@ -583,6 +590,47 @@ LSP workspace, and playground T3 tracks all need this substrate.
 `assemble.sh` retirement is explicitly Task 32: it needs an import-form
 decision (selective/glob) in `CONTRACT_SYNTAX_SURFACE.md` first.
 Bootstrap conformance to `CONTRACT_MODULE_SYSTEM.md` is Task 33.
+
+### Tooling Interlude — Playground/Analysis Synchronization
+
+Status: **complete** — Order 0 of the delivery sequence in
+`docs/ROADMAP.md`.  Landed as the tooling surface (#262: one table for
+token kinds, payload shapes, and routes; generated TypeScript; the
+service as JSON route functions behind `dispatch`; `tooling_surface_test`
+and `playground_service_test`) and its follow-up (file identity on every
+position, program-wide definitions and references, the generated
+capability matrix `docs/tooling_capabilities.md`).
+
+**Objective**: harden the compiler ↔ tooling seam against the program
+model Task 31 D0 introduced, so later Task 31 slices cannot silently
+leave the playground or its API stale.  Explicitly out of scope: the
+multi-file workspace UI (Task 31 D5), which waits for D1–D4 to define
+the semantic program; the interlude makes D5 cheap by carrying file
+identity in every reply while the UI still shows one document.
+
+### Task 30.5 — Mechanical LLVM Validation
+
+Status: **not started** — Order 2 of the delivery sequence; ahead of
+further backend complexity.
+
+**Objective**: every bootstrap LLVM fixture proves its emitted IR is
+accepted by LLVM (`Dao source → bootstrap pipeline → .ll → clang /
+llvm-as → executable where applicable`), so invalid IR is a unit-test
+failure rather than a manual discovery.  Motivated by the `%0`
+SSA-generation bug the first struct slice exposed, which every
+substring-based LLVM assertion had missed.
+
+### Task 34 — Bootstrap Closure Audit
+
+Status: **not started** — Order 3 of the delivery sequence.
+
+**Objective**: for each construct occurring in `bootstrap/**/*.dao`,
+plus each stdlib method those sources instantiate, record host and
+bootstrap status at every stage (`parse → resolve → typecheck → HIR →
+MIR → LLVM → native`).  The result defines Tier B-Bootstrap — the
+feature set the compiler corpus actually needs — and sequences Orders
+4–5; features absent from both the compiler and its stdlib
+instantiations do not delay the first bootstrap.
 
 ### Task 33 — Bootstrap Module-System Parity
 

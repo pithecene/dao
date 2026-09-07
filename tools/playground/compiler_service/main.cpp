@@ -1,6 +1,10 @@
-#include "analyze.h"
-#include "examples.h"
+// HTTP adapter over the compiler service: every route in the tooling
+// surface is registered here and forwarded to `dispatch`.
+
 #include "run.h"
+#include "service.h"
+
+#include "service_surface.h"
 
 #include <httplib.h>
 
@@ -16,6 +20,43 @@ namespace {
 auto find_repo_root() -> std::filesystem::path {
   // DAO_SOURCE_DIR is baked in at compile time.
   return DAO_SOURCE_DIR;
+}
+
+void send(const dao::playground::Reply& reply, httplib::Response& res) {
+  res.status = reply.status;
+  res.set_content(reply.body.dump(), "application/json");
+}
+
+void register_routes(httplib::Server& svr, const dao::playground::ServiceContext& ctx) {
+  using dao::playground::dispatch;
+  using dao::playground::error_reply;
+
+  // NOLINTBEGIN(modernize-use-trailing-return-type)
+  for (const auto& route : dao::playground::kRoutes) {
+    std::string name(route.name);
+    std::string path(route.path);
+    if (route.method == "POST") {
+      svr.Post(path, [name, &ctx](const httplib::Request& req, httplib::Response& res) {
+        nlohmann::json body;
+        try {
+          body = nlohmann::json::parse(req.body);
+        } catch (const nlohmann::json::parse_error&) {
+          send(error_reply(dao::playground::http_status::bad_request, "invalid JSON"), res);
+          return;
+        }
+        send(dispatch(name, body, ctx), res);
+      });
+    } else {
+      svr.Get(path, [name, &ctx](const httplib::Request& req, httplib::Response& res) {
+        auto params = nlohmann::json::object();
+        for (const auto& [key, value] : req.path_params) {
+          params[key] = value;
+        }
+        send(dispatch(name, params, ctx), res);
+      });
+    }
+  }
+  // NOLINTEND(modernize-use-trailing-return-type)
 }
 
 } // namespace
@@ -34,7 +75,7 @@ auto main(int argc, char* argv[]) -> int {
     }
   }
 
-  auto examples_dir = root / "examples";
+  dao::playground::ServiceContext ctx{.repo_root = root, .examples_dir = root / "examples"};
   auto frontend_dir = root / "tools" / "playground" / "frontend" / "dist";
 
   bool serve_frontend = std::filesystem::exists(frontend_dir);
@@ -47,46 +88,7 @@ auto main(int argc, char* argv[]) -> int {
   dao::playground::init_run_support();
 
   httplib::Server svr;
-
-  // API endpoints.
-  // NOLINTBEGIN(modernize-use-trailing-return-type)
-  svr.Post("/api/analyze", [&root](const httplib::Request& req, httplib::Response& res) {
-    dao::playground::handle_analyze(req, res, root);
-  });
-
-  svr.Get("/api/examples", [&examples_dir](const httplib::Request& req, httplib::Response& res) {
-    dao::playground::handle_examples_list(req, res, examples_dir);
-  });
-
-  svr.Get("/api/examples/:name",
-          [&examples_dir](const httplib::Request& req, httplib::Response& res) {
-            dao::playground::handle_example_get(req, res, examples_dir);
-          });
-
-  svr.Post("/api/run", [&root](const httplib::Request& req, httplib::Response& res) {
-    dao::playground::handle_run(req, res, root);
-  });
-
-  svr.Post("/api/hover", [&root](const httplib::Request& req, httplib::Response& res) {
-    dao::playground::handle_hover(req, res, root);
-  });
-
-  svr.Post("/api/goto-def", [&root](const httplib::Request& req, httplib::Response& res) {
-    dao::playground::handle_goto_def(req, res, root);
-  });
-
-  svr.Post("/api/document-symbols", [&root](const httplib::Request& req, httplib::Response& res) {
-    dao::playground::handle_document_symbols(req, res, root);
-  });
-
-  svr.Post("/api/references", [&root](const httplib::Request& req, httplib::Response& res) {
-    dao::playground::handle_references(req, res, root);
-  });
-
-  svr.Post("/api/completions", [&root](const httplib::Request& req, httplib::Response& res) {
-    dao::playground::handle_completions(req, res, root);
-  });
-  // NOLINTEND(modernize-use-trailing-return-type)
+  register_routes(svr, ctx);
 
   // Serve frontend static files when dist/ exists (prod mode).
   if (serve_frontend) {
@@ -108,8 +110,9 @@ auto main(int argc, char* argv[]) -> int {
   }
 
   std::cout << "Dao playground: http://localhost:" << port << "\n";
-  std::cout << "  frontend: " << (serve_frontend ? frontend_dir.string() : "(dev mode — use Vite)") << "\n";
-  std::cout << "  examples: " << examples_dir << "\n";
+  std::cout << "  frontend: " << (serve_frontend ? frontend_dir.string() : "(dev mode — use Vite)")
+            << "\n";
+  std::cout << "  examples: " << ctx.examples_dir << "\n";
 
   if (!svr.listen("127.0.0.1", port)) {
     std::cerr << "error: failed to start server on port " << port << "\n";

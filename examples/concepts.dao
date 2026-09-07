@@ -1,0 +1,53 @@
+module concepts
+// concepts.dao — concepts, extension, and generic bounds.
+//
+// A concept names a set of required methods.  Within a module,
+// `extend T as Concept:` adds a conformance to any type in scope —
+// builtins and `string` included — and a generic bound `<T: Concept>`
+// then accepts every conforming type, dispatching to the conformance
+// chosen for the concrete argument.  Whether an extension is visible
+// from other modules is not yet specified (CONTRACT_MODULE_SYSTEM.md
+// §10), so this example stays within one module.
+//
+// Classes can also conform inside their own body with `as Concept:`;
+// that path is not lowerable to native code yet, so this example stays
+// with builtin receivers.
+
+concept Describe:
+  fn describe(self): string
+
+extend i32 as Describe:
+  fn describe(self): string -> "i32 " + self.to_string()
+
+extend f64 as Describe:
+  fn describe(self): string -> "f64 " + self.to_string()
+
+extend bool as Describe:
+  fn describe(self): string
+    if self:
+      return "bool yes"
+    return "bool no"
+
+extend string as Describe:
+  fn describe(self): string -> "string \"" + self + "\""
+
+// Generic over any Describe: one body, one instantiation per type.
+fn show<T: Describe>(x: T): void -> print(x.describe())
+
+// A second concept, and a bound that requires it.
+concept Doubled:
+  fn doubled(self): i32
+
+extend i32 as Doubled:
+  fn doubled(self): i32 -> self * 2
+
+fn twice_then_describe<T: Doubled>(x: T): void -> print(x.doubled())
+
+fn main(): i32
+  show(42)
+  show(2.5)
+  show(true)
+  show("hi")
+
+  twice_then_describe(21)
+  return 0

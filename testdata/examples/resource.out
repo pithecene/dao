@@ -1,0 +1,8 @@
+compute_in_pool:
+30
+nested_domains:
+150
+early_return(5):
+5
+early_return(0):
+0
