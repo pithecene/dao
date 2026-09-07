@@ -811,6 +811,34 @@ suite<"reserved_prefix"> reserved_prefix = [] {
 // only what the named module itself declares.
 // ---------------------------------------------------------------------------
 
+suite<"per_module_overload_exports"> per_module_overload_exports_suite = [] {
+  // Two prelude modules declaring different-arity overloads of one name
+  // share a declaration scope; each must still export its OWN
+  // declaration under the base name (§4, §7.5).
+  "each module exports the overload it declared"_test = [] {
+    std::vector<std::string> prelude = {
+        "module core::one\nfn f(a: i32): i32 -> a\n",
+        "module core::two\nfn f(a: i32, b: i32): i32 -> a + b\n",
+    };
+    auto program =
+        make_test_program("import core::two\nfn use_it(): i32 -> two::f(1, 2)\n", prelude);
+    auto resolved = resolve(program);
+    expect(!has_diagnostic_containing(resolved, "has no export 'f'"))
+        << "core::two exports its own `f`";
+  };
+
+  "an extern is never given an arity-mangled name"_test = [] {
+    // `extern fn` names a C symbol exactly as written, so two of one
+    // name are one symbol and the second is a duplicate.
+    auto program =
+        make_test_program("extern fn puts(s: string): i32\nextern fn puts(s: string, n: i32): i32\n"
+                          "fn use_it(): i32 -> puts(\"x\")\n");
+    auto resolved = resolve(program);
+    expect(has_diagnostic_containing(resolved, "duplicate top-level declaration"))
+        << "a second extern of one name is a duplicate, not an overload";
+  };
+};
+
 suite<"import_binding_locality"> import_binding_locality_suite = [] {
   // An import binds a name in the importing module and nowhere else
   // (CONTRACT_MODULE_SYSTEM.md §3.1-§3.3) — including when the importing
