@@ -86,7 +86,9 @@ auto parse_program_request(const nlohmann::json& request)
 
 /// Assemble the prelude group under <repo_root>/stdlib plus the
 /// request's files, and lex/parse everything.
-auto build_playground_program(const std::filesystem::path& repo_root, ProgramRequest request)
+auto build_playground_program(const std::filesystem::path& repo_root,
+                              ProgramRequest request,
+                              EntryPolicy entry_policy = EntryPolicy::Optional)
     -> PlaygroundProgram;
 
 /// The document-local offset a position request names, or why it is
@@ -131,6 +133,13 @@ auto without_prelude_warnings(const std::vector<Diagnostic>& diags, const Playgr
 void collect_diagnostics(nlohmann::json& out,
                          const PlaygroundProgram& prog,
                          const std::vector<Diagnostic>& diags);
+
+/// Append the program-assembly diagnostics: a module declaration that
+/// disagrees with its path points at a file, while an import cycle or a
+/// missing entry module has nowhere to point and is reported without a
+/// position.  Called whether or not assembly failed — some of these are
+/// warnings that analysis continues past.
+void collect_program_diagnostics(nlohmann::json& out, const PlaygroundProgram& prog);
 
 /// Build a synthetic error diagnostic entry (no location) for when a
 /// phase fails without reporting where.

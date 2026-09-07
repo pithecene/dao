@@ -356,7 +356,7 @@ auto main(int argc, char* argv[]) -> int {
     } else if (arg.starts_with("--")) {
       std::cerr << "error: unknown option " << arg << "\n";
       return EXIT_FAILURE;
-    } else if (request.root.empty() && request.sources.empty()) {
+    } else if (request.root.empty() && extras.empty()) {
       request.root = arg;
     } else {
       extras.emplace_back(arg);
@@ -365,6 +365,14 @@ auto main(int argc, char* argv[]) -> int {
 
   if (request.root.empty() && request.sources.empty()) {
     print_usage();
+    return EXIT_FAILURE;
+  }
+  // A root file and an explicit file set describe two different programs
+  // (CONTRACT_MODULE_SYSTEM.md §8.2 vs §8.3); taking one and dropping the
+  // other would compile something the command line did not ask for.
+  if (!request.root.empty() && !request.sources.empty()) {
+    std::cerr << "error: give a root file or --source inputs, not both: '" << request.root.string()
+              << "' with --source " << request.sources.front().string() << "\n";
     return EXIT_FAILURE;
   }
   if (!request.root.empty()) {

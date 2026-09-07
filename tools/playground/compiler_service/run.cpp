@@ -65,26 +65,18 @@ void init_run_support() {
 auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
   nlohmann::json diagnostics = nlohmann::json::array();
 
-  auto prog = build_playground_program(ctx.repo_root, std::move(inputs));
-  if (prog.user == nullptr || !prog.program.diagnostics.empty()) {
-    // Assembly failed (an import that resolves to nothing, a cycle).
+  // Running needs an entry point, so here a missing one is an error
+  // rather than the linker's `undefined main`.
+  auto prog = build_playground_program(ctx.repo_root, std::move(inputs), EntryPolicy::Required);
+  if (prog.user == nullptr || has_error_severity(prog.program.diagnostics)) {
     // Report what each file said first: a module that is "not found" is
-    // usually a file that did not parse, and that is the diagnostic
-    // worth showing.
+    // usually a file that did not parse, and that parse error is the
+    // diagnostic worth showing.
     for (const auto& file : prog.program.files) {
       collect_diagnostics(diagnostics, prog, file->lex.diagnostics);
       collect_diagnostics(diagnostics, prog, file->parse.diagnostics);
     }
-    std::vector<Diagnostic> located;
-    for (const auto& diag : prog.program.diagnostics) {
-      // As in analyze: point at the file when the diagnostic can.
-      if (diag.span.length == 0) {
-        diagnostics.push_back(make_internal_error(diag.message));
-      } else {
-        located.push_back(diag);
-      }
-    }
-    collect_diagnostics(diagnostics, prog, located);
+    collect_program_diagnostics(diagnostics, prog);
     return compile_failed(std::move(diagnostics));
   }
 

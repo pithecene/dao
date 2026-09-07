@@ -284,6 +284,36 @@ suite<"playground_service"> playground_service_suite = [] {
         << "a document that is not one of the files must be rejected";
   };
 
+  "filtered llvm keeps every function the document defines"_test = [] {
+    // The backend names a module's functions `<module>::<name>` and
+    // leaves only the entry module's `main` bare, so a filter built from
+    // MIR symbol names kept `main` alone and emitted a call to a
+    // definition it had dropped.
+    const std::string source = "module app\n"
+                               "fn helper(): i32\n  return 41\n"
+                               "fn main(): i32\n  return helper() + 1\n";
+    auto reply = call("analyze", document_request(source));
+    auto ir = reply.body["llvm_ir"].get<std::string>();
+    expect(!ir.empty()) << reply.body["diagnostics"].dump();
+    expect(ir.find("define") != std::string::npos) << ir;
+    // Every call target the filtered IR names must be defined in it.
+    static const std::regex call_pattern(R"re(call [^@]*@"?([A-Za-z0-9_:.$]+)"?\()re");
+    for (std::sregex_iterator it(ir.begin(), ir.end(), call_pattern), last; it != last; ++it) {
+      auto callee = (*it)[1].str();
+      if (callee.starts_with("llvm.") || callee.starts_with("__dao_")) {
+        continue; // intrinsics and runtime hooks are declared, not defined
+      }
+      bool defined = ir.find("define") != std::string::npos &&
+                     (ir.find("@" + callee + "(") != std::string::npos ||
+                      ir.find("@\"" + callee + "\"(") != std::string::npos);
+      bool declared = ir.find("declare") != std::string::npos;
+      expect(defined || declared) << "call to " << callee << " with no definition:\n" << ir;
+    }
+    expect(ir.find("app::helper") != std::string::npos)
+        << "the document's own helper must survive the filter:\n"
+        << ir;
+  };
+
   "duplicate file paths are rejected"_test = [] {
     // Two files with one path made `document` ambiguous: the synthetic
     // module header was measured from one copy and positions from the

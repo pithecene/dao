@@ -195,8 +195,11 @@ struct Discovery {
 
 } // namespace
 
-auto build_program(std::vector<SourceInput> inputs, std::optional<std::string> entry) -> Program {
-  return assemble(std::move(inputs), GraphInputs{.entry = std::move(entry)});
+auto build_program(std::vector<SourceInput> inputs,
+                   std::optional<std::string> entry,
+                   EntryPolicy entry_policy) -> Program {
+  return assemble(std::move(inputs),
+                  GraphInputs{.entry = std::move(entry), .entry_policy = entry_policy});
 }
 
 auto load_program_from_root(const std::filesystem::path& root_file, const ProgramOptions& options)
@@ -255,6 +258,7 @@ auto load_program_from_files(const std::vector<std::filesystem::path>& files,
     discovery.add(path, read_source_input(path, /*is_prelude=*/false));
   }
   discovery.graph.entry = options.entry;
+  discovery.graph.entry_policy = EntryPolicy::Required;
   return assemble(std::move(discovery.inputs), discovery.graph);
 }
 

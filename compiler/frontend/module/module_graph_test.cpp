@@ -179,15 +179,30 @@ suite<"entry_selection"> entry_selection_suite = [] {
   "several_mains_without_entry_is_an_error"_test = [] {
     auto program = program_of({{"a.dao", "module a\n" + kMain}, {"b.dao", "module b\n" + kMain}});
     expect(program.entry == nullptr);
-    expect(messages(program) == std::vector<std::string>{
-                                    "several modules declare `fn main` (a, b); select one with --entry"})
+    expect(messages(program) ==
+           std::vector<std::string>{
+               "ambiguous entry module: 'fn main' declared in a, b (use --entry)"})
         << joined(messages(program));
   };
 
-  "no_main_selects_nothing_silently"_test = [] {
+  "an in_memory_program_without_main_needs_no_entry"_test = [] {
+    // build_program assembles a fragment (the playground's buffer, a
+    // single-file test), not a delivered file set: an entry is not
+    // required of it (CONTRACT_MODULE_SYSTEM.md §8.3 governs file sets).
     auto program = program_of({{"lib.dao", "module lib\nfn f(): i32 -> 1\n"}});
     expect(program.entry == nullptr);
-    expect(program.diagnostics.empty());
+    expect(program.diagnostics.empty()) << joined(messages(program));
+  };
+
+  "an explicit file set without main is an error"_test = [] {
+    // A library compiled on its own would otherwise reach the linker
+    // and fail there with an undefined `main`.
+    auto program =
+        load_program_from_files({fixtures() / "smoke" / "app" / "util.dao"}, {.stdlib_root = {}});
+    expect(program.entry == nullptr);
+    expect(messages(program) ==
+           std::vector<std::string>{"no entry module: no module declares 'fn main' (use --entry)"})
+        << joined(messages(program));
   };
 
   "entry_not_in_program_is_an_error"_test = [] {

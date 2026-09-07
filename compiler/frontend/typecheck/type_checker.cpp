@@ -37,9 +37,15 @@ auto qualified_path_text(const std::vector<std::string_view>& segments) -> std::
 
 auto TypeChecker::check(std::span<const FileNode* const> files) -> TypeCheckResult {
   all_decls_.clear();
+  decl_module_.clear();
   for (const auto* file : files) {
+    auto module_it = file_modules_.find(file);
+    const auto* module = module_it == file_modules_.end() ? nullptr : module_it->second;
     for (const auto* decl : file->declarations) {
       all_decls_.push_back(decl);
+      if (module != nullptr) {
+        decl_module_.emplace(decl, module);
+      }
     }
   }
 
@@ -666,6 +672,13 @@ auto TypeChecker::type_conforms_to(const Type* type, const Decl* concept_decl) -
         continue;
       }
       const auto& ext = decl->as<ExtendDecl>();
+      // Conformance introduced by `extend` is scoped like the methods it
+      // introduces (CONTRACT_MODULE_SYSTEM.md §5): a type does not
+      // satisfy a bound on the strength of an extension another module
+      // declared.
+      if (!extend_is_visible(declaring_module(decl))) {
+        continue;
+      }
       const auto* target = resolve_type_node(ext.target_type);
       if (target == type && ext.concept_name == cpt_name) {
         return true;
@@ -785,6 +798,7 @@ void TypeChecker::compute_derived_conformances() {
 // ---------------------------------------------------------------------------
 
 void TypeChecker::check_declaration(const Decl* decl) {
+  current_module_ = declaring_module(decl);
   switch (decl->kind()) {
   case NodeKind::FunctionDecl:
     check_function(decl);
@@ -1861,6 +1875,27 @@ auto TypeChecker::substitute_generics(const Type* type,
 // Shared generic constraint verification
 // ---------------------------------------------------------------------------
 
+auto TypeChecker::concept_for_constraint(const TypeNode* constraint) const -> const Symbol* {
+  auto at = [&](uint32_t offset) -> const Symbol* {
+    auto it = resolve_.uses.find(offset);
+    return it == resolve_.uses.end() ? nullptr : it->second;
+  };
+  // A bound is a type path.  `Concept` records its symbol at the path's
+  // own offset; `m::Concept` records the import binding there and the
+  // concept at the second segment (CONTRACT_MODULE_SYSTEM.md §6), so
+  // reading only the head would silently skip a qualified bound.
+  const auto* head = at(constraint->span.offset);
+  if (!constraint->is<NamedType>()) {
+    return head;
+  }
+  const auto& path = constraint->as<NamedType>().name;
+  if (head == nullptr || head->kind != SymbolKind::Module || path.segments.size() < 2) {
+    return head;
+  }
+  auto name_offset = path.span.offset + static_cast<uint32_t>(path.segments.front().size()) + 2;
+  return at(name_offset);
+}
+
 void TypeChecker::verify_concept_constraints(
     const Expr* callee_expr,
     Span error_span,
@@ -1886,16 +1921,16 @@ void TypeChecker::verify_concept_constraints(
       continue;
     }
     for (const auto* constraint : gp_decl.constraints) {
-      auto csym_it = resolve_.uses.find(constraint->span.offset);
-      if (csym_it == resolve_.uses.end() || csym_it->second->kind != SymbolKind::Concept ||
-          csym_it->second->decl == nullptr) {
+      const auto* concept_sym = concept_for_constraint(constraint);
+      if (concept_sym == nullptr || concept_sym->kind != SymbolKind::Concept ||
+          concept_sym->decl == nullptr) {
         continue;
       }
-      const auto* concept_decl = csym_it->second->decl_as_decl();
+      const auto* concept_decl = concept_sym->decl_as_decl();
       if (!type_conforms_to(binding_it->second, concept_decl)) {
         error(error_span,
               "type '" + print_type(binding_it->second) + "' does not satisfy concept '" +
-                  std::string(csym_it->second->name) + "' required by generic parameter '" +
+                  std::string(concept_sym->name) + "' required by generic parameter '" +
                   std::string(gp_decl.name) + "'");
       }
     }
@@ -2517,12 +2552,13 @@ void TypeChecker::build_method_table() {
     if (target == nullptr) {
       continue;
     }
+    const auto* owner = declaring_module(decl);
     for (const auto* method_decl : ext.methods) {
       const auto& method = method_decl->as<FunctionDecl>();
       MethodKey key{target, method.name};
       if (method_table_.find(key) == method_table_.end()) {
         const auto* fn_type = build_method_fn_type(method);
-        method_table_.insert({key, {fn_type, method_decl}});
+        method_table_.insert({key, {fn_type, method_decl, owner}});
       }
     }
   }
@@ -2576,7 +2612,7 @@ auto TypeChecker::lookup_method(const Type* obj_type,
   // O(1) table lookup for concrete types (covers struct conformance blocks,
   // extend declarations, and derived conformance methods).
   auto it = method_table_.find(MethodKey{obj_type, name});
-  if (it != method_table_.end()) {
+  if (it != method_table_.end() && extend_is_visible(it->second.extend_module)) {
     if (resolved_decl != nullptr) {
       *resolved_decl = it->second.method_decl;
     }
@@ -2630,11 +2666,11 @@ auto TypeChecker::lookup_method(const Type* obj_type,
       if (type_params != nullptr && gp->index() < type_params->size()) {
         const auto& gp_decl = (*type_params)[gp->index()];
         for (const auto* constraint : gp_decl.constraints) {
-          auto sym_it = resolve_.uses.find(constraint->span.offset);
-          if (sym_it == resolve_.uses.end() || sym_it->second->kind != SymbolKind::Concept) {
+          const auto* concept_sym = concept_for_constraint(constraint);
+          if (concept_sym == nullptr || concept_sym->kind != SymbolKind::Concept) {
             continue;
           }
-          const auto* cpt_decl = sym_it->second->decl_as_decl();
+          const auto* cpt_decl = concept_sym->decl_as_decl();
           if (cpt_decl == nullptr || !cpt_decl->is<ConceptDecl>()) {
             continue;
           }
@@ -2851,10 +2887,12 @@ auto typecheck(const Program& program, const ResolveResult& resolve, TypeContext
   // before a generic of theirs is instantiated in another module's
   // signature.  Then the remaining modules in topological order.
   std::vector<const FileNode*> nodes;
+  std::unordered_map<const FileNode*, const ModuleInfo*> file_modules;
   for (bool prelude : {true, false}) {
     for (const auto* module : program.topo_order) {
       if (module->is_prelude == prelude) {
         nodes.push_back(module->file->parse.file);
+        file_modules.emplace(module->file->parse.file, module);
       }
     }
   }
@@ -2863,7 +2901,9 @@ auto typecheck(const Program& program, const ResolveResult& resolve, TypeContext
       nodes.push_back(file->parse.file);
     }
   }
-  return typecheck(nodes, resolve, types);
+  TypeChecker checker(types, resolve);
+  checker.set_file_modules(std::move(file_modules));
+  return checker.check(nodes);
 }
 
 auto typecheck(const FileNode& file, const ResolveResult& resolve, TypeContext& types)
