@@ -25,16 +25,17 @@ export function setTokens(tokens: SemanticToken[], view: EditorView): void {
  */
 function semanticKindToClass(kind: string): string | null {
   if (kind.startsWith("keyword.")) return "dao-keyword";
+  if (kind.startsWith("decl.variable.")) return "dao-variable";
+  if (kind === "decl.module" || kind === "use.module") return "dao-module";
+  if (kind === "decl.field" || kind === "use.field" || kind === "use.variant") return "dao-field";
   if (kind.startsWith("decl.")) return "dao-decl";
-  if (kind.startsWith("type.")) return "dao-type";
+  if (kind.startsWith("type.") || kind === "use.type") return "dao-type";
   if (kind.startsWith("use.variable.")) return "dao-variable";
   if (kind === "use.function") return "dao-decl";
-  if (kind === "use.field") return "dao-field";
-  if (kind === "use.module" || kind === "decl.module") return "dao-module";
   if (kind.startsWith("mode.")) return "dao-mode";
   if (kind.startsWith("resource.")) return "dao-resource";
   if (kind === "lambda.param") return "dao-lambda-param";
-  if (kind === "literal.number") return "dao-literal-number";
+  if (kind === "literal.number" || kind === "literal.bool") return "dao-literal-number";
   if (kind === "literal.string") return "dao-literal-string";
   if (kind.startsWith("operator.")) return "dao-operator";
   if (kind === "punctuation") return "dao-punctuation";
