@@ -194,6 +194,27 @@ suite<"entry_selection"> entry_selection_suite = [] {
     expect(program.diagnostics.empty()) << joined(messages(program));
   };
 
+  "module identity is indexed, not scanned"_test = [] {
+    // Import resolution asks once per edge; a scan per edge would be
+    // quadratic in the graph.  The index answers every module and
+    // nothing else, so a lookup cannot degrade into a walk.
+    std::vector<NamedSource> sources;
+    for (int i = 0; i < 24; ++i) {
+      auto name = "m" + std::to_string(i);
+      auto text = "module " + name + "\n" +
+                  (i > 0 ? "import m" + std::to_string(i - 1) + "\n" : "") + "fn f(): i32 -> " +
+                  std::to_string(i) + "\n";
+      sources.emplace_back(name + ".dao", text);
+    }
+    auto program = program_of(std::move(sources));
+    expect(program.by_display.size() == program.modules.size())
+        << "every module is indexed exactly once";
+    for (const auto& module : program.modules) {
+      expect(program.module_named(module->display) == module.get()) << module->display;
+    }
+    expect(program.module_named("absent") == nullptr);
+  };
+
   "a named entry module without main is an error"_test = [] {
     // The entry module's `fn main` is the program entry (§8.5): selecting
     // a module by name does not excuse it from declaring one, even when
