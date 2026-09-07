@@ -454,6 +454,52 @@ private:
     return nullptr;
   }
 
+  /// The exported overload of `name` with `arity` in a module's export
+  /// table, or null.  The table is flat — a module's exports are its own
+  /// declarations — so this looks locally rather than up a scope chain.
+  auto find_export_overload(const Scope* exports, std::string_view name, size_t arity) -> Symbol* {
+    const auto* overloads = exports->lookup_overloads(name);
+    if (overloads == nullptr) {
+      return nullptr;
+    }
+    for (auto* sym : *overloads) {
+      if (sym->decl == nullptr) {
+        continue;
+      }
+      const auto* decl = sym->decl_as_decl();
+      if (decl->is<FunctionDecl>() && decl->as<FunctionDecl>().params.size() == arity) {
+        return sym;
+      }
+    }
+    return nullptr;
+  }
+
+  /// `b::f(...)` where `f` is overloaded: bind the overload the call's
+  /// arity names.  Without this the bare first declaration answers every
+  /// arity, so which overload an importer reaches depends on declaration
+  /// order and the rest are unreachable (CONTRACT_MODULE_SYSTEM.md §6).
+  void rebind_qualified_overload(const Expr& callee, size_t arity, Scope* scope) {
+    if (!callee.is<QualifiedName>()) {
+      return;
+    }
+    const auto& qn = callee.as<QualifiedName>();
+    if (qn.segments.size() != 2) {
+      return; // `b::T::m` is a static method, not an overload set
+    }
+    auto* binding = scope->lookup(qn.segments[0]);
+    if (binding == nullptr || binding->kind != SymbolKind::Module) {
+      return;
+    }
+    const auto* target = binding->decl_as_module();
+    if (target == nullptr || target->exports == nullptr) {
+      return;
+    }
+    auto name_offset = callee.span.offset + static_cast<uint32_t>(qn.segments[0].size()) + 2;
+    if (auto* match = find_export_overload(target->exports, qn.segments[1], arity)) {
+      uses_[name_offset] = match;
+    }
+  }
+
   /// Try to resolve an identifier to an overloaded function by arity.
   /// If the name is overloaded and a match is found, records the use
   /// and returns true. Otherwise returns false (caller should fall
@@ -935,8 +981,24 @@ private:
       return;
     }
     auto mangled = ctx_.intern(std::string(name) + "." + std::string(member));
-    auto* method = exports->lookup_local(mangled);
-    uses_[member_offset] = method != nullptr ? method : exported;
+    if (auto* method = exports->lookup_local(mangled)) {
+      uses_[member_offset] = method;
+      return;
+    }
+    // No such static method.  An enum's `b::E::V` names a variant, which
+    // has no symbol of its own — the checker validates it against the
+    // enum — so the type stands in for it there.  For anything else the
+    // member does not exist, and recording the type would let the
+    // checker read `b::T::missing(...)` as a construction of `T`.
+    const auto* decl = exported->decl == nullptr ? nullptr : exported->decl_as_decl();
+    if (decl != nullptr && decl->is<EnumDeclNode>()) {
+      uses_[member_offset] = exported;
+      return;
+    }
+    diagnostics_.push_back(Diagnostic::error(
+        Span{.offset = member_offset, .length = static_cast<uint32_t>(member.size())},
+        "type '" + std::string(name) + "' of module '" + target->display +
+            "' has no static member '" + std::string(member) + "'"));
   }
 
   // --- Expressions ---
@@ -1019,6 +1081,7 @@ private:
       }
       if (!resolved) {
         resolve_expr(*call.callee, scope);
+        rebind_qualified_overload(*call.callee, call.args.size(), scope);
       }
       for (const auto* arg : call.args) {
         resolve_expr(*arg, scope);
