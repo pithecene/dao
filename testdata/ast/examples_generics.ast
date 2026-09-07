@@ -1,0 +1,182 @@
+File
+  Module generics
+  FunctionDecl identity<T>
+    Param x: T
+    ReturnType: T
+    ExprBody
+      Identifier x
+  FunctionDecl largest<T: Numeric>
+    Param a: T
+    Param b: T
+    ReturnType: T
+    IfStatement
+      Condition
+        CallExpr
+          Callee
+            FieldExpr .less_than
+              Identifier a
+          Args
+            Identifier b
+      Then
+        ReturnStatement
+          Identifier b
+    ReturnStatement
+      Identifier a
+  ClassDecl Box<T>
+    Field item: T
+    FunctionDecl get
+      Param self
+      ReturnType: T
+      ExprBody
+        FieldExpr .item
+          Identifier self
+  FunctionDecl first_even
+    Param a: i32
+    Param b: i32
+    ReturnType: Option<i32>
+    IfStatement
+      Condition
+        BinaryExpr ==
+          BinaryExpr %
+            Identifier a
+            IntLiteral 2
+          IntLiteral 0
+      Then
+        ReturnStatement
+          CallExpr
+            Callee
+              QualifiedName Option::Some
+            Args
+              Identifier a
+    IfStatement
+      Condition
+        BinaryExpr ==
+          BinaryExpr %
+            Identifier b
+            IntLiteral 2
+          IntLiteral 0
+      Then
+        ReturnStatement
+          CallExpr
+            Callee
+              QualifiedName Option::Some
+            Args
+              Identifier b
+    ReturnStatement
+      QualifiedName Option::None
+  FunctionDecl describe
+    Param o: Option<i32>
+    ReturnType: string
+    MatchStatement
+      Scrutinee
+        Identifier o
+      Arm
+        Pattern
+          QualifiedName Option::Some
+        ReturnStatement
+          BinaryExpr +
+            StringLiteral "even: "
+            CallExpr
+              Callee
+                FieldExpr .to_string
+                  Identifier value
+      Arm
+        Pattern
+          QualifiedName Option::None
+        ReturnStatement
+          StringLiteral "no even number"
+  FunctionDecl main
+    ReturnType: i32
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier identity
+            Args
+              IntLiteral 7
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier identity
+            TypeArgs
+              string
+            Args
+              StringLiteral "seven"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier largest
+            Args
+              IntLiteral 3
+              IntLiteral 9
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier largest
+            Args
+              FloatLiteral 2.5
+              FloatLiteral 1.5
+    LetStatement b
+      CallExpr
+        Callee
+          Identifier Box
+        Args
+          IntLiteral 41
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            CallExpr
+              Callee
+                FieldExpr .get
+                  Identifier b
+            IntLiteral 1
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier describe
+            Args
+              CallExpr
+                Callee
+                  Identifier first_even
+                Args
+                  IntLiteral 3
+                  IntLiteral 8
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier describe
+            Args
+              CallExpr
+                Callee
+                  Identifier first_even
+                Args
+                  IntLiteral 3
+                  IntLiteral 5
+    ReturnStatement
+      IntLiteral 0
