@@ -339,6 +339,17 @@ suite<"simple_functions"> simple_functions = [] {
     expect(contains(ir, "icmp eq")) << ir;
   };
 
+  "externs differing only in pointee type are diagnosed"_test = [] {
+    // `*i32` and `*f64` both lower to LLVM's opaque `ptr`, so comparing
+    // lowered types would call these compatible; the source signatures
+    // are what decide (CONTRACT_C_ABI_INTEROP.md §5).
+    LlvmTestPipeline pipe("extern fn take(p: *i32): i32\n"
+                          "fn a(): i32 -> take(null_ptr<i32>())\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << ir;
+    expect(ir.find("declare") != std::string::npos) << ir;
+  };
+
   "two modules declaring one extern emit one declaration"_test = [] {
     // An extern keeps its C symbol name exactly as written, so the same
     // extern in two modules is the same symbol — declared once.

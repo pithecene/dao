@@ -7,6 +7,7 @@
 
 #include "backend/llvm/llvm_backend.h"
 #include "backend/llvm/llvm_names.h"
+#include "frontend/types/type_printer.h"
 
 #include "backend/llvm/llvm_abi.h"
 #include "backend/llvm/llvm_runtime_hooks.h"
@@ -205,7 +206,19 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
     // disagreeing signature is a diagnostic rather than a silent pick.
     auto name = fn_name(*mir_fn->symbol);
     if (auto* existing = module_->getFunction(name)) {
-      if (existing->getFunctionType() != fn_type) {
+      // Compare the DAO signature, not the lowered one: `*i32` and
+      // `*f64` are both an opaque `ptr` in LLVM, so equal LLVM types
+      // would let two incompatible declarations of one C symbol through
+      // (CONTRACT_C_ABI_INTEROP.md §5).  The declaration that arrived
+      // first is remembered by its source signature and every later one
+      // is compared against that.
+      auto signature = mir_signature(*mir_fn);
+      auto [known, inserted] = extern_signatures_.try_emplace(name, signature);
+      if (!inserted && known->second != signature) {
+        emit_diagnostic(mir_fn->span,
+                        "extern '" + name + "' is declared with conflicting signatures: '" +
+                            known->second + "' and '" + signature + "'");
+      } else if (existing->getFunctionType() != fn_type) {
         emit_diagnostic(mir_fn->span,
                         "extern '" + name +
                             "' is declared with conflicting signatures in this program");
@@ -1281,6 +1294,24 @@ auto LlvmBackend::lower_field_access(const MirFieldAccess& p,
 // ---------------------------------------------------------------------------
 // Function reference and calls
 // ---------------------------------------------------------------------------
+
+/// A MIR function's signature as the source wrote it: parameter types
+/// then the return type, printed from the Dao types rather than their
+/// lowering, so distinctions LLVM erases (every pointer is `ptr`)
+/// survive the comparison.
+auto LlvmBackend::mir_signature(const MirFunction& fn) -> std::string {
+  std::string rendered;
+  for (const auto& local : fn.locals) {
+    if (!local.is_param) {
+      break; // parameters come first
+    }
+    rendered += print_type(local.type);
+    rendered += ',';
+  }
+  rendered += "->";
+  rendered += print_type(fn.return_type);
+  return rendered;
+}
 
 auto LlvmBackend::fn_name(const Symbol& sym) const -> std::string {
   return llvm_function_name(sym, entry_);
