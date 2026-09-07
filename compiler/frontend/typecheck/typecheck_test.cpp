@@ -221,24 +221,47 @@ suite<"typecheck_qualified_bounds"> typecheck_qualified_bounds = [] {
         << all_messages(checked);
   };
 
-  "conforming to an imported concept is not expressible today"_test = [kTraits] {
-    // Pinning a contract gap, not endorsing it: §6 freezes four
-    // qualified forms and a conformance clause is not among them, so
-    // `as traits::Reveal:` does not parse, while a bare `as Reveal:`
-    // names nothing in a module that imported `app::traits` as a module
-    // binding.  A qualified bound can therefore be written and enforced
-    // but never satisfied.  Resolving this is a normative question.
+  "a type conforms to an imported concept through a qualified as clause"_test = [kTraits] {
+    // CONTRACT_MODULE_SYSTEM.md §6 conformance position: `as b::C:`.
     auto checked = check_program({
         {"main.dao",
          "module app::main\nimport app::traits\n"
          "class Shown:\n  x: i32\n"
-         "extend Shown as Reveal:\n  fn reveal(self): i32 -> self.x\n"
+         "  as traits::Reveal:\n    fn reveal(self): i32 -> self.x\n"
          "fn show<T: traits::Reveal>(v: T): i32 -> v.reveal()\n"
          "fn main(): i32\n  let s: Shown = Shown(1)\n  return show(s)\n"},
         {"traits.dao", kTraits},
     });
-    expect(has_error_containing(checked.result, "does not satisfy concept"))
-        << all_messages(checked);
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "extend conforms to an imported concept through a qualified as clause"_test = [kTraits] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::traits\n"
+         "class Shown:\n  x: i32\n"
+         "extend Shown as traits::Reveal:\n  fn reveal(self): i32 -> self.x\n"
+         "fn show<T: traits::Reveal>(v: T): i32 -> v.reveal()\n"
+         "fn main(): i32\n  let s: Shown = Shown(1)\n  return show(s)\n"},
+        {"traits.dao", kTraits},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "a qualified conformance names a concept the module exports"_test = [kTraits] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::traits\n"
+         "class Shown:\n  x: i32\n"
+         "  as traits::Missing:\n    fn reveal(self): i32 -> self.x\n"
+         "fn main(): i32 -> 0\n"},
+        {"traits.dao", kTraits},
+    });
+    bool named = false;
+    for (const auto& diag : checked.resolved.diagnostics) {
+      named = named || diag.message.find("has no concept 'Missing'") != std::string::npos;
+    }
+    expect(named) << all_messages(checked);
   };
 
   "another module's extend does not satisfy a bound"_test = [kTraits] {

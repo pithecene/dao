@@ -115,8 +115,8 @@ auto query_completions(uint32_t offset,
 }
 
 auto query_dot_completions(const Type* receiver_type,
-                            const TypeCheckResult& typed)
-    -> std::vector<CompletionItem> {
+                           const TypeCheckResult& typed,
+                           const ModuleInfo* from_module) -> std::vector<CompletionItem> {
   std::vector<CompletionItem> items;
 
   if (receiver_type == nullptr) {
@@ -141,9 +141,12 @@ auto query_dot_completions(const Type* receiver_type,
     }
   }
 
-  // Methods from concept extends (exported method table).
+  // Methods from concept extends (exported method table), less those an
+  // `extend` in another module introduced: offering one would advertise
+  // a call the checker rejects.
   for (const auto& method : typed.methods) {
-    if (method.receiver_type == base_type) {
+    if (method.receiver_type == base_type &&
+        extend_visible_from(method.extend_module, from_module)) {
       items.push_back({
           .label = std::string(method.method_name),
           .kind = "method",
