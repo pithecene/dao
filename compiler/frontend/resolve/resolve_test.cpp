@@ -804,5 +804,41 @@ suite<"reserved_prefix"> reserved_prefix = [] {
 
 // NOLINTEND(readability-magic-numbers)
 
+// ---------------------------------------------------------------------------
+// Prelude qualified exports (CONTRACT_MODULE_SYSTEM.md §7.2, §7.3, §7.5):
+// prelude declarations are visible unqualified everywhere and prelude
+// modules see one another as one namespace, but a qualified path reaches
+// only what the named module itself declares.
+// ---------------------------------------------------------------------------
+
+suite<"prelude_qualified_exports"> prelude_qualified_exports_suite = [] {
+  const std::vector<std::string> prelude = {
+      "module core::vector\nfn make(): i32 -> 1\n",
+      "module core::printable\nfn show(): i32 -> 2\n",
+  };
+
+  "a prelude module exports only what it declares"_test = [prelude] {
+    auto program = make_test_program(
+        "import core::vector\nfn use_it(): i32\n  return vector::show()\n", prelude);
+    auto resolved = resolve(program);
+    expect(has_diagnostic_containing(resolved, "has no export 'show'"))
+        << "core::vector must not export core::printable's `show`";
+  };
+
+  "a prelude module's own export resolves qualified"_test = [prelude] {
+    auto program = make_test_program(
+        "import core::vector\nfn use_it(): i32\n  return vector::make()\n", prelude);
+    auto resolved = resolve(program);
+    expect(!has_diagnostic_containing(resolved, "has no export")) << "core::vector exports `make`";
+  };
+
+  "prelude names stay visible unqualified across prelude modules"_test = [prelude] {
+    auto program = make_test_program("fn use_it(): i32\n  return make() + show()\n", prelude);
+    auto resolved = resolve(program);
+    expect(!has_diagnostic_containing(resolved, "unknown name"))
+        << "prelude declarations are visible unqualified (§7.2, §7.3)";
+  };
+};
+
 auto main() -> int {
 }
