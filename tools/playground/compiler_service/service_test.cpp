@@ -284,6 +284,29 @@ suite<"playground_service"> playground_service_suite = [] {
         << "a document that is not one of the files must be rejected";
   };
 
+  "duplicate file paths are rejected"_test = [] {
+    // Two files with one path made `document` ambiguous: the synthetic
+    // module header was measured from one copy and positions from the
+    // other, so the document's length underflowed and any offset passed.
+    const std::string with_header = "module t\nfn main(): i32\n  return 0\n";
+    const std::string without = "fn f(): i32\n  return 0\n";
+    json duplicated = {{"files",
+                        json::array({{{"path", kTestDocument}, {"source", without}},
+                                     {{"path", kTestDocument}, {"source", with_header}}})},
+                       {"document", kTestDocument}};
+    for (const auto& route : kRoutes) {
+      if (route.request == "void" || route.request == "ExampleName") {
+        continue;
+      }
+      json request = duplicated;
+      request["offset"] = 999;
+      auto reply = dispatch(route.name, request, service_context());
+      expect(reply.status == http_status::bad_request)
+          << route.name << " accepted duplicate paths: " << reply.status << " "
+          << reply.body.dump();
+    }
+  };
+
   "document offsets are range checked"_test = [] {
     const std::string source = "module t\nfn main(): i32\n  return 0\n";
     const auto length = static_cast<int64_t>(source.size());

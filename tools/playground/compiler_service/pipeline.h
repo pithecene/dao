@@ -40,9 +40,13 @@ struct PlaygroundProgram {
   uint32_t header_lines = 0;
 
   /// Length of the document as the editor sees it (without the
-  /// synthetic module header).
+  /// synthetic module header).  The header was prepended to this file's
+  /// own text, so it cannot exceed the buffer; the guard keeps a
+  /// mistake from underflowing into a four-billion-byte document that
+  /// would let every offset through.
   [[nodiscard]] auto document_length() const -> uint32_t {
-    return static_cast<uint32_t>(user->buffer.size()) - header_bytes;
+    auto size = static_cast<uint32_t>(user->buffer.size());
+    return size >= header_bytes ? size - header_bytes : 0;
   }
   /// Program offset of an editor-buffer offset, which must be at most
   /// document_length() (document_offset checks a request's).

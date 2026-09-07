@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <format>
 #include <iterator>
+#include <set>
 #include <utility>
 
 namespace dao::playground {
@@ -18,15 +19,20 @@ auto parse_program_request(const nlohmann::json& request)
     -> std::expected<ProgramRequest, std::string> {
   ProgramRequest parsed;
   parsed.document = request["document"].get<std::string>();
+  // A path names at most one file: it is the file's identity here and
+  // its module identity in the program, and `document` must select
+  // exactly one of them.
+  std::set<std::string> paths;
   for (const auto& file : request["files"]) {
-    parsed.files.push_back({.display_path = file["path"].get<std::string>(),
+    auto path = file["path"].get<std::string>();
+    if (!paths.insert(path).second) {
+      return std::unexpected(std::format("duplicate file path '{}'", path));
+    }
+    parsed.files.push_back({.display_path = std::move(path),
                             .text = file["source"].get<std::string>(),
                             .is_prelude = false});
   }
-  const bool named = std::ranges::any_of(parsed.files, [&](const SourceInput& file) -> bool {
-    return file.display_path == parsed.document;
-  });
-  if (!named) {
+  if (!paths.contains(parsed.document)) {
     return std::unexpected(std::format("document '{}' is not one of the files", parsed.document));
   }
   return parsed;
@@ -36,6 +42,9 @@ auto build_playground_program(const std::filesystem::path& repo_root, ProgramReq
     -> PlaygroundProgram {
   PlaygroundProgram prog;
 
+  // Exactly one file carries the document's path (parse_program_request
+  // rejects duplicates), so the header bookkeeping below and the `user`
+  // selection after it name the same file.
   auto inputs = load_prelude_inputs(repo_root / "stdlib");
   for (auto& file : request.files) {
     // Per CONTRACT_SYNTAX_SURFACE.md every source file begins with one
