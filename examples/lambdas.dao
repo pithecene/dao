@@ -1,0 +1,32 @@
+module lambdas
+// lambdas.dao — function types, functions as values, and pipes.
+//
+// `fn(i32): i32` is a function type; any function with that signature
+// is a value of it.  `|>` feeds the left value to the function on the
+// right, so a chain reads in evaluation order.
+//
+// Lambda literals (`|x| -> x + 1`) type-check today but do not lower to
+// native code yet; once they do, this file gains them.
+
+fn apply(f: fn(i32): i32, x: i32): i32 -> f(x)
+
+fn twice(f: fn(i32): i32, x: i32): i32 -> f(f(x))
+
+fn compose_apply(f: fn(i32): i32, g: fn(i32): i32, x: i32): i32 -> g(f(x))
+
+fn double(x: i32): i32 -> x * 2
+
+fn increment(x: i32): i32 -> x + 1
+
+fn square(x: i32): i32 -> x * x
+
+fn main(): i32
+  // Named functions are values of their function type.
+  print(apply(double, 21))
+  print(twice(increment, 40))
+  print(compose_apply(increment, square, 6))
+
+  // Pipelines read left to right: ((4 * 2) * 2) + 1.
+  print(4 |> double |> double |> increment)
+
+  return 0

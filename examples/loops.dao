@@ -1,0 +1,34 @@
+module loops
+// loops.dao — while with break, for over a generator, nesting.
+//
+// `break` leaves the innermost enclosing loop.  `range(start, end)` is
+// a generator from the prelude, so `for k in range(0, 4)` pulls values
+// lazily.
+
+fn first_square_over(limit: i32): i32
+  let i: i32 = 0
+  while true:
+    if i * i > limit:
+      break
+    i = i + 1
+  return i
+
+fn sum_to(n: i32): i32
+  let total: i32 = 0
+  for k in range(0, n + 1):
+    total = total + k
+  return total
+
+fn main(): i32
+  print(first_square_over(50))
+  print(sum_to(10))
+
+  // Nested: the inner for runs to completion, the outer while breaks.
+  let rows: i32 = 0
+  while true:
+    if rows == 3:
+      break
+    for col in range(0, 2):
+      print(rows * 10 + col)
+    rows = rows + 1
+  return 0

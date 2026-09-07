@@ -1,0 +1,10 @@
+=== HashMap<V> ===
+length: 3
+x = 10
+y = 20
+w not found
+x (updated) = 99
+big length: 10
+j = 10
+a = 1
+missing = None (correct)

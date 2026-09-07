@@ -1,0 +1,34 @@
+module methods
+// methods.dao — class methods, static methods, chaining, generic classes.
+//
+// Methods take `self` by value: a "mutating" method returns the updated
+// value, and callers rebind.  A method without `self` is static and is
+// called through the type: `Counter::zero()`.
+
+class Counter:
+  n: i32
+
+  fn zero(): Counter -> Counter(0)
+  fn bump(self): Counter -> Counter(self.n + 1)
+  fn add(self, k: i32): Counter -> Counter(self.n + k)
+  fn value(self): i32 -> self.n
+
+class Stack<T>:
+  items: Vector<T>
+
+  fn empty(): Stack<T> -> Stack(Vector<T>::new())
+  fn push(self, x: T): Stack<T> -> Stack(self.items.push(x))
+  fn size(self): i64 -> self.items.length()
+  fn top(self): T -> self.items.get(self.items.length() - 1)
+
+fn main(): i32
+  let c = Counter::zero().bump().bump().add(40)
+  print(c.value())
+
+  let s = Stack<i32>::empty().push(1).push(2).push(3)
+  print(s.size())
+  print(s.top())
+
+  let words = Stack<string>::empty().push("dao")
+  print(words.top())
+  return 0
