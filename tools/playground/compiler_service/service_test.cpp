@@ -295,23 +295,48 @@ suite<"playground_service"> playground_service_suite = [] {
     auto reply = call("analyze", document_request(source));
     auto ir = reply.body["llvm_ir"].get<std::string>();
     expect(!ir.empty()) << reply.body["diagnostics"].dump();
-    expect(ir.find("define") != std::string::npos) << ir;
-    // Every call target the filtered IR names must be defined in it.
-    static const std::regex call_pattern(R"re(call [^@]*@"?([A-Za-z0-9_:.$]+)"?\()re");
-    for (std::sregex_iterator it(ir.begin(), ir.end(), call_pattern), last; it != last; ++it) {
-      auto callee = (*it)[1].str();
-      if (callee.starts_with("llvm.") || callee.starts_with("__dao_")) {
-        continue; // intrinsics and runtime hooks are declared, not defined
+
+    // Names introduced by `define` / `declare`, and names called.
+    auto names_after = [&ir](std::string_view keyword) -> std::set<std::string> {
+      std::set<std::string> found;
+      const std::regex pattern(std::string(keyword) + R"re(\s[^@\n]*@"?([A-Za-z0-9_:.$]+)"?\()re");
+      for (std::sregex_iterator it(ir.begin(), ir.end(), pattern), last; it != last; ++it) {
+        found.insert((*it)[1].str());
       }
-      bool defined = ir.find("define") != std::string::npos &&
-                     (ir.find("@" + callee + "(") != std::string::npos ||
-                      ir.find("@\"" + callee + "\"(") != std::string::npos);
-      bool declared = ir.find("declare") != std::string::npos;
-      expect(defined || declared) << "call to " << callee << " with no definition:\n" << ir;
-    }
-    expect(ir.find("app::helper") != std::string::npos)
-        << "the document's own helper must survive the filter:\n"
+      return found;
+    };
+    auto defined = names_after("define");
+    auto declared = names_after("declare");
+    auto called = names_after("call");
+
+    expect(defined.contains("app::helper"))
+        << "the document's own helper must be defined in the filtered IR:\n"
         << ir;
+    expect(defined.contains("main")) << "the entry keeps its bare name:\n" << ir;
+    for (const auto& callee : called) {
+      if (callee.starts_with("llvm.")) {
+        continue; // intrinsics need no declaration of ours
+      }
+      expect(defined.contains(callee) || declared.contains(callee))
+          << "call to " << callee << " which the filter dropped:\n"
+          << ir;
+    }
+  };
+
+  "a document without main is advised, not failed"_test = [] {
+    // EntryPolicy::Advisory: analysis runs to completion and the reply
+    // says why Run will not work, as a warning rather than an error.
+    auto reply = call("analyze", document_request("module t\nfn f(): i32\n  return 1\n"));
+    bool advised = false;
+    for (const auto& diag : reply.body["diagnostics"]) {
+      if (diag["message"].get<std::string>().find("no entry module") != std::string::npos) {
+        advised = true;
+        expect(diag["severity"].get<std::string>() == "warning") << diag.dump();
+      }
+    }
+    expect(advised) << reply.body["diagnostics"].dump();
+    expect(!reply.body["llvm_ir"].get<std::string>().empty())
+        << "an advisory must not stop lowering: " << reply.body["diagnostics"].dump();
   };
 
   "duplicate file paths are rejected"_test = [] {

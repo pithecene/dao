@@ -65,8 +65,10 @@ auto TypeChecker::check(std::span<const FileNode* const> files) -> TypeCheckResu
 
   // Export method table for tooling (completion, hover).
   std::vector<MethodInfo> methods;
-  for (const auto& [key, entry] : method_table_) {
-    methods.push_back({key.type, key.name, entry.fn_type});
+  for (const auto& [key, entries] : method_table_) {
+    for (const auto& entry : entries) {
+      methods.push_back({key.type, key.name, entry.fn_type});
+    }
   }
 
   return {.typed = std::move(typed_),
@@ -643,20 +645,19 @@ auto TypeChecker::type_conforms_to(const Type* type, const Decl* concept_decl) -
     if (decl_node != nullptr) {
       if (decl_node->is<ClassDecl>()) {
         const auto& cls = decl_node->as<ClassDecl>();
-        const auto& concept_name = concept_decl->as<ConceptDecl>().name;
 
         // deny supersedes everything — if present, the type does not
         // conform regardless of explicit `as` blocks. (Having both
         // is a compile error diagnosed in check_class.)
         for (const auto& deny : cls.denials) {
-          if (deny.concept_name == concept_name) {
+          if (concept_named_at(deny.concept_span) == concept_decl) {
             return false;
           }
         }
 
         // Check explicit conformance.
         for (const auto& conf : cls.conformances) {
-          if (conf.concept_name == concept_name) {
+          if (concept_named_at(conf.concept_span) == concept_decl) {
             return true;
           }
         }
@@ -666,7 +667,6 @@ auto TypeChecker::type_conforms_to(const Type* type, const Decl* concept_decl) -
 
   // Check extend declarations.
   if (!all_decls_.empty()) {
-    const auto& cpt_name = concept_decl->as<ConceptDecl>().name;
     for (const auto* decl : all_decls_) {
       if (decl->kind() != NodeKind::ExtendDecl) {
         continue;
@@ -680,7 +680,7 @@ auto TypeChecker::type_conforms_to(const Type* type, const Decl* concept_decl) -
         continue;
       }
       const auto* target = resolve_type_node(ext.target_type);
-      if (target == type && ext.concept_name == cpt_name) {
+      if (target == type && concept_named_at(ext.concept_span) == concept_decl) {
         return true;
       }
     }
@@ -2523,21 +2523,15 @@ void TypeChecker::build_method_table() {
     // Direct class methods.
     for (const auto* method_decl : cls.methods) {
       const auto& method = method_decl->as<FunctionDecl>();
-      MethodKey key{struct_type, method.name};
-      if (method_table_.find(key) == method_table_.end()) {
-        const auto* fn_type = build_method_fn_type(method);
-        method_table_.insert({key, {fn_type, method_decl}});
-      }
+      const auto* fn_type = build_method_fn_type(method);
+      add_method(MethodKey{struct_type, method.name}, {fn_type, method_decl});
     }
     // Conformance block methods.
     for (const auto& conf : cls.conformances) {
       for (const auto* method_decl : conf.methods) {
         const auto& method = method_decl->as<FunctionDecl>();
-        MethodKey key{struct_type, method.name};
-        if (method_table_.find(key) == method_table_.end()) {
-          const auto* fn_type = build_method_fn_type(method);
-          method_table_.insert({key, {fn_type, method_decl}});
-        }
+        const auto* fn_type = build_method_fn_type(method);
+        add_method(MethodKey{struct_type, method.name}, {fn_type, method_decl});
       }
     }
   }
@@ -2555,11 +2549,8 @@ void TypeChecker::build_method_table() {
     const auto* owner = declaring_module(decl);
     for (const auto* method_decl : ext.methods) {
       const auto& method = method_decl->as<FunctionDecl>();
-      MethodKey key{target, method.name};
-      if (method_table_.find(key) == method_table_.end()) {
-        const auto* fn_type = build_method_fn_type(method);
-        method_table_.insert({key, {fn_type, method_decl, owner}});
-      }
+      const auto* fn_type = build_method_fn_type(method);
+      add_method(MethodKey{target, method.name}, {fn_type, method_decl, owner});
     }
   }
 
@@ -2596,7 +2587,7 @@ void TypeChecker::build_method_table() {
           if (impl_decl != nullptr)
             break;
         }
-        method_table_.insert({key, {fn_type, impl_decl != nullptr ? impl_decl : cpt_method_decl}});
+        add_method(key, {fn_type, impl_decl != nullptr ? impl_decl : cpt_method_decl});
       }
     }
   }
@@ -2612,11 +2603,13 @@ auto TypeChecker::lookup_method(const Type* obj_type,
   // O(1) table lookup for concrete types (covers struct conformance blocks,
   // extend declarations, and derived conformance methods).
   auto it = method_table_.find(MethodKey{obj_type, name});
-  if (it != method_table_.end() && extend_is_visible(it->second.extend_module)) {
-    if (resolved_decl != nullptr) {
-      *resolved_decl = it->second.method_decl;
+  if (it != method_table_.end()) {
+    if (const auto* entry = visible_entry(it->second)) {
+      if (resolved_decl != nullptr) {
+        *resolved_decl = entry->method_decl;
+      }
+      return entry->fn_type;
     }
-    return it->second.fn_type;
   }
 
   // For concrete struct instantiations (e.g., Vector<i32>), fall back to
@@ -2626,7 +2619,7 @@ auto TypeChecker::lookup_method(const Type* obj_type,
   if (obj_type->kind() == TypeKind::Struct) {
     const auto* concrete_st = static_cast<const TypeStruct*>(obj_type);
     // Look up the class declaration's generic struct type.
-    for (const auto& [key, entry] : method_table_) {
+    for (const auto& [key, entries] : method_table_) {
       if (key.name != name || key.type == nullptr || key.type->kind() != TypeKind::Struct) {
         continue;
       }
@@ -2634,6 +2627,13 @@ auto TypeChecker::lookup_method(const Type* obj_type,
       if (generic_st->decl_id() != concrete_st->decl_id()) {
         continue;
       }
+      // An instantiation reaches only the methods its own module may
+      // see, exactly as the direct lookup above does (§5).
+      const auto* visible = visible_entry(entries);
+      if (visible == nullptr) {
+        continue;
+      }
+      const auto& entry = *visible;
       // Found matching class. Build substitution from generic → concrete
       // field types.
       std::unordered_map<uint32_t, const Type*> bindings;

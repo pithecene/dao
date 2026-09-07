@@ -191,10 +191,43 @@ suite<"typecheck_qualified_bounds"> typecheck_qualified_bounds = [] {
         << all_messages(checked);
   };
 
-  "a qualified concept bound accepts a conforming type"_test = [kTraits] {
-    // Conformance is declared by an `extend` in the using module: §6
-    // freezes four qualified forms and a conformance block is not among
-    // them, so `as traits::Reveal:` is not expressible today.
+  "a bound accepts a type conforming to that very concept"_test = [] {
+    // Same module throughout: conformance is decided by which concept
+    // the `as` clause names, and here it names this one.
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\n"
+         "concept Reveal:\n  fn reveal(self): i32\n"
+         "class Shown:\n  x: i32\n  as Reveal:\n    fn reveal(self): i32 -> self.x\n"
+         "fn show<T: Reveal>(v: T): i32 -> v.reveal()\n"
+         "fn main(): i32\n  let s: Shown = Shown(1)\n  return show(s)\n"},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "conformance to a same-named concept of another module does not count"_test = [kTraits] {
+    // Both modules declare `Reveal`; the bound requires app::traits's.
+    // Comparing spellings accepted the wrong one.
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::traits\n"
+         "concept Reveal:\n  fn reveal(self): i32\n"
+         "class Shown:\n  x: i32\n  as Reveal:\n    fn reveal(self): i32 -> self.x\n"
+         "fn show<T: traits::Reveal>(v: T): i32 -> v.reveal()\n"
+         "fn main(): i32\n  let s: Shown = Shown(1)\n  return show(s)\n"},
+        {"traits.dao", kTraits},
+    });
+    expect(has_error_containing(checked.result, "does not satisfy concept"))
+        << all_messages(checked);
+  };
+
+  "conforming to an imported concept is not expressible today"_test = [kTraits] {
+    // Pinning a contract gap, not endorsing it: §6 freezes four
+    // qualified forms and a conformance clause is not among them, so
+    // `as traits::Reveal:` does not parse, while a bare `as Reveal:`
+    // names nothing in a module that imported `app::traits` as a module
+    // binding.  A qualified bound can therefore be written and enforced
+    // but never satisfied.  Resolving this is a normative question.
     auto checked = check_program({
         {"main.dao",
          "module app::main\nimport app::traits\n"
@@ -204,7 +237,8 @@ suite<"typecheck_qualified_bounds"> typecheck_qualified_bounds = [] {
          "fn main(): i32\n  let s: Shown = Shown(1)\n  return show(s)\n"},
         {"traits.dao", kTraits},
     });
-    expect(clean(checked)) << all_messages(checked);
+    expect(has_error_containing(checked.result, "does not satisfy concept"))
+        << all_messages(checked);
   };
 
   "another module's extend does not satisfy a bound"_test = [kTraits] {
@@ -255,6 +289,33 @@ suite<"typecheck_extend_scoping"> typecheck_extend_scoping = [] {
          "fn use_it(): i32\n  let v: i32 = 1\n  return v.secret()\n"},
     });
     expect(clean(checked)) << all_messages(checked);
+  };
+
+  "same-named extensions in two modules coexist"_test = [] {
+    // Each module extends i32 with its own `local`; each must see its
+    // own, whatever order the modules are checked in.
+    const std::string a = "module app::a\nextend i32 as A:\n  fn local(self): i32 -> 1\n"
+                          "fn use_a(): i32\n  let v: i32 = 0\n  return v.local()\n";
+    const std::string b = "module app::b\nextend i32 as B:\n  fn local(self): i32 -> 2\n"
+                          "fn use_b(): i32\n  let v: i32 = 0\n  return v.local()\n";
+    auto forward = check_program({{"a.dao", a}, {"b.dao", b}});
+    expect(clean(forward)) << all_messages(forward);
+    auto reversed = check_program({{"b.dao", b}, {"a.dao", a}});
+    expect(clean(reversed)) << all_messages(reversed);
+  };
+
+  "another module's extension is invisible on a class receiver"_test = [] {
+    // The struct fallback used by instantiations must apply the same
+    // rule as the direct lookup.
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nclass Box:\n  x: i32\n"
+         "fn main(): i32\n  let b: Box = Box(1)\n  return b.secret()\n"},
+        {"ext.dao",
+         "module app::ext\nimport app::main\n"
+         "extend main::Box as Secret:\n  fn secret(self): i32 -> 42\n"},
+    });
+    expect(!is_ok(checked.result)) << all_messages(checked);
   };
 
   "a prelude extend method is visible everywhere"_test = [] {
