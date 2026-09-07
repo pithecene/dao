@@ -66,6 +66,53 @@ auto contains(const std::string& haystack, std::string_view needle) -> bool {
 } // namespace
 
 // ---------------------------------------------------------------------------
+// Enum variant values: a tag for classification enums, a construction for
+// payload-bearing ones (whose values are tagged structs)
+// ---------------------------------------------------------------------------
+
+suite<"hir_enum_variant_values"> hir_enum_variant_values = [] {
+  "classification enum variant is its tag"_test = [] {
+    HirTestPipeline p("enum Color:\n"
+                      "  Red\n"
+                      "  Green\n"
+                      "fn pick(): Color\n"
+                      "  return Color.Green\n");
+    auto dump = p.dump();
+    expect(contains(dump, "IntLiteral 1")) << dump;
+    expect(!contains(dump, "EnumConstruct")) << dump;
+  };
+
+  "match arms on a payload-bearing enum compare tags, not constructions"_test = [] {
+    HirTestPipeline p("enum class K:\n"
+                      "  A(v: i64)\n"
+                      "  B\n"
+                      "fn pick(k: K): i64\n"
+                      "  match k:\n"
+                      "    K.A(v):\n"
+                      "      return v\n"
+                      "    K.B:\n"
+                      "      return 0\n");
+    auto dump = p.dump();
+    expect(contains(dump, "EnumDiscriminant")) << dump;
+    expect(contains(dump, "IntLiteral 1")) << dump;
+    expect(!contains(dump, "EnumConstruct")) << dump;
+  };
+
+  "fieldless variant of a payload-bearing enum is constructed"_test = [] {
+    HirTestPipeline p("enum class K:\n"
+                      "  A(v: i64)\n"
+                      "  B\n"
+                      "fn pick(): K\n"
+                      "  return K.B\n"
+                      "fn pick_qualified(): K\n"
+                      "  return K::B\n");
+    auto dump = p.dump();
+    expect(!contains(dump, "IntLiteral 1")) << dump;
+    expect(contains(dump, "EnumConstruct")) << dump;
+  };
+};
+
+// ---------------------------------------------------------------------------
 // Positive: expression-bodied function normalized to HIR
 // ---------------------------------------------------------------------------
 
