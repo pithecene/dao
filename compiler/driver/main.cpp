@@ -298,7 +298,7 @@ constexpr auto commands = std::array{
 void print_usage() {
   std::cerr << "usage: daoc <command> <root.dao> [--module-root DIR]... [--stdlib-root DIR]\n"
             << "       daoc <command> --source a.dao [--source b.dao]... [--entry a::b]\n"
-            << "       daoc build <inputs as above> [link-inputs...]\n"
+            << "       daoc build <inputs as above> [--] [link-inputs...]\n"
             << "commands: lex, parse, ast, tokens, resolve, check, hir, mir, llvm-ir, build\n";
 }
 
@@ -353,9 +353,22 @@ auto main(int argc, char* argv[]) -> int {
       request.sources.emplace_back(value());
     } else if (arg == "--entry") {
       request.options.entry = value();
+    } else if (arg == "--") {
+      // Everything after `--` is a link input, verbatim.
+      for (++i; i < argc; ++i) {
+        extras.emplace_back(argv[i]);
+      }
+      break;
     } else if (arg.starts_with("--")) {
-      std::cerr << "error: unknown option " << arg << "\n";
-      return EXIT_FAILURE;
+      // `daoc build <inputs> [link-inputs...]` passes its trailing
+      // arguments to the linker unchanged (Task 31 §13), and linker
+      // options lead with a dash.  Only the analysis commands, which
+      // have nothing to pass anything to, reject an unknown option.
+      if (command != "build") {
+        std::cerr << "error: unknown option " << arg << "\n";
+        return EXIT_FAILURE;
+      }
+      extras.emplace_back(arg);
     } else if (request.root.empty() && request.sources.empty()) {
       // The first positional is the root; anything after it, or after
       // --source, is a link input (`build <inputs> [link-inputs...]`).

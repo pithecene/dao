@@ -323,6 +323,25 @@ suite<"playground_service"> playground_service_suite = [] {
     }
   };
 
+  "filtered llvm keeps a definition the document calls in another file"_test = [] {
+    // The IR views hide the prelude, not the rest of the program: a
+    // document calling into a sibling file must not be shown a call with
+    // no definition.
+    const std::string lib = "module lib\n\nfn helper(): i32\n  return 41\n";
+    const std::string main =
+        "module app\nimport lib\n\nfn main(): i32\n  return lib::helper() + 1\n";
+    json request = {{"files",
+                     json::array({{{"path", "lib.dao"}, {"source", lib}},
+                                  {{"path", kTestDocument}, {"source", main}}})},
+                    {"document", kTestDocument}};
+    auto reply = call("analyze", request);
+    auto ir = reply.body["llvm_ir"].get<std::string>();
+    expect(!ir.empty()) << reply.body["diagnostics"].dump();
+    expect(ir.find("lib::helper") != std::string::npos)
+        << "the callee's definition must survive the filter:\n"
+        << ir;
+  };
+
   "a document without main is advised, not failed"_test = [] {
     // EntryPolicy::Advisory: analysis runs to completion and the reply
     // says why Run will not work, as a warning rather than an error.

@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace dao {
@@ -80,9 +81,10 @@ enum class EntryPolicy : std::uint8_t {
 
 /// Options common to the loaders that read the filesystem.
 struct ProgramOptions {
-  std::filesystem::path stdlib_root;               // prelude group source; empty loads no prelude
-  std::vector<std::filesystem::path> module_roots; // root-file mode: searched after the root's directory
-  std::optional<std::string> entry;                // explicit-set mode: entry module by display name
+  std::filesystem::path stdlib_root; // prelude group source; empty loads no prelude
+  std::vector<std::filesystem::path>
+      module_roots;                 // root-file mode: searched after the root's directory
+  std::optional<std::string> entry; // explicit-set mode: entry module by display name
   // A program that will be built into an executable owes an entry module
   // (§8.1); one that is only analysed is told, not refused.
   EntryPolicy entry_policy = EntryPolicy::Advisory;
@@ -91,8 +93,12 @@ struct ProgramOptions {
 struct Program {
   std::vector<std::unique_ptr<SourceFile>> files;   // prelude group, then lexical by display path
   std::vector<std::unique_ptr<ModuleInfo>> modules; // the order their files appear in `files`
-  std::vector<ModuleInfo*> topo_order;              // imported modules before importers
-  ModuleInfo* entry = nullptr;                      // §7.7; null when no rule selects one
+  // Display name to module, filled as modules are registered: import
+  // resolution asks once per edge, so a scan per edge would be
+  // quadratic in the graph (AGENTS.md, algorithmic awareness).
+  std::unordered_map<std::string_view, ModuleInfo*> by_display;
+  std::vector<ModuleInfo*> topo_order; // imported modules before importers
+  ModuleInfo* entry = nullptr;         // §7.7; null when no rule selects one
   SourceMap source_map;
   std::vector<Diagnostic> diagnostics; // load level (position budget) and graph level (§8.5)
 
@@ -145,7 +151,8 @@ auto load_program_from_files(const std::vector<std::filesystem::path>& files,
 /// files and stable across machines.  Exits the process with a message
 /// if the file cannot be opened, matching the driver's historical
 /// behaviour.
-auto read_source_input(const std::filesystem::path& path, bool is_prelude,
+auto read_source_input(const std::filesystem::path& path,
+                       bool is_prelude,
                        const std::filesystem::path& display_root = {}) -> SourceInput;
 
 /// The prelude group's files (CONTRACT_MODULE_SYSTEM.md §7): every .dao

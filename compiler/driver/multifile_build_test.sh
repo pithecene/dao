@@ -49,6 +49,28 @@ for fixture in cross_module_enum extend_isolation; do
   grep -q 'error:' "$WORK/$fixture.txt" && fail "$fixture: reported an error: $(grep -m1 'error:' "$WORK/$fixture.txt")"
 done
 
+# Link inputs pass through unchanged (Task 31 §13), dash-led ones included,
+# and `--` ends option parsing.  A bad link input reaches the linker, which
+# is where it is diagnosed — the driver does not reject it.
+out=$("$DAOC" build --source "$BM/app_main.dao" --source "$BM/app_math.dao" --source "$BM/core_fmt.dao" -Wl,--no-such-option 2>&1) || true
+echo "$out" | grep -q 'unknown option' && fail "build rejected a link input instead of forwarding it"
+out=$("$DAOC" build --source "$BM/app_main.dao" --source "$BM/app_math.dao" --source "$BM/core_fmt.dao" -- -Wl,--no-such-option 2>&1) || true
+echo "$out" | grep -q 'unknown option' && fail "build rejected a link input after --"
+# The analysis commands still reject one.
+"$DAOC" check --source "$BM/core_fmt.dao" --bogus > "$WORK/bogus.txt" 2>&1 && fail "check accepted an unknown option"
+grep -q 'unknown option' "$WORK/bogus.txt" || fail "check did not name the unknown option"
+
+# Diagnostics come out in source order, not grouped by phase (§8.4).
+mkdir -p "$WORK/order"
+printf 'module first\nfn f(): i32\n  return @\n' > "$WORK/order/first.dao"
+printf 'module second\nfn g(): i32\n  return @\n' > "$WORK/order/second.dao"
+"$DAOC" check --source "$WORK/order/first.dao" --source "$WORK/order/second.dao" > "$WORK/order.txt" 2>&1 || true
+first_line=$(grep -n 'first.dao' "$WORK/order.txt" | head -1 | cut -d: -f1)
+second_line=$(grep -n 'second.dao' "$WORK/order.txt" | head -1 | cut -d: -f1)
+if [ -n "$first_line" ] && [ -n "$second_line" ] && [ "$first_line" -gt "$second_line" ]; then
+  fail "diagnostics are not in file order: first.dao reported after second.dao"
+fi
+
 # Determinism: the same explicit set in two orders emits identical IR.
 "$DAOC" llvm-ir --source "$BM/app_main.dao" --source "$BM/app_math.dao" --source "$BM/core_fmt.dao" > "$WORK/a.ll" || fail "llvm-ir (order 1) failed"
 "$DAOC" llvm-ir --source "$BM/core_fmt.dao" --source "$BM/app_math.dao" --source "$BM/app_main.dao" > "$WORK/b.ll" || fail "llvm-ir (order 2) failed"
