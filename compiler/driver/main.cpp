@@ -356,7 +356,9 @@ auto main(int argc, char* argv[]) -> int {
     } else if (arg.starts_with("--")) {
       std::cerr << "error: unknown option " << arg << "\n";
       return EXIT_FAILURE;
-    } else if (request.root.empty() && extras.empty()) {
+    } else if (request.root.empty() && request.sources.empty()) {
+      // The first positional is the root; anything after it, or after
+      // --source, is a link input (`build <inputs> [link-inputs...]`).
       request.root = arg;
     } else {
       extras.emplace_back(arg);

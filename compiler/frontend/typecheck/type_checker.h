@@ -99,6 +99,18 @@ private:
   /// last segment; null when the bound resolves to nothing.
   [[nodiscard]] auto concept_for_constraint(const TypeNode* constraint) const -> const Symbol*;
 
+  /// The concept declaration named at `span` (an `as`, `deny`, or
+  /// `extend ... as` clause), or null when the name resolves to no
+  /// concept.  Two modules may each declare a concept called `Reveal`,
+  /// so conformance is decided by which one, not by the spelling.
+  [[nodiscard]] auto concept_named_at(Span span) const -> const Decl* {
+    auto it = resolve_.uses.find(span.offset);
+    if (it == resolve_.uses.end() || it->second->kind != SymbolKind::Concept) {
+      return nullptr;
+    }
+    return it->second->decl_as_decl();
+  }
+
   // decl_span.offset -> Symbol* for finding symbols at declaration sites.
   std::unordered_map<uint32_t, const Symbol*> decl_symbols_;
 
@@ -168,7 +180,34 @@ private:
     }
   };
 
-  std::unordered_map<MethodKey, MethodEntry, MethodKeyHash> method_table_;
+  // (type, name) -> the methods declared for it.  More than one exists
+  // when separate modules extend the same type with the same method
+  // name; each is visible only where its own module makes it visible,
+  // so they must coexist whatever order the modules are checked in.
+  std::unordered_map<MethodKey, std::vector<MethodEntry>, MethodKeyHash> method_table_;
+
+  /// The method a lookup from the current module should see, or null.
+  [[nodiscard]] auto visible_entry(const std::vector<MethodEntry>& entries) const
+      -> const MethodEntry* {
+    for (const auto& entry : entries) {
+      if (extend_is_visible(entry.extend_module)) {
+        return &entry;
+      }
+    }
+    return nullptr;
+  }
+
+  /// Record a method unless one with the same scope is already there
+  /// (the first declaration of a name in a scope wins, as before).
+  void add_method(const MethodKey& key, const MethodEntry& entry) {
+    auto& entries = method_table_[key];
+    for (const auto& existing : entries) {
+      if (existing.extend_module == entry.extend_module) {
+        return;
+      }
+    }
+    entries.push_back(entry);
+  }
 
   // Which module each top-level declaration came from, and the one whose
   // body is being checked.  Empty outside a program (single-file

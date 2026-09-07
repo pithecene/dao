@@ -278,7 +278,8 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   // module is not lowered further.
   if (hir_result.program == nullptr || has_error_severity(hir_result.diagnostics)) {
     if (!has_error_severity(hir_result.diagnostics)) {
-      out.diagnostics.push_back(make_internal_error("HIR lowering failed without a diagnostic"));
+      out.diagnostics.push_back(
+          make_unlocated_diagnostic("HIR lowering failed without a diagnostic"));
     }
     return out.reply();
   }
@@ -293,7 +294,8 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   collect_diagnostics(out.diagnostics, prog, mir_result.diagnostics);
   if (mir_result.module == nullptr || has_error_severity(mir_result.diagnostics)) {
     if (!has_error_severity(mir_result.diagnostics)) {
-      out.diagnostics.push_back(make_internal_error("MIR lowering failed without a diagnostic"));
+      out.diagnostics.push_back(
+          make_unlocated_diagnostic("MIR lowering failed without a diagnostic"));
     }
     return out.reply();
   }
