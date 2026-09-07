@@ -55,8 +55,6 @@ void register_modules(Program& program) {
       continue;
     }
     auto module = std::make_unique<ModuleInfo>(ModuleInfo{
-        .module_id = static_cast<uint32_t>(program.modules.size()),
-        .segments = node->module_decl->path.segments,
         .display = display,
         .file = file.get(),
         .is_prelude = file->is_prelude,
@@ -243,12 +241,34 @@ void report_cycles(Program& program, ModuleSet remaining) {
 // Entry (§7.7)
 // ---------------------------------------------------------------------------
 
+/// The entry module's `fn main` is the program entry
+/// (CONTRACT_MODULE_SYSTEM.md §8.5), so a module selected as the entry —
+/// by being the root file or by name — must declare one.  Selecting it
+/// and saying nothing sends a program with no entry point to the linker,
+/// which is the failure the missing-entry diagnostic exists to prevent.
+void require_main(Program& program,
+                  const GraphInputs& inputs,
+                  ModuleInfo* entry,
+                  const std::string& how) {
+  if (entry == nullptr || entry->declares_main) {
+    return;
+  }
+  const std::string message =
+      "entry module '" + entry->display + "' (" + how + ") declares no 'fn main'";
+  if (inputs.entry_policy == EntryPolicy::Required) {
+    program.diagnostics.push_back(Diagnostic::error(Span{}, message));
+  } else if (inputs.entry_policy == EntryPolicy::Advisory) {
+    program.diagnostics.push_back(Diagnostic::warning(Span{}, message));
+  }
+}
+
 void select_entry(Program& program, const GraphInputs& inputs) {
   if (!inputs.root_display.empty()) {
     auto root = std::ranges::find_if(program.files, [&](const auto& file) {
       return file->display_path == inputs.root_display;
     });
     program.entry = root == program.files.end() ? nullptr : (*root)->module;
+    require_main(program, inputs, program.entry, "the root file");
     return;
   }
   if (inputs.entry) {
@@ -257,6 +277,7 @@ void select_entry(Program& program, const GraphInputs& inputs) {
       program.diagnostics.push_back(
           Diagnostic::error(Span{}, "entry module '" + *inputs.entry + "' is not in the program"));
     }
+    require_main(program, inputs, program.entry, "--entry");
     return;
   }
   std::vector<ModuleInfo*> candidates;
