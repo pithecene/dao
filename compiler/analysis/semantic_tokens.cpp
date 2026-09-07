@@ -383,11 +383,11 @@ private:
     }
     visit_methods(st.methods);
     for (const auto& conformance : st.conformances) {
-      classify(conformance.concept_span, "use.type");
+      classify(conformance.target.concept_span, "use.type");
       visit_methods(conformance.methods);
     }
     for (const auto& denial : st.denials) {
-      classify(denial.concept_span, "use.type");
+      classify(denial.target.concept_span, "use.type");
     }
   }
 
@@ -427,8 +427,8 @@ private:
     if (extend.target_type != nullptr) {
       visit_type(*extend.target_type);
     }
-    if (!extend.concept_name.empty()) {
-      classify(extend.concept_span, "use.type");
+    if (!extend.target.concept_name.empty()) {
+      classify(extend.target.concept_span, "use.type");
     }
     visit_methods(extend.methods);
   }

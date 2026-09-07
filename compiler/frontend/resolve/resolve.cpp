@@ -698,7 +698,7 @@ private:
 
     // Resolve conformance blocks — concept name + method signatures.
     for (const auto& conf : st.conformances) {
-      resolve_conformance_target(conf, parent);
+      resolve_conformance_target(conf.target, parent);
       for (const auto* method : conf.methods) {
         resolve_function(*method, struct_scope);
       }
@@ -706,7 +706,7 @@ private:
 
     // Resolve deny specs — concept name lookup only.
     for (const auto& deny : st.denials) {
-      resolve_conformance_target(deny, parent);
+      resolve_conformance_target(deny.target, parent);
     }
   }
 
@@ -714,7 +714,7 @@ private:
   /// its own segment, so the checker compares concepts by identity.
   /// `b::Concept` reaches the binding's module exports; an unqualified
   /// name is looked up in scope (CONTRACT_MODULE_SYSTEM.md §6).
-  template <typename Target> void resolve_conformance_target(const Target& target, Scope* scope) {
+  void resolve_conformance_target(const ConformanceTarget& target, Scope* scope) {
     if (target.module_binding.empty()) {
       if (auto* sym = scope->lookup(target.concept_name)) {
         uses_[target.concept_span.offset] = sym;
@@ -772,7 +772,7 @@ private:
       resolve_type(*ext.target_type, parent);
     }
 
-    resolve_conformance_target(ext, parent);
+    resolve_conformance_target(ext.target, parent);
 
     // Extract target type name for method symbol mangling.
     // Must include type arguments to match print_type() output used

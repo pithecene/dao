@@ -588,21 +588,14 @@ private:
     auto target = parse_conformance_target();
     consume(TokenKind::Colon);
     auto methods = parse_method_list();
-    return {.module_binding = target.module_binding,
-            .binding_span = target.binding_span,
-            .concept_name = target.concept_name,
-            .concept_span = target.concept_span,
-            .methods = std::move(methods)};
+    return {.target = target, .methods = std::move(methods)};
   }
 
   auto parse_deny_spec() -> DenySpec {
     advance(); // consume 'deny'
     auto target = parse_conformance_target();
     consume(TokenKind::Newline);
-    return {.module_binding = target.module_binding,
-            .binding_span = target.binding_span,
-            .concept_name = target.concept_name,
-            .concept_span = target.concept_span};
+    return {.target = target};
   }
 
   auto parse_method_list() -> std::vector<Decl*> {
@@ -735,13 +728,9 @@ private:
     consume(TokenKind::Colon);
     auto methods = parse_method_list();
     Span span = span_from(kw.span);
-    return ctx_.alloc<Decl>(span,
-                            ExtendDecl{.target_type = target_type,
-                                       .module_binding = target.module_binding,
-                                       .binding_span = target.binding_span,
-                                       .concept_name = target.concept_name,
-                                       .concept_span = target.concept_span,
-                                       .methods = std::move(methods)});
+    return ctx_.alloc<Decl>(
+        span,
+        ExtendDecl{.target_type = target_type, .target = target, .methods = std::move(methods)});
   }
 
   // -----------------------------------------------------------------------
