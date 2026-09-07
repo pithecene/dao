@@ -141,9 +141,12 @@ void collect_diagnostics(nlohmann::json& out,
 /// warnings that analysis continues past.
 void collect_program_diagnostics(nlohmann::json& out, const PlaygroundProgram& prog);
 
-/// Build a synthetic error diagnostic entry (no location) for when a
-/// phase fails without reporting where.
-auto make_internal_error(const std::string& message) -> nlohmann::json;
+/// A diagnostic entry with no location, for a phase that failed without
+/// reporting where and for program-assembly diagnostics that have
+/// nowhere to point.  The severity is the reported one: an advisory is
+/// serialized as a warning, not silently promoted to an error.
+auto make_unlocated_diagnostic(const std::string& message, Severity severity = Severity::Error)
+    -> nlohmann::json;
 
 } // namespace dao::playground
 

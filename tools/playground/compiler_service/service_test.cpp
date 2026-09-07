@@ -284,6 +284,22 @@ suite<"playground_service"> playground_service_suite = [] {
         << "a document that is not one of the files must be rejected";
   };
 
+  "a document without main is advised, not failed"_test = [] {
+    // EntryPolicy::Advisory: analysis runs to completion and the reply
+    // says why Run will not work, as a warning rather than an error.
+    auto reply = call("analyze", document_request("module t\nfn f(): i32\n  return 1\n"));
+    bool advised = false;
+    for (const auto& diag : reply.body["diagnostics"]) {
+      if (diag["message"].get<std::string>().find("no entry module") != std::string::npos) {
+        advised = true;
+        expect(diag["severity"].get<std::string>() == "warning") << diag.dump();
+      }
+    }
+    expect(advised) << reply.body["diagnostics"].dump();
+    expect(!reply.body["llvm_ir"].get<std::string>().empty())
+        << "an advisory must not stop lowering: " << reply.body["diagnostics"].dump();
+  };
+
   "duplicate file paths are rejected"_test = [] {
     // Two files with one path made `document` ambiguous: the synthetic
     // module header was measured from one copy and positions from the
