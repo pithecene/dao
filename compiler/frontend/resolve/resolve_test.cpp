@@ -89,9 +89,8 @@ auto find_offset(const ResolvedSource& result, const std::string& text, size_t n
   return static_cast<uint32_t>(pos);
 }
 
-
 // ---------------------------------------------------------------------------
-// Multi-module programs (Task 31 D2): files named `stdlib/...` form the
+// Multi-module programs: files named `stdlib/...` form the
 // prelude group; the rest are user modules.
 // ---------------------------------------------------------------------------
 

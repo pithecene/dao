@@ -109,7 +109,10 @@ struct ProgramRequest {
     if (!root.empty() || sources.empty()) {
       return root;
     }
-    return *std::ranges::min_element(sources);
+    // Compared by the file each path names, not by its spelling:
+    // `./b.dao` and `b.dao` are one file and must not choose different
+    // primaries for one set (CONTRACT_MODULE_SYSTEM.md §8.4).
+    return *std::ranges::min_element(sources, {}, canonical_or_self);
   }
 };
 
