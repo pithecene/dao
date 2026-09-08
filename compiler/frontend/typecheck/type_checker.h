@@ -140,6 +140,10 @@ private:
   struct MethodEntry {
     const Type* fn_type;     // method function type (self removed)
     const Decl* method_decl; // the FunctionDecl node for HIR resolution
+    // Declared by the type itself (a class method or conformance-block
+    // method), as opposed to introduced by an `extend`.  An inherent
+    // method is innermost: no extension shadows it.
+    bool inherent = false;
   };
 
   struct MethodKey {

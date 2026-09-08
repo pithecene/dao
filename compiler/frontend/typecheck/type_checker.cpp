@@ -2571,7 +2571,7 @@ void TypeChecker::build_method_table() {
       MethodKey key{struct_type, method.name};
       if (method_table_.find(key) == method_table_.end()) {
         const auto* fn_type = build_method_fn_type(method);
-        method_table_.insert({key, {fn_type, method_decl}});
+        method_table_.insert({key, {fn_type, method_decl, /*inherent=*/true}});
       }
     }
     // Conformance block methods.
@@ -2581,7 +2581,7 @@ void TypeChecker::build_method_table() {
         MethodKey key{struct_type, method.name};
         if (method_table_.find(key) == method_table_.end()) {
           const auto* fn_type = build_method_fn_type(method);
-          method_table_.insert({key, {fn_type, method_decl}});
+          method_table_.insert({key, {fn_type, method_decl, /*inherent=*/true}});
         }
       }
     }
@@ -2664,9 +2664,19 @@ auto TypeChecker::lookup_method(const Type* obj_type,
   // being checked answers first, then what every module sees: an
   // `extend` reaches only its own module, the prelude's reaches all
   // (CONTRACT_MODULE_SYSTEM.md §5, §7.2).
-  auto it = method_table_.find(MethodKey{obj_type, name, current_module_});
-  if (it == method_table_.end()) {
-    it = method_table_.find(MethodKey{obj_type, name, nullptr});
+  // Innermost-first: the type's own method, then the current module's
+  // `extend`, then the prelude's.  The owner-null slot holds either an
+  // inherent method or a prelude extension; only the former outranks
+  // the module's own extension.
+  auto shared = method_table_.find(MethodKey{obj_type, name, nullptr});
+  auto it = method_table_.end();
+  if (shared != method_table_.end() && shared->second.inherent) {
+    it = shared;
+  } else {
+    it = method_table_.find(MethodKey{obj_type, name, current_module_});
+    if (it == method_table_.end()) {
+      it = shared;
+    }
   }
   if (it != method_table_.end()) {
     if (resolved_decl != nullptr) {
