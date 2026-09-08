@@ -300,6 +300,37 @@ suite<"playground_service"> playground_service_suite = [] {
         << "a document that is not one of the files must be rejected";
   };
 
+  "diagnostics from different phases come back in file order"_test = [] {
+    // Assembly and resolution are different phases, and the phases run
+    // in dependency order, not file order.  `z.dao` cannot be parsed and
+    // `a.dao` names something that does not exist: the parse error is
+    // known first, the unknown name only once the resolver runs, and
+    // appending each phase as it finishes would put `z.dao` ahead of
+    // `a.dao`.  One stream, in program order (§8.4), regardless of which
+    // phase said what.
+    auto program = json{
+        {"files",
+         json::array(
+             {{{"path", "z.dao"}, {"source", "module z\n\nfn also(: i32\n  return 2\n"}},
+              {{"path", kTestDocument}, {"source", "module app\n\nfn main(): i32\n  return 0\n"}},
+              {{"path", "a.dao"}, {"source", "module a\n\nfn f(): i32 -> missing\n"}}})},
+        {"document", kTestDocument}};
+    auto reported = call("analyze", program).body["diagnostics"];
+    std::string said = reported.dump();
+    std::vector<std::string> positioned;
+    for (const auto& diag : reported) {
+      auto file = diag["file"].get<std::string>();
+      if (!file.empty()) {
+        positioned.push_back(file);
+      }
+    }
+    expect(positioned.size() >= 2) << "both phases must report: " << said;
+    expect(std::ranges::is_sorted(positioned)) << "out of file order across phases: " << said;
+    expect(positioned.front() == "a.dao")
+        << "the resolver's error in a.dao must come first: " << said;
+    expect(said.find("missing") != std::string::npos) << said;
+  };
+
   "a graph error does not hide the parse errors around it"_test = [] {
     // Assembly, lex, and parse are one ordered stream (§8.4).  Returning
     // on the graph error would report the cycle and nothing else;
