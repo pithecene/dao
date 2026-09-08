@@ -1,4 +1,5 @@
 #include "analysis/completion.h"
+#include "frontend/module/program.h"
 
 #include "frontend/resolve/symbol.h"
 #include "frontend/types/type_printer.h"

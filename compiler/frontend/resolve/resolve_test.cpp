@@ -437,6 +437,16 @@ suite<"resolve_modules"> resolve_modules = [] {
     expect(bound_own_type) << "the module's own Box was not what resolved";
   };
 
+  "a type path to a missing export is diagnosed"_test = [] {
+    auto resolved = resolve_program({
+        {"lib.dao", "module lib\nclass Real:\n    x: i32\n"},
+        {"main.dao", "module main\nimport lib\n\nfn f(x: lib::Missing): i32 -> 0\n"},
+    });
+    auto said = messages_of(resolved);
+    expect(said.size() == 1_u && said[0] == "module 'lib' has no export 'Missing'")
+        << (said.empty() ? "nothing said" : said[0]);
+  };
+
   "modules_own_their_scopes_and_symbols"_test = [] {
     auto resolved = resolve_program({
         {"main.dao",
