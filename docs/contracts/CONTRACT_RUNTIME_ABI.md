@@ -19,7 +19,6 @@ user-written host-language glue.
 
 Out of scope:
 
-- arena/allocator-level resource-domain memory semantics
 - parallel/GPU execution runtime
 - scheduler/executor architecture
 - allocator design

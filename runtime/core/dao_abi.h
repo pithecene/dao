@@ -45,7 +45,8 @@ void __dao_io_write_stdout(const struct dao_string *msg);
 // Write a string to stderr followed by a newline.
 void __dao_io_write_stderr(const struct dao_string *msg);
 
-// Read an entire file into a heap-allocated string. Traps on error.
+// Read an entire file into a string owned by the current domain.
+// Traps on error.
 struct dao_string __dao_io_read_file(const struct dao_string *path);
 
 // Write a string to a file. Returns true on success, false on failure.
@@ -189,8 +190,10 @@ void __dao_gen_free(void *ptr);
 // ---------------------------------------------------------------------------
 
 // Concatenate two strings, returning the result by value.
-// The returned ptr points to a freshly malloc-allocated buffer
-// owned by the caller. Not automatically freed in the current runtime.
+// The returned ptr points to a fresh buffer allocated through
+// __dao_mem_alloc: owned by the current domain, reclaimed with it
+// inside a `resource memory` block, process-lifetime in the root
+// domain (as every string-producing hook below).
 struct dao_string __dao_str_concat(const struct dao_string *a,
                                    const struct dao_string *b);
 

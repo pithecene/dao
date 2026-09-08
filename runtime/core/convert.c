@@ -3,11 +3,10 @@
 // Implements: scalar-to-string, numeric type conversions
 // Authority:  docs/contracts/CONTRACT_RUNTIME_ABI.md
 //
-// String conversion results are heap-allocated via malloc.  The caller
-// owns the memory; in the current runtime there is no automatic
-// deallocation — these allocations leak until process exit.  Future
-// arena/GC integration will reclaim them.  Matches the convention used
-// by __dao_str_concat in string.c.
+// String conversion results are allocated through __dao_mem_alloc and
+// so belong to the current domain: reclaimed with the block inside
+// `resource memory`, process-lifetime in the root domain.  Matches the
+// convention used by __dao_str_concat in string.c.
 //
 // Earlier versions returned pointers to thread-local static buffers,
 // which silently corrupted any data structure (e.g. HashMap keys) that
