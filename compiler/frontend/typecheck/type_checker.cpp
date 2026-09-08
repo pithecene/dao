@@ -705,7 +705,21 @@ auto TypeChecker::type_conforms_to(const Type* type, const Decl* concept_decl) -
       }
       const auto& ext = decl->as<ExtendDecl>();
       const auto* target = resolve_type_node(ext.target_type);
-      if (target == type && ext.concept_name == cpt_name) {
+      if (target != type) {
+        continue;
+      }
+      // The block names a concept; which one is the resolver's answer,
+      // not the spelling's.  A module may shadow the prelude's `Mark`
+      // with its own, and an `extend i32 as Mark` in the prelude confers
+      // the prelude's, never the module's.
+      auto bound = resolve_.uses.find(ext.concept_span.offset);
+      if (bound != resolve_.uses.end()) {
+        if (bound->second->decl_as_decl() == concept_decl) {
+          return true;
+        }
+        continue;
+      }
+      if (ext.concept_name == cpt_name) {
         return true;
       }
     }

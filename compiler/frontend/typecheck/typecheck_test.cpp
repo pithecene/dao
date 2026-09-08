@@ -1824,6 +1824,23 @@ suite<"module_extend_scoping"> module_extend_scoping = [] {
   // conform, and whether a field type conforms is asked from the
   // class's own module, not from the program as a whole.
 
+  "a shadowed concept does not inherit the prelude concept's conformances"_test = [] {
+    // The prelude's `Mark` and the module's `Mark` are two concepts.
+    // `extend i32 as Mark` in the prelude confers the prelude's; a bound
+    // on the module's must not be satisfied by it.
+    auto checked = check_program({
+        {"stdlib/core/mark.dao",
+         "module core::mark\nconcept Mark:\n    fn mark(self): i32\n"
+         "extend i32 as Mark:\n    fn mark(self): i32 -> 1\n"},
+        {"app.dao",
+         "module app\nconcept Mark:\n    fn shout(self): string\n"
+         "fn accept<T: Mark>(x: T): i32 -> 0\n"
+         "fn main(): i32 -> accept(1)\n"},
+    });
+    expect(has_error_containing(checked->check_result, "does not satisfy concept"))
+        << "i32 satisfied the module's Mark through the prelude's extend";
+  };
+
   "a sibling module's extend cannot make a class derive"_test = [] {
     auto checked = check_program({{"ext.dao", kShoutingModule}, {"app.dao", kBoxModule}});
     expect(has_error_containing(checked->check_result, "no field or method 'shout' on type 'Box'"))
