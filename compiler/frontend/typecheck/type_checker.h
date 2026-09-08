@@ -204,6 +204,9 @@ private:
     // the prelude, everywhere (CONTRACT_MODULE_SYSTEM.md §5).  A class's
     // own methods travel with the type and leave this null.
     const ModuleInfo* extend_module = nullptr;
+    // Declared by the type itself (a class or conformance-block method),
+    // not introduced by an `extend`: innermost, shadowed by nothing.
+    bool inherent = false;
   };
 
   struct MethodKey {
@@ -243,19 +246,24 @@ private:
   /// prelude extension shadow the module's own.
   [[nodiscard]] auto visible_entry(const std::vector<MethodEntry>& entries) const
       -> const MethodEntry* {
-    const MethodEntry* fallback = nullptr;
+    // Innermost-first (§7.4): the type's own method, then the current
+    // module's `extend`, then any visible extension (the prelude's).
     for (const auto& entry : entries) {
-      if (!extend_is_visible(entry.extend_module)) {
-        continue;
-      }
-      if (entry.extend_module == nullptr || entry.extend_module == current_module_) {
+      if (entry.inherent) {
         return &entry;
       }
-      if (fallback == nullptr) {
-        fallback = &entry;
+    }
+    for (const auto& entry : entries) {
+      if (entry.extend_module != nullptr && entry.extend_module == current_module_) {
+        return &entry;
       }
     }
-    return fallback;
+    for (const auto& entry : entries) {
+      if (extend_is_visible(entry.extend_module)) {
+        return &entry;
+      }
+    }
+    return nullptr;
   }
 
   /// Record a method unless one with the same scope is already there

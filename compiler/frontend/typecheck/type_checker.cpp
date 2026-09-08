@@ -2796,14 +2796,16 @@ void TypeChecker::build_method_table() {
     for (const auto* method_decl : cls.methods) {
       const auto& method = method_decl->as<FunctionDecl>();
       const auto* fn_type = build_method_fn_type(method);
-      add_method(MethodKey{struct_type, method.name}, {fn_type, method_decl});
+      add_method(MethodKey{struct_type, method.name},
+                 {fn_type, method_decl, nullptr, /*inherent=*/true});
     }
     // Conformance block methods.
     for (const auto& conf : cls.conformances) {
       for (const auto* method_decl : conf.methods) {
         const auto& method = method_decl->as<FunctionDecl>();
         const auto* fn_type = build_method_fn_type(method);
-        add_method(MethodKey{struct_type, method.name}, {fn_type, method_decl});
+        add_method(MethodKey{struct_type, method.name},
+                   {fn_type, method_decl, nullptr, /*inherent=*/true});
       }
     }
   }

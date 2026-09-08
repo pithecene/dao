@@ -2622,7 +2622,7 @@ suite<"module_extend_scoping"> module_extend_scoping = [] {
     // The prelude's Box has `pick(): i32`; the module extends Box with a
     // `pick(): string` of its own concept.  Innermost is the type's own
     // method, so `b.pick()` is the i32 one.
-    auto checked = check_program({
+    auto checked = check_modules({
         {"stdlib/core/box.dao",
          "module core::box\nclass Box:\n    n: i32\n    fn pick(self): i32 -> self.n\n"},
         {"app.dao",
