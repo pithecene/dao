@@ -447,6 +447,25 @@ suite<"resolve_modules"> resolve_modules = [] {
         << (said.empty() ? "nothing said" : said[0]);
   };
 
+  "a qualified path with spaces around :: binds its segments where they are"_test = [] {
+    // The parser accepts `lib :: helper`; the export is recorded at the
+    // `helper` token, not two bytes past `lib`, so tooling finds it.
+    auto resolved = resolve_program({
+        {"lib.dao", "module lib\nfn helper(): i32 -> 1\n"},
+        {"main.dao", "module main\nimport lib\nfn f(): i32 -> lib :: helper()\n"},
+    });
+    auto said = messages_of(resolved);
+    expect(said.empty()) << (said.empty() ? "" : said.front());
+    bool at_token = false;
+    for (const auto& [offset, sym] : resolved.result.uses) {
+      if (sym != nullptr && sym->name == "helper") {
+        at_token =
+            resolved.program.source_map.text(Span{.offset = offset, .length = 6}) == "helper";
+      }
+    }
+    expect(at_token) << "the export was recorded somewhere other than its token";
+  };
+
   "modules_own_their_scopes_and_symbols"_test = [] {
     auto resolved = resolve_program({
         {"main.dao",

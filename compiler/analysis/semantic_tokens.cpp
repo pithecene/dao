@@ -266,6 +266,13 @@ private:
   static auto segment_spans(const QualifiedPath& path)
       -> std::vector<std::pair<std::string_view, Span>> {
     std::vector<std::pair<std::string_view, Span>> result;
+    if (path.segment_spans.size() == path.segments.size()) {
+      // As the tokens sat in the source: `lib :: x` is legal.
+      for (size_t i = 0; i < path.segments.size(); ++i) {
+        result.emplace_back(path.segments[i], path.segment_spans[i]);
+      }
+      return result;
+    }
     uint32_t offset = path.span.offset;
     for (const auto& seg : path.segments) {
       auto len = static_cast<uint32_t>(seg.size());
