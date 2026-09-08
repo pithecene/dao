@@ -16,12 +16,13 @@
 #include "frontend/resolve/resolve.h"
 #include "ir/mir/mir.h"
 
+#include <algorithm>
 #include <llvm/IR/Constants.h>
-#include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Verifier.h>
@@ -50,6 +51,7 @@ auto LlvmBackend::lower(const MirModule& mir_module,
   module_ = std::make_unique<llvm::Module>("dao_module", ctx_);
   entry_ = entry;
   diagnostics_.clear();
+  extern_signatures_.clear(); // per run: one program's externs do not constrain the next
 
   // Set the target triple and data layout early so that ABI-sensitive
   // lowering (struct coercion, alignment) sees the correct target info.
@@ -80,6 +82,14 @@ auto LlvmBackend::lower(const MirModule& mir_module,
   hooks.declare_all();
 
   declare_functions(mir_module, source_map);
+  // A declaration error leaves a name bound to the wrong signature; a
+  // body lowered against it would trip LLVM's own assertions rather
+  // than reach the diagnostic already recorded.
+  if (std::ranges::any_of(
+          diagnostics_, [](const Diagnostic& diag) { return diag.severity == Severity::Error; })) {
+    module_.reset();
+    return {.module = nullptr, .diagnostics = std::move(diagnostics_)};
+  }
   lower_bodies(mir_module, source_map);
 
   // Kill the module if any hard errors remain.
@@ -229,8 +239,18 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
       }
     }
     if (module_->getFunction(name) != nullptr) {
-      // Already declared: later lookups go through
-      // module_->getFunction(name) and find the one declaration.
+      // Already declared.  Two externs naming one C symbol coalesce
+      // (their signatures were compared above); anything else -- a Dao
+      // definition meeting an extern of the same name, in either order
+      // -- is a collision, and lowering the body into the other's
+      // declaration would emit a function whose body disagrees with
+      // its type.
+      const bool both_extern = mir_fn->is_extern && extern_signatures_.contains(name);
+      if (!both_extern) {
+        emit_diagnostic(mir_fn->span,
+                        "'" + name + "' is both defined in Dao and declared extern; " +
+                            "a C symbol and a Dao function cannot share a name");
+      }
       continue;
     }
     auto* llvm_fn =
