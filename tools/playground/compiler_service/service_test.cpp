@@ -29,6 +29,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 using namespace boost::ut;
@@ -217,6 +218,21 @@ auto reports(const json& reply, const std::string& needle) -> bool {
     }
   }
   return false;
+}
+
+/// The located diagnostics of a reply as (file, file-local offset)
+/// pairs, in the order the reply lists them.  Entries with no position
+/// carry an empty file and are skipped: only located ones have an order
+/// to check.
+auto located_positions(const json& reply) -> std::vector<std::pair<std::string, uint32_t>> {
+  std::vector<std::pair<std::string, uint32_t>> positions;
+  for (const auto& diag : reply["diagnostics"]) {
+    auto file = diag["file"].get<std::string>();
+    if (!file.empty()) {
+      positions.emplace_back(std::move(file), diag["offset"].get<uint32_t>());
+    }
+  }
+  return positions;
 }
 
 /// Offsets of the first `count` semantic tokens whose kind starts with `prefix`.
@@ -547,6 +563,43 @@ suite<"playground_service"> playground_service_suite = [] {
           << "lowered past a lex/parse error in lib.dao: " << reply.body["diagnostics"].dump();
       expect(call("run", unlexable).body["exit_code"].get<int>() == -1)
           << "ran past a lex/parse error in lib.dao";
+    }
+  };
+
+  "assembly_diagnostics_come_back_in_program_order"_test = [] {
+    // The document imports a module whose file does not lex, so that
+    // file yields no module and the graph reports the import missing
+    // while the file itself reports where it broke.  Both are root
+    // causes and both must survive, in the program's canonical order
+    // (Task 31 §8.4: file id, then offset) — the document sorts first,
+    // so its import error leads the other file's.
+    json request = {{"files",
+                     json::array({{{"path", "a_main.dao"},
+                                   {"source",
+                                    "module app\nimport lib\n\nfn main(): i32\n"
+                                    "  return lib::helper()\n"}},
+                                  {{"path", "z_lib.dao"},
+                                   {"source", "module lib\n\nfn helper(): i32\n  return @\n"}}})},
+                    {"document", "a_main.dao"}};
+
+    for (const char* route : {"analyze", "run"}) {
+      auto reply = call(route, request);
+      expect(reports(reply.body, "imported module 'lib' not found"))
+          << route << " lost the import error: " << reply.body["diagnostics"].dump();
+      auto positions = located_positions(reply.body);
+      expect(positions.size() >= 2_ul)
+          << route << " lost a root cause: " << reply.body["diagnostics"].dump();
+      expect(std::ranges::is_sorted(positions))
+          << route
+          << " reported diagnostics out of file/offset order: " << reply.body["diagnostics"].dump();
+      bool names_document = false;
+      bool names_other = false;
+      for (const auto& [file, offset] : positions) {
+        names_document = names_document || file == "a_main.dao";
+        names_other = names_other || file == "z_lib.dao";
+      }
+      expect(names_document && names_other)
+          << route << " dropped a file's diagnostics: " << reply.body["diagnostics"].dump();
     }
   };
 

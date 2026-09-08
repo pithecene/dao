@@ -141,6 +141,15 @@ void collect_diagnostics(nlohmann::json& out,
 /// warnings that analysis continues past.
 void collect_program_diagnostics(nlohmann::json& out, const PlaygroundProgram& prog);
 
+/// Everything a failed assembly has to say: every file's lex and parse
+/// diagnostics — a module reported "not found" is usually a file that
+/// did not parse, and that parse error is the one worth showing —
+/// merged with the assembly diagnostics.  Located entries come out in
+/// the program's canonical order (Task 31 §8.4: file id, then offset,
+/// which is exactly ascending program offset), so the root cause is not
+/// buried behind a later file's; the positionless ones follow.
+void collect_assembly_diagnostics(nlohmann::json& out, const PlaygroundProgram& prog);
+
 /// A diagnostic entry with no location, for a phase that failed without
 /// reporting where and for program-assembly diagnostics that have
 /// nowhere to point.  The severity is the reported one: an advisory is

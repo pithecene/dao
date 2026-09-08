@@ -172,6 +172,14 @@ void collect_program_diagnostics(nlohmann::json& out, const PlaygroundProgram& p
   collect_diagnostics(out, prog, located);
 }
 
+void collect_assembly_diagnostics(nlohmann::json& out, const PlaygroundProgram& prog) {
+  for (const auto& file : prog.program.files) {
+    collect_diagnostics(out, prog, file->lex.diagnostics);
+    collect_diagnostics(out, prog, file->parse.diagnostics);
+  }
+  collect_program_diagnostics(out, prog);
+}
+
 void collect_diagnostics(nlohmann::json& out,
                          const PlaygroundProgram& prog,
                          const std::vector<Diagnostic>& diags) {

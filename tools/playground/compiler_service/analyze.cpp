@@ -178,14 +178,7 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   // is why Run will not work.
   auto prog = build_playground_program(ctx.repo_root, std::move(*inputs), EntryPolicy::Advisory);
   if (prog.user == nullptr || has_error_severity(prog.program.diagnostics)) {
-    // Report what each file said first: a module that is "not found" is
-    // usually a file that did not parse, and that parse error is the
-    // diagnostic worth showing.
-    for (const auto& file : prog.program.files) {
-      collect_diagnostics(out.diagnostics, prog, file->lex.diagnostics);
-      collect_diagnostics(out.diagnostics, prog, file->parse.diagnostics);
-    }
-    collect_program_diagnostics(out.diagnostics, prog);
+    collect_assembly_diagnostics(out.diagnostics, prog);
     return out.reply();
   }
   // Assembly succeeded but may still have something to say (no entry
