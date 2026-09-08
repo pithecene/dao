@@ -297,6 +297,9 @@ private:
     TypeStruct* shell;
   };
   std::vector<PendingClass> pending_classes_;
+  // Set once register_struct_fields has run: aliases of generic
+  // instantiations wait for it (see aliases_generic_shell).
+  bool fields_registered_ = false;
 
   void build_method_table();
   auto build_method_fn_type(const FunctionDecl& method) -> const Type*;
@@ -329,6 +332,9 @@ private:
   /// Whether a type node is a path through an import binding, whose
   /// failures the resolver diagnoses (so the checker must not restate).
   [[nodiscard]] auto resolver_owns_path(const TypeNode* node) const -> bool;
+  /// Whether a type node names a generic instantiation of a class whose
+  /// fields are not registered yet (an alias of it must wait).
+  [[nodiscard]] auto aliases_generic_shell(const TypeNode* node) const -> bool;
   void register_struct_fields();
   void register_enum_variants();
   void register_signatures();

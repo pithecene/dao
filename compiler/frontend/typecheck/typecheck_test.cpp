@@ -695,6 +695,43 @@ suite<"typecheck_modules"> typecheck_modules = [] {
         << "the checker restated the resolver: " << all_messages(checked);
   };
 
+  "an alias of a generic instantiation carries the instantiation's fields"_test = [] {
+    // Aliases used to resolve before class fields were registered, so
+    // `IntBox` cached an empty `Box<i32>` shell that accepted anything.
+    auto checked = check_program({
+        {"lib.dao", "module lib\nclass Box<T>:\n    v: T\n"},
+        {"main.dao",
+         "module app\nimport lib\ntype IntBox = lib::Box<i32>\n"
+         "fn take(b: IntBox): i32 -> b.v\n"
+         "fn ok(): i32 -> take(lib::Box(1))\n"
+         "fn main(): i32 -> take(lib::Box(\"wrong\"))\n"},
+    });
+    expect(has_error_containing(checked.result, "not assignable to parameter type"))
+        << "Box<string> was accepted where IntBox was declared: " << all_messages(checked);
+  };
+
+  "a concept is not a type outside a bound"_test = [] {
+    auto checked = check_program({
+        {"traits.dao", "module app::traits\nconcept Reveal:\n    fn reveal(self): i32\n"},
+        {"main.dao",
+         "module app::main\nimport app::traits\nfn f(x: traits::Reveal): i32 -> 0\n"
+         "fn main(): i32 -> 0\n"},
+    });
+    expect(has_error_containing(checked.result, "is a concept, not a type"))
+        << all_messages(checked);
+  };
+
+  "a resolver-rejected path nested in a type is diagnosed once"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::math\ntype Bad = *math::Missing\n"
+         "fn g(p: math::Point::Extra): i32 -> 0\nfn main(): i32 -> 0\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(checked.result.diagnostics.empty())
+        << "the checker restated the resolver: " << all_messages(checked);
+  };
+
   "unknown_export_in_type_position_is_a_resolver_error"_test = [] {
     auto checked = check_program({
         {"main.dao",
