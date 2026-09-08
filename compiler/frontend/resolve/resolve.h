@@ -27,6 +27,14 @@ struct ResolveResult {
 // §3, §4, §6).  Records each module's scope on its ModuleInfo.  The
 // Program must outlive the result: symbol names are string_views into
 // its source buffers.
+/// The generic intrinsic family: declared by the prelude
+/// (`stdlib/core/builtins.dao`) and answered by the backend with inline
+/// IR rather than a call.  Recognition is by ownership — a prelude
+/// module may declare these, no other module may — so this says only
+/// which names belong to the family, mangled specializations
+/// (`size_of$i32`) included.
+auto is_prelude_intrinsic(std::string_view name) -> bool;
+
 auto resolve(Program& program) -> ResolveResult;
 
 // Resolution without a program: every file is its own module and the

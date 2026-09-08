@@ -64,6 +64,19 @@ constexpr std::string_view kBuiltinFunctions[] = {
     "ptr_cast",
 };
 
+// The generic intrinsic family.  `null_ptr` and `ptr_cast` are outer
+// builtins as well; the rest are prelude declarations whose bodies the
+// backend replaces.  One list, because the resolver decides who may
+// declare them and the backend decides how they are called, and the
+// two must not drift.
+constexpr std::string_view kPreludeIntrinsics[] = {
+    "size_of",
+    "align_of",
+    "null_ptr",
+    "ptr_offset",
+    "ptr_cast",
+};
+
 // ---------------------------------------------------------------------------
 // Resolver — two-pass name resolution over the AST
 // ---------------------------------------------------------------------------
@@ -263,7 +276,14 @@ private:
     }
     Span binding_span{.offset = offset, .length = binding_len};
 
+    // A prelude module's own declarations go to the shared prelude
+    // scope, not to its file scope, so checking the file scope alone
+    // let an import silently shadow a declaration of the same module.
+    // Its export table is the one place holding just this module's
+    // names — another prelude module declaring the name is not a
+    // collision here.
     if (current_->scope->lookup_local(binding_name) != nullptr ||
+        current_->exports->lookup_local(binding_name) != nullptr ||
         builtins_->lookup_local(binding_name) != nullptr) {
       diagnostics_.push_back(Diagnostic::error(
           binding_span,
@@ -335,6 +355,16 @@ private:
     // checks only its own scope, so the outer builtins scope is checked
     // here explicitly.
     if (builtins_->lookup_local(name) != nullptr) {
+      diagnostics_.push_back(Diagnostic::error(
+          name_span, "duplicate top-level declaration '" + std::string(name) + "'"));
+      return;
+    }
+
+    // The intrinsic family is the prelude's to declare and the
+    // backend's to answer with inline IR, so a user module cannot
+    // introduce one — shadowing a prelude name is allowed (§7.6), but
+    // not when the name's meaning is the compiler's.
+    if (!current_->is_prelude && is_prelude_intrinsic(name)) {
       diagnostics_.push_back(Diagnostic::error(
           name_span, "duplicate top-level declaration '" + std::string(name) + "'"));
       return;
@@ -1311,6 +1341,13 @@ private:
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+
+auto is_prelude_intrinsic(std::string_view name) -> bool {
+  return std::ranges::any_of(kPreludeIntrinsics, [name](std::string_view base) {
+    return name == base ||
+           (name.starts_with(base) && name.size() > base.size() && name[base.size()] == '$');
+  });
+}
 
 auto resolve(std::span<const FileNode* const> files, const SourceMap* source_map)
     -> ResolveResult {
