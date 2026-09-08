@@ -1722,6 +1722,16 @@ fn closure_report_diags(name: string, stage: string, diags: Vector<Diagnostic>, 
     eprint("probe: " + name + " diag " + stage + ": " + diags.get(i).message)
     i = i + to_i64(1)
 
+// The same, for the diagnostics the program pipeline attaches to files,
+// from index `from` (a later pass appends to an earlier pass's list).
+fn closure_report_file_diags(name: string, stage: string, diags: Vector<FileDiagnostic>, from: i64, limit: i64): void
+  let i: i64 = from
+  while i < diags.length():
+    if i - from >= limit:
+      return
+    eprint("probe: " + name + " diag " + stage + ": " + diags.get(i).diag.message)
+    i = i + to_i64(1)
+
 fn closure_probe_program(name: string, path: string): string
   if file_exists(path) == false:
     return name + "\tmissing=" + path + "\n"
@@ -1743,6 +1753,33 @@ fn closure_probe_program(name: string, path: string): string
   if parse_n > to_i64(0):
     if first == "":
       first = "parse: " + parsed.diags.get(to_i64(0)).message
+      eprint("probe: " + name + " first=" + first)
+  // Resolution and type checking run inside lower_to_hir, but HirResult
+  // carries only HIR's own diagnostics; the passes are run here so each
+  // has its own count and its own column.
+  eprint("probe: " + name + " stage=resolve")
+  let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  inputs = inputs.push(SourceInput(path, wrap_test_module(src)))
+  let pg: ProgramGraph = build_program(inputs)
+  let p: Program = program_from_graph(pg)
+  p = program_run_resolve(p)
+  let resolve_n: i64 = p.resolve.diags.length()
+  eprint("probe: " + name + " resolve=" + i64_to_string(resolve_n))
+  closure_report_file_diags(name, "resolve", p.resolve.diags, to_i64(0), to_i64(50))
+  if resolve_n > to_i64(0):
+    if first == "":
+      first = "resolve: " + p.resolve.diags.get(to_i64(0)).diag.message
+      eprint("probe: " + name + " first=" + first)
+  eprint("probe: " + name + " stage=typecheck")
+  p = program_run_typecheck(p)
+  // program_run_typecheck starts its list from the resolver's, so the
+  // type checker's own diagnostics are the tail.
+  let typecheck_n: i64 = p.diags.length() - resolve_n
+  eprint("probe: " + name + " typecheck=" + i64_to_string(typecheck_n))
+  closure_report_file_diags(name, "typecheck", p.diags, resolve_n, to_i64(50))
+  if typecheck_n > to_i64(0):
+    if first == "":
+      first = "typecheck: " + p.diags.get(resolve_n).diag.message
       eprint("probe: " + name + " first=" + first)
   eprint("probe: " + name + " stage=hir")
   let hir: HirResult = lower_to_hir(src)
@@ -1770,7 +1807,7 @@ fn closure_probe_program(name: string, path: string): string
   if llvm_n > to_i64(0):
     if first == "":
       first = "llvm: " + ll.diags.get(to_i64(0)).message
-  return name + "\tlex=" + i64_to_string(lex_n) + "\tparse=" + i64_to_string(parse_n) + "\thir=" + i64_to_string(hir_n) + "\tmir=" + i64_to_string(mir_n) + "\tllvm=" + i64_to_string(llvm_n) + "\tfirst=" + first + "\n"
+  return name + "\tlex=" + i64_to_string(lex_n) + "\tparse=" + i64_to_string(parse_n) + "\tresolve=" + i64_to_string(resolve_n) + "\ttypecheck=" + i64_to_string(typecheck_n) + "\thir=" + i64_to_string(hir_n) + "\tmir=" + i64_to_string(mir_n) + "\tllvm=" + i64_to_string(llvm_n) + "\tfirst=" + first + "\n"
 
 fn closure_probe(which: string): void
   let line: string = closure_probe_program(which, "bootstrap/" + which + "/" + which + ".gen.dao")

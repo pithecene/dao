@@ -10,63 +10,42 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 73141 |
-| `CallExpr` | 21950 |
-| `Callee` | 21950 |
-| `FieldExpr` | 20767 |
-| `Args` | 19848 |
-| `BinaryExpr` | 10225 |
-| `LetStatement` | 9905 |
-| `Value` | 7878 |
-| `Target` | 7878 |
-| `Assignment` | 7878 |
-| `IntLiteral` | 7640 |
-| `Condition` | 6412 |
-| `Then` | 5201 |
-| `IfStatement` | 5201 |
-| `ReturnStatement` | 5124 |
-| `StringLiteral` | 4421 |
-| `Param` | 3508 |
-| `Pattern` | 2462 |
-| `Arm` | 2462 |
-| `BoolLiteral` | 2359 |
-| `ReturnType` | 1477 |
-| `FunctionDecl` | 1477 |
-| `Else` | 1265 |
-| `WhileStatement` | 1211 |
+| `Identifier` | 73351 |
+| `CallExpr` | 22024 |
+| `Callee` | 22024 |
+| `FieldExpr` | 20812 |
+| `Args` | 19913 |
+| `BinaryExpr` | 10309 |
+| `LetStatement` | 9923 |
+| `Value` | 7910 |
+| `Target` | 7910 |
+| `Assignment` | 7910 |
+| `IntLiteral` | 7665 |
+| `Condition` | 6429 |
+| `Then` | 5213 |
+| `IfStatement` | 5213 |
+| `ReturnStatement` | 5136 |
+| `StringLiteral` | 4458 |
+| `Param` | 3520 |
+| `Pattern` | 2466 |
+| `Arm` | 2466 |
+| `BoolLiteral` | 2366 |
+| `FunctionDecl` | 1482 |
+| `Else` | 1266 |
+| `WhileStatement` | 1216 |
 | `Variant` | 1155 |
-| `Field` | 1017 |
+| `Field` | 1016 |
 | `UnaryExpr` | 957 |
-| `TypeArgs` | 819 |
-| `Scrutinee` | 539 |
-| `MatchStatement` | 539 |
-| `ExpressionStatement` | 486 |
+| `TypeArgs` | 821 |
+| `Scrutinee` | 542 |
+| `MatchStatement` | 542 |
+| `ExpressionStatement` | 485 |
 | `ClassDecl` | 239 |
-| `SourceInput` | 66 |
 | `BreakStatement` | 64 |
-| `Diagnostic` | 50 |
 | `EnumDecl` | 27 |
-| `FileDiagnostic` | 23 |
-| `Symbol` | 22 |
-| `Scope` | 19 |
-| `ExportTable` | 19 |
-| `Node` | 16 |
-| `Token` | 15 |
 | `EnumClassDecl` | 14 |
-| `DaoType` | 12 |
-| `HirNode` | 11 |
-| `SourceFile` | 8 |
-| `ModuleEntry` | 8 |
 | `Module` | 8 |
 | `File` | 8 |
-| `MirNode` | 2 |
-| `LlInst` | 2 |
-| `LlFunction` | 2 |
-| `LlBlock` | 2 |
-| `LlStructDef` | 1 |
-| `LlParam` | 1 |
-| `LlGlobal` | 1 |
-| `CallArgs` | 1 |
 
 ## 2. Prelude functions the corpus instantiates
 
@@ -76,9 +55,6 @@ bootstrap must compile for itself.
 
 | Function | Instantiations |
 |---|---|
-| `core::builtins::size_of` | 23 |
-| `core::builtins::ptr_offset` | 23 |
-| `core::builtins::align_of` | 23 |
 | `core::vector::Vector.push` | 22 |
 | `core::vector::Vector.new` | 22 |
 | `core::vector::Vector.length` | 22 |
@@ -215,22 +191,21 @@ bootstrap must compile for itself.
 ## 3. The bootstrap pipeline over its own programs
 
 Diagnostics per stage when each program is fed through the bootstrap
-pipeline (`hir` counts resolve, typecheck, and HIR together), and the
-earliest failing stage's first diagnostic.
+pipeline, and the earliest failing stage's first diagnostic.
 
 Each program ran in its own process bounded to 16 GiB of
 virtual memory and 600 s; peak memory is the process's maximum resident set.
 
-| Program | Peak MiB | Seconds | lex | parse | hir | mir | llvm | First blocking diagnostic |
-|---|---|---|---|---|---|---|---|---|
-| lexer | 13711 | 39 | 0 | 46 | 0 | 16 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 12306 | 34 | 0 | 52 | 0 | 19 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 11093 | 31 | 0 | 57 | 0 | 16 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 15413 | 51 | 0 | 132 | 0 | 57 |  | parse: expected expression; then in llvm: panic: allocation failed (size=65536, align=4) |
-| typecheck | 16269 | 54 | 0 | 246 | 0 |  |  | parse: expected expression; then in mir: panic: allocation failed (size=262144, align=8) |
-| hir | 16231 | 53 | 0 | 253 | 0 |  |  | parse: expected expression; then in mir: panic: allocation failed (size=65536, align=4) |
-| mir | 16267 | 54 | 0 | 285 |  |  |  | parse: expected expression; then in hir: panic: allocation failed (size=262144, align=8) |
-| llvm | 20 | 0 |  |  |  |  |  | in lex: process died (status 139; memory bound 16 GiB) |
+| Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
+|---|---|---|---|---|---|---|---|---|---|---|
+| lexer | 15797 | 53 | 0 | 46 | 392 | 427 | 0 | 16 |  | parse: expected expression; then in llvm: panic: allocation failed (size=1179648, align=8) |
+| parser | 14867 | 46 | 0 | 52 | 437 | 347 | 0 | 19 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 13409 | 43 | 0 | 57 | 437 | 386 | 0 | 16 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 15758 | 67 | 0 | 132 | 1065 | 595 | 0 |  |  | parse: expected expression; then in mir: panic: allocation failed (size=2359296, align=8) |
+| typecheck | 16268 | 70 | 0 | 246 | 1896 | 939 |  |  |  | parse: expected expression; then in hir: panic: allocation failed (size=65536, align=4) |
+| hir | 16233 | 68 | 0 | 253 | 2402 | 1150 |  |  |  | parse: expected expression; then in hir: panic: allocation failed (size=262144, align=8) |
+| mir | 16270 | 54 | 0 | 285 | 2750 |  |  |  |  | parse: expected expression; then in typecheck: panic: allocation failed (size=524288, align=8) |
+| llvm | 19 | 1 |  |  |  |  |  |  |  | in lex: process died (status 139; memory bound 16 GiB) |
 
 ### What each stage rejects
 
@@ -242,6 +217,16 @@ named, not inferred.
 
 - `parse` ×45: expected expression
 - `parse` ×1: expected RParen, got Identifier
+- `resolve` ×45: expected expression
+- `resolve` ×1: unknown name 'Vector'
+- `resolve` ×1: unknown name 'substring'
+- `resolve` ×1: unknown name 'new'
+- `resolve` ×1: unknown name 'length'
+- `typecheck` ×30: type mismatch in '+': i64 vs i32
+- `typecheck` ×8: type mismatch: cannot assign i32 to i64
+- `typecheck` ×4: unknown type in annotation
+- `typecheck` ×3: type mismatch in '==': i64 vs i32
+- `typecheck` ×3: type mismatch in assignment: expected bool, got void
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `mir` ×7: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×1: unsupported assignment target
@@ -250,6 +235,13 @@ named, not inferred.
 
 - `parse` ×48: expected expression
 - `parse` ×2: expected RParen, got Identifier
+- `resolve` ×48: expected expression
+- `resolve` ×2: expected RParen, got Identifier
+- `typecheck` ×30: type mismatch in '+': i64 vs i32
+- `typecheck` ×8: type mismatch: cannot assign i32 to i64
+- `typecheck` ×4: unknown type in annotation
+- `typecheck` ×3: type mismatch in '==': i64 vs i32
+- `typecheck` ×3: type mismatch in assignment: expected bool, got void
 - `mir` ×10: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `mir` ×1: unsupported assignment target
@@ -258,6 +250,13 @@ named, not inferred.
 
 - `parse` ×49: expected expression
 - `parse` ×1: expected RParen, got Identifier
+- `resolve` ×49: expected expression
+- `resolve` ×1: expected RParen, got Identifier
+- `typecheck` ×30: type mismatch in '+': i64 vs i32
+- `typecheck` ×8: type mismatch: cannot assign i32 to i64
+- `typecheck` ×4: unknown type in annotation
+- `typecheck` ×3: type mismatch in '==': i64 vs i32
+- `typecheck` ×3: type mismatch in assignment: expected bool, got void
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `mir` ×7: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×1: unsupported assignment target
@@ -266,24 +265,44 @@ named, not inferred.
 
 - `parse` ×47: expected expression
 - `parse` ×3: expected RParen, got Identifier
-- `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
-- `mir` ×9: unsupported assignment target
-- `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
+- `resolve` ×47: expected expression
+- `resolve` ×3: expected RParen, got Identifier
+- `typecheck` ×30: type mismatch in '+': i64 vs i32
+- `typecheck` ×8: type mismatch: cannot assign i32 to i64
+- `typecheck` ×4: unknown type in annotation
+- `typecheck` ×3: type mismatch in '==': i64 vs i32
+- `typecheck` ×3: type mismatch in assignment: expected bool, got void
 
 **typecheck**
 
 - `parse` ×47: expected expression
 - `parse` ×3: expected RParen, got Identifier
+- `resolve` ×47: expected expression
+- `resolve` ×3: expected RParen, got Identifier
+- `typecheck` ×30: type mismatch in '+': i64 vs i32
+- `typecheck` ×8: type mismatch: cannot assign i32 to i64
+- `typecheck` ×4: unknown type in annotation
+- `typecheck` ×3: type mismatch in '==': i64 vs i32
+- `typecheck` ×3: type mismatch in assignment: expected bool, got void
 
 **hir**
 
 - `parse` ×47: expected expression
 - `parse` ×3: expected RParen, got Identifier
+- `resolve` ×47: expected expression
+- `resolve` ×3: expected RParen, got Identifier
+- `typecheck` ×30: type mismatch in '+': i64 vs i32
+- `typecheck` ×8: type mismatch: cannot assign i32 to i64
+- `typecheck` ×4: unknown type in annotation
+- `typecheck` ×3: type mismatch in '==': i64 vs i32
+- `typecheck` ×3: type mismatch in assignment: expected bool, got void
 
 **mir**
 
 - `parse` ×47: expected expression
 - `parse` ×3: expected RParen, got Identifier
+- `resolve` ×47: expected expression
+- `resolve` ×3: expected RParen, got Identifier
 
 ### Parse-stage attribution
 
@@ -306,7 +325,7 @@ Sites per program against the parse column above:
 | typecheck | 124 | 246 |
 | hir | 137 | 253 |
 | mir | 150 | 285 |
-| llvm | 184 | — |
+| llvm | 186 | — |
 
 ## 4. Reading the matrix
 

@@ -33,10 +33,22 @@ PROGRAMS="lexer parser graph resolver typecheck hir mir llvm"
 
 bash bootstrap/assemble.sh > /dev/null || { echo "audit: assemble failed"; exit 1; }
 mkdir -p "$OUT"
+# The probe marker must not outlive this run: left behind, every later
+# bootstrap/llvm/llvm.gen run would probe instead of testing.
+trap 'rm -f "$OUT/.closure_probe"' EXIT
 
-# 1. Construct inventory.
-INVENTORY="$(for p in $PROGRAMS; do "$DAOC" ast "bootstrap/$p/$p.gen.dao" 2>/dev/null; done \
-  | grep -oE '^\s*[A-Z][A-Za-z]+' | sed 's/^\s*//' | sort | uniq -c | sort -rn)"
+# 1. Construct inventory: the labels the host AST printer prints, counted
+#    over every program.  Only the printer's own vocabulary counts, so a
+#    bare type-argument line (`SourceInput`) is not taken for a construct.
+#    A program the host cannot print is an audit failure, not a smaller
+#    inventory.
+LABELS="$(grep -ohE '"[A-Z][A-Za-z]+' compiler/frontend/ast/ast_printer.cpp compiler/frontend/ast/ast.cpp | tr -d '"' | sort -u)"
+: > "$OUT/inventory.ast"
+for p in $PROGRAMS; do
+  "$DAOC" ast "bootstrap/$p/$p.gen.dao" >> "$OUT/inventory.ast" || { echo "audit: daoc ast failed for $p"; exit 1; }
+done
+INVENTORY="$(awk -v labels="$LABELS" 'BEGIN { n = split(labels, a, "\n"); for (i = 1; i <= n; i++) label[a[i]] = 1 }
+  ($1 in label) { print $1 }' "$OUT/inventory.ast" | sort | uniq -c | sort -rn)"
 
 # 2. Prelude instantiations forced by the largest program.  Prelude
 #    functions are told apart by their module-qualified LLVM names
@@ -87,7 +99,7 @@ for p in $PROGRAMS; do
     fi
     # Stage counts and an earlier stage's first diagnostic survive on
     # stderr even when a later stage kills the process.
-    counts="$(grep -oE "^probe: $p (lex|parse|hir|mir|llvm)=[0-9]+" "$OUT/probe-$p.log" | sed "s/^probe: $p //" | tr '\n' '\t')"
+    counts="$(grep -oE "^probe: $p (lex|parse|resolve|typecheck|hir|mir|llvm)=[0-9]+" "$OUT/probe-$p.log" | sed "s/^probe: $p //" | tr '\n' '\t')"
     earlier="$(grep -m1 -oE "^probe: $p first=.*" "$OUT/probe-$p.log" | sed "s/^probe: $p first=//")"
     printf '%s\tpeak_mb=%s\tseconds=%s\t%sfirst=%s\n' "$p" "$peak_mb" "$elapsed" "$counts" "${earlier:+$earlier; then }in ${stage:-?}: $why" >> "$OUT/closure.txt"
   fi
@@ -134,25 +146,25 @@ generic_qualified_sites() {
   echo "## 3. The bootstrap pipeline over its own programs"
   echo
   echo "Diagnostics per stage when each program is fed through the bootstrap"
-  echo "pipeline (\`hir\` counts resolve, typecheck, and HIR together), and the"
-  echo "earliest failing stage's first diagnostic."
+  echo "pipeline, and the earliest failing stage's first diagnostic."
   echo
   echo "Each program ran in its own process bounded to $((LIMIT_KB / 1048576)) GiB of"
   echo "virtual memory and ${LIMIT_S} s; peak memory is the process's maximum resident set."
   echo
-  echo "| Program | Peak MiB | Seconds | lex | parse | hir | mir | llvm | First blocking diagnostic |"
-  echo "|---|---|---|---|---|---|---|---|---|"
+  echo "| Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |"
+  echo "|---|---|---|---|---|---|---|---|---|---|---|"
   awk -F'\t' '{
-    name=$1; lex=""; parse=""; hir=""; mir=""; llvm=""; first=""; peak=""; secs="";
+    name=$1; lex=""; parse=""; resolve=""; typecheck=""; hir=""; mir=""; llvm=""; first=""; peak=""; secs="";
     for (i = 2; i <= NF; i++) {
       split($i, kv, "="); key=kv[1]; val=substr($i, length(key) + 2);
-      if (key == "lex") lex=val; else if (key == "parse") parse=val; else if (key == "hir") hir=val;
+      if (key == "lex") lex=val; else if (key == "parse") parse=val; else if (key == "resolve") resolve=val;
+      else if (key == "typecheck") typecheck=val; else if (key == "hir") hir=val;
       else if (key == "mir") mir=val; else if (key == "llvm") llvm=val; else if (key == "first") first=val;
       else if (key == "peak_mb") peak=val; else if (key == "seconds") secs=val;
       else if (key == "missing") first="not assembled: " val;
     }
     gsub(/\|/, "\\|", first);
-    printf "| %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", name, peak, secs, lex, parse, hir, mir, llvm, (first == "" ? "—" : first);
+    printf "| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", name, peak, secs, lex, parse, resolve, typecheck, hir, mir, llvm, (first == "" ? "—" : first);
   }' "$OUT/closure.txt"
   echo
   echo "### What each stage rejects"
@@ -165,7 +177,7 @@ generic_qualified_sites() {
     if grep -q "^probe: $p diag " "$OUT/probe-$p.log" 2>/dev/null; then
       echo "**$p**"
       echo
-      for stage in lex parse hir mir llvm; do
+      for stage in lex parse resolve typecheck hir mir llvm; do
         grep "^probe: $p diag $stage: " "$OUT/probe-$p.log" | sed "s/^probe: $p diag $stage: //" \
           | sort | uniq -c | sort -rn | head -5 \
           | awk -v stage="$stage" '{ n=$1; $1=""; sub(/^ /, ""); gsub(/\|/, "\\|"); printf "- \`%s\` ×%s: %s\n", stage, n, $0 }'
