@@ -109,7 +109,13 @@ void cmd_tokens(const dao::ProgramRequest& request) {
   // Every user module; prelude tokens are not the user's concern.
   // Collected once: user_files() builds a vector by scanning every file,
   // so asking again per iteration would be quadratic.
-  const auto user_files = program.user_files();
+  auto user_files = program.user_files();
+  if (user_files.empty()) {
+    // The root is itself a prelude file (`daoc tokens stdlib/core/x.dao`):
+    // the program holds it in the prelude group, so there is no user
+    // file -- but the command named it, and it is what gets reported.
+    user_files.push_back(&reported_file(program));
+  }
   for (const auto* user : user_files) {
     if (user_files.size() > 1) {
       std::cout << "== " << user->display_path << "\n";
