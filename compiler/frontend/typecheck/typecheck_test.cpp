@@ -783,6 +783,54 @@ suite<"typecheck_modules"> typecheck_modules = [] {
     expect(said == 1_u) << all_messages(checked);
   };
 
+  "nested instantiated fields must be complete before an alias caches a copy"_test = [] {
+    // Outer's direct field is typed while the instantiated Inner it holds
+    // still has an untyped field; readiness must look all the way down.
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nclass Base<T>:\n    v: T\nclass Inner<T>:\n    dep: IntBase\n    t: T\nclass "
+         "Outer<T>:\n    inner: Inner<i32>\n    t: T\ntype IntBase = Base<i32>\ntype IntOuter = "
+         "Outer<i32>\nfn bad(o: IntOuter): string -> o.inner.dep.v\nfn main(): i32 -> 0\n"},
+    });
+    expect(!checked.result.diagnostics.empty())
+        << "an i32 field was returned as string through an incomplete cached instantiation";
+  };
+
+  "an enum payload typed by a deferred alias is typed once the alias resolves"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nclass Box<T>:\n    v: T\nenum class Wrap:\n    Some(value: IntBox)\n    "
+         "None\ntype IntBox = Box<i32>\nfn main(): i32\n  let w: Wrap = Wrap::Some(value = "
+         "\"wrong\")\n  return 0\n"},
+    });
+    expect(!checked.result.diagnostics.empty())
+        << "Wrap::Some(\"wrong\") was accepted with an untyped payload";
+  };
+
+  "the registration fixpoint converges on progress, not a round count"_test = [] {
+    // Eighteen aliases declared in reverse, each enabling the next: one
+    // registers per pass, so any fixed cap below eighteen leaves the top
+    // of the chain cached with a hole.
+    auto checked = check_program({
+        {"main.dao",
+         "module app\n"
+         "class C0<T>:\n    dep: T\nclass C1<T>:\n    dep: A0\nclass C2<T>:\n    dep: A1\nclass "
+         "C3<T>:\n    dep: A2\nclass C4<T>:\n    dep: A3\nclass C5<T>:\n    dep: A4\nclass "
+         "C6<T>:\n    dep: A5\nclass C7<T>:\n    dep: A6\nclass C8<T>:\n    dep: A7\nclass "
+         "C9<T>:\n    dep: A8\nclass C10<T>:\n    dep: A9\nclass C11<T>:\n    dep: A10\nclass "
+         "C12<T>:\n    dep: A11\nclass C13<T>:\n    dep: A12\nclass C14<T>:\n    dep: A13\nclass "
+         "C15<T>:\n    dep: A14\nclass C16<T>:\n    dep: A15\nclass C17<T>:\n    dep: A16\n"
+         "type A17 = C17<i32>\ntype A16 = C16<i32>\ntype A15 = C15<i32>\ntype A14 = C14<i32>\ntype "
+         "A13 = C13<i32>\ntype A12 = C12<i32>\ntype A11 = C11<i32>\ntype A10 = C10<i32>\ntype A9 = "
+         "C9<i32>\ntype A8 = C8<i32>\ntype A7 = C7<i32>\ntype A6 = C6<i32>\ntype A5 = "
+         "C5<i32>\ntype A4 = C4<i32>\ntype A3 = C3<i32>\ntype A2 = C2<i32>\ntype A1 = "
+         "C1<i32>\ntype A0 = C0<i32>\n"
+         "fn take(a: A17): i32 -> 0\nfn main(): i32 -> take(C17(\"wrong\"))\n"},
+    });
+    expect(!checked.result.diagnostics.empty())
+        << "C17(\"wrong\") was accepted where A17 was declared";
+  };
+
   "a concept is not a type outside a bound"_test = [] {
     auto checked = check_program({
         {"traits.dao", "module app::traits\nconcept Reveal:\n    fn reveal(self): i32\n"},

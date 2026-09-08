@@ -348,8 +348,15 @@ private:
   /// Whether a type node names a generic instantiation of a class whose
   /// fields are not registered yet (an alias of it must wait).
   [[nodiscard]] auto aliases_generic_shell(const TypeNode* node) const -> bool;
-  void register_struct_fields(bool report_failures);
-  void register_enum_variants();
+  /// Each returns how many slots (fields / payloads) went from untyped
+  /// to typed in this pass -- the progress the registration fixpoint
+  /// converges on.
+  auto register_struct_fields(bool report_failures) -> size_t;
+  auto register_enum_variants(bool report_failures) -> size_t;
+  /// Whether a type carries no untyped slot anywhere by value: an
+  /// instantiation cloned from it would otherwise carry the hole.
+  [[nodiscard]] static auto type_complete(const Type* type, std::unordered_set<const Type*>& seen)
+      -> bool;
   void register_signatures();
   void compute_derived_conformances();
   auto type_conforms_to(const Type* type, const Decl* concept_decl) -> bool;
