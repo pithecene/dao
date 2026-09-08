@@ -1,0 +1,3 @@
+module core::x
+
+fn f(): i32 -> 1
