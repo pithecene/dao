@@ -480,7 +480,9 @@ void TypeChecker::register_declarations() {
   register_enum_variants();
   while (register_type_aliases(/*report_failures=*/false) > 0) {
   }
-  register_type_aliases(/*report_failures=*/true);
+  // No failure is final yet: an alias may name one that waits for
+  // fields (below), and reporting it here would reject a program that
+  // resolves a pass later.
   register_struct_fields();
   fields_registered_ = true;
   // Aliases of generic instantiations were held back until the classes
@@ -493,10 +495,28 @@ void TypeChecker::register_declarations() {
 }
 
 auto TypeChecker::aliases_generic_shell(const TypeNode* node) const -> bool {
-  if (fields_registered_ || node == nullptr || !node->is<NamedType>()) {
+  if (fields_registered_ || node == nullptr) {
+    return false;
+  }
+  // `*Box<i32>`, `fn(Box<i32>): i32`, `Vec<Box<i32>>`: the shell may sit
+  // anywhere inside the node.
+  if (node->is<PointerType>()) {
+    return aliases_generic_shell(node->as<PointerType>().pointee);
+  }
+  if (node->is<FunctionTypeNode>()) {
+    const auto& ftn = node->as<FunctionTypeNode>();
+    return aliases_generic_shell(ftn.return_type) ||
+           std::ranges::any_of(ftn.param_types,
+                               [&](const TypeNode* pt) { return aliases_generic_shell(pt); });
+  }
+  if (!node->is<NamedType>()) {
     return false;
   }
   const auto& named = node->as<NamedType>();
+  if (std::ranges::any_of(named.type_args,
+                          [&](const TypeNode* arg) { return aliases_generic_shell(arg); })) {
+    return true;
+  }
   if (named.type_args.empty()) {
     return false;
   }
