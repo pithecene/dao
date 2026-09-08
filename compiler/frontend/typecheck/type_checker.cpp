@@ -256,14 +256,14 @@ auto TypeChecker::resolve_type_node(const TypeNode* node) -> const Type* {
       return base_type;
     }
 
-    // `b::T` where `b` is an import the graph already reported missing:
-    // the resolver records the binding at the head with no module behind
-    // it, so there is no export table to find `T` in.  One diagnostic
-    // for one missing import; a second one here would only restate it.
+    // `b::T` through an import binding: the resolver owns that path.  If
+    // `b` is an import the graph reported missing, there is no module to
+    // look in; if it resolved and `T` is not among its exports, the
+    // resolver has already said so by name.  Either way a second
+    // diagnostic here would only restate the first.
     if (path.segments.size() > 1) {
       auto head = resolve_.uses.find(path.span.offset);
-      if (head != resolve_.uses.end() && head->second->kind == SymbolKind::Module &&
-          head->second->decl_as_module() == nullptr) {
+      if (head != resolve_.uses.end() && head->second->kind == SymbolKind::Module) {
         return nullptr;
       }
     }

@@ -681,6 +681,10 @@ suite<"typecheck_modules"> typecheck_modules = [] {
     expect(checked.resolved.diagnostics.size() == 1_u &&
            checked.resolved.diagnostics[0].message == "module 'app::math' has no export 'Nope'")
         << all_messages(checked);
+    // ...and the resolver's is the only one: the checker must not add
+    // `unknown type 'Nope'` on top, in the signature or in the body.
+    expect(checked.result.diagnostics.empty())
+        << "the checker restated the resolver's diagnostic: " << all_messages(checked);
   };
 
   "prelude_generics_instantiate_identically_regardless_of_module_order"_test = [] {
