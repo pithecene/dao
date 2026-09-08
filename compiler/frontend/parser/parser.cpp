@@ -255,12 +255,14 @@ private:
     QualifiedPath path;
     const auto& first = consume(TokenKind::Identifier);
     path.segments.push_back(first.text);
+    path.segment_spans.push_back(first.span);
     path.span = first.span;
 
     while (peek_kind() == TokenKind::ColonColon) {
       advance(); // ::
       const auto& seg = consume(TokenKind::Identifier);
       path.segments.push_back(seg.text);
+      path.segment_spans.push_back(seg.span);
       path.span.length = (seg.span.offset + seg.span.length) - path.span.offset;
     }
 
@@ -567,21 +569,35 @@ private:
                                          .is_enum_class = is_enum_class});
   }
 
+  /// The concept named by a conformance position: `Concept`, or
+  /// `b::Concept` through an import binding (CONTRACT_MODULE_SYSTEM.md
+  /// §6).  Shared by `as`, `deny`, and `extend ... as`.
+  auto parse_conformance_target() -> ConformanceTarget {
+    const auto& first = consume(TokenKind::Identifier);
+    if (peek_kind() != TokenKind::ColonColon) {
+      return {.concept_name = first.text, .concept_span = first.span};
+    }
+    advance(); // ::
+    const auto& concept_tok = consume(TokenKind::Identifier);
+    return {.module_binding = first.text,
+            .binding_span = first.span,
+            .concept_name = concept_tok.text,
+            .concept_span = concept_tok.span};
+  }
+
   auto parse_conformance_block() -> ConformanceBlock {
     advance(); // consume 'as'
-    const auto& concept_tok = consume(TokenKind::Identifier);
+    auto target = parse_conformance_target();
     consume(TokenKind::Colon);
     auto methods = parse_method_list();
-    return {.concept_name = concept_tok.text,
-            .concept_span = concept_tok.span,
-            .methods = std::move(methods)};
+    return {.target = target, .methods = std::move(methods)};
   }
 
   auto parse_deny_spec() -> DenySpec {
     advance(); // consume 'deny'
-    const auto& concept_tok = consume(TokenKind::Identifier);
+    auto target = parse_conformance_target();
     consume(TokenKind::Newline);
-    return {.concept_name = concept_tok.text, .concept_span = concept_tok.span};
+    return {.target = target};
   }
 
   auto parse_method_list() -> std::vector<Decl*> {
@@ -710,15 +726,13 @@ private:
     const auto& kw = advance(); // NOLINT(readability-identifier-length) consume 'extend'
     auto* target_type = parse_type();
     consume(TokenKind::KwAs);
-    const auto& concept_tok = consume(TokenKind::Identifier);
+    auto target = parse_conformance_target();
     consume(TokenKind::Colon);
     auto methods = parse_method_list();
     Span span = span_from(kw.span);
-    return ctx_.alloc<Decl>(span,
-                            ExtendDecl{.target_type = target_type,
-                                       .concept_name = concept_tok.text,
-                                       .concept_span = concept_tok.span,
-                                       .methods = std::move(methods)});
+    return ctx_.alloc<Decl>(
+        span,
+        ExtendDecl{.target_type = target_type, .target = target, .methods = std::move(methods)});
   }
 
   // -----------------------------------------------------------------------
@@ -1602,17 +1616,20 @@ private:
 
     // Qualified name: ident :: ident (:: ident)*
     std::vector<std::string_view> segments;
+    std::vector<Span> segment_spans;
     segments.push_back(first.text);
+    segment_spans.push_back(first.span);
     Span span = first.span;
 
     while (peek_kind() == TokenKind::ColonColon) {
       advance(); // ::
       const auto& seg = consume(TokenKind::Identifier);
       segments.push_back(seg.text);
+      segment_spans.push_back(seg.span);
       span.length = (seg.span.offset + seg.span.length) - span.offset;
     }
 
-    return ctx_.alloc<Expr>(span, QualifiedName{std::move(segments)});
+    return ctx_.alloc<Expr>(span, QualifiedName{std::move(segments), std::move(segment_spans)});
   }
 
   // -----------------------------------------------------------------------
@@ -1675,12 +1692,14 @@ private:
     QualifiedPath path;
     const auto& first = consume(TokenKind::Identifier);
     path.segments.push_back(first.text);
+    path.segment_spans.push_back(first.span);
     path.span = first.span;
 
     while (peek_kind() == TokenKind::ColonColon) {
       advance(); // ::
       const auto& seg = consume(TokenKind::Identifier);
       path.segments.push_back(seg.text);
+      path.segment_spans.push_back(seg.span);
       path.span.length = (seg.span.offset + seg.span.length) - path.span.offset;
     }
 

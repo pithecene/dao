@@ -5,8 +5,12 @@
 
 #include <boost/ut.hpp>
 
+#include <algorithm>
 #include <filesystem>
+#include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace boost::ut;
 using namespace dao;
@@ -85,7 +89,477 @@ auto find_offset(const ResolvedSource& result, const std::string& text, size_t n
   return static_cast<uint32_t>(pos);
 }
 
+// ---------------------------------------------------------------------------
+// Multi-module programs: files named `stdlib/...` form the
+// prelude group; the rest are user modules.
+// ---------------------------------------------------------------------------
+
+struct ResolvedProgram {
+  Program program;
+  ResolveResult result;
+};
+
+using NamedSource = std::pair<std::string, std::string>;
+
+auto resolve_program(std::vector<NamedSource> files) -> ResolvedProgram {
+  std::vector<SourceInput> inputs;
+  for (auto& [display, text] : files) {
+    inputs.push_back(
+        {.display_path = display, .text = text, .is_prelude = display.starts_with("stdlib/")});
+  }
+  ResolvedProgram resolved{.program = build_program(std::move(inputs)), .result = {}};
+  resolved.result = resolve(resolved.program);
+  return resolved;
+}
+
+auto file_named(const ResolvedProgram& resolved, std::string_view display) -> const SourceFile& {
+  for (const auto& file : resolved.program.files) {
+    if (file->display_path == display) {
+      return *file;
+    }
+  }
+  throw std::runtime_error("no file " + std::string(display));
+}
+
+/// Program offset of the n-th occurrence of `text` in a file.
+auto offset_in(const ResolvedProgram& resolved,
+               std::string_view display,
+               std::string_view text,
+               size_t occurrence = 0) -> uint32_t {
+  const auto& file = file_named(resolved, display);
+  auto contents = file.buffer.contents();
+  size_t pos = std::string::npos;
+  for (size_t i = 0, from = 0; i <= occurrence; ++i, from = pos + 1) {
+    pos = contents.find(text, from);
+    if (pos == std::string::npos) {
+      throw std::runtime_error("no occurrence of " + std::string(text));
+    }
+  }
+  return file.base_offset + static_cast<uint32_t>(pos);
+}
+
+auto use_in(const ResolvedProgram& resolved,
+            std::string_view display,
+            std::string_view text,
+            size_t occurrence = 0) -> const Symbol* {
+  auto it = resolved.result.uses.find(offset_in(resolved, display, text, occurrence));
+  return it == resolved.result.uses.end() ? nullptr : it->second;
+}
+
+auto messages_of(const ResolvedProgram& resolved) -> std::vector<std::string> {
+  std::vector<std::string> out;
+  for (const auto& diag : resolved.result.diagnostics) {
+    out.push_back(diag.message);
+  }
+  return out;
+}
+
+auto joined(const std::vector<std::string>& items) -> std::string {
+  std::string out;
+  for (const auto& item : items) {
+    out += item + " | ";
+  }
+  return out;
+}
+
+// Literals, not std::string objects: boost.ut runs suites after main
+// returns, when namespace-scope objects are already destroyed.
+constexpr const char* kMathModule = "module app::math\n"
+                                    "import app::util\n"
+                                    "fn add(a: i32, b: i32): i32 -> a + b\n"
+                                    "class Point:\n"
+                                    "  x: i32\n"
+                                    "  fn origin(): Point -> Point(0)\n"
+                                    "enum Color:\n"
+                                    "  Red\n"
+                                    "  Green\n";
+
+constexpr const char* kUtilModule = "module app::util\nfn one(): i32 -> 1\n";
+
 } // namespace
+
+suite<"resolve_modules"> resolve_modules = [] {
+  "qualified_function_resolves_through_the_import"_test = [] {
+    auto resolved = resolve_program({
+        {"main.dao", "module app::main\nimport app::math\nfn main(): i32 -> math::add(1, 2)\n"},
+        {"math.dao", kMathModule},
+        {"util.dao", kUtilModule},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+    const auto* head = use_in(resolved, "main.dao", "math::add");
+    expect(head != nullptr && head->kind == SymbolKind::Module);
+    expect(head != nullptr && head->decl_as_module()->display == "app::math");
+    const auto* add = use_in(resolved, "main.dao", "add(1");
+    expect(add != nullptr && add->kind == SymbolKind::Function && add->name == "add");
+    expect(add != nullptr && add->module != nullptr && add->module->display == "app::math");
+  };
+
+  "qualified_static_method_and_variant"_test = [] {
+    auto resolved = resolve_program({
+        {"main.dao",
+         "module app::main\nimport app::math\n"
+         "fn main(): i32\n  let p: i32 = math::Point::origin()\n"
+         "  let c: i32 = math::Color::Red\n  return 0\n"},
+        {"math.dao", kMathModule},
+        {"util.dao", kUtilModule},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+    const auto* point = use_in(resolved, "main.dao", "Point::origin");
+    expect(point != nullptr && point->kind == SymbolKind::Type && point->name == "Point");
+    const auto* origin = use_in(resolved, "main.dao", "origin()");
+    expect(origin != nullptr && origin->name == "Point.origin") << "static method by mangled name";
+    const auto* red = use_in(resolved, "main.dao", "Red");
+    expect(red != nullptr && red->kind == SymbolKind::Type && red->name == "Color")
+        << "variant recorded as its enum for the checker";
+  };
+
+  "unknown_export_is_diagnosed"_test = [] {
+    auto resolved = resolve_program({
+        {"main.dao", "module app::main\nimport app::math\nfn main(): i32 -> math::nope()\n"},
+        {"math.dao", kMathModule},
+        {"util.dao", kUtilModule},
+    });
+    expect(messages_of(resolved) ==
+           std::vector<std::string>{"module 'app::math' has no export 'nope'"})
+        << joined(messages_of(resolved));
+  };
+
+  "import_bindings_are_not_reexported"_test = [] {
+    auto resolved = resolve_program({
+        {"main.dao", "module app::main\nimport app::math\nfn main(): i32 -> math::util::one()\n"},
+        {"math.dao", kMathModule},
+        {"util.dao", kUtilModule},
+    });
+    expect(messages_of(resolved) ==
+           std::vector<std::string>{"module 'app::math' has no export 'util'"})
+        << joined(messages_of(resolved));
+  };
+
+  "deeper_path_through_a_binding_is_an_error"_test = [] {
+    auto resolved = resolve_program({
+        {"main.dao",
+         "module app::main\nimport app::math\nfn main(): i32 -> math::Point::origin::x()\n"},
+        {"math.dao", kMathModule},
+        {"util.dao", kUtilModule},
+    });
+    expect(!messages_of(resolved).empty() &&
+           messages_of(resolved)[0].starts_with(
+               "'math::Point::origin::x': a path through import binding"))
+        << joined(messages_of(resolved));
+  };
+
+  "import_binding_collides_with_a_declaration"_test = [] {
+    auto resolved = resolve_program({
+        {"main.dao",
+         "module app::main\nimport app::math\nfn math(): i32 -> 0\nfn main(): i32 -> 0\n"},
+        {"math.dao", kMathModule},
+        {"util.dao", kUtilModule},
+    });
+    expect(messages_of(resolved) ==
+           std::vector<std::string>{"duplicate top-level declaration 'math'"})
+        << joined(messages_of(resolved));
+  };
+
+  "import_binding_collides_with_an_import"_test = [] {
+    auto resolved = resolve_program({
+        {"main.dao",
+         "module app::main\nimport app::math\nimport other::math\nfn main(): i32 -> 0\n"},
+        {"math.dao", kMathModule},
+        {"util.dao", kUtilModule},
+        {"other.dao", "module other::math\n"},
+    });
+    expect(messages_of(resolved) ==
+           std::vector<std::string>{"duplicate top-level declaration 'math'"})
+        << joined(messages_of(resolved));
+  };
+
+  "prelude_names_are_visible_unqualified_and_shadowable"_test = [] {
+    auto resolved = resolve_program({
+        {"stdlib/core/helper.dao",
+         "module core::helper\nfn helper(): i32 -> 1\nfn shared(): i32 -> 2\n"},
+        {"main.dao",
+         "module app::main\nfn shared(): i32 -> 3\n"
+         "fn main(): i32 -> helper() + shared()\n"},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+    const auto* helper = use_in(resolved, "main.dao", "helper()");
+    expect(helper != nullptr && helper->module != nullptr && helper->module->is_prelude);
+    const auto* shared = use_in(resolved, "main.dao", "shared()", 1); // 0 is the declaration
+    expect(shared != nullptr && shared->module != nullptr && shared->module->display == "app::main")
+        << "the module's own declaration shadows the prelude's";
+  };
+
+  "prelude_symbols_resolve_through_an_import_too"_test = [] {
+    auto resolved = resolve_program({
+        {"stdlib/core/vec.dao",
+         "module core::vec\nclass Vec:\n  n: i32\n  fn make(): Vec -> Vec(0)\n"},
+        {"main.dao",
+         "module app::main\nimport core::vec\n"
+         "fn main(): i32\n  let a: i32 = vec::Vec::make()\n  let b: i32 = Vec::make()\n  return "
+         "0\n"},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+    const auto* qualified = use_in(resolved, "main.dao", "make()"); // recorded at the member
+    const auto* unqualified = use_in(resolved, "main.dao", "Vec::make", 1); // recorded at the head
+    expect(qualified != nullptr && qualified == unqualified && qualified->name == "Vec.make")
+        << "one prelude symbol either way";
+  };
+
+  "prelude_class_methods_resolve_regardless_of_module_order"_test = [] {
+    // `aaa` sorts before `core::vec` and imports nothing, so its bodies
+    // resolve before the prelude's; method names must already be declared.
+    auto resolved = resolve_program({
+        {"stdlib/core/vec.dao",
+         "module core::vec\nclass Vec:\n  n: i32\n  fn make(): Vec -> Vec(0)\n"},
+        {"aaa.dao", "module aaa\nfn main(): i32\n  let v: i32 = Vec::make()\n  return 0\n"},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+    const auto* make = use_in(resolved, "aaa.dao", "Vec::make");
+    expect(make != nullptr && make->name == "Vec.make");
+  };
+
+  "builtins_cannot_be_redeclared_anywhere"_test = [] {
+    auto resolved = resolve_program({
+        {"stdlib/core/bad.dao", "module core::bad\nfn null_ptr(): i32 -> 0\n"},
+        {"main.dao",
+         "module app::main\nimport app::lib\nclass string:\n  n: i32\nfn main(): i32 -> 0\n"},
+        {"lib.dao", "module app::lib\nclass bool:\n  n: i32\n"},
+    });
+    auto messages = messages_of(resolved);
+    std::sort(messages.begin(), messages.end());
+    expect(messages == std::vector<std::string>{"duplicate top-level declaration 'bool'",
+                                                "duplicate top-level declaration 'null_ptr'",
+                                                "duplicate top-level declaration 'string'"})
+        << joined(messages);
+  };
+
+  "reserved_prefix_is_keyed_on_the_prelude_group"_test = [] {
+    auto resolved = resolve_program({
+        {"stdlib/core/hooks.dao", "module core::hooks\nextern fn __dao_x(): i32\n"},
+        {"main.dao", "module app::main\nfn __dao_y(): i32 -> 0\nfn main(): i32 -> 0\n"},
+    });
+    expect(messages_of(resolved) ==
+           std::vector<std::string>{
+               "'__dao_y': the '__dao_' prefix is reserved for compiler/runtime use"})
+        << joined(messages_of(resolved));
+  };
+
+  "the intrinsic family is the prelude's to declare"_test = [] {
+    // `size_of` and its family are prelude declarations the backend
+    // answers with inline IR; shadowing a prelude name is allowed
+    // (§7.6) but not when the name's meaning belongs to the compiler.
+    for (auto name : {"size_of", "align_of", "ptr_offset"}) {
+      auto entry = resolve_program(
+          {{"main.dao",
+            std::string("module app::main\nfn ") + name + "(): i32 -> 0\nfn main(): i32 -> 0\n"}});
+      expect(
+          messages_of(entry) ==
+          std::vector<std::string>{std::string("duplicate top-level declaration '") + name + "'"})
+          << name << " accepted in the entry module: " << joined(messages_of(entry));
+
+      auto imported = resolve_program({
+          {"lib.dao", std::string("module app::lib\nfn ") + name + "(): i32 -> 0\n"},
+          {"main.dao", "module app::main\nimport app::lib\nfn main(): i32 -> 0\n"},
+      });
+      expect(
+          messages_of(imported) ==
+          std::vector<std::string>{std::string("duplicate top-level declaration '") + name + "'"})
+          << name << " accepted in an imported module: " << joined(messages_of(imported));
+    }
+  };
+
+  "a prelude module's import cannot shadow its own declaration"_test = [] {
+    // A prelude module publishes its declarations into the shared
+    // prelude scope rather than its file scope, so the collision has to
+    // be looked for in what THAT module exports.
+    auto resolved = resolve_program({
+        {"stdlib/core/one.dao", "module core::one\nimport core::two\nfn two(): i32 -> 0\n"},
+        {"stdlib/core/two.dao", "module core::two\nfn helper(): i32 -> 0\n"},
+        {"main.dao", "module app::main\nfn main(): i32 -> 0\n"},
+    });
+    expect(messages_of(resolved) ==
+           std::vector<std::string>{"duplicate top-level declaration 'two'"})
+        << joined(messages_of(resolved));
+  };
+
+  "another prelude module's name is not a collision"_test = [] {
+    // The prelude group shares one namespace for lookup, but an import
+    // binding collides only with the importing module's own names.
+    auto resolved = resolve_program({
+        {"stdlib/core/one.dao", "module core::one\nimport core::two\n"},
+        {"stdlib/core/two.dao", "module core::two\nfn helper(): i32 -> 0\n"},
+        {"stdlib/core/three.dao", "module core::three\nfn two(): i32 -> 0\n"},
+        {"main.dao", "module app::main\nfn main(): i32 -> 0\n"},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+  };
+
+  "diagnostics come back in file order, not the order bodies were resolved"_test = [] {
+    // `a` imports `z`, so `z` is resolved first; both name something that
+    // does not exist.  `a.dao` has the earlier file id, so its diagnostic
+    // comes first (§8.4) whatever order the passes walked.
+    auto resolved = resolve_program({
+        {"a.dao", "module a\nimport z\nfn f(): i32 -> nowhere\n"},
+        {"z.dao", "module z\nfn g(): i32 -> missing\n"},
+    });
+    auto said = messages_of(resolved);
+    expect(said.size() == 2_u) << said.size();
+    expect(said.size() == 2_u && said[0].find("nowhere") != std::string::npos)
+        << "z's diagnostic came first: " << (said.empty() ? "" : said[0]);
+  };
+
+  "a shadowed prelude type does not lend its static methods"_test = [] {
+    // The module's `Box` shadows the prelude's (§7.4).  `Box::make` must
+    // then look for `make` on the module's `Box` -- which has none -- and
+    // not reach the prelude's method through the scope chain.
+    auto resolved = resolve_program({
+        {"stdlib/core/b.dao", "module core::b\nclass Box:\n    x: i32\n    fn make(): i32 -> 1\n"},
+        {"app.dao", "module app\nclass Box:\n    y: i32\nfn main(): i32 -> Box::make()\n"},
+    });
+    bool bound_prelude_method = false;
+    bool bound_own_type = false;
+    for (const auto& [offset, sym] : resolved.result.uses) {
+      if (sym == nullptr) {
+        continue;
+      }
+      if (sym->name == "Box.make") {
+        bound_prelude_method = true;
+      }
+      // The module's own `Box` is the one declared in app.dao.
+      if (sym->name == "Box" && sym->kind == SymbolKind::Type) {
+        const auto* declared_in = resolved.program.source_map.file_for(sym->decl_span.offset);
+        if (declared_in != nullptr && declared_in->display_path == "app.dao") {
+          bound_own_type = true;
+        }
+      }
+    }
+    expect(!bound_prelude_method) << "Box::make reached the prelude's method past the module's Box";
+    expect(bound_own_type) << "the module's own Box was not what resolved";
+  };
+
+  "a type path to a missing export is diagnosed"_test = [] {
+    auto resolved = resolve_program({
+        {"lib.dao", "module lib\nclass Real:\n    x: i32\n"},
+        {"main.dao", "module main\nimport lib\n\nfn f(x: lib::Missing): i32 -> 0\n"},
+    });
+    auto said = messages_of(resolved);
+    expect(said.size() == 1_u && said[0] == "module 'lib' has no export 'Missing'")
+        << (said.empty() ? "nothing said" : said[0]);
+  };
+
+  "a qualified path with spaces around :: binds its segments where they are"_test = [] {
+    // The parser accepts `lib :: helper`; the export is recorded at the
+    // `helper` token, not two bytes past `lib`, so tooling finds it.
+    auto resolved = resolve_program({
+        {"lib.dao", "module lib\nfn helper(): i32 -> 1\n"},
+        {"main.dao", "module main\nimport lib\nfn f(): i32 -> lib :: helper()\n"},
+    });
+    auto said = messages_of(resolved);
+    expect(said.empty()) << (said.empty() ? "" : said.front());
+    bool at_token = false;
+    for (const auto& [offset, sym] : resolved.result.uses) {
+      if (sym != nullptr && sym->name == "helper") {
+        at_token =
+            resolved.program.source_map.text(Span{.offset = offset, .length = 6}) == "helper";
+      }
+    }
+    expect(at_token) << "the export was recorded somewhere other than its token";
+  };
+
+  "modules_own_their_scopes_and_symbols"_test = [] {
+    auto resolved = resolve_program({
+        {"main.dao",
+         "module app::main\nimport app::util\nfn main(): i32\n  let n: i32 = util::one()\n  return "
+         "n\n"},
+        {"util.dao", kUtilModule},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+    const auto* util = resolved.program.module_named("app::util");
+    expect(util != nullptr && util->scope != nullptr &&
+           util->scope->lookup_local("one") != nullptr);
+    expect(util != nullptr && util->scope->lookup_local("main") == nullptr)
+        << "scopes are per module";
+    const auto* n = use_in(resolved, "main.dao", "n\n", 1); // 0 ends `module app::main`
+    expect(n != nullptr && n->kind == SymbolKind::Local && n->module != nullptr &&
+           n->module->display == "app::main");
+  };
+
+  // Overload sets are indexed beside the ordinary declarations of a
+  // scope, so a chain walk that ignores the ordinary ones lets an outer
+  // set answer a name an inner binding owns (§7.4, innermost-first).
+
+  "a declaration shadows an overloaded prelude name"_test = [] {
+    auto resolved = resolve_program({
+        {"stdlib/core/pick.dao",
+         "module core::pick\nfn pick(a: i32): i32 -> 1\nfn pick(a: i32, b: i32): i32 -> 2\n"},
+        {"main.dao", "module app::main\nfn pick(a: i32): i32 -> 3\nfn main(): i32 -> pick(1)\n"},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+    const auto* called = use_in(resolved, "main.dao", "pick(1)");
+    expect(called != nullptr && called->module != nullptr && called->module->display == "app::main")
+        << "the prelude's overload set answered a call the module's own name owns";
+  };
+
+  "a shadowing declaration hides every arity of the outer set"_test = [] {
+    // The module declares one arity; the prelude's two-argument
+    // overload is out of reach behind it, not an alternative to it.
+    auto resolved = resolve_program({
+        {"stdlib/core/pick.dao",
+         "module core::pick\nfn pick(a: i32): i32 -> 1\nfn pick(a: i32, b: i32): i32 -> 2\n"},
+        {"main.dao", "module app::main\nfn pick(a: i32): i32 -> 3\nfn main(): i32 -> pick(1, 2)\n"},
+    });
+    const auto* called = use_in(resolved, "main.dao", "pick(1, 2)");
+    expect(called != nullptr && called->module != nullptr && called->module->display == "app::main")
+        << "a call reached past the shadowing declaration into the prelude";
+  };
+
+  "an import binding shadows an overloaded prelude name"_test = [] {
+    auto resolved = resolve_program({
+        {"stdlib/core/lib.dao",
+         "module core::lib\nfn lib(a: i32): i32 -> 1\nfn lib(a: i32, b: i32): i32 -> 2\n"},
+        {"lib.dao", "module lib\nfn one(): i32 -> 1\n"},
+        {"main.dao",
+         "module app::main\nimport lib\nfn main(): i32\n  let n: i32 = lib::one()\n"
+         "  return lib(1)\n"},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+    const auto* binding = use_in(resolved, "main.dao", "lib(1)");
+    expect(binding != nullptr && binding->kind == SymbolKind::Module)
+        << "the prelude's overload set answered through an import binding of the same name";
+    const auto* exported = use_in(resolved, "main.dao", "one()");
+    expect(exported != nullptr && exported->module != nullptr && exported->module->display == "lib")
+        << "the binding still reaches its own module's export";
+  };
+
+  // A qualified path is checked the same way wherever it appears: the
+  // closed set of forms in §6 is not an expression-only rule.
+
+  "a deeper path in type position is an error"_test = [] {
+    auto resolved = resolve_program({
+        {"lib.dao", "module lib\nclass T:\n  x: i32\n"},
+        {"main.dao", "module app::main\nimport lib\nfn f(x: lib::T::Extra): void\n  return\n"},
+    });
+    expect(messages_of(resolved) ==
+           std::vector<std::string>{"'lib::T::Extra': a path through import binding 'lib' "
+                                    "reaches at most an exported type (imports bind one segment)"})
+        << joined(messages_of(resolved));
+  };
+
+  "a type path binds the exported type at its own segment"_test = [] {
+    auto resolved = resolve_program({
+        {"lib.dao", "module lib\nclass T:\n  x: i32\n"},
+        {"main.dao", "module app::main\nimport lib\nfn f(x: lib::T): void\n  return\n"},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+    const auto* head = use_in(resolved, "main.dao", "lib::T");
+    expect(head != nullptr && head->kind == SymbolKind::Module);
+    const auto* exported = use_in(resolved, "main.dao", "T)");
+    expect(exported != nullptr && exported->kind == SymbolKind::Type && exported->name == "T" &&
+           exported->module != nullptr && exported->module->display == "lib");
+  };
+};
+
+namespace {} // namespace
 
 // NOLINTBEGIN(readability-magic-numbers)
 
@@ -547,6 +1021,167 @@ suite<"reserved_prefix"> reserved_prefix = [] {
 };
 
 // NOLINTEND(readability-magic-numbers)
+
+// ---------------------------------------------------------------------------
+// Prelude qualified exports (CONTRACT_MODULE_SYSTEM.md §7.2, §7.3, §7.5):
+// prelude declarations are visible unqualified everywhere and prelude
+// modules see one another as one namespace, but a qualified path reaches
+// only what the named module itself declares.
+// ---------------------------------------------------------------------------
+
+suite<"per_module_overload_exports"> per_module_overload_exports_suite = [] {
+  // Two prelude modules declaring different-arity overloads of one name
+  // share a declaration scope; each must still export its OWN
+  // declaration under the base name (§4, §7.5).
+  "each module exports the overload it declared"_test = [] {
+    std::vector<std::string> prelude = {
+        "module core::one\nfn f(a: i32): i32 -> a\n",
+        "module core::two\nfn f(a: i32, b: i32): i32 -> a + b\n",
+    };
+    auto program =
+        make_test_program("import core::two\nfn use_it(): i32 -> two::f(1, 2)\n", prelude);
+    auto resolved = resolve(program);
+    expect(!has_diagnostic_containing(resolved, "has no export 'f'"))
+        << "core::two exports its own `f`";
+  };
+
+  "an extern is never given an arity-mangled name"_test = [] {
+    // `extern fn` names a C symbol exactly as written, so two of one
+    // name are one symbol and the second is a duplicate.
+    auto program =
+        make_test_program("extern fn puts(s: string): i32\nextern fn puts(s: string, n: i32): i32\n"
+                          "fn use_it(): i32 -> puts(\"x\")\n");
+    auto resolved = resolve(program);
+    expect(has_diagnostic_containing(resolved, "duplicate top-level declaration"))
+        << "a second extern of one name is a duplicate, not an overload";
+  };
+};
+
+suite<"import_binding_locality"> import_binding_locality_suite = [] {
+  // An import binds a name in the importing module and nowhere else
+  // (CONTRACT_MODULE_SYSTEM.md §3.1-§3.3) — including when the importing
+  // module is in the prelude, whose declarations are shared but whose
+  // bindings are not.
+  const std::vector<std::string> prelude = {
+      "module core::a\nimport core::dep\nfn ua(): i32 -> dep::d()\n",
+      "module core::b\nfn ub(): i32 -> 0\n",
+      "module core::dep\nfn d(): i32 -> 1\n",
+  };
+
+  "one prelude module's import is not visible in another"_test = [prelude] {
+    // core::b never imported `dep`, so naming it there is unresolved.
+    auto program = make_test_program("fn f(): i32 -> 0\n", prelude);
+    auto resolved = resolve(program);
+    for (const auto& diag : resolved.diagnostics) {
+      expect(diag.severity != Severity::Error) << diag.message;
+    }
+    auto user = make_test_program("fn f(): i32 -> dep::d()\n", prelude);
+    auto user_resolved = resolve(user);
+    expect(has_diagnostic_containing(user_resolved, "dep"))
+        << "a prelude module's import binding must not reach a user module";
+  };
+
+  "two modules may bind the same import name independently"_test = [] {
+    // Both bind `dep`; neither collides with the other.
+    std::vector<std::string> prelude = {
+        "module core::x\nimport core::dep\nfn ux(): i32 -> dep::d()\n",
+        "module core::y\nimport core::dep\nfn uy(): i32 -> dep::d()\n",
+        "module core::dep\nfn d(): i32 -> 1\n",
+    };
+    auto program = make_test_program("fn f(): i32 -> 0\n", prelude);
+    auto resolved = resolve(program);
+    expect(!has_diagnostic_containing(resolved, "duplicate top-level declaration"))
+        << "each module binds `dep` in its own scope";
+  };
+};
+
+suite<"prelude_qualified_exports"> prelude_qualified_exports_suite = [] {
+  const std::vector<std::string> prelude = {
+      "module core::vector\nfn make(): i32 -> 1\n",
+      "module core::printable\nfn show(): i32 -> 2\n",
+  };
+
+  "a prelude module exports only what it declares"_test = [prelude] {
+    auto program = make_test_program(
+        "import core::vector\nfn use_it(): i32\n  return vector::show()\n", prelude);
+    auto resolved = resolve(program);
+    expect(has_diagnostic_containing(resolved, "has no export 'show'"))
+        << "core::vector must not export core::printable's `show`";
+  };
+
+  "a prelude module's own export resolves qualified"_test = [prelude] {
+    auto program = make_test_program(
+        "import core::vector\nfn use_it(): i32\n  return vector::make()\n", prelude);
+    auto resolved = resolve(program);
+    expect(!has_diagnostic_containing(resolved, "has no export")) << "core::vector exports `make`";
+  };
+
+  "prelude names stay visible unqualified across prelude modules"_test = [prelude] {
+    auto program = make_test_program("fn use_it(): i32\n  return make() + show()\n", prelude);
+    auto resolved = resolve(program);
+    expect(!has_diagnostic_containing(resolved, "unknown name"))
+        << "prelude declarations are visible unqualified (§7.2, §7.3)";
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Qualified forms reach the right export (CONTRACT_MODULE_SYSTEM.md §6):
+// an overload set is selected by the call's arity, and a static member that
+// does not exist is not silently answered with its type.
+// ---------------------------------------------------------------------------
+
+suite<"qualified_export_selection"> qualified_export_selection_suite = [] {
+  const std::vector<std::string> prelude = {};
+
+  "a qualified call binds the overload its arity names"_test = [] {
+    // Three arity-distinct overloads; each call must reach its own.
+    const std::string lib = "module lib\nfn f(): i32 -> 0\nfn f(a: i32): i32 -> a\n"
+                            "fn f(a: i32, b: i32): i32 -> a + b\n";
+    const std::string app = "module app\nimport lib\n"
+                            "fn use_all(): i32\n  return lib::f() + lib::f(1) + lib::f(1, 2)\n";
+    for (bool lib_first : {true, false}) {
+      std::vector<SourceInput> inputs;
+      if (lib_first) {
+        inputs = {{.display_path = "lib.dao", .text = lib, .is_prelude = false},
+                  {.display_path = "app.dao", .text = app, .is_prelude = false}};
+      } else {
+        inputs = {{.display_path = "app.dao", .text = app, .is_prelude = false},
+                  {.display_path = "lib.dao", .text = lib, .is_prelude = false}};
+      }
+      auto program = build_program(std::move(inputs));
+      auto resolved = resolve(program);
+      // Each call site resolves to a function of the matching arity.
+      std::vector<size_t> arities;
+      for (const auto& [offset, sym] : resolved.uses) {
+        if (sym == nullptr || sym->decl == nullptr || sym->name.substr(0, 1) != "f") {
+          continue;
+        }
+        const auto* decl = sym->decl_as_decl();
+        if (decl->is<FunctionDecl>()) {
+          arities.push_back(decl->as<FunctionDecl>().params.size());
+        }
+      }
+      std::ranges::sort(arities);
+      arities.erase(std::unique(arities.begin(), arities.end()), arities.end());
+      expect(arities == std::vector<size_t>{0, 1, 2})
+          << "declaration order " << (lib_first ? "lib first" : "app first") << " reached arities "
+          << arities.size();
+    }
+  };
+
+  "an unknown static member of an imported type is diagnosed"_test = [] {
+    auto program = build_program(
+        {{.display_path = "lib.dao",
+          .text = "module lib\nclass P:\n  x: i32\n",
+          .is_prelude = false},
+         {.display_path = "app.dao",
+          .text = "module app\nimport lib\nfn f(): lib::P\n  return lib::P::missing(1)\n",
+          .is_prelude = false}});
+    auto resolved = resolve(program);
+    expect(has_diagnostic_containing(resolved, "has no static member 'missing'"))
+        << "a missing static member must not resolve to its type";
+  };
+};
 
 auto main() -> int {
 }

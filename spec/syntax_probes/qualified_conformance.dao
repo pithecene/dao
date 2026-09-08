@@ -1,0 +1,11 @@
+module app::shapes
+import app::traits
+
+class Point:
+    x: i32
+    as traits::Reveal:
+        fn reveal(self): i32 -> self.x
+    deny traits::Hidden
+
+extend Point as traits::Named:
+    fn name(self): string -> "point"

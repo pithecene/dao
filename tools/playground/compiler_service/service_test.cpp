@@ -29,6 +29,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 using namespace boost::ut;
@@ -192,6 +193,55 @@ auto load_examples() -> std::vector<Example> {
   return examples;
 }
 
+/// One multi-file example: every `.dao` file of a directory under
+/// `examples/` whose files declare a single `fn main` between them,
+/// which makes them ONE program rather than several.  A directory of
+/// independent programs — `bootstrap_probe/`, where every file has its
+/// own `fn main` — is not one, and is skipped.  The example routes list
+/// single files only, so these are read from disk; the service sees
+/// them as the program-shaped request any editor would send.
+struct MultifileExample {
+  std::string name; // the directory's name
+  json files = json::array();
+  std::string document; // the file declaring `fn main`
+};
+
+auto load_multifile_examples() -> std::vector<MultifileExample> {
+  std::vector<MultifileExample> examples;
+  auto dir = repo_root() / "examples";
+  if (!std::filesystem::exists(dir)) {
+    return examples;
+  }
+  for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+    if (!entry.is_directory()) {
+      continue;
+    }
+    MultifileExample example{.name = entry.path().filename().string()};
+    std::vector<std::filesystem::path> paths;
+    for (const auto& file : std::filesystem::directory_iterator(entry.path())) {
+      if (file.path().extension() == ".dao") {
+        paths.push_back(file.path());
+      }
+    }
+    std::ranges::sort(paths);
+    size_t entries = 0;
+    for (const auto& path : paths) {
+      auto source = dao::read_file(path);
+      auto name = example.name + "/" + path.filename().string();
+      if (source.find("fn main(") != std::string::npos) {
+        example.document = name;
+        ++entries;
+      }
+      example.files.push_back({{"path", name}, {"source", source}});
+    }
+    if (entries == 1) {
+      examples.push_back(std::move(example));
+    }
+  }
+  std::ranges::sort(examples, {}, &MultifileExample::name);
+  return examples;
+}
+
 /// `<name>.dao<TAB><expected diagnostic substring>` per line; blank lines
 /// and `#` comments ignored.  The substring is what the compiler must
 /// report for the failure to count as the known one.
@@ -217,6 +267,21 @@ auto reports(const json& reply, const std::string& needle) -> bool {
     }
   }
   return false;
+}
+
+/// The located diagnostics of a reply as (file, file-local offset)
+/// pairs, in the order the reply lists them.  Entries with no position
+/// carry an empty file and are skipped: only located ones have an order
+/// to check.
+auto located_positions(const json& reply) -> std::vector<std::pair<std::string, uint32_t>> {
+  std::vector<std::pair<std::string, uint32_t>> positions;
+  for (const auto& diag : reply["diagnostics"]) {
+    auto file = diag["file"].get<std::string>();
+    if (!file.empty()) {
+      positions.emplace_back(std::move(file), diag["offset"].get<uint32_t>());
+    }
+  }
+  return positions;
 }
 
 /// Offsets of the first `count` semantic tokens whose kind starts with `prefix`.
@@ -263,6 +328,23 @@ auto minimal_request(std::string_view shape_name) -> json {
 
 } // namespace
 
+/// Every lexical token of the analysed document has a semantic token at
+/// its offset -- the single-file corpus's bar, applied to every document
+/// of a multi-file example too.
+void expect_every_token_classified(const std::string& name, const json& body) {
+  std::set<uint32_t> classified;
+  for (const auto& token : body["semanticTokens"]) {
+    classified.insert(token["offset"].get<uint32_t>());
+  }
+  expect(!body["tokens"].empty()) << name << ": the document produced no tokens";
+  for (const auto& token : body["tokens"]) {
+    auto offset = token["offset"].get<uint32_t>();
+    expect(classified.contains(offset))
+        << name << ": no semantic token for " << token["text"].get<std::string>() << " ("
+        << token["kind"].get<std::string>() << ") at line " << token["line"].get<uint32_t>();
+  }
+}
+
 suite<"playground_service"> playground_service_suite = [] {
   "every_route_is_bound_and_validates_its_request"_test = [] {
     for (const auto& route : kRoutes) {
@@ -282,6 +364,229 @@ suite<"playground_service"> playground_service_suite = [] {
     auto unnamed = document_request("x", {{"document", "elsewhere.dao"}, {"offset", 0}});
     expect(dispatch("hover", unnamed, service_context()).status == http_status::bad_request)
         << "a document that is not one of the files must be rejected";
+  };
+
+  "filtered llvm keeps every function the document defines"_test = [] {
+    // The backend names a module's functions `<module>::<name>` and
+    // leaves only the entry module's `main` bare, so a filter built from
+    // MIR symbol names kept `main` alone and emitted a call to a
+    // definition it had dropped.
+    const std::string source = "module app\n"
+                               "fn helper(): i32\n  return 41\n"
+                               "fn main(): i32\n  return helper() + 1\n";
+    auto reply = call("analyze", document_request(source));
+    auto ir = reply.body["llvm_ir"].get<std::string>();
+    expect(!ir.empty()) << reply.body["diagnostics"].dump();
+
+    // Names introduced by `define` / `declare`, and names called.
+    auto names_after = [&ir](std::string_view keyword) -> std::set<std::string> {
+      std::set<std::string> found;
+      const std::regex pattern(std::string(keyword) + R"re(\s[^@\n]*@"?([A-Za-z0-9_:.$]+)"?\()re");
+      for (std::sregex_iterator it(ir.begin(), ir.end(), pattern), last; it != last; ++it) {
+        found.insert((*it)[1].str());
+      }
+      return found;
+    };
+    auto defined = names_after("define");
+    auto declared = names_after("declare");
+    auto called = names_after("call");
+
+    expect(defined.contains("app::helper"))
+        << "the document's own helper must be defined in the filtered IR:\n"
+        << ir;
+    expect(defined.contains("main")) << "the entry keeps its bare name:\n" << ir;
+    for (const auto& callee : called) {
+      if (callee.starts_with("llvm.")) {
+        continue; // intrinsics need no declaration of ours
+      }
+      expect(defined.contains(callee) || declared.contains(callee))
+          << "call to " << callee << " which the filter dropped:\n"
+          << ir;
+    }
+  };
+
+  "filtered llvm keeps a definition the document calls in another file"_test = [] {
+    // The IR views hide the prelude, not the rest of the program: a
+    // document calling into a sibling file must not be shown a call with
+    // no definition.
+    const std::string lib = "module lib\n\nfn helper(): i32\n  return 41\n";
+    const std::string main =
+        "module app\nimport lib\n\nfn main(): i32\n  return lib::helper() + 1\n";
+    json request = {{"files",
+                     json::array({{{"path", "lib.dao"}, {"source", lib}},
+                                  {{"path", kTestDocument}, {"source", main}}})},
+                    {"document", kTestDocument}};
+    auto reply = call("analyze", request);
+    auto ir = reply.body["llvm_ir"].get<std::string>();
+    expect(!ir.empty()) << reply.body["diagnostics"].dump();
+    expect(ir.find("lib::helper") != std::string::npos)
+        << "the callee's definition must survive the filter:\n"
+        << ir;
+  };
+
+  "diagnostics from different phases come back in file order"_test = [] {
+    // Assembly and resolution are different phases, and the phases run
+    // in dependency order, not file order.  `z.dao` cannot be parsed and
+    // `a.dao` names something that does not exist: the parse error is
+    // known first, the unknown name only once the resolver runs, and
+    // appending each phase as it finishes would put `z.dao` ahead of
+    // `a.dao`.  One stream, in program order (§8.4), regardless of which
+    // phase said what.
+    auto program = json{
+        {"files",
+         json::array(
+             {{{"path", "z.dao"}, {"source", "module z\n\nfn also(: i32\n  return 2\n"}},
+              {{"path", kTestDocument}, {"source", "module app\n\nfn main(): i32\n  return 0\n"}},
+              {{"path", "a.dao"}, {"source", "module a\n\nfn f(): i32 -> missing\n"}}})},
+        {"document", kTestDocument}};
+    auto reported = call("analyze", program).body["diagnostics"];
+    std::string said = reported.dump();
+    std::vector<std::string> positioned;
+    for (const auto& diag : reported) {
+      auto file = diag["file"].get<std::string>();
+      if (!file.empty()) {
+        positioned.push_back(file);
+      }
+    }
+    expect(positioned.size() >= 2) << "both phases must report: " << said;
+    expect(std::ranges::is_sorted(positioned)) << "out of file order across phases: " << said;
+    expect(positioned.front() == "a.dao")
+        << "the resolver's error in a.dao must come first: " << said;
+    expect(said.find("missing") != std::string::npos) << said;
+  };
+
+  "a graph error does not hide the parse errors around it"_test = [] {
+    // Assembly, lex, and parse are one ordered stream (§8.4).  Returning
+    // on the graph error would report the cycle and nothing else;
+    // reporting the phases in turn would put the cycle before both parse
+    // errors instead of between them; and collecting the files a second
+    // time after the stream would report each parse error twice.
+    const std::string broken_z = "module z\nimport a\n\nfn also(: i32\n  return 2\n";
+    auto program_of = [&](const std::string& first, const std::string& document) {
+      return json{{"files",
+                   json::array({{{"path", "z.dao"}, {"source", broken_z}},
+                                {{"path", kTestDocument}, {"source", document}},
+                                {{"path", "a.dao"}, {"source", first}}})},
+                  {"document", kTestDocument}};
+    };
+    // Both programs stop at assembly — the first on the cycle, the
+    // second on the document's lex error — so each reply is exactly the
+    // stream under test, with no later phase appending to it.
+    auto cyclic = program_of("module a\nimport z\n\nfn broken(: i32\n  return 1\n",
+                             "module app\n\nfn main(): i32\n  return 0\n");
+    auto unlexable = program_of("module a\n\nfn broken(: i32\n  return 1\n",
+                                "module app\n\nfn main(): i32\n  return @\n");
+
+    // File ids follow the display path, not the request order, so this
+    // is the order the assembly diagnostics must come back in.
+    const std::vector<std::string> by_file_id = {"a.dao", "main.dao", "z.dao"};
+    /// Assert the reply names each positioned diagnostic once, in file
+    /// then offset order, and answer which files it named.
+    auto stream_of = [&](std::string_view label, const json& diagnostics) {
+      std::vector<std::pair<size_t, uint32_t>> ordered;
+      std::set<std::string> once;
+      std::set<std::string> files_named;
+      for (const auto& diag : diagnostics) {
+        auto file = diag["file"].get<std::string>();
+        if (file.empty()) {
+          continue; // no position to order by
+        }
+        auto offset = diag["offset"].get<uint32_t>();
+        auto key = file + "@" + std::to_string(offset) + ": " + diag["message"].get<std::string>();
+        expect(once.insert(key).second) << label << ": reported twice: " << key;
+        auto rank = std::ranges::find(by_file_id, file);
+        expect(rank != by_file_id.end()) << label << ": unexpected file " << file;
+        files_named.insert(file);
+        ordered.emplace_back(static_cast<size_t>(rank - by_file_id.begin()), offset);
+      }
+      expect(std::ranges::is_sorted(ordered))
+          << label << ": out of file/offset order: " << diagnostics.dump();
+      return files_named;
+    };
+
+    for (const auto* route : {"analyze", "run"}) {
+      auto reported = call(route, cyclic).body["diagnostics"];
+      std::string said = reported.dump();
+      expect(said.find("import cycle: a -> z -> a") != std::string::npos) << route << ": " << said;
+      expect(stream_of(route, reported) == std::set<std::string>{"a.dao", "z.dao"})
+          << route << ": the parse errors around the cycle are missing: " << said;
+
+      auto without_a_cycle = call(route, unlexable).body["diagnostics"];
+      expect(stream_of(route, without_a_cycle) ==
+             std::set<std::string>{"a.dao", "main.dao", "z.dao"})
+          << route << ": " << without_a_cycle.dump();
+    }
+  };
+
+  "a document without main is advised, not failed"_test = [] {
+    // EntryPolicy::Advisory: analysis runs to completion and the reply
+    // says why Run will not work, as a warning rather than an error.
+    auto reply = call("analyze", document_request("module t\nfn f(): i32\n  return 1\n"));
+    bool advised = false;
+    for (const auto& diag : reply.body["diagnostics"]) {
+      if (diag["message"].get<std::string>().find("no entry module") != std::string::npos) {
+        advised = true;
+        expect(diag["severity"].get<std::string>() == "warning") << diag.dump();
+      }
+    }
+    expect(advised) << reply.body["diagnostics"].dump();
+    expect(!reply.body["llvm_ir"].get<std::string>().empty())
+        << "an advisory must not stop lowering: " << reply.body["diagnostics"].dump();
+  };
+
+  "completion does not offer another module's extension"_test = [] {
+    // Tooling must not advertise a call the checker rejects: `secret`
+    // is introduced by an `extend` in a module the document does not
+    // (and cannot) import for that purpose (CONTRACT_MODULE_SYSTEM.md §5).
+    const std::string main = "module app::main\nfn use_it(): i32\n  let v: i32 = 1\n  return v.";
+    json request = {{"files",
+                     json::array({{{"path", kTestDocument}, {"source", main}},
+                                  {{"path", "ext.dao"},
+                                   {"source",
+                                    "module app::ext\nextend i32 as Secret:\n"
+                                    "  fn secret(self): i32 -> 42\n"}}})},
+                    {"document", kTestDocument},
+                    {"offset", static_cast<uint32_t>(main.size())}};
+    auto reply = call("completions", request);
+    for (const auto& item : reply.body) {
+      expect(item["label"].get<std::string>() != "secret")
+          << "offered an extension of another module: " << reply.body.dump();
+    }
+  };
+
+  "completion offers one method where a call would select one"_test = [] {
+    // The document's Box has its own `pick`; the document also extends
+    // Box with a `pick` of another concept.  A call selects the type's
+    // own method, and completion offers that one, not both.
+    const std::string main =
+        "module app::main\nclass Box:\n  n: i32\n  fn pick(self): i32 -> self.n\nconcept Alt:\n  "
+        "fn pick(self): string\nextend Box as Alt:\n  fn pick(self): string -> \"x\"\nfn use_it(): "
+        "i32\n  let b: Box = Box(1)\n  return b.";
+    auto reply = call("completions",
+                      document_request(main, {{"offset", static_cast<uint32_t>(main.size())}}));
+    size_t picks = 0;
+    std::string type;
+    for (const auto& item : reply.body) {
+      if (item["label"].get<std::string>() == "pick") {
+        ++picks;
+        type = item["type"].get<std::string>();
+      }
+    }
+    expect(picks == 1_u) << "offered " << picks << " pick(s): " << reply.body.dump();
+    expect(type.find("i32") != std::string::npos) << "offered the shadowed extension: " << type;
+  };
+
+  "completion offers the document's own extension"_test = [] {
+    const std::string main = "module app::main\nextend i32 as Secret:\n"
+                             "  fn secret(self): i32 -> 42\n"
+                             "fn use_it(): i32\n  let v: i32 = 1\n  return v.";
+    auto reply = call("completions",
+                      document_request(main, {{"offset", static_cast<uint32_t>(main.size())}}));
+    bool offered = false;
+    for (const auto& item : reply.body) {
+      offered = offered || item["label"].get<std::string>() == "secret";
+    }
+    expect(offered) << "an extension of this module must be offered: " << reply.body.dump();
   };
 
   "duplicate file paths are rejected"_test = [] {
@@ -348,18 +653,7 @@ suite<"playground_service"> playground_service_suite = [] {
     for (const auto& example : load_examples()) {
       auto reply = call("analyze", document_request(example.source));
       const auto& body = reply.body;
-
-      std::set<uint32_t> classified;
-      for (const auto& token : body["semanticTokens"]) {
-        classified.insert(token["offset"].get<uint32_t>());
-      }
-      for (const auto& token : body["tokens"]) {
-        auto offset = token["offset"].get<uint32_t>();
-        expect(classified.contains(offset))
-            << example.name << ": no semantic token for " << token["text"].get<std::string>()
-            << " (" << token["kind"].get<std::string>() << ") at line "
-            << token["line"].get<uint32_t>();
-      }
+      expect_every_token_classified(example.name, body);
 
       if (!known_failures.contains(example.name)) {
         expect(body["diagnostics"].empty())
@@ -368,6 +662,28 @@ suite<"playground_service"> playground_service_suite = [] {
             << example.name << " produced no LLVM IR";
       }
     }
+  };
+
+  "completion offers one method where a call would select one"_test = [] {
+    // The document's Box has its own `pick`; the document also extends
+    // Box with a `pick` of another concept.  A call selects the type's
+    // own method, and completion offers that one, not both.
+    const std::string main =
+        "module app::main\nclass Box:\n  n: i32\n  fn pick(self): i32 -> self.n\nconcept Alt:\n  "
+        "fn pick(self): string\nextend Box as Alt:\n  fn pick(self): string -> \"x\"\nfn use_it(): "
+        "i32\n  let b: Box = Box(1)\n  return b.";
+    auto reply = call("completions",
+                      document_request(main, {{"offset", static_cast<uint32_t>(main.size())}}));
+    size_t picks = 0;
+    std::string type;
+    for (const auto& item : reply.body) {
+      if (item["label"].get<std::string>() == "pick") {
+        ++picks;
+        type = item["type"].get<std::string>();
+      }
+    }
+    expect(picks == 1_u) << "offered " << picks << " pick(s): " << reply.body.dump();
+    expect(type.find("i32") != std::string::npos) << "offered the shadowed extension: " << type;
   };
 
   "navigation_and_completion_answer_over_the_examples"_test = [] {
@@ -470,13 +786,16 @@ suite<"playground_service"> playground_service_suite = [] {
     // The document calls into another file of the program; the reply
     // says where the definition is, in that file's own coordinates.
     const std::string lib = "module lib\n\nfn helper(): i32\n  return 41\n";
-    const std::string main = "module app\n\nfn main(): i32\n  return helper() + 1\n";
+    // `import lib` binds `lib` locally (CONTRACT_MODULE_SYSTEM): a module
+    // reaches another module's functions through that binding.
+    const std::string main =
+        "module app\nimport lib\n\nfn main(): i32\n  return lib::helper() + 1\n";
     json request = {{"files",
                      json::array({{{"path", "lib.dao"}, {"source", lib}},
                                   {{"path", kTestDocument}, {"source", main}}})},
                     {"document", kTestDocument}};
 
-    auto call_site = static_cast<uint32_t>(main.find("helper()"));
+    auto call_site = static_cast<uint32_t>(main.find("lib::helper()") + 5);
     json position = request;
     position["offset"] = call_site;
     auto definition = call("gotoDef", position);
@@ -528,6 +847,43 @@ suite<"playground_service"> playground_service_suite = [] {
           << "lowered past a lex/parse error in lib.dao: " << reply.body["diagnostics"].dump();
       expect(call("run", unlexable).body["exit_code"].get<int>() == -1)
           << "ran past a lex/parse error in lib.dao";
+    }
+  };
+
+  "assembly_diagnostics_come_back_in_program_order"_test = [] {
+    // The document imports a module whose file does not lex, so that
+    // file yields no module and the graph reports the import missing
+    // while the file itself reports where it broke.  Both are root
+    // causes and both must survive, in the program's canonical order
+    // (Task 31 §8.4: file id, then offset) — the document sorts first,
+    // so its import error leads the other file's.
+    json request = {{"files",
+                     json::array({{{"path", "a_main.dao"},
+                                   {"source",
+                                    "module app\nimport lib\n\nfn main(): i32\n"
+                                    "  return lib::helper()\n"}},
+                                  {{"path", "z_lib.dao"},
+                                   {"source", "module lib\n\nfn helper(): i32\n  return @\n"}}})},
+                    {"document", "a_main.dao"}};
+
+    for (const char* route : {"analyze", "run"}) {
+      auto reply = call(route, request);
+      expect(reports(reply.body, "imported module 'lib' not found"))
+          << route << " lost the import error: " << reply.body["diagnostics"].dump();
+      auto positions = located_positions(reply.body);
+      expect(positions.size() >= 2_ul)
+          << route << " lost a root cause: " << reply.body["diagnostics"].dump();
+      expect(std::ranges::is_sorted(positions))
+          << route
+          << " reported diagnostics out of file/offset order: " << reply.body["diagnostics"].dump();
+      bool names_document = false;
+      bool names_other = false;
+      for (const auto& [file, offset] : positions) {
+        names_document = names_document || file == "a_main.dao";
+        names_other = names_other || file == "z_lib.dao";
+      }
+      expect(names_document && names_other)
+          << route << " dropped a file's diagnostics: " << reply.body["diagnostics"].dump();
     }
   };
 
@@ -598,6 +954,96 @@ suite<"playground_service"> playground_service_suite = [] {
     expect(std::filesystem::exists(matrix)) << matrix.string() << " is missing";
     expect(dao::read_file(matrix) == render_capability_matrix())
         << matrix.string() << " is stale: run `task gen-tooling-surface`";
+  };
+
+  "a request file under stdlib is refused"_test = [] {
+    // A request file whose path collides with a prelude file's would be
+    // ranked as the prelude's when diagnostics are ordered.  It is not
+    // a user file the playground can take.
+    json files = json::array({
+        {{"path", "a.dao"}, {"source", "module a\nfn broken(): i32\n  return @\n"}},
+        {{"path", "stdlib/core/builtins.dao"},
+         {"source", "module x\nfn also(): i32\n  return @\n"}},
+    });
+    for (const auto& route : {"analyze", "run"}) {
+      // `call` insists on a 200; this reply is meant to be a 400.
+      auto reply =
+          dispatch(route, json{{"files", files}, {"document", "a.dao"}}, service_context());
+      expect(reply.status == http_status::bad_request)
+          << route << " accepted a request file under the prelude roots: " << reply.body.dump();
+    }
+    // Only the prelude roots are reserved: `stdlib/concepts/` is not the
+    // prelude (§7.1) and is an ordinary request file.
+    json outside = json::array({
+        {{"path", "stdlib/concepts/mine.dao"},
+         {"source", "module concepts::mine\nfn f(): i32 -> 1\n"}},
+        {{"path", kTestDocument}, {"source", "module app\nfn main(): i32 -> 0\n"}},
+    });
+    auto ok = dispatch(
+        "analyze", json{{"files", outside}, {"document", kTestDocument}}, service_context());
+    expect(ok.status == http_status::ok)
+        << "a non-prelude stdlib path was refused: " << ok.body.dump();
+  };
+
+  "diagnostics_come_back_in_program_order"_test = [] {
+    // Phases are collected one after another, so without a final sort a
+    // resolve error in the first file follows a parse error in the
+    // second.  Program order is by file, then by offset within it
+    // (CONTRACT_MODULE_SYSTEM.md §8.4).
+    json files = json::array({
+        {{"path", "a.dao"}, {"source", "module a\nfn uses_missing(): i32 -> nowhere()\n"}},
+        {{"path", "b.dao"}, {"source", "module b\nfn broken(): i32\n  return @\n"}},
+    });
+    for (const auto& route : {"analyze", "run"}) {
+      auto reply = call(route, json{{"files", files}, {"document", "a.dao"}});
+      std::vector<std::pair<std::string, uint32_t>> seen;
+      for (const auto& diag : reply.body["diagnostics"]) {
+        seen.emplace_back(diag.value("file", std::string{}), diag.value("offset", 0U));
+      }
+      expect(seen.size() > 1_ul) << route << ": expected diagnostics from both files";
+      expect(std::ranges::is_sorted(seen))
+          << route << " diagnostics are out of program order: " << reply.body["diagnostics"].dump();
+    }
+  };
+
+  "multifile_examples_analyze_and_run_as_one_program"_test = [] {
+    // A directory of examples is one program: every file analyzes with
+    // its own diagnostics, and the set builds and runs together.
+    init_run_support();
+    const bool update = std::getenv("DAO_UPDATE_GOLDENS") != nullptr;
+
+    for (const auto& example : load_multifile_examples()) {
+      for (const auto& file : example.files) {
+        json request = {{"files", example.files}, {"document", file["path"]}};
+        auto analyzed = call("analyze", request);
+        expect(analyzed.status == http_status::ok) << example.name << ": analyze failed";
+        for (const auto& diag : analyzed.body["diagnostics"]) {
+          expect(diag["severity"] != "error")
+              << example.name << "/" << file["path"] << ": " << diag["message"];
+        }
+        expect_every_token_classified(example.name + "/" + file["path"].get<std::string>(),
+                                      analyzed.body);
+      }
+
+      auto reply = call("run", json{{"files", example.files}, {"document", example.document}});
+      auto exit_code = reply.body["exit_code"].get<int>();
+      expect(exit_code == 0) << example.name << " exited " << exit_code << ": "
+                             << reply.body["stderr"].get<std::string>()
+                             << reply.body["diagnostics"].dump();
+
+      auto stdout_text = reply.body["stdout"].get<std::string>();
+      auto golden_path = golden_dir() / (example.name + ".out");
+      if (update) {
+        std::ofstream(golden_path, std::ios::binary) << stdout_text;
+        continue;
+      }
+      expect(std::filesystem::exists(golden_path))
+          << golden_path.string() << " is missing; run with DAO_UPDATE_GOLDENS=1";
+      if (std::filesystem::exists(golden_path)) {
+        expect(dao::read_file(golden_path) == stdout_text)
+            << example.name << " output differs from " << golden_path.filename().string();
+      }
+    }
   };
 
   "examples_run_to_their_goldens"_test = [] {

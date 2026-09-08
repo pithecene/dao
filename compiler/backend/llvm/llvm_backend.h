@@ -22,6 +22,8 @@
 
 namespace dao {
 
+struct ModuleInfo;
+
 // ---------------------------------------------------------------------------
 // LlvmBackendResult — output of LLVM lowering.
 // ---------------------------------------------------------------------------
@@ -47,8 +49,11 @@ public:
   // bodies dropped with a warning if they use unsupported constructs,
   // while user functions produce hard errors. Without a source map
   // every function is user code.
-  auto lower(const MirModule& mir_module, const SourceMap* source_map = nullptr)
-      -> LlvmBackendResult;
+  // `entry` is the program's entry module: its `main` keeps the name
+  // `main`; every other module-owned function is named `<module>::<name>`.
+  auto lower(const MirModule& mir_module,
+             const SourceMap* source_map = nullptr,
+             const ModuleInfo* entry = nullptr) -> LlvmBackendResult;
 
   // Emit textual LLVM IR to a stream.
   static void print_ir(std::ostream& out, const llvm::Module& module);
@@ -71,6 +76,30 @@ private:
   llvm::LLVMContext& ctx_;
   LlvmTypeLowering types_;
   std::unique_ptr<llvm::Module> module_;
+  const ModuleInfo* entry_ = nullptr; // the program's entry module while lowering
+
+  /// LLVM name of a function symbol (llvm_names.h) for this program.
+  [[nodiscard]] auto fn_name(const Symbol& sym) const -> std::string;
+
+  /// A MIR function's source-level signature, for comparing two
+  /// declarations of one C symbol without LLVM's type erasure.
+  /// One declaration of a C symbol.  `identity` is what two
+  /// declarations must agree on: a semantic key per parameter type and
+  /// then the return type.  Neither printed forms nor addresses can
+  /// decide that — two distinct classes named `Payload` print alike,
+  /// and nominal types are not interned, so `Box<i32>` written twice is
+  /// two objects.  `printed` is how the signature reads in a message,
+  /// and `module` says who declared it, which is what makes the message
+  /// legible when two different signatures print the same.
+  struct ExternDeclaration {
+    std::vector<std::string> identity;
+    std::string printed;
+    std::string module;
+  };
+  [[nodiscard]] static auto extern_declaration(const MirFunction& fn) -> ExternDeclaration;
+
+  /// The source signature each extern was first declared with.
+  std::unordered_map<std::string, ExternDeclaration> extern_signatures_;
   std::vector<Diagnostic> diagnostics_;
 
   void emit_diagnostic(Span span, const std::string& message);

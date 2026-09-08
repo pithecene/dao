@@ -18,16 +18,35 @@ struct ResolveResult {
   ResolveContext context;
   std::unordered_map<uint32_t, Symbol*> uses; // token span offset -> resolved Symbol*
   std::vector<Diagnostic> diagnostics;
+
+  /// The symbol an identifier or qualified name denotes.  A qualified
+  /// name through an import binding is recorded per segment
+  /// (CONTRACT_MODULE_SYSTEM.md §6): the binding at the head, the export
+  /// at the second segment, a type's member at the third — this follows
+  /// them to the last.  Null when unresolved.
+  [[nodiscard]] auto symbol_for(const Expr& expr) const -> const Symbol*;
 };
 
-// Run name resolution over every parsed file of a program.  All files
-// are declared into one shared file scope, in load order; per-module
-// scopes are not implemented yet.  The Program must outlive the
-// result: symbol names are string_views into its source buffers.
-// The source map decides which declarations belong to the prelude
-// group and are therefore exempt from user-code naming restrictions
-// (CONTRACT_MODULE_SYSTEM.md §7.7).
-auto resolve(const Program& program) -> ResolveResult;
+// Run name resolution over a program: builtins, then the prelude
+// group as one namespace, then one scope per module (spec §7.6), in
+// topological order.  Imports bind module names; `b::name` resolves
+// through the bound module's export table (CONTRACT_MODULE_SYSTEM.md
+// §3, §4, §6).  Records each module's scope on its ModuleInfo.  The
+// Program must outlive the result: symbol names are string_views into
+// its source buffers.
+/// The generic intrinsic family: declared by the prelude
+/// (`stdlib/core/builtins.dao`) and answered by the backend with inline
+/// IR rather than a call.  Recognition is by ownership — a prelude
+/// module may declare these, no other module may — so this says only
+/// which names belong to the family, mangled specializations
+/// (`size_of$i32`) included.
+auto is_prelude_intrinsic(std::string_view name) -> bool;
+
+auto resolve(Program& program) -> ResolveResult;
+
+// Resolution without a program: every file is its own module and the
+// source map decides prelude membership.  Imports bind names that
+// resolve no further.
 auto resolve(std::span<const FileNode* const> files, const SourceMap* source_map)
     -> ResolveResult;
 

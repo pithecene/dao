@@ -184,6 +184,14 @@ public:
   [[nodiscard]] auto name() const -> std::string_view {
     return name_;
   }
+  /// Revise the variants of an enum registered earlier with payloads
+  /// that could not yet be typed -- the enum's identity is fixed at
+  /// its first registration so every reference to it stays valid, and
+  /// its payload types settle as the aliases they name do.
+  void set_variants(std::vector<EnumVariant> variants) {
+    variants_ = std::move(variants);
+  }
+
   [[nodiscard]] auto variants() const -> const std::vector<EnumVariant>& {
     return variants_;
   }

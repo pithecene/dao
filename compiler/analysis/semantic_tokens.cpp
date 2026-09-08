@@ -266,6 +266,13 @@ private:
   static auto segment_spans(const QualifiedPath& path)
       -> std::vector<std::pair<std::string_view, Span>> {
     std::vector<std::pair<std::string_view, Span>> result;
+    if (path.segment_spans.size() == path.segments.size()) {
+      // As the tokens sat in the source: `lib :: x` is legal.
+      for (size_t i = 0; i < path.segments.size(); ++i) {
+        result.emplace_back(path.segments[i], path.segment_spans[i]);
+      }
+      return result;
+    }
     uint32_t offset = path.span.offset;
     for (const auto& seg : path.segments) {
       auto len = static_cast<uint32_t>(seg.size());
@@ -383,11 +390,11 @@ private:
     }
     visit_methods(st.methods);
     for (const auto& conformance : st.conformances) {
-      classify(conformance.concept_span, "use.type");
+      classify_conformance_target(conformance.target);
       visit_methods(conformance.methods);
     }
     for (const auto& denial : st.denials) {
-      classify(denial.concept_span, "use.type");
+      classify_conformance_target(denial.target);
     }
   }
 
@@ -422,13 +429,24 @@ private:
     visit_methods(concept_decl.methods);
   }
 
+  /// `as b::Reveal`, `deny b::Reveal`, `extend T as b::Reveal`: the
+  /// binding segment is a module use by its position alone, so it is
+  /// painted whether or not `b` resolved -- an unresolved binding must
+  /// not vanish from the token stream.
+  void classify_conformance_target(const ConformanceTarget& target) {
+    if (!target.module_binding.empty()) {
+      classify(target.binding_span, "use.module");
+    }
+    classify(target.concept_span, "use.type");
+  }
+
   void visit_extend(const Decl& decl) {
     const auto& extend = decl.as<ExtendDecl>();
     if (extend.target_type != nullptr) {
       visit_type(*extend.target_type);
     }
-    if (!extend.concept_name.empty()) {
-      classify(extend.concept_span, "use.type");
+    if (!extend.target.concept_name.empty()) {
+      classify_conformance_target(extend.target);
     }
     visit_methods(extend.methods);
   }
@@ -580,12 +598,15 @@ private:
   // expression (segments are separated by `::`).
   auto record_qualified(const Expr& expr) -> std::vector<Span> {
     const auto& qn = expr.as<QualifiedName>();
-    std::vector<Span> spans;
-    uint32_t offset = expr.span.offset;
-    for (const auto& seg : qn.segments) {
-      auto len = static_cast<uint32_t>(seg.size());
-      spans.push_back(Span{.offset = offset, .length = len});
-      offset += len + 2; // skip "::"
+    std::vector<Span> spans = qn.segment_spans; // as the tokens sat: `lib :: x` is legal
+    if (spans.size() != qn.segments.size()) {
+      spans.clear();
+      uint32_t offset = expr.span.offset;
+      for (const auto& seg : qn.segments) {
+        auto len = static_cast<uint32_t>(seg.size());
+        spans.push_back(Span{.offset = offset, .length = len});
+        offset += len + 2; // skip "::"
+      }
     }
     if (!spans.empty()) {
       qualified_[spans.front().offset] = spans;
@@ -933,11 +954,28 @@ auto classify_tokens(const std::vector<Token>& tokens,
         if (auto qual = qualified.find(tok.span.offset); qual != qualified.end()) {
           auto painting = paint_qualified(*sym);
           const auto& spans = qual->second;
-          for (size_t i = 1; i + 1 < spans.size(); ++i) {
-            pending[spans[i].offset] = "use.module";
-          }
-          if (spans.size() > 1 && !painting.tail.empty()) {
-            pending[spans.back().offset] = painting.tail;
+          // A path through an import binding is resolved segment by
+          // segment — the module, its exported type, then the static
+          // method or variant — and each segment's own resolved symbol
+          // is what classifies it.  Only a segment the resolver left
+          // unrecorded falls back to what the head implies.
+          for (size_t i = 1; i < spans.size(); ++i) {
+            const auto* segment_sym = resolved_symbol(spans[i].offset);
+            std::string_view category;
+            if (segment_sym == nullptr) {
+              category = i + 1 < spans.size() ? "use.module" : painting.tail;
+            } else if (i + 1 == spans.size() && segment_sym->kind == SymbolKind::Type &&
+                       segment_sym == resolved_symbol(spans[i - 1].offset)) {
+              // An enum variant has no symbol of its own, so `b::E::V`
+              // records the enum at both segments; the repetition is
+              // what marks the last one a variant rather than a type.
+              category = "use.variant";
+            } else {
+              category = resolve_use_category(segment_sym->kind);
+            }
+            if (!category.empty()) {
+              pending[spans[i].offset] = category;
+            }
           }
           if (!painting.head.empty()) {
             emit(tok, painting.head);

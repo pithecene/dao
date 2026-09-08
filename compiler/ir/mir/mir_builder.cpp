@@ -149,38 +149,54 @@ auto hir_function_is_generic(const HirFunction& fn) -> bool {
 // Top-level
 // ---------------------------------------------------------------------------
 
-auto MirBuilder::build(const HirModule& module) -> MirBuildResult {
+namespace {
+
+/// Smallest span covering both (disjoint ranges of one offset space).
+auto covering(Span lhs, Span rhs) -> Span {
+  auto begin = std::min(lhs.offset, rhs.offset);
+  auto end = std::max(lhs.offset + lhs.length, rhs.offset + rhs.length);
+  return Span{.offset = begin, .length = end - begin};
+}
+
+} // namespace
+
+auto MirBuilder::build(const HirProgram& program) -> MirBuildResult {
   auto* mir_mod = ctx_.alloc<MirModule>();
-  mir_mod->span = module.span;
   current_module_ = mir_mod;
   generic_templates_.clear();
 
-  for (const auto* decl : module.declarations) {
-    if (decl->is<HirFunction>()) {
-      const auto& hir_fn = decl->as<HirFunction>();
+  // Every module's functions, in program order, into one MirModule.
+  // Generic templates are keyed by symbol and so are program-wide.
+  for (const auto* hir_module : program.modules) {
+    mir_mod->span =
+        mir_mod->span.length == 0 ? hir_module->span : covering(mir_mod->span, hir_module->span);
+    for (const auto* decl : hir_module->declarations) {
+      if (decl->is<HirFunction>()) {
+        const auto& hir_fn = decl->as<HirFunction>();
 
-      if (hir_function_is_generic(hir_fn)) {
-        // Generic function: lower body into a template for the
-        // monomorphizer to clone from, but do NOT add to the module's
-        // function list.  The lowering_generic_template_ flag gates
-        // tolerance for unresolved field accesses on generic type
-        // parameters (concept method calls like x.to_string() where
-        // x: T: Printable).
-        lowering_generic_template_ = true;
-        auto* mir_fn = lower_function(hir_fn, decl->span);
-        lowering_generic_template_ = false;
-        if (mir_fn != nullptr && mir_fn->symbol != nullptr) {
-          generic_templates_[mir_fn->symbol] = mir_fn;
-        }
-      } else {
-        // Monomorphic function: lower normally into the module.
-        auto* mir_fn = lower_function(hir_fn, decl->span);
-        if (mir_fn != nullptr) {
-          mir_mod->functions.push_back(mir_fn);
+        if (hir_function_is_generic(hir_fn)) {
+          // Generic function: lower body into a template for the
+          // monomorphizer to clone from, but do NOT add to the module's
+          // function list.  The lowering_generic_template_ flag gates
+          // tolerance for unresolved field accesses on generic type
+          // parameters (concept method calls like x.to_string() where
+          // x: T: Printable).
+          lowering_generic_template_ = true;
+          auto* mir_fn = lower_function(hir_fn, decl->span);
+          lowering_generic_template_ = false;
+          if (mir_fn != nullptr && mir_fn->symbol != nullptr) {
+            generic_templates_[mir_fn->symbol] = mir_fn;
+          }
+        } else {
+          // Monomorphic function: lower normally into the module.
+          auto* mir_fn = lower_function(hir_fn, decl->span);
+          if (mir_fn != nullptr) {
+            mir_mod->functions.push_back(mir_fn);
+          }
         }
       }
+      // ClassDecl: no MIR function to produce; skip.
     }
-    // ClassDecl: no MIR function to produce; skip.
   }
 
   return {.module = mir_mod,
@@ -842,10 +858,9 @@ void MirBuilder::error(Span span, std::string message) {
 // Free-function entry point
 // ---------------------------------------------------------------------------
 
-auto build_mir(const HirModule& module, MirContext& ctx,
-               TypeContext& types) -> MirBuildResult {
+auto build_mir(const HirProgram& program, MirContext& ctx, TypeContext& types) -> MirBuildResult {
   MirBuilder builder(ctx, types);
-  return builder.build(module);
+  return builder.build(program);
 }
 
 } // namespace dao

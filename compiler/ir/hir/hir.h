@@ -15,6 +15,8 @@
 
 namespace dao {
 
+struct ModuleInfo;
+
 // Forward declarations for recursive references.
 struct HirDecl;
 struct HirStmt;
@@ -264,7 +266,15 @@ struct HirExpr {
 
 struct HirModule {
   Span span;
-  std::vector<HirDecl*> declarations;
+  const ModuleInfo* module = nullptr; // null outside a program (single-file lowering)
+  std::vector<HirDecl*> declarations; // the module's declarations, then its extend methods
+};
+
+/// Every module of a program in the order they are lowered: prelude
+/// modules first, then the rest topologically, then any file without a
+/// module declaration.
+struct HirProgram {
+  std::vector<HirModule*> modules;
 };
 
 } // namespace dao

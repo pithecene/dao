@@ -290,8 +290,23 @@ expressions, break/continue, LLVM C API integration,
 **How to run tests**:
 
 ```sh
-bash bootstrap/assemble.sh && daoc build bootstrap/llvm/llvm.gen.dao && ./bootstrap/llvm/llvm.gen
+task bootstrap-test   # every suite, then validate_ir over bootstrap/llvm/out
 ```
+
+or by hand (the suite writes its artifacts under `bootstrap/llvm/out`,
+which is gitignored, so create it first):
+
+```sh
+rm -rf bootstrap/llvm/out && mkdir -p bootstrap/llvm/out
+bash bootstrap/assemble.sh && daoc build bootstrap/llvm/llvm.gen.dao && ./bootstrap/llvm/llvm.gen
+bash bootstrap/validate_ir.sh build/debug
+```
+
+The suite writes the IR of every fixture it lowers to
+`bootstrap/llvm/out/<test>.ll` (and `<test>.exit` where the program's
+result is known); `validate_ir.sh` compiles each with `clang`, links the
+ones with an expectation against the runtime, runs them, and compares
+exit codes (Task 30.5).  `task bootstrap-test` runs both steps.
 
 ## Module-system contract parity
 
@@ -305,7 +320,7 @@ same change as the bootstrap work that closes a row.
 | §3 imports | conforms (Tasks 25–26) — one-segment binding, module-name-only exposure, cycle rejection |
 | §4 exports, same-module access | conforms (Task 26) |
 | §5 `extend` scoping | conforms (Task 26 §6.5) — module granularity, not imported |
-| §6 qualified forms | `b::f`, `b::T`, `b::E::V` conform (Task 27 D4); `b::T::m` is rejected until the bootstrap has methods — Task 33 |
+| §6 qualified forms | `b::f`, `b::T`, `b::E::V` conform (Task 27 D4); `b::C` in conformance positions and `b::T::m` are rejected until the bootstrap has concepts and methods — Task 33 |
 | §7 prelude | not implemented — the resolver declares compiler builtins only and loads no stdlib — Task 33 |
 | §8 entry module | not implemented — no driver or entry concept; MIR flattens every function of every module — Task 33 |
 | §9 determinism | graph construction conforms (Task 25 §8; graph tests 7–8); program-level output determinism is unverified — Task 33 |
@@ -325,6 +340,5 @@ probe. The probe is retained as a historical artifact.
 ## What comes next
 
 - Tier B expansion (generics, concepts, extend, mode/resource)
-- `llc`/`clang` validation of emitted LLVM IR (Task 30.5)
 - Diagnostic formatting integration
 - Multi-file compilation (eliminate assembly workaround)

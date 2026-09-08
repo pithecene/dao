@@ -320,7 +320,7 @@ in `bootstrap/shared/base.dao`; assembly via `bootstrap/assemble.sh`.
 Task 29 (bootstrap MIR) is complete — HIR lowered to basic-block MIR
 with 8 tests.
 Task 30 (bootstrap LLVM backend) is complete — MIR lowered to
-deterministic textual LLVM IR with 17 tests.
+deterministic textual LLVM IR with 19 tests.
 
 The Tier A bootstrap frontend-to-IR-to-text pipeline (lex → parse →
 resolve → typecheck → HIR → MIR → LLVM text) is complete.
@@ -550,9 +550,27 @@ measured by the audit's peak-memory column.
 
 ### Task 31 — Host Multi-file Compilation
 
-Status: **in progress** — D0 (program-wide source map; prelude loaded
+Status: **complete** — D0 (program-wide source map; prelude loaded
 as separate files; `prelude_bytes` machinery and `blank_leading_module`
-removed; `compiler/frontend/module/` created) landed.  D1–D6 follow.
+removed; `compiler/frontend/module/` created), D1 (`ModuleInfo`,
+module graph with import edges, lexical Kahn ordering and cycle traces,
+entry selection per §7.7, root-file discovery with the §8.3 mapping
+rule, lexical file-id order per §8.4, `--module-root` / `--stdlib-root`
+/ `--source` / `--entry`), D2 (builtins → prelude → per-module scopes,
+`Symbol::module`, imports bound to `ModuleInfo`, export-table
+resolution of qualified names, builtins unshadowable, prelude shadowing)
+and D3 (qualified forms type-check through the resolver's per-segment
+entries: `b::f`, `b::T` in type position, `b::T::m`, `b::E::V`; modules
+checked in topological order) and D4 (`HirProgram` of per-module
+`HirModule`s, MIR flattened in program order, `llvm_function_name` by
+symbol identity with `<module>::<name>` mangling and the entry-module
+`main` rule, intrinsic and hook recognition gated on identity, the
+first multi-file executable), D5 (analysis and the playground on the
+program's in-memory mode; `daoc tokens` / `resolve` dumps select user
+modules by `is_prelude`; cross-file hover and definition covered) and
+D6 (`docs/building.md` driver usage; this entry) landed.  Explicit
+deferrals stay as the spec lists them: Task 32 (import forms,
+`assemble.sh` retirement) and Task 33 (bootstrap module-system parity).
 
 **Objective**: make the C++ host compiler compile a program spanning
 multiple Dao source files with real module identity, import-driven
@@ -614,7 +632,7 @@ identity in every reply while the UI still shows one document.
 
 ### Task 30.5 — Mechanical LLVM Validation
 
-Status: **not started** — Order 2 of the delivery sequence; ahead of
+Status: **complete** — Order 2 of the delivery sequence; ahead of
 further backend complexity.
 
 **Objective**: every bootstrap LLVM fixture proves its emitted IR is
@@ -624,9 +642,21 @@ failure rather than a manual discovery.  Motivated by the `%0`
 SSA-generation bug the first struct slice exposed, which every
 substring-based LLVM assertion had missed.
 
+The bootstrap LLVM suite (`bootstrap/llvm/impl.dao`) writes the IR of
+every fixture it lowers to `bootstrap/llvm/out/<test>.ll`, plus a
+`<test>.exit` file where the program's result is known.
+`bootstrap/validate_ir.sh` proves each artifact is accepted by LLVM
+(`clang -c -x ir`), links the ones with an expectation against the
+runtime, runs them, and compares exit codes; `task bootstrap-test` runs
+it after the suite.  Invalid IR from the bootstrap backend is a test
+failure rather than a manual discovery — the follow-up Task 30 §14.3
+called for, ahead of the Tier B backend slices.
+
 ### Task 34 — Bootstrap Closure Audit
 
-Status: **not started** — Order 3 of the delivery sequence.
+Status: **complete** (first audit) — Order 3 of the delivery sequence;
+`task bootstrap-audit` regenerates `docs/bootstrap_closure.md` after
+every bootstrap slice.
 
 **Objective**: for each construct occurring in `bootstrap/**/*.dao`,
 plus each stdlib method those sources instantiate, record host and
@@ -635,6 +665,36 @@ MIR → LLVM → native`).  The result defines Tier B-Bootstrap — the
 feature set the compiler corpus actually needs — and sequences Orders
 4–5; features absent from both the compiler and its stdlib
 instantiations do not delay the first bootstrap.
+
+Delivered per `docs/task_specs/TASK_34_BOOTSTRAP_CLOSURE_AUDIT.md` from
+three mechanical sources: the host AST printer's construct inventory
+over every assembled bootstrap program, the prelude functions the host
+instantiates for the largest program, and the bootstrap pipeline's own
+diagnostics per stage over its own programs (an opt-in probe in
+`bootstrap/llvm/impl.dao`, one process per program and stage, memory-
+and time-bounded).  The first blocking diagnostic per program names what to
+implement next; the figures per program and stage are in the generated
+document.
+
+First audit: the corpus uses classes, payload enums with `match`,
+`if`/`while`/`break`, generics through `Vector<T>` and its methods,
+strings, and generators via `range` — no lambdas, `for`, modes,
+resources, pipelines, or concepts.  Measured one stage per process
+(the bootstrap frees nothing, so a stage's cost can only be measured
+alone), the four smallest programs (3–5k lines) reach the LLVM stage
+in 5.5–12 GiB and 17–40 s and panic there on an out-of-bounds token
+index; the three largest (7–9k lines) exhaust 16 GiB in `typecheck`
+or `mir`.  Capacity is therefore the blocker for the large half of the
+corpus, and a construct for the rest: `lex` is clean; the bootstrap
+parser rejects one construct at every site it occurs — generic
+arguments on a qualified name in expression position
+(`Vector<i64>::new()`) — and the resolver and type checker report their
+own gaps past those sites (the histograms name the messages); `mir`
+rejects `break` and synthesized literals; `llvm` panics where reached.
+Tier B-Bootstrap therefore starts with that parser construct and the
+bootstrap's memory behaviour (value-threaded state copying its vectors
+at every step) side by side, then the resolver, type checker, MIR, and
+LLVM rejections the histograms name.
 
 ### Task 33 — Bootstrap Module-System Parity
 

@@ -10,6 +10,7 @@ Normative behavior lives in `CLAUDE.md` and `docs/contracts/`.
 | `CLAUDE.md` | Repo constitution and structural invariants |
 | `AGENTS.md` | Contributor and agent guardrails |
 | `README.md` | Project overview |
+| `CHANGELOG.md` | Observable behaviour changes, newest first |
 | `.bonsai.yaml` | Repo-local Bonsai routing hints |
 | `.grove.yaml` | Grove project metadata and consolidation hints |
 | `mise.toml` | mise tool/runtime pins, env-based build parallelism cap |
@@ -38,6 +39,7 @@ Contracts and explanatory material.
 - `COMPILER_SERVICE_API.md` — explanatory shared analysis payloads for CLI, playground, and LSP
 - `building.md` — build prerequisites, parallelism cap (`DAO_BUILD_JOBS`), and override instructions
 - `tooling_capabilities.md` — generated capability matrix (compiler entry points × playground route × `daoc` command × LSP method) from `tools/playground/compiler_service/service_surface.h`; verified by `playground_service_test`
+- `bootstrap_closure.md` — generated closure audit (Task 34): construct inventory, forced prelude instantiations, per-stage self-compile matrix
 - `language_vision.md` — explanatory design doctrine, stdlib posture, module/namespace design, and GPU strategy
 
 ## `spec/`
@@ -137,6 +139,11 @@ Self-hosting compiler subsystems written in Dao.
   into `*.gen.dao` files via `assemble.sh`
 - `assemble.sh` — concatenates `shared/base.dao` with subsystem sources
   to produce compilable `*.gen.dao` outputs (gitignored build artifacts)
+- `validate_ir.sh` — compiles, links, and runs the IR the LLVM suite
+  emits under `llvm/out/` (gitignored), comparing exit codes
+- `audit_closure.sh` — measures the constructs and prelude functions the
+  bootstrap corpus needs and where the bootstrap pipeline stops on its own
+  programs; writes `docs/bootstrap_closure.md`
 - `lexer/` — indentation-aware lexer matching the host compiler's token
   surface; tests in `tests.dao` (Task 20)
 - `parser/` — recursive-descent parser producing arena-indexed AST for
@@ -172,6 +179,13 @@ Also serves as a playground corpus and early regression corpus.
 Fixtures and golden inputs/outputs for parser/compiler tests.
 
 - `ast/` — golden AST printer output for examples, stdlib, and syntax probes
+- `module/` — on-disk fixtures for host root-file discovery
+  (`smoke/`: transitive imports and a prelude import; `mismatch/`: a
+  located file declaring a different module; `roots/`: a second module
+  root; `duplicate/`: two files declaring one module; `prelude_imports/`:
+  a prelude file importing outside the group; `shadowed_prelude/`: an
+  earlier root mapping an identity the prelude also supplies;
+  `prelude_root/`: a stdlib file compiled as the root)
 - `examples/` — golden stdout of every runnable example (`<name>.out`)
   and `known_failures.txt` naming the examples the compiler cannot build
   yet, checked by `playground_service_test`

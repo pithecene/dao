@@ -41,7 +41,7 @@ equivalence.
 | Order | Work | Exit condition |
 |---|---|---|
 | 0 | Bounded playground/analysis synchronization interlude | compiler changes cannot silently leave the playground or its API stale |
-| 1 | Finish Task 31 D1 → D6 | the host compiler builds a genuine multi-file Dao executable |
+| 1 | Task 31 D1 → D6 — **complete** | the host compiler builds a genuine multi-file Dao executable; next is Task 32 (bootstrap sources as real modules) at order 6 |
 | 2 | Task 30.5: mechanical LLVM/native validation | every bootstrap LLVM test proves its IR is accepted by LLVM/clang |
 | 3 | Bootstrap closure audit | exact list of language features and stdlib instantiations the compiler corpus needs, per pipeline stage |
 | 4 | Tier B core: methods + generics + monomorphization | `Vector<T>`, `HashMap<T>`, compiler methods and generic calls survive HIR → MIR → LLVM |

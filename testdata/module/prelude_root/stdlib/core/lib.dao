@@ -1,0 +1,3 @@
+module core::lib
+
+fn one(): i32 -> 1

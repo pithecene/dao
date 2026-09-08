@@ -149,13 +149,11 @@ suite<"source_map_layout"> source_map_layout = [] {
     // needed to exercise the boundary): `high` occupies
     // [max-6, max-3], `top` occupies [max-2, max].
     constexpr uint32_t max = std::numeric_limits<uint32_t>::max();
-    SourceFile high{.file_id = 0,
-                    .display_path = "high.dao",
+    SourceFile high{.display_path = "high.dao",
                     .buffer = SourceBuffer("high.dao", "abc"),
                     .base_offset = max - 6,
                     .is_prelude = false};
-    SourceFile top{.file_id = 1,
-                   .display_path = "top.dao",
+    SourceFile top{.display_path = "top.dao",
                    .buffer = SourceBuffer("top.dao", "xy"),
                    .base_offset = max - 2,
                    .is_prelude = false};

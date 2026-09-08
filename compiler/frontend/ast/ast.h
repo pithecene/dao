@@ -114,6 +114,9 @@ struct TypeNode;
 struct QualifiedPath {
   std::vector<std::string_view> segments;
   Span span;
+  // One span per segment, as the tokens sat in the source: `lib :: x`
+  // is legal, so a consumer cannot place a segment from the text alone.
+  std::vector<Span> segment_spans;
 };
 
 struct Param {
@@ -196,17 +199,27 @@ struct FieldSpec {
 // Conformance and denial specifiers — used inside class bodies.
 // ---------------------------------------------------------------------------
 
-// Conformance block inside a class: `as ConceptName:`
-struct ConformanceBlock {
+// The concept a conformance position names: `Concept` or, through an
+// import binding, `b::Concept` (CONTRACT_MODULE_SYSTEM.md §6).
+// `concept_name` and `concept_span` are always the concept's own
+// segment, so a consumer that only wants the concept reads them
+// unchanged; `module_binding` is empty for the unqualified form.
+struct ConformanceTarget {
+  std::string_view module_binding;
+  Span binding_span;
   std::string_view concept_name;
   Span concept_span;
+};
+
+// Conformance block inside a class: `as ConceptName:` / `as b::Concept:`
+struct ConformanceBlock {
+  ConformanceTarget target;
   std::vector<Decl*> methods; // FunctionDecl nodes
 };
 
-// Deny statement inside a class: `deny ConceptName`
+// Deny statement inside a class: `deny ConceptName` / `deny b::Concept`
 struct DenySpec {
-  std::string_view concept_name;
-  Span concept_span;
+  ConformanceTarget target;
 };
 
 // ---------------------------------------------------------------------------
@@ -270,8 +283,7 @@ struct ConceptDecl {
 
 struct ExtendDecl {
   TypeNode* target_type;
-  std::string_view concept_name;
-  Span concept_span;
+  ConformanceTarget target;
   std::vector<Decl*> methods; // FunctionDecl nodes
 };
 
@@ -455,6 +467,7 @@ struct IdentifierExpr {
 
 struct QualifiedName {
   std::vector<std::string_view> segments;
+  std::vector<Span> segment_spans; // one per segment, see QualifiedPath
 };
 
 using ExprPayload = std::variant<BinaryExpr,
