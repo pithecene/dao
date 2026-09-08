@@ -29,10 +29,10 @@ struct LocatedImport {
 };
 
 struct GraphInputs {
-  std::optional<std::string> entry;       // explicit entry module (explicit / in-memory mode)
+  std::optional<std::string> entry; // explicit entry module (explicit / in-memory mode)
   EntryPolicy entry_policy = EntryPolicy::Optional;
-  std::string root_display;               // root-file mode: the root file; its module is the entry
-  std::vector<LocatedImport> located;     // root-file mode
+  std::string root_display;                // root-file mode: the root file; its module is the entry
+  std::vector<LocatedImport> located;      // root-file mode
   std::vector<std::string> searched_roots; // root-file mode: named in "not found" diagnostics
 };
 

@@ -56,9 +56,10 @@ void register_modules(Program& program) {
     }
     auto display = module_display(node->module_decl->path.segments);
     if (auto existing = program.by_display.find(display); existing != program.by_display.end()) {
-      program.diagnostics.push_back(Diagnostic::error(
-          node->module_decl->span, "module '" + display + "' is already declared by " +
-                                       existing->second->file->display_path));
+      program.diagnostics.push_back(Diagnostic::error(node->module_decl->span,
+                                                      "module '" + display +
+                                                          "' is already declared by " +
+                                                          existing->second->file->display_path));
       continue;
     }
     auto module = std::make_unique<ModuleInfo>(ModuleInfo{
@@ -167,7 +168,8 @@ void resolve_edges(Program& program, const GraphInputs& inputs) {
 // display, so the order is a function of the graph alone (§8.4).
 // ---------------------------------------------------------------------------
 
-auto dependents_of(const Program& program) -> std::unordered_map<const ModuleInfo*, std::vector<ModuleInfo*>> {
+auto dependents_of(const Program& program)
+    -> std::unordered_map<const ModuleInfo*, std::vector<ModuleInfo*>> {
   std::unordered_map<const ModuleInfo*, std::vector<ModuleInfo*>> dependents;
   for (const auto& module : program.modules) {
     for (auto* imported : module->imports) {
@@ -177,7 +179,8 @@ auto dependents_of(const Program& program) -> std::unordered_map<const ModuleInf
   return dependents;
 }
 
-auto topological_order(Program& program) -> ModuleSet /* modules left unordered: on or behind a cycle */ {
+auto topological_order(Program& program) -> ModuleSet
+/* modules left unordered: on or behind a cycle */ {
   auto dependents = dependents_of(program);
   std::unordered_map<const ModuleInfo*, size_t> pending_imports;
   ModuleSet ready;
@@ -253,8 +256,8 @@ void strip_acyclic_dependents(ModuleSet& remaining) {
 }
 
 auto first_import_within(const ModuleInfo& module, const ModuleSet& remaining) -> ModuleInfo* {
-  auto it = std::ranges::find_if(module.imports,
-                                 [&](ModuleInfo* imported) { return remaining.contains(imported); });
+  auto it = std::ranges::find_if(
+      module.imports, [&](ModuleInfo* imported) { return remaining.contains(imported); });
   return it == module.imports.end() ? nullptr : *it;
 }
 
@@ -286,9 +289,8 @@ void report_cycles(Program& program, ModuleSet remaining) {
       trace += member->display + " -> ";
     }
     trace += current->display;
-    program.diagnostics.push_back(
-        Diagnostic::error(import_span(*cycle.front(), *cycle[1 % cycle.size()]),
-                          "import cycle: " + trace));
+    program.diagnostics.push_back(Diagnostic::error(
+        import_span(*cycle.front(), *cycle[1 % cycle.size()]), "import cycle: " + trace));
     for (auto* member : cycle) {
       remaining.erase(member);
     }
@@ -322,9 +324,8 @@ void require_main(Program& program,
 
 void select_entry(Program& program, const GraphInputs& inputs) {
   if (!inputs.root_display.empty()) {
-    auto root = std::ranges::find_if(program.files, [&](const auto& file) {
-      return file->display_path == inputs.root_display;
-    });
+    auto root = std::ranges::find_if(
+        program.files, [&](const auto& file) { return file->display_path == inputs.root_display; });
     program.entry = root == program.files.end() ? nullptr : (*root)->module;
     require_main(program, inputs, program.entry, "the root file");
     return;
