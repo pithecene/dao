@@ -1,4 +1,5 @@
 #include "ir/hir/hir_printer.h"
+#include "frontend/module/program.h"
 
 #include "frontend/types/type_printer.h"
 #include "support/op_str.h"
@@ -16,10 +17,16 @@ class HirPrinter {
 public:
   explicit HirPrinter(std::ostream& out) : out_(out) {}
 
-  void print(const HirModule& module) {
-    out_ << "Module\n";
-    for (const auto* decl : module.declarations) {
-      print_decl(*decl);
+  void print(const HirProgram& program) {
+    for (const auto* module : program.modules) {
+      out_ << "Module";
+      if (module->module != nullptr) {
+        out_ << " " << module->module->display;
+      }
+      out_ << "\n";
+      for (const auto* decl : module->declarations) {
+        print_decl(*decl);
+      }
     }
   }
 
@@ -434,9 +441,9 @@ private:
 
 } // namespace
 
-void print_hir(std::ostream& out, const HirModule& module) {
+void print_hir(std::ostream& out, const HirProgram& program) {
   HirPrinter printer(out);
-  printer.print(module);
+  printer.print(program);
 }
 
 } // namespace dao

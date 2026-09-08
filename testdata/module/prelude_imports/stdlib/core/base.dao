@@ -1,0 +1,4 @@
+module core::base
+import ext::thing
+
+fn base_one(): i32 -> thing::value()

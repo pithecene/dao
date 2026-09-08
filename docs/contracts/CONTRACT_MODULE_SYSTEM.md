@@ -68,9 +68,16 @@ Given `import a::b` binding `b`:
 | `b::T` (type position) | exported type `T` of `a::b` |
 | `b::E::V` | variant `V` of exported enum `E` of `a::b` |
 | `b::T::m(...)` | static method `m` of exported type `T` of `a::b` |
+| `b::C` (conformance position) | exported concept `C` of `a::b`, in `as`, `deny`, and `extend ... as` |
 
 Unqualified `T::m` and `E::V` on same-module or prelude types are
 unchanged.  Any deeper path through a binding is an error.
+
+A conformance position names one concept: `as b::C:`, `deny b::C`, and
+`extend T as b::C:`.  Without this form a type could not conform to an
+imported concept at all — an unqualified name does not reach through an
+import binding (§3) — so a bound written `b::C` could be stated but
+never satisfied from another module.
 
 ## 7. Prelude
 
@@ -95,6 +102,11 @@ unchanged.  Any deeper path through a binding is an error.
 7. Only prelude modules may declare names carrying the `__dao_`
    prefix, which `CONTRACT_RUNTIME_ABI.md` reserves for runtime hooks.
    Such a declaration in any other module is an error.
+8. Only prelude modules may declare the intrinsic family `size_of`,
+   `align_of`, and `ptr_offset`: these are prelude declarations whose
+   bodies the backend replaces with inline IR, so a declaration bearing
+   one of those names in any other module is an error.  Rule 4 does
+   not apply to them.
 
 Scope order, outermost to innermost:
 
@@ -156,14 +168,14 @@ from it:
 
 | Section | Host compiler | Bootstrap compiler |
 |---|---|---|
-| §2 identity | Task 31 | conforms (Task 25; explicit file lists only, no path convention) |
-| §3 imports | Task 31 | conforms (Tasks 25–26) |
-| §4 exports, same-module access | Task 31 | conforms (Task 26) |
-| §5 `extend` scoping | Task 31 | conforms (Task 26 §6.5) |
-| §6 qualified forms | Task 31 | `b::f`, `b::T`, `b::E::V` conform (Task 27); `b::T::m` rejected until the bootstrap has methods — Task 33 |
-| §7 prelude | Task 31 | not implemented: the bootstrap resolver declares compiler builtins only and loads no stdlib — Task 33 |
-| §8 entry module | Task 31 | not implemented: no driver or entry concept; MIR flattens all functions — Task 33 |
-| §9 determinism | Task 31 | graph construction conforms (Task 25 §8); program-level output determinism unverified — Task 33 |
+| §2 identity | conforms (Task 31) | conforms (Task 25; explicit file lists only, no path convention) |
+| §3 imports | conforms (Task 31) | conforms (Tasks 25–26) |
+| §4 exports, same-module access | conforms (Task 31) | conforms (Task 26) |
+| §5 `extend` scoping | conforms (Task 31) | conforms (Task 26 §6.5) |
+| §6 qualified forms | conforms (Task 31) | `b::f`, `b::T`, `b::E::V` conform (Task 27); `b::C` in conformance positions and `b::T::m` rejected until the bootstrap has methods — Task 33 |
+| §7 prelude | conforms (Task 31) | not implemented: the bootstrap resolver declares compiler builtins only and loads no stdlib — Task 33 |
+| §8 entry module | conforms (Task 31) | not implemented: no driver or entry concept; MIR flattens all functions — Task 33 |
+| §9 determinism | conforms (Task 31; `multifile_build_test` compares two file orders' IR) | graph construction conforms (Task 25 §8); program-level output determinism unverified — Task 33 |
 
 "Task N" in a cell means the section is not yet implemented by that
 compiler and Task N delivers it.  The bootstrap column is mirrored in

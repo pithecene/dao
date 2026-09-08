@@ -46,13 +46,13 @@ struct HirTestPipeline {
   }
 
   [[nodiscard]] auto module() const -> HirModule* {
-    return hir_result.module;
+    return hir_result.program == nullptr ? nullptr : hir_result.program->modules.front();
   }
 
   [[nodiscard]] auto dump() const -> std::string {
     std::ostringstream out;
-    if (hir_result.module != nullptr) {
-      print_hir(out, *hir_result.module);
+    if (hir_result.program != nullptr) {
+      print_hir(out, *hir_result.program);
     }
     return out.str();
   }

@@ -249,9 +249,16 @@ listed in §19.
 
 **Builtins are not shadowable.**  Shadowing stops at the prelude.
 Compiler builtins and predeclared names (`i32`, `string`, `void`,
-`Generator`, `null_ptr`, `ptr_cast`, the `size_of`/`align_of` family)
-cannot be redeclared by any module, prelude included
-(`CONTRACT_MODULE_SYSTEM.md` §7.6).  Today this falls out of builtins
+`Generator`, `null_ptr`, `ptr_cast`) cannot be redeclared by any
+module, prelude included (`CONTRACT_MODULE_SYSTEM.md` §7.6).  The
+`size_of` / `align_of` / `ptr_offset` family is NOT among them: those
+are prelude declarations (`stdlib/core/builtins.dao`), reserved to the
+prelude by `CONTRACT_MODULE_SYSTEM.md` §7.8 as the `__dao_` prefix is
+by §7.7, whose bodies the backend replaces with inline IR (§12).  They are generic
+(`size_of<T>()`), which the builtins scope — whose symbols carry no
+declaration to instantiate — cannot express.  Operator ruling
+(2026-09-07), raised by review round 7 as a spec conflict: the
+normative contract enumerates no names, so this prose was the error.  Today this falls out of builtins
 sharing the file scope; with builtins in their own outer scope,
 `Scope::declare`'s local-only check would silently let `fn size_of`
 through, and §12's intrinsic recognition would then lower calls to it
@@ -334,8 +341,11 @@ and each module is loaded once.
 
 ### 8.4 Determinism
 
-- `file_id` is assigned in lexical order of the normalized absolute
-  path (in-memory inputs: lexical order of `display_path`)
+- `file_id` is assigned to the prelude group first, then to the other
+  files, each group in lexical order of the normalized absolute path
+  (in-memory inputs: lexical order of `display_path`); prelude-first
+  keeps prelude declarations ahead of user files for passes that walk
+  files in id order
 - `module_id` is assigned in registration order, which is a pure
   function of `file_id` order
 - topological order is Kahn's algorithm with the ready set kept in
@@ -603,13 +613,16 @@ both the function-definition site and every lookup site in the backend
 | `fn f` in module `a::b` | `a::b::f` | unambiguous, readable in IR and debuggers; LLVM quotes it |
 | method `T.m` in `a::b` | `a::b::T.m` | existing `.` method mangling preserved |
 | instantiation `f$i32` in `a::b` | `a::b::f$i32` | existing `$` generic mangling preserved |
-| builtin intrinsic (`size_of`, `ptr_cast`) | unchanged | bodies replaced by inline IR |
+| builtin intrinsic (`ptr_cast`) or prelude intrinsic (`size_of`) | unchanged | bodies replaced by inline IR |
 
-Recognition of special symbols is by identity, never by name pattern:
-`is_builtin_intrinsic` applies only to symbols with no owning module
-(the predeclared builtin function symbols the resolver creates), and
-`is_runtime_hook` applies only to `extern fn` symbols, whose names are
-never mangled.  A user function can therefore never be mistaken for an
+Recognition of special symbols is by ownership, never by spelling
+alone: `is_builtin_intrinsic` applies to symbols with no owning module
+(the predeclared builtins `null_ptr` and `ptr_cast`) and to symbols
+owned by a PRELUDE module (the `size_of` / `align_of` / `ptr_offset`
+family, which §7.6 reserves to the prelude), and `is_runtime_hook`
+applies only to `extern fn` symbols, whose names are never mangled.
+A symbol owned by any other module is never either, whatever it is
+named.  A user function can therefore never be mistaken for an
 intrinsic or a hook regardless of its name — and §11.2 rejects such
 names at declaration anyway.  Names are not ABI-stable; the C-facing
 export story stays reserved (§6.2).
@@ -696,7 +709,8 @@ edited by neither task.
 Where the two compilers diverge from the contract today is recorded
 in `CONTRACT_MODULE_SYSTEM.md` §12 and `bootstrap/README.md`: the
 bootstrap conforms to §2–§5 and to the `b::f` / `b::T` / `b::E::V`
-forms of §6, rejects `b::T::m` until it has methods, has no prelude
+forms of §6, rejects `b::C` in conformance positions and `b::T::m`
+until it has concepts and methods, has no prelude
 (§7) and no entry-module selection (§8), and verifies determinism at
 graph level only (§9).  Task 33 closes those gaps on the bootstrap
 side; Task 31 closes the host side.
@@ -833,7 +847,7 @@ declared in one module instantiated from another (Task 28 §21.2).
 8. Output is deterministic under input-order permutation for a fixed
    file set and entry selection.
 9. The one behaviour change (prelude shadowing, §7.6) is covered by a
-   test and called out in the changelog.
+   test and called out in the changelog (`CHANGELOG.md`, Unreleased).
 10. Every rule in §7 is stated in `CONTRACT_MODULE_SYSTEM.md`; the
     implementation cites the contract, not this spec.
 

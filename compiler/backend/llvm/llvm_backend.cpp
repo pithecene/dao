@@ -6,17 +6,23 @@
 //   - `id`  = MIR value identifier
 
 #include "backend/llvm/llvm_backend.h"
+#include "backend/llvm/llvm_names.h"
+#include "frontend/module/program.h"
+#include "frontend/types/type_identity.h"
+#include "frontend/types/type_printer.h"
 
 #include "backend/llvm/llvm_abi.h"
 #include "backend/llvm/llvm_runtime_hooks.h"
+#include "frontend/resolve/resolve.h"
 #include "ir/mir/mir.h"
 
+#include <algorithm>
 #include <llvm/IR/Constants.h>
-#include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Verifier.h>
@@ -39,10 +45,13 @@ namespace dao {
 
 LlvmBackend::LlvmBackend(llvm::LLVMContext& ctx) : ctx_(ctx), types_(ctx) {}
 
-auto LlvmBackend::lower(const MirModule& mir_module, const SourceMap* source_map)
-    -> LlvmBackendResult {
+auto LlvmBackend::lower(const MirModule& mir_module,
+                        const SourceMap* source_map,
+                        const ModuleInfo* entry) -> LlvmBackendResult {
   module_ = std::make_unique<llvm::Module>("dao_module", ctx_);
+  entry_ = entry;
   diagnostics_.clear();
+  extern_signatures_.clear(); // per run: one program's externs do not constrain the next
 
   // Set the target triple and data layout early so that ABI-sensitive
   // lowering (struct coercion, alignment) sees the correct target info.
@@ -73,6 +82,14 @@ auto LlvmBackend::lower(const MirModule& mir_module, const SourceMap* source_map
   hooks.declare_all();
 
   declare_functions(mir_module, source_map);
+  // A declaration error leaves a name bound to the wrong signature; a
+  // body lowered against it would trip LLVM's own assertions rather
+  // than reach the diagnostic already recorded.
+  if (std::ranges::any_of(
+          diagnostics_, [](const Diagnostic& diag) { return diag.severity == Severity::Error; })) {
+    module_.reset();
+    return {.module = nullptr, .diagnostics = std::move(diagnostics_)};
+  }
   lower_bodies(mir_module, source_map);
 
   // Kill the module if any hard errors remain.
@@ -108,7 +125,7 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
 
     // Runtime hooks are already declared by LlvmRuntimeHooks with
     // canonical signatures — skip re-declaration from MIR externs.
-    if (LlvmRuntimeHooks::is_runtime_hook(mir_fn->symbol->name)) {
+    if (mir_fn->is_extern && LlvmRuntimeHooks::is_runtime_hook(mir_fn->symbol->name)) {
       continue;
     }
 
@@ -193,9 +210,56 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
     }
     auto* fn_type =
         llvm::FunctionType::get(lowered_ret, param_types, /*isVarArg=*/false);
-    auto* llvm_fn = llvm::Function::Create(
-        fn_type, llvm::Function::ExternalLinkage,
-        std::string(mir_fn->symbol->name), module_.get());
+
+    // An `extern fn` keeps the C symbol name exactly as written
+    // (CONTRACT_C_ABI_INTEROP.md §3), so two modules declaring the same
+    // one name the same symbol.  Declaring it twice would let LLVM
+    // rename the second (`puts.1`) and leave later lookups by that name
+    // bound to whichever came first; one declaration is emitted and a
+    // disagreeing signature is a diagnostic rather than a silent pick.
+    auto name = fn_name(*mir_fn->symbol);
+    // Whether the name already on the module came from an extern is
+    // decided BEFORE this function records itself: read afterwards, an
+    // extern arriving second would see its own entry and take a Dao
+    // definition for a fellow extern.
+    const bool existing_is_extern = extern_signatures_.contains(name);
+    if (mir_fn->is_extern) {
+      // Compare the DAO types by identity, not the lowered ones and
+      // not their printed form: `*i32` and `*f64` are both an opaque
+      // `ptr` in LLVM, and two distinct classes named `Payload` print
+      // alike, so either comparison would call incompatible
+      // declarations of one C symbol identical
+      // (CONTRACT_C_ABI_INTEROP.md §5).  Every declaration records its
+      // signature, including the first, which is what later ones are
+      // compared against.
+      auto declared = extern_declaration(*mir_fn);
+      auto [known, first] = extern_signatures_.try_emplace(name, declared);
+      if (!first && known->second.identity != declared.identity) {
+        auto describe = [](const ExternDeclaration& one) {
+          return "'" + one.printed + "'" + (one.module.empty() ? "" : " (in " + one.module + ")");
+        };
+        emit_diagnostic(mir_fn->span,
+                        "extern '" + name + "' is declared with conflicting signatures: " +
+                            describe(known->second) + " and " + describe(declared));
+      }
+    }
+    if (module_->getFunction(name) != nullptr) {
+      // Already declared.  Two externs naming one C symbol coalesce
+      // (their signatures were compared above); anything else -- a Dao
+      // definition meeting an extern of the same name, in either order
+      // -- is a collision, and lowering the body into the other's
+      // declaration would emit a function whose body disagrees with
+      // its type.
+      const bool both_extern = mir_fn->is_extern && existing_is_extern;
+      if (!both_extern) {
+        emit_diagnostic(mir_fn->span,
+                        "'" + name + "' is both defined in Dao and declared extern; " +
+                            "a C symbol and a Dao function cannot share a name");
+      }
+      continue;
+    }
+    auto* llvm_fn =
+        llvm::Function::Create(fn_type, llvm::Function::ExternalLinkage, name, module_.get());
 
     // Add byval attributes for indirect struct params.
     if (mir_fn->is_extern) {
@@ -253,9 +317,10 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
       auto* void_type = llvm::Type::getVoidTy(ctx_);
       auto* resume_fn_type =
           llvm::FunctionType::get(void_type, {ptr_type}, /*isVarArg=*/false);
-      llvm::Function::Create(
-          resume_fn_type, llvm::Function::ExternalLinkage,
-          std::string(mir_fn->symbol->name) + ".resume", module_.get());
+      llvm::Function::Create(resume_fn_type,
+                             llvm::Function::ExternalLinkage,
+                             fn_name(*mir_fn->symbol) + ".resume",
+                             module_.get());
     }
   }
 }
@@ -279,8 +344,7 @@ void LlvmBackend::lower_bodies(const MirModule& mir_module,
         // user code actually calls this function, linking will fail
         // with a clear undefined-reference error.
         if (mir_fn->symbol != nullptr) {
-          auto* llvm_fn =
-              module_->getFunction(std::string(mir_fn->symbol->name));
+          auto* llvm_fn = module_->getFunction(fn_name(*mir_fn->symbol));
           if (llvm_fn != nullptr && !llvm_fn->empty()) {
             llvm_fn->deleteBody();
           }
@@ -388,7 +452,7 @@ auto LlvmBackend::lower_function(const MirFunction& fn) -> bool {
     return true; // skip anonymous functions (lambdas handled separately)
   }
 
-  auto* llvm_fn = module_->getFunction(std::string(fn.symbol->name));
+  auto* llvm_fn = module_->getFunction(fn_name(*fn.symbol));
   if (llvm_fn == nullptr) {
     emit_diagnostic(fn.span, "function not declared: " + std::string(fn.symbol->name));
     return false;
@@ -1262,17 +1326,32 @@ auto LlvmBackend::lower_field_access(const MirFieldAccess& p,
 // Function reference and calls
 // ---------------------------------------------------------------------------
 
-// Check if a function name is a compiler builtin intrinsic.
-// Matches both unmangled names (size_of) and mangled (size_of$i32).
-static auto is_builtin_intrinsic(std::string_view name) -> bool {
-  // Check for exact name or mangled variant (name$type).
-  for (auto base : {"size_of", "align_of", "null_ptr",
-                     "ptr_offset", "ptr_cast"}) {
-    if (name == base || name.starts_with(std::string(base) + "$")) {
-      return true;
+/// A MIR function's signature as the source wrote it: parameter types
+/// then the return type, printed from the Dao types rather than their
+/// lowering, so distinctions LLVM erases (every pointer is `ptr`)
+/// survive the comparison.
+auto LlvmBackend::extern_declaration(const MirFunction& fn) -> ExternDeclaration {
+  ExternDeclaration declared;
+  auto add = [&declared](const Type* type, bool last) {
+    declared.identity.push_back(type_identity_key(type));
+    declared.printed += print_type(type);
+    declared.printed += last ? "" : ",";
+  };
+  for (const auto& local : fn.locals) {
+    if (!local.is_param) {
+      break; // parameters come first
     }
+    add(local.type, /*last=*/false);
   }
-  return false;
+  declared.printed += "->";
+  add(fn.return_type, /*last=*/true);
+  declared.module =
+      fn.symbol != nullptr && fn.symbol->module != nullptr ? fn.symbol->module->display : "";
+  return declared;
+}
+
+auto LlvmBackend::fn_name(const Symbol& sym) const -> std::string {
+  return llvm_function_name(sym, entry_);
 }
 
 auto LlvmBackend::lower_fn_ref(const MirFnRef& p, const MirInst& inst,
@@ -1284,14 +1363,14 @@ auto LlvmBackend::lower_fn_ref(const MirFnRef& p, const MirInst& inst,
 
   // Compiler builtin intrinsics don't have LLVM function declarations.
   // Store a nullptr marker; lower_call will generate inline IR.
-  if (is_builtin_intrinsic(p.symbol->name)) {
+  if (is_builtin_intrinsic(*p.symbol)) {
     state.values[inst.result.id] = nullptr;
     state.value_types[inst.result.id] = inst.type;
     state.builtin_names[inst.result.id] = p.symbol->name;
     return true;
   }
 
-  auto* fn = module_->getFunction(std::string(p.symbol->name));
+  auto* fn = module_->getFunction(fn_name(*p.symbol));
   if (fn == nullptr) {
     emit_diagnostic(inst.span,
                     "function not found: " + std::string(p.symbol->name));
@@ -1777,7 +1856,7 @@ auto LlvmBackend::is_generator_function(const MirFunction& fn) -> bool {
 
 auto LlvmBackend::create_generator_frame_type(const MirFunction& fn)
     -> llvm::StructType* {
-  auto frame_name = "dao.gen." + std::string(fn.symbol->name);
+  auto frame_name = "dao.gen." + fn_name(*fn.symbol);
 
   // Return cached type if already created.
   auto* existing = llvm::StructType::getTypeByName(ctx_, frame_name);
@@ -1817,7 +1896,7 @@ auto LlvmBackend::lower_generator_init(const MirFunction& fn) -> bool {
     return true;
   }
 
-  auto* init_fn = module_->getFunction(std::string(fn.symbol->name));
+  auto* init_fn = module_->getFunction(fn_name(*fn.symbol));
   if (init_fn == nullptr) {
     emit_diagnostic(fn.span, "generator init function not declared");
     return false;
@@ -1885,8 +1964,7 @@ auto LlvmBackend::lower_generator_init(const MirFunction& fn) -> bool {
   }
 
   // Build the generator fat pair: { ptr frame, ptr resume_fn }.
-  auto* resume_fn =
-      module_->getFunction(std::string(fn.symbol->name) + ".resume");
+  auto* resume_fn = module_->getFunction(fn_name(*fn.symbol) + ".resume");
   auto* gen_type = types_.generator_type();
   llvm::Value* gen_val = llvm::UndefValue::get(gen_type);
   gen_val =
@@ -1908,7 +1986,7 @@ auto LlvmBackend::lower_generator_resume(const MirFunction& fn) -> bool {
     return true;
   }
 
-  auto resume_name = std::string(fn.symbol->name) + ".resume";
+  auto resume_name = fn_name(*fn.symbol) + ".resume";
   auto* resume_fn = module_->getFunction(resume_name);
   if (resume_fn == nullptr) {
     emit_diagnostic(fn.span,

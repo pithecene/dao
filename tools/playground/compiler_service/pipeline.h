@@ -62,6 +62,15 @@ struct PlaygroundProgram {
   [[nodiscard]] auto in_user_file(uint32_t program_offset) const -> bool {
     return program.source_map.file_for(program_offset) == user;
   }
+  /// True if the offset lies in any file the request sent — the document
+  /// or another of its files — rather than in the prelude.  The IR views
+  /// hide the prelude, not the rest of the program: a document that
+  /// calls into a sibling file must not be shown a call with no
+  /// definition.
+  [[nodiscard]] auto in_request_files(uint32_t program_offset) const -> bool {
+    const auto* file = program.source_map.file_for(program_offset);
+    return file != nullptr && !file->is_prelude;
+  }
   /// True if the offset lies in the editor buffer past the synthetic header.
   [[nodiscard]] auto in_editor_text(uint32_t program_offset) const -> bool {
     return in_user_file(program_offset) && user->local_offset(program_offset) >= header_bytes;
@@ -86,7 +95,9 @@ auto parse_program_request(const nlohmann::json& request)
 
 /// Assemble the prelude group under <repo_root>/stdlib plus the
 /// request's files, and lex/parse everything.
-auto build_playground_program(const std::filesystem::path& repo_root, ProgramRequest request)
+auto build_playground_program(const std::filesystem::path& repo_root,
+                              ProgramRequest request,
+                              EntryPolicy entry_policy = EntryPolicy::Optional)
     -> PlaygroundProgram;
 
 /// The document-local offset a position request names, or why it is
@@ -132,9 +143,32 @@ void collect_diagnostics(nlohmann::json& out,
                          const PlaygroundProgram& prog,
                          const std::vector<Diagnostic>& diags);
 
-/// Build a synthetic error diagnostic entry (no location) for when a
-/// phase fails without reporting where.
-auto make_internal_error(const std::string& message) -> nlohmann::json;
+/// Append everything assembling the program had to say — graph, lex,
+/// and parse — in the one §8.4 order (`assembly_diagnostics`): a module
+/// declaration that disagrees with its path points at a file, while an
+/// import cycle or a missing entry module has nowhere to point and is
+/// reported without a position.  Called before any early return: a
+/// graph error must not hide the parse error in another file that
+/// explains it.  Some of these are warnings analysis continues past.
+void collect_program_diagnostics(nlohmann::json& out, const PlaygroundProgram& prog);
+
+/// A diagnostic entry with no location, for a phase that failed without
+/// reporting where and for program-assembly diagnostics that have
+/// nowhere to point.  The severity is the reported one: an advisory is
+/// serialized as a warning, not silently promoted to an error.
+/// Put a reply's diagnostics in program order: by the position of the
+/// file they lie in, then by offset within it.  The program's file
+/// order is the prelude group first, then display path (Task 31 §8.4;
+/// CONTRACT_MODULE_SYSTEM.md §9 makes the result independent of the
+/// order files were given), which the file's name alone does not give.  Entries with no location
+/// sort first, where a reader meets them before any file's own complaints.  The service collects
+/// diagnostics phase by phase, which would otherwise let a later
+/// phase's diagnostic in an earlier file follow an earlier phase's in
+/// a later one.
+void sort_diagnostics(nlohmann::json& diagnostics, const PlaygroundProgram& prog);
+
+auto make_unlocated_diagnostic(const std::string& message, Severity severity = Severity::Error)
+    -> nlohmann::json;
 
 } // namespace dao::playground
 

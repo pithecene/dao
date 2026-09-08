@@ -15,6 +15,32 @@ task test         # run tests
 task playground   # start playground at http://localhost:8090
 ```
 
+## Driver usage
+
+```
+daoc <command> <root.dao> [--module-root DIR]... [--stdlib-root DIR]
+daoc <command> --source a.dao [--source b.dao]... [--entry a::b]
+daoc build <inputs as above> [link-inputs...]
+```
+
+Commands: `lex`, `parse`, `ast` (single file, before module structure
+exists), `tokens`, `resolve`, `check`, `hir`, `mir`, `llvm-ir`, `build`.
+
+- **Root-file mode** — the root's imports drive discovery: `import
+  a::b::c` is satisfied by the first `<root>/a/b/c.dao` over the root
+  file's directory, each `--module-root DIR` in order, and the stdlib
+  root; the located file must declare `a::b::c`.  The root's module is
+  the entry module.
+- **Explicit mode** — `--source` names every file; nothing is searched
+  and an import outside the set is an error.  The entry module is
+  `--entry a::b`, or the one module declaring `fn main`.
+- `--stdlib-root DIR` replaces the default prelude source
+  (`<repo>/stdlib`); `stdlib/core` and `stdlib/io` under it form the
+  prelude group.
+
+File ids, diagnostics order, and every output are independent of the
+order files are given (`CONTRACT_MODULE_SYSTEM.md` §9).
+
 ## Build parallelism
 
 Build parallelism is centrally managed through a single variable:

@@ -1,4 +1,5 @@
 #include "backend/llvm/llvm_backend.h"
+#include "backend/llvm/llvm_names.h"
 #include "backend/llvm/llvm_runtime_hooks.h"
 #include "backend/llvm/llvm_type_lowering.h"
 #include "frontend/diagnostics/source.h"
@@ -11,15 +12,18 @@
 #include "ir/hir/hir_context.h"
 #include "ir/mir/mir_builder.h"
 #include "ir/mir/mir_context.h"
+#include "ir/mir/mir_monomorphize.h"
 #include "support/test_utils.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 
-#include <boost/ut.hpp>
 #include <algorithm>
+#include <boost/ut.hpp>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <utility>
 
 using namespace boost::ut;
 using namespace dao;
@@ -45,6 +49,7 @@ struct LlvmTestPipeline {
   HirBuildResult hir_result;
   MirContext mir_ctx;
   MirBuildResult mir_result;
+  MonomorphizeResult mono_result;
   llvm::LLVMContext llvm_ctx;
   LlvmBackendResult llvm_result;
 
@@ -57,11 +62,16 @@ struct LlvmTestPipeline {
     resolve_result = resolve(program);
     check_result = typecheck(program, resolve_result, types);
     hir_result = build_hir(program, resolve_result, check_result, hir_ctx);
-    if (hir_result.module != nullptr) {
-      mir_result = build_mir(*hir_result.module, mir_ctx, types);
+    if (hir_result.program != nullptr) {
+      mir_result = build_mir(*hir_result.program, mir_ctx, types);
       if (mir_result.module != nullptr) {
+        // The driver monomorphizes between MIR and the backend, so the
+        // backend never sees a generic template; a helper that skipped
+        // it would test a pipeline no build runs.
+        mono_result =
+            monomorphize(*mir_result.module, mir_ctx, types, mir_result.generic_templates);
         LlvmBackend backend(llvm_ctx);
-        llvm_result = backend.lower(*mir_result.module, &program.source_map);
+        llvm_result = backend.lower(*mir_result.module, &program.source_map, program.entry);
       }
     }
   }
@@ -92,6 +102,291 @@ auto contains(const std::string& haystack, std::string_view needle) -> bool {
 // ---------------------------------------------------------------------------
 // Type lowering
 // ---------------------------------------------------------------------------
+
+/// The same pipeline over an explicit multi-module program: files named
+/// `stdlib/...` form the prelude group, the rest are user modules, and
+/// the entry is `entry` or the unique `fn main`.
+struct LlvmProgramPipeline {
+  Program program;
+  ResolveResult resolve_result;
+  TypeContext types;
+  TypeCheckResult check_result;
+  HirContext hir_ctx;
+  HirBuildResult hir_result;
+  MirContext mir_ctx;
+  MirBuildResult mir_result;
+  MonomorphizeResult mono_result;
+  llvm::LLVMContext llvm_ctx;
+  LlvmBackendResult llvm_result;
+
+  explicit LlvmProgramPipeline(std::vector<std::pair<std::string, std::string>> files,
+                               std::optional<std::string> entry = {}) {
+    std::vector<SourceInput> inputs;
+    for (auto& [display, text] : files) {
+      inputs.push_back(
+          {.display_path = display, .text = text, .is_prelude = display.starts_with("stdlib/")});
+    }
+    program = build_program(std::move(inputs), std::move(entry));
+    if (!program.lexed_and_parsed_cleanly() || !program.diagnostics.empty()) {
+      return;
+    }
+    resolve_result = resolve(program);
+    check_result = typecheck(program, resolve_result, types);
+    hir_result = build_hir(program, resolve_result, check_result, hir_ctx);
+    if (hir_result.program != nullptr) {
+      mir_result = build_mir(*hir_result.program, mir_ctx, types);
+      if (mir_result.module != nullptr) {
+        // The driver monomorphizes between MIR and the backend, so the
+        // backend never sees a generic template; a helper that skipped
+        // it would test a pipeline no build runs.
+        mono_result =
+            monomorphize(*mir_result.module, mir_ctx, types, mir_result.generic_templates);
+        LlvmBackend backend(llvm_ctx);
+        llvm_result = backend.lower(*mir_result.module, &program.source_map, program.entry);
+      }
+    }
+  }
+
+  [[nodiscard]] auto ir() const -> std::string {
+    std::ostringstream out;
+    if (llvm_result.module != nullptr) {
+      LlvmBackend::print_ir(out, *llvm_result.module);
+    }
+    return out.str();
+  }
+
+  [[nodiscard]] auto function(const std::string& name) const -> llvm::Function* {
+    return llvm_result.module == nullptr ? nullptr : llvm_result.module->getFunction(name);
+  }
+
+  /// Every stage's diagnostics, for failure messages.
+  [[nodiscard]] auto problems() const -> std::string {
+    std::string out;
+    auto add = [&](const char* stage, const std::vector<Diagnostic>& diags) {
+      for (const auto& diag : diags) {
+        out += std::string("[") + stage + "] " + diag.message + " | ";
+      }
+    };
+    add("program", program.diagnostics);
+    for (const auto& file : program.files) {
+      add("lex", file->lex.diagnostics);
+      add("parse", file->parse.diagnostics);
+    }
+    add("resolve", resolve_result.diagnostics);
+    add("check", check_result.diagnostics);
+    add("hir", hir_result.diagnostics);
+    add("mir", mir_result.diagnostics);
+    add("mono", mono_result.diagnostics);
+    add("llvm", llvm_result.diagnostics);
+    return out;
+  }
+};
+
+suite<"module_naming"> module_naming = [] {
+  "names_follow_symbol_identity"_test = [] {
+    ModuleInfo lib{.display = "app::lib", .is_prelude = false};
+    ModuleInfo entry{.display = "app::main", .is_prelude = false};
+    ModuleInfo prelude{.display = "core::x", .is_prelude = true};
+    Symbol plain{.kind = SymbolKind::Function,
+                 .name = "f",
+                 .decl_span = {},
+                 .decl = nullptr,
+                 .module = &lib};
+    Symbol lib_main{.kind = SymbolKind::Function,
+                    .name = "main",
+                    .decl_span = {},
+                    .decl = nullptr,
+                    .module = &lib};
+    Symbol entry_main{.kind = SymbolKind::Function,
+                      .name = "main",
+                      .decl_span = {},
+                      .decl = nullptr,
+                      .module = &entry};
+    Symbol builtin{.kind = SymbolKind::Function,
+                   .name = "null_ptr",
+                   .decl_span = {},
+                   .decl = nullptr,
+                   .module = nullptr};
+    Symbol method{.kind = SymbolKind::Function,
+                  .name = "Vec.push$i32",
+                  .decl_span = {},
+                  .decl = nullptr,
+                  .module = &prelude};
+    expect(llvm_function_name(plain, &entry) == "app::lib::f");
+    expect(llvm_function_name(lib_main, &entry) == "app::lib::main")
+        << "main elsewhere is not main";
+    expect(llvm_function_name(entry_main, &entry) == "main");
+    expect(llvm_function_name(builtin, &entry) == "null_ptr") << "no owning module: as written";
+    expect(llvm_function_name(method, &entry) == "core::x::Vec.push$i32")
+        << "method and instantiation mangling kept";
+  };
+
+  "intrinsics_are_recognised_by_identity"_test = [] {
+    ModuleInfo user{.display = "app::main", .is_prelude = false};
+    ModuleInfo prelude{.display = "core::builtins", .is_prelude = true};
+    Symbol user_size_of{.kind = SymbolKind::Function,
+                        .name = "size_of",
+                        .decl_span = {},
+                        .decl = nullptr,
+                        .module = &user};
+    Symbol prelude_size_of{.kind = SymbolKind::Function,
+                           .name = "size_of$i32",
+                           .decl_span = {},
+                           .decl = nullptr,
+                           .module = &prelude};
+    Symbol builtin{.kind = SymbolKind::Function,
+                   .name = "ptr_cast",
+                   .decl_span = {},
+                   .decl = nullptr,
+                   .module = nullptr};
+    Symbol prelude_other{.kind = SymbolKind::Function,
+                         .name = "size_offset",
+                         .decl_span = {},
+                         .decl = nullptr,
+                         .module = &prelude};
+    expect(!is_builtin_intrinsic(user_size_of))
+        << "a user module's size_of is an ordinary function";
+    expect(is_builtin_intrinsic(prelude_size_of));
+    expect(is_builtin_intrinsic(builtin));
+    expect(!is_builtin_intrinsic(prelude_other)) << "prefix alone is not a match";
+    expect(llvm_function_name(prelude_size_of, &user) == "size_of$i32")
+        << "an intrinsic keeps its bare name: the backend replaces its body by that name";
+  };
+
+  "two_modules_may_declare_the_same_function"_test = [] {
+    LlvmProgramPipeline pipe({
+        {"x.dao", "module a::x\nfn add(p: i32, q: i32): i32 -> p + q\n"},
+        {"y.dao", "module a::y\nfn add(p: i32, q: i32): i32 -> p * q\n"},
+        {"main.dao",
+         "module a::main\nimport a::x\nimport a::y\nfn main(): i32 -> x::add(2, 3) + y::add(2, "
+         "3)\n"},
+    });
+    expect(pipe.llvm_result.module != nullptr) << "lowering failed: " << pipe.problems();
+    expect(pipe.function("a::x::add") != nullptr && pipe.function("a::y::add") != nullptr)
+        << "both add functions lowered under module-qualified names";
+    expect(pipe.function("main") != nullptr);
+    auto ir = pipe.ir();
+    expect(ir.find("call i32 @\"a::x::add\"") != std::string::npos &&
+           ir.find("call i32 @\"a::y::add\"") != std::string::npos)
+        << "main calls each module's add";
+  };
+
+  "a module's own extend wins generic dispatch over the prelude's"_test = [] {
+    // Lookup is innermost-first everywhere (CONTRACT_MODULE_SYSTEM.md
+    // §7.4); a generic body dispatching through a concept bound is not
+    // an exception.  HIR lists prelude functions first, so "the first
+    // visible candidate" was the prelude's method whenever the module
+    // had its own.
+    LlvmProgramPipeline pipe({
+        {"stdlib/core/alt.dao",
+         "module core::alt\nconcept Alternate:\n    fn to_string(self): string\n"
+         "extend i32 as Alternate:\n    fn to_string(self): string -> \"prelude\"\n"},
+        {"main.dao",
+         "module app::main\nextend i32 as Alternate:\n"
+         "    fn to_string(self): string -> \"local\"\n"
+         "fn show<T: Alternate>(x: T): string -> x.to_string()\n"
+         "fn main(): i32\n  let s: string = show(42)\n  return 0\n"},
+    });
+    expect(pipe.llvm_result.module != nullptr) << "lowering failed: " << pipe.problems();
+    auto ir = pipe.ir();
+    expect(ir.find("call ptr @\"app::main::i32.to_string\"") != std::string::npos ||
+           ir.find("@\"app::main::i32.to_string\"(") != std::string::npos)
+        << "the instantiation must call the module's own method: " << ir;
+    expect(ir.find("call ptr @\"core::alt::i32.to_string\"") == std::string::npos)
+        << "the prelude's method was chosen over the module's own: " << ir;
+  };
+
+  "conflicting extern signatures stop lowering before any body"_test = [] {
+    // Two modules declare one C symbol with LLVM-distinct parameter
+    // types.  The conflict is diagnosed; a body lowered against the
+    // wrong declaration would trip LLVM's own signature assertion
+    // instead.
+    LlvmProgramPipeline pipe({
+        {"x.dao", "module a::x\nextern fn take(v: i32): i32\nfn fx(): i32 -> take(1)\n"},
+        {"y.dao", "module a::y\nextern fn take(v: f64): i32\nfn fy(): i32 -> take(2.0)\n"},
+        {"main.dao",
+         "module a::main\nimport a::x\nimport a::y\nfn main(): i32 -> x::fx() + y::fy()\n"},
+    });
+    expect(pipe.llvm_result.module == nullptr) << "a conflicting extern must not lower";
+    expect(!pipe.llvm_result.diagnostics.empty());
+    bool named = false;
+    for (const auto& diag : pipe.llvm_result.diagnostics) {
+      named |= diag.message.find("conflicting signatures") != std::string::npos;
+    }
+    expect(named) << pipe.problems();
+  };
+
+  "an extern cannot take the entry's place"_test = [] {
+    // `extern fn main(x: f64): f64` in a library and the entry module's
+    // `fn main(): i32` both want the bare name `main`.  Silently
+    // attaching the entry's body to the extern's declaration emits a
+    // function whose body disagrees with its type.
+    LlvmProgramPipeline pipe({
+        {"lib.dao", "module lib\nextern fn main(x: f64): f64\n"},
+        {"main.dao", "module app\nimport lib\nfn main(): i32 -> 0\n"},
+    });
+    expect(pipe.llvm_result.module == nullptr) << "the collision must not lower";
+    bool named = false;
+    for (const auto& diag : pipe.llvm_result.diagnostics) {
+      named |= diag.message.find("'main'") != std::string::npos &&
+               diag.message.find("extern") != std::string::npos;
+    }
+    expect(named) << pipe.problems();
+  };
+
+  "an extern declared after the entry still collides with it"_test = [] {
+    // Same collision, other order: the entry's `main` is defined first
+    // and a later module declares `extern fn main`.  The detection must
+    // not depend on which arrives first.
+    LlvmProgramPipeline pipe({
+        {"a.dao", "module a\nimport z\nfn main(): i32 -> z::use_it()\n"},
+        {"z.dao", "module z\nextern fn main(x: f64): f64\nfn use_it(): i32 -> 0\n"},
+    });
+    expect(pipe.llvm_result.module == nullptr) << "the collision must not lower";
+    bool named = false;
+    for (const auto& diag : pipe.llvm_result.diagnostics) {
+      named |= diag.message.find("'main'") != std::string::npos &&
+               diag.message.find("extern") != std::string::npos;
+    }
+    expect(named) << pipe.problems();
+  };
+
+  "extern signatures do not leak between lowering runs"_test = [] {
+    // One backend, two programs: an extern recorded by the first must
+    // not be compared against the second's declarations.
+    LlvmProgramPipeline first({
+        {"main.dao", "module app\nextern fn take(v: i32): i32\nfn main(): i32 -> take(1)\n"},
+    });
+    LlvmProgramPipeline second({
+        {"main.dao", "module app\nextern fn take(v: f64): i32\nfn main(): i32 -> take(2.0)\n"},
+    });
+    expect(first.mir_result.module != nullptr && second.mir_result.module != nullptr)
+        << first.problems() << second.problems();
+    llvm::LLVMContext ctx;
+    LlvmBackend backend(ctx);
+    auto one =
+        backend.lower(*first.mir_result.module, &first.program.source_map, first.program.entry);
+    auto two =
+        backend.lower(*second.mir_result.module, &second.program.source_map, second.program.entry);
+    expect(one.module != nullptr && one.diagnostics.empty());
+    expect(two.module != nullptr && two.diagnostics.empty())
+        << "the first run's extern constrained the second: "
+        << (two.diagnostics.empty() ? "" : two.diagnostics.front().message);
+  };
+
+  "main_outside_the_entry_module_is_an_ordinary_function"_test = [] {
+    LlvmProgramPipeline pipe(
+        {
+            {"lib.dao", "module a::lib\nfn main(): i32 -> 7\n"},
+            {"app.dao", "module a::app\nimport a::lib\nfn main(): i32 -> lib::main()\n"},
+        },
+        "a::app");
+    expect(pipe.llvm_result.module != nullptr) << "lowering failed: " << pipe.problems();
+    expect(pipe.function("main") != nullptr);
+    expect(pipe.function("a::lib::main") != nullptr) << "the other main is module-qualified";
+    expect(pipe.ir().find("call i32 @\"a::lib::main\"") != std::string::npos);
+  };
+};
 
 suite<"type_lowering"> type_lowering = [] {
   "builtin scalars lower correctly"_test = [] {
@@ -169,7 +464,7 @@ suite<"simple_functions"> simple_functions = [] {
         "  return 42\n");
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
-    expect(contains(ir, "define i32 @answer()")) << ir;
+    expect(contains(ir, "define i32 @\"test::answer\"()")) << ir;
     expect(contains(ir, "ret i32 42")) << ir;
   };
 
@@ -204,13 +499,160 @@ suite<"simple_functions"> simple_functions = [] {
     expect(contains(ir, "icmp eq")) << ir;
   };
 
+  "a pipeline selects its target's one-argument overload"_test = [] {
+    // `x |> lib::f` is a call of one argument.  Binding the
+    // two-argument overload and calling it with one is an LLVM
+    // signature assertion, so the selection has to happen before
+    // lowering, qualified target included.
+    LlvmProgramPipeline pipe({
+        {"lib.dao",
+         "module app::lib\n"
+         "fn f(a: i32, b: i32): i32 -> a + b\n"
+         "fn f(a: i32): i32 -> a * 10\n"},
+        {"main.dao",
+         "module app::main\n"
+         "import app::lib\n"
+         "fn main(): i32\n"
+         "  return 1 |> lib::f\n"},
+    });
+    auto ir = pipe.ir();
+    expect(contains(ir, "call i32 @\"app::lib::f$1\"(i32 1)"))
+        << "the pipeline did not call the one-argument overload:\n"
+        << pipe.problems() << ir;
+  };
+
+  "one generic serves same-named types from two modules"_test = [] {
+    // Distinct declarations are distinct types (§11), so their
+    // specializations cannot share a symbol: one definition would then
+    // be called with the other's struct type.
+    LlvmProgramPipeline pipe({
+        {"lib.dao", "module app::lib\nfn ident<T>(v: T): T -> v\n"},
+        {"a.dao",
+         "module app::a\n"
+         "class Box:\n  value: i32\n"},
+        {"main.dao",
+         "module app::main\n"
+         "import app::lib\n"
+         "import app::a\n"
+         "class Box:\n  tag: i32\n"
+         "fn main(): i32\n"
+         "  let mine = lib::ident(Box(2))\n"
+         "  let theirs = lib::ident(a::Box(3))\n"
+         "  return mine.tag + theirs.value\n"},
+    });
+    auto ir = pipe.ir();
+    size_t definitions = 0;
+    for (size_t at = ir.find("define"); at != std::string::npos; at = ir.find("define", at + 1)) {
+      auto line = ir.substr(at, ir.find('\n', at) - at);
+      if (line.find("ident$") != std::string::npos) {
+        ++definitions;
+      }
+    }
+    expect(definitions == 2_ul) << "expected two specializations, got " << definitions << "\n"
+                                << pipe.problems() << ir;
+  };
+
+  "one semantic type specializes a generic once"_test = [] {
+    // `Box<i32>` written twice is two type objects — nominal types are
+    // not interned — so keying a specialization by address would build
+    // the same one twice under numbered names.
+    LlvmProgramPipeline pipe({
+        {"main.dao",
+         "module app::main\n"
+         "class Box<T>:\n  value: T\n"
+         "fn ident<T>(v: T): T -> v\n"
+         "fn main(): i32\n"
+         "  let a = Box<i32>(7)\n"
+         "  let b = Box<i32>(9)\n"
+         "  let p = ident(a)\n"
+         "  let q = ident(b)\n"
+         "  return p.value + q.value\n"},
+    });
+    auto ir = pipe.ir();
+    size_t definitions = 0;
+    for (size_t at = ir.find("define"); at != std::string::npos; at = ir.find("define", at + 1)) {
+      auto line = ir.substr(at, ir.find('\n', at) - at);
+      if (line.find("ident$") != std::string::npos) {
+        ++definitions;
+      }
+    }
+    expect(definitions == 1_ul) << "expected one specialization, got " << definitions << "\n"
+                                << pipe.problems() << ir;
+  };
+
+  "externs whose types merely print alike are diagnosed"_test = [] {
+    // Each module declares its own `Payload`, and both print as
+    // `Payload`: comparing the rendered signature would call them one
+    // type.  Distinct declarations are distinct types (§11), so the
+    // comparison is by identity and the message names the modules.
+    LlvmProgramPipeline pipe({
+        {"a.dao",
+         "module app::a\n"
+         "class Payload:\n  value: i32\n"
+         "extern fn consume(p: Payload): i32\n"
+         "fn use_a(p: Payload): i32 -> consume(p)\n"},
+        {"main.dao",
+         "module app::main\n"
+         "class Payload:\n  other: i32\n"
+         "extern fn consume(p: Payload): i32\n"
+         "fn use_main(p: Payload): i32 -> consume(p)\n"
+         "fn main(): i32\n  return 0\n"},
+    });
+    auto said = pipe.problems();
+    expect(contains(said, "conflicting signatures")) << "accepted two Payloads: " << said;
+    expect(contains(said, "app::a") && contains(said, "app::main"))
+        << "the message does not say which module declared which: " << said;
+  };
+
+  "externs differing only in pointee type are diagnosed"_test = [] {
+    // `*i32` and `*f64` both lower to LLVM's opaque `ptr`, so comparing
+    // lowered types calls these compatible and lets one declaration
+    // answer for the other; the source signatures are what decide
+    // (CONTRACT_C_ABI_INTEROP.md §5).  It takes two modules, since one
+    // module cannot declare the same name twice.
+    LlvmProgramPipeline pipe({
+        {"a.dao",
+         "module app::a\n"
+         "extern fn take(p: *i32): i32\n"
+         "fn use_a(p: *i32): i32 -> take(p)\n"},
+        {"main.dao",
+         "module app::main\n"
+         "extern fn take(p: *f64): i32\n"
+         "fn use_main(p: *f64): i32 -> take(p)\n"
+         "fn main(): i32\n"
+         "  return 0\n"},
+    });
+    expect(contains(pipe.problems(), "conflicting signatures"))
+        << "conflicting extern accepted: " << pipe.problems();
+  };
+
+  "two modules declaring one extern emit one declaration"_test = [] {
+    // An extern keeps its C symbol name exactly as written, so the same
+    // extern in two modules is the same symbol — declared once.
+    LlvmTestPipeline pipe("extern fn puts(s: string): i32\n"
+                          "fn a(): i32 -> puts(\"x\")\n"
+                          "fn b(): i32 -> puts(\"y\")\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << ir;
+    size_t declarations = 0;
+    for (size_t at = ir.find("declare"); at != std::string::npos; at = ir.find("declare", at + 1)) {
+      auto line = ir.substr(at, ir.find('\n', at) - at);
+      if (line.find("@puts(") != std::string::npos) {
+        ++declarations;
+      }
+    }
+    expect(declarations == 1_ul) << "expected one @puts declaration, got " << declarations << "\n"
+                                 << ir;
+    expect(ir.find("@puts.1") == std::string::npos) << "a renamed duplicate:\n" << ir;
+  };
+
   "void function"_test = [] {
     LlvmTestPipeline pipe(
         "fn noop(): void\n"
         "  return\n");
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
-    expect(contains(ir, "define void @noop()")) << ir;
+    expect(contains(ir, "define void @\"test::noop\"()")) << ir;
     expect(contains(ir, "ret void")) << ir;
   };
 
@@ -220,7 +662,7 @@ suite<"simple_functions"> simple_functions = [] {
         "  return a + b\n");
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
-    expect(contains(ir, "define i32 @add(i32 %a, i32 %b)")) << ir;
+    expect(contains(ir, "define i32 @\"test::add\"(i32 %a, i32 %b)")) << ir;
     expect(contains(ir, "add")) << ir;
     expect(contains(ir, "ret i32")) << ir;
   };
@@ -417,7 +859,7 @@ suite<"calls"> calls = [] {
         "  return double(21)\n");
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
-    expect(contains(ir, "call i32 @double")) << ir;
+    expect(contains(ir, "call i32 @\"test::double\"")) << ir;
   };
 };
 
@@ -434,7 +876,7 @@ suite<"externs"> externs = [] {
         "  return 0\n");
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
-    expect(contains(ir, "declare void @print")) << ir;
+    expect(contains(ir, "declare void @print")) << ir; // extern: as written
   };
 
   "extern fn with struct param uses ABI-coerced types"_test = [] {
@@ -588,8 +1030,8 @@ suite<"module_structure"> module_structure = [] {
         "  return 2\n");
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
-    expect(contains(ir, "@foo")) << ir;
-    expect(contains(ir, "@bar")) << ir;
+    expect(contains(ir, "@\"test::foo\"")) << ir;
+    expect(contains(ir, "@\"test::bar\"")) << ir;
   };
 };
 
@@ -842,7 +1284,7 @@ suite<"construction"> construction = [] {
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
     expect(contains(ir, "%dao.Point")) << ir;
-    expect(contains(ir, "call i32 @get_x")) << ir;
+    expect(contains(ir, "call i32 @\"test::get_x\"")) << ir;
   };
 
   "construction with non-constant args uses insertvalue"_test = [] {
@@ -1075,9 +1517,9 @@ suite<"generators"> generators = [] {
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
     // Init function: returns a generator fat pair.
-    expect(contains(ir, "define %dao.generator @single()")) << ir;
+    expect(contains(ir, "define %dao.generator @\"test::single\"()")) << ir;
     // Resume function: takes ptr, returns void.
-    expect(contains(ir, "define void @single.resume(ptr")) << ir;
+    expect(contains(ir, "define void @\"test::single.resume\"(ptr")) << ir;
   };
 
   "generator init allocates frame"_test = [] {
@@ -1170,7 +1612,7 @@ suite<"generators"> generators = [] {
     // Alignment is computed via GEP-from-null offsetof trick, not
     // hardcoded.  LLVM constant-folds the GEP to a ConstantExpr,
     // so we check for the { i8, %frame } wrapper struct pattern.
-    expect(contains(ir, "{ i8, %dao.gen.single }")) << ir;
+    expect(contains(ir, "{ i8, %\"dao.gen.test::single\" }")) << ir;
   };
 
   "range generator with params"_test = [] {
@@ -1189,11 +1631,11 @@ suite<"generators"> generators = [] {
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
     // Init function takes params.
-    expect(contains(ir, "define %dao.generator @range(i32 %start, i32 %end)")) << ir;
+    expect(contains(ir, "define %dao.generator @\"test::range\"(i32 %start, i32 %end)")) << ir;
     // Resume function.
-    expect(contains(ir, "define void @range.resume(ptr")) << ir;
+    expect(contains(ir, "define void @\"test::range.resume\"(ptr")) << ir;
     // Frame type exists.
-    expect(contains(ir, "dao.gen.range")) << ir;
+    expect(contains(ir, "dao.gen.test::range")) << ir;
   };
 
   "generator through storage"_test = [] {
