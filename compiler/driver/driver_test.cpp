@@ -402,6 +402,28 @@ suite<"driver_cli"> driver_cli_suite = [] {
     expect(exit_status(scratch.output_for(real)) == 4);
   };
 
+  "a prelude root that imports a user module is still reported"_test = [] {
+    // The root is a prelude file, and it imports a user module, so the
+    // user-file set is not empty -- the root must be reported anyway,
+    // since it is what the command named.
+    const Scratch scratch("prelude-root-imports");
+    auto base = scratch.file("stdlib/core/base.dao",
+                             "module core::base\nimport ext::thing\n\nfn base_one(): i32 -> 1\n");
+    scratch.file("ext/thing.dao", "module ext::thing\n\nfn thing_one(): i32 -> 2\n");
+    auto dumped = run_daoc(scratch,
+                           {"tokens",
+                            base.string(),
+                            "--module-root",
+                            scratch.dir.string(),
+                            "--stdlib-root",
+                            scratch.stdlib.string()});
+    expect(dumped.exit_code == 0) << dumped.err;
+    expect(dumped.out.find("decl.function base_one") != std::string::npos)
+        << "the prelude root vanished from the dump: " << dumped.out;
+    expect(dumped.out.find("decl.function thing_one") != std::string::npos)
+        << "the imported user module is missing: " << dumped.out;
+  };
+
   "a stdlib file compiled as the root keeps its root role"_test = [] {
     const Scratch scratch("prelude-root");
     auto library = scratch.file("stdlib/core/lib.dao", "module core::lib\n\nfn one(): i32 -> 1\n");

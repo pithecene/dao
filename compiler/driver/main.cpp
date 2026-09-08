@@ -109,12 +109,16 @@ void cmd_tokens(const dao::ProgramRequest& request) {
   // Every user module; prelude tokens are not the user's concern.
   // Collected once: user_files() builds a vector by scanning every file,
   // so asking again per iteration would be quadratic.
+  // Every user module, and the file the command named when that file
+  // is itself a prelude file (`daoc tokens stdlib/core/x.dao`): the
+  // program holds it in the prelude group, whether or not it imports a
+  // user module, and the command asked about it.  Program order.
   auto user_files = program.user_files();
-  if (user_files.empty()) {
-    // The root is itself a prelude file (`daoc tokens stdlib/core/x.dao`):
-    // the program holds it in the prelude group, so there is no user
-    // file -- but the command named it, and it is what gets reported.
-    user_files.push_back(&reported_file(program));
+  const auto& named = reported_file(program);
+  if (named.is_prelude) {
+    // Prelude files occupy the lowest offsets, so the named file sorts
+    // ahead of every user file.
+    user_files.insert(user_files.begin(), &named);
   }
   for (const auto* user : user_files) {
     if (user_files.size() > 1) {

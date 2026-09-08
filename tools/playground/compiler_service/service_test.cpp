@@ -328,6 +328,23 @@ auto minimal_request(std::string_view shape_name) -> json {
 
 } // namespace
 
+/// Every lexical token of the analysed document has a semantic token at
+/// its offset -- the single-file corpus's bar, applied to every document
+/// of a multi-file example too.
+void expect_every_token_classified(const std::string& name, const json& body) {
+  std::set<uint32_t> classified;
+  for (const auto& token : body["semanticTokens"]) {
+    classified.insert(token["offset"].get<uint32_t>());
+  }
+  expect(!body["tokens"].empty()) << name << ": the document produced no tokens";
+  for (const auto& token : body["tokens"]) {
+    auto offset = token["offset"].get<uint32_t>();
+    expect(classified.contains(offset))
+        << name << ": no semantic token for " << token["text"].get<std::string>() << " ("
+        << token["kind"].get<std::string>() << ") at line " << token["line"].get<uint32_t>();
+  }
+}
+
 suite<"playground_service"> playground_service_suite = [] {
   "every_route_is_bound_and_validates_its_request"_test = [] {
     for (const auto& route : kRoutes) {
@@ -614,18 +631,7 @@ suite<"playground_service"> playground_service_suite = [] {
     for (const auto& example : load_examples()) {
       auto reply = call("analyze", document_request(example.source));
       const auto& body = reply.body;
-
-      std::set<uint32_t> classified;
-      for (const auto& token : body["semanticTokens"]) {
-        classified.insert(token["offset"].get<uint32_t>());
-      }
-      for (const auto& token : body["tokens"]) {
-        auto offset = token["offset"].get<uint32_t>();
-        expect(classified.contains(offset))
-            << example.name << ": no semantic token for " << token["text"].get<std::string>()
-            << " (" << token["kind"].get<std::string>() << ") at line "
-            << token["line"].get<uint32_t>();
-      }
+      expect_every_token_classified(example.name, body);
 
       if (!known_failures.contains(example.name)) {
         expect(body["diagnostics"].empty())
@@ -942,6 +948,8 @@ suite<"playground_service"> playground_service_suite = [] {
           expect(diag["severity"] != "error")
               << example.name << "/" << file["path"] << ": " << diag["message"];
         }
+        expect_every_token_classified(example.name + "/" + file["path"].get<std::string>(),
+                                      analyzed.body);
       }
 
       auto reply = call("run", json{{"files", example.files}, {"document", example.document}});
