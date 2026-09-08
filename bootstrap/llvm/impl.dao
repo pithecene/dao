@@ -1721,19 +1721,21 @@ fn check_contains(result: LlvmTextResult, needle: string, test_name: string): bo
 
 
 // =========================================================================
-// Closure probe (Task 34): feed one assembled bootstrap program through
-// the bootstrap pipeline stage by stage and record where it stops.
-// Opt-in — runs only when bootstrap/llvm/out/.closure_probe exists; its
-// content names the program to probe (bootstrap/audit_closure.sh runs
-// one process per program, since a Dao panic aborts the process and
-// must not hide the other programs' results).  The line for the
-// program is appended to bootstrap/llvm/out/closure.txt:
-//   <program>\tlex=<diagnostics>\tparse=<n>\thir=<n>\tmir=<n>\tllvm=<n>\tfirst=<message>
-// where hir counts resolve, typecheck, and HIR diagnostics together and
-// `first` is the earliest failing stage's first diagnostic.  "probe:
-// <program> stage=<stage>" is printed before each stage so a panic can
-// be attributed to the stage it happened in (on stderr, which is not
-// buffered, so a killed process still shows its last stage).
+// Closure probe: feed one assembled bootstrap program through one stage
+// of the bootstrap pipeline and record what that stage says.  Opt-in --
+// runs only when bootstrap/llvm/out/.closure_probe exists; its content
+// is "<program>\t<stage>" (bootstrap/audit_closure.sh runs one process
+// per program and stage: a Dao panic aborts the process and must not
+// hide the other lines, and the bootstrap frees nothing, so a stage's
+// cost can only be measured alone).  The probe process does nothing
+// else.  The stage's columns are appended to bootstrap/llvm/out/closure.txt:
+//   <program>\t<stage>=<diagnostics>...
+// ("parse" writes lex= and parse=, "typecheck" writes resolve= and
+// typecheck=; the script merges the stages into the program's line and
+// adds peak memory, time, and the earliest failing stage's first
+// diagnostic).  "probe: <program> stage=<stage>", the counts, and each
+// stage's first diagnostic go to stderr, which is not buffered, so a
+// killed process still shows where it died.
 // =========================================================================
 
 // Report a stage's diagnostics on stderr (at most `limit`), one per line,
@@ -1829,6 +1831,9 @@ fn closure_stage_file_column(name: string, stage: string, diags: Vector<FileDiag
 // The marker holds "<program>\t<stage>".
 fn closure_probe(marker: string): void
   let tab: i64 = index_of(marker, "\t")
+  if tab < to_i64(0):
+    eprint("probe: marker must be <program>, a tab, and a stage; got '" + marker + "'")
+    return
   let which: string = substring(marker, to_i64(0), tab)
   let stage: string = substring(marker, tab + to_i64(1), length(marker) - tab - to_i64(1))
   let line: string = closure_probe_stage(which, "bootstrap/" + which + "/" + which + ".gen.dao", stage)

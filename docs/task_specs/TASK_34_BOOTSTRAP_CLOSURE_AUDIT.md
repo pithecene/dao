@@ -41,28 +41,38 @@ hand):
    backend a full run stops rather than write an empty table, and
    `--report-only` keeps the last measured one.
 3. **Self-compile matrix.**  The bootstrap pipeline over its own eight
-   programs, stage by stage — `lex`, `parse`, `hir` (resolve, typecheck,
-   and HIR lowering together), `mir`, `llvm` — recording the diagnostic
-   count per stage and the earliest failing stage's first diagnostic.
+   programs, stage by stage — `lex`, `parse`, `resolve`, `typecheck`,
+   `hir`, `mir`, `llvm` — recording each pass's own diagnostic count
+   (a pass's list begins with what it was handed; its own diagnostics
+   are the tail) and the earliest failing stage's first diagnostic.
    The probe lives in `bootstrap/llvm/impl.dao` (`closure_probe`) and
    runs only when `bootstrap/llvm/out/.closure_probe` exists, which the
-   script creates around its run, so `task bootstrap-test` is unchanged.
-   The script runs one process per program — a Dao panic aborts the
-   process and must not hide the other programs' lines — bounded in
-   virtual memory and wall time (`AUDIT_MEMORY_KB`, `AUDIT_SECONDS`;
-   6 GiB and 600 s by default) so a runaway run is recorded as such
-   rather than exhausting the machine.  The probe announces each stage
-   on stderr, which is unbuffered, so a killed process still shows the
-   stage it died in.  `--report-only` rewrites the document from the
-   last run's outputs without re-running the probes, for changes to
-   what the document says rather than to what was measured.
+   script creates around its run, so `task bootstrap-test` is unchanged;
+   a probe process does only the probe.  The script runs one process
+   per program and stage (`parse` measures `lex` and `parse`,
+   `typecheck` measures `resolve` and `typecheck` on one pipeline, then
+   `hir`, `mir`, `llvm`), from source each time: a Dao panic aborts the
+   process and must not hide the other lines, and the bootstrap frees
+   nothing, so a stage's cost can only be measured alone.  A program
+   stops at the first stage that dies, and its peak memory and wall
+   time are its deepest stage's — one self-compilation attempt through
+   that stage.  Each process is bounded in virtual memory and wall
+   time (`AUDIT_MEMORY_KB`, `AUDIT_SECONDS`; 6 GiB and 600 s by
+   default) so a runaway run is recorded as such rather than exhausting
+   the machine.  The probe announces its stage and counts on stderr,
+   which is unbuffered, so a killed process still shows where it died.
+   `--report-only` rewrites the document from the last run's records
+   (under `<build dir>/bootstrap_audit`, out of the way of
+   `task bootstrap-test`, which clears `bootstrap/llvm/out`) without
+   re-running the probes, for changes to what the document says rather
+   than to what was measured.
 
 The probe also answers narrower questions cheaply: name any program
-under `bootstrap/<name>/<name>.gen.dao` in the marker file and it is
-fed through the pipeline the same way, so a one-construct program
-measures what one construct costs at each stage, and a source file cut
-into one program per top-level declaration locates a stage's failures
-by function.
+under `bootstrap/<name>/<name>.gen.dao` and a stage in the marker file
+(`<name>`, a tab, the stage) and it is fed through the pipeline the
+same way, so a one-construct program measures what one construct costs
+at each stage, and a source file cut into one program per top-level
+declaration locates a stage's failures by function.
 
 The first blocking diagnostic per program names the construct to
 implement next for that stage.  Diagnostics are the bootstrap's own,
@@ -71,15 +81,15 @@ sharpening a message sharpens the audit.
 
 ## 4. Reading the result
 
-- **Capacity comes first.**  The matrix records peak memory and wall
-  time per program.  The first audit found the bootstrap unable to hold
-  programs of its own size: 11–14 GiB and 30–40 s for its three smallest
-  programs (3–4k lines) before reaching the LLVM stage, and more than
-  16 GiB in `hir`/`mir` for the larger ones.  Until that is fixed the
-  construct columns of the larger programs cannot even be measured, so
-  the bootstrap's memory behaviour (state threaded by value through
-  every lowering step, copying its vectors) is the first item of
-  Tier B-Bootstrap, ahead of any language construct.
+- **Capacity for the large half.**  The matrix records peak memory and
+  wall time per program, each stage measured in its own process.  The
+  first audit found the four smallest programs (3–5k lines) reaching
+  the LLVM stage in 5.5–12 GiB and 17–40 s, and the three largest
+  (7–9k lines) exhausting 16 GiB in `typecheck` or `mir`.  Until that
+  is fixed the `mir` and `llvm` columns of the larger programs cannot
+  be measured, so the bootstrap's memory behaviour (state threaded by
+  value through every lowering step, copying its vectors) sits beside
+  the first construct at the head of Tier B-Bootstrap.
 - **Then the stages in order.**  The first audit's parser column shows
   the bootstrap parser rejecting 46–285 sites per program ("expected
   expression").  Probing one-construct programs and each top-level
@@ -92,10 +102,11 @@ sharpening a message sharpens the audit.
   document's "Parse-stage attribution" table sets the sites against the
   parse column and reaches zero when the parser closes it.  Nothing
   else the corpus writes fails to parse.
-- **Tier B-Bootstrap** = that capacity work, that one parser construct, then
-  constructs in the inventory that the self-compile matrix rejects at
-  `mir`/`llvm`, plus forced prelude functions the bootstrap cannot yet
-  compile.
+- **Tier B-Bootstrap** = that one parser construct and that capacity
+  work, then what the self-compile matrix rejects at `resolve`,
+  `typecheck`, `mir`, and `llvm` (the histograms name the messages),
+  plus forced prelude functions — the intrinsic family included — the
+  bootstrap cannot yet compile.
 - A stage with zero diagnostics on every program is closed for the
   corpus.
 - Constructs the inventory does not contain (and prelude functions the
@@ -116,6 +127,7 @@ sharpening a message sharpens the audit.
 
 - `bootstrap/audit_closure.sh <build dir>` and `task bootstrap-audit`
 - `closure_probe` in `bootstrap/llvm/impl.dao`, opt-in via marker file
+  (`<program>`, tab, `<stage>`), one process per program and stage
 - `docs/bootstrap_closure.md`, generated
 - `IMPLEMENTATION_PLAN.md` entry; `ARCH_INDEX.md` entries
 

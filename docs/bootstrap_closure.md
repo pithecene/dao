@@ -10,22 +10,22 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 73379 |
-| `CallExpr` | 22019 |
-| `Callee` | 22019 |
+| `Identifier` | 73383 |
+| `CallExpr` | 22021 |
+| `Callee` | 22021 |
 | `FieldExpr` | 20806 |
-| `Args` | 19907 |
-| `BinaryExpr` | 10274 |
+| `Args` | 19909 |
+| `BinaryExpr` | 10277 |
 | `LetStatement` | 9929 |
 | `Value` | 7915 |
 | `Target` | 7915 |
 | `Assignment` | 7915 |
-| `IntLiteral` | 7666 |
-| `Condition` | 6428 |
-| `Then` | 5211 |
-| `IfStatement` | 5211 |
-| `ReturnStatement` | 5141 |
-| `StringLiteral` | 4433 |
+| `IntLiteral` | 7667 |
+| `Condition` | 6429 |
+| `Then` | 5212 |
+| `IfStatement` | 5212 |
+| `ReturnStatement` | 5142 |
+| `StringLiteral` | 4435 |
 | `Param` | 3536 |
 | `Pattern` | 2466 |
 | `Arm` | 2466 |
@@ -40,7 +40,7 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 | `TypeArgs` | 822 |
 | `Scrutinee` | 542 |
 | `MatchStatement` | 542 |
-| `ExpressionStatement` | 475 |
+| `ExpressionStatement` | 476 |
 | `ClassDecl` | 239 |
 | `BreakStatement` | 64 |
 | `EnumDecl` | 27 |
@@ -208,13 +208,13 @@ one self-compilation attempt through that stage.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 6855 | 19 | 0 | 46 | 346 | 427 | 0 | 16 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 6151 | 17 | 0 | 52 | 385 | 347 | 0 | 19 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 5544 | 16 | 0 | 57 | 380 | 386 | 0 | 16 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 11669 | 39 | 0 | 132 | 933 | 595 | 0 | 57 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 15007 | 51 | 0 | 246 | 1650 | 939 | 0 |  |  | parse: expected expression; then in mir: panic: allocation failed (size=2359296, align=8) |
-| hir | 15943 | 51 | 0 | 253 | 2149 | 1150 | 0 |  |  | parse: expected expression; then in mir: panic: allocation failed (size=1179648, align=8) |
-| mir | 16271 | 53 | 0 | 285 | 2465 |  |  |  |  | parse: expected expression; then in typecheck: panic: allocation failed (size=524288, align=8) |
+| lexer | 6854 | 20 |  |  |  |  |  |  |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 6152 | 17 |  |  |  |  |  |  |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 5545 | 16 |  |  |  |  |  |  |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 11666 | 40 |  |  |  |  |  |  |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 15006 | 51 |  |  |  |  |  |  |  | parse: expected expression; then in mir: panic: allocation failed (size=2359296, align=8) |
+| hir | 15941 | 52 |  |  |  |  |  |  |  | parse: expected expression; then in mir: panic: allocation failed (size=1179648, align=8) |
+| mir | 16270 | 53 |  |  | 2465 |  |  |  |  | parse: expected expression; then in typecheck: panic: allocation failed (size=524288, align=8) |
 | llvm | 15 | 0 |  |  |  |  |  |  |  | in parse: process died (status 139; memory bound 16 GiB) |
 
 ### What each stage rejects
@@ -349,13 +349,13 @@ Sites per program against the parse column above:
 
 | Program | `Type<Args>::` sites | parse diagnostics |
 |---|---|---|
-| lexer | 42 | 46 |
-| parser | 44 | 52 |
-| graph | 53 | 57 |
-| resolver | 85 | 132 |
-| typecheck | 124 | 246 |
-| hir | 137 | 253 |
-| mir | 150 | 285 |
+| lexer | 42 | — |
+| parser | 44 | — |
+| graph | 53 | — |
+| resolver | 85 | — |
+| typecheck | 124 | — |
+| hir | 137 | — |
+| mir | 150 | — |
 | llvm | 187 | — |
 
 ## 4. Reading the matrix

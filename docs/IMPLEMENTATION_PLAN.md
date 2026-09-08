@@ -654,8 +654,8 @@ three mechanical sources: the host AST printer's construct inventory
 over every assembled bootstrap program, the prelude functions the host
 instantiates for the largest program, and the bootstrap pipeline's own
 diagnostics per stage over its own programs (an opt-in probe in
-`bootstrap/llvm/impl.dao`, one process per program, memory- and
-time-bounded).  The first blocking diagnostic per program names what to
+`bootstrap/llvm/impl.dao`, one process per program and stage, memory-
+and time-bounded).  The first blocking diagnostic per program names what to
 implement next; the figures per program and stage are in the generated
 document.
 
