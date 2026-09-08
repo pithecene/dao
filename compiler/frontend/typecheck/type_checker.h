@@ -27,6 +27,9 @@ struct MethodInfo {
   const Type* receiver_type;
   std::string_view method_name;
   const Type* method_type; // function type (self removed)
+  // The module whose `extend` introduced it; null when it is visible
+  // everywhere (a class's own method, or a prelude module's extend).
+  const ModuleInfo* owner = nullptr;
 };
 
 struct TypeCheckResult {

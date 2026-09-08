@@ -99,12 +99,13 @@ auto TypeChecker::check(std::span<const FileNode* const> files) -> TypeCheckResu
   // Export method table for tooling (completion, hover).  Two modules
   // may each extend one type with one method name; tooling offers the
   // receiver a method once, so the module-scoped keys collapse here.
+  // Every entry, with its owner: which module's `extend` a method came
+  // from decides where tooling may offer it (§5), so collapsing the
+  // module-scoped keys here would offer a module-private method
+  // everywhere.
   std::vector<MethodInfo> methods;
-  std::unordered_set<MethodKey, MethodKeyHash> exported;
   for (const auto& [key, entry] : method_table_) {
-    if (exported.insert({.type = key.type, .name = key.name}).second) {
-      methods.push_back({key.type, key.name, entry.fn_type});
-    }
+    methods.push_back({key.type, key.name, entry.fn_type, key.owner});
   }
 
   return {.typed = std::move(typed_),
@@ -673,19 +674,30 @@ auto TypeChecker::type_conforms_to(const Type* type, const Decl* concept_decl) -
       if (decl_node->is<ClassDecl>()) {
         const auto& cls = decl_node->as<ClassDecl>();
         const auto& concept_name = concept_decl->as<ConceptDecl>().name;
+        // Which concept a block names is the resolver's answer, not the
+        // spelling's: a module may shadow the prelude's `Mark` with its
+        // own, and `as Mark` then names the module's.  Unbound (outside
+        // a program) the spelling is all there is.
+        auto names_this = [&](std::string_view spelled, Span at) -> bool {
+          auto bound = resolve_.uses.find(at.offset);
+          if (bound != resolve_.uses.end()) {
+            return bound->second->decl_as_decl() == concept_decl;
+          }
+          return spelled == concept_name;
+        };
 
         // deny supersedes everything — if present, the type does not
         // conform regardless of explicit `as` blocks. (Having both
         // is a compile error diagnosed in check_class.)
         for (const auto& deny : cls.denials) {
-          if (deny.concept_name == concept_name) {
+          if (names_this(deny.concept_name, deny.concept_span)) {
             return false;
           }
         }
 
         // Check explicit conformance.
         for (const auto& conf : cls.conformances) {
-          if (conf.concept_name == concept_name) {
+          if (names_this(conf.concept_name, conf.concept_span)) {
             return true;
           }
         }

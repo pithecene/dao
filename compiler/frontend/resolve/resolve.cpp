@@ -1289,8 +1289,15 @@ private:
             if (target != nullptr && target->exports != nullptr) {
               auto name = path.segments[1];
               auto name_offset = path.span.offset + static_cast<uint32_t>(first_seg.size()) + 2;
-              if (auto* exported = target->exports->lookup_local(name);
-                  exported != nullptr && exported->kind != SymbolKind::Module) {
+              auto* exported = target->exports->lookup_local(name);
+              if (exported == nullptr || exported->kind == SymbolKind::Module) {
+                // The export is the module's to have or not; this is the
+                // same diagnostic the expression position gives, so a
+                // type path through a binding is never silently unbound.
+                diagnostics_.push_back(Diagnostic::error(
+                    Span{.offset = name_offset, .length = static_cast<uint32_t>(name.size())},
+                    "module '" + target->display + "' has no export '" + std::string(name) + "'"));
+              } else {
                 uses_[name_offset] = exported;
               }
             }

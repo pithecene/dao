@@ -1,4 +1,5 @@
 #include "analysis/completion.h"
+#include "frontend/module/program.h"
 
 #include "frontend/resolve/symbol.h"
 #include "frontend/types/type_printer.h"
@@ -115,8 +116,8 @@ auto query_completions(uint32_t offset,
 }
 
 auto query_dot_completions(const Type* receiver_type,
-                            const TypeCheckResult& typed)
-    -> std::vector<CompletionItem> {
+                           const TypeCheckResult& typed,
+                           const ModuleInfo* from_module) -> std::vector<CompletionItem> {
   std::vector<CompletionItem> items;
 
   if (receiver_type == nullptr) {
@@ -141,9 +142,12 @@ auto query_dot_completions(const Type* receiver_type,
     }
   }
 
-  // Methods from concept extends (exported method table).
+  // Methods from concept extends (exported method table), filtered to
+  // what this module can call: an `extend` is module-local (§5), so a
+  // sibling module's method is not offered here.
   for (const auto& method : typed.methods) {
-    if (method.receiver_type == base_type) {
+    const bool visible = method.owner == nullptr || method.owner == from_module;
+    if (method.receiver_type == base_type && visible) {
       items.push_back({
           .label = std::string(method.method_name),
           .kind = "method",
