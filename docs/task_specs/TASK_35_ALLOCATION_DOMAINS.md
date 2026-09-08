@@ -106,14 +106,21 @@ The compiler therefore **copies escaping values into the enclosing
 domain at exit**.  What is copied depends on the exit being taken:
 
 1. at a fall-through or `break` exit: each binding declared outside
-   the block that was assigned inside it *on the path that reaches
-   this exit*.  The region-wide set of such bindings is static; which
-   of them were assigned on the path taken is not (`let out: string`
-   with no initializer, assigned in one arm of an `if` and not the
-   other), so each escaping binding carries a per-region dirty flag —
-   cleared at entry, set at every assignment to it inside the block —
-   and the exit copies a binding only when its flag is set.  A binding
-   never assigned on the path taken is not read, let alone copied.
+   the block that is the root of a place assigned inside it *on the
+   path that reaches this exit* — the binding itself (`out = …`) or a
+   field path or index rooted at it (`box.text = …`, `box.inner.name
+   = …`, `cells[i] = …`), since a store into a field of `box` puts
+   domain memory where `box` reaches it just as surely.  The
+   region-wide set of such root bindings is static; which of them
+   were stored to on the path taken is not (`let out: string` with no
+   initializer, assigned in one arm of an `if` and not the other), so
+   each escaping binding carries a per-region dirty flag — cleared at
+   entry, set at every store whose place is rooted at it inside the
+   block — and the exit copies the whole binding only when its flag is
+   set.  A binding never stored to on the path taken is not read, let
+   alone copied.  Stores through a pointer (`*p = …`, `mode unsafe`)
+   root at no binding and are the author's responsibility, as
+   everywhere for pointers.
 2. at a `return` exit from inside the block: the return value.  Outer
    bindings are not copied on a return exit: the function is leaving
    them, and nothing reads them afterwards.
@@ -187,9 +194,9 @@ can read off the source.
   before the exit call, a copy into the enclosing domain for each
   escaping value (§3.3).  The MIR builder already tracks active regions
   and emits exits on every path; it gains, per region, the set of
-  outer bindings assigned within it, one dirty flag per such binding
-  (a local the region's entry clears and each assignment inside sets),
-  and, on a `return` exit, the return value.  A fall-through or
+  outer bindings at the root of a place stored to within it, one dirty
+  flag per such binding (a local the region's entry clears and each
+  such store inside sets), and, on a `return` exit, the return value.  A fall-through or
   `break` exit copies each binding under its flag; a `return` exit
   copies the return value only (§3.3).  Copies are emitted through per-type copier functions the
   backend generates on demand (`dao.copy.<mangled type>`).  The copy
@@ -265,11 +272,14 @@ can read off the source.
   early `return` from nested blocks copies the return value through
   each and no outer binding; an outer `let out: string` assigned in
   one `if` arm and not the other is copied only on the path that
-  assigned it (the other path reads no flagless binding); a value not
+  assigned it (the other path reads no flagless binding); an outer
+  class binding whose field is assigned inside (`box.text = …`) is
+  copied whole; a value not
   escaping is not copied (IR contains no copier call); a callee's
   outermost block copies into the caller's open domain, not the root
   (the caller's domain exit reclaims it)
-- typechecker (E0): escaping heap-owning binding diagnosed; scalar
+- typechecker (E0): escaping heap-owning binding diagnosed, whether
+  assigned directly or through a field path rooted at it; scalar
   escape not; `yield` inside a `resource` block diagnosed; an escaping
   generator stays diagnosed after E1
 - examples: `resource.dao` extended with an escaping string and an
