@@ -308,9 +308,6 @@ result is known); `validate_ir.sh` compiles each with `clang`, links the
 ones with an expectation against the runtime, runs them, and compares
 exit codes (Task 30.5).  `task bootstrap-test` runs both steps.
 
-```
-```
-
 ## Module-system contract parity
 
 `docs/contracts/CONTRACT_MODULE_SYSTEM.md` governs both compilers.
