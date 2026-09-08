@@ -422,9 +422,16 @@ auto main(int argc, char* argv[]) -> int {
     require_file(source);
   }
 
+  // An explicit file set names a delivered program, so it owes an entry
+  // module whatever the command (CONTRACT_MODULE_SYSTEM.md §8.3).  A root
+  // file under an analysis command is advisory: the buffer is analysable
+  // without one, and the diagnostic says why it cannot be run.
+  if (!request.sources.empty()) {
+    request.options.entry_policy = dao::EntryPolicy::Required;
+  }
   if (command == "build") {
     // Building produces an executable, so the program must have an entry
-    // point; the analysis commands report a missing one as a warning.
+    // point whichever way it was given.
     request.options.entry_policy = dao::EntryPolicy::Required;
     cmd_build(request, extras);
     return EXIT_SUCCESS;
