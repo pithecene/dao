@@ -173,11 +173,24 @@ void collect_program_diagnostics(nlohmann::json& out, const PlaygroundProgram& p
 }
 
 void collect_assembly_diagnostics(nlohmann::json& out, const PlaygroundProgram& prog) {
+  std::vector<Diagnostic> located;
+  std::vector<Diagnostic> unlocated;
   for (const auto& file : prog.program.files) {
-    collect_diagnostics(out, prog, file->lex.diagnostics);
-    collect_diagnostics(out, prog, file->parse.diagnostics);
+    std::ranges::copy(file->lex.diagnostics, std::back_inserter(located));
+    std::ranges::copy(file->parse.diagnostics, std::back_inserter(located));
   }
-  collect_program_diagnostics(out, prog);
+  for (const auto& diag : prog.program.diagnostics) {
+    (diag.span.length == 0 ? unlocated : located).push_back(diag);
+  }
+  // Files occupy disjoint ascending ranges of one offset space assigned
+  // in file-id order, so sorting on the program offset is the contract's
+  // file-then-offset order.  Stable: two diagnostics at one offset keep
+  // the order the phase that produced them chose.
+  std::ranges::stable_sort(located, {}, [](const Diagnostic& diag) { return diag.span.offset; });
+  collect_diagnostics(out, prog, located);
+  for (const auto& diag : unlocated) {
+    out.push_back(make_unlocated_diagnostic(diag.message, diag.severity));
+  }
 }
 
 void collect_diagnostics(nlohmann::json& out,

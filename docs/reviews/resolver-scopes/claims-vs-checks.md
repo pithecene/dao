@@ -42,3 +42,9 @@ this branch (Task 31 D2).
 | `is_prelude_intrinsic` (`resolve.h`) | Names the generic intrinsic family, mangled specializations included; only a prelude module may declare one. | `resolve_test.cpp` `.../the intrinsic family is the prelude's to declare` (entry module and imported module alike). The mangled form (`size_of$i32`) is not covered by a resolver test: no source can declare it — the `$` is not a legal identifier character — and the backend's use of the predicate is Task 31 D4's. |
 | `reject_deep_path` (`resolve.cpp`) | The closed set of qualified forms bottoms out at a type's member in expression position and at the exported type in type position; anything deeper is an error in either position. | `resolve_test.cpp` `.../deeper_path_through_a_binding_is_an_error` (expression) and `.../a deeper path in type position is an error` (type). |
 | `collect_assembly_diagnostics` (`tools/playground/compiler_service/pipeline.h`) | A failed assembly reports every file's lex/parse diagnostics merged with the graph's, located entries in program order (Task 31 §8.4). | `service_test.cpp` `.../assembly_diagnostics_come_back_in_program_order`, over `analyze` and `run`. |
+
+## Verifiers
+
+| Verifier | Claim | Verified by |
+|---|---|---|
+| `compute_derived_conformances` (`type_checker.cpp`) | A class derives a concept from what its own module can see, so a sibling module's `extend` cannot confer the conformance. | Only in the positive direction: `typecheck_test.cpp` `typecheck_scalar_conformance` and the example corpus in `playground_service_test` cover deriving through prelude `extend` blocks. The negative direction is deliberately unverified: stating it needs a class in one module whose field type is extended in another, which needs `b::T` in a field position to type-check — Task 31 D3's slice, not this one's. |
