@@ -545,6 +545,15 @@ auto TypeChecker::aliases_generic_shell(const TypeNode* node) const -> bool {
   if (it == resolve_.uses.end() || it->second->kind != SymbolKind::Type) {
     return false;
   }
+  // A generic enum: not ready while a payload, or anything a payload
+  // holds by value, is still untyped -- an instantiation clones the
+  // payloads exactly as it clones a class's fields.
+  if (auto registered = symbol_types_.find(it->second);
+      registered != symbol_types_.end() && registered->second != nullptr &&
+      registered->second->kind() == TypeKind::Enum) {
+    std::unordered_set<const Type*> seen;
+    return !type_complete(registered->second, seen);
+  }
   const auto* decl = it->second->decl_as_decl();
   // Not ready while the class has no fields yet, a field the earlier
   // passes could not type (one typed by an alias still waiting), or a

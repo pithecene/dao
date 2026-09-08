@@ -831,6 +831,19 @@ suite<"typecheck_modules"> typecheck_modules = [] {
         << "C17(\"wrong\") was accepted where A17 was declared";
   };
 
+  "an alias of a generic enum waits for its payloads to be typed"_test = [] {
+    // Wrap's payload is typed by a deferred alias; IntWrap must not cache
+    // an instantiation with that payload still untyped.
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nclass Box<T>:\n    v: T\nenum class Wrap<T>:\n    Some(box: IntBox, t: T)\n  "
+         "  None\ntype IntBox = Box<i32>\ntype IntWrap = Wrap<i32>\nfn main(): i32\n  let w: "
+         "IntWrap = Wrap::Some(box = Box(\"wrong\"), t = 1)\n  return 0\n"},
+    });
+    expect(!checked.result.diagnostics.empty())
+        << "Wrap::Some(box = Box(\"wrong\")) was accepted through an incomplete enum instantiation";
+  };
+
   "a concept is not a type outside a bound"_test = [] {
     auto checked = check_program({
         {"traits.dao", "module app::traits\nconcept Reveal:\n    fn reveal(self): i32\n"},
