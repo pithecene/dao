@@ -51,7 +51,7 @@ auto compile_failed(nlohmann::json diagnostics) -> Reply {
 
 auto compile_failed(nlohmann::json diagnostics, const std::string& fallback_message) -> Reply {
   if (diagnostics.empty()) {
-    diagnostics.push_back(make_internal_error(fallback_message));
+    diagnostics.push_back(make_unlocated_diagnostic(fallback_message));
   }
   return compile_failed(std::move(diagnostics));
 }
@@ -65,24 +65,18 @@ void init_run_support() {
 auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
   nlohmann::json diagnostics = nlohmann::json::array();
 
-  auto prog = build_playground_program(ctx.repo_root, std::move(inputs));
-  if (prog.user == nullptr || !prog.program.diagnostics.empty()) {
-    for (const auto& diag : prog.program.diagnostics) {
-      diagnostics.push_back(make_internal_error(diag.message));
-    }
+  // Running needs an entry point, so here a missing one is an error
+  // rather than the linker's `undefined main`.
+  auto prog = build_playground_program(ctx.repo_root, std::move(inputs), EntryPolicy::Required);
+  // Graph, lex, and parse diagnostics of every file as one §8.4-ordered
+  // stream, reported before anything can return: a graph error must not
+  // hide the parse error that explains it.
+  collect_program_diagnostics(diagnostics, prog);
+  if (prog.user == nullptr || has_error_severity(prog.program.diagnostics)) {
     return compile_failed(std::move(diagnostics));
   }
-
-  // Lex/parse diagnostics of every file; only the editor buffer's are
-  // reported, but any file failing to parse stops the run.
-  bool lex_parse_failed = false;
-  for (const auto& file : prog.program.files) {
-    collect_diagnostics(diagnostics, prog, file->lex.diagnostics);
-    collect_diagnostics(diagnostics, prog, file->parse.diagnostics);
-    lex_parse_failed |= !file->lex.diagnostics.empty() || !file->parse.diagnostics.empty() ||
-                        file->parse.file == nullptr;
-  }
-  if (lex_parse_failed) {
+  // Any file failing to lex or parse stops the run.
+  if (!prog.program.lexed_and_parsed_cleanly()) {
     return compile_failed(std::move(diagnostics), "prelude failed to parse");
   }
 
@@ -144,7 +138,7 @@ auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
 
   std::string emit_error;
   if (!LlvmBackend::emit_object(*llvm_result.module, obj_path.string(), emit_error)) {
-    diagnostics.push_back(make_internal_error("emit object failed: " + emit_error));
+    diagnostics.push_back(make_unlocated_diagnostic("emit object failed: " + emit_error));
     return compile_failed(std::move(diagnostics));
   }
 
@@ -152,7 +146,7 @@ auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
   auto cc_path = llvm::sys::findProgramByName("cc");
   if (!cc_path) {
     std::filesystem::remove(obj_path);
-    diagnostics.push_back(make_internal_error("cannot find 'cc' linker"));
+    diagnostics.push_back(make_unlocated_diagnostic("cannot find 'cc' linker"));
     return compile_failed(std::move(diagnostics));
   }
 
@@ -176,7 +170,7 @@ auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
     if (!link_error.empty()) {
       msg += ": " + link_error;
     }
-    diagnostics.push_back(make_internal_error(msg));
+    diagnostics.push_back(make_unlocated_diagnostic(msg));
     return compile_failed(std::move(diagnostics));
   }
 

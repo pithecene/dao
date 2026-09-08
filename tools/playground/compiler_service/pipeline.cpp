@@ -38,8 +38,9 @@ auto parse_program_request(const nlohmann::json& request)
   return parsed;
 }
 
-auto build_playground_program(const std::filesystem::path& repo_root, ProgramRequest request)
-    -> PlaygroundProgram {
+auto build_playground_program(const std::filesystem::path& repo_root,
+                              ProgramRequest request,
+                              EntryPolicy entry_policy) -> PlaygroundProgram {
   PlaygroundProgram prog;
 
   // Exactly one file carries the document's path (parse_program_request
@@ -61,7 +62,7 @@ auto build_playground_program(const std::filesystem::path& repo_root, ProgramReq
     }
     inputs.push_back(std::move(file));
   }
-  prog.program = build_program(std::move(inputs));
+  prog.program = build_program(std::move(inputs), {}, entry_policy);
   for (const auto& file : prog.program.files) {
     if (!file->is_prelude && file->display_path == request.document) {
       prog.user = file.get();
@@ -159,6 +160,14 @@ auto without_prelude_warnings(const std::vector<Diagnostic>& diags, const Playgr
   return kept;
 }
 
+void collect_program_diagnostics(nlohmann::json& out, const PlaygroundProgram& prog) {
+  auto diagnostics = assembly_diagnostics(prog.program);
+  for (const auto& diag : diagnostics.unlocated) {
+    out.push_back(make_unlocated_diagnostic(diag.message, diag.severity));
+  }
+  collect_diagnostics(out, prog, diagnostics.located);
+}
+
 void collect_diagnostics(nlohmann::json& out,
                          const PlaygroundProgram& prog,
                          const std::vector<Diagnostic>& diags) {
@@ -173,9 +182,9 @@ void collect_diagnostics(nlohmann::json& out,
   }
 }
 
-auto make_internal_error(const std::string& message) -> nlohmann::json {
+auto make_unlocated_diagnostic(const std::string& message, Severity severity) -> nlohmann::json {
   return {
-      {"severity", "error"},
+      {"severity", severity == Severity::Warning ? "warning" : "error"},
       {"file", ""},
       {"offset", 0},
       {"length", 0},

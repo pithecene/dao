@@ -38,9 +38,9 @@ inline auto wrap_with_test_module(std::string_view src) -> std::string {
 }
 
 /// Build a Program from prelude sources (each a real stdlib file with its
-/// own `module` line, marked as prelude group) followed by one user
-/// source (wrapped with `module test` if it lacks a module line).  The
-/// user file is always the last file of the program.
+/// own `module` line, marked as prelude group) and one user source
+/// (wrapped with `module test` if it lacks a module line); `user_file`
+/// finds the latter.
 inline auto make_test_program(std::string_view user_source,
                               std::span<const std::string> prelude_sources = {})
     -> Program {
@@ -70,7 +70,7 @@ inline auto stdlib_prelude_sources(const std::filesystem::path& repo_root)
 
 /// The user file of a program built by make_test_program.
 inline auto user_file(const Program& program) -> const SourceFile& {
-  return *program.files.back();
+  return *program.user_files().front();
 }
 
 } // namespace dao

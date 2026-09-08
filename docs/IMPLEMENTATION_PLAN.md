@@ -535,7 +535,11 @@ See `docs/task_specs/TASK_30_BOOTSTRAP_LLVM_BACKEND.md` and
 
 Status: **in progress** — D0 (program-wide source map; prelude loaded
 as separate files; `prelude_bytes` machinery and `blank_leading_module`
-removed; `compiler/frontend/module/` created) landed.  D1–D6 follow.
+removed; `compiler/frontend/module/` created) and D1 (`ModuleInfo`,
+module graph with import edges, lexical Kahn ordering and cycle traces,
+entry selection per §7.7, root-file discovery with the §8.3 mapping
+rule, lexical file-id order per §8.4, `--module-root` / `--stdlib-root`
+/ `--source` / `--entry`) landed.  D2–D6 follow.
 
 **Objective**: make the C++ host compiler compile a program spanning
 multiple Dao source files with real module identity, import-driven

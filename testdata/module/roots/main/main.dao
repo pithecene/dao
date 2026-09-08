@@ -1,0 +1,5 @@
+module rooted
+import ext::thing
+
+fn main(): i32
+  return 0

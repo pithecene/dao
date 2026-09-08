@@ -11,7 +11,10 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <optional>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <vector>
 
 using namespace boost::ut;
@@ -63,6 +66,87 @@ auto run_and_capture(const std::filesystem::path& exe, const std::filesystem::pa
   return dao::read_file(out);
 }
 
+/// Run an executable for its exit status, which is how these fixtures
+/// report a value without needing the real prelude's `print`.
+auto exit_status(const std::filesystem::path& exe) -> int {
+  std::string exe_str = exe.string();
+  std::vector<llvm::StringRef> args = {exe_str};
+  return llvm::sys::ExecuteAndWait(exe_str, args);
+}
+
+/// A scratch program the CLI tests lay out file by file, with a stdlib
+/// root of its own.  That root is empty unless a test fills it, so the
+/// real prelude is neither read nor parsed and every name a fixture
+/// uses is one the fixture wrote.
+struct Scratch {
+  std::filesystem::path dir;
+  std::filesystem::path stdlib;
+
+  explicit Scratch(std::string_view name) : dir(scratch_dir(name)), stdlib(dir / "stdlib") {
+    std::filesystem::create_directories(stdlib);
+  }
+
+  auto file(const std::filesystem::path& relative, std::string_view text) const
+      -> std::filesystem::path {
+    auto path = dir / relative;
+    std::filesystem::create_directories(path.parent_path());
+    write(path, text);
+    return path;
+  }
+
+  /// Where `daoc build` puts the executable for a source file: beside
+  /// the file it names its output after.
+  [[nodiscard]] auto output_for(const std::filesystem::path& source) const
+      -> std::filesystem::path {
+    auto named = dao::canonical_or_self(source);
+    return named.parent_path() / named.stem();
+  }
+};
+
+/// What one `daoc` invocation did.  Every CLI test asserts on the exit
+/// code and on the stream the driver actually writes to: diagnostics go
+/// to stderr, results to stdout.
+struct Output {
+  int exit_code = 0;
+  std::string out;
+  std::string err;
+
+  [[nodiscard]] auto err_says(std::string_view text) const -> bool {
+    return err.find(text) != std::string::npos;
+  }
+};
+
+auto run_daoc(const Scratch& scratch, const std::vector<std::string>& args) -> Output {
+  auto out_path = (scratch.dir / "stdout.txt").string();
+  auto err_path = (scratch.dir / "stderr.txt").string();
+  std::vector<llvm::StringRef> argv;
+  argv.reserve(args.size() + 1);
+  argv.emplace_back(DAO_DAOC);
+  for (const auto& arg : args) {
+    argv.emplace_back(arg);
+  }
+  std::optional<llvm::StringRef> to_out = llvm::StringRef(out_path);
+  std::optional<llvm::StringRef> to_err = llvm::StringRef(err_path);
+  int status =
+      llvm::sys::ExecuteAndWait(DAO_DAOC, argv, std::nullopt, {std::nullopt, to_out, to_err});
+  return {.exit_code = status, .out = dao::read_file(out_path), .err = dao::read_file(err_path)};
+}
+
+/// Compile a C snippet with the same `cc` the driver links through, so
+/// the link-passthrough test has a real object to pass.
+auto compile_object(const Scratch& scratch, std::string_view code) -> std::filesystem::path {
+  auto source = scratch.dir / "helper.c";
+  write(source, code);
+  auto object = scratch.dir / "helper.o";
+  auto cc = llvm::sys::findProgramByName("cc");
+  expect(static_cast<bool>(cc)) << "cannot find 'cc'";
+  auto source_str = source.string();
+  auto object_str = object.string();
+  std::vector<llvm::StringRef> args = {*cc, "-c", source_str, "-o", object_str};
+  expect(llvm::sys::ExecuteAndWait(*cc, args) == 0) << "cc could not compile " << source_str;
+  return object;
+}
+
 } // namespace
 
 suite<"driver"> driver_suite = [] {
@@ -86,6 +170,246 @@ suite<"driver"> driver_suite = [] {
       expect(run_and_capture(a / "hello", a / "out.txt") == "from a\n") << "round " << round;
       expect(run_and_capture(b / "hello", b / "out.txt") == "from b\n") << "round " << round;
     }
+  };
+};
+
+// The CLI forms of Task 31 §13, each exercised as the command line a
+// user types.  The loaders are tested directly in module_graph_test;
+// what these add is that the driver reaches them with the arguments it
+// was given, in the order it was given them.
+suite<"driver_cli"> driver_cli_suite = [] {
+  "a root file's imports are discovered from its own directory"_test = [] {
+    const Scratch scratch("root-discovery");
+    auto root = scratch.file("main.dao",
+                             "module main\nimport app::util\n\nfn main(): i32\n  return one()\n");
+    scratch.file("app/util.dao", "module app::util\n\nfn one(): i32 -> 3\n");
+
+    auto built =
+        run_daoc(scratch, {"build", root.string(), "--stdlib-root", scratch.stdlib.string()});
+    expect(built.exit_code == 0) << built.err;
+    expect(exit_status(scratch.output_for(root)) == 3) << "the imported module was not compiled in";
+
+    // The dumps report on the file the command line named.  A
+    // discovered import can sort ahead of the root by display path, so
+    // "the first user file" is not the same question.
+    auto dumped =
+        run_daoc(scratch, {"tokens", root.string(), "--stdlib-root", scratch.stdlib.string()});
+    expect(dumped.exit_code == 0) << dumped.err;
+    expect(dumped.out.find("decl.function main") != std::string::npos) << dumped.out;
+    expect(dumped.out.find("decl.function one") == std::string::npos)
+        << "reported on a discovered import instead of the root: " << dumped.out;
+  };
+
+  "module roots are searched in command-line order"_test = [] {
+    const Scratch scratch("ordered-module-roots");
+    auto root = scratch.file(
+        "main.dao", "module main\nimport ext::thing\n\nfn main(): i32\n  return value()\n");
+    scratch.file("first/ext/thing.dao", "module ext::thing\n\nfn value(): i32 -> 1\n");
+    scratch.file("second/ext/thing.dao", "module ext::thing\n\nfn value(): i32 -> 2\n");
+
+    auto build_with = [&](std::string_view earlier, std::string_view later) {
+      return run_daoc(scratch,
+                      {"build",
+                       root.string(),
+                       "--module-root",
+                       (scratch.dir / earlier).string(),
+                       "--module-root",
+                       (scratch.dir / later).string(),
+                       "--stdlib-root",
+                       scratch.stdlib.string()});
+    };
+    auto first_wins = build_with("first", "second");
+    expect(first_wins.exit_code == 0) << first_wins.err;
+    expect(exit_status(scratch.output_for(root)) == 1) << "the later --module-root won";
+    auto second_wins = build_with("second", "first");
+    expect(second_wins.exit_code == 0) << second_wins.err;
+    expect(exit_status(scratch.output_for(root)) == 2) << "the roots are not searched in order";
+  };
+
+  "an unfound import names every root, in the order they were searched"_test = [] {
+    const Scratch scratch("searched-roots");
+    auto root =
+        scratch.file("main.dao", "module main\nimport ext::thing\n\nfn main(): i32\n  return 0\n");
+    auto first = scratch.dir / "first";
+    auto second = scratch.dir / "second";
+
+    auto result = run_daoc(scratch,
+                           {"check",
+                            root.string(),
+                            "--module-root",
+                            first.string(),
+                            "--module-root",
+                            second.string(),
+                            "--stdlib-root",
+                            scratch.stdlib.string()});
+    // §8.2 fixes the order — the root's directory, each --module-root in
+    // command-line order, then the stdlib root — and this message is
+    // what tells the user which directory was expected to hold the file.
+    auto expected = "searched " + scratch.dir.generic_string() + " " + first.generic_string() +
+                    " " + second.generic_string() + " " + scratch.stdlib.generic_string();
+    expect(result.exit_code != 0) << result.out;
+    expect(result.err_says(expected)) << result.err << "\nwant: " << expected;
+  };
+
+  "--stdlib-root replaces the prelude the driver would load"_test = [] {
+    const Scratch scratch("stdlib-root");
+    scratch.file("stdlib/core/greet.dao", "module core::greet\n\nfn greeting(): i32 -> 5\n");
+    auto root = scratch.file("main.dao", "module main\n\nfn main(): i32\n  return greeting()\n");
+
+    auto overridden =
+        run_daoc(scratch, {"build", root.string(), "--stdlib-root", scratch.stdlib.string()});
+    expect(overridden.exit_code == 0) << overridden.err;
+    expect(exit_status(scratch.output_for(root)) == 5);
+
+    auto defaulted = run_daoc(scratch, {"check", root.string()});
+    expect(defaulted.exit_code != 0) << "the built-in prelude declares no 'greeting'";
+  };
+
+  "--source takes an explicit set and --entry names its entry"_test = [] {
+    const Scratch scratch("explicit-sources");
+    auto library = scratch.file("lib.dao", "module lib\n\nfn helper(): i32 -> 8\n");
+    auto app = scratch.file("app.dao", "module app\n\nfn main(): i32\n  return helper()\n");
+    auto sources = [&](std::vector<std::string> extra) {
+      std::vector<std::string> args = {"check",
+                                       "--source",
+                                       library.string(),
+                                       "--source",
+                                       app.string(),
+                                       "--stdlib-root",
+                                       scratch.stdlib.string()};
+      args.insert(args.end(), extra.begin(), extra.end());
+      return run_daoc(scratch, args);
+    };
+
+    auto implicit = sources({});
+    expect(implicit.exit_code == 0) << implicit.err;
+    expect(implicit.out == "ok\n") << implicit.out;
+
+    auto named = sources({"--entry", "app"});
+    expect(named.exit_code == 0) << named.err;
+
+    auto without_main = sources({"--entry", "lib"});
+    expect(without_main.exit_code != 0) << without_main.out;
+    expect(without_main.err_says("entry module 'lib' (--entry) declares no 'fn main'"))
+        << without_main.err;
+  };
+
+  "several mains without --entry are rejected"_test = [] {
+    const Scratch scratch("ambiguous-entry");
+    auto first = scratch.file("a.dao", "module a\n\nfn main(): i32\n  return 1\n");
+    auto second = scratch.file("b.dao", "module b\n\nfn main(): i32\n  return 2\n");
+
+    auto result = run_daoc(scratch,
+                           {"check",
+                            "--source",
+                            first.string(),
+                            "--source",
+                            second.string(),
+                            "--stdlib-root",
+                            scratch.stdlib.string()});
+    expect(result.exit_code != 0) << result.out;
+    expect(result.err_says("ambiguous entry module: 'fn main' declared in a, b (use --entry)"))
+        << result.err;
+  };
+
+  "a root file given with --source is rejected"_test = [] {
+    const Scratch scratch("mixed-inputs");
+    auto root = scratch.file("root.dao", "module root\n\nfn main(): i32\n  return 0\n");
+    auto source = scratch.file("other.dao", "module other\n\nfn one(): i32 -> 1\n");
+
+    // The two describe different programs; taking one and dropping the
+    // other would compile something the command line did not ask for.
+    auto result = run_daoc(scratch, {"check", root.string(), "--source", source.string()});
+    expect(result.exit_code != 0) << result.out;
+    expect(result.err_says("give a root file or --source inputs, not both")) << result.err;
+  };
+
+  "the single-file dumps reject --source inputs"_test = [] {
+    const Scratch scratch("single-file-dumps");
+    auto source = scratch.file("a.dao", "module a\n\nfn one(): i32 -> 1\n");
+
+    for (const auto* command : {"lex", "parse", "ast"}) {
+      auto result = run_daoc(scratch, {command, "--source", source.string()});
+      expect(result.exit_code != 0) << command << ": " << result.out;
+      expect(result.err_says("this command takes a single file, not --source inputs"))
+          << command << ": " << result.err;
+    }
+  };
+
+  "link inputs after --source still reach the linker"_test = [] {
+    const Scratch scratch("link-passthrough");
+    auto source = scratch.file(
+        "app.dao", "module app\nextern fn helper(): i32\n\nfn main(): i32\n  return helper()\n");
+    auto object = compile_object(scratch, "int helper(void) { return 7; }\n");
+
+    // `build <inputs> [link-inputs...]`: a positional after --source is
+    // a link input, not a second way to name the program.
+    auto built = run_daoc(scratch,
+                          {"build",
+                           "--source",
+                           source.string(),
+                           "--stdlib-root",
+                           scratch.stdlib.string(),
+                           object.string()});
+    expect(built.exit_code == 0) << built.err;
+    expect(exit_status(scratch.output_for(source)) == 7) << "the object never reached 'cc'";
+  };
+
+  "an explicit set names its output by the set, not by the order"_test = [] {
+    const Scratch scratch("alias-order");
+    auto real = scratch.file("real.dao", "module app\n\nfn main(): i32\n  return 4\n");
+    auto alias = scratch.dir / "zzz.dao";
+    std::error_code ec;
+    std::filesystem::create_symlink(real, alias, ec);
+    expect(!ec) << "cannot create symlink: " << ec.message();
+
+    // Two spellings of one file are one source — the loader already
+    // deduplicates them — so the same set in either order must build the
+    // same program under the same name (§8.4).  An alias with its own
+    // stem is what makes a spelling-ranked choice visible.
+    auto build = [&](const std::filesystem::path& first, const std::filesystem::path& second) {
+      return run_daoc(scratch,
+                      {"build",
+                       "--source",
+                       first.string(),
+                       "--source",
+                       second.string(),
+                       "--stdlib-root",
+                       scratch.stdlib.string()});
+    };
+    auto forward = build(real, alias);
+    auto reversed = build(alias, real);
+    expect(forward.exit_code == 0) << forward.err;
+    expect(reversed.exit_code == 0) << reversed.err;
+    expect(forward.out == reversed.out) << forward.out << " vs " << reversed.out;
+    expect(forward.out == scratch.output_for(real).string() + "\n") << forward.out;
+    expect(exit_status(scratch.output_for(real)) == 4);
+  };
+
+  "a stdlib file compiled as the root keeps its root role"_test = [] {
+    const Scratch scratch("prelude-root");
+    auto library = scratch.file("stdlib/core/lib.dao", "module core::lib\n\nfn one(): i32 -> 1\n");
+    auto app =
+        scratch.file("stdlib/core/app.dao", "module core::app\n\nfn main(): i32\n  return 6\n");
+
+    // The program holds one copy of the root, in the prelude group, so
+    // it has no user file at all.  Entry selection must still find the
+    // root through the spelling the program kept.
+    auto no_main =
+        run_daoc(scratch, {"check", library.string(), "--stdlib-root", scratch.stdlib.string()});
+    expect(no_main.exit_code != 0) << no_main.out;
+    expect(no_main.err_says("entry module 'core::lib' (the root file) declares no 'fn main'"))
+        << no_main.err;
+
+    auto dumped =
+        run_daoc(scratch, {"tokens", app.string(), "--stdlib-root", scratch.stdlib.string()});
+    expect(dumped.exit_code == 0) << "tokens indexed an empty user-file set: " << dumped.err;
+    expect(dumped.out.find("decl.function main") != std::string::npos) << dumped.out;
+
+    auto built =
+        run_daoc(scratch, {"build", app.string(), "--stdlib-root", scratch.stdlib.string()});
+    expect(built.exit_code == 0) << built.err;
+    expect(exit_status(scratch.output_for(app)) == 6);
   };
 };
 

@@ -2,6 +2,7 @@ add_library(dao_frontend STATIC
   ast/ast.cpp
   ast/ast_printer.cpp
   lexer/lexer.cpp
+  module/module_graph.cpp
   module/program.cpp
   module/source_map.cpp
   parser/parser.cpp
@@ -100,3 +101,15 @@ target_compile_definitions(source_map_test PRIVATE
 )
 
 add_test(NAME source_map_test COMMAND source_map_test)
+
+add_executable(module_graph_test
+  module/module_graph_test.cpp
+)
+
+target_link_libraries(module_graph_test PRIVATE dao_frontend Boost::ut)
+
+target_compile_definitions(module_graph_test PRIVATE
+  DAO_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+
+add_test(NAME module_graph_test COMMAND module_graph_test)

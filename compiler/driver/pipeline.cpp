@@ -18,12 +18,7 @@ namespace dao {
 // ---------------------------------------------------------------------------
 
 auto read_file(const std::filesystem::path& path) -> std::string {
-  std::ifstream file(path);
-  if (!file) {
-    std::cerr << "error: could not open: " << path << "\n";
-    std::exit(EXIT_FAILURE);
-  }
-  return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+  return read_text_file(path);
 }
 
 // ---------------------------------------------------------------------------
@@ -110,39 +105,44 @@ auto lex_and_parse(const std::filesystem::path& path) -> ParsedFile {
 // Program stages
 // ---------------------------------------------------------------------------
 
-auto load_program(const std::filesystem::path& user_path) -> Program {
-  auto inputs = load_prelude_inputs(std::filesystem::path(DAO_SOURCE_DIR) / "stdlib");
-  inputs.push_back(read_source_input(user_path, /*is_prelude=*/false));
-  auto program = build_program(std::move(inputs));
+auto load_program(const ProgramRequest& request) -> Program {
+  auto program = request.sources.empty()
+                     ? load_program_from_root(request.root, request.options)
+                     : load_program_from_files(request.sources, request.options);
 
-  if (!program.diagnostics.empty()) {
-    for (const auto& diag : program.diagnostics) {
-      std::cerr << "error: " << diag.message << "\n";
-    }
-    std::exit(EXIT_FAILURE);
-  }
-
+  // Load, graph, lex, and parse diagnostics as one §8.4-ordered stream.
+  // The ones with a location print through the source map; the rest
+  // (position budget, entry selection) have nowhere to point.
+  auto diagnostics = assembly_diagnostics(program);
   bool has_errors = false;
-  for (const auto& file : program.files) {
-    has_errors |= print_error_diagnostics(program.source_map, file->lex.diagnostics);
-    has_errors |= print_error_diagnostics(program.source_map, file->parse.diagnostics);
+  for (const auto& diag : diagnostics.unlocated) {
+    std::cerr << "error: " << diag.message << "\n";
+    has_errors = true;
   }
+  has_errors |= print_error_diagnostics(program.source_map, diagnostics.located);
   if (has_errors || !program.lexed_and_parsed_cleanly()) {
     std::exit(EXIT_FAILURE);
   }
   return program;
 }
 
-auto run_frontend(const std::filesystem::path& path) -> FrontendResult {
-  auto program = load_program(path);
+auto run_frontend(const ProgramRequest& request) -> FrontendResult {
+  auto program = load_program(request);
 
+  // §8.4: diagnostics are emitted in file order, then offset order —
+  // across the whole frontend, not per phase.  Resolution and type
+  // checking are both run, then their diagnostics are merged and sorted
+  // by program offset, which is exactly that order.
   auto resolve_result = resolve(program);
-  bool has_errors =
-      print_error_diagnostics(program.source_map, resolve_result.diagnostics);
-
   TypeContext types;
   auto check_result = typecheck(program, resolve_result, types);
-  has_errors |= print_diagnostics(program.source_map, check_result.diagnostics);
+
+  std::vector<Diagnostic> frontend_diagnostics = resolve_result.diagnostics;
+  frontend_diagnostics.insert(
+      frontend_diagnostics.end(), check_result.diagnostics.begin(), check_result.diagnostics.end());
+  std::ranges::stable_sort(
+      frontend_diagnostics, {}, [](const Diagnostic& diag) { return diag.span.offset; });
+  bool has_errors = print_diagnostics(program.source_map, frontend_diagnostics);
 
   if (has_errors) {
     std::exit(EXIT_FAILURE);
@@ -154,8 +154,8 @@ auto run_frontend(const std::filesystem::path& path) -> FrontendResult {
           .typecheck = std::move(check_result)};
 }
 
-auto run_through_hir(const std::filesystem::path& path) -> HirResult {
-  auto frontend = run_frontend(path);
+auto run_through_hir(const ProgramRequest& request) -> HirResult {
+  auto frontend = run_frontend(request);
   HirContext hir_ctx;
   auto hir = build_hir(frontend.program, frontend.resolve, frontend.typecheck, hir_ctx);
 
@@ -169,8 +169,8 @@ auto run_through_hir(const std::filesystem::path& path) -> HirResult {
           .hir = std::move(hir)};
 }
 
-auto run_through_mir(const std::filesystem::path& path) -> MirResult {
-  auto hir_result = run_through_hir(path);
+auto run_through_mir(const ProgramRequest& request) -> MirResult {
+  auto hir_result = run_through_hir(request);
   const auto& source_map = hir_result.frontend.program.source_map;
   MirContext mir_ctx;
   auto mir = build_mir(*hir_result.hir.module, mir_ctx, hir_result.frontend.types);
