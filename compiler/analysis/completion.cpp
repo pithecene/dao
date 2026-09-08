@@ -1,5 +1,7 @@
 #include "analysis/completion.h"
+
 #include "frontend/module/program.h"
+#include <map>
 
 #include "frontend/resolve/symbol.h"
 #include "frontend/types/type_printer.h"
@@ -143,17 +145,30 @@ auto query_dot_completions(const Type* receiver_type,
   }
 
   // Methods from concept extends (exported method table), less those an
-  // `extend` in another module introduced: offering one would advertise
-  // a call the checker rejects.
+  // `extend` in another module introduced -- offering one would advertise
+  // a call the checker rejects -- and, where several share a name, only
+  // the one a call selects: the type's own method, then the current
+  // module's extension, then the prelude's (innermost-first, §7.4).
+  std::map<std::string_view, std::pair<int, const MethodInfo*>> best;
   for (const auto& method : typed.methods) {
-    if (method.receiver_type == base_type &&
-        extend_visible_from(method.extend_module, from_module)) {
-      items.push_back({
-          .label = std::string(method.method_name),
-          .kind = "method",
-          .type = print_type(method.method_type),
-      });
+    if (method.receiver_type != base_type ||
+        !extend_visible_from(method.extend_module, from_module)) {
+      continue;
     }
+    const int tier = method.inherent                                                            ? 0
+                     : (method.extend_module != nullptr && method.extend_module == from_module) ? 1
+                                                                                                : 2;
+    auto it = best.find(method.method_name);
+    if (it == best.end() || tier < it->second.first) {
+      best[method.method_name] = {tier, &method};
+    }
+  }
+  for (const auto& [name, chosen] : best) {
+    items.push_back({
+        .label = std::string(name),
+        .kind = "method",
+        .type = print_type(chosen.second->method_type),
+    });
   }
 
   return items;

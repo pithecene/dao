@@ -757,6 +757,32 @@ suite<"typecheck_modules"> typecheck_modules = [] {
         << "Holder(\"x\") was accepted: the alias-typed field was left untyped";
   };
 
+  "nested deferred aliases do not cache an incomplete instantiation"_test = [] {
+    // `Holder<T>` has a field typed by the deferred `IntBox`; `IntHolder`
+    // instantiates Holder and must wait until that field is typed, or
+    // the copy it caches carries the hole and `IntHolder("wrong", 1)`
+    // is accepted.
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nclass Box<T>:\n    v: T\nclass Holder<T>:\n    box: IntBox\n    tag: T\n"
+         "type IntBox = Box<i32>\ntype IntHolder = Holder<i32>\n"
+         "fn take(h: IntHolder): i32 -> h.tag\n"
+         "fn main(): i32 -> take(Holder(\"wrong\", 1))\n"},
+    });
+    expect(!checked.result.diagnostics.empty()) << "Holder(\"wrong\", 1) was accepted";
+  };
+
+  "an untypable field is reported once"_test = [] {
+    auto checked = check_program({
+        {"main.dao", "module app\nclass Broken:\n    value: Missing\nfn main(): i32 -> 0\n"},
+    });
+    size_t said = 0;
+    for (const auto& d : checked.result.diagnostics) {
+      said += d.message.find("unknown type 'Missing'") != std::string::npos;
+    }
+    expect(said == 1_u) << all_messages(checked);
+  };
+
   "a concept is not a type outside a bound"_test = [] {
     auto checked = check_program({
         {"traits.dao", "module app::traits\nconcept Reveal:\n    fn reveal(self): i32\n"},

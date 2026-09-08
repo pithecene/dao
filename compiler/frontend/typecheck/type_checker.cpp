@@ -88,7 +88,7 @@ auto TypeChecker::check(std::span<const FileNode* const> files) -> TypeCheckResu
   std::vector<MethodInfo> methods;
   for (const auto& [key, entries] : method_table_) {
     for (const auto& entry : entries) {
-      methods.push_back({key.type, key.name, entry.fn_type, entry.extend_module});
+      methods.push_back({key.type, key.name, entry.fn_type, entry.extend_module, entry.inherent});
     }
   }
 
@@ -483,17 +483,24 @@ void TypeChecker::register_declarations() {
   // No failure is final yet: an alias may name one that waits for
   // fields (below), and reporting it here would reject a program that
   // resolves a pass later.
-  register_struct_fields();
-  fields_registered_ = true;
-  // Aliases of generic instantiations were held back until the classes
-  // they instantiate had fields; they resolve now, to a fixpoint as
-  // before, and only now are their failures final.
-  while (register_type_aliases(/*report_failures=*/false) > 0) {
+  // Fields and the aliases that name generic instantiations depend on
+  // each other: `Holder<T>` may have a field typed by `IntBox`, and
+  // `IntHolder = Holder<i32>` must not be instantiated while that field
+  // is still untyped, or the copy it caches would carry the hole.  The
+  // two are driven to a joint fixpoint, every pass provisional -- its
+  // diagnostics discarded -- until nothing more resolves; then the
+  // final passes report.
+  register_struct_fields(/*report_failures=*/false);
+  for (int round = 0; round < 16; ++round) {
+    size_t registered = register_type_aliases(/*report_failures=*/false);
+    register_struct_fields(/*report_failures=*/false);
+    if (registered == 0) {
+      break;
+    }
   }
+  fields_registered_ = true;
   register_type_aliases(/*report_failures=*/true);
-  // A field typed by one of those aliases was left null by the first
-  // field pass; now that the alias exists, the field can be typed.
-  register_struct_fields();
+  register_struct_fields(/*report_failures=*/true);
   register_signatures();
 }
 
@@ -532,8 +539,16 @@ auto TypeChecker::aliases_generic_shell(const TypeNode* node) const -> bool {
     return false;
   }
   const auto* decl = it->second->decl_as_decl();
-  return std::ranges::any_of(pending_classes_,
-                             [decl](const PendingClass& pc) { return pc.decl == decl; });
+  // Not ready while the class has no fields yet, or a field the earlier
+  // passes could not type (one typed by an alias still waiting).
+  return std::ranges::any_of(pending_classes_, [decl](const PendingClass& pc) {
+    if (pc.decl != decl) {
+      return false;
+    }
+    const auto& fields = pc.shell->fields();
+    return fields.size() != pc.class_decl->fields.size() ||
+           std::ranges::any_of(fields, [](const StructField& f) { return f.type == nullptr; });
+  });
 }
 
 auto TypeChecker::resolver_owns_path(const TypeNode* node) const -> bool {
@@ -691,18 +706,24 @@ void TypeChecker::register_enum_variants() {
   }
 }
 
-void TypeChecker::register_struct_fields() {
+void TypeChecker::register_struct_fields(bool report_failures) {
   // Sub-pass 1b-ii: resolve class field types now that all type
   // shells (classes and enums) are registered in symbol_types_.
   // Unresolved types are kept as nullptr to preserve arity — same
   // rationale as enum variant payloads: dropping the slot silently
   // mutates the struct shape and produces misleading secondary
   // constructor-arity errors instead of the real type-resolution
-  // failure.
+  // failure.  A provisional pass keeps none of its diagnostics: a field
+  // it cannot type yet may be typed by a later pass, and one that never
+  // is gets reported exactly once, by the final pass.
   for (auto& pending : pending_classes_) {
     std::vector<StructField> fields;
     for (const auto* field : pending.class_decl->fields) {
+      auto before = diagnostics_.size();
       const auto* field_type = resolve_type_node(field->type);
+      if (!report_failures) {
+        diagnostics_.resize(before);
+      }
       fields.push_back({field->name, field_type});
     }
     pending.shell->set_fields(std::move(fields));

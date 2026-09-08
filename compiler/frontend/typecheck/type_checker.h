@@ -37,6 +37,9 @@ struct MethodInfo {
   std::string_view method_name;
   const Type* method_type;                   // function type (self removed)
   const ModuleInfo* extend_module = nullptr; // set only for `extend` methods
+  // Declared by the type itself: outranks every extension of the same
+  // name, so tooling offers it alone where a call would select it.
+  bool inherent = false;
 };
 
 struct TypeCheckResult {
@@ -354,7 +357,7 @@ private:
   /// Whether a type node names a generic instantiation of a class whose
   /// fields are not registered yet (an alias of it must wait).
   [[nodiscard]] auto aliases_generic_shell(const TypeNode* node) const -> bool;
-  void register_struct_fields();
+  void register_struct_fields(bool report_failures);
   void register_enum_variants();
   void register_signatures();
   void compute_derived_conformances();
