@@ -29,6 +29,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 using namespace boost::ut;
@@ -217,6 +218,21 @@ auto reports(const json& reply, const std::string& needle) -> bool {
     }
   }
   return false;
+}
+
+/// The located diagnostics of a reply as (file, file-local offset)
+/// pairs, in the order the reply lists them.  Entries with no position
+/// carry an empty file and are skipped: only located ones have an order
+/// to check.
+auto located_positions(const json& reply) -> std::vector<std::pair<std::string, uint32_t>> {
+  std::vector<std::pair<std::string, uint32_t>> positions;
+  for (const auto& diag : reply["diagnostics"]) {
+    auto file = diag["file"].get<std::string>();
+    if (!file.empty()) {
+      positions.emplace_back(std::move(file), diag["offset"].get<uint32_t>());
+    }
+  }
+  return positions;
 }
 
 /// Offsets of the first `count` semantic tokens whose kind starts with `prefix`.
@@ -480,6 +496,28 @@ suite<"playground_service"> playground_service_suite = [] {
     }
   };
 
+  "completion offers one method where a call would select one"_test = [] {
+    // The document's Box has its own `pick`; the document also extends
+    // Box with a `pick` of another concept.  A call selects the type's
+    // own method, and completion offers that one, not both.
+    const std::string main =
+        "module app::main\nclass Box:\n  n: i32\n  fn pick(self): i32 -> self.n\nconcept Alt:\n  "
+        "fn pick(self): string\nextend Box as Alt:\n  fn pick(self): string -> \"x\"\nfn use_it(): "
+        "i32\n  let b: Box = Box(1)\n  return b.";
+    auto reply = call("completions",
+                      document_request(main, {{"offset", static_cast<uint32_t>(main.size())}}));
+    size_t picks = 0;
+    std::string type;
+    for (const auto& item : reply.body) {
+      if (item["label"].get<std::string>() == "pick") {
+        ++picks;
+        type = item["type"].get<std::string>();
+      }
+    }
+    expect(picks == 1_u) << "offered " << picks << " pick(s): " << reply.body.dump();
+    expect(type.find("i32") != std::string::npos) << "offered the shadowed extension: " << type;
+  };
+
   "navigation_and_completion_answer_over_the_examples"_test = [] {
     constexpr size_t kUsesPerExample = 3;
     constexpr size_t kDeclsPerExample = 2;
@@ -580,13 +618,16 @@ suite<"playground_service"> playground_service_suite = [] {
     // The document calls into another file of the program; the reply
     // says where the definition is, in that file's own coordinates.
     const std::string lib = "module lib\n\nfn helper(): i32\n  return 41\n";
-    const std::string main = "module app\n\nfn main(): i32\n  return helper() + 1\n";
+    // `import lib` binds `lib` locally (CONTRACT_MODULE_SYSTEM): a module
+    // reaches another module's functions through that binding.
+    const std::string main =
+        "module app\nimport lib\n\nfn main(): i32\n  return lib::helper() + 1\n";
     json request = {{"files",
                      json::array({{{"path", "lib.dao"}, {"source", lib}},
                                   {{"path", kTestDocument}, {"source", main}}})},
                     {"document", kTestDocument}};
 
-    auto call_site = static_cast<uint32_t>(main.find("helper()"));
+    auto call_site = static_cast<uint32_t>(main.find("lib::helper()") + 5);
     json position = request;
     position["offset"] = call_site;
     auto definition = call("gotoDef", position);
@@ -638,6 +679,43 @@ suite<"playground_service"> playground_service_suite = [] {
           << "lowered past a lex/parse error in lib.dao: " << reply.body["diagnostics"].dump();
       expect(call("run", unlexable).body["exit_code"].get<int>() == -1)
           << "ran past a lex/parse error in lib.dao";
+    }
+  };
+
+  "assembly_diagnostics_come_back_in_program_order"_test = [] {
+    // The document imports a module whose file does not lex, so that
+    // file yields no module and the graph reports the import missing
+    // while the file itself reports where it broke.  Both are root
+    // causes and both must survive, in the program's canonical order
+    // (Task 31 §8.4: file id, then offset) — the document sorts first,
+    // so its import error leads the other file's.
+    json request = {{"files",
+                     json::array({{{"path", "a_main.dao"},
+                                   {"source",
+                                    "module app\nimport lib\n\nfn main(): i32\n"
+                                    "  return lib::helper()\n"}},
+                                  {{"path", "z_lib.dao"},
+                                   {"source", "module lib\n\nfn helper(): i32\n  return @\n"}}})},
+                    {"document", "a_main.dao"}};
+
+    for (const char* route : {"analyze", "run"}) {
+      auto reply = call(route, request);
+      expect(reports(reply.body, "imported module 'lib' not found"))
+          << route << " lost the import error: " << reply.body["diagnostics"].dump();
+      auto positions = located_positions(reply.body);
+      expect(positions.size() >= 2_ul)
+          << route << " lost a root cause: " << reply.body["diagnostics"].dump();
+      expect(std::ranges::is_sorted(positions))
+          << route
+          << " reported diagnostics out of file/offset order: " << reply.body["diagnostics"].dump();
+      bool names_document = false;
+      bool names_other = false;
+      for (const auto& [file, offset] : positions) {
+        names_document = names_document || file == "a_main.dao";
+        names_other = names_other || file == "z_lib.dao";
+      }
+      expect(names_document && names_other)
+          << route << " dropped a file's diagnostics: " << reply.body["diagnostics"].dump();
     }
   };
 

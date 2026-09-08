@@ -27,6 +27,12 @@ struct MethodInfo {
   const Type* receiver_type;
   std::string_view method_name;
   const Type* method_type; // function type (self removed)
+  // The module whose `extend` introduced it; null when it is visible
+  // everywhere (a class's own method, or a prelude module's extend).
+  const ModuleInfo* owner = nullptr;
+  // Declared by the type itself: outranks every extension of the same
+  // name, so tooling offers it alone where a call would select it.
+  bool inherent = false;
 };
 
 struct TypeCheckResult {
@@ -132,15 +138,28 @@ private:
     auto operator=(const ConceptSelfMapGuard&) -> ConceptSelfMapGuard& = delete;
   };
 
-  // Pre-built method lookup table: (type*, method_name) -> {fn_type, decl}.
+  // Pre-built method lookup table:
+  // (type*, method_name, owner) -> {fn_type, decl}.
   struct MethodEntry {
     const Type* fn_type;     // method function type (self removed)
     const Decl* method_decl; // the FunctionDecl node for HIR resolution
+    // Declared by the type itself (a class method or conformance-block
+    // method), as opposed to introduced by an `extend`.  An inherent
+    // method is innermost: no extension shadows it.
+    bool inherent = false;
   };
 
   struct MethodKey {
     const Type* type;
     std::string_view name;
+    // The module whose `extend` block introduced the method, which is
+    // the only module it participates in method-set lookup from
+    // (CONTRACT_MODULE_SYSTEM.md §5).  Null means every module sees it:
+    // a type's own methods, which travel with the type; a prelude
+    // `extend`, the sole cross-module exception (§7.2); and any program
+    // whose symbols carry no module identity, such as a single-file
+    // test fixture.
+    const ModuleInfo* owner = nullptr;
     auto operator==(const MethodKey&) const -> bool = default;
   };
 
@@ -148,11 +167,51 @@ private:
     auto operator()(const MethodKey& key) const -> size_t {
       auto h1 = std::hash<const void*>{}(key.type);
       auto h2 = std::hash<std::string_view>{}(key.name);
-      return h1 ^ (h2 * 0x9e3779b97f4a7c15ULL + 0x9e3779b9 + (h1 << 6) + (h1 >> 2));
+      auto h3 = std::hash<const void*>{}(static_cast<const void*>(key.owner));
+      auto mixed = h1 ^ (h2 * 0x9e3779b97f4a7c15ULL + 0x9e3779b9 + (h1 << 6) + (h1 >> 2));
+      return mixed ^ (h3 * 0x9e3779b97f4a7c15ULL + 0x9e3779b9 + (mixed << 6) + (mixed >> 2));
     }
   };
 
   std::unordered_map<MethodKey, MethodEntry, MethodKeyHash> method_table_;
+
+  // The module whose declaration is being registered or checked, so that
+  // method-set lookup can tell a module's own `extend` methods from a
+  // sibling module's.  Null outside a program.
+  const ModuleInfo* current_module_ = nullptr;
+
+  /// RAII: sets current_module_ for a declaration and restores it after.
+  struct CurrentModuleGuard {
+    const ModuleInfo*& slot;
+    const ModuleInfo* saved;
+    CurrentModuleGuard(const ModuleInfo*& target, const ModuleInfo* module)
+        : slot(target), saved(target) {
+      slot = module;
+    }
+    ~CurrentModuleGuard() {
+      slot = saved;
+    }
+    CurrentModuleGuard(const CurrentModuleGuard&) = delete;
+    auto operator=(const CurrentModuleGuard&) -> CurrentModuleGuard& = delete;
+  };
+
+  /// The module a top-level declaration belongs to, or null outside a
+  /// program.  The resolver stamps every symbol with its owning module;
+  /// a named declaration is found by the symbol at its name span, and an
+  /// `extend` block — which declares no name of its own — by the symbol
+  /// of the first method it introduces.
+  [[nodiscard]] auto declaring_module(const Decl* decl) const -> const ModuleInfo*;
+
+  /// The owner to register an `extend` block's methods under: the
+  /// declaring module, or null for a prelude module, whose `extend`
+  /// methods are visible everywhere (CONTRACT_MODULE_SYSTEM.md §7.2).
+  [[nodiscard]] auto extend_owner(const Decl* extend_decl) const -> const ModuleInfo*;
+
+  /// Whether a method registered under `owner` participates in
+  /// method-set lookup from the module being checked.
+  [[nodiscard]] auto owner_is_visible(const ModuleInfo* owner) const -> bool {
+    return owner == nullptr || owner == current_module_;
+  }
 
   // Pending class shells awaiting field resolution (populated by
   // register_type_names, consumed by register_struct_fields).

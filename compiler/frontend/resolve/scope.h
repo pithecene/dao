@@ -13,7 +13,9 @@
 namespace dao {
 
 enum class ScopeKind : std::uint8_t {
-  File,     // top-level file scope
+  Builtins, // compiler builtins and predeclared names; the root
+  Prelude,  // the prelude group's declarations, one namespace
+  Module,   // one non-prelude module's declarations and import bindings
   Function, // function body
   Block,    // if/while/for/mode/resource body
   Struct,   // struct member scope
@@ -103,26 +105,27 @@ public:
     return nullptr;
   }
 
-  // Check if a name has overloaded declarations in this scope chain.
+  // Check if a name has overloaded declarations reachable from here.
   [[nodiscard]] auto has_overloads(std::string_view name) const -> bool {
-    if (lookup_overloads(name) != nullptr) {
-      return true;
-    }
-    if (parent_ != nullptr) {
-      return parent_->has_overloads(name);
-    }
-    return false;
+    return find_overloads(name) != nullptr;
   }
 
-  // Look up overloads traversing the scope chain.
+  // Look up overloads traversing the scope chain.  The walk stops where
+  // ordinary lookup would: an overload set is an index beside
+  // `declarations_`, so a nearer scope binding the name to anything else
+  // — a local, an import binding, a module's own function — shadows an
+  // outer set, exactly as lookup() is innermost-first
+  // (CONTRACT_MODULE_SYSTEM.md §7.4).  Without the stop, a prelude
+  // overload set answers calls that a module-local declaration owns.
   [[nodiscard]] auto find_overloads(std::string_view name) const
       -> const std::vector<Symbol*>* {
-    auto* local = lookup_overloads(name);
-    if (local != nullptr) {
-      return local;
-    }
-    if (parent_ != nullptr) {
-      return parent_->find_overloads(name);
+    for (const Scope* scope = this; scope != nullptr; scope = scope->parent_) {
+      if (const auto* local = scope->lookup_overloads(name); local != nullptr) {
+        return local;
+      }
+      if (scope->lookup_local(name) != nullptr) {
+        return nullptr;
+      }
     }
     return nullptr;
   }

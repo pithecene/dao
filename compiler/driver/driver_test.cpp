@@ -180,14 +180,18 @@ suite<"driver"> driver_suite = [] {
 suite<"driver_cli"> driver_cli_suite = [] {
   "a root file's imports are discovered from its own directory"_test = [] {
     const Scratch scratch("root-discovery");
-    auto root = scratch.file("main.dao",
-                             "module main\nimport app::util\n\nfn main(): i32\n  return one()\n");
+    auto root = scratch.file(
+        "main.dao", "module main\nimport app::util\n\nfn main(): i32\n  return util::one()\n");
     scratch.file("app/util.dao", "module app::util\n\nfn one(): i32 -> 3\n");
 
-    auto built =
-        run_daoc(scratch, {"build", root.string(), "--stdlib-root", scratch.stdlib.string()});
-    expect(built.exit_code == 0) << built.err;
-    expect(exit_status(scratch.output_for(root)) == 3) << "the imported module was not compiled in";
+    // `check`, not `build`: a qualified cross-module call resolves and
+    // type-checks here, but lowering one is D4's work (§17.4).  What
+    // this asks is whether discovery found `app/util.dao` at all --
+    // unfound, the qualified call would not resolve.
+    auto checked =
+        run_daoc(scratch, {"check", root.string(), "--stdlib-root", scratch.stdlib.string()});
+    expect(checked.exit_code == 0) << checked.err;
+    expect(checked.out == "ok\n") << "the imported module was not discovered: " << checked.out;
 
     // The dumps report on the file the command line named.  A
     // discovered import can sort ahead of the root by display path, so
@@ -202,14 +206,18 @@ suite<"driver_cli"> driver_cli_suite = [] {
 
   "module roots are searched in command-line order"_test = [] {
     const Scratch scratch("ordered-module-roots");
+    // The two candidates EXPORT DIFFERENT NAMES, so which one was loaded
+    // is decided in resolution and visible to `check`: lowering a
+    // cross-module call is D4's work (§17.4) and type-checking one is
+    // D3's, so neither execution nor a type mismatch can be the witness.
     auto root = scratch.file(
-        "main.dao", "module main\nimport ext::thing\n\nfn main(): i32\n  return value()\n");
+        "main.dao", "module main\nimport ext::thing\n\nfn main(): i32\n  return thing::value()\n");
     scratch.file("first/ext/thing.dao", "module ext::thing\n\nfn value(): i32 -> 1\n");
-    scratch.file("second/ext/thing.dao", "module ext::thing\n\nfn value(): i32 -> 2\n");
+    scratch.file("second/ext/thing.dao", "module ext::thing\n\nfn other(): i32 -> 2\n");
 
     auto build_with = [&](std::string_view earlier, std::string_view later) {
       return run_daoc(scratch,
-                      {"build",
+                      {"check",
                        root.string(),
                        "--module-root",
                        (scratch.dir / earlier).string(),
@@ -219,11 +227,13 @@ suite<"driver_cli"> driver_cli_suite = [] {
                        scratch.stdlib.string()});
     };
     auto first_wins = build_with("first", "second");
-    expect(first_wins.exit_code == 0) << first_wins.err;
-    expect(exit_status(scratch.output_for(root)) == 1) << "the later --module-root won";
+    expect(first_wins.exit_code == 0) << "the later --module-root won: " << first_wins.err;
     auto second_wins = build_with("second", "first");
-    expect(second_wins.exit_code == 0) << second_wins.err;
-    expect(exit_status(scratch.output_for(root)) == 2) << "the roots are not searched in order";
+    expect(second_wins.exit_code != 0)
+        << "the roots are not searched in order: the earlier root did not win";
+    expect(second_wins.err.find("has no export 'value'") != std::string::npos ||
+           second_wins.out.find("has no export 'value'") != std::string::npos)
+        << second_wins.err << second_wins.out;
   };
 
   "an unfound import names every root, in the order they were searched"_test = [] {
@@ -268,7 +278,8 @@ suite<"driver_cli"> driver_cli_suite = [] {
   "--source takes an explicit set and --entry names its entry"_test = [] {
     const Scratch scratch("explicit-sources");
     auto library = scratch.file("lib.dao", "module lib\n\nfn helper(): i32 -> 8\n");
-    auto app = scratch.file("app.dao", "module app\n\nfn main(): i32\n  return helper()\n");
+    auto app = scratch.file("app.dao",
+                            "module app\nimport lib\n\nfn main(): i32\n  return lib::helper()\n");
     auto sources = [&](std::vector<std::string> extra) {
       std::vector<std::string> args = {"check",
                                        "--source",

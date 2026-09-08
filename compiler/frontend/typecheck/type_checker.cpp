@@ -19,6 +19,58 @@ TypeChecker::TypeChecker(TypeContext& types, const ResolveResult& resolve)
 }
 
 // ---------------------------------------------------------------------------
+// Module provenance
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// The class declaration a struct type was built from, or null.
+auto struct_decl_of(const Type* type) -> const Decl* {
+  if (type == nullptr || type->kind() != TypeKind::Struct) {
+    return nullptr;
+  }
+  return static_cast<const TypeStruct*>(type)->decl_id();
+}
+
+} // namespace
+
+auto TypeChecker::declaring_module(const Decl* decl) const -> const ModuleInfo* {
+  if (decl == nullptr) {
+    return nullptr;
+  }
+  auto module_at = [this](Span name_span) -> const ModuleInfo* {
+    auto found = decl_symbols_.find(name_span.offset);
+    return found == decl_symbols_.end() ? nullptr : found->second->module;
+  };
+  switch (decl->kind()) {
+  case NodeKind::FunctionDecl:
+    return module_at(decl->as<FunctionDecl>().name_span);
+  case NodeKind::ClassDecl:
+    return module_at(decl->as<ClassDecl>().name_span);
+  case NodeKind::EnumDecl:
+    return module_at(decl->as<EnumDeclNode>().name_span);
+  case NodeKind::AliasDecl:
+    return module_at(decl->as<AliasDecl>().name_span);
+  case NodeKind::ConceptDecl:
+    return module_at(decl->as<ConceptDecl>().name_span);
+  case NodeKind::ExtendDecl: {
+    const auto& ext = decl->as<ExtendDecl>();
+    if (ext.methods.empty()) {
+      return nullptr;
+    }
+    return module_at(ext.methods.front()->as<FunctionDecl>().name_span);
+  }
+  default:
+    return nullptr;
+  }
+}
+
+auto TypeChecker::extend_owner(const Decl* extend_decl) const -> const ModuleInfo* {
+  const auto* module = declaring_module(extend_decl);
+  return module != nullptr && module->is_prelude ? nullptr : module;
+}
+
+// ---------------------------------------------------------------------------
 // Top-level entry
 // ---------------------------------------------------------------------------
 
@@ -44,10 +96,16 @@ auto TypeChecker::check(std::span<const FileNode* const> files) -> TypeCheckResu
     check_declaration(decl);
   }
 
-  // Export method table for tooling (completion, hover).
+  // Export method table for tooling (completion, hover).  Two modules
+  // may each extend one type with one method name; tooling offers the
+  // receiver a method once, so the module-scoped keys collapse here.
+  // Every entry, with its owner: which module's `extend` a method came
+  // from decides where tooling may offer it (§5), so collapsing the
+  // module-scoped keys here would offer a module-private method
+  // everywhere.
   std::vector<MethodInfo> methods;
   for (const auto& [key, entry] : method_table_) {
-    methods.push_back({key.type, key.name, entry.fn_type});
+    methods.push_back({key.type, key.name, entry.fn_type, key.owner, entry.inherent});
   }
 
   return {.typed = std::move(typed_),
@@ -616,19 +674,34 @@ auto TypeChecker::type_conforms_to(const Type* type, const Decl* concept_decl) -
       if (decl_node->is<ClassDecl>()) {
         const auto& cls = decl_node->as<ClassDecl>();
         const auto& concept_name = concept_decl->as<ConceptDecl>().name;
+        // Which concept a block names is the resolver's answer, not the
+        // spelling's: a module may shadow the prelude's `Mark` with its
+        // own, and `as Mark` then names the module's.  Unbound (outside
+        // a program) the spelling is all there is.
+        auto names_this = [&](std::string_view spelled, Span at) -> bool {
+          auto bound = resolve_.uses.find(at.offset);
+          if (bound != resolve_.uses.end()) {
+            return bound->second->decl_as_decl() == concept_decl;
+          }
+          // Unbound inside a program means the resolver rejected the
+          // name; matching it by spelling would let an unimported
+          // sibling's concept in.  Only outside a program is the
+          // spelling all there is.
+          return current_module_ == nullptr && spelled == concept_name;
+        };
 
         // deny supersedes everything — if present, the type does not
         // conform regardless of explicit `as` blocks. (Having both
         // is a compile error diagnosed in check_class.)
         for (const auto& deny : cls.denials) {
-          if (deny.concept_name == concept_name) {
+          if (names_this(deny.concept_name, deny.concept_span)) {
             return false;
           }
         }
 
         // Check explicit conformance.
         for (const auto& conf : cls.conformances) {
-          if (conf.concept_name == concept_name) {
+          if (names_this(conf.concept_name, conf.concept_span)) {
             return true;
           }
         }
@@ -636,16 +709,33 @@ auto TypeChecker::type_conforms_to(const Type* type, const Decl* concept_decl) -
     }
   }
 
-  // Check extend declarations.
+  // Check extend declarations.  An `extend` block confers conformance
+  // only where its methods are in the method set — its own module, or
+  // everywhere when it is the prelude's (CONTRACT_MODULE_SYSTEM.md §5,
+  // §7.2) — so a sibling module's block must not answer here.
   if (!all_decls_.empty()) {
     const auto& cpt_name = concept_decl->as<ConceptDecl>().name;
     for (const auto* decl : all_decls_) {
-      if (decl->kind() != NodeKind::ExtendDecl) {
+      if (decl->kind() != NodeKind::ExtendDecl || !owner_is_visible(extend_owner(decl))) {
         continue;
       }
       const auto& ext = decl->as<ExtendDecl>();
       const auto* target = resolve_type_node(ext.target_type);
-      if (target == type && ext.concept_name == cpt_name) {
+      if (target != type) {
+        continue;
+      }
+      // The block names a concept; which one is the resolver's answer,
+      // not the spelling's.  A module may shadow the prelude's `Mark`
+      // with its own, and an `extend i32 as Mark` in the prelude confers
+      // the prelude's, never the module's.
+      auto bound = resolve_.uses.find(ext.concept_span.offset);
+      if (bound != resolve_.uses.end()) {
+        if (bound->second->decl_as_decl() == concept_decl) {
+          return true;
+        }
+        continue;
+      }
+      if (current_module_ == nullptr && ext.concept_name == cpt_name) {
         return true;
       }
     }
@@ -674,6 +764,10 @@ void TypeChecker::compute_derived_conformances() {
     const Decl* decl;
     const ClassDecl* cls;
     const Type* struct_type;
+    // Whether a field type conforms is asked from the class's module:
+    // an `extend` in a sibling module is not in that module's method
+    // set and cannot make the class derive (CONTRACT_MODULE_SYSTEM.md §5).
+    const ModuleInfo* module;
   };
   std::vector<ClassEntry> classes;
   for (const auto* decl : all_decls_) {
@@ -689,7 +783,7 @@ void TypeChecker::compute_derived_conformances() {
     if (struct_type == nullptr || struct_type->kind() != TypeKind::Struct) {
       continue;
     }
-    classes.push_back({decl, &cls, struct_type});
+    classes.push_back({decl, &cls, struct_type, declaring_module(decl)});
   }
 
   // Fixpoint loop: repeat until no new conformances are discovered.
@@ -698,13 +792,24 @@ void TypeChecker::compute_derived_conformances() {
   while (changed) {
     changed = false;
     for (const auto& entry : classes) {
+      CurrentModuleGuard module_guard(current_module_, entry.module);
       for (const auto* concept_decl : derived_concepts_) {
         const auto& cpt = concept_decl->as<ConceptDecl>();
 
-        // Skip if explicit conformance or deny exists.
+        // Skip if explicit conformance or deny exists -- of THIS concept,
+        // by the declaration the resolver bound, not by spelling: a
+        // class conforming to its module's `Mark` still derives the
+        // prelude's distinct `Mark` through its fields.
+        auto names_this = [&](std::string_view spelled, Span at) -> bool {
+          auto bound = resolve_.uses.find(at.offset);
+          if (bound != resolve_.uses.end()) {
+            return bound->second->decl_as_decl() == concept_decl;
+          }
+          return current_module_ == nullptr && spelled == cpt.name;
+        };
         bool has_explicit = false;
         for (const auto& conf : entry.cls->conformances) {
-          if (conf.concept_name == cpt.name) {
+          if (names_this(conf.concept_name, conf.concept_span)) {
             has_explicit = true;
             break;
           }
@@ -715,7 +820,7 @@ void TypeChecker::compute_derived_conformances() {
 
         bool denied = false;
         for (const auto& deny : entry.cls->denials) {
-          if (deny.concept_name == cpt.name) {
+          if (names_this(deny.concept_name, deny.concept_span)) {
             denied = true;
             break;
           }
@@ -763,6 +868,9 @@ void TypeChecker::compute_derived_conformances() {
 // ---------------------------------------------------------------------------
 
 void TypeChecker::check_declaration(const Decl* decl) {
+  // Every name this body reaches is resolved from the declaring
+  // module's point of view, `extend` method sets included.
+  CurrentModuleGuard module_guard(current_module_, declaring_module(decl));
   switch (decl->kind()) {
   case NodeKind::FunctionDecl:
     check_function(decl);
@@ -788,7 +896,20 @@ void TypeChecker::check_declaration(const Decl* decl) {
       if (dnode != nullptr) {
         if (dnode->is<ClassDecl>()) {
           for (const auto& deny : dnode->as<ClassDecl>().denials) {
-            if (deny.concept_name == ext.concept_name) {
+            // The same concept, by the declaration the resolver bound:
+            // a module's `Mark` is not the prelude's `Mark` the class
+            // denied.  Outside a program the spelling is all there is.
+            auto bound_of = [&](Span at) -> const Decl* {
+              auto it = resolve_.uses.find(at.offset);
+              return it == resolve_.uses.end() ? nullptr : it->second->decl_as_decl();
+            };
+            const auto* denied = bound_of(deny.concept_span);
+            const auto* extended = bound_of(ext.concept_span);
+            const bool same =
+                (denied != nullptr && extended != nullptr)
+                    ? denied == extended
+                    : (current_module_ == nullptr && deny.concept_name == ext.concept_name);
+            if (same) {
               error(ext.concept_span,
                     "cannot extend '" + std::string(st->name()) + "' as '" +
                         std::string(ext.concept_name) + "' because the type denies it");
@@ -2455,7 +2576,7 @@ void TypeChecker::build_method_table() {
       MethodKey key{struct_type, method.name};
       if (method_table_.find(key) == method_table_.end()) {
         const auto* fn_type = build_method_fn_type(method);
-        method_table_.insert({key, {fn_type, method_decl}});
+        method_table_.insert({key, {fn_type, method_decl, /*inherent=*/true}});
       }
     }
     // Conformance block methods.
@@ -2465,13 +2586,15 @@ void TypeChecker::build_method_table() {
         MethodKey key{struct_type, method.name};
         if (method_table_.find(key) == method_table_.end()) {
           const auto* fn_type = build_method_fn_type(method);
-          method_table_.insert({key, {fn_type, method_decl}});
+          method_table_.insert({key, {fn_type, method_decl, /*inherent=*/true}});
         }
       }
     }
   }
 
-  // 2. Top-level extend declarations.
+  // 2. Top-level extend declarations, keyed on the declaring module:
+  //    its methods are in that module's method set only, the prelude's
+  //    in every module's (CONTRACT_MODULE_SYSTEM.md §5, §7.2).
   for (const auto* decl : all_decls_) {
     if (decl->kind() != NodeKind::ExtendDecl) {
       continue;
@@ -2481,9 +2604,10 @@ void TypeChecker::build_method_table() {
     if (target == nullptr) {
       continue;
     }
+    const auto* owner = extend_owner(decl);
     for (const auto* method_decl : ext.methods) {
       const auto& method = method_decl->as<FunctionDecl>();
-      MethodKey key{target, method.name};
+      MethodKey key{.type = target, .name = method.name, .owner = owner};
       if (method_table_.find(key) == method_table_.end()) {
         const auto* fn_type = build_method_fn_type(method);
         method_table_.insert({key, {fn_type, method_decl}});
@@ -2495,6 +2619,9 @@ void TypeChecker::build_method_table() {
   //    For each (type, derived_concept), register each concept method
   //    with the type. Resolve the concrete extend implementation for dispatch.
   for (const auto& [type, concepts] : derived_conformances_) {
+    // The conformance was derived from the class's own module, so the
+    // implementation backing it must be a block that module can see.
+    CurrentModuleGuard module_guard(current_module_, declaring_module(struct_decl_of(type)));
     for (const auto* concept_decl : concepts) {
       const auto& cpt = concept_decl->as<ConceptDecl>();
       ConceptSelfMapGuard guard(concept_self_map_, cpt.name);
@@ -2509,7 +2636,7 @@ void TypeChecker::build_method_table() {
         // Find the concrete extend implementation for HIR lowering.
         const Decl* impl_decl = nullptr;
         for (const auto* decl : all_decls_) {
-          if (decl->kind() != NodeKind::ExtendDecl)
+          if (decl->kind() != NodeKind::ExtendDecl || !owner_is_visible(extend_owner(decl)))
             continue;
           const auto& ext = decl->as<ExtendDecl>();
           const auto* target = resolve_type_node(ext.target_type);
@@ -2538,8 +2665,24 @@ auto TypeChecker::lookup_method(const Type* obj_type,
                                 std::string_view name,
                                 const Decl** resolved_decl) -> const Type* {
   // O(1) table lookup for concrete types (covers struct conformance blocks,
-  // extend declarations, and derived conformance methods).
-  auto it = method_table_.find(MethodKey{obj_type, name});
+  // extend declarations, and derived conformance methods).  The module
+  // being checked answers first, then what every module sees: an
+  // `extend` reaches only its own module, the prelude's reaches all
+  // (CONTRACT_MODULE_SYSTEM.md §5, §7.2).
+  // Innermost-first: the type's own method, then the current module's
+  // `extend`, then the prelude's.  The owner-null slot holds either an
+  // inherent method or a prelude extension; only the former outranks
+  // the module's own extension.
+  auto shared = method_table_.find(MethodKey{obj_type, name, nullptr});
+  auto it = method_table_.end();
+  if (shared != method_table_.end() && shared->second.inherent) {
+    it = shared;
+  } else {
+    it = method_table_.find(MethodKey{obj_type, name, current_module_});
+    if (it == method_table_.end()) {
+      it = shared;
+    }
+  }
   if (it != method_table_.end()) {
     if (resolved_decl != nullptr) {
       *resolved_decl = it->second.method_decl;
@@ -2553,29 +2696,46 @@ auto TypeChecker::lookup_method(const Type* obj_type,
   // substitute into the method's return/param types.
   if (obj_type->kind() == TypeKind::Struct) {
     const auto* concrete_st = static_cast<const TypeStruct*>(obj_type);
-    // Look up the class declaration's generic struct type.
+    // Every registration of this name for the class, whichever generic
+    // or concrete key it sits under, then the same precedence as the
+    // direct lookup: the type's own method, the current module's
+    // extension, the prelude's.  The table is unordered; iteration
+    // order must not decide.
+    const TypeStruct* chosen_st = nullptr;
+    const MethodEntry* chosen = nullptr;
+    int chosen_tier = 3;
     for (const auto& [key, entry] : method_table_) {
-      if (key.name != name || key.type == nullptr || key.type->kind() != TypeKind::Struct) {
+      if (key.name != name || key.type == nullptr || key.type->kind() != TypeKind::Struct ||
+          !owner_is_visible(key.owner)) {
         continue;
       }
       const auto* generic_st = static_cast<const TypeStruct*>(key.type);
       if (generic_st->decl_id() != concrete_st->decl_id()) {
         continue;
       }
-      // Found matching class. Build substitution from generic → concrete
-      // field types.
+      const int tier = entry.inherent                                           ? 0
+                       : (key.owner != nullptr && key.owner == current_module_) ? 1
+                                                                                : 2;
+      if (tier < chosen_tier) {
+        chosen_tier = tier;
+        chosen = &entry;
+        chosen_st = generic_st;
+      }
+    }
+    if (chosen != nullptr) {
+      // Build substitution from generic → concrete field types.
       std::unordered_map<uint32_t, const Type*> bindings;
-      for (size_t i = 0; i < generic_st->fields().size() && i < concrete_st->fields().size(); ++i) {
+      for (size_t i = 0; i < chosen_st->fields().size() && i < concrete_st->fields().size(); ++i) {
         infer_type_bindings(
-            generic_st->fields()[i].type, concrete_st->fields()[i].type, bindings, Span{});
+            chosen_st->fields()[i].type, concrete_st->fields()[i].type, bindings, Span{});
       }
       if (resolved_decl != nullptr) {
-        *resolved_decl = entry.method_decl;
+        *resolved_decl = chosen->method_decl;
       }
       if (bindings.empty()) {
-        return entry.fn_type;
+        return chosen->fn_type;
       }
-      return substitute_generics(entry.fn_type, bindings);
+      return substitute_generics(chosen->fn_type, bindings);
     }
   }
 

@@ -16,6 +16,8 @@
 
 namespace dao {
 
+class Scope;
+
 // ---------------------------------------------------------------------------
 // Program — the set of source files compiled together, their modules,
 // and the import graph over them (CONTRACT_MODULE_SYSTEM.md §2, §3, §8,
@@ -27,9 +29,9 @@ namespace dao {
 // downstream output are independent of the order inputs were supplied
 // in.  Each file's `module` declaration is
 // its identity; imports are edges; modules are ordered so that every
-// module follows the modules it imports.  Per-module scopes and
-// cross-module resolution are later slices: the passes still declare
-// every file into one shared scope.
+// module follows the modules it imports.  The resolver gives every
+// module its own scope; cross-module type checking and lowering are
+// later slices.
 // ---------------------------------------------------------------------------
 
 struct SourceInput {
@@ -48,6 +50,10 @@ struct ModuleInfo {
   bool is_prelude = false;
   bool declares_main = false;       // a top-level `fn main`
   std::vector<ModuleInfo*> imports; // resolved edges in declaration order, duplicates removed
+  Scope* scope = nullptr;           // set by the resolver: the module's lexical scope
+  Scope* exports = nullptr;         // its own declarations — what a qualified path reaches (§7.5).
+                                    // Same scope as `scope` except for a prelude module, whose
+                                    // declarations live in the shared prelude scope (§7.2, §7.3)
 };
 
 /// Options common to the loaders that read the filesystem.

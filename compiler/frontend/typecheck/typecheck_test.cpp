@@ -8,7 +8,11 @@
 #include "support/test_utils.h"
 
 #include <boost/ut.hpp>
+
+#include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace boost::ut;
 using namespace dao;
@@ -1713,5 +1717,252 @@ suite<"explicit_type_args"> explicit_type_args = [] {
 };
 
 // NOLINTEND(readability-magic-numbers)
+
+// ---------------------------------------------------------------------------
+// `extend` scoping across modules (CONTRACT_MODULE_SYSTEM.md §5, §7.2):
+// a block's methods are in the declaring module's method set only, and
+// the prelude group is the sole exception.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Owns everything a checked multi-module program points into: the
+/// program buffers, the resolver's symbols, and the type universe.
+/// Files under `stdlib/` form the prelude group, as the driver's do.
+struct CheckedProgram {
+  Program program;
+  ResolveResult resolve_result;
+  TypeContext types;
+  TypeCheckResult check_result;
+};
+
+auto check_program(std::vector<std::pair<std::string, std::string>> files)
+    -> std::unique_ptr<CheckedProgram> {
+  std::vector<SourceInput> inputs;
+  for (auto& [path, text] : files) {
+    inputs.push_back(
+        {.display_path = path, .text = text, .is_prelude = path.starts_with("stdlib/")});
+  }
+  auto checked = std::make_unique<CheckedProgram>();
+  checked->program = build_program(std::move(inputs));
+  checked->resolve_result = resolve(checked->program);
+  checked->check_result = typecheck(checked->program, checked->resolve_result, checked->types);
+  return checked;
+}
+
+/// An `extend` on i32 and a module that uses the method it introduces.
+/// The extending module and the using module are given by the caller,
+/// so the same pair can be placed in the prelude or beside it.
+constexpr const char* kDoublingModule = "module lib\n"
+                                        "concept Doubling:\n"
+                                        "    fn doubled(self): i32\n"
+                                        "extend i32 as Doubling:\n"
+                                        "    fn doubled(self): i32 -> self + self\n"
+                                        "fn here(): i32\n"
+                                        "    let n: i32 = 21\n"
+                                        "    return n.doubled()\n";
+
+constexpr const char* kUsingModule = "module app\n"
+                                     "import lib\n"
+                                     "fn there(): i32\n"
+                                     "    let n: i32 = 21\n"
+                                     "    return n.doubled()\n";
+
+/// A `derived` concept and an `extend` that satisfies it for i32.  A
+/// class whose only field is an i32 derives the concept structurally —
+/// but only from a module where that `extend` is in the method set.
+constexpr const char* kShoutingModule = "module ext\n"
+                                        "derived concept Shout:\n"
+                                        "    fn shout(self): string\n"
+                                        "extend i32 as Shout:\n"
+                                        "    fn shout(self): string -> \"i32\"\n";
+
+constexpr const char* kBoxModule = "module app\n"
+                                   "class Box:\n"
+                                   "    n: i32\n"
+                                   "fn describe(): string\n"
+                                   "    let b: Box = Box(1)\n"
+                                   "    return b.shout()\n";
+
+/// Concept, `extend`, class, and use in one ordinary module: the block
+/// is in the method set of the very module asking whether its class
+/// derives, so the conformance must still be conferred.
+constexpr const char* kSelfShoutingModule = "module solo\n"
+                                            "derived concept Shout:\n"
+                                            "    fn shout(self): string\n"
+                                            "extend i32 as Shout:\n"
+                                            "    fn shout(self): string -> \"i32\"\n"
+                                            "class Box:\n"
+                                            "    n: i32\n"
+                                            "fn describe(): string\n"
+                                            "    let b: Box = Box(1)\n"
+                                            "    return b.shout()\n";
+
+} // namespace
+
+suite<"module_extend_scoping"> module_extend_scoping = [] {
+  "a module's extend method is not in a sibling module's method set"_test = [] {
+    auto checked = check_program({{"lib.dao", kDoublingModule}, {"app.dao", kUsingModule}});
+    expect(has_error_containing(checked->check_result, "no method 'doubled' on type 'i32'"))
+        << "importing a module must not import its extend methods";
+  };
+
+  "a module sees its own extend methods"_test = [] {
+    // The same block, read from the module that declares it.
+    auto checked = check_program({{"lib.dao", kDoublingModule}});
+    expect(is_ok(checked->check_result)) << "an extend is invisible in its own module";
+  };
+
+  "a prelude extend method is in every module's method set"_test = [] {
+    auto checked =
+        check_program({{"stdlib/core/lib.dao", kDoublingModule}, {"app.dao", kUsingModule}});
+    expect(is_ok(checked->check_result))
+        << "the prelude is the exception to module-scoped extend (§7.2)";
+  };
+
+  // Derived conformance is structural: a class derives when its fields
+  // conform, and whether a field type conforms is asked from the
+  // class's own module, not from the program as a whole.
+
+  "a shadowed concept does not inherit the prelude concept's conformances"_test = [] {
+    // The prelude's `Mark` and the module's `Mark` are two concepts.
+    // `extend i32 as Mark` in the prelude confers the prelude's; a bound
+    // on the module's must not be satisfied by it.
+    auto checked = check_program({
+        {"stdlib/core/mark.dao",
+         "module core::mark\nconcept Mark:\n    fn mark(self): i32\n"
+         "extend i32 as Mark:\n    fn mark(self): i32 -> 1\n"},
+        {"app.dao",
+         "module app\nconcept Mark:\n    fn shout(self): string\n"
+         "fn accept<T: Mark>(x: T): i32 -> 0\n"
+         "fn main(): i32 -> accept(1)\n"},
+    });
+    expect(has_error_containing(checked->check_result, "does not satisfy concept"))
+        << "i32 satisfied the module's Mark through the prelude's extend";
+  };
+
+  "an inline conformance to a shadowed concept is to the module's concept"_test = [] {
+    // The module's `Mark` shadows the prelude's.  `as Mark:` on Box
+    // conforms to the module's; a bound on the prelude's `Mark` must
+    // not be satisfied by it.
+    auto checked = check_program({
+        {"stdlib/core/mark.dao",
+         "module core::mark\nconcept Mark:\n    fn mark(self): i32\n"
+         "fn accept<T: Mark>(x: T): i32 -> 0\n"},
+        {"app.dao",
+         "module app\nconcept Mark:\n    fn shout(self): string\n"
+         "class Box:\n    n: i32\n    as Mark:\n        fn shout(self): string -> \"box\"\n"
+         "fn main(): i32 -> accept(Box(1))\n"},
+    });
+    expect(has_error_containing(checked->check_result, "does not satisfy concept"))
+        << "Box satisfied the prelude's Mark through a conformance to the module's";
+  };
+
+  "a class conforming to a shadowing concept still derives the prelude's"_test = [] {
+    // The prelude's `Mark` is derived and `i32` satisfies it.  The module
+    // shadows `Mark` and conforms Box to ITS `Mark` inline; that is a
+    // different concept, so Box still derives the prelude's through its
+    // i32 field, and a bound on the prelude's accepts it.
+    auto checked = check_program({
+        {"stdlib/core/mark.dao",
+         "module core::mark\nderived concept Mark:\n    fn mark(self): i32\n"
+         "extend i32 as Mark:\n    fn mark(self): i32 -> 1\n"
+         "fn accept<T: Mark>(x: T): i32 -> 0\n"},
+        {"app.dao",
+         "module app\nconcept Mark:\n    fn shout(self): string\n"
+         "class Box:\n    n: i32\n    as Mark:\n        fn shout(self): string -> \"box\"\n"
+         "fn main(): i32 -> accept(Box(1))\n"},
+    });
+    expect(is_ok(checked->check_result))
+        << "an inline conformance to the module's Mark blocked deriving the prelude's";
+  };
+
+  "extending a class as the module's concept is not extending it as the prelude's"_test = [] {
+    // The prelude's `Box` denies the prelude's `Mark`.  The module's
+    // `Mark` is a different concept; extending Box as it is allowed.
+    auto checked = check_program({
+        {"stdlib/core/m.dao",
+         "module core::m\nconcept Mark:\n    fn mark(self): i32\n"
+         "class Box:\n    n: i32\n    deny Mark\n"},
+        {"app.dao",
+         "module app\nconcept Mark:\n    fn shout(self): string\n"
+         "extend Box as Mark:\n    fn shout(self): string -> \"box\"\n"
+         "fn main(): i32 -> 0\n"},
+    });
+    expect(!has_error_containing(checked->check_result, "denies it"))
+        << "the module's Mark was taken for the prelude's: "
+        << (checked->check_result.diagnostics.empty()
+                ? ""
+                : checked->check_result.diagnostics.front().message);
+  };
+
+  "a type's own method outranks a module's extend of the same name"_test = [] {
+    // The prelude's Box has `pick(): i32`; the module extends Box with a
+    // `pick(): string` of its own concept.  Innermost is the type's own
+    // method, so `b.pick()` is the i32 one.
+    auto checked = check_program({
+        {"stdlib/core/box.dao",
+         "module core::box\nclass Box:\n    n: i32\n    fn pick(self): i32 -> self.n\n"},
+        {"app.dao",
+         "module app\nconcept Alt:\n    fn pick(self): string\n"
+         "extend Box as Alt:\n    fn pick(self): string -> \"x\"\n"
+         "fn main(): i32\n  let b: Box = Box(1)\n  return b.pick()\n"},
+    });
+    expect(is_ok(checked->check_result))
+        << "the module's extend shadowed Box's own pick: "
+        << (checked->check_result.diagnostics.empty()
+                ? ""
+                : checked->check_result.diagnostics.front().message);
+  };
+
+  "an unimported concept's spelling does not reach across modules"_test = [] {
+    // `ext` declares a derived `Shout`; `app` never imports it and writes
+    // `extend i32 as Shout` anyway.  The resolver rejects the name; the
+    // checker must not match it by spelling and let Box derive Shout.
+    auto checked = check_program({
+        {"ext.dao", "module ext\nderived concept Shout:\n    fn shout(self): i32\n"},
+        {"app.dao",
+         "module app\nextend i32 as Shout:\n    fn shout(self): i32 -> 1\n"
+         "class Box:\n    n: i32\n"
+         "fn main(): i32\n  let b: Box = Box(1)\n  return b.shout()\n"},
+    });
+    expect(has_error_containing(checked->check_result, "shout"))
+        << "Box derived an unimported sibling's concept by spelling";
+  };
+
+  "a generic class's own method outranks a module's extend of an instantiation"_test = [] {
+    auto checked = check_program({
+        {"stdlib/core/box.dao",
+         "module core::box\nclass Box<T>:\n    v: T\n    fn pick(self): i32 -> 1\n"},
+        {"app.dao",
+         "module app\nconcept Alt:\n    fn pick(self): string\n"
+         "extend Box<i32> as Alt:\n    fn pick(self): string -> \"x\"\n"
+         "fn main(): i32\n  let b: Box<i32> = Box(1)\n  return b.pick()\n"},
+    });
+    expect(is_ok(checked->check_result))
+        << "the extension of Box<i32> shadowed Box's own pick: "
+        << (checked->check_result.diagnostics.empty()
+                ? ""
+                : checked->check_result.diagnostics.front().message);
+  };
+
+  "a sibling module's extend cannot make a class derive"_test = [] {
+    auto checked = check_program({{"ext.dao", kShoutingModule}, {"app.dao", kBoxModule}});
+    expect(has_error_containing(checked->check_result, "no field or method 'shout' on type 'Box'"))
+        << "a class derived a concept through an extend its module cannot see";
+  };
+
+  "a module's own extend makes its own class derive"_test = [] {
+    auto checked = check_program({{"solo.dao", kSelfShoutingModule}});
+    expect(is_ok(checked->check_result)) << "a module lost the conformance its own extend confers";
+  };
+
+  "a prelude extend makes a class in any module derive"_test = [] {
+    auto checked =
+        check_program({{"stdlib/core/ext.dao", kShoutingModule}, {"app.dao", kBoxModule}});
+    expect(is_ok(checked->check_result))
+        << "the prelude's extend must still confer derived conformance everywhere";
+  };
+};
 
 auto main() -> int {} // NOLINT(readability-named-parameter)
