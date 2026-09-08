@@ -1768,6 +1768,36 @@ constexpr const char* kUsingModule = "module app\n"
                                      "    let n: i32 = 21\n"
                                      "    return n.doubled()\n";
 
+/// A `derived` concept and an `extend` that satisfies it for i32.  A
+/// class whose only field is an i32 derives the concept structurally —
+/// but only from a module where that `extend` is in the method set.
+constexpr const char* kShoutingModule = "module ext\n"
+                                        "derived concept Shout:\n"
+                                        "    fn shout(self): string\n"
+                                        "extend i32 as Shout:\n"
+                                        "    fn shout(self): string -> \"i32\"\n";
+
+constexpr const char* kBoxModule = "module app\n"
+                                   "class Box:\n"
+                                   "    n: i32\n"
+                                   "fn describe(): string\n"
+                                   "    let b: Box = Box(1)\n"
+                                   "    return b.shout()\n";
+
+/// Concept, `extend`, class, and use in one ordinary module: the block
+/// is in the method set of the very module asking whether its class
+/// derives, so the conformance must still be conferred.
+constexpr const char* kSelfShoutingModule = "module solo\n"
+                                            "derived concept Shout:\n"
+                                            "    fn shout(self): string\n"
+                                            "extend i32 as Shout:\n"
+                                            "    fn shout(self): string -> \"i32\"\n"
+                                            "class Box:\n"
+                                            "    n: i32\n"
+                                            "fn describe(): string\n"
+                                            "    let b: Box = Box(1)\n"
+                                            "    return b.shout()\n";
+
 } // namespace
 
 suite<"module_extend_scoping"> module_extend_scoping = [] {
@@ -1788,6 +1818,28 @@ suite<"module_extend_scoping"> module_extend_scoping = [] {
         check_program({{"stdlib/core/lib.dao", kDoublingModule}, {"app.dao", kUsingModule}});
     expect(is_ok(checked->check_result))
         << "the prelude is the exception to module-scoped extend (§7.2)";
+  };
+
+  // Derived conformance is structural: a class derives when its fields
+  // conform, and whether a field type conforms is asked from the
+  // class's own module, not from the program as a whole.
+
+  "a sibling module's extend cannot make a class derive"_test = [] {
+    auto checked = check_program({{"ext.dao", kShoutingModule}, {"app.dao", kBoxModule}});
+    expect(has_error_containing(checked->check_result, "no field or method 'shout' on type 'Box'"))
+        << "a class derived a concept through an extend its module cannot see";
+  };
+
+  "a module's own extend makes its own class derive"_test = [] {
+    auto checked = check_program({{"solo.dao", kSelfShoutingModule}});
+    expect(is_ok(checked->check_result)) << "a module lost the conformance its own extend confers";
+  };
+
+  "a prelude extend makes a class in any module derive"_test = [] {
+    auto checked =
+        check_program({{"stdlib/core/ext.dao", kShoutingModule}, {"app.dao", kBoxModule}});
+    expect(is_ok(checked->check_result))
+        << "the prelude's extend must still confer derived conformance everywhere";
   };
 };
 

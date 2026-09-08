@@ -47,4 +47,4 @@ this branch (Task 31 D2).
 
 | Verifier | Claim | Verified by |
 |---|---|---|
-| `compute_derived_conformances` (`type_checker.cpp`) | A class derives a concept from what its own module can see, so a sibling module's `extend` cannot confer the conformance. | Only in the positive direction: `typecheck_test.cpp` `typecheck_scalar_conformance` and the example corpus in `playground_service_test` cover deriving through prelude `extend` blocks. The negative direction is deliberately unverified: stating it needs a class in one module whose field type is extended in another, which needs `b::T` in a field position to type-check — Task 31 D3's slice, not this one's. |
+| `compute_derived_conformances` (`type_checker.cpp`) | A class derives a concept from what its own module can see: a sibling module's `extend` cannot confer the conformance, its own and the prelude's still do. | `typecheck_test.cpp` `module_extend_scoping` suite, all three directions: `.../a sibling module's extend cannot make a class derive`, `.../a module's own extend makes its own class derive`, `.../a prelude extend makes a class in any module derive`. |
