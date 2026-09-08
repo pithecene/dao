@@ -1,6 +1,8 @@
 // NOLINTBEGIN(readability-magic-numbers,readability-identifier-length)
 #include "ir/mir/mir_monomorphize.h"
 
+#include "frontend/types/type_identity.h"
+
 #include "frontend/module/program.h"
 #include "frontend/types/type.h"
 #include "frontend/types/type_printer.h"
@@ -232,7 +234,10 @@ public:
 
 private:
   auto spelling_of(const Type* type) -> const std::string& {
-    auto [it, inserted] = spelling_.try_emplace(type, std::string{});
+    // Keyed by what the type IS, not by where it sits: nominal types
+    // are not interned, so `Box<i32>` written twice is two objects and
+    // an address would number the second one as a different type.
+    auto [it, inserted] = spelling_.try_emplace(type_identity_key(type), std::string{});
     if (inserted) {
       auto base = print_type(type);
       auto taken = claims_[base]++;
@@ -241,7 +246,7 @@ private:
     return it->second;
   }
 
-  std::unordered_map<const Type*, std::string> spelling_;
+  std::unordered_map<std::string, std::string> spelling_;
   std::unordered_map<std::string, size_t> claims_;
 };
 
@@ -249,9 +254,13 @@ private:
 // Specialization key for deduplication.
 // ---------------------------------------------------------------------------
 
+/// One specialization: the template and what it was instantiated with.
+/// The arguments are held as identity keys rather than as pointers,
+/// since two occurrences of `Box<i32>` are two objects and would
+/// otherwise specialize the same template twice.
 struct SpecKey {
   const MirFunction* generic_fn;
-  std::vector<const Type*> type_args;
+  std::vector<std::string> type_args;
 
   auto operator==(const SpecKey& other) const -> bool {
     return generic_fn == other.generic_fn && type_args == other.type_args;
@@ -261,12 +270,21 @@ struct SpecKey {
 struct SpecKeyHash {
   auto operator()(const SpecKey& key) const -> size_t {
     size_t h = std::hash<const void*>{}(key.generic_fn);
-    for (const auto* type : key.type_args) {
-      h ^= std::hash<const void*>{}(type) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    for (const auto& arg : key.type_args) {
+      h ^= std::hash<std::string>{}(arg) + 0x9e3779b9 + (h << 6) + (h >> 2);
     }
     return h;
   }
 };
+
+auto identity_keys(const std::vector<const Type*>& types) -> std::vector<std::string> {
+  std::vector<std::string> keys;
+  keys.reserve(types.size());
+  for (const auto* type : types) {
+    keys.push_back(type_identity_key(type));
+  }
+  return keys;
+}
 
 /// What one monomorphization run accumulates: the specializations it
 /// has already made, and the spellings their names give type arguments.
@@ -685,7 +703,7 @@ auto specialize_call_site(MirInst* inst,
   }
 
   auto type_args = subst_to_type_args(subst);
-  SpecKey key{git->second, type_args};
+  SpecKey key{git->second, identity_keys(type_args)};
 
   // Check cache.
   auto cache_it = state.cache.find(key);

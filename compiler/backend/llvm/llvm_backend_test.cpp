@@ -406,6 +406,34 @@ suite<"simple_functions"> simple_functions = [] {
                                 << pipe.problems() << ir;
   };
 
+  "one semantic type specializes a generic once"_test = [] {
+    // `Box<i32>` written twice is two type objects — nominal types are
+    // not interned — so keying a specialization by address would build
+    // the same one twice under numbered names.
+    LlvmProgramPipeline pipe({
+        {"main.dao",
+         "module app::main\n"
+         "class Box<T>:\n  value: T\n"
+         "fn ident<T>(v: T): T -> v\n"
+         "fn main(): i32\n"
+         "  let a = Box<i32>(7)\n"
+         "  let b = Box<i32>(9)\n"
+         "  let p = ident(a)\n"
+         "  let q = ident(b)\n"
+         "  return p.value + q.value\n"},
+    });
+    auto ir = pipe.ir();
+    size_t definitions = 0;
+    for (size_t at = ir.find("define"); at != std::string::npos; at = ir.find("define", at + 1)) {
+      auto line = ir.substr(at, ir.find('\n', at) - at);
+      if (line.find("ident$") != std::string::npos) {
+        ++definitions;
+      }
+    }
+    expect(definitions == 1_ul) << "expected one specialization, got " << definitions << "\n"
+                                << pipe.problems() << ir;
+  };
+
   "externs whose types merely print alike are diagnosed"_test = [] {
     // Each module declares its own `Payload`, and both print as
     // `Payload`: comparing the rendered signature would call them one
