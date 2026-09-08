@@ -190,6 +190,14 @@ private:
     }
     current_ = nullptr;
 
+    // Bodies were resolved in topological order, which is not file
+    // order; the diagnostics come back in program order (§8.4) so no
+    // consumer has to know which order the passes walked.  Files occupy
+    // disjoint ascending ranges of one offset space, so offset order is
+    // file order then position.
+    std::ranges::stable_sort(
+        diagnostics_, {}, [](const Diagnostic& diag) { return diag.span.offset; });
+
     return ResolveResult{
         .context = std::move(ctx_),
         .uses = std::move(uses_),
@@ -1152,8 +1160,12 @@ private:
         // (the type checker handles enum variant resolution).
         auto mangled_name = ctx_.intern(
             std::string(qn.segments[0]) + "." + std::string(qn.segments[1]));
+        // The method must belong to the type that resolved, not to a
+        // same-named type further out: a module's own `Box` shadows the
+        // prelude's, and `Box::make` must not reach the prelude's method
+        // through the scope chain when the module's `Box` has none.
         auto* method_sym = scope->lookup(mangled_name);
-        if (method_sym != nullptr) {
+        if (method_sym != nullptr && method_sym->module == sym->module) {
           uses_[expr.span.offset] = method_sym;
         } else {
           // Resolve to the type symbol — the type checker will validate
