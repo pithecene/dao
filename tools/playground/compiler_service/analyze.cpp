@@ -33,7 +33,14 @@ namespace {
 struct AnalyzeOutput {
   nlohmann::json tokens = nlohmann::json::array();
   nlohmann::json semantic_tokens = nlohmann::json::array();
-  nlohmann::json diagnostics = nlohmann::json::array();
+  // Positioned diagnostics from every phase reached, rendered together
+  // at reply time in program order (§8.4): the phases run in dependency
+  // order, which is not file order, so an assembly error in `z.dao`
+  // must not come back ahead of the resolver's error in `a.dao`.
+  std::vector<Diagnostic> located;
+  // Positionless ones follow the positioned, in the order raised.
+  nlohmann::json unlocated = nlohmann::json::array();
+  const PlaygroundProgram* prog = nullptr;
   std::string file;   // the document's path, as the request named it
   std::string module; // the document's module name, once parsed
   std::string ast;
@@ -41,7 +48,21 @@ struct AnalyzeOutput {
   std::string mir;
   std::string llvm_ir;
 
+  void add(const std::vector<Diagnostic>& diags) {
+    located.insert(located.end(), diags.begin(), diags.end());
+  }
+
   [[nodiscard]] auto reply() const -> Reply {
+    nlohmann::json diagnostics = nlohmann::json::array();
+    if (prog != nullptr) {
+      auto ordered = located;
+      std::ranges::stable_sort(
+          ordered, {}, [](const Diagnostic& diag) { return diag.span.offset; });
+      collect_diagnostics(diagnostics, *prog, ordered);
+    }
+    for (const auto& diag : unlocated) {
+      diagnostics.push_back(diag);
+    }
     return {.status = http_status::ok,
             .body = {
                 {"file", file},
@@ -204,7 +225,12 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   // §8.4-ordered stream, so a graph error in one file no longer hides
   // the parse error in another, and assembly that only had a warning
   // (no entry module) still says so.
-  collect_program_diagnostics(out.diagnostics, prog);
+  out.prog = &prog;
+  auto assembly = assembly_diagnostics(prog.program);
+  for (const auto& diag : assembly.unlocated) {
+    out.unlocated.push_back(make_unlocated_diagnostic(diag.message, diag.severity));
+  }
+  out.add(assembly.located);
   if (prog.user == nullptr || has_error_severity(prog.program.diagnostics)) {
     return out.reply();
   }
@@ -231,7 +257,7 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   // Continues past parse errors: the resolver tolerates error recovery
   // nodes and produces partial results.
   auto resolve_result = resolve(prog.program);
-  collect_diagnostics(out.diagnostics, prog, resolve_result.diagnostics);
+  out.add(resolve_result.diagnostics);
 
   // Semantic tokens — always classified once lex/parse produced a file.
   add_semantic_tokens(
@@ -246,7 +272,7 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   // silently, producing partial type information.
   TypeContext types;
   auto check_result = typecheck(prog.program, resolve_result, types);
-  collect_diagnostics(out.diagnostics, prog, check_result.diagnostics);
+  out.add(check_result.diagnostics);
   if (has_error_severity(check_result.diagnostics)) {
     return out.reply();
   }
@@ -260,12 +286,12 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   // --- HIR ---
   HirContext hir_ctx;
   auto hir_result = build_hir(prog.program, resolve_result, check_result, hir_ctx);
-  collect_diagnostics(out.diagnostics, prog, hir_result.diagnostics);
+  out.add(hir_result.diagnostics);
   // A builder may hand back a module alongside error diagnostics; that
   // module is not lowered further.
   if (hir_result.program == nullptr || has_error_severity(hir_result.diagnostics)) {
     if (!has_error_severity(hir_result.diagnostics)) {
-      out.diagnostics.push_back(
+      out.unlocated.push_back(
           make_unlocated_diagnostic("HIR lowering failed without a diagnostic"));
     }
     return out.reply();
@@ -278,17 +304,17 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   // --- MIR ---
   MirContext mir_ctx;
   auto mir_result = build_mir(*hir_result.program, mir_ctx, types);
-  collect_diagnostics(out.diagnostics, prog, mir_result.diagnostics);
+  out.add(mir_result.diagnostics);
   if (mir_result.module == nullptr || has_error_severity(mir_result.diagnostics)) {
     if (!has_error_severity(mir_result.diagnostics)) {
-      out.diagnostics.push_back(
+      out.unlocated.push_back(
           make_unlocated_diagnostic("MIR lowering failed without a diagnostic"));
     }
     return out.reply();
   }
 
   auto mono_result = monomorphize(*mir_result.module, mir_ctx, types, mir_result.generic_templates);
-  collect_diagnostics(out.diagnostics, prog, mono_result.diagnostics);
+  out.add(mono_result.diagnostics);
 
   auto user_mir = user_functions(*mir_result.module, prog);
   out.mir = printed(
@@ -307,8 +333,7 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   LlvmBackend llvm_backend(llvm_ctx);
   auto llvm_result =
       llvm_backend.lower(*mir_result.module, &prog.program.source_map, prog.program.entry);
-  collect_diagnostics(
-      out.diagnostics, prog, without_prelude_warnings(llvm_result.diagnostics, prog));
+  out.add(without_prelude_warnings(llvm_result.diagnostics, prog));
 
   if (llvm_result.module != nullptr && !has_error_severity(llvm_result.diagnostics)) {
     out.llvm_ir = printed([&](std::ostream& os) {
