@@ -17,7 +17,10 @@ auto symbol_is_extern(const Symbol& sym) -> bool {
 }
 
 auto llvm_function_name(const Symbol& sym, const ModuleInfo* entry) -> std::string {
-  if (sym.module == nullptr || symbol_is_extern(sym)) {
+  // An intrinsic keeps its bare name: the backend replaces its body with
+  // inline IR and looks it up by that name, so a module-qualified
+  // spelling would leave a dead definition behind.
+  if (sym.module == nullptr || symbol_is_extern(sym) || is_builtin_intrinsic(sym)) {
     return std::string(sym.name);
   }
   if (sym.name == "main" && sym.module == entry) {

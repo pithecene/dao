@@ -143,11 +143,13 @@ void collect_diagnostics(nlohmann::json& out,
                          const PlaygroundProgram& prog,
                          const std::vector<Diagnostic>& diags);
 
-/// Append the program-assembly diagnostics: a module declaration that
-/// disagrees with its path points at a file, while an import cycle or a
-/// missing entry module has nowhere to point and is reported without a
-/// position.  Called whether or not assembly failed — some of these are
-/// warnings that analysis continues past.
+/// Append everything assembling the program had to say — graph, lex,
+/// and parse — in the one §8.4 order (`assembly_diagnostics`): a module
+/// declaration that disagrees with its path points at a file, while an
+/// import cycle or a missing entry module has nowhere to point and is
+/// reported without a position.  Called before any early return: a
+/// graph error must not hide the parse error in another file that
+/// explains it.  Some of these are warnings analysis continues past.
 void collect_program_diagnostics(nlohmann::json& out, const PlaygroundProgram& prog);
 
 /// A diagnostic entry with no location, for a phase that failed without

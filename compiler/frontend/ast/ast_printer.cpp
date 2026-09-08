@@ -175,7 +175,9 @@ private:
     }
     for (const auto& conf : node.conformances) {
       indent();
-      out_ << "Conformance " << conf.target.concept_name << "\n";
+      out_ << "Conformance ";
+      print_conformance_target(conf.target);
+      out_ << "\n";
       Scope conf_scope(depth_);
       for (const auto* method : conf.methods) {
         print_decl(*method);
@@ -183,7 +185,9 @@ private:
     }
     for (const auto& deny : node.denials) {
       indent();
-      out_ << "Deny " << deny.target.concept_name << "\n";
+      out_ << "Deny ";
+      print_conformance_target(deny.target);
+      out_ << "\n";
     }
   }
 
@@ -218,11 +222,23 @@ private:
     }
   }
 
+  /// `Reveal` or `traits::Reveal`: a qualified target prints the binding
+  /// it went through, so two conformances to same-named concepts from
+  /// different modules print differently.
+  void print_conformance_target(const ConformanceTarget& target) {
+    if (!target.module_binding.empty()) {
+      out_ << target.module_binding << "::";
+    }
+    out_ << target.concept_name;
+  }
+
   void print_extend_decl(const ExtendDecl& node) {
     indent();
     out_ << "ExtendDecl ";
     print_type_inline(*node.target_type);
-    out_ << " as " << node.target.concept_name << "\n";
+    out_ << " as ";
+    print_conformance_target(node.target);
+    out_ << "\n";
     Scope scope(depth_);
     for (const auto* method : node.methods) {
       print_decl(*method);

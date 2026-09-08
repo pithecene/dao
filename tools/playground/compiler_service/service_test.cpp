@@ -29,6 +29,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 using namespace boost::ut;
@@ -268,6 +269,21 @@ auto reports(const json& reply, const std::string& needle) -> bool {
   return false;
 }
 
+/// The located diagnostics of a reply as (file, file-local offset)
+/// pairs, in the order the reply lists them.  Entries with no position
+/// carry an empty file and are skipped: only located ones have an order
+/// to check.
+auto located_positions(const json& reply) -> std::vector<std::pair<std::string, uint32_t>> {
+  std::vector<std::pair<std::string, uint32_t>> positions;
+  for (const auto& diag : reply["diagnostics"]) {
+    auto file = diag["file"].get<std::string>();
+    if (!file.empty()) {
+      positions.emplace_back(std::move(file), diag["offset"].get<uint32_t>());
+    }
+  }
+  return positions;
+}
+
 /// Offsets of the first `count` semantic tokens whose kind starts with `prefix`.
 auto sample_offsets(const json& semantic_tokens, std::string_view prefix, size_t count)
     -> std::vector<uint32_t> {
@@ -389,6 +405,100 @@ suite<"playground_service"> playground_service_suite = [] {
     expect(ir.find("lib::helper") != std::string::npos)
         << "the callee's definition must survive the filter:\n"
         << ir;
+  };
+
+  "diagnostics from different phases come back in file order"_test = [] {
+    // Assembly and resolution are different phases, and the phases run
+    // in dependency order, not file order.  `z.dao` cannot be parsed and
+    // `a.dao` names something that does not exist: the parse error is
+    // known first, the unknown name only once the resolver runs, and
+    // appending each phase as it finishes would put `z.dao` ahead of
+    // `a.dao`.  One stream, in program order (§8.4), regardless of which
+    // phase said what.
+    auto program = json{
+        {"files",
+         json::array(
+             {{{"path", "z.dao"}, {"source", "module z\n\nfn also(: i32\n  return 2\n"}},
+              {{"path", kTestDocument}, {"source", "module app\n\nfn main(): i32\n  return 0\n"}},
+              {{"path", "a.dao"}, {"source", "module a\n\nfn f(): i32 -> missing\n"}}})},
+        {"document", kTestDocument}};
+    auto reported = call("analyze", program).body["diagnostics"];
+    std::string said = reported.dump();
+    std::vector<std::string> positioned;
+    for (const auto& diag : reported) {
+      auto file = diag["file"].get<std::string>();
+      if (!file.empty()) {
+        positioned.push_back(file);
+      }
+    }
+    expect(positioned.size() >= 2) << "both phases must report: " << said;
+    expect(std::ranges::is_sorted(positioned)) << "out of file order across phases: " << said;
+    expect(positioned.front() == "a.dao")
+        << "the resolver's error in a.dao must come first: " << said;
+    expect(said.find("missing") != std::string::npos) << said;
+  };
+
+  "a graph error does not hide the parse errors around it"_test = [] {
+    // Assembly, lex, and parse are one ordered stream (§8.4).  Returning
+    // on the graph error would report the cycle and nothing else;
+    // reporting the phases in turn would put the cycle before both parse
+    // errors instead of between them; and collecting the files a second
+    // time after the stream would report each parse error twice.
+    const std::string broken_z = "module z\nimport a\n\nfn also(: i32\n  return 2\n";
+    auto program_of = [&](const std::string& first, const std::string& document) {
+      return json{{"files",
+                   json::array({{{"path", "z.dao"}, {"source", broken_z}},
+                                {{"path", kTestDocument}, {"source", document}},
+                                {{"path", "a.dao"}, {"source", first}}})},
+                  {"document", kTestDocument}};
+    };
+    // Both programs stop at assembly — the first on the cycle, the
+    // second on the document's lex error — so each reply is exactly the
+    // stream under test, with no later phase appending to it.
+    auto cyclic = program_of("module a\nimport z\n\nfn broken(: i32\n  return 1\n",
+                             "module app\n\nfn main(): i32\n  return 0\n");
+    auto unlexable = program_of("module a\n\nfn broken(: i32\n  return 1\n",
+                                "module app\n\nfn main(): i32\n  return @\n");
+
+    // File ids follow the display path, not the request order, so this
+    // is the order the assembly diagnostics must come back in.
+    const std::vector<std::string> by_file_id = {"a.dao", "main.dao", "z.dao"};
+    /// Assert the reply names each positioned diagnostic once, in file
+    /// then offset order, and answer which files it named.
+    auto stream_of = [&](std::string_view label, const json& diagnostics) {
+      std::vector<std::pair<size_t, uint32_t>> ordered;
+      std::set<std::string> once;
+      std::set<std::string> files_named;
+      for (const auto& diag : diagnostics) {
+        auto file = diag["file"].get<std::string>();
+        if (file.empty()) {
+          continue; // no position to order by
+        }
+        auto offset = diag["offset"].get<uint32_t>();
+        auto key = file + "@" + std::to_string(offset) + ": " + diag["message"].get<std::string>();
+        expect(once.insert(key).second) << label << ": reported twice: " << key;
+        auto rank = std::ranges::find(by_file_id, file);
+        expect(rank != by_file_id.end()) << label << ": unexpected file " << file;
+        files_named.insert(file);
+        ordered.emplace_back(static_cast<size_t>(rank - by_file_id.begin()), offset);
+      }
+      expect(std::ranges::is_sorted(ordered))
+          << label << ": out of file/offset order: " << diagnostics.dump();
+      return files_named;
+    };
+
+    for (const auto* route : {"analyze", "run"}) {
+      auto reported = call(route, cyclic).body["diagnostics"];
+      std::string said = reported.dump();
+      expect(said.find("import cycle: a -> z -> a") != std::string::npos) << route << ": " << said;
+      expect(stream_of(route, reported) == std::set<std::string>{"a.dao", "z.dao"})
+          << route << ": the parse errors around the cycle are missing: " << said;
+
+      auto without_a_cycle = call(route, unlexable).body["diagnostics"];
+      expect(stream_of(route, without_a_cycle) ==
+             std::set<std::string>{"a.dao", "main.dao", "z.dao"})
+          << route << ": " << without_a_cycle.dump();
+    }
   };
 
   "a document without main is advised, not failed"_test = [] {
@@ -687,6 +797,43 @@ suite<"playground_service"> playground_service_suite = [] {
           << "lowered past a lex/parse error in lib.dao: " << reply.body["diagnostics"].dump();
       expect(call("run", unlexable).body["exit_code"].get<int>() == -1)
           << "ran past a lex/parse error in lib.dao";
+    }
+  };
+
+  "assembly_diagnostics_come_back_in_program_order"_test = [] {
+    // The document imports a module whose file does not lex, so that
+    // file yields no module and the graph reports the import missing
+    // while the file itself reports where it broke.  Both are root
+    // causes and both must survive, in the program's canonical order
+    // (Task 31 §8.4: file id, then offset) — the document sorts first,
+    // so its import error leads the other file's.
+    json request = {{"files",
+                     json::array({{{"path", "a_main.dao"},
+                                   {"source",
+                                    "module app\nimport lib\n\nfn main(): i32\n"
+                                    "  return lib::helper()\n"}},
+                                  {{"path", "z_lib.dao"},
+                                   {"source", "module lib\n\nfn helper(): i32\n  return @\n"}}})},
+                    {"document", "a_main.dao"}};
+
+    for (const char* route : {"analyze", "run"}) {
+      auto reply = call(route, request);
+      expect(reports(reply.body, "imported module 'lib' not found"))
+          << route << " lost the import error: " << reply.body["diagnostics"].dump();
+      auto positions = located_positions(reply.body);
+      expect(positions.size() >= 2_ul)
+          << route << " lost a root cause: " << reply.body["diagnostics"].dump();
+      expect(std::ranges::is_sorted(positions))
+          << route
+          << " reported diagnostics out of file/offset order: " << reply.body["diagnostics"].dump();
+      bool names_document = false;
+      bool names_other = false;
+      for (const auto& [file, offset] : positions) {
+        names_document = names_document || file == "a_main.dao";
+        names_other = names_other || file == "z_lib.dao";
+      }
+      expect(names_document && names_other)
+          << route << " dropped a file's diagnostics: " << reply.body["diagnostics"].dump();
     }
   };
 

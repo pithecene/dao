@@ -8,6 +8,8 @@
 #include "support/test_utils.h"
 
 #include <boost/ut.hpp>
+
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -2307,5 +2309,148 @@ suite<"explicit_type_args"> explicit_type_args = [] {
 };
 
 // NOLINTEND(readability-magic-numbers)
+
+// ---------------------------------------------------------------------------
+// `extend` scoping across modules (CONTRACT_MODULE_SYSTEM.md §5, §7.2):
+// a block's methods are in the declaring module's method set only, and
+// the prelude group is the sole exception.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Owns everything a checked multi-module program points into: the
+/// program buffers, the resolver's symbols, and the type universe.
+/// Files under `stdlib/` form the prelude group, as the driver's do.
+struct CheckedModules {
+  Program program;
+  ResolveResult resolve_result;
+  TypeContext types;
+  TypeCheckResult check_result;
+};
+
+auto check_modules(std::vector<std::pair<std::string, std::string>> files)
+    -> std::unique_ptr<CheckedModules> {
+  std::vector<SourceInput> inputs;
+  for (auto& [path, text] : files) {
+    inputs.push_back(
+        {.display_path = path, .text = text, .is_prelude = path.starts_with("stdlib/")});
+  }
+  auto checked = std::make_unique<CheckedModules>();
+  checked->program = build_program(std::move(inputs));
+  checked->resolve_result = resolve(checked->program);
+  checked->check_result = typecheck(checked->program, checked->resolve_result, checked->types);
+  return checked;
+}
+
+/// An `extend` on i32 and a module that uses the method it introduces.
+/// The extending module and the using module are given by the caller,
+/// so the same pair can be placed in the prelude or beside it.
+constexpr const char* kDoublingModule = "module lib\n"
+                                        "concept Doubling:\n"
+                                        "    fn doubled(self): i32\n"
+                                        "extend i32 as Doubling:\n"
+                                        "    fn doubled(self): i32 -> self + self\n"
+                                        "fn here(): i32\n"
+                                        "    let n: i32 = 21\n"
+                                        "    return n.doubled()\n";
+
+constexpr const char* kUsingModule = "module app\n"
+                                     "import lib\n"
+                                     "fn there(): i32\n"
+                                     "    let n: i32 = 21\n"
+                                     "    return n.doubled()\n";
+
+/// A `derived` concept and an `extend` that satisfies it for i32.  A
+/// class whose only field is an i32 derives the concept structurally —
+/// but only from a module where that `extend` is in the method set.
+constexpr const char* kShoutingModule = "module ext\n"
+                                        "derived concept Shout:\n"
+                                        "    fn shout(self): string\n"
+                                        "extend i32 as Shout:\n"
+                                        "    fn shout(self): string -> \"i32\"\n";
+
+constexpr const char* kBoxModule = "module app\n"
+                                   "class Box:\n"
+                                   "    n: i32\n"
+                                   "fn describe(): string\n"
+                                   "    let b: Box = Box(1)\n"
+                                   "    return b.shout()\n";
+
+/// Concept, `extend`, class, and use in one ordinary module: the block
+/// is in the method set of the very module asking whether its class
+/// derives, so the conformance must still be conferred.
+constexpr const char* kSelfShoutingModule = "module solo\n"
+                                            "derived concept Shout:\n"
+                                            "    fn shout(self): string\n"
+                                            "extend i32 as Shout:\n"
+                                            "    fn shout(self): string -> \"i32\"\n"
+                                            "class Box:\n"
+                                            "    n: i32\n"
+                                            "fn describe(): string\n"
+                                            "    let b: Box = Box(1)\n"
+                                            "    return b.shout()\n";
+
+} // namespace
+
+suite<"module_extend_scoping"> module_extend_scoping = [] {
+  "a module's extend method is not in a sibling module's method set"_test = [] {
+    auto checked = check_modules({{"lib.dao", kDoublingModule}, {"app.dao", kUsingModule}});
+    expect(has_error_containing(checked->check_result, "no method 'doubled' on type 'i32'"))
+        << "importing a module must not import its extend methods";
+  };
+
+  "a module sees its own extend methods"_test = [] {
+    // The same block, read from the module that declares it.
+    auto checked = check_modules({{"lib.dao", kDoublingModule}});
+    expect(is_ok(checked->check_result)) << "an extend is invisible in its own module";
+  };
+
+  "a prelude extend method is in every module's method set"_test = [] {
+    auto checked =
+        check_modules({{"stdlib/core/lib.dao", kDoublingModule}, {"app.dao", kUsingModule}});
+    expect(is_ok(checked->check_result))
+        << "the prelude is the exception to module-scoped extend (§7.2)";
+  };
+
+  // Derived conformance is structural: a class derives when its fields
+  // conform, and whether a field type conforms is asked from the
+  // class's own module, not from the program as a whole.
+
+  "a missing import's qualified type is reported once, by the graph"_test = [] {
+    // `import app::missing` is the graph's diagnostic.  The resolver still
+    // records the binding at `missing::T`'s head, with no module behind
+    // it, and the checker used to add `unknown type 'T'` on top -- a
+    // second diagnostic restating the first.
+    auto checked = check_modules(
+        {{"main.dao", "module app\nimport app::missing\n\nfn f(x: missing::T): i32 -> 0\n"}});
+    bool graph_said_missing = false;
+    for (const auto& diag : checked->program.diagnostics) {
+      if (diag.message.find("missing") != std::string::npos) {
+        graph_said_missing = true;
+      }
+    }
+    expect(graph_said_missing) << "the graph must report the missing module";
+    expect(!has_error_containing(checked->check_result, "unknown type"))
+        << "the checker restated the missing import as an unknown type";
+  };
+
+  "a sibling module's extend cannot make a class derive"_test = [] {
+    auto checked = check_modules({{"ext.dao", kShoutingModule}, {"app.dao", kBoxModule}});
+    expect(has_error_containing(checked->check_result, "no field or method 'shout' on type 'Box'"))
+        << "a class derived a concept through an extend its module cannot see";
+  };
+
+  "a module's own extend makes its own class derive"_test = [] {
+    auto checked = check_modules({{"solo.dao", kSelfShoutingModule}});
+    expect(is_ok(checked->check_result)) << "a module lost the conformance its own extend confers";
+  };
+
+  "a prelude extend makes a class in any module derive"_test = [] {
+    auto checked =
+        check_modules({{"stdlib/core/ext.dao", kShoutingModule}, {"app.dao", kBoxModule}});
+    expect(is_ok(checked->check_result))
+        << "the prelude's extend must still confer derived conformance everywhere";
+  };
+};
 
 auto main() -> int {} // NOLINT(readability-named-parameter)

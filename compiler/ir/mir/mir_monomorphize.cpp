@@ -473,11 +473,22 @@ void fixup_method_calls(MirFunction* fn, const MirModule& module,
       if (sym_it == fn_by_name.end()) {
         continue;
       }
+      // Innermost-first, as lookup is everywhere else
+      // (CONTRACT_MODULE_SYSTEM.md §7.4): the module's own `extend`
+      // shadows the prelude's.  HIR lists prelude functions before
+      // module functions, so "first visible" chose the prelude's method
+      // over a local one of the same name.
       const FnEntry* visible = nullptr;
       for (const auto& candidate : sym_it->second) {
-        if (extend_visible_from(candidate.symbol->module, from_module)) {
+        if (!extend_visible_from(candidate.symbol->module, from_module)) {
+          continue;
+        }
+        if (candidate.symbol->module == from_module) {
           visible = &candidate;
           break;
+        }
+        if (visible == nullptr) {
+          visible = &candidate;
         }
       }
       if (visible == nullptr) {
