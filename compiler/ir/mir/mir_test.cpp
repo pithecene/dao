@@ -47,8 +47,8 @@ struct MirTestPipeline {
       hir_result =
           build_hir(*parse_result.file, resolve_result, check_result,
                     hir_ctx);
-      if (hir_result.module != nullptr) {
-        mir_result = build_mir(*hir_result.module, mir_ctx, types);
+      if (hir_result.program != nullptr) {
+        mir_result = build_mir(*hir_result.program, mir_ctx, types);
       }
     }
   }

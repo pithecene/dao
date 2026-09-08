@@ -2037,24 +2037,7 @@ auto TypeChecker::names_a_type(const Expr* expr) const -> bool {
 }
 
 auto TypeChecker::symbol_for_use(const Expr* expr) const -> const Symbol* {
-  auto at = [&](uint32_t offset) -> const Symbol* {
-    auto it = resolve_.uses.find(offset);
-    return it == resolve_.uses.end() ? nullptr : it->second;
-  };
-  const auto* head = at(expr->span.offset);
-  if (head == nullptr || !expr->is<QualifiedName>()) {
-    return head;
-  }
-  const auto& qn = expr->as<QualifiedName>();
-  if (head->kind != SymbolKind::Module || qn.segments.size() < 2) {
-    return head;
-  }
-  auto export_offset = segment_offset(qn.segments, qn.segment_spans, expr->span, 1);
-  const auto* exported = at(export_offset);
-  if (exported == nullptr || qn.segments.size() < 3) {
-    return exported;
-  }
-  return at(segment_offset(qn.segments, qn.segment_spans, expr->span, 2));
+  return resolve_.symbol_for(*expr);
 }
 
 auto TypeChecker::check_identifier(const Expr* expr) -> const Type* {

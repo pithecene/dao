@@ -260,9 +260,10 @@ auto load_program_from_root(const std::filesystem::path& root_file, const Progra
     discovery.graph.searched_roots.push_back(root.empty() ? "." : root.generic_string());
   }
 
-  // A root file names a program the driver was asked to compile, exactly
-  // as an explicit file set does, so it owes the same entry point (§8.1).
-  discovery.graph.entry_policy = EntryPolicy::Required;
+  // Whether the root owes an entry point is the caller's to say: a
+  // delivered file set must have one, an editor buffer only wants to
+  // be told (§8.1, EntryPolicy).
+  discovery.graph.entry_policy = options.entry_policy;
   if (const auto* already = discovery.display_of(root_file)) {
     // The root is also a prelude file (`daoc check stdlib/core/vector.dao`).
     // The program keeps one copy of it, in the prelude group per §7.6 —
@@ -272,6 +273,8 @@ auto load_program_from_root(const std::filesystem::path& root_file, const Progra
     // only holds if the root is named by the spelling the program kept.
     discovery.graph.root_display = *already;
   } else {
+    // The root is the last thing enqueued: the prelude files are ahead
+    // of it, and each of them is a discovery root of its own.
     auto root_input = read_source_input(root_file, /*is_prelude=*/false);
     pending.push_back(root_input);
     discovery.graph.root_display = discovery.add(root_file, std::move(root_input));
@@ -313,7 +316,7 @@ auto load_program_from_files(const std::vector<std::filesystem::path>& files,
     discovery.add(path, read_source_input(path, /*is_prelude=*/false));
   }
   discovery.graph.entry = options.entry;
-  discovery.graph.entry_policy = EntryPolicy::Required;
+  discovery.graph.entry_policy = options.entry_policy;
   return assemble(std::move(discovery.inputs), discovery.graph);
 }
 

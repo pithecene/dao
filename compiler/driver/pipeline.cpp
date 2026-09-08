@@ -39,9 +39,15 @@ void print_location(const SourceMap& source_map, Span span) {
 
 } // namespace
 
+auto in_program_order(std::span<const Diagnostic> diags) -> std::vector<Diagnostic> {
+  std::vector<Diagnostic> ordered(diags.begin(), diags.end());
+  std::ranges::stable_sort(ordered, {}, [](const Diagnostic& diag) { return diag.span.offset; });
+  return ordered;
+}
+
 auto print_error_diagnostics(const SourceMap& source_map,
                              std::span<const Diagnostic> diags) -> bool {
-  for (const auto& diag : diags) {
+  for (const auto& diag : in_program_order(diags)) {
     print_location(source_map, diag.span);
     std::cerr << ": error: " << diag.message << "\n";
   }
@@ -50,7 +56,7 @@ auto print_error_diagnostics(const SourceMap& source_map,
 
 auto print_error_diagnostics(std::string_view filename, const SourceBuffer& source,
                              std::span<const Diagnostic> diags) -> bool {
-  for (const auto& diag : diags) {
+  for (const auto& diag : in_program_order(diags)) {
     auto loc = source.line_col(diag.span.offset);
     std::cerr << filename << ":" << loc.line << ":" << loc.col << ": error: " << diag.message
               << "\n";
@@ -61,7 +67,7 @@ auto print_error_diagnostics(std::string_view filename, const SourceBuffer& sour
 auto print_diagnostics(const SourceMap& source_map,
                        std::span<const Diagnostic> diags) -> bool {
   bool has_errors = false;
-  for (const auto& diag : diags) {
+  for (const auto& diag : in_program_order(diags)) {
     const auto* severity = diag.severity == Severity::Error ? "error" : "warning";
     print_location(source_map, diag.span);
     std::cerr << ": " << severity << ": " << diag.message << "\n";
@@ -116,8 +122,12 @@ auto load_program(const ProgramRequest& request) -> Program {
   auto diagnostics = assembly_diagnostics(program);
   bool has_errors = false;
   for (const auto& diag : diagnostics.unlocated) {
-    std::cerr << "error: " << diag.message << "\n";
-    has_errors = true;
+    // An unlocated diagnostic keeps its severity: an advisory (a
+    // library set with no entry point) is a warning and does not stop
+    // the command, exactly as a located warning does not.
+    const bool fatal = diag.severity == Severity::Error;
+    std::cerr << (fatal ? "error: " : "warning: ") << diag.message << "\n";
+    has_errors |= fatal;
   }
   has_errors |= print_error_diagnostics(program.source_map, diagnostics.located);
   if (has_errors || !program.lexed_and_parsed_cleanly()) {
@@ -140,8 +150,6 @@ auto run_frontend(const ProgramRequest& request) -> FrontendResult {
   std::vector<Diagnostic> frontend_diagnostics = resolve_result.diagnostics;
   frontend_diagnostics.insert(
       frontend_diagnostics.end(), check_result.diagnostics.begin(), check_result.diagnostics.end());
-  std::ranges::stable_sort(
-      frontend_diagnostics, {}, [](const Diagnostic& diag) { return diag.span.offset; });
   bool has_errors = print_diagnostics(program.source_map, frontend_diagnostics);
 
   if (has_errors) {
@@ -160,20 +168,18 @@ auto run_through_hir(const ProgramRequest& request) -> HirResult {
   auto hir = build_hir(frontend.program, frontend.resolve, frontend.typecheck, hir_ctx);
 
   bool has_errors = print_error_diagnostics(frontend.program.source_map, hir.diagnostics);
-  if (hir.module == nullptr || has_errors) {
+  if (hir.program == nullptr || has_errors) {
     std::exit(EXIT_FAILURE);
   }
 
-  return {.frontend = std::move(frontend),
-          .hir_ctx = std::move(hir_ctx),
-          .hir = std::move(hir)};
+  return {.frontend = std::move(frontend), .hir_ctx = std::move(hir_ctx), .hir = std::move(hir)};
 }
 
 auto run_through_mir(const ProgramRequest& request) -> MirResult {
   auto hir_result = run_through_hir(request);
   const auto& source_map = hir_result.frontend.program.source_map;
   MirContext mir_ctx;
-  auto mir = build_mir(*hir_result.hir.module, mir_ctx, hir_result.frontend.types);
+  auto mir = build_mir(*hir_result.hir.program, mir_ctx, hir_result.frontend.types);
 
   bool has_errors = print_error_diagnostics(source_map, mir.diagnostics);
   if (mir.module == nullptr || has_errors) {
@@ -202,7 +208,7 @@ auto run_through_mir(const ProgramRequest& request) -> MirResult {
 auto lower_to_llvm(const MirResult& mir, llvm::LLVMContext& llvm_ctx) -> LlvmBackendResult {
   const auto& source_map = mir.hir_result.frontend.program.source_map;
   LlvmBackend backend(llvm_ctx);
-  auto result = backend.lower(*mir.mir.module, &source_map);
+  auto result = backend.lower(*mir.mir.module, &source_map, mir.hir_result.frontend.program.entry);
 
   // Prelude warnings (dropped bodies of prelude functions that use
   // unsupported constructs) are not the user's concern.

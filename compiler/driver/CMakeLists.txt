@@ -20,3 +20,8 @@ add_dependencies(driver_test daoc)
 
 include(CTest)
 add_test(NAME driver_test COMMAND driver_test)
+
+# End-to-end multi-file builds: discovery mode, explicit mode, and
+# input-order determinism (compiler/driver/multifile_build_test.sh).
+add_test(NAME multifile_build_test
+  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/multifile_build_test.sh $<TARGET_FILE:daoc> ${CMAKE_SOURCE_DIR})

@@ -300,6 +300,64 @@ suite<"playground_service"> playground_service_suite = [] {
         << "a document that is not one of the files must be rejected";
   };
 
+  "filtered llvm keeps every function the document defines"_test = [] {
+    // The backend names a module's functions `<module>::<name>` and
+    // leaves only the entry module's `main` bare, so a filter built from
+    // MIR symbol names kept `main` alone and emitted a call to a
+    // definition it had dropped.
+    const std::string source = "module app\n"
+                               "fn helper(): i32\n  return 41\n"
+                               "fn main(): i32\n  return helper() + 1\n";
+    auto reply = call("analyze", document_request(source));
+    auto ir = reply.body["llvm_ir"].get<std::string>();
+    expect(!ir.empty()) << reply.body["diagnostics"].dump();
+
+    // Names introduced by `define` / `declare`, and names called.
+    auto names_after = [&ir](std::string_view keyword) -> std::set<std::string> {
+      std::set<std::string> found;
+      const std::regex pattern(std::string(keyword) + R"re(\s[^@\n]*@"?([A-Za-z0-9_:.$]+)"?\()re");
+      for (std::sregex_iterator it(ir.begin(), ir.end(), pattern), last; it != last; ++it) {
+        found.insert((*it)[1].str());
+      }
+      return found;
+    };
+    auto defined = names_after("define");
+    auto declared = names_after("declare");
+    auto called = names_after("call");
+
+    expect(defined.contains("app::helper"))
+        << "the document's own helper must be defined in the filtered IR:\n"
+        << ir;
+    expect(defined.contains("main")) << "the entry keeps its bare name:\n" << ir;
+    for (const auto& callee : called) {
+      if (callee.starts_with("llvm.")) {
+        continue; // intrinsics need no declaration of ours
+      }
+      expect(defined.contains(callee) || declared.contains(callee))
+          << "call to " << callee << " which the filter dropped:\n"
+          << ir;
+    }
+  };
+
+  "filtered llvm keeps a definition the document calls in another file"_test = [] {
+    // The IR views hide the prelude, not the rest of the program: a
+    // document calling into a sibling file must not be shown a call with
+    // no definition.
+    const std::string lib = "module lib\n\nfn helper(): i32\n  return 41\n";
+    const std::string main =
+        "module app\nimport lib\n\nfn main(): i32\n  return lib::helper() + 1\n";
+    json request = {{"files",
+                     json::array({{{"path", "lib.dao"}, {"source", lib}},
+                                  {{"path", kTestDocument}, {"source", main}}})},
+                    {"document", kTestDocument}};
+    auto reply = call("analyze", request);
+    auto ir = reply.body["llvm_ir"].get<std::string>();
+    expect(!ir.empty()) << reply.body["diagnostics"].dump();
+    expect(ir.find("lib::helper") != std::string::npos)
+        << "the callee's definition must survive the filter:\n"
+        << ir;
+  };
+
   "diagnostics from different phases come back in file order"_test = [] {
     // Assembly and resolution are different phases, and the phases run
     // in dependency order, not file order.  `z.dao` cannot be parsed and

@@ -236,6 +236,23 @@ suite<"driver_cli"> driver_cli_suite = [] {
         << second_wins.err << second_wins.out;
   };
 
+  "an explicit set with no entry is an error even under check"_test = [] {
+    const Scratch scratch("explicit-no-entry");
+    auto a = scratch.file("a.dao", "module a\n\nfn one(): i32 -> 1\n");
+    auto b = scratch.file("b.dao", "module b\n\nfn two(): i32 -> 2\n");
+    auto checked = run_daoc(scratch,
+                            {"check",
+                             "--source",
+                             a.string(),
+                             "--source",
+                             b.string(),
+                             "--stdlib-root",
+                             scratch.stdlib.string()});
+    expect(checked.exit_code != 0)
+        << "an explicit set without an entry was accepted: " << checked.out;
+    expect(checked.err_says("no entry module")) << checked.err;
+  };
+
   "an unfound import names every root, in the order they were searched"_test = [] {
     const Scratch scratch("searched-roots");
     auto root =
@@ -299,6 +316,8 @@ suite<"driver_cli"> driver_cli_suite = [] {
     auto named = sources({"--entry", "app"});
     expect(named.exit_code == 0) << named.err;
 
+    // An explicit file set owes an entry module whatever the command
+    // (§8.3): naming one that declares no `fn main` is an error.
     auto without_main = sources({"--entry", "lib"});
     expect(without_main.exit_code != 0) << without_main.out;
     expect(without_main.err_says("entry module 'lib' (--entry) declares no 'fn main'"))
@@ -406,9 +425,11 @@ suite<"driver_cli"> driver_cli_suite = [] {
     // The program holds one copy of the root, in the prelude group, so
     // it has no user file at all.  Entry selection must still find the
     // root through the spelling the program kept.
+    // `check` only advises on a missing entry (§8.1), so the witness is
+    // the diagnostic naming the root, not the exit status.
     auto no_main =
         run_daoc(scratch, {"check", library.string(), "--stdlib-root", scratch.stdlib.string()});
-    expect(no_main.exit_code != 0) << no_main.out;
+    expect(no_main.exit_code == 0) << no_main.err;
     expect(no_main.err_says("entry module 'core::lib' (the root file) declares no 'fn main'"))
         << no_main.err;
 

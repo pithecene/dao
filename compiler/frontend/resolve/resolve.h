@@ -18,6 +18,13 @@ struct ResolveResult {
   ResolveContext context;
   std::unordered_map<uint32_t, Symbol*> uses; // token span offset -> resolved Symbol*
   std::vector<Diagnostic> diagnostics;
+
+  /// The symbol an identifier or qualified name denotes.  A qualified
+  /// name through an import binding is recorded per segment
+  /// (CONTRACT_MODULE_SYSTEM.md §6): the binding at the head, the export
+  /// at the second segment, a type's member at the third — this follows
+  /// them to the last.  Null when unresolved.
+  [[nodiscard]] auto symbol_for(const Expr& expr) const -> const Symbol*;
 };
 
 // Run name resolution over a program: builtins, then the prelude

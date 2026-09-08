@@ -159,7 +159,7 @@ void cmd_resolve(const dao::ProgramRequest& request) {
 
   // Print diagnostics in user files (to stdout -- this is a debug dump command).
   bool has_user_diags = false;
-  for (const auto& diag : resolve_result.diagnostics) {
+  for (const auto& diag : dao::in_program_order(resolve_result.diagnostics)) {
     if (source_map.is_prelude(diag.span.offset)) {
       continue;
     }
@@ -182,8 +182,8 @@ void cmd_check(const dao::ProgramRequest& request) {
 // Build and print HIR. Output is deterministic.
 void cmd_hir(const dao::ProgramRequest& request) {
   auto result = dao::run_through_hir(request);
-  if (result.hir.module != nullptr) {
-    dao::print_hir(std::cout, *result.hir.module);
+  if (result.hir.program != nullptr) {
+    dao::print_hir(std::cout, *result.hir.program);
   }
 }
 
@@ -327,7 +327,8 @@ auto main(int argc, char* argv[]) -> int {
   }
   std::string_view command(argv[1]);
 
-  // daoc <file> -- read and exit (Task 0 compat)
+  // `daoc <file>` with no command reads the file and exits, as it
+  // did before there were commands.
   const bool known_command =
       command == "build" ||
       std::ranges::any_of(commands, [&](const Command& c) { return c.name == command; });
@@ -369,7 +370,7 @@ auto main(int argc, char* argv[]) -> int {
       break;
     } else if (arg.starts_with("--")) {
       // `daoc build <inputs> [link-inputs...]` passes its trailing
-      // arguments to the linker unchanged (Task 31 §13), and linker
+      // arguments to the linker unchanged, and linker
       // options lead with a dash.  Only the analysis commands, which
       // have nothing to pass anything to, reject an unknown option.
       if (command != "build") {
@@ -405,7 +406,17 @@ auto main(int argc, char* argv[]) -> int {
     require_file(source);
   }
 
+  // An explicit file set names a delivered program, so it owes an entry
+  // module whatever the command (CONTRACT_MODULE_SYSTEM.md §8.3).  A root
+  // file under an analysis command is advisory: the buffer is analysable
+  // without one, and the diagnostic says why it cannot be run.
+  if (!request.sources.empty()) {
+    request.options.entry_policy = dao::EntryPolicy::Required;
+  }
   if (command == "build") {
+    // Building produces an executable, so the program must have an entry
+    // point whichever way it was given.
+    request.options.entry_policy = dao::EntryPolicy::Required;
     cmd_build(request, extras);
     return EXIT_SUCCESS;
   }

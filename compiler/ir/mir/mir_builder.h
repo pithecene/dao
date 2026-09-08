@@ -35,7 +35,7 @@ class MirBuilder {
 public:
   MirBuilder(MirContext& ctx, TypeContext& types);
 
-  auto build(const HirModule& module) -> MirBuildResult;
+  auto build(const HirProgram& program) -> MirBuildResult;
 
 private:
   MirContext& ctx_;
@@ -111,8 +111,7 @@ private:
 // Top-level entry point.
 // ---------------------------------------------------------------------------
 
-auto build_mir(const HirModule& module, MirContext& ctx,
-               TypeContext& types) -> MirBuildResult;
+auto build_mir(const HirProgram& program, MirContext& ctx, TypeContext& types) -> MirBuildResult;
 
 } // namespace dao
 

@@ -40,6 +40,15 @@ struct SourceInput {
   bool is_prelude = false;
 };
 
+/// Whether a method introduced by `extend` in `owner` participates in
+/// lookup from `from`: within the declaring module, and everywhere when
+/// that module is in the prelude (CONTRACT_MODULE_SYSTEM.md §5).  A
+/// method that travels with its type carries no owner and is always
+/// visible.  Every consumer of that rule — the type checker, the tooling
+/// that mirrors it, and monomorphization — asks here.
+struct ModuleInfo;
+inline auto extend_visible_from(const ModuleInfo* owner, const ModuleInfo* from) -> bool;
+
 struct ModuleInfo {
   // The module's identity is its display name: `module_display` builds it
   // from the declaration's segments, and every consumer — the graph, the
@@ -56,12 +65,29 @@ struct ModuleInfo {
                                     // declarations live in the shared prelude scope (§7.2, §7.3)
 };
 
+inline auto extend_visible_from(const ModuleInfo* owner, const ModuleInfo* from) -> bool {
+  return owner == nullptr || owner == from || owner->is_prelude;
+}
+
+/// How much a program cares that no module declares `fn main`.
+/// A delivered file set must have an entry (CONTRACT_MODULE_SYSTEM.md
+/// §8.3); an editor buffer wants to be told why it cannot be run; a
+/// fragment lowered for a test or for tooling does not care.
+enum class EntryPolicy : std::uint8_t {
+  Optional, // a fragment: no diagnostic
+  Advisory, // an editor buffer: a warning, which does not stop analysis
+  Required, // an explicit file set: an error
+};
+
 /// Options common to the loaders that read the filesystem.
 struct ProgramOptions {
   std::filesystem::path stdlib_root; // prelude group source; empty loads no prelude
   std::vector<std::filesystem::path>
       module_roots;                 // root-file mode: searched after the root's directory
   std::optional<std::string> entry; // explicit-set mode: entry module by display name
+  // A program that will be built into an executable owes an entry module
+  // (§8.1); one that is only analysed is told, not refused.
+  EntryPolicy entry_policy = EntryPolicy::Advisory;
 };
 
 struct Program {
@@ -109,16 +135,6 @@ struct ProgramDiagnostics {
 };
 
 auto assembly_diagnostics(const Program& program) -> ProgramDiagnostics;
-
-/// How much a program cares that no module declares `fn main`.
-/// A delivered file set must have an entry (CONTRACT_MODULE_SYSTEM.md
-/// §8.3); an editor buffer wants to be told why it cannot be run; a
-/// fragment lowered for a test or for tooling does not care.
-enum class EntryPolicy : std::uint8_t {
-  Optional, // a fragment: no diagnostic
-  Advisory, // an editor buffer: a warning, which does not stop analysis
-  Required, // an explicit file set: an error
-};
 
 /// In-memory mode (§8.1): lex, parse, and build the module graph over
 /// exactly these inputs; imports of modules outside the set are

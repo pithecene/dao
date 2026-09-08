@@ -96,12 +96,12 @@ auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
   HirContext hir_ctx;
   auto hir_result = build_hir(prog.program, resolve_result, check_result, hir_ctx);
   collect_diagnostics(diagnostics, prog, hir_result.diagnostics);
-  if (hir_result.module == nullptr || has_error_severity(hir_result.diagnostics)) {
+  if (hir_result.program == nullptr || has_error_severity(hir_result.diagnostics)) {
     return compile_failed(std::move(diagnostics), "HIR lowering failed without a diagnostic");
   }
 
   MirContext mir_ctx;
-  auto mir_result = build_mir(*hir_result.module, mir_ctx, types);
+  auto mir_result = build_mir(*hir_result.program, mir_ctx, types);
   collect_diagnostics(diagnostics, prog, mir_result.diagnostics);
   bool mono_has_errors = false;
   if (mir_result.module != nullptr) {
@@ -120,7 +120,8 @@ auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
   // LLVM lowering.
   llvm::LLVMContext llvm_ctx;
   LlvmBackend backend(llvm_ctx);
-  auto llvm_result = backend.lower(*mir_result.module, &prog.program.source_map);
+  auto llvm_result =
+      backend.lower(*mir_result.module, &prog.program.source_map, prog.program.entry);
 
   auto user_diags = without_prelude_warnings(llvm_result.diagnostics, prog);
   collect_diagnostics(diagnostics, prog, user_diags);

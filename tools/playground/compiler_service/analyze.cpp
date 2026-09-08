@@ -4,6 +4,7 @@
 
 #include "analysis/semantic_tokens.h"
 #include "backend/llvm/llvm_backend.h"
+#include "backend/llvm/llvm_names.h"
 #include "frontend/ast/ast_printer.h"
 #include "ir/hir/hir_builder.h"
 #include "ir/hir/hir_context.h"
@@ -121,22 +122,38 @@ void add_semantic_tokens(AnalyzeOutput& out,
 // IR views restricted to the editor buffer's declarations.  Monomorphized
 // instantiations keep their template's span, so a user generic's
 // instantiations stay visible and prelude instantiations stay hidden.
+//
+// HIR is program-wide, so the filter runs per module and drops the
+// modules left with nothing (the prelude's).
 // ---------------------------------------------------------------------------
 
-auto user_declarations(const HirModule& module, const PlaygroundProgram& prog) -> HirModule {
-  HirModule view{.span = module.span, .declarations = {}};
-  std::ranges::copy_if(
-      module.declarations,
-      std::back_inserter(view.declarations),
-      [&prog](const HirDecl* decl) -> bool { return prog.in_user_file(decl->span.offset); });
-  return view;
+auto user_declarations(const HirProgram& program,
+                       const PlaygroundProgram& prog,
+                       std::vector<HirModule>& storage) -> HirProgram {
+  for (const auto* module : program.modules) {
+    HirModule view{.span = module->span, .module = module->module, .declarations = {}};
+    std::ranges::copy_if(
+        module->declarations,
+        std::back_inserter(view.declarations),
+        [&prog](const HirDecl* decl) -> bool { return prog.in_request_files(decl->span.offset); });
+    if (!view.declarations.empty()) {
+      storage.push_back(std::move(view));
+    }
+  }
+  // Pointers are taken after the storage has stopped growing.
+  HirProgram filtered;
+  filtered.modules.reserve(storage.size());
+  for (auto& module : storage) {
+    filtered.modules.push_back(&module);
+  }
+  return filtered;
 }
 
 auto user_functions(const MirModule& module, const PlaygroundProgram& prog) -> MirModule {
   MirModule view{.functions = {}, .span = module.span};
   std::ranges::copy_if(
       module.functions, std::back_inserter(view.functions), [&prog](const MirFunction* fn) -> bool {
-        return prog.in_user_file(fn->span.offset);
+        return prog.in_request_files(fn->span.offset);
       });
   return view;
 }
@@ -144,10 +161,16 @@ auto user_functions(const MirModule& module, const PlaygroundProgram& prog) -> M
 /// Predicate over LLVM function names selecting the editor buffer's
 /// functions.  LLVM names are the MIR symbol names; a generator's resume
 /// function carries a `.resume` suffix.
-auto user_function_filter(const MirModule& user_mir) -> std::function<bool(std::string_view)> {
+auto user_function_filter(const MirModule& user_mir, const ModuleInfo* entry)
+    -> std::function<bool(std::string_view)> {
+  // Match the names the backend emits, not the MIR symbol names: a
+  // function of module `app` is `app::helper` in the IR, and only the
+  // entry module's `main` keeps a bare name (llvm_names.h).  Filtering
+  // on symbol names kept just that one and dropped every other
+  // definition the document contains.
   std::set<std::string, std::less<>> names;
   for (const auto* fn : user_mir.functions) {
-    names.emplace(fn->symbol->name);
+    names.emplace(llvm_function_name(*fn->symbol, entry));
   }
   return [names = std::move(names)](std::string_view name) -> bool {
     constexpr std::string_view resume_suffix = ".resume";
@@ -266,21 +289,21 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   out.add(hir_result.diagnostics);
   // A builder may hand back a module alongside error diagnostics; that
   // module is not lowered further.
-  if (hir_result.module == nullptr || has_error_severity(hir_result.diagnostics)) {
+  if (hir_result.program == nullptr || has_error_severity(hir_result.diagnostics)) {
     if (!has_error_severity(hir_result.diagnostics)) {
       out.unlocated.push_back(
           make_unlocated_diagnostic("HIR lowering failed without a diagnostic"));
     }
     return out.reply();
   }
-  out.hir = printed([&](std::ostream& os) {
-    print_hir(os,
-              include_prelude ? *hir_result.module : user_declarations(*hir_result.module, prog));
-  });
+  std::vector<HirModule> user_hir_storage;
+  auto user_hir = user_declarations(*hir_result.program, prog, user_hir_storage);
+  out.hir = printed(
+      [&](std::ostream& os) { print_hir(os, include_prelude ? *hir_result.program : user_hir); });
 
   // --- MIR ---
   MirContext mir_ctx;
-  auto mir_result = build_mir(*hir_result.module, mir_ctx, types);
+  auto mir_result = build_mir(*hir_result.program, mir_ctx, types);
   out.add(mir_result.diagnostics);
   if (mir_result.module == nullptr || has_error_severity(mir_result.diagnostics)) {
     if (!has_error_severity(mir_result.diagnostics)) {
@@ -308,7 +331,8 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   // --- LLVM IR ---
   llvm::LLVMContext llvm_ctx;
   LlvmBackend llvm_backend(llvm_ctx);
-  auto llvm_result = llvm_backend.lower(*mir_result.module, &prog.program.source_map);
+  auto llvm_result =
+      llvm_backend.lower(*mir_result.module, &prog.program.source_map, prog.program.entry);
   out.add(without_prelude_warnings(llvm_result.diagnostics, prog));
 
   if (llvm_result.module != nullptr && !has_error_severity(llvm_result.diagnostics)) {
@@ -316,7 +340,8 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
       if (include_prelude) {
         LlvmBackend::print_ir(os, *llvm_result.module);
       } else {
-        LlvmBackend::print_ir(os, *llvm_result.module, user_function_filter(user_mir));
+        LlvmBackend::print_ir(
+            os, *llvm_result.module, user_function_filter(user_mir, prog.program.entry));
       }
     });
   }

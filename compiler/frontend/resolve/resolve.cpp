@@ -1372,6 +1372,27 @@ private:
 // Public API
 // ---------------------------------------------------------------------------
 
+auto ResolveResult::symbol_for(const Expr& expr) const -> const Symbol* {
+  auto at = [&](uint32_t offset) -> const Symbol* {
+    auto it = uses.find(offset);
+    return it == uses.end() ? nullptr : it->second;
+  };
+  const auto* head = at(expr.span.offset);
+  if (head == nullptr || !expr.is<QualifiedName>()) {
+    return head;
+  }
+  const auto& qn = expr.as<QualifiedName>();
+  if (head->kind != SymbolKind::Module || qn.segments.size() < 2) {
+    return head;
+  }
+  auto export_offset = segment_span(qn.segments, qn.segment_spans, expr.span, 1).offset;
+  const auto* exported = at(export_offset);
+  if (exported == nullptr || qn.segments.size() < 3) {
+    return exported;
+  }
+  return at(segment_span(qn.segments, qn.segment_spans, expr.span, 2).offset);
+}
+
 auto is_prelude_intrinsic(std::string_view name) -> bool {
   return std::ranges::any_of(kPreludeIntrinsics, [name](std::string_view base) {
     return name == base ||

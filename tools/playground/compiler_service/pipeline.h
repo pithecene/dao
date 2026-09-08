@@ -62,6 +62,15 @@ struct PlaygroundProgram {
   [[nodiscard]] auto in_user_file(uint32_t program_offset) const -> bool {
     return program.source_map.file_for(program_offset) == user;
   }
+  /// True if the offset lies in any file the request sent — the document
+  /// or another of its files — rather than in the prelude.  The IR views
+  /// hide the prelude, not the rest of the program: a document that
+  /// calls into a sibling file must not be shown a call with no
+  /// definition.
+  [[nodiscard]] auto in_request_files(uint32_t program_offset) const -> bool {
+    const auto* file = program.source_map.file_for(program_offset);
+    return file != nullptr && !file->is_prelude;
+  }
   /// True if the offset lies in the editor buffer past the synthetic header.
   [[nodiscard]] auto in_editor_text(uint32_t program_offset) const -> bool {
     return in_user_file(program_offset) && user->local_offset(program_offset) >= header_bytes;
