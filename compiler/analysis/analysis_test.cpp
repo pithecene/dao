@@ -1,10 +1,10 @@
 #include "analysis/completion.h"
-#include "frontend/module/program.h"
-#include "analysis/hover.h"
-#include "analysis/goto_definition.h"
 #include "analysis/document_symbols.h"
+#include "analysis/goto_definition.h"
+#include "analysis/hover.h"
 #include "analysis/references.h"
 #include "frontend/lexer/lexer.h"
+#include "frontend/module/program.h"
 #include "frontend/parser/parser.h"
 #include "frontend/resolve/resolve.h"
 #include "frontend/typecheck/type_checker.h"
@@ -13,8 +13,8 @@
 
 #include <boost/ut.hpp>
 #include <string>
-#include <vector>
 #include <utility>
+#include <vector>
 
 using namespace boost::ut;
 using namespace dao;
@@ -68,8 +68,7 @@ struct ProgramPipeline {
   }
 
   /// Program offset of the first occurrence of `text` in a file.
-  [[nodiscard]] auto offset_in(std::string_view display, std::string_view text) const
-      -> uint32_t {
+  [[nodiscard]] auto offset_in(std::string_view display, std::string_view text) const -> uint32_t {
     for (const auto& file : program.files) {
       if (file->display_path == display) {
         return file->base_offset + static_cast<uint32_t>(file->buffer.contents().find(text));
@@ -108,14 +107,13 @@ suite<"cross_module_navigation"> cross_module_navigation = [] {
     }
 
     // The head segment still names the module binding.
-    auto head = query_hover(pipe.offset_in("main.dao", "math::add"), pipe.resolve_result,
-                            pipe.check_result);
+    auto head = query_hover(
+        pipe.offset_in("main.dao", "math::add"), pipe.resolve_result, pipe.check_result);
     expect(head.has_value() && head->symbol_kind == "module") << (head ? head->symbol_kind : "");
   };
 };
 
-namespace {
-} // namespace
+namespace {} // namespace
 
 // ---------------------------------------------------------------------------
 // Document symbols
