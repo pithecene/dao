@@ -143,6 +143,27 @@ private:
   // silently retypes an expression (CONTRACT_TYPE_SYSTEM_FOUNDATIONS.md §11).
   std::unordered_map<const Decl*, const Type*> concept_self_map_;
 
+  /// RAII guard that answers "which module is asking?" for the length
+  /// of a scope and restores the previous answer after.  Visibility of
+  /// an `extend` depends on it (§5), so a pass that consults it must
+  /// say where it is standing.
+  struct ModuleScope {
+    const ModuleInfo*& slot;
+    const ModuleInfo* previous;
+
+    ModuleScope(const ModuleInfo*& current, const ModuleInfo* asking)
+        : slot(current), previous(current) {
+      slot = asking;
+    }
+    ~ModuleScope() {
+      slot = previous;
+    }
+    ModuleScope(const ModuleScope&) = delete;
+    auto operator=(const ModuleScope&) -> ModuleScope& = delete;
+    ModuleScope(ModuleScope&&) = delete;
+    auto operator=(ModuleScope&&) -> ModuleScope& = delete;
+  };
+
   // RAII guard that saves and restores a single key in concept_self_map_.
   // Each guard scope inserts exactly one concept→type binding; on
   // destruction the prior state of that key is restored. O(1) instead
