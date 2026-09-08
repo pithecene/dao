@@ -782,12 +782,13 @@ auto TypeChecker::register_enum(const Decl* decl, const Symbol* sym, bool report
       if (!report_failures) {
         diagnostics_.resize(before);
       }
-      // A payload holding the enum itself by value -- directly, or
-      // through a class or another enum -- has no finite size.  The
-      // slot stays untyped, and the final pass says why.
-      if (resolved != nullptr && existing != nullptr) {
+      // A payload holding the enum itself by value -- directly, through
+      // a class or another enum, or as an instantiation of it -- has no
+      // finite size.  The slot stays untyped, and the final pass says
+      // why.
+      if (resolved != nullptr) {
         std::unordered_set<const Type*> seen;
-        if (contains_by_value(resolved, existing, seen)) {
+        if (contains_by_value(resolved, decl, seen)) {
           resolved = nullptr;
           if (report_failures) {
             error(variant.payload_types[i]->span,
@@ -865,6 +866,19 @@ auto TypeChecker::register_class_fields(PendingClass& pending, bool report_failu
     if (field_type != nullptr && (index >= had.size() || had[index].type == nullptr)) {
       ++progress;
     }
+    if (field_type != nullptr && report_failures) {
+      // A field holding the class itself by value -- directly, through
+      // another declaration, or as an instantiation of it -- has no
+      // finite size.  Said once, here, where the cycle closes.
+      std::unordered_set<const Type*> seen;
+      if (contains_by_value(field_type, pending.decl, seen)) {
+        error(field->type->span,
+              "class '" + std::string(pending.class_decl->name) +
+                  "' cannot contain itself by value in field '" + std::string(field->name) +
+                  "'; use a pointer (*" + std::string(pending.class_decl->name) +
+                  ") for recursive types");
+      }
+    }
     fields.push_back({field->name, field_type});
     ++index;
   }
@@ -878,10 +892,54 @@ auto TypeChecker::type_complete(const Type* type) -> bool {
   if (!complete_by_value(type, seen)) {
     return false;
   }
+  // No hole anywhere.  A cycle by value is not a hole, but nothing
+  // finite either: a declaration holding itself by value is rejected
+  // (register_enum, register_class_fields) and never counts as
+  // complete, so no alias instantiates it.  Every type the walk
+  // reached is checked, since a cycle behind a pointer is a cycle of
+  // the type behind the pointer.
+  std::unordered_set<const Type*> on_path;
+  std::unordered_set<const Type*> acyclic;
+  for (const auto* reached : seen) {
+    if (value_cycle(reached, on_path, acyclic)) {
+      return false;
+    }
+  }
   // Slots only ever fill, so what is complete stays complete -- and so
   // is everything the walk reached.
   complete_types_.insert(seen.begin(), seen.end());
   return true;
+}
+
+auto TypeChecker::value_cycle(const Type* type,
+                              std::unordered_set<const Type*>& on_path,
+                              std::unordered_set<const Type*>& acyclic) -> bool {
+  if (type == nullptr || acyclic.contains(type)) {
+    return false;
+  }
+  if (type->kind() != TypeKind::Struct && type->kind() != TypeKind::Enum) {
+    return false; // a pointer, or a scalar: the path by value ends here
+  }
+  if (!on_path.insert(type).second) {
+    return true;
+  }
+  bool cyclic = false;
+  if (type->kind() == TypeKind::Struct) {
+    const auto* st = static_cast<const TypeStruct*>(type);
+    cyclic = std::ranges::any_of(
+        st->fields(), [&](const StructField& f) { return value_cycle(f.type, on_path, acyclic); });
+  } else {
+    const auto* en = static_cast<const TypeEnum*>(type);
+    cyclic = std::ranges::any_of(en->variants(), [&](const EnumVariant& v) {
+      return std::ranges::any_of(v.payload_types,
+                                 [&](const Type* t) { return value_cycle(t, on_path, acyclic); });
+    });
+  }
+  on_path.erase(type);
+  if (!cyclic) {
+    acyclic.insert(type);
+  }
+  return cyclic;
 }
 
 auto TypeChecker::complete_by_value(const Type* type, std::unordered_set<const Type*>& seen) const
@@ -933,23 +991,28 @@ auto TypeChecker::complete_by_value(const Type* type, std::unordered_set<const T
 }
 
 auto TypeChecker::contains_by_value(const Type* type,
-                                    const Type* target,
+                                    const Decl* target,
                                     std::unordered_set<const Type*>& seen) -> bool {
   if (type == nullptr || !seen.insert(type).second) {
     return false;
   }
-  if (type == target) {
-    return true;
-  }
+  // By declaration, not by object: an instantiation is another object
+  // of the same declaration, and holds it by value just the same.
   switch (type->kind()) {
   case TypeKind::Struct: {
     const auto* st = static_cast<const TypeStruct*>(type);
+    if (st->decl_id() == target) {
+      return true;
+    }
     return std::ranges::any_of(st->fields(), [&](const StructField& f) {
       return contains_by_value(f.type, target, seen);
     });
   }
   case TypeKind::Enum: {
     const auto* en = static_cast<const TypeEnum*>(type);
+    if (en->decl_id() == target) {
+      return true;
+    }
     return std::ranges::any_of(en->variants(), [&](const EnumVariant& v) {
       return std::ranges::any_of(v.payload_types,
                                  [&](const Type* t) { return contains_by_value(t, target, seen); });
@@ -2332,6 +2395,9 @@ auto TypeChecker::substitute_generics(const Type* type,
     return changed ? types_.function_type(std::move(params), ret) : type;
   }
   case TypeKind::Struct: {
+    if (!substituting_.insert(type).second) {
+      return type; // holds itself by value: no finite copy exists (rejected at its declaration)
+    }
     const auto* st = static_cast<const TypeStruct*>(type);
     bool changed = false;
     std::vector<StructField> new_fields;
@@ -2342,9 +2408,13 @@ auto TypeChecker::substitute_generics(const Type* type,
         changed = true;
       new_fields.push_back({field.name, sub});
     }
+    substituting_.erase(type);
     return changed ? types_.make_struct(st->decl_id(), st->name(), std::move(new_fields)) : type;
   }
   case TypeKind::Enum: {
+    if (!substituting_.insert(type).second) {
+      return type; // as for a class above
+    }
     const auto* en = static_cast<const TypeEnum*>(type);
     bool changed = false;
     std::vector<EnumVariant> new_variants;
@@ -2360,6 +2430,7 @@ auto TypeChecker::substitute_generics(const Type* type,
       }
       new_variants.push_back({variant.name, std::move(new_payload), variant.field_names});
     }
+    substituting_.erase(type);
     return changed ? types_.make_enum(en->decl_id(), en->name(), std::move(new_variants)) : type;
   }
   default:
