@@ -668,11 +668,6 @@ auto specialize_call_site(MirInst* inst,
                           MirContext& ctx,
                           TypeContext& types) -> bool {
 
-  auto git = generic_fns.find(fn_ref->symbol);
-  if (git == generic_fns.end()) {
-    return false;
-  }
-
   // Find the matching MirCall instruction that uses this FnRef.
   const MirCall* call_payload = nullptr;
   for (size_t j = inst_idx + 1; j < block->insts.size(); ++j) {
@@ -682,6 +677,24 @@ auto specialize_call_site(MirInst* inst,
       call_payload = candidate;
       break;
     }
+  }
+
+  auto git = generic_fns.find(fn_ref->symbol);
+  if (git == generic_fns.end()) {
+    // Not a template: a compiler builtin (`null_ptr<T>`, `ptr_cast<T>`)
+    // has no body to specialize, but its reference is typed with the
+    // builtin's generic signature.  The call's explicit type arguments
+    // make that type concrete; the backend keys the builtin on its name
+    // and reads the types from the call, so nothing else is needed.
+    if (type_has_generic(inst->type) && call_payload != nullptr &&
+        call_payload->explicit_type_args != nullptr && !call_payload->explicit_type_args->empty()) {
+      std::unordered_map<uint32_t, const Type*> subst;
+      for (size_t i = 0; i < call_payload->explicit_type_args->size(); ++i) {
+        subst[static_cast<uint32_t>(i)] = (*call_payload->explicit_type_args)[i];
+      }
+      inst->type = substitute_type(inst->type, subst, types);
+    }
+    return false;
   }
 
   if (call_payload == nullptr || call_payload->args == nullptr) {
@@ -771,10 +784,10 @@ auto monomorphize(
   // The MIR builder already separated generic function bodies into
   // templates (not in module.functions).  No scanning needed.
   //
-  // When generic_templates is empty, skip specialization but still
-  // run the concreteness invariant check below — the check must fire
-  // even for programs with no generics, to catch synthetic residue.
-  const bool has_templates = !generic_templates.empty();
+  // The call-site pass runs at least once even when there are no
+  // templates: a reference to a compiler builtin (`null_ptr<T>`) is
+  // made concrete there, template or not.  The concreteness check
+  // below runs regardless, to catch synthetic residue.
 
   // Specialization cache: (generic fn, type args) → specialized fn.
   SpecializationState state;
@@ -782,7 +795,7 @@ auto monomorphize(
   // Phase 2+3+4: iterate until no new specializations are produced.
   // Use index-based iteration because specialize_call_site() may
   // push_back new functions, invalidating range-for iterators.
-  bool changed = has_templates;
+  bool changed = true;
   while (changed) {
     changed = false;
 

@@ -560,6 +560,27 @@ suite<"mir_generator"> mir_generator = [] {
 // ---------------------------------------------------------------------------
 
 suite<"mir_concreteness"> mir_concreteness = [] {
+  "compiler builtins with explicit type arguments leave no generic residue"_test = [] {
+    // null_ptr<T> and ptr_cast<T> have no template to specialize; the
+    // reference to them is typed with the builtin's generic signature
+    // and must be made concrete from the call's type arguments.
+    MirTestPipeline pipe("fn main(): i32\n"
+                         "    let p: *i32 = null_ptr<i32>()\n"
+                         "    mode unsafe =>\n"
+                         "        let q = ptr_cast<i32>(null_ptr<void>())\n"
+                         "        if q != null_ptr<i32>():\n"
+                         "            return 1\n"
+                         "    return 0\n");
+    expect(pipe.check_result.diagnostics.empty())
+        << (pipe.check_result.diagnostics.empty() ? "" : pipe.check_result.diagnostics[0].message);
+    auto mono =
+        monomorphize(*pipe.module(), pipe.mir_ctx, pipe.types, pipe.mir_result.generic_templates);
+    expect(mono.diagnostics.empty())
+        << "unexpected concreteness diagnostics: "
+        << (mono.diagnostics.empty() ? "" : mono.diagnostics[0].message) << "\n"
+        << pipe.dump();
+  };
+
   // After monomorphization, module.functions must contain only
   // type-concrete bodies.  Generic declarations live in
   // generic_templates and are cloned+specialized on demand.
