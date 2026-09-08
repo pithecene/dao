@@ -1731,9 +1731,14 @@ fn check_contains(result: LlvmTextResult, needle: string, test_name: string): bo
 // Report a stage's diagnostics on stderr (at most `limit`), one per line,
 // so the audit can histogram what each stage rejects.
 fn closure_report_diags(name: string, stage: string, diags: Vector<Diagnostic>, limit: i64): void
-  let i: i64 = to_i64(0)
+  closure_report_diags_from(name, stage, diags, to_i64(0), limit)
+
+// The same from index `from`: a pass whose list begins with an earlier
+// pass's diagnostics reports only its own.
+fn closure_report_diags_from(name: string, stage: string, diags: Vector<Diagnostic>, from: i64, limit: i64): void
+  let i: i64 = from
   while i < diags.length():
-    if i >= limit:
+    if i - from >= limit:
       return
     eprint("probe: " + name + " diag " + stage + ": " + diags.get(i).message)
     i = i + to_i64(1)
@@ -1763,12 +1768,14 @@ fn closure_probe_program(name: string, path: string): string
     eprint("probe: " + name + " first=" + first)
   eprint("probe: " + name + " stage=parse")
   let parsed: ParseOutput = parse(src)
-  let parse_n: i64 = parsed.diags.length()
+  // The parser's list begins with the lexer's diagnostics; its own are
+  // the tail past them.
+  let parse_n: i64 = parsed.diags.length() - lex_n
   eprint("probe: " + name + " parse=" + i64_to_string(parse_n))
-  closure_report_diags(name, "parse", parsed.diags, to_i64(50))
+  closure_report_diags_from(name, "parse", parsed.diags, lex_n, to_i64(50))
   if parse_n > to_i64(0):
     if first == "":
-      first = "parse: " + parsed.diags.get(to_i64(0)).message
+      first = "parse: " + parsed.diags.get(lex_n).message
       eprint("probe: " + name + " first=" + first)
   // Resolution and type checking run inside lower_to_hir, but HirResult
   // carries only HIR's own diagnostics; the passes are run here so each
@@ -1780,10 +1787,10 @@ fn closure_probe_program(name: string, path: string): string
   let p: Program = program_from_graph(pg)
   p = program_run_resolve(p)
   // Each pass's list begins with what it was handed: the resolver's
-  // with the graph's diagnostics and the file's parse diagnostics, the
-  // type checker's with the resolver's.  A pass's own diagnostics are
-  // the tail past that.
-  let carried_into_resolve: i64 = pg.diags.length() + parse_n
+  // with the graph's list (which already holds every file's lexer and
+  // parser diagnostics), the type checker's with the resolver's.  A
+  // pass's own diagnostics are the tail past that.
+  let carried_into_resolve: i64 = pg.diags.length()
   let resolve_n: i64 = p.resolve.diags.length() - carried_into_resolve
   eprint("probe: " + name + " resolve=" + i64_to_string(resolve_n))
   closure_report_file_diags(name, "resolve", p.resolve.diags, carried_into_resolve, to_i64(50))

@@ -48,7 +48,7 @@ for p in $PROGRAMS; do
   "$DAOC" ast "bootstrap/$p/$p.gen.dao" >> "$OUT/inventory.ast" || { echo "audit: daoc ast failed for $p"; exit 1; }
 done
 INVENTORY="$(awk -v labels="$LABELS" 'BEGIN { n = split(labels, a, "\n"); for (i = 1; i <= n; i++) label[a[i]] = 1 }
-  ($1 in label) { print $1 }' "$OUT/inventory.ast" | sort | uniq -c | sort -rn)"
+  { name = $1; sub(/:$/, "", name); if (name in label) print name }' "$OUT/inventory.ast" | sort | uniq -c | sort -rn)"
 
 # 2. Prelude instantiations forced by the largest program.  Prelude
 #    functions are told apart by their module-qualified LLVM names
