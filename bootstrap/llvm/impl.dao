@@ -1208,28 +1208,44 @@ fn ll_inst_is_unreachable(inst: LlInst): bool
       return true
   return false
 
-// Every block some branch in the function jumps to.  With the entry
-// block, these are the blocks a path can reach: MIR has no other edges.
-fn mir_branch_targets(bs: BS, blocks_raw: Vector<i64>): Vector<i64>
+// The blocks one block branches to.
+fn mir_block_targets(bs: BS, block_node_idx: i64): Vector<i64>
   let targets: Vector<i64> = Vector<i64>::new()
-  let bi: i64 = to_i64(0)
-  while bi < blocks_raw.length():
-    let mb: MirNode = bs.mir_nodes.get(blocks_raw.get(bi))
-    match mb:
-      MirNode.MirBlock(block_id, inst_list_lp, inst_count):
-        let insts_raw: Vector<i64> = read_mir_list(bs.mir_idx, inst_list_lp)
-        let ii: i64 = to_i64(0)
-        while ii < insts_raw.length():
-          let inst: MirNode = bs.mir_nodes.get(insts_raw.get(ii))
-          match inst:
-            MirNode.MirBr(target_block):
-              targets = targets.push(target_block)
-            MirNode.MirCondBr(cond, then_block, else_block):
-              targets = targets.push(then_block)
-              targets = targets.push(else_block)
-          ii = ii + to_i64(1)
-    bi = bi + to_i64(1)
+  let mb: MirNode = bs.mir_nodes.get(block_node_idx)
+  match mb:
+    MirNode.MirBlock(block_id, inst_list_lp, inst_count):
+      let insts_raw: Vector<i64> = read_mir_list(bs.mir_idx, inst_list_lp)
+      let ii: i64 = to_i64(0)
+      while ii < insts_raw.length():
+        let inst: MirNode = bs.mir_nodes.get(insts_raw.get(ii))
+        match inst:
+          MirNode.MirBr(target_block):
+            targets = targets.push(target_block)
+          MirNode.MirCondBr(cond, then_block, else_block):
+            targets = targets.push(then_block)
+            targets = targets.push(else_block)
+        ii = ii + to_i64(1)
   return targets
+
+// The blocks a path from the entry block reaches, by walking branches
+// transitively.  Being a branch target is not enough: a merge block no
+// path reaches can still branch on to the next merge block (nested
+// if/else whose arms all return), and that target is dead too.
+fn mir_reachable_blocks(bs: BS, blocks_raw: Vector<i64>): Vector<i64>
+  let reachable: Vector<i64> = Vector<i64>::new()
+  if blocks_raw.length() == to_i64(0):
+    return reachable
+  reachable = reachable.push(blocks_raw.get(to_i64(0)))
+  let next: i64 = to_i64(0)
+  while next < reachable.length():
+    let targets: Vector<i64> = mir_block_targets(bs, reachable.get(next))
+    let ti: i64 = to_i64(0)
+    while ti < targets.length():
+      if i64_vector_contains(reachable, targets.get(ti)) == false:
+        reachable = reachable.push(targets.get(ti))
+      ti = ti + to_i64(1)
+    next = next + to_i64(1)
+  return reachable
 
 fn i64_vector_contains(xs: Vector<i64>, x: i64): bool
   let i: i64 = to_i64(0)
@@ -1366,7 +1382,7 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
       // the prologue lives with the body).  Subsequent blocks get
       // their own fresh LlBlock.
       let ll_blocks: Vector<LlBlock> = Vector<LlBlock>::new()
-      let branch_targets: Vector<i64> = mir_branch_targets(bs, blocks_raw)
+      let reachable_blocks: Vector<i64> = mir_reachable_blocks(bs, blocks_raw)
       let block_i: i64 = to_i64(0)
       while block_i < blocks_raw.length():
         let block_node_idx: i64 = blocks_raw.get(block_i)
@@ -1392,11 +1408,11 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
               let last: LlInst = this_insts.get(this_insts.length() - to_i64(1))
               if ll_inst_is_terminator(last) == false:
                 bs = bs_error(bs, "bootstrap llvm backend expected block terminator in block " + label)
-              // An `unreachable` end is only right in a block nothing
-              // branches to; in the entry block or a branch target it is
-              // a non-void function falling off its end.
+              // An `unreachable` end is only right in a block no path
+              // reaches; in a reachable block it is a non-void function
+              // falling off its end.
               if ll_inst_is_unreachable(last):
-                if block_i == to_i64(0) or i64_vector_contains(branch_targets, block_node_idx):
+                if i64_vector_contains(reachable_blocks, block_node_idx):
                   bs = bs_error(bs, "bootstrap llvm backend rejects function '" + name + "': block " + label + " ends without returning a value")
             ll_blocks = ll_blocks.push(LlBlock(label, this_insts))
         block_i = block_i + to_i64(1)
@@ -1700,7 +1716,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 18
+  let total: i32 = 19
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -2060,6 +2076,21 @@ fn main(): i32
     else:
       print("FAIL fallthrough_rejected: rejected, but not for falling off the end")
       print(diags_text(ft_r.diags))
+
+  // -----------------------------------------------------------------
+  // Test 19: nested_total_if — every arm of a nested if/else returns;
+  // the inner merge block branches to the outer one, and neither is
+  // reachable, so both end in `unreachable` and the function is accepted
+  // -----------------------------------------------------------------
+  let nt_src: string = "fn main(): i32\n  let x: i32 = 7\n  if x > 0:\n    if x > 5:\n      return 1\n    else:\n      return 2\n  else:\n    return 3\n"
+  let nt_r: LlvmTextResult = lower_source_to_llvm_text(nt_src)
+  write_failures = write_failures + emit_ir("nested_total_if", nt_r, 1)
+  if nt_r.ok:
+    print("PASS nested_total_if")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL nested_total_if: a function whose every arm returns was rejected")
+    print(diags_text(nt_r.diags))
 
   // -----------------------------------------------------------------
   // Summary
