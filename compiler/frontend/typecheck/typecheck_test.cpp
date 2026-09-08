@@ -757,6 +757,32 @@ suite<"typecheck_modules"> typecheck_modules = [] {
         << "Holder(\"x\") was accepted: the alias-typed field was left untyped";
   };
 
+  "nested deferred aliases do not cache an incomplete instantiation"_test = [] {
+    // `Holder<T>` has a field typed by the deferred `IntBox`; `IntHolder`
+    // instantiates Holder and must wait until that field is typed, or
+    // the copy it caches carries the hole and `IntHolder("wrong", 1)`
+    // is accepted.
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nclass Box<T>:\n    v: T\nclass Holder<T>:\n    box: IntBox\n    tag: T\n"
+         "type IntBox = Box<i32>\ntype IntHolder = Holder<i32>\n"
+         "fn take(h: IntHolder): i32 -> h.tag\n"
+         "fn main(): i32 -> take(Holder(\"wrong\", 1))\n"},
+    });
+    expect(!checked.result.diagnostics.empty()) << "Holder(\"wrong\", 1) was accepted";
+  };
+
+  "an untypable field is reported once"_test = [] {
+    auto checked = check_program({
+        {"main.dao", "module app\nclass Broken:\n    value: Missing\nfn main(): i32 -> 0\n"},
+    });
+    size_t said = 0;
+    for (const auto& d : checked.result.diagnostics) {
+      said += d.message.find("unknown type 'Missing'") != std::string::npos;
+    }
+    expect(said == 1_u) << all_messages(checked);
+  };
+
   "a concept is not a type outside a bound"_test = [] {
     auto checked = check_program({
         {"traits.dao", "module app::traits\nconcept Reveal:\n    fn reveal(self): i32\n"},
@@ -2632,6 +2658,37 @@ suite<"module_extend_scoping"> module_extend_scoping = [] {
     });
     expect(is_ok(checked->check_result))
         << "the module's extend shadowed Box's own pick: "
+        << (checked->check_result.diagnostics.empty()
+                ? ""
+                : checked->check_result.diagnostics.front().message);
+  };
+
+  "an unimported concept's spelling does not reach across modules"_test = [] {
+    // `ext` declares a derived `Shout`; `app` never imports it and writes
+    // `extend i32 as Shout` anyway.  The resolver rejects the name; the
+    // checker must not match it by spelling and let Box derive Shout.
+    auto checked = check_modules({
+        {"ext.dao", "module ext\nderived concept Shout:\n    fn shout(self): i32\n"},
+        {"app.dao",
+         "module app\nextend i32 as Shout:\n    fn shout(self): i32 -> 1\n"
+         "class Box:\n    n: i32\n"
+         "fn main(): i32\n  let b: Box = Box(1)\n  return b.shout()\n"},
+    });
+    expect(has_error_containing(checked->check_result, "shout"))
+        << "Box derived an unimported sibling's concept by spelling";
+  };
+
+  "a generic class's own method outranks a module's extend of an instantiation"_test = [] {
+    auto checked = check_modules({
+        {"stdlib/core/box.dao",
+         "module core::box\nclass Box<T>:\n    v: T\n    fn pick(self): i32 -> 1\n"},
+        {"app.dao",
+         "module app\nconcept Alt:\n    fn pick(self): string\n"
+         "extend Box<i32> as Alt:\n    fn pick(self): string -> \"x\"\n"
+         "fn main(): i32\n  let b: Box<i32> = Box(1)\n  return b.pick()\n"},
+    });
+    expect(is_ok(checked->check_result))
+        << "the extension of Box<i32> shadowed Box's own pick: "
         << (checked->check_result.diagnostics.empty()
                 ? ""
                 : checked->check_result.diagnostics.front().message);

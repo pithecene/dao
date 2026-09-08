@@ -554,6 +554,28 @@ suite<"playground_service"> playground_service_suite = [] {
     }
   };
 
+  "completion offers one method where a call would select one"_test = [] {
+    // The document's Box has its own `pick`; the document also extends
+    // Box with a `pick` of another concept.  A call selects the type's
+    // own method, and completion offers that one, not both.
+    const std::string main =
+        "module app::main\nclass Box:\n  n: i32\n  fn pick(self): i32 -> self.n\nconcept Alt:\n  "
+        "fn pick(self): string\nextend Box as Alt:\n  fn pick(self): string -> \"x\"\nfn use_it(): "
+        "i32\n  let b: Box = Box(1)\n  return b.";
+    auto reply = call("completions",
+                      document_request(main, {{"offset", static_cast<uint32_t>(main.size())}}));
+    size_t picks = 0;
+    std::string type;
+    for (const auto& item : reply.body) {
+      if (item["label"].get<std::string>() == "pick") {
+        ++picks;
+        type = item["type"].get<std::string>();
+      }
+    }
+    expect(picks == 1_u) << "offered " << picks << " pick(s): " << reply.body.dump();
+    expect(type.find("i32") != std::string::npos) << "offered the shadowed extension: " << type;
+  };
+
   "completion offers the document's own extension"_test = [] {
     const std::string main = "module app::main\nextend i32 as Secret:\n"
                              "  fn secret(self): i32 -> 42\n"
@@ -640,6 +662,28 @@ suite<"playground_service"> playground_service_suite = [] {
             << example.name << " produced no LLVM IR";
       }
     }
+  };
+
+  "completion offers one method where a call would select one"_test = [] {
+    // The document's Box has its own `pick`; the document also extends
+    // Box with a `pick` of another concept.  A call selects the type's
+    // own method, and completion offers that one, not both.
+    const std::string main =
+        "module app::main\nclass Box:\n  n: i32\n  fn pick(self): i32 -> self.n\nconcept Alt:\n  "
+        "fn pick(self): string\nextend Box as Alt:\n  fn pick(self): string -> \"x\"\nfn use_it(): "
+        "i32\n  let b: Box = Box(1)\n  return b.";
+    auto reply = call("completions",
+                      document_request(main, {{"offset", static_cast<uint32_t>(main.size())}}));
+    size_t picks = 0;
+    std::string type;
+    for (const auto& item : reply.body) {
+      if (item["label"].get<std::string>() == "pick") {
+        ++picks;
+        type = item["type"].get<std::string>();
+      }
+    }
+    expect(picks == 1_u) << "offered " << picks << " pick(s): " << reply.body.dump();
+    expect(type.find("i32") != std::string::npos) << "offered the shadowed extension: " << type;
   };
 
   "navigation_and_completion_answer_over_the_examples"_test = [] {
