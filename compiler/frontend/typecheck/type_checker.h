@@ -22,14 +22,21 @@ namespace dao {
 // TypeCheckResult — output of the type-checking pass.
 // ---------------------------------------------------------------------------
 
+/// Whether a method introduced by `extend` in `owner` participates in
+/// lookup from `from`: within the declaring module, and everywhere when
+/// that module is in the prelude (CONTRACT_MODULE_SYSTEM.md §5).  A
+/// method that travels with its type carries no owner and is always
+/// visible.  The checker and the tooling that mirrors it share this.
+inline auto extend_visible_from(const ModuleInfo* owner, const ModuleInfo* from) -> bool {
+  return owner == nullptr || owner == from || owner->is_prelude;
+}
+
 /// A method available on a type via concept/extend.
 struct MethodInfo {
   const Type* receiver_type;
   std::string_view method_name;
-  const Type* method_type; // function type (self removed)
-  // The module whose `extend` introduced it; null when it is visible
-  // everywhere (a class's own method, or a prelude module's extend).
-  const ModuleInfo* owner = nullptr;
+  const Type* method_type;                   // function type (self removed)
+  const ModuleInfo* extend_module = nullptr; // set only for `extend` methods
   // Declared by the type itself: outranks every extension of the same
   // name, so tooling offers it alone where a call would select it.
   bool inherent = false;
@@ -69,8 +76,9 @@ public:
   TypeChecker(TypeContext& types, const ResolveResult& resolve);
 
   // Check every file's declarations as one program: register all
-  // declarations first, then check all bodies.  Per-module checking is
-  // not implemented yet.
+  // declarations first, then check all bodies.  Files arrive in
+  // topological module order; cross-module references need no
+  // ordering because of the two passes.
   auto check(std::span<const FileNode* const> files) -> TypeCheckResult;
 
 private:
@@ -94,6 +102,32 @@ private:
   // Symbol -> semantic type cache (populated in pass 1).
   std::unordered_map<const Symbol*, const Type*> symbol_types_;
 
+  // The symbol an identifier or qualified name denotes, following the
+  // resolver's per-segment entries: `b::name` is the export recorded at
+  // `name`, `b::T::m` the member recorded at `m` (CONTRACT_MODULE_SYSTEM.md
+  // §6).  Null when unresolved.
+  [[nodiscard]] auto symbol_for_use(const Expr* expr) const -> const Symbol*;
+
+  /// The concept a generic bound names, reading a qualified bound at its
+  /// last segment; null when the bound resolves to nothing.
+  [[nodiscard]] auto concept_for_constraint(const TypeNode* constraint) const -> const Symbol*;
+
+  /// True if the expression names a type rather than a member reached
+  /// through one (`T` or `m::T`, never `T::m` or `m::T::m`).
+  [[nodiscard]] auto names_a_type(const Expr* expr) const -> bool;
+
+  /// The concept declaration named at `span` (an `as`, `deny`, or
+  /// `extend ... as` clause), or null when the name resolves to no
+  /// concept.  Two modules may each declare a concept called `Reveal`,
+  /// so conformance is decided by which one, not by the spelling.
+  [[nodiscard]] auto concept_named_at(Span span) const -> const Decl* {
+    auto it = resolve_.uses.find(span.offset);
+    if (it == resolve_.uses.end() || it->second->kind != SymbolKind::Concept) {
+      return nullptr;
+    }
+    return it->second->decl_as_decl();
+  }
+
   // decl_span.offset -> Symbol* for finding symbols at declaration sites.
   std::unordered_map<uint32_t, const Symbol*> decl_symbols_;
 
@@ -107,20 +141,45 @@ private:
   // When set, resolve_type_node substitutes the concept name with the
   // conforming type (§3.2: concept name in type position means the
   // conforming type).
-  std::unordered_map<std::string_view, const Type*> concept_self_map_;
+  // Keyed by the concept DECLARATION, not its spelling: two modules may
+  // each declare a concept named `C`, and substituting for the wrong one
+  // silently retypes an expression (CONTRACT_TYPE_SYSTEM_FOUNDATIONS.md §11).
+  std::unordered_map<const Decl*, const Type*> concept_self_map_;
+
+  /// RAII guard that answers "which module is asking?" for the length
+  /// of a scope and restores the previous answer after.  Visibility of
+  /// an `extend` depends on it (§5), so a pass that consults it must
+  /// say where it is standing.
+  struct ModuleScope {
+    const ModuleInfo*& slot;
+    const ModuleInfo* previous;
+
+    ModuleScope(const ModuleInfo*& current, const ModuleInfo* asking)
+        : slot(current), previous(current) {
+      slot = asking;
+    }
+    ~ModuleScope() {
+      slot = previous;
+    }
+    ModuleScope(const ModuleScope&) = delete;
+    auto operator=(const ModuleScope&) -> ModuleScope& = delete;
+    ModuleScope(ModuleScope&&) = delete;
+    auto operator=(ModuleScope&&) -> ModuleScope& = delete;
+  };
 
   // RAII guard that saves and restores a single key in concept_self_map_.
   // Each guard scope inserts exactly one concept→type binding; on
   // destruction the prior state of that key is restored. O(1) instead
   // of copying the entire map.
   struct ConceptSelfMapGuard {
-    using Map = std::unordered_map<std::string_view, const Type*>;
+    using Map = std::unordered_map<const Decl*, const Type*>;
     Map& map;
-    std::string_view key;
+    const Decl* key;
     const Type* old_value = nullptr;
     bool had_key = false;
 
-    ConceptSelfMapGuard(Map& m, std::string_view k) : map(m), key(k) { // NOLINT(readability-identifier-length)
+    ConceptSelfMapGuard(Map& m, const Decl* k)
+        : map(m), key(k) { // NOLINT(readability-identifier-length)
       auto iter = map.find(key);
       if (iter != map.end()) {
         had_key = true;
@@ -143,9 +202,13 @@ private:
   struct MethodEntry {
     const Type* fn_type;     // method function type (self removed)
     const Decl* method_decl; // the FunctionDecl node for HIR resolution
-    // Declared by the type itself (a class method or conformance-block
-    // method), as opposed to introduced by an `extend`.  An inherent
-    // method is innermost: no extension shadows it.
+    // Set only for a method introduced by `extend`, which participates
+    // in lookup within its declaring module and, if that module is in
+    // the prelude, everywhere (CONTRACT_MODULE_SYSTEM.md §5).  A class's
+    // own methods travel with the type and leave this null.
+    const ModuleInfo* extend_module = nullptr;
+    // Declared by the type itself (a class or conformance-block method),
+    // not introduced by an `extend`: innermost, shadowed by nothing.
     bool inherent = false;
   };
 
@@ -173,45 +236,80 @@ private:
     }
   };
 
-  std::unordered_map<MethodKey, MethodEntry, MethodKeyHash> method_table_;
+  // (type, name) -> the methods declared for it.  More than one exists
+  // when separate modules extend the same type with the same method
+  // name; each is visible only where its own module makes it visible,
+  // so they must coexist whatever order the modules are checked in.
+  std::unordered_map<MethodKey, std::vector<MethodEntry>, MethodKeyHash> method_table_;
 
-  // The module whose declaration is being registered or checked, so that
-  // method-set lookup can tell a module's own `extend` methods from a
-  // sibling module's.  Null outside a program.
+  /// The method a lookup from the current module should see, or null.
+  /// Innermost-first (CONTRACT_MODULE_SYSTEM.md §7.4): the type's own
+  /// method, then the current module's `extend`, then the prelude's --
+  /// entries are stored prelude-first, so "first visible" would let a
+  /// prelude extension shadow the module's own.
+  [[nodiscard]] auto visible_entry(const std::vector<MethodEntry>& entries) const
+      -> const MethodEntry* {
+    // Innermost-first (§7.4): the type's own method, then the current
+    // module's `extend`, then any visible extension (the prelude's).
+    for (const auto& entry : entries) {
+      if (entry.inherent) {
+        return &entry;
+      }
+    }
+    for (const auto& entry : entries) {
+      if (entry.extend_module != nullptr && entry.extend_module == current_module_) {
+        return &entry;
+      }
+    }
+    for (const auto& entry : entries) {
+      if (extend_is_visible(entry.extend_module)) {
+        return &entry;
+      }
+    }
+    return nullptr;
+  }
+
+  /// Record a method unless one with the same scope is already there
+  /// (the first declaration of a name in a scope wins, as before).
+  void add_method(const MethodKey& key, const MethodEntry& entry) {
+    auto& entries = method_table_[key];
+    for (const auto& existing : entries) {
+      if (existing.extend_module == entry.extend_module) {
+        return;
+      }
+    }
+    entries.push_back(entry);
+  }
+
+  // Which module each top-level declaration came from, and the one whose
+  // body is being checked.  Empty outside a program (single-file
+  // checking), where every declaration is equally visible.
+  std::unordered_map<const Decl*, const ModuleInfo*> decl_module_;
   const ModuleInfo* current_module_ = nullptr;
 
-  /// RAII: sets current_module_ for a declaration and restores it after.
-  struct CurrentModuleGuard {
-    const ModuleInfo*& slot;
-    const ModuleInfo* saved;
-    CurrentModuleGuard(const ModuleInfo*& target, const ModuleInfo* module)
-        : slot(target), saved(target) {
-      slot = module;
-    }
-    ~CurrentModuleGuard() {
-      slot = saved;
-    }
-    CurrentModuleGuard(const CurrentModuleGuard&) = delete;
-    auto operator=(const CurrentModuleGuard&) -> CurrentModuleGuard& = delete;
-  };
-
-  /// The module a top-level declaration belongs to, or null outside a
-  /// program.  The resolver stamps every symbol with its owning module;
-  /// a named declaration is found by the symbol at its name span, and an
-  /// `extend` block — which declares no name of its own — by the symbol
-  /// of the first method it introduces.
-  [[nodiscard]] auto declaring_module(const Decl* decl) const -> const ModuleInfo*;
-
-  /// The owner to register an `extend` block's methods under: the
-  /// declaring module, or null for a prelude module, whose `extend`
-  /// methods are visible everywhere (CONTRACT_MODULE_SYSTEM.md §7.2).
-  [[nodiscard]] auto extend_owner(const Decl* extend_decl) const -> const ModuleInfo*;
-
-  /// Whether a method registered under `owner` participates in
-  /// method-set lookup from the module being checked.
-  [[nodiscard]] auto owner_is_visible(const ModuleInfo* owner) const -> bool {
-    return owner == nullptr || owner == current_module_;
+  /// True if an `extend` method declared in `owner` is in scope for the
+  /// module being checked.
+  [[nodiscard]] auto extend_is_visible(const ModuleInfo* owner) const -> bool {
+    return extend_visible_from(owner, current_module_);
   }
+
+  /// The module a top-level declaration belongs to, or null when
+  /// checking outside a program.
+  [[nodiscard]] auto declaring_module(const Decl* decl) const -> const ModuleInfo* {
+    auto it = decl_module_.find(decl);
+    return it == decl_module_.end() ? nullptr : it->second;
+  }
+
+public:
+  /// Record which module each file belongs to, so `extend` scoping and
+  /// diagnostics can name it.  Called before check() by the Program
+  /// entry point; single-file checking leaves it empty.
+  void set_file_modules(std::unordered_map<const FileNode*, const ModuleInfo*> file_modules) {
+    file_modules_ = std::move(file_modules);
+  }
+
+private:
+  std::unordered_map<const FileNode*, const ModuleInfo*> file_modules_;
 
   // Pending class shells awaiting field resolution (populated by
   // register_type_names, consumed by register_struct_fields).
@@ -221,6 +319,39 @@ private:
     TypeStruct* shell;
   };
   std::vector<PendingClass> pending_classes_;
+  // The same, by declaration, for the on-demand pull in
+  // aliases_generic_shell.  Filled once the list is complete.
+  std::unordered_map<const Decl*, PendingClass*> pending_by_decl_;
+  // Declarations whose registration is under way: one reached again
+  // through its own chain (an alias naming itself through another, an
+  // enum whose payload holds it) registers nothing the second time.
+  std::unordered_set<const Decl*> registering_;
+  // Types found complete by value (type_complete): slots only ever
+  // fill, so the answer stands and the walk is not repeated.
+  std::unordered_set<const Type*> complete_types_;
+  // How deep the on-demand pull currently is; bounded (kPullDepthCap)
+  // so a long chain cannot exhaust the stack.
+  size_t pull_depth_ = 0;
+  // Structs and enums substitute_generics is inside of: one reached
+  // again holds itself by value, and is returned as it is.
+  std::unordered_set<const Type*> substituting_;
+  struct PullDepth {
+    explicit PullDepth(TypeChecker& checker) : checker_(checker) {
+      ++checker_.pull_depth_;
+    }
+    ~PullDepth() {
+      --checker_.pull_depth_;
+    }
+    PullDepth(const PullDepth&) = delete;
+    auto operator=(const PullDepth&) -> PullDepth& = delete;
+    [[nodiscard]] static auto available(const TypeChecker& checker) -> bool;
+
+  private:
+    TypeChecker& checker_;
+  };
+  // Set once the registration fixpoint has run: aliases of generic
+  // instantiations wait for it (see aliases_generic_shell).
+  bool fields_registered_ = false;
 
   void build_method_table();
   auto build_method_fn_type(const FunctionDecl& method) -> const Type*;
@@ -241,8 +372,49 @@ private:
 
   void register_declarations();
   void register_type_names();
-  void register_struct_fields();
-  void register_enum_variants();
+  /// Register every alias not registered yet.  Returns how many this
+  /// pass registered -- the progress the registration fixpoint
+  /// converges on.  The final run reports the aliases that never
+  /// resolved; a provisional run stays quiet, since a target it cannot
+  /// see yet may still arrive.
+  auto register_type_aliases(bool report_failures) -> size_t;
+  /// Register one alias: the aliased type, or null when it does not
+  /// resolve yet (or ever).  Also the on-demand path: a name that
+  /// reaches an unregistered alias registers it first.
+  auto register_type_alias(const Decl* decl, const Symbol* sym, bool report_failures)
+      -> const Type*;
+  /// Whether a type node is a path through an import binding, whose
+  /// failures the resolver diagnoses (so the checker must not restate).
+  [[nodiscard]] auto resolver_owns_path(const TypeNode* node) const -> bool;
+  /// Whether a type node names a generic instantiation of a declaration
+  /// that is not complete by value yet (an alias of it must wait).
+  /// Pulls the declaration's slots first, so the answer is current.
+  auto aliases_generic_shell(const TypeNode* node) -> bool;
+  /// Each returns how many slots (fields / payloads) went from untyped
+  /// to typed in this pass -- the progress the registration fixpoint
+  /// converges on.
+  auto register_struct_fields(bool report_failures) -> size_t;
+  auto register_class_fields(PendingClass& pending, bool report_failures) -> size_t;
+  auto register_enum_variants(bool report_failures) -> size_t;
+  auto register_enum(const Decl* decl, const Symbol* sym, bool report_failures) -> size_t;
+  /// Whether a type carries no untyped slot anywhere substitution would
+  /// clone: an instantiation cloned from it would otherwise carry the
+  /// hole.  Remembers a yes.
+  [[nodiscard]] auto type_complete(const Type* type) -> bool;
+  [[nodiscard]] auto complete_by_value(const Type* type,
+                                       std::unordered_set<const Type*>& seen) const -> bool;
+  /// Whether `type` is, or holds by value, a struct or enum of the
+  /// declaration `target` -- the shape of a declaration with no finite
+  /// size.
+  [[nodiscard]] static auto contains_by_value(const Type* type,
+                                              const Decl* target,
+                                              std::unordered_set<const Type*>& seen) -> bool;
+  /// Whether a path by value from `type` returns to a type on it.
+  /// `acyclic` accumulates what has been cleared, so a graph is walked
+  /// once however many paths share it.
+  [[nodiscard]] static auto value_cycle(const Type* type,
+                                        std::unordered_set<const Type*>& on_path,
+                                        std::unordered_set<const Type*>& acyclic) -> bool;
   void register_signatures();
   void compute_derived_conformances();
   auto type_conforms_to(const Type* type, const Decl* concept_decl) -> bool;

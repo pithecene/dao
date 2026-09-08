@@ -410,6 +410,61 @@ suite<"playground_service"> playground_service_suite = [] {
         << "an advisory must not stop lowering: " << reply.body["diagnostics"].dump();
   };
 
+  "completion does not offer another module's extension"_test = [] {
+    // Tooling must not advertise a call the checker rejects: `secret`
+    // is introduced by an `extend` in a module the document does not
+    // (and cannot) import for that purpose (CONTRACT_MODULE_SYSTEM.md §5).
+    const std::string main = "module app::main\nfn use_it(): i32\n  let v: i32 = 1\n  return v.";
+    json request = {{"files",
+                     json::array({{{"path", kTestDocument}, {"source", main}},
+                                  {{"path", "ext.dao"},
+                                   {"source",
+                                    "module app::ext\nextend i32 as Secret:\n"
+                                    "  fn secret(self): i32 -> 42\n"}}})},
+                    {"document", kTestDocument},
+                    {"offset", static_cast<uint32_t>(main.size())}};
+    auto reply = call("completions", request);
+    for (const auto& item : reply.body) {
+      expect(item["label"].get<std::string>() != "secret")
+          << "offered an extension of another module: " << reply.body.dump();
+    }
+  };
+
+  "completion offers one method where a call would select one"_test = [] {
+    // The document's Box has its own `pick`; the document also extends
+    // Box with a `pick` of another concept.  A call selects the type's
+    // own method, and completion offers that one, not both.
+    const std::string main =
+        "module app::main\nclass Box:\n  n: i32\n  fn pick(self): i32 -> self.n\nconcept Alt:\n  "
+        "fn pick(self): string\nextend Box as Alt:\n  fn pick(self): string -> \"x\"\nfn use_it(): "
+        "i32\n  let b: Box = Box(1)\n  return b.";
+    auto reply = call("completions",
+                      document_request(main, {{"offset", static_cast<uint32_t>(main.size())}}));
+    size_t picks = 0;
+    std::string type;
+    for (const auto& item : reply.body) {
+      if (item["label"].get<std::string>() == "pick") {
+        ++picks;
+        type = item["type"].get<std::string>();
+      }
+    }
+    expect(picks == 1_u) << "offered " << picks << " pick(s): " << reply.body.dump();
+    expect(type.find("i32") != std::string::npos) << "offered the shadowed extension: " << type;
+  };
+
+  "completion offers the document's own extension"_test = [] {
+    const std::string main = "module app::main\nextend i32 as Secret:\n"
+                             "  fn secret(self): i32 -> 42\n"
+                             "fn use_it(): i32\n  let v: i32 = 1\n  return v.";
+    auto reply = call("completions",
+                      document_request(main, {{"offset", static_cast<uint32_t>(main.size())}}));
+    bool offered = false;
+    for (const auto& item : reply.body) {
+      offered = offered || item["label"].get<std::string>() == "secret";
+    }
+    expect(offered) << "an extension of this module must be offered: " << reply.body.dump();
+  };
+
   "duplicate file paths are rejected"_test = [] {
     // Two files with one path made `document` ambiguous: the synthetic
     // module header was measured from one copy and positions from the

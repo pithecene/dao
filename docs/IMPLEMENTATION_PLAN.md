@@ -539,7 +539,12 @@ removed; `compiler/frontend/module/` created) and D1 (`ModuleInfo`,
 module graph with import edges, lexical Kahn ordering and cycle traces,
 entry selection per §7.7, root-file discovery with the §8.3 mapping
 rule, lexical file-id order per §8.4, `--module-root` / `--stdlib-root`
-/ `--source` / `--entry`) landed.  D2–D6 follow.
+/ `--source` / `--entry`), D2 (builtins → prelude → per-module scopes,
+`Symbol::module`, imports bound to `ModuleInfo`, export-table
+resolution of qualified names, builtins unshadowable, prelude shadowing)
+and D3 (qualified forms type-check through the resolver's per-segment
+entries: `b::f`, `b::T` in type position, `b::T::m`, `b::E::V`; modules
+checked in topological order) landed.  D4–D6 follow.
 
 **Objective**: make the C++ host compiler compile a program spanning
 multiple Dao source files with real module identity, import-driven

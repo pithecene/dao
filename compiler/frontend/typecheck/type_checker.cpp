@@ -1,8 +1,29 @@
 #include "frontend/typecheck/type_checker.h"
 
+#include "frontend/module/module_graph.h"
+
 #include "frontend/typecheck/type_conversion.h"
 
 namespace dao {
+
+namespace {
+/// The program offset of segment `i` of a qualified path, from the spans
+/// the parser recorded; a path built by hand carries none, in which
+/// case the segments are assumed to abut their `::` separators.
+auto segment_offset(const std::vector<std::string_view>& segments,
+                    const std::vector<Span>& spans,
+                    Span whole,
+                    size_t i) -> uint32_t {
+  if (i < spans.size()) {
+    return spans[i].offset;
+  }
+  uint32_t offset = whole.offset;
+  for (size_t k = 0; k < i; ++k) {
+    offset += static_cast<uint32_t>(segments[k].size()) + 2;
+  }
+  return offset;
+}
+} // namespace
 
 // ---------------------------------------------------------------------------
 // Construction
@@ -18,57 +39,18 @@ TypeChecker::TypeChecker(TypeContext& types, const ResolveResult& resolve)
   }
 }
 
-// ---------------------------------------------------------------------------
-// Module provenance
-// ---------------------------------------------------------------------------
-
 namespace {
 
-/// The class declaration a struct type was built from, or null.
-auto struct_decl_of(const Type* type) -> const Decl* {
-  if (type == nullptr || type->kind() != TypeKind::Struct) {
-    return nullptr;
+/// `a::b::c` for diagnostics.
+auto qualified_path_text(const std::vector<std::string_view>& segments) -> std::string {
+  std::string text;
+  for (auto segment : segments) {
+    text += (text.empty() ? "" : "::") + std::string(segment);
   }
-  return static_cast<const TypeStruct*>(type)->decl_id();
+  return text;
 }
 
 } // namespace
-
-auto TypeChecker::declaring_module(const Decl* decl) const -> const ModuleInfo* {
-  if (decl == nullptr) {
-    return nullptr;
-  }
-  auto module_at = [this](Span name_span) -> const ModuleInfo* {
-    auto found = decl_symbols_.find(name_span.offset);
-    return found == decl_symbols_.end() ? nullptr : found->second->module;
-  };
-  switch (decl->kind()) {
-  case NodeKind::FunctionDecl:
-    return module_at(decl->as<FunctionDecl>().name_span);
-  case NodeKind::ClassDecl:
-    return module_at(decl->as<ClassDecl>().name_span);
-  case NodeKind::EnumDecl:
-    return module_at(decl->as<EnumDeclNode>().name_span);
-  case NodeKind::AliasDecl:
-    return module_at(decl->as<AliasDecl>().name_span);
-  case NodeKind::ConceptDecl:
-    return module_at(decl->as<ConceptDecl>().name_span);
-  case NodeKind::ExtendDecl: {
-    const auto& ext = decl->as<ExtendDecl>();
-    if (ext.methods.empty()) {
-      return nullptr;
-    }
-    return module_at(ext.methods.front()->as<FunctionDecl>().name_span);
-  }
-  default:
-    return nullptr;
-  }
-}
-
-auto TypeChecker::extend_owner(const Decl* extend_decl) const -> const ModuleInfo* {
-  const auto* module = declaring_module(extend_decl);
-  return module != nullptr && module->is_prelude ? nullptr : module;
-}
 
 // ---------------------------------------------------------------------------
 // Top-level entry
@@ -76,9 +58,15 @@ auto TypeChecker::extend_owner(const Decl* extend_decl) const -> const ModuleInf
 
 auto TypeChecker::check(std::span<const FileNode* const> files) -> TypeCheckResult {
   all_decls_.clear();
+  decl_module_.clear();
   for (const auto* file : files) {
+    auto module_it = file_modules_.find(file);
+    const auto* module = module_it == file_modules_.end() ? nullptr : module_it->second;
     for (const auto* decl : file->declarations) {
       all_decls_.push_back(decl);
+      if (module != nullptr) {
+        decl_module_.emplace(decl, module);
+      }
     }
   }
 
@@ -96,16 +84,12 @@ auto TypeChecker::check(std::span<const FileNode* const> files) -> TypeCheckResu
     check_declaration(decl);
   }
 
-  // Export method table for tooling (completion, hover).  Two modules
-  // may each extend one type with one method name; tooling offers the
-  // receiver a method once, so the module-scoped keys collapse here.
-  // Every entry, with its owner: which module's `extend` a method came
-  // from decides where tooling may offer it (§5), so collapsing the
-  // module-scoped keys here would offer a module-private method
-  // everywhere.
+  // Export method table for tooling (completion, hover).
   std::vector<MethodInfo> methods;
-  for (const auto& [key, entry] : method_table_) {
-    methods.push_back({key.type, key.name, entry.fn_type, key.owner, entry.inherent});
+  for (const auto& [key, entries] : method_table_) {
+    for (const auto& entry : entries) {
+      methods.push_back({key.type, key.name, entry.fn_type, entry.extend_module, entry.inherent});
+    }
   }
 
   return {.typed = std::move(typed_),
@@ -155,6 +139,27 @@ auto TypeChecker::instantiate_generic(const Type* base_type, std::string_view na
   return nullptr;
 }
 
+/// Null when a symbol of this kind may name a type; otherwise what to
+/// call it in a diagnostic.  Named types, aliases, builtins, generic
+/// parameters, and concepts are all legitimate in a type position;
+/// these kinds never are.
+auto not_a_type(SymbolKind kind) -> const char* {
+  switch (kind) {
+  case SymbolKind::Function:
+    return "a function";
+  case SymbolKind::Param:
+  case SymbolKind::Local:
+  case SymbolKind::LambdaParam:
+    return "a value";
+  case SymbolKind::Field:
+    return "a field";
+  case SymbolKind::Module:
+    return "a module";
+  default:
+    return nullptr;
+  }
+}
+
 auto TypeChecker::resolve_type_node(const TypeNode* node) -> const Type* {
   if (node == nullptr) {
     return nullptr;
@@ -164,43 +169,57 @@ auto TypeChecker::resolve_type_node(const TypeNode* node) -> const Type* {
   case NodeKind::NamedType: {
     const auto& named = node->as<NamedType>();
     const auto& path = named.name;
-    if (path.segments.size() != 1) {
-      error(node->span, "qualified type names are not yet supported");
+    if (path.segments.size() > 2) {
+      // Through an import binding the resolver has already rejected the
+      // path; only a head that is not a binding is the checker's to say.
+      if (!resolver_owns_path(node)) {
+        error(node->span,
+              "'" + qualified_path_text(path.segments) +
+                  "': a type path through an import binding has one more "
+                  "segment (imports bind one segment)");
+      }
       return nullptr;
     }
-    auto name = path.segments[0];
+    auto name = path.segments.back();
 
-    // Check builtin scalars.
-    auto builtin = builtin_kind_from_name(name);
-    if (builtin.has_value()) {
-      return types_.builtin(*builtin);
-    }
-
-    // Check predeclared types.
-    if (name == "void") {
-      return types_.void_type();
-    }
-    if (name == "string") {
-      // string is a predeclared named type. For now, use a sentinel
-      // named type with a null decl_id.
-      return types_.named_type(nullptr, "string", {});
-    }
-
-    // Generator<T> — compiler-provided coroutine type.
-    if (name == "Generator") {
-      if (named.type_args.size() != 1) {
-        error(node->span, "Generator requires exactly one type argument");
-        return nullptr;
+    if (path.segments.size() == 1) {
+      // Check builtin scalars.
+      auto builtin = builtin_kind_from_name(name);
+      if (builtin.has_value()) {
+        return types_.builtin(*builtin);
       }
-      const auto* yield_type = resolve_type_node(named.type_args[0]);
-      if (yield_type == nullptr) {
-        return nullptr;
+
+      // Check predeclared types.
+      if (name == "void") {
+        return types_.void_type();
       }
-      return types_.generator_type(yield_type);
+      if (name == "string") {
+        // string is a predeclared named type. For now, use a sentinel
+        // named type with a null decl_id.
+        return types_.named_type(nullptr, "string", {});
+      }
+
+      // Generator<T> — compiler-provided coroutine type.
+      if (name == "Generator") {
+        if (named.type_args.size() != 1) {
+          error(node->span, "Generator requires exactly one type argument");
+          return nullptr;
+        }
+        const auto* yield_type = resolve_type_node(named.type_args[0]);
+        if (yield_type == nullptr) {
+          return nullptr;
+        }
+        return types_.generator_type(yield_type);
+      }
     }
 
-    // Look up user-defined types via resolver symbols.
-    auto it = resolve_.uses.find(node->span.offset);
+    // Look up user-defined types via resolver symbols: a plain name at
+    // its own offset, `b::T` at T's offset where the resolver recorded
+    // the export.
+    auto symbol_offset = path.segments.size() == 1
+                             ? node->span.offset
+                             : segment_offset(path.segments, path.segment_spans, path.span, 1);
+    auto it = resolve_.uses.find(symbol_offset);
     if (it != resolve_.uses.end()) {
       const auto* sym = it->second;
       // Generic type parameters resolve to TypeGenericParam.
@@ -211,11 +230,26 @@ auto TypeChecker::resolve_type_node(const TypeNode* node) -> const Type* {
       }
       // Concept name in type position: substitute the conforming type
       // when inside a context that has set concept_self_map_ (§3.2).
-      if (sym->kind == SymbolKind::Concept) {
-        auto csm = concept_self_map_.find(sym->name);
+      if (sym->kind == SymbolKind::Concept && sym->decl != nullptr) {
+        auto csm = concept_self_map_.find(sym->decl_as_decl());
         if (csm != concept_self_map_.end()) {
           return csm->second;
         }
+        // Anywhere else a concept is not a type: it constrains a type
+        // parameter (`<T: Reveal>`), it does not stand for one.
+        error(node->span,
+              "'" + qualified_path_text(path.segments) +
+                  "' is a concept, not a type; use it as a bound (<T: " + std::string(name) + ">)");
+        return nullptr;
+      }
+      // A type position takes a type.  Without this, a function symbol
+      // yields its own function type and a value symbol its value type,
+      // so `p: helper` or `p: lib::helper` typechecks silently as
+      // whatever the name happens to denote
+      // (CONTRACT_TYPE_SYSTEM_FOUNDATIONS.md §11).
+      if (const auto* what = not_a_type(sym->kind)) {
+        error(node->span, "'" + module_display(path.segments) + "' is " + what + ", not a type");
+        return nullptr;
       }
       const auto* base_type = resolve_symbol_type(sym);
 
@@ -248,6 +282,18 @@ auto TypeChecker::resolve_type_node(const TypeNode* node) -> const Type* {
       }
 
       return base_type;
+    }
+
+    // `b::T` through an import binding: the resolver owns that path.  If
+    // `b` is an import the graph reported missing, there is no module to
+    // look in; if it resolved and `T` is not among its exports, the
+    // resolver has already said so by name.  Either way a second
+    // diagnostic here would only restate the first.
+    if (path.segments.size() > 1) {
+      auto head = resolve_.uses.find(path.span.offset);
+      if (head != resolve_.uses.end() && head->second->kind == SymbolKind::Module) {
+        return nullptr;
+      }
     }
 
     error(node->span, "unknown type '" + std::string(name) + "'");
@@ -409,10 +455,27 @@ auto TypeChecker::resolve_symbol_type(const Symbol* sym) -> const Type* {
 
 // Helper for Type-kind symbols (structs).
 auto TypeChecker::resolve_symbol_type_for_type_decl(const Symbol* sym) -> const Type* {
-  // Check if it was already registered during pass 1.
   auto it = symbol_types_.find(sym);
   if (it != symbol_types_.end()) {
     return it->second;
+  }
+  // Not registered yet: register it now, on demand, so the name resolves
+  // in the pass that first reaches it whatever the source order -- a
+  // chain of aliases settles link by link, each once.  A class has its
+  // shell from register_type_names; only an alias and an enum have
+  // nothing to point at before they register.
+  const auto* decl = sym->decl_as_decl();
+  if (decl == nullptr || !PullDepth::available(*this)) {
+    return nullptr;
+  }
+  PullDepth depth(*this);
+  if (decl->is<AliasDecl>()) {
+    return register_type_alias(decl, sym, /*report_failures=*/false);
+  }
+  if (decl->is<EnumDeclNode>()) {
+    register_enum(decl, sym, /*report_failures=*/false);
+    it = symbol_types_.find(sym);
+    return it != symbol_types_.end() ? it->second : nullptr;
   }
   return nullptr;
 }
@@ -421,17 +484,165 @@ auto TypeChecker::resolve_symbol_type_for_type_decl(const Symbol* sym) -> const 
 // Pass 1: register declaration types
 // ---------------------------------------------------------------------------
 
+// A guard on the registration fixpoint, not a working limit: a
+// declaration pulls what it depends on as it registers, so a pass
+// settles everything it reaches and the next confirms it.  The cap is
+// reached only by a defect in that reasoning, and then it is reported.
+constexpr size_t kRegistrationRoundCap = 100000;
+
+// The pull recurses -- a chain of aliases is followed link by link --
+// so its depth is bounded to keep the stack finite on any input.  A
+// chain deeper than this settles a cap's worth of links per fixpoint
+// round instead: still one visit per link, plus a round per cap.
+constexpr size_t kPullDepthCap = 128;
+
+auto TypeChecker::PullDepth::available(const TypeChecker& checker) -> bool {
+  return checker.pull_depth_ < kPullDepthCap;
+}
+
 void TypeChecker::register_declarations() {
   pending_classes_.clear(); // Reset pass-local state for this file.
+  pending_by_decl_.clear();
+  registering_.clear();
+  complete_types_.clear();
+  fields_registered_ = false;
   register_type_names();
-  register_enum_variants();
-  register_struct_fields();
+  // Each declaration registers what it names as it resolves, on demand
+  // (resolve_symbol_type_for_type_decl, aliases_generic_shell): an alias
+  // naming an alias, an enum payload naming an alias of an
+  // instantiation, an instantiation of a class whose fields name an
+  // alias -- every chain settles in the pass that first reaches it,
+  // whatever the source order, each link visited once.
+  register_type_aliases(/*report_failures=*/false);
+  register_enum_variants(/*report_failures=*/false);
+  register_struct_fields(/*report_failures=*/false);
+  // What remains untyped depends on a slot the pull could not fill in
+  // time: a class whose fields name an instantiation of itself, say.
+  // Every pass is provisional -- its diagnostics discarded -- until
+  // nothing more resolves; then the final passes report.  Progress is
+  // an untyped slot becoming typed, so the loop is bounded by the
+  // number of slots; the cap is a guard, never a working limit.
+  bool converged = false;
+  for (size_t round = 0; round < kRegistrationRoundCap; ++round) {
+    size_t progress = register_type_aliases(/*report_failures=*/false);
+    progress += register_enum_variants(/*report_failures=*/false);
+    progress += register_struct_fields(/*report_failures=*/false);
+    if (progress == 0) {
+      converged = true;
+      break;
+    }
+  }
+  if (!converged) {
+    // Still making progress at the cap: continuing would let aliases
+    // cache instantiations with holes.  Said, not swallowed.
+    error(Span{},
+          "type registration did not converge within " + std::to_string(kRegistrationRoundCap) +
+              " rounds; the declaration graph is too deep");
+  }
+  fields_registered_ = true;
+  register_type_aliases(/*report_failures=*/true);
+  register_enum_variants(/*report_failures=*/true);
+  register_struct_fields(/*report_failures=*/true);
   register_signatures();
 }
 
-void TypeChecker::register_type_names() {
-  // Pass 1a: register type aliases first so that functions and structs
-  // can reference them regardless of source order.
+auto TypeChecker::aliases_generic_shell(const TypeNode* node) -> bool {
+  if (fields_registered_ || node == nullptr) {
+    return false;
+  }
+  // `*Box<i32>`, `fn(Box<i32>): i32`, `Vec<Box<i32>>`: the shell may sit
+  // anywhere inside the node.
+  if (node->is<PointerType>()) {
+    return aliases_generic_shell(node->as<PointerType>().pointee);
+  }
+  if (node->is<FunctionTypeNode>()) {
+    const auto& ftn = node->as<FunctionTypeNode>();
+    return aliases_generic_shell(ftn.return_type) ||
+           std::ranges::any_of(ftn.param_types,
+                               [&](const TypeNode* pt) { return aliases_generic_shell(pt); });
+  }
+  if (!node->is<NamedType>()) {
+    return false;
+  }
+  const auto& named = node->as<NamedType>();
+  if (std::ranges::any_of(named.type_args,
+                          [&](const TypeNode* arg) { return aliases_generic_shell(arg); })) {
+    return true;
+  }
+  if (named.type_args.empty()) {
+    return false;
+  }
+  const auto& path = named.name;
+  auto symbol_offset = path.segments.size() == 1
+                           ? node->span.offset
+                           : segment_offset(path.segments, path.segment_spans, path.span, 1);
+  auto it = resolve_.uses.find(symbol_offset);
+  if (it == resolve_.uses.end() || it->second->kind != SymbolKind::Type) {
+    return false;
+  }
+  const auto* sym = it->second;
+  const auto* decl = sym->decl_as_decl();
+  if (decl == nullptr) {
+    return false;
+  }
+  // Pull the declaration's slots now -- the enum's payloads, the
+  // class's fields -- as far as they can be typed yet.  Ready means
+  // complete by value: an instantiation clones exactly that graph, and
+  // a hole anywhere in it would be cloned.  Past the pull's depth the
+  // slots stay as they are, and the answer waits for the next round.
+  const bool pull = PullDepth::available(*this);
+  if (decl->is<EnumDeclNode>()) {
+    if (pull) {
+      PullDepth depth(*this);
+      register_enum(decl, sym, /*report_failures=*/false);
+    }
+    auto registered = symbol_types_.find(sym);
+    return registered == symbol_types_.end() || !type_complete(registered->second);
+  }
+  auto pending = pending_by_decl_.find(decl);
+  if (pending == pending_by_decl_.end()) {
+    return false;
+  }
+  if (pull) {
+    PullDepth depth(*this);
+    register_class_fields(*pending->second, /*report_failures=*/false);
+  }
+  return !type_complete(pending->second->shell);
+}
+
+auto TypeChecker::resolver_owns_path(const TypeNode* node) const -> bool {
+  if (node == nullptr) {
+    return false;
+  }
+  switch (node->kind()) {
+  case NodeKind::NamedType: {
+    const auto& named = node->as<NamedType>();
+    const auto& path = named.name;
+    if (path.segments.size() >= 2) {
+      auto head = resolve_.uses.find(path.span.offset);
+      if (head != resolve_.uses.end() && head->second->kind == SymbolKind::Module) {
+        return true;
+      }
+    }
+    // `Vec<lib::Missing>`: the failure sits in a type argument.
+    return std::ranges::any_of(named.type_args,
+                               [&](const TypeNode* arg) { return resolver_owns_path(arg); });
+  }
+  case NodeKind::PointerType:
+    return resolver_owns_path(node->as<PointerType>().pointee);
+  case NodeKind::FunctionType: {
+    const auto& ftn = node->as<FunctionTypeNode>();
+    return resolver_owns_path(ftn.return_type) ||
+           std::ranges::any_of(ftn.param_types,
+                               [&](const TypeNode* pt) { return resolver_owns_path(pt); });
+  }
+  default:
+    return false;
+  }
+}
+
+auto TypeChecker::register_type_aliases(bool report_failures) -> size_t {
+  size_t registered = 0;
   for (const auto* decl : all_decls_) {
     if (decl->kind() != NodeKind::AliasDecl) {
       continue;
@@ -442,16 +653,57 @@ void TypeChecker::register_type_names() {
       continue;
     }
     const auto* sym = decl_it->second;
-
-    // Resolve the aliased type and cache it so later lookups of the
-    // alias name transparently return the underlying type.
-    const auto* aliased_type = resolve_type_node(alias.type);
-    if (aliased_type != nullptr) {
-      symbol_types_[sym] = aliased_type;
-      typed_.set_decl_type(decl, aliased_type);
+    if (symbol_types_.contains(sym)) {
+      continue; // registered by an earlier pass, or on demand
+    }
+    if (register_type_alias(decl, sym, report_failures) != nullptr) {
+      ++registered;
     }
   }
+  return registered;
+}
 
+auto TypeChecker::register_type_alias(const Decl* decl, const Symbol* sym, bool report_failures)
+    -> const Type* {
+  const auto& alias = decl->as<AliasDecl>();
+  if (!registering_.insert(decl).second) {
+    return nullptr; // reached again through its own chain: nothing to point at
+  }
+  auto before = diagnostics_.size();
+  const Type* aliased_type = nullptr;
+  // An alias of a generic instantiation (`type IntBox = lib::Box<i32>`)
+  // waits for `Box` to have its fields: instantiating the shell would
+  // cache a `Box<i32>` with no fields at all, and the alias would then
+  // accept anything.
+  if (!aliases_generic_shell(alias.type)) {
+    // Resolve the aliased type and cache it so later lookups of the
+    // alias name transparently return the underlying type.
+    aliased_type = resolve_type_node(alias.type);
+  }
+  registering_.erase(decl);
+  if (aliased_type != nullptr) {
+    symbol_types_[sym] = aliased_type;
+    typed_.set_decl_type(decl, aliased_type);
+    return aliased_type;
+  }
+  if (!report_failures) {
+    // The target may simply not be registered yet; anything said now
+    // would be said again by the final run.
+    diagnostics_.resize(before);
+    return nullptr;
+  }
+  if (diagnostics_.size() == before && !resolver_owns_path(alias.type)) {
+    // The name resolved to a symbol whose type never materialized —
+    // one alias naming another that names it back, say.  Left
+    // unsaid, the alias is silently unusable everywhere it appears.
+    // A path through an import binding is not that case: the
+    // resolver has already said what is wrong with it.
+    error(alias.name_span, "cannot resolve the type aliased by '" + std::string(alias.name) + "'");
+  }
+  return nullptr;
+}
+
+void TypeChecker::register_type_names() {
   // Pass 1b: register type shells (enums and class structs) so that
   // function signatures processed in pass 1c can reference them
   // regardless of source order.
@@ -476,14 +728,14 @@ void TypeChecker::register_type_names() {
       pending_classes_.push_back({&st, decl, shell});
     }
   }
+  // The list is complete; pointers into it stay valid from here on.
+  for (auto& pending : pending_classes_) {
+    pending_by_decl_[pending.decl] = &pending;
+  }
 }
 
-void TypeChecker::register_enum_variants() {
-  // Register enum types with resolved variant payload types.
-  // Unresolved types are kept as nullptr to preserve arity — the
-  // primary diagnostic comes from resolve_type_node; dropping the
-  // slot would silently mutate the variant shape and produce
-  // misleading secondary errors.
+auto TypeChecker::register_enum_variants(bool report_failures) -> size_t {
+  size_t progress = 0;
   for (const auto* decl : all_decls_) {
     if (decl->kind() != NodeKind::EnumDecl) {
       continue;
@@ -493,50 +745,281 @@ void TypeChecker::register_enum_variants() {
     if (decl_it == decl_symbols_.end()) {
       continue;
     }
-    const auto* sym = decl_it->second;
+    progress += register_enum(decl, decl_it->second, report_failures);
+  }
+  return progress;
+}
 
-    std::vector<EnumVariant> variants;
-    for (const auto& variant : en.variants) {
-      std::vector<const Type*> payload_types;
-      for (size_t i = 0; i < variant.payload_types.size(); ++i) {
-        const auto* resolved = resolve_type_node(variant.payload_types[i]);
-        payload_types.push_back(resolved);
-        if (resolved == nullptr) {
-          if (variant.payload_types[i]->is<NamedType>()) {
-            const auto& named = variant.payload_types[i]->as<NamedType>();
-            if (named.name.segments.size() == 1 && named.name.segments[0] == en.name) {
-              error(variant.payload_types[i]->span,
-                    "enum '" + std::string(en.name) +
-                        "' cannot contain itself by value in variant '" +
-                        std::string(variant.name) + "'; use a pointer (*" + std::string(en.name) +
-                        ") for recursive types");
-            }
+auto TypeChecker::register_enum(const Decl* decl, const Symbol* sym, bool report_failures)
+    -> size_t {
+  // Register the enum type with resolved variant payload types.
+  // Unresolved types are kept as nullptr to preserve arity — the
+  // primary diagnostic comes from resolve_type_node; dropping the
+  // slot would silently mutate the variant shape and produce
+  // misleading secondary errors.  Registered once, an enum keeps its
+  // identity; later passes revise its payloads in place as the aliases
+  // they name settle.  A provisional pass keeps none of its diagnostics.
+  const auto& en = decl->as<EnumDeclNode>();
+  const TypeEnum* existing = nullptr;
+  if (auto known = symbol_types_.find(sym);
+      known != symbol_types_.end() && known->second->kind() == TypeKind::Enum) {
+    existing = static_cast<const TypeEnum*>(known->second);
+  }
+  if (existing != nullptr && !report_failures && type_complete(existing)) {
+    return 0; // complete by value: nothing a further pass can change
+  }
+  if (!registering_.insert(decl).second) {
+    return 0; // reached again through its own payloads
+  }
+  size_t progress = 0;
+  std::vector<EnumVariant> variants;
+  size_t variant_index = 0;
+  for (const auto& variant : en.variants) {
+    std::vector<const Type*> payload_types;
+    for (size_t i = 0; i < variant.payload_types.size(); ++i) {
+      auto before = diagnostics_.size();
+      const auto* resolved = resolve_type_node(variant.payload_types[i]);
+      if (!report_failures) {
+        diagnostics_.resize(before);
+      }
+      // A payload holding the enum itself by value -- directly, through
+      // a class or another enum, or as an instantiation of it -- has no
+      // finite size.  The slot stays untyped, and the final pass says
+      // why.
+      if (resolved != nullptr) {
+        std::unordered_set<const Type*> seen;
+        if (contains_by_value(resolved, decl, seen)) {
+          resolved = nullptr;
+          if (report_failures) {
+            error(variant.payload_types[i]->span,
+                  "enum '" + std::string(en.name) +
+                      "' cannot contain itself by value in variant '" + std::string(variant.name) +
+                      "'; use a pointer (*" + std::string(en.name) + ") for recursive types");
           }
         }
       }
-      variants.push_back({variant.name, std::move(payload_types), variant.field_names});
+      if (resolved != nullptr && existing != nullptr &&
+          variant_index < existing->variants().size() &&
+          i < existing->variants()[variant_index].payload_types.size() &&
+          existing->variants()[variant_index].payload_types[i] == nullptr) {
+        ++progress;
+      }
+      payload_types.push_back(resolved);
     }
-    const auto* enum_type = types_.make_enum(decl, en.name, std::move(variants));
-    symbol_types_[sym] = enum_type;
-    typed_.set_decl_type(decl, enum_type);
+    variants.push_back({variant.name, std::move(payload_types), variant.field_names});
+    ++variant_index;
   }
+  registering_.erase(decl);
+  if (existing != nullptr) {
+    // The same object every reference already points at, revised --
+    // as a class shell's fields are (register_class_fields).
+    const_cast<TypeEnum*>(existing)->set_variants(std::move(variants));
+    return progress;
+  }
+  const auto* enum_type = types_.make_enum(decl, en.name, std::move(variants));
+  symbol_types_[sym] = enum_type;
+  typed_.set_decl_type(decl, enum_type);
+  for (const auto& v : enum_type->variants()) {
+    progress += std::ranges::count_if(v.payload_types, [](const Type* t) { return t != nullptr; });
+  }
+  return progress;
 }
 
-void TypeChecker::register_struct_fields() {
+auto TypeChecker::register_struct_fields(bool report_failures) -> size_t {
+  size_t progress = 0;
+  for (auto& pending : pending_classes_) {
+    progress += register_class_fields(pending, report_failures);
+  }
+  return progress;
+}
+
+auto TypeChecker::register_class_fields(PendingClass& pending, bool report_failures) -> size_t {
   // Sub-pass 1b-ii: resolve class field types now that all type
   // shells (classes and enums) are registered in symbol_types_.
   // Unresolved types are kept as nullptr to preserve arity — same
   // rationale as enum variant payloads: dropping the slot silently
   // mutates the struct shape and produces misleading secondary
   // constructor-arity errors instead of the real type-resolution
-  // failure.
-  for (auto& pending : pending_classes_) {
-    std::vector<StructField> fields;
-    for (const auto* field : pending.class_decl->fields) {
-      const auto* field_type = resolve_type_node(field->type);
-      fields.push_back({field->name, field_type});
+  // failure.  A provisional pass keeps none of its diagnostics: a field
+  // it cannot type yet may be typed by a later pass, and one that never
+  // is gets reported exactly once, by the final pass.
+  const auto& had = pending.shell->fields();
+  if (!report_failures && had.size() == pending.class_decl->fields.size() &&
+      type_complete(pending.shell)) {
+    // Settled only when complete by value all the way down: a field
+    // typed by an instantiation that still carries a hole must be
+    // re-resolved once that hole is filled.
+    return 0;
+  }
+  if (!registering_.insert(pending.decl).second) {
+    return 0; // reached again through its own fields
+  }
+  size_t progress = 0;
+  std::vector<StructField> fields;
+  size_t index = 0;
+  for (const auto* field : pending.class_decl->fields) {
+    auto before = diagnostics_.size();
+    const auto* field_type = resolve_type_node(field->type);
+    if (!report_failures) {
+      diagnostics_.resize(before);
     }
-    pending.shell->set_fields(std::move(fields));
+    if (field_type != nullptr && (index >= had.size() || had[index].type == nullptr)) {
+      ++progress;
+    }
+    if (field_type != nullptr && report_failures) {
+      // A field holding the class itself by value -- directly, through
+      // another declaration, or as an instantiation of it -- has no
+      // finite size.  Said once, here, where the cycle closes.
+      std::unordered_set<const Type*> seen;
+      if (contains_by_value(field_type, pending.decl, seen)) {
+        error(field->type->span,
+              "class '" + std::string(pending.class_decl->name) +
+                  "' cannot contain itself by value in field '" + std::string(field->name) +
+                  "'; use a pointer (*" + std::string(pending.class_decl->name) +
+                  ") for recursive types");
+      }
+    }
+    fields.push_back({field->name, field_type});
+    ++index;
+  }
+  pending.shell->set_fields(std::move(fields));
+  registering_.erase(pending.decl);
+  return progress;
+}
+
+auto TypeChecker::type_complete(const Type* type) -> bool {
+  std::unordered_set<const Type*> seen;
+  if (!complete_by_value(type, seen)) {
+    return false;
+  }
+  // No hole anywhere.  A cycle by value is not a hole, but nothing
+  // finite either: a declaration holding itself by value is rejected
+  // (register_enum, register_class_fields) and never counts as
+  // complete, so no alias instantiates it.  Every type the walk
+  // reached is checked, since a cycle behind a pointer is a cycle of
+  // the type behind the pointer.
+  std::unordered_set<const Type*> on_path;
+  std::unordered_set<const Type*> acyclic;
+  for (const auto* reached : seen) {
+    if (value_cycle(reached, on_path, acyclic)) {
+      return false;
+    }
+  }
+  // Slots only ever fill, so what is complete stays complete -- and so
+  // is everything the walk reached.
+  complete_types_.insert(seen.begin(), seen.end());
+  return true;
+}
+
+auto TypeChecker::value_cycle(const Type* type,
+                              std::unordered_set<const Type*>& on_path,
+                              std::unordered_set<const Type*>& acyclic) -> bool {
+  if (type == nullptr || acyclic.contains(type)) {
+    return false;
+  }
+  if (type->kind() != TypeKind::Struct && type->kind() != TypeKind::Enum) {
+    return false; // a pointer, or a scalar: the path by value ends here
+  }
+  if (!on_path.insert(type).second) {
+    return true;
+  }
+  bool cyclic = false;
+  if (type->kind() == TypeKind::Struct) {
+    const auto* st = static_cast<const TypeStruct*>(type);
+    cyclic = std::ranges::any_of(
+        st->fields(), [&](const StructField& f) { return value_cycle(f.type, on_path, acyclic); });
+  } else {
+    const auto* en = static_cast<const TypeEnum*>(type);
+    cyclic = std::ranges::any_of(en->variants(), [&](const EnumVariant& v) {
+      return std::ranges::any_of(v.payload_types,
+                                 [&](const Type* t) { return value_cycle(t, on_path, acyclic); });
+    });
+  }
+  on_path.erase(type);
+  if (!cyclic) {
+    acyclic.insert(type);
+  }
+  return cyclic;
+}
+
+auto TypeChecker::complete_by_value(const Type* type, std::unordered_set<const Type*>& seen) const
+    -> bool {
+  if (type == nullptr) {
+    return false;
+  }
+  if (complete_types_.contains(type)) {
+    return true;
+  }
+  if (!seen.insert(type).second) {
+    return true; // a cycle by value is a separate diagnostic; not a hole
+  }
+  switch (type->kind()) {
+  case TypeKind::Struct: {
+    const auto* st = static_cast<const TypeStruct*>(type);
+    // A shell whose fields are not registered yet has nothing to check
+    // and is not complete: the declaration says how many it will have.
+    if (const auto* decl = st->decl_id();
+        decl != nullptr && decl->is<ClassDecl>() &&
+        st->fields().size() != decl->as<ClassDecl>().fields.size()) {
+      return false;
+    }
+    return std::ranges::all_of(
+        st->fields(), [&](const StructField& f) { return complete_by_value(f.type, seen); });
+  }
+  case TypeKind::Enum: {
+    const auto* en = static_cast<const TypeEnum*>(type);
+    return std::ranges::all_of(en->variants(), [&](const EnumVariant& v) {
+      return std::ranges::all_of(v.payload_types,
+                                 [&](const Type* t) { return complete_by_value(t, seen); });
+    });
+  }
+  // Substitution clones through these as it does through fields
+  // (substitute_generics), so a hole behind them would be cloned too.
+  case TypeKind::Pointer:
+    return complete_by_value(static_cast<const TypePointer*>(type)->pointee(), seen);
+  case TypeKind::Generator:
+    return complete_by_value(static_cast<const TypeGenerator*>(type)->yield_type(), seen);
+  case TypeKind::Function: {
+    const auto* fn = static_cast<const TypeFunction*>(type);
+    return complete_by_value(fn->return_type(), seen) &&
+           std::ranges::all_of(fn->param_types(),
+                               [&](const Type* t) { return complete_by_value(t, seen); });
+  }
+  default:
+    return true; // scalars carry nothing
+  }
+}
+
+auto TypeChecker::contains_by_value(const Type* type,
+                                    const Decl* target,
+                                    std::unordered_set<const Type*>& seen) -> bool {
+  if (type == nullptr || !seen.insert(type).second) {
+    return false;
+  }
+  // By declaration, not by object: an instantiation is another object
+  // of the same declaration, and holds it by value just the same.
+  switch (type->kind()) {
+  case TypeKind::Struct: {
+    const auto* st = static_cast<const TypeStruct*>(type);
+    if (st->decl_id() == target) {
+      return true;
+    }
+    return std::ranges::any_of(st->fields(), [&](const StructField& f) {
+      return contains_by_value(f.type, target, seen);
+    });
+  }
+  case TypeKind::Enum: {
+    const auto* en = static_cast<const TypeEnum*>(type);
+    if (en->decl_id() == target) {
+      return true;
+    }
+    return std::ranges::any_of(en->variants(), [&](const EnumVariant& v) {
+      return std::ranges::any_of(v.payload_types,
+                                 [&](const Type* t) { return contains_by_value(t, target, seen); });
+    });
+  }
+  default:
+    return false; // behind a pointer the size is finite
   }
 }
 
@@ -673,35 +1156,19 @@ auto TypeChecker::type_conforms_to(const Type* type, const Decl* concept_decl) -
     if (decl_node != nullptr) {
       if (decl_node->is<ClassDecl>()) {
         const auto& cls = decl_node->as<ClassDecl>();
-        const auto& concept_name = concept_decl->as<ConceptDecl>().name;
-        // Which concept a block names is the resolver's answer, not the
-        // spelling's: a module may shadow the prelude's `Mark` with its
-        // own, and `as Mark` then names the module's.  Unbound (outside
-        // a program) the spelling is all there is.
-        auto names_this = [&](std::string_view spelled, Span at) -> bool {
-          auto bound = resolve_.uses.find(at.offset);
-          if (bound != resolve_.uses.end()) {
-            return bound->second->decl_as_decl() == concept_decl;
-          }
-          // Unbound inside a program means the resolver rejected the
-          // name; matching it by spelling would let an unimported
-          // sibling's concept in.  Only outside a program is the
-          // spelling all there is.
-          return current_module_ == nullptr && spelled == concept_name;
-        };
 
         // deny supersedes everything — if present, the type does not
         // conform regardless of explicit `as` blocks. (Having both
         // is a compile error diagnosed in check_class.)
         for (const auto& deny : cls.denials) {
-          if (names_this(deny.concept_name, deny.concept_span)) {
+          if (concept_named_at(deny.target.concept_span) == concept_decl) {
             return false;
           }
         }
 
         // Check explicit conformance.
         for (const auto& conf : cls.conformances) {
-          if (names_this(conf.concept_name, conf.concept_span)) {
+          if (concept_named_at(conf.target.concept_span) == concept_decl) {
             return true;
           }
         }
@@ -709,33 +1176,22 @@ auto TypeChecker::type_conforms_to(const Type* type, const Decl* concept_decl) -
     }
   }
 
-  // Check extend declarations.  An `extend` block confers conformance
-  // only where its methods are in the method set — its own module, or
-  // everywhere when it is the prelude's (CONTRACT_MODULE_SYSTEM.md §5,
-  // §7.2) — so a sibling module's block must not answer here.
+  // Check extend declarations.
   if (!all_decls_.empty()) {
-    const auto& cpt_name = concept_decl->as<ConceptDecl>().name;
     for (const auto* decl : all_decls_) {
-      if (decl->kind() != NodeKind::ExtendDecl || !owner_is_visible(extend_owner(decl))) {
+      if (decl->kind() != NodeKind::ExtendDecl) {
         continue;
       }
       const auto& ext = decl->as<ExtendDecl>();
+      // Conformance introduced by `extend` is scoped like the methods it
+      // introduces (CONTRACT_MODULE_SYSTEM.md §5): a type does not
+      // satisfy a bound on the strength of an extension another module
+      // declared.
+      if (!extend_is_visible(declaring_module(decl))) {
+        continue;
+      }
       const auto* target = resolve_type_node(ext.target_type);
-      if (target != type) {
-        continue;
-      }
-      // The block names a concept; which one is the resolver's answer,
-      // not the spelling's.  A module may shadow the prelude's `Mark`
-      // with its own, and an `extend i32 as Mark` in the prelude confers
-      // the prelude's, never the module's.
-      auto bound = resolve_.uses.find(ext.concept_span.offset);
-      if (bound != resolve_.uses.end()) {
-        if (bound->second->decl_as_decl() == concept_decl) {
-          return true;
-        }
-        continue;
-      }
-      if (current_module_ == nullptr && ext.concept_name == cpt_name) {
+      if (target == type && concept_named_at(ext.target.concept_span) == concept_decl) {
         return true;
       }
     }
@@ -764,10 +1220,6 @@ void TypeChecker::compute_derived_conformances() {
     const Decl* decl;
     const ClassDecl* cls;
     const Type* struct_type;
-    // Whether a field type conforms is asked from the class's module:
-    // an `extend` in a sibling module is not in that module's method
-    // set and cannot make the class derive (CONTRACT_MODULE_SYSTEM.md §5).
-    const ModuleInfo* module;
   };
   std::vector<ClassEntry> classes;
   for (const auto* decl : all_decls_) {
@@ -783,7 +1235,7 @@ void TypeChecker::compute_derived_conformances() {
     if (struct_type == nullptr || struct_type->kind() != TypeKind::Struct) {
       continue;
     }
-    classes.push_back({decl, &cls, struct_type, declaring_module(decl)});
+    classes.push_back({decl, &cls, struct_type});
   }
 
   // Fixpoint loop: repeat until no new conformances are discovered.
@@ -792,24 +1244,18 @@ void TypeChecker::compute_derived_conformances() {
   while (changed) {
     changed = false;
     for (const auto& entry : classes) {
-      CurrentModuleGuard module_guard(current_module_, entry.module);
+      // Derivation asks whether the fields conform, and that question is
+      // asked FROM the class's module: an `extend` of its own module is
+      // in scope, another module's is not (§5).  Without this the whole
+      // pass ran with no current module, which made every non-prelude
+      // extension invisible — including the class's own.
+      current_module_ = declaring_module(entry.decl);
       for (const auto* concept_decl : derived_concepts_) {
-        const auto& cpt = concept_decl->as<ConceptDecl>();
-
-        // Skip if explicit conformance or deny exists -- of THIS concept,
-        // by the declaration the resolver bound, not by spelling: a
-        // class conforming to its module's `Mark` still derives the
-        // prelude's distinct `Mark` through its fields.
-        auto names_this = [&](std::string_view spelled, Span at) -> bool {
-          auto bound = resolve_.uses.find(at.offset);
-          if (bound != resolve_.uses.end()) {
-            return bound->second->decl_as_decl() == concept_decl;
-          }
-          return current_module_ == nullptr && spelled == cpt.name;
-        };
+        // Explicit conformance or denial of THIS concept — by identity,
+        // since two modules may each declare one named the same.
         bool has_explicit = false;
         for (const auto& conf : entry.cls->conformances) {
-          if (names_this(conf.concept_name, conf.concept_span)) {
+          if (concept_named_at(conf.target.concept_span) == concept_decl) {
             has_explicit = true;
             break;
           }
@@ -820,7 +1266,7 @@ void TypeChecker::compute_derived_conformances() {
 
         bool denied = false;
         for (const auto& deny : entry.cls->denials) {
-          if (names_this(deny.concept_name, deny.concept_span)) {
+          if (concept_named_at(deny.target.concept_span) == concept_decl) {
             denied = true;
             break;
           }
@@ -861,6 +1307,7 @@ void TypeChecker::compute_derived_conformances() {
       }
     }
   }
+  current_module_ = nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -868,9 +1315,7 @@ void TypeChecker::compute_derived_conformances() {
 // ---------------------------------------------------------------------------
 
 void TypeChecker::check_declaration(const Decl* decl) {
-  // Every name this body reaches is resolved from the declaring
-  // module's point of view, `extend` method sets included.
-  CurrentModuleGuard module_guard(current_module_, declaring_module(decl));
+  current_module_ = declaring_module(decl);
   switch (decl->kind()) {
   case NodeKind::FunctionDecl:
     check_function(decl);
@@ -896,30 +1341,19 @@ void TypeChecker::check_declaration(const Decl* decl) {
       if (dnode != nullptr) {
         if (dnode->is<ClassDecl>()) {
           for (const auto& deny : dnode->as<ClassDecl>().denials) {
-            // The same concept, by the declaration the resolver bound:
-            // a module's `Mark` is not the prelude's `Mark` the class
-            // denied.  Outside a program the spelling is all there is.
-            auto bound_of = [&](Span at) -> const Decl* {
-              auto it = resolve_.uses.find(at.offset);
-              return it == resolve_.uses.end() ? nullptr : it->second->decl_as_decl();
-            };
-            const auto* denied = bound_of(deny.concept_span);
-            const auto* extended = bound_of(ext.concept_span);
-            const bool same =
-                (denied != nullptr && extended != nullptr)
-                    ? denied == extended
-                    : (current_module_ == nullptr && deny.concept_name == ext.concept_name);
-            if (same) {
-              error(ext.concept_span,
+            const auto* denied_concept = concept_named_at(deny.target.concept_span);
+            if (denied_concept != nullptr &&
+                denied_concept == concept_named_at(ext.target.concept_span)) {
+              error(ext.target.concept_span,
                     "cannot extend '" + std::string(st->name()) + "' as '" +
-                        std::string(ext.concept_name) + "' because the type denies it");
+                        std::string(ext.target.concept_name) + "' because the type denies it");
             }
           }
         }
       }
     }
     for (const auto* method : ext.methods) {
-      validate_receiver(method, ext.concept_span);
+      validate_receiver(method, ext.target.concept_span);
       const auto& fn = method->as<FunctionDecl>();
       if (!fn.body.empty() || fn.expr_body != nullptr) {
         check_function(method);
@@ -1015,13 +1449,17 @@ void TypeChecker::check_class(const Decl* decl) {
     ctx_.self_type = resolve_symbol_type(decl_it->second);
   }
 
-  // Diagnose conflicting as + deny for the same concept.
+  // Diagnose conflicting as + deny for the same concept — the same one,
+  // by declaration identity: `as a::C` alongside `deny b::C` names two
+  // concepts and is not a contradiction.
   for (const auto& deny : cls.denials) {
+    const auto* denied_concept = concept_named_at(deny.target.concept_span);
     for (const auto& conf : cls.conformances) {
-      if (conf.concept_name == deny.concept_name) {
-        error(deny.concept_span,
+      if (denied_concept != nullptr &&
+          denied_concept == concept_named_at(conf.target.concept_span)) {
+        error(deny.target.concept_span,
               "'" + std::string(cls.name) + "' both conforms to and denies '" +
-                  std::string(deny.concept_name) + "'");
+                  std::string(deny.target.concept_name) + "'");
       }
     }
   }
@@ -1041,7 +1479,7 @@ void TypeChecker::check_class(const Decl* decl) {
   // Validate and check conformance-block methods.
   for (const auto& conf : cls.conformances) {
     for (const auto* method : conf.methods) {
-      validate_receiver(method, conf.concept_span);
+      validate_receiver(method, conf.target.concept_span);
       const auto& fn = method->as<FunctionDecl>();
       if (!fn.body.empty() || fn.expr_body != nullptr) {
         check_function(method);
@@ -1578,27 +2016,91 @@ done_generic_check:
 // Identifier
 // ---------------------------------------------------------------------------
 
+/// True if `expr` names a type rather than something reached through one:
+/// a bare identifier, or a qualified path whose last segment is the type
+/// itself (`m::T`).  `T::m` and `m::T::m` name a member (§6), so a call on
+/// them is a static-method call, never a construction.
+auto TypeChecker::names_a_type(const Expr* expr) const -> bool {
+  if (expr->is<IdentifierExpr>()) {
+    return true;
+  }
+  if (!expr->is<QualifiedName>()) {
+    return false;
+  }
+  const auto& qn = expr->as<QualifiedName>();
+  if (qn.segments.size() != 2) {
+    return false; // `m::T::member` — and a single segment is not qualified
+  }
+  // `m::T` only when `m` is an import binding; `T::m` is a member of T.
+  auto head_it = resolve_.uses.find(expr->span.offset);
+  return head_it != resolve_.uses.end() && head_it->second->kind == SymbolKind::Module;
+}
+
+auto TypeChecker::symbol_for_use(const Expr* expr) const -> const Symbol* {
+  auto at = [&](uint32_t offset) -> const Symbol* {
+    auto it = resolve_.uses.find(offset);
+    return it == resolve_.uses.end() ? nullptr : it->second;
+  };
+  const auto* head = at(expr->span.offset);
+  if (head == nullptr || !expr->is<QualifiedName>()) {
+    return head;
+  }
+  const auto& qn = expr->as<QualifiedName>();
+  if (head->kind != SymbolKind::Module || qn.segments.size() < 2) {
+    return head;
+  }
+  auto export_offset = segment_offset(qn.segments, qn.segment_spans, expr->span, 1);
+  const auto* exported = at(export_offset);
+  if (exported == nullptr || qn.segments.size() < 3) {
+    return exported;
+  }
+  return at(segment_offset(qn.segments, qn.segment_spans, expr->span, 2));
+}
+
 auto TypeChecker::check_identifier(const Expr* expr) -> const Type* {
-  // Works for both IdentifierExpr and QualifiedName (static method calls).
-  auto it = resolve_.uses.find(expr->span.offset);
-  if (it == resolve_.uses.end()) {
-    std::string name_str;
+  // Works for IdentifierExpr and QualifiedName (static method calls,
+  // enum variants, and names through import bindings).
+  auto name_text = [&] {
     if (expr->is<IdentifierExpr>()) {
-      name_str = expr->as<IdentifierExpr>().name;
-    } else if (expr->is<QualifiedName>()) {
-      const auto& qn = expr->as<QualifiedName>();
-      for (size_t i = 0; i < qn.segments.size(); ++i) {
-        if (i > 0)
-          name_str += "::";
-        name_str += qn.segments[i];
-      }
+      return std::string(expr->as<IdentifierExpr>().name);
     }
-    error(expr->span, "unresolved identifier '" + name_str + "'");
+    return qualified_path_text(expr->as<QualifiedName>().segments);
+  };
+  const auto* sym = symbol_for_use(expr);
+  if (sym == nullptr) {
+    // A path through an import binding is the resolver's to diagnose:
+    // a missing import is the graph's report, and a missing export is
+    // the resolver's "has no export".  Either way it has been said.
+    const auto* head =
+        resolve_.uses.contains(expr->span.offset) ? resolve_.uses.at(expr->span.offset) : nullptr;
+    if (head == nullptr || head->kind != SymbolKind::Module) {
+      error(expr->span, "unresolved identifier '" + name_text() + "'");
+    }
     return nullptr;
   }
-  const auto* result = resolve_symbol_type(it->second);
-  if (result == nullptr && it->second->kind == SymbolKind::Param) {
-    error(expr->span, "'" + std::string(it->second->name) + "' has no known type in this context");
+  if (sym->kind == SymbolKind::Module) {
+    error(expr->span, "'" + name_text() + "' is a module, not a value");
+    return nullptr;
+  }
+  // `b::T::m` reaches a static method (§6).  An instance method has a
+  // receiver the qualified form cannot supply, so it is not a value here.
+  if (expr->is<QualifiedName>() && expr->as<QualifiedName>().segments.size() == 3 &&
+      sym->kind == SymbolKind::Function && sym->decl != nullptr) {
+    const auto* fn_decl = sym->decl_as_decl();
+    if (fn_decl->is<FunctionDecl>()) {
+      const auto& params = fn_decl->as<FunctionDecl>().params;
+      if (!params.empty() && params.front().name == "self") {
+        error(expr->span,
+              "'" + name_text() +
+                  "' is an instance method; a qualified path reaches static "
+                  "methods only (CONTRACT_MODULE_SYSTEM.md §6)");
+        return nullptr;
+      }
+    }
+  }
+  const auto* result = resolve_symbol_type(sym);
+  if (result == nullptr && sym->kind == SymbolKind::Param) {
+    error(expr->span, "'" + std::string(sym->name) + "' has no known type in this context");
   }
   return result;
 }
@@ -1910,6 +2412,9 @@ auto TypeChecker::substitute_generics(const Type* type,
     return changed ? types_.function_type(std::move(params), ret) : type;
   }
   case TypeKind::Struct: {
+    if (!substituting_.insert(type).second) {
+      return type; // holds itself by value: no finite copy exists (rejected at its declaration)
+    }
     const auto* st = static_cast<const TypeStruct*>(type);
     bool changed = false;
     std::vector<StructField> new_fields;
@@ -1920,9 +2425,13 @@ auto TypeChecker::substitute_generics(const Type* type,
         changed = true;
       new_fields.push_back({field.name, sub});
     }
+    substituting_.erase(type);
     return changed ? types_.make_struct(st->decl_id(), st->name(), std::move(new_fields)) : type;
   }
   case TypeKind::Enum: {
+    if (!substituting_.insert(type).second) {
+      return type; // as for a class above
+    }
     const auto* en = static_cast<const TypeEnum*>(type);
     bool changed = false;
     std::vector<EnumVariant> new_variants;
@@ -1938,6 +2447,7 @@ auto TypeChecker::substitute_generics(const Type* type,
       }
       new_variants.push_back({variant.name, std::move(new_payload), variant.field_names});
     }
+    substituting_.erase(type);
     return changed ? types_.make_enum(en->decl_id(), en->name(), std::move(new_variants)) : type;
   }
   default:
@@ -1949,19 +2459,41 @@ auto TypeChecker::substitute_generics(const Type* type,
 // Shared generic constraint verification
 // ---------------------------------------------------------------------------
 
+auto TypeChecker::concept_for_constraint(const TypeNode* constraint) const -> const Symbol* {
+  auto at = [&](uint32_t offset) -> const Symbol* {
+    auto it = resolve_.uses.find(offset);
+    return it == resolve_.uses.end() ? nullptr : it->second;
+  };
+  // A bound is a type path.  `Concept` records its symbol at the path's
+  // own offset; `m::Concept` records the import binding there and the
+  // concept at the second segment (CONTRACT_MODULE_SYSTEM.md §6), so
+  // reading only the head would silently skip a qualified bound.
+  const auto* head = at(constraint->span.offset);
+  if (!constraint->is<NamedType>()) {
+    return head;
+  }
+  const auto& path = constraint->as<NamedType>().name;
+  if (head == nullptr || head->kind != SymbolKind::Module || path.segments.size() < 2) {
+    return head;
+  }
+  auto name_offset = segment_offset(path.segments, path.segment_spans, path.span, 1);
+  return at(name_offset);
+}
+
 void TypeChecker::verify_concept_constraints(
     const Expr* callee_expr,
     Span error_span,
     const std::unordered_map<uint32_t, const Type*>& bindings) {
-  if (bindings.empty() || !callee_expr->is<IdentifierExpr>()) {
+  if (bindings.empty() ||
+      !(callee_expr->is<IdentifierExpr>() || callee_expr->is<QualifiedName>())) {
     return;
   }
-  auto sym_it = resolve_.uses.find(callee_expr->span.offset);
-  if (sym_it == resolve_.uses.end() || sym_it->second->kind != SymbolKind::Function ||
-      sym_it->second->decl == nullptr) {
+  const auto* callee_sym = symbol_for_use(callee_expr);
+  if (callee_sym == nullptr || callee_sym->kind != SymbolKind::Function ||
+      callee_sym->decl == nullptr) {
     return;
   }
-  const auto* fn_decl = sym_it->second->decl_as_decl();
+  const auto* fn_decl = callee_sym->decl_as_decl();
   if (!fn_decl->is<FunctionDecl>()) {
     return;
   }
@@ -1973,16 +2505,16 @@ void TypeChecker::verify_concept_constraints(
       continue;
     }
     for (const auto* constraint : gp_decl.constraints) {
-      auto csym_it = resolve_.uses.find(constraint->span.offset);
-      if (csym_it == resolve_.uses.end() || csym_it->second->kind != SymbolKind::Concept ||
-          csym_it->second->decl == nullptr) {
+      const auto* concept_sym = concept_for_constraint(constraint);
+      if (concept_sym == nullptr || concept_sym->kind != SymbolKind::Concept ||
+          concept_sym->decl == nullptr) {
         continue;
       }
-      const auto* concept_decl = csym_it->second->decl_as_decl();
+      const auto* concept_decl = concept_sym->decl_as_decl();
       if (!type_conforms_to(binding_it->second, concept_decl)) {
         error(error_span,
               "type '" + print_type(binding_it->second) + "' does not satisfy concept '" +
-                  std::string(csym_it->second->name) + "' required by generic parameter '" +
+                  std::string(concept_sym->name) + "' required by generic parameter '" +
                   std::string(gp_decl.name) + "'");
       }
     }
@@ -2151,12 +2683,15 @@ auto TypeChecker::check_call(const Expr* expr) -> const Type* {
     }
   }
 
-  // Constructor call: callee must be an identifier that resolves to a
-  // Type symbol (e.g. `Point`), not merely any expression whose type
-  // happens to be a struct (e.g. `p` where `p: Point`).
-  if (callee_type->kind() == TypeKind::Struct && call.callee->is<IdentifierExpr>()) {
-    auto sym_it = resolve_.uses.find(call.callee->span.offset);
-    if (sym_it != resolve_.uses.end() && sym_it->second->kind == SymbolKind::Type) {
+  // Constructor call: the callee must NAME the type — `Point` or `m::Point`
+  // — not merely any expression whose type happens to be a struct (`p`
+  // where `p: Point`), and not a path whose last segment is a member of
+  // it.  `m::T::missing(...)` denotes a static member that does not
+  // exist; reading it as a construction of `T` hides the error whenever
+  // the arguments happen to match `T`'s fields.
+  if (callee_type->kind() == TypeKind::Struct && names_a_type(call.callee)) {
+    const auto* callee_sym = symbol_for_use(call.callee);
+    if (callee_sym != nullptr && callee_sym->kind == SymbolKind::Type) {
       return check_construct(expr, static_cast<const TypeStruct*>(callee_type));
     }
   }
@@ -2178,11 +2713,11 @@ auto TypeChecker::check_call(const Expr* expr) -> const Type* {
 
   // Detect if the callee is an extern fn (for ABI boundary enforcement).
   bool callee_is_extern = false;
-  if (call.callee->is<IdentifierExpr>()) {
-    auto sym_it = resolve_.uses.find(call.callee->span.offset);
-    if (sym_it != resolve_.uses.end() && sym_it->second->kind == SymbolKind::Function &&
-        sym_it->second->decl != nullptr) {
-      const auto* fn_decl = sym_it->second->decl_as_decl();
+  if (call.callee->is<IdentifierExpr>() || call.callee->is<QualifiedName>()) {
+    const auto* callee_sym = symbol_for_use(call.callee);
+    if (callee_sym != nullptr && callee_sym->kind == SymbolKind::Function &&
+        callee_sym->decl != nullptr) {
+      const auto* fn_decl = callee_sym->decl_as_decl();
       if (fn_decl->is<FunctionDecl>()) {
         callee_is_extern = fn_decl->as<FunctionDecl>().is_extern;
       }
@@ -2194,26 +2729,35 @@ auto TypeChecker::check_call(const Expr* expr) -> const Type* {
   std::unordered_map<uint32_t, const Type*> type_bindings;
 
   // Populate bindings from explicit type arguments: f<i32, f64>(x).
-  if (!call.type_args.empty() && call.callee->is<IdentifierExpr>()) {
-    auto sym_it = resolve_.uses.find(call.callee->span.offset);
-    if (sym_it != resolve_.uses.end() && sym_it->second->kind == SymbolKind::Function) {
+  if (!call.type_args.empty() &&
+      (call.callee->is<IdentifierExpr>() || call.callee->is<QualifiedName>())) {
+    const auto* callee_sym = symbol_for_use(call.callee);
+    if (callee_sym != nullptr && callee_sym->kind == SymbolKind::Function) {
       // Determine expected type param count.
       size_t expected_count = 0;
-      if (sym_it->second->decl != nullptr) {
-        const auto* fn_decl = sym_it->second->decl_as_decl();
+      if (callee_sym->decl != nullptr) {
+        const auto* fn_decl = callee_sym->decl_as_decl();
         if (fn_decl->is<FunctionDecl>()) {
           expected_count = fn_decl->as<FunctionDecl>().type_params.size();
           // For class methods (no own type params), use the enclosing
           // class's type params when invoked via Type<Args>::method().
-          if (expected_count == 0 && sym_it->second->name.find('.') != std::string_view::npos) {
-            // Find the enclosing ClassDecl by checking file declarations.
-            auto class_name = sym_it->second->name.substr(0, sym_it->second->name.find('.'));
+          if (expected_count == 0 && callee_sym->name.find('.') != std::string_view::npos) {
+            // The enclosing class of a method symbol `T.m`.  Two modules
+            // may each declare a `T`, so the class must come from the
+            // METHOD'S OWN module, not from the first same-named
+            // declaration in the program
+            // (CONTRACT_TYPE_SYSTEM_FOUNDATIONS.md §11).
+            auto class_name = callee_sym->name.substr(0, callee_sym->name.find('.'));
             for (const auto* file_decl : all_decls_) {
-              if (file_decl->kind() == NodeKind::ClassDecl &&
-                  file_decl->as<ClassDecl>().name == class_name) {
-                expected_count = file_decl->as<ClassDecl>().type_params.size();
-                break;
+              if (file_decl->kind() != NodeKind::ClassDecl ||
+                  file_decl->as<ClassDecl>().name != class_name) {
+                continue;
               }
+              if (declaring_module(file_decl) != callee_sym->module) {
+                continue;
+              }
+              expected_count = file_decl->as<ClassDecl>().type_params.size();
+              break;
             }
           }
         }
@@ -2573,28 +3117,22 @@ void TypeChecker::build_method_table() {
     // Direct class methods.
     for (const auto* method_decl : cls.methods) {
       const auto& method = method_decl->as<FunctionDecl>();
-      MethodKey key{struct_type, method.name};
-      if (method_table_.find(key) == method_table_.end()) {
-        const auto* fn_type = build_method_fn_type(method);
-        method_table_.insert({key, {fn_type, method_decl, /*inherent=*/true}});
-      }
+      const auto* fn_type = build_method_fn_type(method);
+      add_method(MethodKey{struct_type, method.name},
+                 {fn_type, method_decl, nullptr, /*inherent=*/true});
     }
     // Conformance block methods.
     for (const auto& conf : cls.conformances) {
       for (const auto* method_decl : conf.methods) {
         const auto& method = method_decl->as<FunctionDecl>();
-        MethodKey key{struct_type, method.name};
-        if (method_table_.find(key) == method_table_.end()) {
-          const auto* fn_type = build_method_fn_type(method);
-          method_table_.insert({key, {fn_type, method_decl, /*inherent=*/true}});
-        }
+        const auto* fn_type = build_method_fn_type(method);
+        add_method(MethodKey{struct_type, method.name},
+                   {fn_type, method_decl, nullptr, /*inherent=*/true});
       }
     }
   }
 
-  // 2. Top-level extend declarations, keyed on the declaring module:
-  //    its methods are in that module's method set only, the prelude's
-  //    in every module's (CONTRACT_MODULE_SYSTEM.md §5, §7.2).
+  // 2. Top-level extend declarations.
   for (const auto* decl : all_decls_) {
     if (decl->kind() != NodeKind::ExtendDecl) {
       continue;
@@ -2604,14 +3142,11 @@ void TypeChecker::build_method_table() {
     if (target == nullptr) {
       continue;
     }
-    const auto* owner = extend_owner(decl);
+    const auto* owner = declaring_module(decl);
     for (const auto* method_decl : ext.methods) {
       const auto& method = method_decl->as<FunctionDecl>();
-      MethodKey key{.type = target, .name = method.name, .owner = owner};
-      if (method_table_.find(key) == method_table_.end()) {
-        const auto* fn_type = build_method_fn_type(method);
-        method_table_.insert({key, {fn_type, method_decl}});
-      }
+      const auto* fn_type = build_method_fn_type(method);
+      add_method(MethodKey{target, method.name}, {fn_type, method_decl, owner});
     }
   }
 
@@ -2619,39 +3154,73 @@ void TypeChecker::build_method_table() {
   //    For each (type, derived_concept), register each concept method
   //    with the type. Resolve the concrete extend implementation for dispatch.
   for (const auto& [type, concepts] : derived_conformances_) {
-    // The conformance was derived from the class's own module, so the
-    // implementation backing it must be a block that module can see.
-    CurrentModuleGuard module_guard(current_module_, declaring_module(struct_decl_of(type)));
+    // Asked from the deriving class's module, as derivation itself was
+    // (§5): this pass runs after compute_derived_conformances() has
+    // cleared the current module, and without restoring it every
+    // non-prelude extension is invisible — the class's own included.
+    ModuleScope derived_in(current_module_,
+                           type != nullptr && type->kind() == TypeKind::Struct
+                               ? declaring_module(static_cast<const TypeStruct*>(type)->decl_id())
+                               : nullptr);
     for (const auto* concept_decl : concepts) {
       const auto& cpt = concept_decl->as<ConceptDecl>();
-      ConceptSelfMapGuard guard(concept_self_map_, cpt.name);
-      concept_self_map_[cpt.name] = type;
+      ConceptSelfMapGuard guard(concept_self_map_, concept_decl);
+      concept_self_map_[concept_decl] = type;
       for (const auto* cpt_method_decl : cpt.methods) {
         const auto& method = cpt_method_decl->as<FunctionDecl>();
         MethodKey key{type, method.name};
-        if (method_table_.find(key) != method_table_.end()) {
+        // Skip only when a method already VISIBLE from this module
+        // answers the name.  An extension another module declared sits
+        // in the table but answers nothing here (§5), so treating its
+        // presence as coverage left the type with no method at all.
+        if (auto it = method_table_.find(key);
+            it != method_table_.end() && visible_entry(it->second) != nullptr) {
           continue;
         }
         const auto* fn_type = build_method_fn_type(method);
         // Find the concrete extend implementation for HIR lowering.
+        // Matching the target type and the method's spelling is not
+        // enough: an extension is module-local (§5), and one written
+        // for a DIFFERENT concept that happens to name a method the
+        // same way does not implement this one.
         const Decl* impl_decl = nullptr;
+        const ModuleInfo* impl_module = nullptr;
         for (const auto* decl : all_decls_) {
-          if (decl->kind() != NodeKind::ExtendDecl || !owner_is_visible(extend_owner(decl)))
+          if (decl->kind() != NodeKind::ExtendDecl) {
             continue;
+          }
           const auto& ext = decl->as<ExtendDecl>();
-          const auto* target = resolve_type_node(ext.target_type);
-          if (target != type)
+          if (resolve_type_node(ext.target_type) != type) {
             continue;
+          }
+          const auto* owner = declaring_module(decl);
+          if (!extend_is_visible(owner)) {
+            continue;
+          }
+          // An unconstrained `extend T:` supplies methods to anyone; a
+          // conforming one supplies them for its own concept only.
+          const auto* conforms_to = concept_named_at(ext.target.concept_span);
+          if (!ext.target.concept_name.empty() && conforms_to != concept_decl) {
+            continue;
+          }
           for (const auto* ext_method : ext.methods) {
             if (ext_method->as<FunctionDecl>().name == method.name) {
               impl_decl = ext_method;
+              impl_module = owner;
               break;
             }
           }
-          if (impl_decl != nullptr)
+          if (impl_decl != nullptr) {
             break;
+          }
         }
-        method_table_.insert({key, {fn_type, impl_decl != nullptr ? impl_decl : cpt_method_decl}});
+        // A concept method with no concrete implementation is what the
+        // derivation itself provides, and is available wherever the
+        // type is; a concrete one carries the module that wrote it.
+        add_method(key,
+                   {fn_type,
+                    impl_decl != nullptr ? impl_decl : cpt_method_decl,
+                    impl_decl != nullptr ? impl_module : nullptr});
       }
     }
   }
@@ -2665,29 +3234,15 @@ auto TypeChecker::lookup_method(const Type* obj_type,
                                 std::string_view name,
                                 const Decl** resolved_decl) -> const Type* {
   // O(1) table lookup for concrete types (covers struct conformance blocks,
-  // extend declarations, and derived conformance methods).  The module
-  // being checked answers first, then what every module sees: an
-  // `extend` reaches only its own module, the prelude's reaches all
-  // (CONTRACT_MODULE_SYSTEM.md §5, §7.2).
-  // Innermost-first: the type's own method, then the current module's
-  // `extend`, then the prelude's.  The owner-null slot holds either an
-  // inherent method or a prelude extension; only the former outranks
-  // the module's own extension.
-  auto shared = method_table_.find(MethodKey{obj_type, name, nullptr});
-  auto it = method_table_.end();
-  if (shared != method_table_.end() && shared->second.inherent) {
-    it = shared;
-  } else {
-    it = method_table_.find(MethodKey{obj_type, name, current_module_});
-    if (it == method_table_.end()) {
-      it = shared;
-    }
-  }
+  // extend declarations, and derived conformance methods).
+  auto it = method_table_.find(MethodKey{obj_type, name});
   if (it != method_table_.end()) {
-    if (resolved_decl != nullptr) {
-      *resolved_decl = it->second.method_decl;
+    if (const auto* entry = visible_entry(it->second)) {
+      if (resolved_decl != nullptr) {
+        *resolved_decl = entry->method_decl;
+      }
+      return entry->fn_type;
     }
-    return it->second.fn_type;
   }
 
   // For concrete struct instantiations (e.g., Vector<i32>), fall back to
@@ -2696,29 +3251,35 @@ auto TypeChecker::lookup_method(const Type* obj_type,
   // substitute into the method's return/param types.
   if (obj_type->kind() == TypeKind::Struct) {
     const auto* concrete_st = static_cast<const TypeStruct*>(obj_type);
-    // Every registration of this name for the class, whichever generic
-    // or concrete key it sits under, then the same precedence as the
+    // Every registration of this name for the class, under whichever
+    // generic or concrete key it sits, then the same precedence as the
     // direct lookup: the type's own method, the current module's
-    // extension, the prelude's.  The table is unordered; iteration
-    // order must not decide.
+    // extension, any visible extension (the prelude's).  The table is
+    // unordered; iteration order must not decide.
     const TypeStruct* chosen_st = nullptr;
     const MethodEntry* chosen = nullptr;
     int chosen_tier = 3;
-    for (const auto& [key, entry] : method_table_) {
-      if (key.name != name || key.type == nullptr || key.type->kind() != TypeKind::Struct ||
-          !owner_is_visible(key.owner)) {
+    for (const auto& [key, entries] : method_table_) {
+      if (key.name != name || key.type == nullptr || key.type->kind() != TypeKind::Struct) {
         continue;
       }
       const auto* generic_st = static_cast<const TypeStruct*>(key.type);
       if (generic_st->decl_id() != concrete_st->decl_id()) {
         continue;
       }
-      const int tier = entry.inherent                                           ? 0
-                       : (key.owner != nullptr && key.owner == current_module_) ? 1
-                                                                                : 2;
+      // An instantiation reaches only the methods its own module may
+      // see, exactly as the direct lookup above does (§5).
+      const auto* visible = visible_entry(entries);
+      if (visible == nullptr) {
+        continue;
+      }
+      const int tier =
+          visible->inherent                                                                  ? 0
+          : (visible->extend_module != nullptr && visible->extend_module == current_module_) ? 1
+                                                                                             : 2;
       if (tier < chosen_tier) {
         chosen_tier = tier;
-        chosen = &entry;
+        chosen = visible;
         chosen_st = generic_st;
       }
     }
@@ -2754,11 +3315,11 @@ auto TypeChecker::lookup_method(const Type* obj_type,
       if (type_params != nullptr && gp->index() < type_params->size()) {
         const auto& gp_decl = (*type_params)[gp->index()];
         for (const auto* constraint : gp_decl.constraints) {
-          auto sym_it = resolve_.uses.find(constraint->span.offset);
-          if (sym_it == resolve_.uses.end() || sym_it->second->kind != SymbolKind::Concept) {
+          const auto* concept_sym = concept_for_constraint(constraint);
+          if (concept_sym == nullptr || concept_sym->kind != SymbolKind::Concept) {
             continue;
           }
-          const auto* cpt_decl = sym_it->second->decl_as_decl();
+          const auto* cpt_decl = concept_sym->decl_as_decl();
           if (cpt_decl == nullptr || !cpt_decl->is<ConceptDecl>()) {
             continue;
           }
@@ -2766,8 +3327,8 @@ auto TypeChecker::lookup_method(const Type* obj_type,
           for (const auto* concept_method : cpt.methods) {
             const auto& method = concept_method->as<FunctionDecl>();
             if (method.name == name) {
-              ConceptSelfMapGuard guard(concept_self_map_, cpt.name);
-              concept_self_map_[cpt.name] = obj_type;
+              ConceptSelfMapGuard guard(concept_self_map_, cpt_decl);
+              concept_self_map_[cpt_decl] = obj_type;
               if (resolved_decl != nullptr) {
                 *resolved_decl = concept_method;
               }
@@ -2970,8 +3531,28 @@ auto typecheck(std::span<const FileNode* const> files, const ResolveResult& reso
 
 auto typecheck(const Program& program, const ResolveResult& resolve, TypeContext& types)
     -> TypeCheckResult {
-  auto nodes = program.file_nodes();
-  return typecheck(nodes, resolve, types);
+  // Prelude modules first: they are every module's environment without
+  // being import edges, and a module's declarations must be registered
+  // before a generic of theirs is instantiated in another module's
+  // signature.  Then the remaining modules in topological order.
+  std::vector<const FileNode*> nodes;
+  std::unordered_map<const FileNode*, const ModuleInfo*> file_modules;
+  for (bool prelude : {true, false}) {
+    for (const auto* module : program.topo_order) {
+      if (module->is_prelude == prelude) {
+        nodes.push_back(module->file->parse.file);
+        file_modules.emplace(module->file->parse.file, module);
+      }
+    }
+  }
+  for (const auto& file : program.files) {
+    if (file->parse.file != nullptr && file->module == nullptr) {
+      nodes.push_back(file->parse.file);
+    }
+  }
+  TypeChecker checker(types, resolve);
+  checker.set_file_modules(std::move(file_modules));
+  return checker.check(nodes);
 }
 
 auto typecheck(const FileNode& file, const ResolveResult& resolve, TypeContext& types)

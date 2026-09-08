@@ -114,12 +114,11 @@ auto completions(const nlohmann::json& request, const ServiceContext& ctx) -> Re
 
   auto absolute_offset = pipe.prog.to_program_offset(*document_offset(request, pipe.prog));
   const auto* receiver = dot_receiver(absolute_offset, pipe);
-  // The method set is the querying module's: what the document's own
-  // module can call at this position.
-  const auto* at = pipe.prog.program.source_map.file_for(absolute_offset);
-  const ModuleInfo* from_module = at != nullptr ? at->module : nullptr;
+  // Completions are offered from the document's module, so an `extend`
+  // method another module introduced is not suggested: calling it would
+  // not compile (CONTRACT_MODULE_SYSTEM.md §5).
   auto items = receiver != nullptr
-                   ? query_dot_completions(receiver, pipe.check_result, from_module)
+                   ? query_dot_completions(receiver, pipe.check_result, pipe.prog.user->module)
                    : query_completions(absolute_offset, pipe.resolve_result, pipe.check_result);
 
   nlohmann::json body = nlohmann::json::array();

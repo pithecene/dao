@@ -144,20 +144,20 @@ auto query_dot_completions(const Type* receiver_type,
     }
   }
 
-  // Methods from concept extends (exported method table), filtered to
-  // what this module can call -- an `extend` is module-local (§5) -- and
-  // to the one a call would select when several share a name: the
-  // type's own method, then the current module's extension, then the
-  // prelude's (innermost-first, §7.4).
+  // Methods from concept extends (exported method table), less those an
+  // `extend` in another module introduced -- offering one would advertise
+  // a call the checker rejects -- and, where several share a name, only
+  // the one a call selects: the type's own method, then the current
+  // module's extension, then the prelude's (innermost-first, §7.4).
   std::map<std::string_view, std::pair<int, const MethodInfo*>> best;
   for (const auto& method : typed.methods) {
-    const bool visible = method.owner == nullptr || method.owner == from_module;
-    if (method.receiver_type != base_type || !visible) {
+    if (method.receiver_type != base_type ||
+        !extend_visible_from(method.extend_module, from_module)) {
       continue;
     }
-    const int tier = method.inherent                                            ? 0
-                     : (method.owner != nullptr && method.owner == from_module) ? 1
-                                                                                : 2;
+    const int tier = method.inherent                                                            ? 0
+                     : (method.extend_module != nullptr && method.extend_module == from_module) ? 1
+                                                                                                : 2;
     auto it = best.find(method.method_name);
     if (it == best.end() || tier < it->second.first) {
       best[method.method_name] = {tier, &method};

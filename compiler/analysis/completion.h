@@ -33,9 +33,13 @@ auto query_completions(uint32_t offset,
 /// The playground resolves both simple identifier receivers and
 /// general expression receivers (calls, field chains, indexing)
 /// via the typed expression map.
+/// `from_module` is the module the cursor sits in: an `extend` method
+/// of another module is not offered, because a call to it would not
+/// compile (CONTRACT_MODULE_SYSTEM.md §5).  Null outside a program,
+/// where every method is equally visible.
 auto query_dot_completions(const Type* receiver_type,
                            const TypeCheckResult& typed,
-                           const ModuleInfo* from_module) -> std::vector<CompletionItem>;
+                           const ModuleInfo* from_module = nullptr) -> std::vector<CompletionItem>;
 
 } // namespace dao
 
