@@ -1023,6 +1023,31 @@ private:
     }
   }
 
+  /// The qualified forms through an import binding are a closed set
+  /// (CONTRACT_MODULE_SYSTEM.md §6): a path bottoms out at a type's
+  /// member in expression position (`b::T::m`, `b::E::V`) and at the
+  /// exported type itself in type position (`b::T`).  Anything deeper is
+  /// an error in either position, naming the binding it went through.
+  /// Returns true when the path was rejected.
+  auto reject_deep_path(Span span,
+                        const std::vector<std::string_view>& segments,
+                        size_t deepest,
+                        std::string_view binding,
+                        std::string_view reach) -> bool {
+    if (segments.size() <= deepest) {
+      return false;
+    }
+    std::string path_text;
+    for (auto segment : segments) {
+      path_text += (path_text.empty() ? "" : "::") + std::string(segment);
+    }
+    diagnostics_.push_back(Diagnostic::error(
+        span,
+        "'" + path_text + "': a path through import binding '" + std::string(binding) +
+            "' reaches at most " + std::string(reach) + " (imports bind one segment)"));
+    return true;
+  }
+
   /// `b::name`, `b::E::V`, and `b::T::m` through an import binding
   /// (CONTRACT_MODULE_SYSTEM.md §6).  The binding is recorded at the
   /// head segment and each resolved segment at its own offset, so
@@ -1033,18 +1058,7 @@ private:
     if (target == nullptr) {
       return; // no program, or an import the graph already reported missing
     }
-    auto path_text = [&] {
-      std::string text;
-      for (auto segment : qn.segments) {
-        text += (text.empty() ? "" : "::") + std::string(segment);
-      }
-      return text;
-    };
-    if (qn.segments.size() > 3) {
-      diagnostics_.push_back(Diagnostic::error(
-          expr.span,
-          "'" + path_text() + "': a path through import binding '" + std::string(binding->name) +
-              "' reaches at most a type's member (imports bind one segment)"));
+    if (reject_deep_path(expr.span, qn.segments, 3, binding->name, "a type's member")) {
       return;
     }
 
@@ -1260,11 +1274,7 @@ private:
     if (target == nullptr) {
       return; // no program, or an import the graph already reported missing
     }
-    if (path.segments.size() > 2) {
-      diagnostics_.push_back(Diagnostic::error(
-          path.span,
-          "'" + module_display(path.segments) + "': a type path through import binding '" +
-              std::string(first_seg) + "' has one more segment (imports bind one segment)"));
+    if (reject_deep_path(path.span, path.segments, 2, first_seg, "an exported type")) {
       return;
     }
     auto name = path.segments[1];

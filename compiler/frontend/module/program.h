@@ -96,6 +96,20 @@ struct Program {
   [[nodiscard]] auto module_named(std::string_view display) const -> ModuleInfo*;
 };
 
+/// Everything assembling a program had to say, in the one order §8.4
+/// prescribes.  Graph, lex, and parse diagnostics are one stream, not
+/// three phase-batched ones: an import cycle must not hide the parse
+/// error that explains it, and a consumer that reports the phases in
+/// turn would order two diagnostics in one file by which pass found
+/// them.  Every consumer — the driver, the playground service — asks
+/// here rather than merging its own, so they cannot disagree.
+struct ProgramDiagnostics {
+  std::vector<Diagnostic> unlocated; // nowhere to point: entry selection, position budget
+  std::vector<Diagnostic> located;   // by file, then by offset within it
+};
+
+auto assembly_diagnostics(const Program& program) -> ProgramDiagnostics;
+
 /// How much a program cares that no module declares `fn main`.
 /// A delivered file set must have an entry (CONTRACT_MODULE_SYSTEM.md
 /// §8.3); an editor buffer wants to be told why it cannot be run; a

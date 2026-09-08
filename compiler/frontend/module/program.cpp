@@ -44,6 +44,28 @@ auto Program::module_named(std::string_view display) const -> ModuleInfo* {
   return it == by_display.end() ? nullptr : it->second;
 }
 
+auto assembly_diagnostics(const Program& program) -> ProgramDiagnostics {
+  ProgramDiagnostics out;
+  for (const auto& diag : program.diagnostics) {
+    // A graph diagnostic points at the declaration or import it is
+    // about; entry selection and the position budget concern the whole
+    // program and have a zero-length span standing for "nowhere".
+    (diag.span.length == 0 ? out.unlocated : out.located).push_back(diag);
+  }
+  for (const auto& file : program.files) {
+    out.located.insert(
+        out.located.end(), file->lex.diagnostics.begin(), file->lex.diagnostics.end());
+    out.located.insert(
+        out.located.end(), file->parse.diagnostics.begin(), file->parse.diagnostics.end());
+  }
+  // Files occupy disjoint, ascending ranges of the program's offset
+  // space, so ordering by offset is exactly file order then offset
+  // order (§8.4).
+  std::ranges::stable_sort(
+      out.located, {}, [](const Diagnostic& diag) { return diag.span.offset; });
+  return out;
+}
+
 auto canonical_or_self(const std::filesystem::path& path) -> std::filesystem::path {
   std::error_code ec;
   auto canonical = std::filesystem::weakly_canonical(path, ec);
@@ -191,6 +213,11 @@ struct Discovery {
     }
   }
 
+  /// Add a file to the set unless the same file is already in it, and
+  /// answer the display path the program keeps for it — the spelling of
+  /// the FIRST load, not necessarily this one.  A caller that remembers
+  /// the spelling it passed instead would be naming a file the program
+  /// does not have (§8.4).
   auto add(const std::filesystem::path& path, SourceInput input) -> const std::string& {
     auto canonical = canonical_or_self(path).generic_string();
     auto [it, inserted] = display_by_canonical.emplace(canonical, input.display_path);
@@ -200,8 +227,10 @@ struct Discovery {
     return it->second;
   }
 
-  auto loaded(const std::filesystem::path& path) const -> bool {
-    return display_by_canonical.contains(canonical_or_self(path).generic_string());
+  /// The display path the set already holds for this file, or null.
+  auto display_of(const std::filesystem::path& path) const -> const std::string* {
+    auto it = display_by_canonical.find(canonical_or_self(path).generic_string());
+    return it == display_by_canonical.end() ? nullptr : &it->second;
   }
 };
 
@@ -231,12 +260,22 @@ auto load_program_from_root(const std::filesystem::path& root_file, const Progra
     discovery.graph.searched_roots.push_back(root.empty() ? "." : root.generic_string());
   }
 
-  pending.push_back(read_source_input(root_file, /*is_prelude=*/false));
-  discovery.graph.root_display = pending.back().display_path;
   // A root file names a program the driver was asked to compile, exactly
   // as an explicit file set does, so it owes the same entry point (§8.1).
   discovery.graph.entry_policy = EntryPolicy::Required;
-  discovery.add(root_file, pending.back());
+  if (const auto* already = discovery.display_of(root_file)) {
+    // The root is also a prelude file (`daoc check stdlib/core/vector.dao`).
+    // The program keeps one copy of it, in the prelude group per §7.6 —
+    // whether a stdlib file belongs to the prelude cannot depend on
+    // whether the command line happened to name it.  What the root
+    // contributes is its ROLE: its module is the entry (§7.7), which
+    // only holds if the root is named by the spelling the program kept.
+    discovery.graph.root_display = *already;
+  } else {
+    auto root_input = read_source_input(root_file, /*is_prelude=*/false);
+    pending.push_back(root_input);
+    discovery.graph.root_display = discovery.add(root_file, std::move(root_input));
+  }
 
   while (!pending.empty()) {
     auto input = std::move(pending.front());
@@ -246,10 +285,8 @@ auto load_program_from_root(const std::filesystem::path& root_file, const Progra
       if (!path) {
         continue; // the graph reports it, naming the roots searched
       }
-      if (discovery.loaded(*path)) {
-        discovery.graph.located.push_back({.identity = identity,
-                                           .display_path = discovery.display_by_canonical.at(
-                                               canonical_or_self(*path).generic_string())});
+      if (const auto* already = discovery.display_of(*path)) {
+        discovery.graph.located.push_back({.identity = identity, .display_path = *already});
         continue;
       }
       // The display path read_source_input derived is kept as it is:

@@ -105,14 +105,22 @@ struct ProgramRequest {
   /// The entry module names the program, but the file that carries it
   /// is not known until the graph is built; the smallest path is a
   /// stable stand-in that no permutation changes.
-  [[nodiscard]] auto primary_file() const -> const std::filesystem::path& {
+  [[nodiscard]] auto primary_file() const -> std::filesystem::path {
     if (!root.empty() || sources.empty()) {
       return root;
     }
-    // Compared by the file each path names, not by its spelling:
-    // `./b.dao` and `b.dao` are one file and must not choose different
-    // primaries for one set (CONTRACT_MODULE_SYSTEM.md §8.4).
-    return *std::ranges::min_element(sources, {}, canonical_or_self);
+    // The file each path NAMES, not the spelling it was given: `./b.dao`,
+    // `b.dao`, and a symlink to it are one source, and the explicit
+    // loader already deduplicates them.  Ranking the spellings would
+    // leave the winner among equals to input order — and a symlink alias
+    // has its own stem, so the same program would be built under two
+    // different names (§8.4).
+    std::vector<std::filesystem::path> named;
+    named.reserve(sources.size());
+    for (const auto& source : sources) {
+      named.push_back(canonical_or_self(source));
+    }
+    return *std::ranges::min_element(named);
   }
 };
 

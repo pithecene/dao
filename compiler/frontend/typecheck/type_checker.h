@@ -194,7 +194,8 @@ private:
     auto operator=(const ConceptSelfMapGuard&) -> ConceptSelfMapGuard& = delete;
   };
 
-  // Pre-built method lookup table: (type*, method_name) -> {fn_type, decl}.
+  // Pre-built method lookup table:
+  // (type*, method_name, owner) -> {fn_type, decl}.
   struct MethodEntry {
     const Type* fn_type;     // method function type (self removed)
     const Decl* method_decl; // the FunctionDecl node for HIR resolution
@@ -208,6 +209,14 @@ private:
   struct MethodKey {
     const Type* type;
     std::string_view name;
+    // The module whose `extend` block introduced the method, which is
+    // the only module it participates in method-set lookup from
+    // (CONTRACT_MODULE_SYSTEM.md §5).  Null means every module sees it:
+    // a type's own methods, which travel with the type; a prelude
+    // `extend`, the sole cross-module exception (§7.2); and any program
+    // whose symbols carry no module identity, such as a single-file
+    // test fixture.
+    const ModuleInfo* owner = nullptr;
     auto operator==(const MethodKey&) const -> bool = default;
   };
 
@@ -215,7 +224,9 @@ private:
     auto operator()(const MethodKey& key) const -> size_t {
       auto h1 = std::hash<const void*>{}(key.type);
       auto h2 = std::hash<std::string_view>{}(key.name);
-      return h1 ^ (h2 * 0x9e3779b97f4a7c15ULL + 0x9e3779b9 + (h1 << 6) + (h1 >> 2));
+      auto h3 = std::hash<const void*>{}(static_cast<const void*>(key.owner));
+      auto mixed = h1 ^ (h2 * 0x9e3779b97f4a7c15ULL + 0x9e3779b9 + (h1 << 6) + (h1 >> 2));
+      return mixed ^ (h3 * 0x9e3779b97f4a7c15ULL + 0x9e3779b9 + (mixed << 6) + (mixed >> 2));
     }
   };
 
