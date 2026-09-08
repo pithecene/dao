@@ -467,6 +467,11 @@ auto TypeChecker::resolve_symbol_type_for_type_decl(const Symbol* sym) -> const 
 // Pass 1: register declaration types
 // ---------------------------------------------------------------------------
 
+// A guard on the registration fixpoint, not a working limit: every
+// round types at least one slot, so the graph would have to be this
+// deep for the guard to trip -- and if it does, it is reported.
+constexpr size_t kRegistrationRoundCap = 100000;
+
 void TypeChecker::register_declarations() {
   pending_classes_.clear(); // Reset pass-local state for this file.
   fields_registered_ = false;
@@ -496,13 +501,25 @@ void TypeChecker::register_declarations() {
   // Every declaration can be enabled at most once, so the loop is
   // bounded by the number of slots; the cap below is a guard against a
   // defect in that reasoning, never a working limit.
-  for (size_t round = 0; round < 100000; ++round) {
+  // Each pass revisits only declarations that still have an untyped
+  // slot, so a round costs the number of unresolved declarations, and
+  // every round resolves at least one or the loop ends.
+  bool converged = false;
+  for (size_t round = 0; round < kRegistrationRoundCap; ++round) {
     size_t progress = register_type_aliases(/*report_failures=*/false);
     progress += register_enum_variants(/*report_failures=*/false);
     progress += register_struct_fields(/*report_failures=*/false);
     if (progress == 0) {
+      converged = true;
       break;
     }
+  }
+  if (!converged) {
+    // Still making progress at the cap: continuing would let aliases
+    // cache instantiations with holes.  Said, not swallowed.
+    error(Span{},
+          "type registration did not converge within " + std::to_string(kRegistrationRoundCap) +
+              " rounds; the declaration graph is too deep");
   }
   fields_registered_ = true;
   register_type_aliases(/*report_failures=*/true);
@@ -707,6 +724,12 @@ auto TypeChecker::register_enum_variants(bool report_failures) -> size_t {
         known != symbol_types_.end() && known->second->kind() == TypeKind::Enum) {
       existing = static_cast<const TypeEnum*>(known->second);
     }
+    if (existing != nullptr && !report_failures) {
+      std::unordered_set<const Type*> seen;
+      if (type_complete(existing, seen)) {
+        continue; // complete by value: nothing a further pass can change
+      }
+    }
     std::vector<EnumVariant> variants;
     size_t variant_index = 0;
     for (const auto& variant : en.variants) {
@@ -770,6 +793,15 @@ auto TypeChecker::register_struct_fields(bool report_failures) -> size_t {
   // is gets reported exactly once, by the final pass.
   for (auto& pending : pending_classes_) {
     const auto& had = pending.shell->fields();
+    if (!report_failures && had.size() == pending.class_decl->fields.size()) {
+      // Settled only when complete by value all the way down: a field
+      // typed by an instantiation that still carries a hole must be
+      // re-resolved once that hole is filled.
+      std::unordered_set<const Type*> seen;
+      if (type_complete(pending.shell, seen)) {
+        continue;
+      }
+    }
     std::vector<StructField> fields;
     size_t index = 0;
     for (const auto* field : pending.class_decl->fields) {
@@ -799,6 +831,13 @@ auto TypeChecker::type_complete(const Type* type, std::unordered_set<const Type*
   switch (type->kind()) {
   case TypeKind::Struct: {
     const auto* st = static_cast<const TypeStruct*>(type);
+    // A shell whose fields are not registered yet has nothing to check
+    // and is not complete: the declaration says how many it will have.
+    if (const auto* decl = st->decl_id();
+        decl != nullptr && decl->is<ClassDecl>() &&
+        st->fields().size() != decl->as<ClassDecl>().fields.size()) {
+      return false;
+    }
     return std::ranges::all_of(st->fields(),
                                [&](const StructField& f) { return type_complete(f.type, seen); });
   }

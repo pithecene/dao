@@ -844,6 +844,21 @@ suite<"typecheck_modules"> typecheck_modules = [] {
         << "Wrap::Some(box = Box(\"wrong\")) was accepted through an incomplete enum instantiation";
   };
 
+  "an alias of a generic enum whose payload is a class waits for the class's fields"_test = [] {
+    // Enum registration runs before the first field pass, when Box is
+    // still an empty shell.  The shell is not complete, so IntWrap waits
+    // for it; registered early it stayed shaped as Wrap<T>.  Constructing
+    // a generic enum's variant against an explicit instantiation does not
+    // unify on this branch (pre-existing, independent of aliases), so the
+    // witness is that the alias registers cleanly and types a parameter.
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nclass Box<T>:\n    v: T\nenum class Wrap<T>:\n    Some(box: Box<T>)\n    "
+         "None\ntype IntWrap = Wrap<i32>\nfn take(w: IntWrap): i32 -> 0\nfn main(): i32 -> 0\n"},
+    });
+    expect(checked.result.diagnostics.empty()) << all_messages(checked);
+  };
+
   "a concept is not a type outside a bound"_test = [] {
     auto checked = check_program({
         {"traits.dao", "module app::traits\nconcept Reveal:\n    fn reveal(self): i32\n"},
