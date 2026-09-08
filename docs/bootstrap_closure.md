@@ -206,16 +206,19 @@ virtual memory and 600 s (the bootstrap frees nothing, so a stage's cost
 can only be measured alone); peak memory and time are the deepest stage's --
 one self-compilation attempt through that stage.
 
+A stage the program never reached reads as —; the last column says where
+it died and why.
+
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 6854 | 19 | 0 | 46 | 346 | 427 | 0 | 16 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 6151 | 17 | 0 | 52 | 385 | 347 | 0 | 19 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 5543 | 16 | 0 | 57 | 380 | 386 | 0 | 16 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 11667 | 35 | 0 | 132 | 933 | 595 | 0 | 57 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 15006 | 52 | 0 | 246 | 1650 | 939 | 0 |  |  | parse: expected expression; then in mir: panic: allocation failed (size=2359296, align=8) |
-| hir | 15942 | 52 | 0 | 253 | 2149 | 1150 | 0 |  |  | parse: expected expression; then in mir: panic: allocation failed (size=1179648, align=8) |
-| mir | 16270 | 54 | 0 | 285 | 2465 |  |  |  |  | parse: expected expression; then in typecheck: panic: allocation failed (size=524288, align=8) |
-| llvm | 16 | 1 |  |  |  |  |  |  |  | in parse: process died (status 139; memory bound 16 GiB) |
+| lexer | 6854 | 19 | 0 | 46 | 346 | 427 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 6151 | 17 | 0 | 52 | 385 | 347 | 0 | 19 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 5543 | 16 | 0 | 57 | 380 | 386 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 11667 | 35 | 0 | 132 | 933 | 595 | 0 | 57 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 15006 | 52 | 0 | 246 | 1650 | 939 | 0 | — | — | parse: expected expression; then in mir: panic: allocation failed (size=2359296, align=8) |
+| hir | 15942 | 52 | 0 | 253 | 2149 | 1150 | 0 | — | — | parse: expected expression; then in mir: panic: allocation failed (size=1179648, align=8) |
+| mir | 16270 | 54 | 0 | 285 | 2465 | — | — | — | — | parse: expected expression; then in typecheck: panic: allocation failed (size=524288, align=8) |
+| llvm | 16 | 1 | — | — | — | — | — | — | — | in parse: process died (status 139; memory bound 16 GiB) |
 
 ### What each stage rejects
 

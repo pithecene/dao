@@ -198,6 +198,9 @@ generic_qualified_sites() {
   echo "can only be measured alone); peak memory and time are the deepest stage's --"
   echo "one self-compilation attempt through that stage."
   echo
+  echo "A stage the program never reached reads as —; the last column says where"
+  echo "it died and why."
+  echo
   echo "| Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |"
   echo "|---|---|---|---|---|---|---|---|---|---|---|"
   awk -F'\t' '{
@@ -211,6 +214,10 @@ generic_qualified_sites() {
       else if (key == "missing") first="not assembled: " val;
     }
     gsub(/\|/, "\\|", first);
+    # A stage the program never reached (it died earlier; the last column
+    # says where and why) reads as a dash, not as an empty count.
+    if (lex == "") lex = "—"; if (parse == "") parse = "—"; if (resolve == "") resolve = "—"; if (typecheck == "") typecheck = "—";
+    if (hir == "") hir = "—"; if (mir == "") mir = "—"; if (llvm == "") llvm = "—";
     printf "| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", name, peak, secs, lex, parse, resolve, typecheck, hir, mir, llvm, (first == "" ? "—" : first);
   }' "$AUDIT_OUT/closure.txt"
   echo
