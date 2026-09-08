@@ -1,0 +1,4 @@
+module app
+
+fn main(): i32
+  return 0
