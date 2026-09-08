@@ -249,6 +249,8 @@ suite<"module_naming"> module_naming = [] {
     expect(is_builtin_intrinsic(prelude_size_of));
     expect(is_builtin_intrinsic(builtin));
     expect(!is_builtin_intrinsic(prelude_other)) << "prefix alone is not a match";
+    expect(llvm_function_name(prelude_size_of, &user) == "size_of$i32")
+        << "an intrinsic keeps its bare name: the backend replaces its body by that name";
   };
 
   "two_modules_may_declare_the_same_function"_test = [] {
@@ -267,6 +269,31 @@ suite<"module_naming"> module_naming = [] {
     expect(ir.find("call i32 @\"a::x::add\"") != std::string::npos &&
            ir.find("call i32 @\"a::y::add\"") != std::string::npos)
         << "main calls each module's add";
+  };
+
+  "a module's own extend wins generic dispatch over the prelude's"_test = [] {
+    // Lookup is innermost-first everywhere (CONTRACT_MODULE_SYSTEM.md
+    // §7.4); a generic body dispatching through a concept bound is not
+    // an exception.  HIR lists prelude functions first, so "the first
+    // visible candidate" was the prelude's method whenever the module
+    // had its own.
+    LlvmProgramPipeline pipe({
+        {"stdlib/core/alt.dao",
+         "module core::alt\nconcept Alternate:\n    fn to_string(self): string\n"
+         "extend i32 as Alternate:\n    fn to_string(self): string -> \"prelude\"\n"},
+        {"main.dao",
+         "module app::main\nextend i32 as Alternate:\n"
+         "    fn to_string(self): string -> \"local\"\n"
+         "fn show<T: Alternate>(x: T): string -> x.to_string()\n"
+         "fn main(): i32\n  let s: string = show(42)\n  return 0\n"},
+    });
+    expect(pipe.llvm_result.module != nullptr) << "lowering failed: " << pipe.problems();
+    auto ir = pipe.ir();
+    expect(ir.find("call ptr @\"app::main::i32.to_string\"") != std::string::npos ||
+           ir.find("@\"app::main::i32.to_string\"(") != std::string::npos)
+        << "the instantiation must call the module's own method: " << ir;
+    expect(ir.find("call ptr @\"core::alt::i32.to_string\"") == std::string::npos)
+        << "the prelude's method was chosen over the module's own: " << ir;
   };
 
   "main_outside_the_entry_module_is_an_ordinary_function"_test = [] {
