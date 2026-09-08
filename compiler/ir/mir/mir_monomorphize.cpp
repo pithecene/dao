@@ -652,6 +652,21 @@ auto build_value_types(const MirFunction* fn)
   return value_types;
 }
 
+// The call each callee value feeds, function-wide: a reference and its
+// call need not share a block (an argument containing `?` puts the
+// call in the merge block that follows).
+auto build_call_index(const MirFunction* fn) -> std::unordered_map<uint32_t, const MirCall*> {
+  std::unordered_map<uint32_t, const MirCall*> calls_by_callee;
+  for (const auto* blk : fn->blocks) {
+    for (const auto* inst : blk->insts) {
+      if (const auto* call = std::get_if<MirCall>(&inst->payload)) {
+        calls_by_callee[call->callee.id] = call;
+      }
+    }
+  }
+  return calls_by_callee;
+}
+
 // ---------------------------------------------------------------------------
 // Process a single call site that references a generic function.
 // Returns true if a new specialization was created.
@@ -659,8 +674,7 @@ auto build_value_types(const MirFunction* fn)
 
 auto specialize_call_site(MirInst* inst,
                           MirFnRef* fn_ref,
-                          const MirBlock* block,
-                          size_t inst_idx,
+                          const std::unordered_map<uint32_t, const MirCall*>& calls_by_callee,
                           const std::unordered_map<uint32_t, const Type*>& value_types,
                           const std::unordered_map<const Symbol*, MirFunction*>& generic_fns,
                           SpecializationState& state,
@@ -677,15 +691,10 @@ auto specialize_call_site(MirInst* inst,
     return false;
   }
 
-  // Find the matching MirCall instruction that uses this FnRef.
+  // The call this reference feeds, wherever in the function it sits.
   const MirCall* call_payload = nullptr;
-  for (size_t j = inst_idx + 1; j < block->insts.size(); ++j) {
-    auto* candidate = std::get_if<MirCall>(&block->insts[j]->payload);
-    if (candidate != nullptr &&
-        candidate->callee.id == inst->result.id) {
-      call_payload = candidate;
-      break;
-    }
+  if (auto found = calls_by_callee.find(inst->result.id); found != calls_by_callee.end()) {
+    call_payload = found->second;
   }
 
   if (!is_template) {
@@ -811,8 +820,10 @@ auto monomorphize(
     for (size_t fn_idx = 0; fn_idx < fn_count; ++fn_idx) {
       auto* fn = module.functions[fn_idx];
 
-      // Build per-function value-type index for O(1) arg type lookups.
+      // Per-function indexes: value types for O(1) argument lookups,
+      // and the call each callee value feeds.
       auto value_types = build_value_types(fn);
+      auto calls_by_callee = build_call_index(fn);
 
       for (auto* block : fn->blocks) {
         for (size_t inst_idx = 0; inst_idx < block->insts.size();
@@ -825,8 +836,7 @@ auto monomorphize(
 
           if (specialize_call_site(inst,
                                    fn_ref,
-                                   block,
-                                   inst_idx,
+                                   calls_by_callee,
                                    value_types,
                                    generic_templates,
                                    state,
