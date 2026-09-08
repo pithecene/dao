@@ -112,9 +112,15 @@ for p in $PROGRAMS; do
     # The deepest stage attempted is the cost of one self-compilation
     # attempt through that stage: its peak and time are the program's.
     deepest="$stage"; deepest_peak=$peak_mb; deepest_seconds=$elapsed
+    # The probe wrote its stage's columns to $OUT/closure.txt; take them.
     if [ -f "$OUT/closure.txt" ] && grep -q "^$p	" "$OUT/closure.txt"; then
-      record="$record$(grep "^$p	" "$AUDIT_OUT/closure.txt" | head -1 | sed "s/^$p//")"
+      record="$record$(grep "^$p	" "$OUT/closure.txt" | head -1 | sed "s/^$p//")"
       continue
+    fi
+    # A stage that exits cleanly has written its line; none means the
+    # audit is not reading its probe, not a program with nothing to say.
+    if [ "$status" -eq 0 ]; then
+      echo "audit: stage $stage of $p exited 0 without writing its line (see $AUDIT_OUT/probe-$p-$stage.log)"; exit 1
     fi
     if [ "$status" -eq 124 ]; then
       why="exceeded ${LIMIT_S}s"

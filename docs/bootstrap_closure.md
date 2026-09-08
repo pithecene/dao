@@ -208,14 +208,14 @@ one self-compilation attempt through that stage.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 6854 | 20 |  |  |  |  |  |  |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 6152 | 17 |  |  |  |  |  |  |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 5545 | 16 |  |  |  |  |  |  |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 11666 | 40 |  |  |  |  |  |  |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 15006 | 51 |  |  |  |  |  |  |  | parse: expected expression; then in mir: panic: allocation failed (size=2359296, align=8) |
-| hir | 15941 | 52 |  |  |  |  |  |  |  | parse: expected expression; then in mir: panic: allocation failed (size=1179648, align=8) |
-| mir | 16270 | 53 |  |  | 2465 |  |  |  |  | parse: expected expression; then in typecheck: panic: allocation failed (size=524288, align=8) |
-| llvm | 15 | 0 |  |  |  |  |  |  |  | in parse: process died (status 139; memory bound 16 GiB) |
+| lexer | 6854 | 19 | 0 | 46 | 346 | 427 | 0 | 16 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 6151 | 17 | 0 | 52 | 385 | 347 | 0 | 19 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 5543 | 16 | 0 | 57 | 380 | 386 | 0 | 16 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 11667 | 35 | 0 | 132 | 933 | 595 | 0 | 57 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 15006 | 52 | 0 | 246 | 1650 | 939 | 0 |  |  | parse: expected expression; then in mir: panic: allocation failed (size=2359296, align=8) |
+| hir | 15942 | 52 | 0 | 253 | 2149 | 1150 | 0 |  |  | parse: expected expression; then in mir: panic: allocation failed (size=1179648, align=8) |
+| mir | 16270 | 54 | 0 | 285 | 2465 |  |  |  |  | parse: expected expression; then in typecheck: panic: allocation failed (size=524288, align=8) |
+| llvm | 16 | 1 |  |  |  |  |  |  |  | in parse: process died (status 139; memory bound 16 GiB) |
 
 ### What each stage rejects
 
@@ -349,13 +349,13 @@ Sites per program against the parse column above:
 
 | Program | `Type<Args>::` sites | parse diagnostics |
 |---|---|---|
-| lexer | 42 | — |
-| parser | 44 | — |
-| graph | 53 | — |
-| resolver | 85 | — |
-| typecheck | 124 | — |
-| hir | 137 | — |
-| mir | 150 | — |
+| lexer | 42 | 46 |
+| parser | 44 | 52 |
+| graph | 53 | 57 |
+| resolver | 85 | 132 |
+| typecheck | 124 | 246 |
+| hir | 137 | 253 |
+| mir | 150 | 285 |
 | llvm | 187 | — |
 
 ## 4. Reading the matrix
