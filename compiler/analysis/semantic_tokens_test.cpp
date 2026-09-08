@@ -7,8 +7,11 @@
 #include <boost/ut.hpp>
 
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 using namespace boost::ut;
 using namespace dao;
@@ -503,6 +506,87 @@ suite<"expansion_classification"> expansion_classification = [] {
 };
 
 // NOLINTEND(readability-magic-numbers)
+
+// ---------------------------------------------------------------------------
+// Qualified paths across modules (CONTRACT_MODULE_SYSTEM.md §6): the
+// resolver records what each segment resolved to at that segment's own
+// offset, and classification must paint each segment from its own
+// record rather than from what the head of the path implies.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Classify one document of a multi-module program, so a path through
+/// an import binding is classified with the modules it really crosses.
+struct ClassifiedProgram {
+  Program program;
+  ResolveResult resolve_result;
+  std::vector<SemanticToken> tokens;
+};
+
+auto classify_program(std::vector<std::pair<std::string, std::string>> files,
+                      std::string_view document) -> std::unique_ptr<ClassifiedProgram> {
+  std::vector<SourceInput> inputs;
+  for (auto& [path, text] : files) {
+    inputs.push_back({.display_path = path, .text = text, .is_prelude = false});
+  }
+  auto classified = std::make_unique<ClassifiedProgram>();
+  classified->program = build_program(std::move(inputs));
+  classified->resolve_result = resolve(classified->program);
+  for (const auto& file : classified->program.files) {
+    if (file->display_path != document) {
+      continue;
+    }
+    expect(file->lex.diagnostics.empty() && file->parse.diagnostics.empty())
+        << "fixture does not parse";
+    classified->tokens =
+        classify_tokens(file->lex.tokens, file->file(), &classified->resolve_result);
+  }
+  return classified;
+}
+
+/// The categories given to every token spelled `text`, in source order.
+auto kinds_of(const ClassifiedProgram& classified, std::string_view text)
+    -> std::vector<std::string_view> {
+  std::vector<std::string_view> kinds;
+  for (const auto& tok : classified.tokens) {
+    if (classified.program.source_map.text(tok.span) == text) {
+      kinds.push_back(tok.kind);
+    }
+  }
+  return kinds;
+}
+
+using Kinds = std::vector<std::string_view>;
+
+} // namespace
+
+suite<"qualified_path_segments"> qualified_path_segments = [] {
+  "b::T::m paints module, type, function"_test = [] {
+    auto classified = classify_program(
+        {{"lib.dao", "module lib\nclass Box:\n  n: i32\n  fn make(): Box -> Box(0)\n"},
+         {"main.dao",
+          "module app\nimport lib\nfn main(): i32\n  let b: Box = lib::Box::make()\n  return 0\n"}},
+        "main.dao");
+    expect(kinds_of(*classified, "lib") == Kinds{"decl.module", "use.module"})
+        << "the import binding and the head of the path";
+    expect(kinds_of(*classified, "Box") == Kinds{"type.nominal", "use.type"})
+        << "the exported type, not another module segment";
+    expect(kinds_of(*classified, "make") == Kinds{"use.function"});
+  };
+
+  "b::E::V paints module, type, variant"_test = [] {
+    auto classified = classify_program({{"lib.dao", "module lib\nenum Color:\n  Red\n  Green\n"},
+                                        {"main.dao",
+                                         "module app\nimport lib\nfn main(): i32\n  let c: Color = "
+                                         "lib::Color::Red\n  return 0\n"}},
+                                       "main.dao");
+    expect(kinds_of(*classified, "lib") == Kinds{"decl.module", "use.module"});
+    expect(kinds_of(*classified, "Color") == Kinds{"type.nominal", "use.type"});
+    expect(kinds_of(*classified, "Red") == Kinds{"use.variant"})
+        << "the variant, not the enum type it is recorded as";
+  };
+};
 
 auto main() -> int {
 } // NOLINT(readability-named-parameter)
