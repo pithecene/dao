@@ -290,6 +290,14 @@ expressions, break/continue, LLVM C API integration,
 **How to run tests**:
 
 ```sh
+task bootstrap-test   # every suite, then validate_ir over bootstrap/llvm/out
+```
+
+or by hand (the suite writes its artifacts under `bootstrap/llvm/out`,
+which is gitignored, so create it first):
+
+```sh
+rm -rf bootstrap/llvm/out && mkdir -p bootstrap/llvm/out
 bash bootstrap/assemble.sh && daoc build bootstrap/llvm/llvm.gen.dao && ./bootstrap/llvm/llvm.gen
 bash bootstrap/validate_ir.sh build/debug
 ```
