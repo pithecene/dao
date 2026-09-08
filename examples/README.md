@@ -3,8 +3,13 @@
 Illustrative Dao programs live here.
 Keep them small and human-readable.
 
-Every file is a complete program meant to build with `daoc build` and
-run.  The playground lists this directory, and each file is a
+Every file here is a complete program meant to build with `daoc build`
+and run.  A subdirectory whose files declare one `fn main` between them
+is a single multi-file program instead — `playground_service_test`
+analyzes each of its files and builds and runs the set together against
+`testdata/examples/<dir>.out`.  A subdirectory whose files each declare
+their own `fn main` is a collection of separate programs and is left
+alone.  The playground lists this directory, and each file is a
 regression input, so a new language feature should land with an
 example that exercises it.  `playground_service_test` compiles and
 runs every file, compares its output with `testdata/examples/<name>.out`
@@ -33,4 +38,5 @@ it stays here as the regression input for that fix and is listed in
 | `resource.dao`, `unsafe.dao`, `raw_memory.dao` | `resource memory` domains, `mode unsafe`, pointers and allocation |
 | `astar.dao` | a small search algorithm using several of the above |
 | `ffi/` | calling C from Dao (needs the C helpers alongside) |
+| `modules/` | a multi-file program: `module`, `import`, and names reached through a module binding |
 | `bootstrap_probe/` | historical probes that preceded `bootstrap/`; kept as artifacts |

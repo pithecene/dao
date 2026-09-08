@@ -10,6 +10,7 @@ Normative behavior lives in `CLAUDE.md` and `docs/contracts/`.
 | `CLAUDE.md` | Repo constitution and structural invariants |
 | `AGENTS.md` | Contributor and agent guardrails |
 | `README.md` | Project overview |
+| `CHANGELOG.md` | Observable behaviour changes, newest first |
 | `.bonsai.yaml` | Repo-local Bonsai routing hints |
 | `.grove.yaml` | Grove project metadata and consolidation hints |
 | `mise.toml` | mise tool/runtime pins, env-based build parallelism cap |

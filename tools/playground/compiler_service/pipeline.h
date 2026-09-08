@@ -156,6 +156,17 @@ void collect_program_diagnostics(nlohmann::json& out, const PlaygroundProgram& p
 /// reporting where and for program-assembly diagnostics that have
 /// nowhere to point.  The severity is the reported one: an advisory is
 /// serialized as a warning, not silently promoted to an error.
+/// Put a reply's diagnostics in program order: by the position of the
+/// file they lie in, then by offset within it.  The program's file
+/// order is the prelude group first, then display path (Task 31 §8.4;
+/// CONTRACT_MODULE_SYSTEM.md §9 makes the result independent of the
+/// order files were given), which the file's name alone does not give.  Entries with no location
+/// sort first, where a reader meets them before any file's own complaints.  The service collects
+/// diagnostics phase by phase, which would otherwise let a later
+/// phase's diagnostic in an earlier file follow an earlier phase's in
+/// a later one.
+void sort_diagnostics(nlohmann::json& diagnostics, const PlaygroundProgram& prog);
+
 auto make_unlocated_diagnostic(const std::string& message, Severity severity = Severity::Error)
     -> nlohmann::json;
 

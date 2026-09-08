@@ -102,18 +102,34 @@ auto reported_file(const dao::Program& program) -> const dao::SourceFile& {
 // and imported modules alike -- are not printed.
 void cmd_tokens(const dao::ProgramRequest& request) {
   auto program = dao::load_program(request);
-  const auto& user = reported_file(program);
 
   // Run name resolution for resolve-driven classifications.
   auto resolve_result = dao::resolve(program);
 
-  auto sem_tokens =
-      dao::classify_tokens(user.lex.tokens, user.file(), &resolve_result);
-
-  for (const auto& tok : sem_tokens) {
-    auto loc = program.source_map.locate(tok.span.offset);
-    auto text = program.source_map.text(tok.span);
-    std::cout << loc.line << ":" << loc.col << " " << tok.kind << " " << text << "\n";
+  // Every user module; prelude tokens are not the user's concern.
+  // Collected once: user_files() builds a vector by scanning every file,
+  // so asking again per iteration would be quadratic.
+  // Every user module, and the file the command named when that file
+  // is itself a prelude file (`daoc tokens stdlib/core/x.dao`): the
+  // program holds it in the prelude group, whether or not it imports a
+  // user module, and the command asked about it.  Program order.
+  auto user_files = program.user_files();
+  const auto& named = reported_file(program);
+  if (named.is_prelude) {
+    // Prelude files occupy the lowest offsets, so the named file sorts
+    // ahead of every user file.
+    user_files.insert(user_files.begin(), &named);
+  }
+  for (const auto* user : user_files) {
+    if (user_files.size() > 1) {
+      std::cout << "== " << user->display_path << "\n";
+    }
+    auto sem_tokens = dao::classify_tokens(user->lex.tokens, user->file(), &resolve_result);
+    for (const auto& tok : sem_tokens) {
+      auto loc = program.source_map.locate(tok.span.offset);
+      auto text = program.source_map.text(tok.span);
+      std::cout << loc.line << ":" << loc.col << " " << tok.kind << " " << text << "\n";
+    }
   }
 }
 

@@ -1,7 +1,10 @@
 #include "analysis/completion.h"
 #include "analysis/document_symbols.h"
+#include "analysis/goto_definition.h"
+#include "analysis/hover.h"
 #include "analysis/references.h"
 #include "frontend/lexer/lexer.h"
+#include "frontend/module/program.h"
 #include "frontend/parser/parser.h"
 #include "frontend/resolve/resolve.h"
 #include "frontend/typecheck/type_checker.h"
@@ -10,6 +13,8 @@
 
 #include <boost/ut.hpp>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace boost::ut;
 using namespace dao;
@@ -41,7 +46,74 @@ struct AnalysisPipeline {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Cross-module navigation: hover and definition follow a
+// qualified name into the module that declares it.
+// ---------------------------------------------------------------------------
+
+struct ProgramPipeline {
+  Program program;
+  ResolveResult resolve_result;
+  TypeContext types;
+  TypeCheckResult check_result;
+
+  explicit ProgramPipeline(std::vector<std::pair<std::string, std::string>> files) {
+    std::vector<SourceInput> inputs;
+    for (auto& [display, text] : files) {
+      inputs.push_back({.display_path = display, .text = text, .is_prelude = false});
+    }
+    program = build_program(std::move(inputs));
+    resolve_result = resolve(program);
+    check_result = typecheck(program, resolve_result, types);
+  }
+
+  /// Program offset of the first occurrence of `text` in a file.
+  [[nodiscard]] auto offset_in(std::string_view display, std::string_view text) const -> uint32_t {
+    for (const auto& file : program.files) {
+      if (file->display_path == display) {
+        return file->base_offset + static_cast<uint32_t>(file->buffer.contents().find(text));
+      }
+    }
+    return 0;
+  }
+
+  [[nodiscard]] auto file_of(uint32_t offset) const -> std::string {
+    const auto* file = program.source_map.file_for(offset);
+    return file == nullptr ? "" : file->display_path;
+  }
+};
+
 } // namespace
+
+suite<"cross_module_navigation"> cross_module_navigation = [] {
+  "hover_and_definition_follow_a_qualified_call_into_its_module"_test = [] {
+    ProgramPipeline pipe({
+        {"main.dao", "module app::main\nimport app::math\nfn main(): i32 -> math::add(1, 2)\n"},
+        {"math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n"},
+    });
+    expect(pipe.resolve_result.diagnostics.empty() && pipe.check_result.diagnostics.empty());
+
+    auto use = pipe.offset_in("main.dao", "add(1");
+    auto hover = query_hover(use, pipe.resolve_result, pipe.check_result);
+    expect(hover.has_value() && hover->name == "add" && hover->symbol_kind == "function")
+        << (hover ? hover->name : "no hover");
+    expect(hover.has_value() && hover->type == "fn(i32, i32): i32") << (hover ? hover->type : "");
+
+    auto definition = query_definition(use, pipe.resolve_result);
+    expect(definition.has_value()) << "no definition";
+    if (definition) {
+      expect(pipe.file_of(definition->offset) == "math.dao") << pipe.file_of(definition->offset);
+      expect(pipe.program.source_map.locate(definition->offset).line == 2_u);
+    }
+
+    // The head segment still names the module binding.
+    auto head = query_hover(
+        pipe.offset_in("main.dao", "math::add"), pipe.resolve_result, pipe.check_result);
+    expect(head.has_value() && head->symbol_kind == "module") << (head ? head->symbol_kind : "");
+  };
+};
+
+namespace {} // namespace
 
 // ---------------------------------------------------------------------------
 // Document symbols

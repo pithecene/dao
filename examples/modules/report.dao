@@ -1,0 +1,10 @@
+module report
+// A module that imports another: `import shapes` binds the last segment
+// of the path, so its declarations are reached as `shapes::name`.
+
+import shapes
+
+fn describe(r: shapes::Rect): i32
+  if shapes::kind_of(r) == shapes::Kind::Square:
+    return shapes::area(r)
+  return 0

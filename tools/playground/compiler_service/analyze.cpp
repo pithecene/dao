@@ -38,7 +38,7 @@ struct AnalyzeOutput {
   // order, which is not file order, so an assembly error in `z.dao`
   // must not come back ahead of the resolver's error in `a.dao`.
   std::vector<Diagnostic> located;
-  // Positionless ones follow the positioned, in the order raised.
+  // Positionless ones lead, in the order raised.
   nlohmann::json unlocated = nlohmann::json::array();
   const PlaygroundProgram* prog = nullptr;
   std::string file;   // the document's path, as the request named it
@@ -53,15 +53,15 @@ struct AnalyzeOutput {
   }
 
   [[nodiscard]] auto reply() const -> Reply {
-    nlohmann::json diagnostics = nlohmann::json::array();
+    // Positionless first, as the driver prints them: they concern the
+    // whole program (entry selection, the position budget), and a
+    // reader wants that before any one file's line.
+    nlohmann::json diagnostics = unlocated;
     if (prog != nullptr) {
       auto ordered = located;
       std::ranges::stable_sort(
           ordered, {}, [](const Diagnostic& diag) { return diag.span.offset; });
       collect_diagnostics(diagnostics, *prog, ordered);
-    }
-    for (const auto& diag : unlocated) {
-      diagnostics.push_back(diag);
     }
     return {.status = http_status::ok,
             .body = {

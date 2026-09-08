@@ -28,6 +28,13 @@ auto parse_program_request(const nlohmann::json& request)
     if (!paths.insert(path).second) {
       return std::unexpected(std::format("duplicate file path '{}'", path));
     }
+    // The prelude group is `stdlib/core/` and `stdlib/io/`
+    // (CONTRACT_MODULE_SYSTEM.md §7.1); a request file under either would
+    // collide with a prelude file's identity and be ranked as one when
+    // the reply is ordered.  The rest of `stdlib/` is ordinary.
+    if (path.starts_with("stdlib/core/") || path.starts_with("stdlib/io/")) {
+      return std::unexpected(std::format("file path '{}' is reserved for the prelude", path));
+    }
     parsed.files.push_back({.display_path = std::move(path),
                             .text = file["source"].get<std::string>(),
                             .is_prelude = false});
@@ -180,6 +187,34 @@ void collect_diagnostics(nlohmann::json& out,
     add_position(entry, prog, diag.span.offset);
     out.push_back(std::move(entry));
   }
+}
+
+void sort_diagnostics(nlohmann::json& diagnostics, const PlaygroundProgram& prog) {
+  if (!diagnostics.is_array()) {
+    return;
+  }
+  // The program lays its files out prelude-group first, then by display
+  // path (§8.4), so ordering by the path alone would put a user file
+  // before a prelude file that holds the earlier offsets.  The file's
+  // own position in the program is the key.
+  std::unordered_map<std::string_view, size_t> position;
+  for (size_t i = 0; i < prog.program.files.size(); ++i) {
+    position.emplace(prog.program.files[i]->display_path, i + 1);
+  }
+  auto file_rank = [&position](const nlohmann::json& entry) {
+    auto file = entry.value("file", std::string{});
+    auto it = position.find(file);
+    return it == position.end() ? size_t{0} : it->second; // unlocated sorts first
+  };
+  auto& entries = diagnostics.get_ref<nlohmann::json::array_t&>();
+  std::ranges::stable_sort(entries, [&](const nlohmann::json& a, const nlohmann::json& b) {
+    auto rank_a = file_rank(a);
+    auto rank_b = file_rank(b);
+    if (rank_a != rank_b) {
+      return rank_a < rank_b;
+    }
+    return a.value("offset", 0U) < b.value("offset", 0U);
+  });
 }
 
 auto make_unlocated_diagnostic(const std::string& message, Severity severity) -> nlohmann::json {
