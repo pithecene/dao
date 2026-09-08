@@ -8,7 +8,11 @@
 #include "support/test_utils.h"
 
 #include <boost/ut.hpp>
+
+#include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace boost::ut;
 using namespace dao;
@@ -1713,5 +1717,78 @@ suite<"explicit_type_args"> explicit_type_args = [] {
 };
 
 // NOLINTEND(readability-magic-numbers)
+
+// ---------------------------------------------------------------------------
+// `extend` scoping across modules (CONTRACT_MODULE_SYSTEM.md §5, §7.2):
+// a block's methods are in the declaring module's method set only, and
+// the prelude group is the sole exception.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Owns everything a checked multi-module program points into: the
+/// program buffers, the resolver's symbols, and the type universe.
+/// Files under `stdlib/` form the prelude group, as the driver's do.
+struct CheckedProgram {
+  Program program;
+  ResolveResult resolve_result;
+  TypeContext types;
+  TypeCheckResult check_result;
+};
+
+auto check_program(std::vector<std::pair<std::string, std::string>> files)
+    -> std::unique_ptr<CheckedProgram> {
+  std::vector<SourceInput> inputs;
+  for (auto& [path, text] : files) {
+    inputs.push_back(
+        {.display_path = path, .text = text, .is_prelude = path.starts_with("stdlib/")});
+  }
+  auto checked = std::make_unique<CheckedProgram>();
+  checked->program = build_program(std::move(inputs));
+  checked->resolve_result = resolve(checked->program);
+  checked->check_result = typecheck(checked->program, checked->resolve_result, checked->types);
+  return checked;
+}
+
+/// An `extend` on i32 and a module that uses the method it introduces.
+/// The extending module and the using module are given by the caller,
+/// so the same pair can be placed in the prelude or beside it.
+constexpr const char* kDoublingModule = "module lib\n"
+                                        "concept Doubling:\n"
+                                        "    fn doubled(self): i32\n"
+                                        "extend i32 as Doubling:\n"
+                                        "    fn doubled(self): i32 -> self + self\n"
+                                        "fn here(): i32\n"
+                                        "    let n: i32 = 21\n"
+                                        "    return n.doubled()\n";
+
+constexpr const char* kUsingModule = "module app\n"
+                                     "import lib\n"
+                                     "fn there(): i32\n"
+                                     "    let n: i32 = 21\n"
+                                     "    return n.doubled()\n";
+
+} // namespace
+
+suite<"module_extend_scoping"> module_extend_scoping = [] {
+  "a module's extend method is not in a sibling module's method set"_test = [] {
+    auto checked = check_program({{"lib.dao", kDoublingModule}, {"app.dao", kUsingModule}});
+    expect(has_error_containing(checked->check_result, "no method 'doubled' on type 'i32'"))
+        << "importing a module must not import its extend methods";
+  };
+
+  "a module sees its own extend methods"_test = [] {
+    // The same block, read from the module that declares it.
+    auto checked = check_program({{"lib.dao", kDoublingModule}});
+    expect(is_ok(checked->check_result)) << "an extend is invisible in its own module";
+  };
+
+  "a prelude extend method is in every module's method set"_test = [] {
+    auto checked =
+        check_program({{"stdlib/core/lib.dao", kDoublingModule}, {"app.dao", kUsingModule}});
+    expect(is_ok(checked->check_result))
+        << "the prelude is the exception to module-scoped extend (§7.2)";
+  };
+};
 
 auto main() -> int {} // NOLINT(readability-named-parameter)
