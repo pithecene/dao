@@ -531,6 +531,23 @@ Narrow upstream fix landed alongside:
 See `docs/task_specs/TASK_30_BOOTSTRAP_LLVM_BACKEND.md` and
 `bootstrap/llvm/impl.dao`.
 
+### Task 35 — Allocation Domains
+
+Status: **spec** — `docs/task_specs/TASK_35_ALLOCATION_DOMAINS.md`;
+implementation not started.
+
+**Objective**: make `resource memory <name> =>` a real arena: every
+allocation inside comes from the domain and is reclaimed wholesale at
+exit; values that outlive the domain are copied into the enclosing one
+by a compiler-applied, contract-stated rule; the runtime's string- and
+frame-producing hooks allocate through the memory hooks instead of
+leaking `malloc`s.  Sequenced ahead of the Tier B-Bootstrap construct
+work because the closure audit (Task 34) found capacity to be the first
+blocker: the bootstrap needs 5–16 GiB per program (each stage measured
+alone), and the cause is strings that are never freed.  Delivery: E0 runtime arenas with escapes
+rejected, E1 copy-out, E2 `core::text::Builder`, E3 bootstrap adoption
+measured by the audit's peak-memory column.
+
 ### Task 31 — Host Multi-file Compilation
 
 Status: **complete** — D0 (program-wide source map; prelude loaded
