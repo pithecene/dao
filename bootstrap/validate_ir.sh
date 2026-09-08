@@ -23,7 +23,7 @@ if [ ! -d "$OUT" ] || ! ls "$OUT"/*.ll > /dev/null 2>&1; then
   echo "validate_ir: no IR under $OUT (run bootstrap/llvm/llvm.gen first)"; exit 1
 fi
 
-checked=0; ran=0; failures=0
+checked=0; accepted=0; ran=0; failures=0
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -36,6 +36,7 @@ for ll in "$OUT"/*.ll; do
     failures=$((failures + 1))
     continue
   fi
+  accepted=$((accepted + 1))
   expect_file="$OUT/$name.exit"
   if [ -f "$expect_file" ]; then
     expected="$(cat "$expect_file")"
@@ -52,5 +53,5 @@ for ll in "$OUT"/*.ll; do
   fi
 done
 
-echo "validate_ir: $checked IR files accepted by LLVM, $ran executed, $failures failure(s)"
+echo "validate_ir: $checked IR files checked, $accepted accepted by LLVM, $ran executed, $failures failure(s)"
 [ "$failures" -eq 0 ]
