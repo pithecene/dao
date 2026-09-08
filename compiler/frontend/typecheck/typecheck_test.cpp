@@ -2663,6 +2663,37 @@ suite<"module_extend_scoping"> module_extend_scoping = [] {
                 : checked->check_result.diagnostics.front().message);
   };
 
+  "an unimported concept's spelling does not reach across modules"_test = [] {
+    // `ext` declares a derived `Shout`; `app` never imports it and writes
+    // `extend i32 as Shout` anyway.  The resolver rejects the name; the
+    // checker must not match it by spelling and let Box derive Shout.
+    auto checked = check_program({
+        {"ext.dao", "module ext\nderived concept Shout:\n    fn shout(self): i32\n"},
+        {"app.dao",
+         "module app\nextend i32 as Shout:\n    fn shout(self): i32 -> 1\n"
+         "class Box:\n    n: i32\n"
+         "fn main(): i32\n  let b: Box = Box(1)\n  return b.shout()\n"},
+    });
+    expect(has_error_containing(checked->check_result, "shout"))
+        << "Box derived an unimported sibling's concept by spelling";
+  };
+
+  "a generic class's own method outranks a module's extend of an instantiation"_test = [] {
+    auto checked = check_program({
+        {"stdlib/core/box.dao",
+         "module core::box\nclass Box<T>:\n    v: T\n    fn pick(self): i32 -> 1\n"},
+        {"app.dao",
+         "module app\nconcept Alt:\n    fn pick(self): string\n"
+         "extend Box<i32> as Alt:\n    fn pick(self): string -> \"x\"\n"
+         "fn main(): i32\n  let b: Box<i32> = Box(1)\n  return b.pick()\n"},
+    });
+    expect(is_ok(checked->check_result))
+        << "the extension of Box<i32> shadowed Box's own pick: "
+        << (checked->check_result.diagnostics.empty()
+                ? ""
+                : checked->check_result.diagnostics.front().message);
+  };
+
   "a sibling module's extend cannot make a class derive"_test = [] {
     auto checked = check_modules({{"ext.dao", kShoutingModule}, {"app.dao", kBoxModule}});
     expect(has_error_containing(checked->check_result, "no field or method 'shout' on type 'Box'"))

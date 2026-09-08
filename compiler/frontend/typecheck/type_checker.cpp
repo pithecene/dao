@@ -2969,17 +2969,17 @@ auto TypeChecker::lookup_method(const Type* obj_type,
       // Found matching class. Build substitution from generic → concrete
       // field types.
       std::unordered_map<uint32_t, const Type*> bindings;
-      for (size_t i = 0; i < generic_st->fields().size() && i < concrete_st->fields().size(); ++i) {
+      for (size_t i = 0; i < chosen_st->fields().size() && i < concrete_st->fields().size(); ++i) {
         infer_type_bindings(
-            generic_st->fields()[i].type, concrete_st->fields()[i].type, bindings, Span{});
+            chosen_st->fields()[i].type, concrete_st->fields()[i].type, bindings, Span{});
       }
       if (resolved_decl != nullptr) {
-        *resolved_decl = entry.method_decl;
+        *resolved_decl = chosen->method_decl;
       }
       if (bindings.empty()) {
-        return entry.fn_type;
+        return chosen->fn_type;
       }
-      return substitute_generics(entry.fn_type, bindings);
+      return substitute_generics(chosen->fn_type, bindings);
     }
   }
 
