@@ -39,9 +39,15 @@ void print_location(const SourceMap& source_map, Span span) {
 
 } // namespace
 
+auto in_program_order(std::span<const Diagnostic> diags) -> std::vector<Diagnostic> {
+  std::vector<Diagnostic> ordered(diags.begin(), diags.end());
+  std::ranges::stable_sort(ordered, {}, [](const Diagnostic& diag) { return diag.span.offset; });
+  return ordered;
+}
+
 auto print_error_diagnostics(const SourceMap& source_map,
                              std::span<const Diagnostic> diags) -> bool {
-  for (const auto& diag : diags) {
+  for (const auto& diag : in_program_order(diags)) {
     print_location(source_map, diag.span);
     std::cerr << ": error: " << diag.message << "\n";
   }
@@ -50,7 +56,7 @@ auto print_error_diagnostics(const SourceMap& source_map,
 
 auto print_error_diagnostics(std::string_view filename, const SourceBuffer& source,
                              std::span<const Diagnostic> diags) -> bool {
-  for (const auto& diag : diags) {
+  for (const auto& diag : in_program_order(diags)) {
     auto loc = source.line_col(diag.span.offset);
     std::cerr << filename << ":" << loc.line << ":" << loc.col << ": error: " << diag.message
               << "\n";
@@ -61,7 +67,7 @@ auto print_error_diagnostics(std::string_view filename, const SourceBuffer& sour
 auto print_diagnostics(const SourceMap& source_map,
                        std::span<const Diagnostic> diags) -> bool {
   bool has_errors = false;
-  for (const auto& diag : diags) {
+  for (const auto& diag : in_program_order(diags)) {
     const auto* severity = diag.severity == Severity::Error ? "error" : "warning";
     print_location(source_map, diag.span);
     std::cerr << ": " << severity << ": " << diag.message << "\n";
@@ -135,7 +141,6 @@ auto load_program(const ProgramRequest& request) -> Program {
     located.insert(located.end(), file->lex.diagnostics.begin(), file->lex.diagnostics.end());
     located.insert(located.end(), file->parse.diagnostics.begin(), file->parse.diagnostics.end());
   }
-  std::ranges::stable_sort(located, {}, [](const Diagnostic& diag) { return diag.span.offset; });
   has_errors |= print_error_diagnostics(program.source_map, located);
   if (has_errors || !program.lexed_and_parsed_cleanly()) {
     std::exit(EXIT_FAILURE);
@@ -157,8 +162,6 @@ auto run_frontend(const ProgramRequest& request) -> FrontendResult {
   std::vector<Diagnostic> frontend_diagnostics = resolve_result.diagnostics;
   frontend_diagnostics.insert(
       frontend_diagnostics.end(), check_result.diagnostics.begin(), check_result.diagnostics.end());
-  std::ranges::stable_sort(
-      frontend_diagnostics, {}, [](const Diagnostic& diag) { return diag.span.offset; });
   bool has_errors = print_diagnostics(program.source_map, frontend_diagnostics);
 
   if (has_errors) {
@@ -181,9 +184,7 @@ auto run_through_hir(const ProgramRequest& request) -> HirResult {
     std::exit(EXIT_FAILURE);
   }
 
-  return {.frontend = std::move(frontend),
-          .hir_ctx = std::move(hir_ctx),
-          .hir = std::move(hir)};
+  return {.frontend = std::move(frontend), .hir_ctx = std::move(hir_ctx), .hir = std::move(hir)};
 }
 
 auto run_through_mir(const ProgramRequest& request) -> MirResult {

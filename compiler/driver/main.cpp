@@ -146,7 +146,7 @@ void cmd_resolve(const dao::ProgramRequest& request) {
 
   // Print diagnostics in user files (to stdout -- this is a debug dump command).
   bool has_user_diags = false;
-  for (const auto& diag : resolve_result.diagnostics) {
+  for (const auto& diag : dao::in_program_order(resolve_result.diagnostics)) {
     if (source_map.is_prelude(diag.span.offset)) {
       continue;
     }
@@ -197,8 +197,7 @@ void cmd_llvm_ir(const dao::ProgramRequest& request) {
 // Compile a .dao file to a native executable.
 // Extra link inputs (object files, -l flags, -L flags) are forwarded
 // to the system linker.
-void cmd_build(const dao::ProgramRequest& request,
-               std::span<const std::string> link_extras = {}) {
+void cmd_build(const dao::ProgramRequest& request, std::span<const std::string> link_extras = {}) {
   const auto& path = request.primary_file();
   // Initialize targets before lowering so the module gets a correct
   // DataLayout for ABI-sensitive struct coercion.
@@ -318,9 +317,8 @@ auto main(int argc, char* argv[]) -> int {
   // `daoc <file>` with no command reads the file and exits, as it
   // did before there were commands.
   const bool known_command =
-      command == "build" || std::ranges::any_of(commands, [&](const Command& c) {
-        return c.name == command;
-      });
+      command == "build" ||
+      std::ranges::any_of(commands, [&](const Command& c) { return c.name == command; });
   if (!known_command) {
     std::filesystem::path path(command);
     if (argc == 2 && std::filesystem::exists(path)) {

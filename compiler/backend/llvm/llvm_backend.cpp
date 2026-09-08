@@ -44,9 +44,9 @@ namespace dao {
 
 LlvmBackend::LlvmBackend(llvm::LLVMContext& ctx) : ctx_(ctx), types_(ctx) {}
 
-auto LlvmBackend::lower(const MirModule& mir_module, const SourceMap* source_map,
-                        const ModuleInfo* entry)
-    -> LlvmBackendResult {
+auto LlvmBackend::lower(const MirModule& mir_module,
+                        const SourceMap* source_map,
+                        const ModuleInfo* entry) -> LlvmBackendResult {
   module_ = std::make_unique<llvm::Module>("dao_module", ctx_);
   entry_ = entry;
   diagnostics_.clear();
@@ -292,9 +292,10 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
       auto* void_type = llvm::Type::getVoidTy(ctx_);
       auto* resume_fn_type =
           llvm::FunctionType::get(void_type, {ptr_type}, /*isVarArg=*/false);
-      llvm::Function::Create(
-          resume_fn_type, llvm::Function::ExternalLinkage,
-          fn_name(*mir_fn->symbol) + ".resume", module_.get());
+      llvm::Function::Create(resume_fn_type,
+                             llvm::Function::ExternalLinkage,
+                             fn_name(*mir_fn->symbol) + ".resume",
+                             module_.get());
     }
   }
 }
@@ -318,8 +319,7 @@ void LlvmBackend::lower_bodies(const MirModule& mir_module,
         // user code actually calls this function, linking will fail
         // with a clear undefined-reference error.
         if (mir_fn->symbol != nullptr) {
-          auto* llvm_fn =
-              module_->getFunction(fn_name(*mir_fn->symbol));
+          auto* llvm_fn = module_->getFunction(fn_name(*mir_fn->symbol));
           if (llvm_fn != nullptr && !llvm_fn->empty()) {
             llvm_fn->deleteBody();
           }
@@ -1939,8 +1939,7 @@ auto LlvmBackend::lower_generator_init(const MirFunction& fn) -> bool {
   }
 
   // Build the generator fat pair: { ptr frame, ptr resume_fn }.
-  auto* resume_fn =
-      module_->getFunction(fn_name(*fn.symbol) + ".resume");
+  auto* resume_fn = module_->getFunction(fn_name(*fn.symbol) + ".resume");
   auto* gen_type = types_.generator_type();
   llvm::Value* gen_val = llvm::UndefValue::get(gen_type);
   gen_val =

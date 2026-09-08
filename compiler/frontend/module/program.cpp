@@ -77,8 +77,9 @@ auto assemble(std::vector<SourceInput> inputs, const GraphInputs& graph) -> Prog
   }
   if (!position_budget_fits(sizes)) {
     program.diagnostics.push_back(Diagnostic::error(
-        Span{}, "program exceeds the 4 GiB offset space: " + std::to_string(inputs.size()) +
-                    " files, " + std::to_string(total_bytes) + " bytes"));
+        Span{},
+        "program exceeds the 4 GiB offset space: " + std::to_string(inputs.size()) + " files, " +
+            std::to_string(total_bytes) + " bytes"));
     return program;
   }
 
@@ -246,10 +247,9 @@ auto load_program_from_root(const std::filesystem::path& root_file, const Progra
         continue; // the graph reports it, naming the roots searched
       }
       if (discovery.loaded(*path)) {
-        discovery.graph.located.push_back(
-            {.identity = identity,
-             .display_path = discovery.display_by_canonical.at(
-                 canonical_or_self(*path).generic_string())});
+        discovery.graph.located.push_back({.identity = identity,
+                                           .display_path = discovery.display_by_canonical.at(
+                                               canonical_or_self(*path).generic_string())});
         continue;
       }
       // The display path read_source_input derived is kept as it is:

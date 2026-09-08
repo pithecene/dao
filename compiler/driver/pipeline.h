@@ -82,6 +82,15 @@ struct MirResult {
 
 auto read_file(const std::filesystem::path& path) -> std::string;
 
+/// Diagnostics in the order a reader walks the program: by offset,
+/// which is by file and then by position within it
+/// (CONTRACT_MODULE_SYSTEM.md §8.4).  Phases produce them in their own
+/// order — resolution and lowering walk topological order, which is not
+/// file order — so anything that prints them puts them in this order
+/// first.  The printers below do it; a command that formats its own
+/// output calls this.
+auto in_program_order(std::span<const Diagnostic> diags) -> std::vector<Diagnostic>;
+
 // ---------------------------------------------------------------------------
 // Pipeline stage functions
 // ---------------------------------------------------------------------------

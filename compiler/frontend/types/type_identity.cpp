@@ -16,8 +16,12 @@ using InProgress = std::vector<const Type*>;
 
 void append_key(std::string& out, const Type* type, InProgress& open);
 
-void append_nominal(std::string& out, const Type* type, InProgress& open, char tag,
-                    const Decl* decl_id, const std::vector<const Type*>& children) {
+void append_nominal(std::string& out,
+                    const Type* type,
+                    InProgress& open,
+                    char tag,
+                    const Decl* decl_id,
+                    const std::vector<const Type*>& children) {
   for (size_t i = 0; i < open.size(); ++i) {
     if (open[i] == type) {
       out += std::format("^{}", i);

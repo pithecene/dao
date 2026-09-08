@@ -51,7 +51,8 @@ public:
   // every function is user code.
   // `entry` is the program's entry module: its `main` keeps the name
   // `main`; every other module-owned function is named `<module>::<name>`.
-  auto lower(const MirModule& mir_module, const SourceMap* source_map = nullptr,
+  auto lower(const MirModule& mir_module,
+             const SourceMap* source_map = nullptr,
              const ModuleInfo* entry = nullptr) -> LlvmBackendResult;
 
   // Emit textual LLVM IR to a stream.
