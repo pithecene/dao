@@ -320,7 +320,7 @@ in `bootstrap/shared/base.dao`; assembly via `bootstrap/assemble.sh`.
 Task 29 (bootstrap MIR) is complete — HIR lowered to basic-block MIR
 with 8 tests.
 Task 30 (bootstrap LLVM backend) is complete — MIR lowered to
-deterministic textual LLVM IR with 17 tests.
+deterministic textual LLVM IR with 18 tests.
 
 The Tier A bootstrap frontend-to-IR-to-text pipeline (lex → parse →
 resolve → typecheck → HIR → MIR → LLVM text) is complete.
