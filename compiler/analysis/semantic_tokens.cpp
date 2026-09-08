@@ -580,12 +580,15 @@ private:
   // expression (segments are separated by `::`).
   auto record_qualified(const Expr& expr) -> std::vector<Span> {
     const auto& qn = expr.as<QualifiedName>();
-    std::vector<Span> spans;
-    uint32_t offset = expr.span.offset;
-    for (const auto& seg : qn.segments) {
-      auto len = static_cast<uint32_t>(seg.size());
-      spans.push_back(Span{.offset = offset, .length = len});
-      offset += len + 2; // skip "::"
+    std::vector<Span> spans = qn.segment_spans; // as the tokens sat: `lib :: x` is legal
+    if (spans.size() != qn.segments.size()) {
+      spans.clear();
+      uint32_t offset = expr.span.offset;
+      for (const auto& seg : qn.segments) {
+        auto len = static_cast<uint32_t>(seg.size());
+        spans.push_back(Span{.offset = offset, .length = len});
+        offset += len + 2; // skip "::"
+      }
     }
     if (!spans.empty()) {
       qualified_[spans.front().offset] = spans;

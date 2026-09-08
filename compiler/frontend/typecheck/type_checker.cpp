@@ -792,10 +792,20 @@ void TypeChecker::compute_derived_conformances() {
       for (const auto* concept_decl : derived_concepts_) {
         const auto& cpt = concept_decl->as<ConceptDecl>();
 
-        // Skip if explicit conformance or deny exists.
+        // Skip if explicit conformance or deny exists -- of THIS concept,
+        // by the declaration the resolver bound, not by spelling: a
+        // class conforming to its module's `Mark` still derives the
+        // prelude's distinct `Mark` through its fields.
+        auto names_this = [&](std::string_view spelled, Span at) -> bool {
+          auto bound = resolve_.uses.find(at.offset);
+          if (bound != resolve_.uses.end()) {
+            return bound->second->decl_as_decl() == concept_decl;
+          }
+          return spelled == cpt.name;
+        };
         bool has_explicit = false;
         for (const auto& conf : entry.cls->conformances) {
-          if (conf.concept_name == cpt.name) {
+          if (names_this(conf.concept_name, conf.concept_span)) {
             has_explicit = true;
             break;
           }
@@ -806,7 +816,7 @@ void TypeChecker::compute_derived_conformances() {
 
         bool denied = false;
         for (const auto& deny : entry.cls->denials) {
-          if (deny.concept_name == cpt.name) {
+          if (names_this(deny.concept_name, deny.concept_span)) {
             denied = true;
             break;
           }
