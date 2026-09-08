@@ -168,14 +168,14 @@ from it:
 
 | Section | Host compiler | Bootstrap compiler |
 |---|---|---|
-| §2 identity | Task 31 | conforms (Task 25; explicit file lists only, no path convention) |
-| §3 imports | Task 31 | conforms (Tasks 25–26) |
-| §4 exports, same-module access | Task 31 | conforms (Task 26) |
-| §5 `extend` scoping | Task 31 | conforms (Task 26 §6.5) |
-| §6 qualified forms | Task 31 | `b::f`, `b::T`, `b::E::V` conform (Task 27); `b::C` in conformance positions and `b::T::m` rejected until the bootstrap has methods — Task 33 |
-| §7 prelude | Task 31 | not implemented: the bootstrap resolver declares compiler builtins only and loads no stdlib — Task 33 |
-| §8 entry module | Task 31 | not implemented: no driver or entry concept; MIR flattens all functions — Task 33 |
-| §9 determinism | Task 31 | graph construction conforms (Task 25 §8); program-level output determinism unverified — Task 33 |
+| §2 identity | conforms (Task 31) | conforms (Task 25; explicit file lists only, no path convention) |
+| §3 imports | conforms (Task 31) | conforms (Tasks 25–26) |
+| §4 exports, same-module access | conforms (Task 31) | conforms (Task 26) |
+| §5 `extend` scoping | conforms (Task 31) | conforms (Task 26 §6.5) |
+| §6 qualified forms | conforms (Task 31) | `b::f`, `b::T`, `b::E::V` conform (Task 27); `b::C` in conformance positions and `b::T::m` rejected until the bootstrap has methods — Task 33 |
+| §7 prelude | conforms (Task 31) | not implemented: the bootstrap resolver declares compiler builtins only and loads no stdlib — Task 33 |
+| §8 entry module | conforms (Task 31) | not implemented: no driver or entry concept; MIR flattens all functions — Task 33 |
+| §9 determinism | conforms (Task 31; `multifile_build_test` compares two file orders' IR) | graph construction conforms (Task 25 §8); program-level output determinism unverified — Task 33 |
 
 "Task N" in a cell means the section is not yet implemented by that
 compiler and Task N delivers it.  The bootstrap column is mirrored in
