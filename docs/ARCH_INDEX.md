@@ -116,7 +116,7 @@ CLI, playground, and LSP.
 Execution support for lowered programs.
 
 - `core/` — minimal native runtime linked into every executable: ABI declarations (`dao_abi.h`) and hooks for IO (`io.c`), equality (`equality.c`), scalar-to-string conversion (`convert.c`), strings (`string.c`), checked overflow (`overflow.c`), panics (`panic.c`), resource domains (`resource.c`), and generators (`generator.c`)
-- `memory/` — scoped resource and allocation-domain support
+- `memory/` — allocation hooks and the domain arenas behind `resource memory` (`alloc.c`, `domain.h`)
 - `modes/` — runtime integration for `mode` semantics
 - `gpu/` — GPU/runtime bindings and execution support
 

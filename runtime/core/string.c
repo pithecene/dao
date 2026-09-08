@@ -7,10 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-// __dao_str_concat allocates via malloc. The result is a fresh heap
-// allocation that the caller owns. In the current runtime there is no
-// automatic deallocation — these allocations leak until process exit.
-// Future arena/GC integration will reclaim them.
+// Every string this file produces is allocated through __dao_mem_alloc,
+// so it lands in the current allocation domain: process-lifetime in the
+// root domain, reclaimed with the block inside `resource memory`.
 
 struct dao_string __dao_str_concat(const struct dao_string *a,
                                    const struct dao_string *b) {
@@ -22,10 +21,7 @@ struct dao_string __dao_str_concat(const struct dao_string *a,
     return (struct dao_string){.ptr = NULL, .len = 0};
   }
 
-  char *buf = (char *)malloc((size_t)total);
-  if (buf == NULL) {
-    return (struct dao_string){.ptr = NULL, .len = 0};
-  }
+  char *buf = (char *)__dao_mem_alloc(total, 1);
 
   if (a_len > 0 && a->ptr != NULL) {
     memcpy(buf, a->ptr, (size_t)a_len);
@@ -55,7 +51,8 @@ int32_t __dao_str_char_at(const struct dao_string *s, int64_t index) {
 }
 
 // Extract a substring starting at `start` with byte length `len`.
-// Traps if the range is out of bounds. Returns a heap-allocated copy.
+// Traps if the range is out of bounds. Returns a copy owned by the
+// current domain.
 struct dao_string __dao_str_substring(const struct dao_string *s,
                                       int64_t start, int64_t len) {
   int64_t s_len = (s != NULL) ? s->len : 0;
@@ -71,10 +68,7 @@ struct dao_string __dao_str_substring(const struct dao_string *s,
   if (len == 0) {
     return (struct dao_string){.ptr = NULL, .len = 0};
   }
-  char *buf = (char *)malloc((size_t)len);
-  if (buf == NULL) {
-    return (struct dao_string){.ptr = NULL, .len = 0};
-  }
+  char *buf = (char *)__dao_mem_alloc(len, 1);
   memcpy(buf, s->ptr + start, (size_t)len);
   return (struct dao_string){.ptr = buf, .len = len};
 }

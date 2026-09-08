@@ -53,8 +53,61 @@ File
         IntLiteral 42
     ReturnStatement
       IntLiteral 0
+  FunctionDecl scratch_in_pool
+    ReturnType: i64
+    LetStatement size: i64
+      IntLiteral 0
+    ResourceBlock memory scratch
+      LetStatement text: string
+        StringLiteral ""
+      LetStatement i: i32
+        IntLiteral 0
+      WhileStatement
+        Condition
+          BinaryExpr <
+            Identifier i
+            IntLiteral 100
+        Assignment
+          Target
+            Identifier text
+          Value
+            BinaryExpr +
+              Identifier text
+              StringLiteral "ab"
+        Assignment
+          Target
+            Identifier i
+          Value
+            BinaryExpr +
+              Identifier i
+              IntLiteral 1
+      Assignment
+        Target
+          Identifier size
+        Value
+          CallExpr
+            Callee
+              Identifier length
+            Args
+              Identifier text
+    ReturnStatement
+      Identifier size
   FunctionDecl main
     ReturnType: i32
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          StringLiteral "scratch_in_pool:"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier scratch_in_pool
     ExpressionStatement
       CallExpr
         Callee

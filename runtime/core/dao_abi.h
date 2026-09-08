@@ -233,22 +233,29 @@ int64_t __dao_str_hash(const struct dao_string *s);
 // Runtime hook declarations — Memory/resource domain
 // ---------------------------------------------------------------------------
 
-// Enter a scoped resource domain. Returns an opaque domain handle.
-// Current implementation: scope/lifetime bookkeeping only.
-// Arena-based allocation semantics are deferred.
+// Enter a scoped resource domain: an arena that becomes the current
+// allocation domain until the matching exit.  Returns an opaque handle.
 void *__dao_mem_resource_enter(void);
 
-// Exit a scoped resource domain. Takes the handle returned by enter.
+// Exit a scoped resource domain, reclaiming every allocation it made
+// (and every domain still open inside it).  Takes the handle returned
+// by enter; the enclosing domain becomes current again.
 void __dao_mem_resource_exit(void *domain);
 
 // ---------------------------------------------------------------------------
 // Runtime hook declarations — Allocation domain
 // ---------------------------------------------------------------------------
 
-// Allocate size bytes with the given alignment. Traps on failure.
-// aligned_alloc requires size to be a multiple of alignment; the
-// implementation rounds up internally.
+// Allocate size bytes with the given alignment in the current domain.
+// Traps on failure.  In the root domain (outside every `resource
+// memory` block) this is the system allocator; inside a block the
+// memory belongs to the block's domain and is reclaimed with it.
 void *__dao_mem_alloc(int64_t size, int64_t align);
+
+// Allocate in the parent of the current domain: the domain that
+// becomes current when the current block is left.  For values that
+// must outlive the block (copy-out).  In the root domain, the root.
+void* __dao_mem_alloc_outer(int64_t size, int64_t align);
 
 // Resize allocation. Traps on failure. ptr may be null (acts as alloc).
 // old_size is the number of bytes to preserve from the old allocation.
@@ -257,8 +264,12 @@ void *__dao_mem_alloc(int64_t size, int64_t align);
 void *__dao_mem_realloc(void *ptr, int64_t old_size, int64_t new_size,
                         int64_t align);
 
-// Free allocation. Null is a no-op.
+// Free allocation. Null is a no-op, and so is domain memory: a domain
+// is reclaimed whole when its block is left.
 void __dao_mem_free(void *ptr);
+
+// A string owned by the current domain holding a copy of `len` bytes.
+struct dao_string __dao_str_from_bytes(const char* bytes, int64_t len);
 
 // ---------------------------------------------------------------------------
 // Runtime hook declarations — Panic domain

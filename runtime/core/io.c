@@ -75,13 +75,7 @@ struct dao_string __dao_io_read_file(const struct dao_string *path) {
   if (is_regular && file_stat.st_size > 0) {
     // Fast path: known size, single allocation + read.
     int64_t size = (int64_t)file_stat.st_size;
-    char *buf = (char *)malloc((size_t)size);
-    if (buf == NULL) {
-      fprintf(stderr, "dao: read_file: allocation failed for '%s'\n", cpath);
-      fclose(file);
-      free(cpath);
-      abort();
-    }
+    char *buf = (char *)__dao_mem_alloc(size, 1);
 
     size_t read_bytes = fread(buf, 1, (size_t)size, file);
     int read_err = ferror(file);
@@ -91,7 +85,7 @@ struct dao_string __dao_io_read_file(const struct dao_string *path) {
       fprintf(stderr, "dao: read_file: read error for '%s' "
               "(expected %" PRId64 " bytes, got %zu)\n",
               cpath, size, read_bytes);
-      free(buf);
+      __dao_mem_free(buf);
       free(cpath);
       abort();
     }
@@ -104,31 +98,18 @@ struct dao_string __dao_io_read_file(const struct dao_string *path) {
   // Read in chunks until EOF.
   size_t capacity = 4096;
   size_t length = 0;
-  char *buf = (char *)malloc(capacity);
-  if (buf == NULL) {
-    fprintf(stderr, "dao: read_file: allocation failed for '%s'\n", cpath);
-    fclose(file);
-    free(cpath);
-    abort();
-  }
+  char *buf = (char *)__dao_mem_alloc((int64_t)capacity, 1);
 
   while (!feof(file)) {
     if (length + 4096 > capacity) {
-      capacity *= 2;
-      char *newbuf = (char *)realloc(buf, capacity);
-      if (newbuf == NULL) {
-        fprintf(stderr, "dao: read_file: realloc failed for '%s'\n", cpath);
-        free(buf);
-        fclose(file);
-        free(cpath);
-        abort();
-      }
-      buf = newbuf;
+      size_t grown = capacity * 2;
+      buf = (char *)__dao_mem_realloc(buf, (int64_t)capacity, (int64_t)grown, 1);
+      capacity = grown;
     }
     size_t n = fread(buf + length, 1, 4096, file);
     if (ferror(file)) {
       fprintf(stderr, "dao: read_file: read error for '%s'\n", cpath);
-      free(buf);
+      __dao_mem_free(buf);
       fclose(file);
       free(cpath);
       abort();
@@ -140,7 +121,7 @@ struct dao_string __dao_io_read_file(const struct dao_string *path) {
   free(cpath);
 
   if (length == 0) {
-    free(buf);
+    __dao_mem_free(buf);
     return (struct dao_string){.ptr = NULL, .len = 0};
   }
   return (struct dao_string){.ptr = buf, .len = (int64_t)length};

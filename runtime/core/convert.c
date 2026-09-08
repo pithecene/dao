@@ -24,17 +24,12 @@
 #include <string.h>
 
 // Helper: format into a stack buffer of known size, then duplicate
-// into a fresh heap allocation sized to the actual length.  Returns
-// an empty string on OOM rather than crashing (same posture as
-// __dao_str_concat).
+// into an allocation of the current domain sized to the actual length.
 static struct dao_string conv_str_dup(const char *buf, int len) {
   if (len <= 0) {
     return (struct dao_string){.ptr = NULL, .len = 0};
   }
-  char *heap = (char *)malloc((size_t)len);
-  if (heap == NULL) {
-    return (struct dao_string){.ptr = NULL, .len = 0};
-  }
+  char *heap = (char *)__dao_mem_alloc(len, 1);
   memcpy(heap, buf, (size_t)len);
   return (struct dao_string){.ptr = heap, .len = len};
 }

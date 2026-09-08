@@ -61,14 +61,22 @@ private:
   std::unordered_map<const Symbol*, MirFunction*> generic_templates_;
 
   // Loop exit block stack for break statement lowering.
-  std::vector<BlockId> loop_exit_stack_;
-
   // Active mode/resource region stack for exit-on-return.
   struct ActiveRegion {
     MirPayload exit_payload;
     Span span;
   };
   std::vector<ActiveRegion> active_regions_;
+
+  // The loops being lowered, innermost last: where `break` branches to,
+  // and how many regions were active when the loop was entered.  A
+  // `break` exits only the regions entered inside the loop; the ones
+  // enclosing it stay open, and are exited where their own blocks end.
+  struct LoopExit {
+    BlockId exit_block;
+    size_t region_depth;
+  };
+  std::vector<LoopExit> loop_exit_stack_;
 
   // --- Function lowering ---
   auto lower_function(const HirFunction& fn, Span span) -> MirFunction*;
@@ -99,7 +107,10 @@ private:
   void switch_to_block(MirBlock* block);
   [[nodiscard]] auto block_terminated() const -> bool;
 
+  /// Exit every active region, innermost first (a `return` leaves them all).
   void emit_region_exits(Span span);
+  /// Exit the active regions above `depth`, innermost first.
+  void emit_region_exits_from(size_t depth, Span span);
 
   auto resolve_field_index(const Type* obj_type, std::string_view field_name)
       -> std::optional<uint32_t>;

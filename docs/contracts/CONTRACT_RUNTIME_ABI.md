@@ -97,6 +97,11 @@ Examples:
 | `__dao_gen_free`          | `(ptr: *void): void`                 |
 | `__dao_mem_resource_enter`| `(): *void`                           |
 | `__dao_mem_resource_exit` | `(domain: *void): void`              |
+| `__dao_mem_alloc`         | `(size: i64, align: i64): *void`     |
+| `__dao_mem_realloc`       | `(ptr: *void, old_size: i64, new_size: i64, align: i64): *void` |
+| `__dao_mem_free`          | `(ptr: *void): void`                 |
+| `__dao_mem_alloc_outer`   | `(size: i64, align: i64): *void`     |
+| `__dao_str_from_bytes`    | `(bytes: *u8, len: i64): string`     |
 | `__dao_conv_i32_to_f64`  | `(x: i32): f64`                       |
 | `__dao_conv_i32_to_i64`  | `(x: i32): i64`                       |
 | `__dao_conv_f64_to_i32`  | `(x: f64): i32`                       |
@@ -258,18 +263,37 @@ Properties:
 - `__dao_mem_resource_enter` returns a fresh handle; the compiler
   passes the same handle to the corresponding `__dao_mem_resource_exit`
 - handles are scope-paired: every enter has exactly one exit on every
-  control-flow path (including early return)
-- nesting is supported: each enter/exit pair is independent
+  control-flow path — fall-through, `break`, and `return`; a `break`
+  exits only the domains entered inside the loop it leaves
+- nesting is supported: exiting a handle also closes every domain
+  still open inside it
 
-Current implementation status:
+Allocation semantics (Task 35):
 
-- the first implementation provides **scope/lifetime bookkeeping
-  only** — entering a resource domain establishes a scope boundary
-  and exiting closes it
-- arena-based allocation, per-domain allocator routing, and domain-
-  scoped deallocation are deferred
-- the handle/token ABI is designed to accommodate future arena
-  semantics without signature churn
+- a domain is an **arena**.  Between its enter and its exit it is the
+  **current domain**: every allocation made through the memory hooks
+  (`__dao_mem_alloc`, `__dao_mem_realloc`, and every string-, frame-,
+  and file-producing hook, which allocate through them) lands in it
+- exit **reclaims the domain wholesale**: no per-object frees, no
+  destructors, no finalization order
+- `__dao_mem_free` on domain memory is a no-op; `__dao_mem_realloc`
+  inside a domain copies into the domain and abandons the old block
+  (to the domain if it was the domain's, to the system if it was the
+  root's)
+- outside every block the **root domain** is current: the system
+  allocator, process lifetime, `__dao_mem_free` frees — unchanged
+- `__dao_mem_alloc_outer` allocates in the parent of the current
+  domain (the root, when the current block is the outermost), for
+  values that must outlive the block; which domain that is only the
+  runtime's domain stack knows
+- a value allocated in a domain is invalid after the domain's exit.
+  The compiler rejects a program in which a heap-owning value (a
+  string, a generator, or a class or enum holding one or a raw
+  pointer field by value) would leave its block — stored to a binding
+  declared outside it, or returned from inside it — and rejects
+  `yield` inside a block, since a domain cannot stay current across
+  a suspension.  Task 35 E1 replaces the rejection of escaping
+  values with a copy into the enclosing domain and amends this list.
 
 ## Ownership and lifetime rules
 
@@ -283,38 +307,39 @@ For the current supported hook slice:
    reside in static storage and are valid for the lifetime of the
    process.
 
-3. **Conversion results are heap-owned.** Scalar-to-string
-   conversion hooks (`__dao_conv_*_to_string`) return a `dao_string`
-   whose `ptr` points to a freshly `malloc`-allocated buffer owned
-   by the caller.  The result is valid until the caller explicitly
-   frees it (or indefinitely, under the current leak-on-exit runtime
-   posture).  Callers may store the result in long-lived data
-   structures (e.g. as a HashMap key) without copying — see rule 6
-   below for details.
+3. **Conversion results are owned by the current domain.**
+   Scalar-to-string conversion hooks (`__dao_conv_*_to_string`)
+   return a `dao_string` whose `ptr` points to a buffer allocated
+   through `__dao_mem_alloc`: in the root domain, a heap buffer with
+   process lifetime; inside a `resource memory` block, the block's
+   memory, reclaimed at its exit.  Callers may store the result in
+   long-lived data structures (e.g. as a HashMap key) without copying
+   — see rule 6 below.
 
-4. **Generator frames are caller-managed.** Generator frames are
-   allocated by `__dao_gen_alloc` and must be freed by
-   `__dao_gen_free` when the iterator is no longer needed. The
-   compiler inserts the free call at for-loop exit.
+4. **Generator frames belong to the domain current at creation.**
+   Frames are allocated by `__dao_gen_alloc` (through the memory
+   hooks) and released by `__dao_gen_free` when the iterator is no
+   longer needed; the compiler inserts that call at for-loop exit.
+   In the root domain the release frees; inside a block it is a
+   no-op, the frame going with the block.
 
 5. **Resource domain handles are scope-paired.** Every handle
    returned by `__dao_mem_resource_enter` must be passed to exactly
    one `__dao_mem_resource_exit` call. The compiler inserts exit
    calls on both normal and early-return paths.
 
-6. **String-producing runtime hooks return heap-allocated buffers.**
-   Both `__dao_str_concat` and all `__dao_conv_*_to_string` hooks
-   return a `dao_string` whose `ptr` points to a freshly
-   `malloc`-allocated buffer owned by the caller.  Earlier versions
-   of the scalar-to-string hooks returned pointers to thread-local
-   static buffers, which silently corrupted any data structure that
-   stored the returned string: the next conversion call overwrote
-   the previous contents in place (observable via
-   `HashMap<V>.set(i64_to_string(i), v)` in a loop, where keys
-   collided because every returned string pointed at the same
-   buffer).  In the current runtime these allocations are not
-   automatically freed — they leak until process exit.  Future arena
-   or GC integration will reclaim them.
+6. **String-producing runtime hooks return buffers owned by the
+   current domain.**  `__dao_str_concat`, `__dao_str_substring`,
+   `__dao_str_from_bytes`, `__dao_io_read_file`, and all
+   `__dao_conv_*_to_string` hooks return a `dao_string` whose `ptr`
+   points to a fresh buffer allocated through `__dao_mem_alloc` —
+   never to a static or thread-local buffer, which an earlier
+   runtime used and which silently corrupted any data structure that
+   stored the result (observable via `HashMap<V>.set(i64_to_string(i),
+   v)` in a loop, where keys collided because every returned string
+   pointed at the same buffer).  In the root domain such a buffer has
+   process lifetime; inside a `resource memory` block it is the
+   block's, reclaimed at its exit.
 
 ## Stability
 
@@ -330,7 +355,8 @@ For the current supported hook slice:
 ### Provisional (may evolve)
 
 - additional string manipulation hooks (beyond concat)
-- memory allocation hooks (beyond resource domain scope tracking)
+- the internal layout of a domain (chunk sizes, growth); the hooks
+  and their semantics above are stable
 - mode runtime hooks (parallel, GPU)
 
 ## Authoritative sources
