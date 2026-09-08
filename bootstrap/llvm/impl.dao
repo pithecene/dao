@@ -1779,23 +1779,27 @@ fn closure_probe_program(name: string, path: string): string
   let pg: ProgramGraph = build_program(inputs)
   let p: Program = program_from_graph(pg)
   p = program_run_resolve(p)
-  let resolve_n: i64 = p.resolve.diags.length()
+  // Each pass's list begins with what it was handed: the resolver's
+  // with the graph's diagnostics and the file's parse diagnostics, the
+  // type checker's with the resolver's.  A pass's own diagnostics are
+  // the tail past that.
+  let carried_into_resolve: i64 = pg.diags.length() + parse_n
+  let resolve_n: i64 = p.resolve.diags.length() - carried_into_resolve
   eprint("probe: " + name + " resolve=" + i64_to_string(resolve_n))
-  closure_report_file_diags(name, "resolve", p.resolve.diags, to_i64(0), to_i64(50))
+  closure_report_file_diags(name, "resolve", p.resolve.diags, carried_into_resolve, to_i64(50))
   if resolve_n > to_i64(0):
     if first == "":
-      first = "resolve: " + p.resolve.diags.get(to_i64(0)).diag.message
+      first = "resolve: " + p.resolve.diags.get(carried_into_resolve).diag.message
       eprint("probe: " + name + " first=" + first)
   eprint("probe: " + name + " stage=typecheck")
   p = program_run_typecheck(p)
-  // program_run_typecheck starts its list from the resolver's, so the
-  // type checker's own diagnostics are the tail.
-  let typecheck_n: i64 = p.diags.length() - resolve_n
+  let carried_into_typecheck: i64 = p.resolve.diags.length()
+  let typecheck_n: i64 = p.diags.length() - carried_into_typecheck
   eprint("probe: " + name + " typecheck=" + i64_to_string(typecheck_n))
-  closure_report_file_diags(name, "typecheck", p.diags, resolve_n, to_i64(50))
+  closure_report_file_diags(name, "typecheck", p.diags, carried_into_typecheck, to_i64(50))
   if typecheck_n > to_i64(0):
     if first == "":
-      first = "typecheck: " + p.diags.get(resolve_n).diag.message
+      first = "typecheck: " + p.diags.get(carried_into_typecheck).diag.message
       eprint("probe: " + name + " first=" + first)
   eprint("probe: " + name + " stage=hir")
   let hir: HirResult = lower_to_hir(src)

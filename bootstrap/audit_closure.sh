@@ -180,7 +180,7 @@ generic_qualified_sites() {
       for stage in lex parse resolve typecheck hir mir llvm; do
         grep "^probe: $p diag $stage: " "$OUT/probe-$p.log" | sed "s/^probe: $p diag $stage: //" \
           | sort | uniq -c | sort -rn | head -5 \
-          | awk -v stage="$stage" '{ n=$1; $1=""; sub(/^ /, ""); gsub(/\|/, "\\|"); printf "- \`%s\` ×%s: %s\n", stage, n, $0 }'
+          | awk -v stage="$stage" '{ n=$1; $1=""; sub(/^ /, ""); gsub(/\|/, "\\|"); printf "- `%s` ×%s: %s\n", stage, n, $0 }'
       done
       echo
     fi

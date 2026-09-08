@@ -637,7 +637,9 @@ called for, ahead of the Tier B backend slices.
 
 ### Task 34 — Bootstrap Closure Audit
 
-Status: **not started** — Order 3 of the delivery sequence.
+Status: **complete** (first audit) — Order 3 of the delivery sequence;
+`task bootstrap-audit` regenerates `docs/bootstrap_closure.md` after
+every bootstrap slice.
 
 **Objective**: for each construct occurring in `bootstrap/**/*.dao`,
 plus each stdlib method those sources instantiate, record host and
@@ -646,6 +648,33 @@ MIR → LLVM → native`).  The result defines Tier B-Bootstrap — the
 feature set the compiler corpus actually needs — and sequences Orders
 4–5; features absent from both the compiler and its stdlib
 instantiations do not delay the first bootstrap.
+
+Delivered per `docs/task_specs/TASK_34_BOOTSTRAP_CLOSURE_AUDIT.md` from
+three mechanical sources: the host AST printer's construct inventory
+over every assembled bootstrap program, the prelude functions the host
+instantiates for the largest program, and the bootstrap pipeline's own
+diagnostics per stage over its own programs (an opt-in probe in
+`bootstrap/llvm/impl.dao`, one process per program, memory- and
+time-bounded).  The first blocking diagnostic per program names what to
+implement next; the figures per program and stage are in the generated
+document.
+
+First audit: the corpus uses classes, payload enums with `match`,
+`if`/`while`/`break`, generics through `Vector<T>` and its methods,
+strings, and generators via `range` — no lambdas, `for`, modes,
+resources, pipelines, or concepts.  The blocker is capacity, not a
+construct: the bootstrap needs on the order of 16 GiB to carry even
+its smallest programs (3–4k lines) to the LLVM stage, where it panics,
+and exhausts that bound in `typecheck`/`hir`/`mir` on the larger ones.
+Per stage, `lex` is clean; the bootstrap parser rejects one construct
+at every site it occurs — generic arguments on a qualified name in
+expression position (`Vector<i64>::new()`) — and the resolver and type
+checker report their own gaps past those sites (the histograms name
+the messages); `mir` rejects `break` and synthesized literals; `llvm`
+panics where reached.  Tier B-Bootstrap therefore starts with the
+bootstrap's memory behaviour (value-threaded state copying its vectors
+at every step), then that parser construct, then the resolver, type
+checker, MIR, and LLVM rejections the histograms name.
 
 ### Task 33 — Bootstrap Module-System Parity
 
