@@ -324,6 +324,56 @@ suite<"resolve_modules"> resolve_modules = [] {
         << joined(messages_of(resolved));
   };
 
+  "the intrinsic family is the prelude's to declare"_test = [] {
+    // `size_of` and its family are prelude declarations the backend
+    // answers with inline IR; shadowing a prelude name is allowed
+    // (§7.6) but not when the name's meaning belongs to the compiler.
+    for (auto name : {"size_of", "align_of", "ptr_offset"}) {
+      auto entry = resolve_program(
+          {{"main.dao",
+            std::string("module app::main\nfn ") + name + "(): i32 -> 0\nfn main(): i32 -> 0\n"}});
+      expect(
+          messages_of(entry) ==
+          std::vector<std::string>{std::string("duplicate top-level declaration '") + name + "'"})
+          << name << " accepted in the entry module: " << joined(messages_of(entry));
+
+      auto imported = resolve_program({
+          {"lib.dao", std::string("module app::lib\nfn ") + name + "(): i32 -> 0\n"},
+          {"main.dao", "module app::main\nimport app::lib\nfn main(): i32 -> 0\n"},
+      });
+      expect(
+          messages_of(imported) ==
+          std::vector<std::string>{std::string("duplicate top-level declaration '") + name + "'"})
+          << name << " accepted in an imported module: " << joined(messages_of(imported));
+    }
+  };
+
+  "a prelude module's import cannot shadow its own declaration"_test = [] {
+    // A prelude module publishes its declarations into the shared
+    // prelude scope rather than its file scope, so the collision has to
+    // be looked for in what THAT module exports.
+    auto resolved = resolve_program({
+        {"stdlib/core/one.dao", "module core::one\nimport core::two\nfn two(): i32 -> 0\n"},
+        {"stdlib/core/two.dao", "module core::two\nfn helper(): i32 -> 0\n"},
+        {"main.dao", "module app::main\nfn main(): i32 -> 0\n"},
+    });
+    expect(messages_of(resolved) ==
+           std::vector<std::string>{"duplicate top-level declaration 'two'"})
+        << joined(messages_of(resolved));
+  };
+
+  "another prelude module's name is not a collision"_test = [] {
+    // The prelude group shares one namespace for lookup, but an import
+    // binding collides only with the importing module's own names.
+    auto resolved = resolve_program({
+        {"stdlib/core/one.dao", "module core::one\nimport core::two\n"},
+        {"stdlib/core/two.dao", "module core::two\nfn helper(): i32 -> 0\n"},
+        {"stdlib/core/three.dao", "module core::three\nfn two(): i32 -> 0\n"},
+        {"main.dao", "module app::main\nfn main(): i32 -> 0\n"},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+  };
+
   "modules_own_their_scopes_and_symbols"_test = [] {
     auto resolved = resolve_program({
         {"main.dao", "module app::main\nimport app::util\nfn main(): i32\n  let n: i32 = util::one()\n  return n\n"},

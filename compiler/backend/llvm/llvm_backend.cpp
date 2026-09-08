@@ -9,6 +9,7 @@
 
 #include "backend/llvm/llvm_abi.h"
 #include "backend/llvm/llvm_runtime_hooks.h"
+#include "frontend/resolve/resolve.h"
 #include "ir/mir/mir.h"
 
 #include <llvm/IR/Constants.h>
@@ -1262,17 +1263,11 @@ auto LlvmBackend::lower_field_access(const MirFieldAccess& p,
 // Function reference and calls
 // ---------------------------------------------------------------------------
 
-// Check if a function name is a compiler builtin intrinsic.
-// Matches both unmangled names (size_of) and mangled (size_of$i32).
+// Check if a function name is a compiler builtin intrinsic.  The
+// family is named once, by the resolver, which decides who may declare
+// these; here we decide how they are called.
 static auto is_builtin_intrinsic(std::string_view name) -> bool {
-  // Check for exact name or mangled variant (name$type).
-  for (auto base : {"size_of", "align_of", "null_ptr",
-                     "ptr_offset", "ptr_cast"}) {
-    if (name == base || name.starts_with(std::string(base) + "$")) {
-      return true;
-    }
-  }
-  return false;
+  return is_prelude_intrinsic(name);
 }
 
 auto LlvmBackend::lower_fn_ref(const MirFnRef& p, const MirInst& inst,
