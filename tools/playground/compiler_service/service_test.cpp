@@ -284,6 +284,69 @@ suite<"playground_service"> playground_service_suite = [] {
         << "a document that is not one of the files must be rejected";
   };
 
+  "a graph error does not hide the parse errors around it"_test = [] {
+    // Assembly, lex, and parse are one ordered stream (§8.4).  Returning
+    // on the graph error would report the cycle and nothing else;
+    // reporting the phases in turn would put the cycle before both parse
+    // errors instead of between them; and collecting the files a second
+    // time after the stream would report each parse error twice.
+    const std::string broken_z = "module z\nimport a\n\nfn also(: i32\n  return 2\n";
+    auto program_of = [&](const std::string& first, const std::string& document) {
+      return json{{"files",
+                   json::array({{{"path", "z.dao"}, {"source", broken_z}},
+                                {{"path", kTestDocument}, {"source", document}},
+                                {{"path", "a.dao"}, {"source", first}}})},
+                  {"document", kTestDocument}};
+    };
+    // Both programs stop at assembly — the first on the cycle, the
+    // second on the document's lex error — so each reply is exactly the
+    // stream under test, with no later phase appending to it.
+    auto cyclic = program_of("module a\nimport z\n\nfn broken(: i32\n  return 1\n",
+                             "module app\n\nfn main(): i32\n  return 0\n");
+    auto unlexable = program_of("module a\n\nfn broken(: i32\n  return 1\n",
+                                "module app\n\nfn main(): i32\n  return @\n");
+
+    // File ids follow the display path, not the request order, so this
+    // is the order the assembly diagnostics must come back in.
+    const std::vector<std::string> by_file_id = {"a.dao", "main.dao", "z.dao"};
+    /// Assert the reply names each positioned diagnostic once, in file
+    /// then offset order, and answer which files it named.
+    auto stream_of = [&](std::string_view label, const json& diagnostics) {
+      std::vector<std::pair<size_t, uint32_t>> ordered;
+      std::set<std::string> once;
+      std::set<std::string> files_named;
+      for (const auto& diag : diagnostics) {
+        auto file = diag["file"].get<std::string>();
+        if (file.empty()) {
+          continue; // no position to order by
+        }
+        auto offset = diag["offset"].get<uint32_t>();
+        auto key = file + "@" + std::to_string(offset) + ": " + diag["message"].get<std::string>();
+        expect(once.insert(key).second) << label << ": reported twice: " << key;
+        auto rank = std::ranges::find(by_file_id, file);
+        expect(rank != by_file_id.end()) << label << ": unexpected file " << file;
+        files_named.insert(file);
+        ordered.emplace_back(static_cast<size_t>(rank - by_file_id.begin()), offset);
+      }
+      expect(std::ranges::is_sorted(ordered))
+          << label << ": out of file/offset order: " << diagnostics.dump();
+      return files_named;
+    };
+
+    for (const auto* route : {"analyze", "run"}) {
+      auto reported = call(route, cyclic).body["diagnostics"];
+      std::string said = reported.dump();
+      expect(said.find("import cycle: a -> z -> a") != std::string::npos) << route << ": " << said;
+      expect(stream_of(route, reported) == std::set<std::string>{"a.dao", "z.dao"})
+          << route << ": the parse errors around the cycle are missing: " << said;
+
+      auto without_a_cycle = call(route, unlexable).body["diagnostics"];
+      expect(stream_of(route, without_a_cycle) ==
+             std::set<std::string>{"a.dao", "main.dao", "z.dao"})
+          << route << ": " << without_a_cycle.dump();
+    }
+  };
+
   "a document without main is advised, not failed"_test = [] {
     // EntryPolicy::Advisory: analysis runs to completion and the reply
     // says why Run will not work, as a warning rather than an error.

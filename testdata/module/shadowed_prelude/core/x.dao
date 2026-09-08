@@ -1,0 +1,3 @@
+module core::wrong
+
+fn one(): i32 -> 1

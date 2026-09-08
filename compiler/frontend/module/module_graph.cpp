@@ -140,20 +140,26 @@ void resolve_edges(Program& program, const GraphInputs& inputs) {
             Diagnostic::error(import->span, "module '" + identity + "' imports itself"));
         continue;
       }
-      auto* target = program.module_named(identity);
-      if (target == nullptr) {
-        // Root-file mode may have loaded a file for this import that
-        // turned out to declare something else (§8.3).
-        if (const auto* display = located.display_for(identity)) {
-          auto declared = declared_identity(located.file_at(*display));
+      // Root-file mode located a file for this import by the §8.3
+      // mapping rule, and that file's own declaration must agree.  Asked
+      // BEFORE the graph: a module of the requested identity loaded from
+      // somewhere else — a prelude file, another root — does not excuse
+      // the file the search actually found, and binding it would let the
+      // import name a module the mapping rule never chose.
+      if (const auto* display = located.display_for(identity)) {
+        auto declared = declared_identity(located.file_at(*display));
+        if (declared != identity) {
           program.diagnostics.push_back(Diagnostic::error(
               import->span,
               *display + " was found for import '" + identity + "' but declares " +
                   (declared ? "module '" + *declared + "'" : "no module")));
-        } else {
-          program.diagnostics.push_back(
-              Diagnostic::error(import->span, not_found_message(inputs, identity)));
+          continue;
         }
+      }
+      auto* target = program.module_named(identity);
+      if (target == nullptr) {
+        program.diagnostics.push_back(
+            Diagnostic::error(import->span, not_found_message(inputs, identity)));
         continue;
       }
       if (seen.insert(target).second) {
@@ -211,45 +217,70 @@ auto topological_order(Program& program) -> ModuleSet
 
 // ---------------------------------------------------------------------------
 // Cycles: modules left unordered are on a cycle or merely import one.
-// Repeatedly dropping modules nothing left depends on strips the
-// acyclic dependents; walking first-import edges from the lexically
-// smallest remaining module then closes a cycle, which is reported once
-// and removed.  Deterministic, and the trace names only cycle members.
+// Reducing that set to its cycle kernel drops the modules that only
+// lead to a cycle; walking first-import edges from the lexically
+// smallest survivor then closes a cycle, which is reported once and
+// removed.  Deterministic, and the trace names only cycle members.
 // ---------------------------------------------------------------------------
 
-void strip_acyclic_dependents(ModuleSet& remaining) {
-  // Each module counts how many remaining modules import it; dropping
-  // one decrements its imports' counts, so the whole strip costs one
-  // pass over the edges rather than a rescan of the set per candidate.
-  std::unordered_map<const ModuleInfo*, size_t> dependents;
-  for (const auto* module : remaining) {
-    dependents.try_emplace(module, 0);
+/// Drop every module of `remaining` that is not itself on a cycle: one
+/// nothing left imports (an acyclic dependent, which §8.5 keeps out of
+/// the trace) and one that imports nothing left (a bridge into a cycle
+/// already reported and erased) are both peripheral, and dropping one
+/// can make its neighbours peripheral in turn.
+///
+/// Every survivor therefore has a remaining import to walk.  Only
+/// dependents were counted at first, which holds for the residue Kahn's
+/// algorithm leaves — every module in it has an unordered import — but
+/// not after report_cycles erases a cycle's members, where a bridge
+/// module can be left with no remaining import at all and the walk
+/// below would step off the end of the graph.
+void strip_to_cycle_kernel(ModuleSet& remaining) {
+  // Both directions: dropping a module leaves the modules it imports
+  // with one dependent fewer and the modules importing it with one
+  // import fewer, and either count reaching zero drops that module too.
+  // Counting once and decrementing costs one pass over the edges rather
+  // than a rescan of the set per candidate.
+  std::unordered_map<const ModuleInfo*, std::vector<ModuleInfo*>> importers;
+  std::unordered_map<const ModuleInfo*, size_t> dependent_count;
+  std::unordered_map<const ModuleInfo*, size_t> import_count;
+  for (auto* module : remaining) {
+    dependent_count.try_emplace(module, 0);
+    import_count.try_emplace(module, 0);
   }
-  for (const auto* module : remaining) {
-    for (const auto* imported : module->imports) {
-      if (auto it = dependents.find(imported); it != dependents.end()) {
-        ++it->second;
+  for (auto* module : remaining) {
+    for (auto* imported : module->imports) {
+      if (!remaining.contains(imported)) {
+        continue;
       }
+      ++dependent_count[imported];
+      ++import_count[module];
+      importers[imported].push_back(module);
     }
   }
 
   // Seeded in display order so the trace a cycle report walks is the
   // same on every run; the set that survives is order-independent.
-  std::vector<ModuleInfo*> unneeded;
+  std::vector<ModuleInfo*> peripheral;
   for (auto* module : remaining) {
-    if (dependents.at(module) == 0) {
-      unneeded.push_back(module);
+    if (dependent_count[module] == 0 || import_count[module] == 0) {
+      peripheral.push_back(module);
     }
   }
-  while (!unneeded.empty()) {
-    auto* dropped = unneeded.back();
-    unneeded.pop_back();
-    remaining.erase(dropped);
+  while (!peripheral.empty()) {
+    auto* dropped = peripheral.back();
+    peripheral.pop_back();
+    if (remaining.erase(dropped) == 0) {
+      continue; // both counts reached zero, or a neighbour queued it twice
+    }
     for (auto* imported : dropped->imports) {
-      auto it = dependents.find(imported);
-      if (it != dependents.end() && it->second > 0 && --it->second == 0 &&
-          remaining.contains(imported)) {
-        unneeded.push_back(imported);
+      if (remaining.contains(imported) && --dependent_count[imported] == 0) {
+        peripheral.push_back(imported);
+      }
+    }
+    for (auto* importer : importers[dropped]) {
+      if (remaining.contains(importer) && --import_count[importer] == 0) {
+        peripheral.push_back(importer);
       }
     }
   }
@@ -259,6 +290,24 @@ auto first_import_within(const ModuleInfo& module, const ModuleSet& remaining) -
   auto it = std::ranges::find_if(
       module.imports, [&](ModuleInfo* imported) { return remaining.contains(imported); });
   return it == module.imports.end() ? nullptr : *it;
+}
+
+/// Walk first-import edges from `start` until the walk revisits a
+/// module; that module and everything after its first visit are the
+/// cycle.  Empty only if the walk runs out of edges, which the cycle
+/// kernel rules out.
+auto cycle_from(ModuleInfo* start, const ModuleSet& remaining) -> std::vector<ModuleInfo*> {
+  std::vector<ModuleInfo*> path;
+  std::map<const ModuleInfo*, size_t> position;
+  for (auto* current = start; current != nullptr;
+       current = first_import_within(*current, remaining)) {
+    if (auto seen = position.find(current); seen != position.end()) {
+      return {path.begin() + static_cast<std::ptrdiff_t>(seen->second), path.end()};
+    }
+    position.emplace(current, path.size());
+    path.push_back(current);
+  }
+  return {};
 }
 
 auto import_span(const ModuleInfo& module, const ModuleInfo& target) -> Span {
@@ -271,24 +320,22 @@ auto import_span(const ModuleInfo& module, const ModuleInfo& target) -> Span {
 }
 
 void report_cycles(Program& program, ModuleSet remaining) {
-  for (strip_acyclic_dependents(remaining); !remaining.empty();
-       strip_acyclic_dependents(remaining)) {
-    std::vector<ModuleInfo*> path;
-    std::map<const ModuleInfo*, size_t> position;
-    auto* current = *remaining.begin();
-    while (!position.contains(current)) {
-      position[current] = path.size();
-      path.push_back(current);
-      current = first_import_within(*current, remaining);
+  for (strip_to_cycle_kernel(remaining); !remaining.empty(); strip_to_cycle_kernel(remaining)) {
+    auto* start = *remaining.begin();
+    auto cycle = cycle_from(start, remaining);
+    if (cycle.empty()) {
+      // The kernel leaves only modules with a remaining import, so the
+      // walk always closes.  Erasing the module it started from keeps a
+      // later change to the kernel from spinning here forever.
+      remaining.erase(start);
+      continue;
     }
-    std::vector<ModuleInfo*> cycle(path.begin() + static_cast<std::ptrdiff_t>(position[current]),
-                                   path.end());
 
     std::string trace;
     for (const auto* member : cycle) {
       trace += member->display + " -> ";
     }
-    trace += current->display;
+    trace += cycle.front()->display;
     program.diagnostics.push_back(Diagnostic::error(
         import_span(*cycle.front(), *cycle[1 % cycle.size()]), "import cycle: " + trace));
     for (auto* member : cycle) {

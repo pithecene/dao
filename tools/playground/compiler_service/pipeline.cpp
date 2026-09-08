@@ -161,15 +161,11 @@ auto without_prelude_warnings(const std::vector<Diagnostic>& diags, const Playgr
 }
 
 void collect_program_diagnostics(nlohmann::json& out, const PlaygroundProgram& prog) {
-  std::vector<Diagnostic> located;
-  for (const auto& diag : prog.program.diagnostics) {
-    if (diag.span.length == 0) {
-      out.push_back(make_unlocated_diagnostic(diag.message, diag.severity));
-    } else {
-      located.push_back(diag);
-    }
+  auto diagnostics = assembly_diagnostics(prog.program);
+  for (const auto& diag : diagnostics.unlocated) {
+    out.push_back(make_unlocated_diagnostic(diag.message, diag.severity));
   }
-  collect_diagnostics(out, prog, located);
+  collect_diagnostics(out, prog, diagnostics.located);
 }
 
 void collect_diagnostics(nlohmann::json& out,
