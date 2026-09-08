@@ -2667,7 +2667,7 @@ suite<"module_extend_scoping"> module_extend_scoping = [] {
     // `ext` declares a derived `Shout`; `app` never imports it and writes
     // `extend i32 as Shout` anyway.  The resolver rejects the name; the
     // checker must not match it by spelling and let Box derive Shout.
-    auto checked = check_program({
+    auto checked = check_modules({
         {"ext.dao", "module ext\nderived concept Shout:\n    fn shout(self): i32\n"},
         {"app.dao",
          "module app\nextend i32 as Shout:\n    fn shout(self): i32 -> 1\n"
@@ -2679,7 +2679,7 @@ suite<"module_extend_scoping"> module_extend_scoping = [] {
   };
 
   "a generic class's own method outranks a module's extend of an instantiation"_test = [] {
-    auto checked = check_program({
+    auto checked = check_modules({
         {"stdlib/core/box.dao",
          "module core::box\nclass Box<T>:\n    v: T\n    fn pick(self): i32 -> 1\n"},
         {"app.dao",

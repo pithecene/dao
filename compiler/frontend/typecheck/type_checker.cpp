@@ -2950,7 +2950,14 @@ auto TypeChecker::lookup_method(const Type* obj_type,
   // substitute into the method's return/param types.
   if (obj_type->kind() == TypeKind::Struct) {
     const auto* concrete_st = static_cast<const TypeStruct*>(obj_type);
-    // Look up the class declaration's generic struct type.
+    // Every registration of this name for the class, under whichever
+    // generic or concrete key it sits, then the same precedence as the
+    // direct lookup: the type's own method, the current module's
+    // extension, any visible extension (the prelude's).  The table is
+    // unordered; iteration order must not decide.
+    const TypeStruct* chosen_st = nullptr;
+    const MethodEntry* chosen = nullptr;
+    int chosen_tier = 3;
     for (const auto& [key, entries] : method_table_) {
       if (key.name != name || key.type == nullptr || key.type->kind() != TypeKind::Struct) {
         continue;
@@ -2965,9 +2972,18 @@ auto TypeChecker::lookup_method(const Type* obj_type,
       if (visible == nullptr) {
         continue;
       }
-      const auto& entry = *visible;
-      // Found matching class. Build substitution from generic → concrete
-      // field types.
+      const int tier =
+          visible->inherent                                                                  ? 0
+          : (visible->extend_module != nullptr && visible->extend_module == current_module_) ? 1
+                                                                                             : 2;
+      if (tier < chosen_tier) {
+        chosen_tier = tier;
+        chosen = visible;
+        chosen_st = generic_st;
+      }
+    }
+    if (chosen != nullptr) {
+      // Build substitution from generic → concrete field types.
       std::unordered_map<uint32_t, const Type*> bindings;
       for (size_t i = 0; i < chosen_st->fields().size() && i < concrete_st->fields().size(); ++i) {
         infer_type_bindings(
