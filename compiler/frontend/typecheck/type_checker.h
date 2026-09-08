@@ -326,6 +326,9 @@ private:
   /// Returns how many aliases this pass registered, so the caller can
   /// repeat until a pass adds nothing.
   auto register_type_aliases(bool report_failures) -> size_t;
+  /// Whether a type node is a path through an import binding, whose
+  /// failures the resolver diagnoses (so the checker must not restate).
+  [[nodiscard]] auto resolver_owns_path(const TypeNode* node) const -> bool;
   void register_struct_fields();
   void register_enum_variants();
   void register_signatures();

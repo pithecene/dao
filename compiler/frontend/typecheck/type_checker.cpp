@@ -456,6 +456,18 @@ void TypeChecker::register_declarations() {
   register_signatures();
 }
 
+auto TypeChecker::resolver_owns_path(const TypeNode* node) const -> bool {
+  if (node == nullptr || !node->is<NamedType>()) {
+    return false;
+  }
+  const auto& path = node->as<NamedType>().name;
+  if (path.segments.size() < 2) {
+    return false;
+  }
+  auto head = resolve_.uses.find(path.span.offset);
+  return head != resolve_.uses.end() && head->second->kind == SymbolKind::Module;
+}
+
 auto TypeChecker::register_type_aliases(bool report_failures) -> size_t {
   size_t registered = 0;
   for (const auto* decl : all_decls_) {
@@ -488,10 +500,12 @@ auto TypeChecker::register_type_aliases(bool report_failures) -> size_t {
       diagnostics_.resize(before);
       continue;
     }
-    if (diagnostics_.size() == before) {
+    if (diagnostics_.size() == before && !resolver_owns_path(alias.type)) {
       // The name resolved to a symbol whose type never materialized —
       // one alias naming another that names it back, say.  Left
       // unsaid, the alias is silently unusable everywhere it appears.
+      // A path through an import binding is not that case: the
+      // resolver has already said what is wrong with it.
       error(alias.name_span,
             "cannot resolve the type aliased by '" + std::string(alias.name) + "'");
     }
@@ -1633,11 +1647,12 @@ auto TypeChecker::check_identifier(const Expr* expr) -> const Type* {
   };
   const auto* sym = symbol_for_use(expr);
   if (sym == nullptr) {
-    // An import the graph reported missing leaves its binding without a
-    // module; the graph's diagnostic already names the problem.
+    // A path through an import binding is the resolver's to diagnose:
+    // a missing import is the graph's report, and a missing export is
+    // the resolver's "has no export".  Either way it has been said.
     const auto* head =
         resolve_.uses.contains(expr->span.offset) ? resolve_.uses.at(expr->span.offset) : nullptr;
-    if (head == nullptr || head->kind != SymbolKind::Module || head->decl != nullptr) {
+    if (head == nullptr || head->kind != SymbolKind::Module) {
       error(expr->span, "unresolved identifier '" + name_text() + "'");
     }
     return nullptr;
@@ -1645,6 +1660,22 @@ auto TypeChecker::check_identifier(const Expr* expr) -> const Type* {
   if (sym->kind == SymbolKind::Module) {
     error(expr->span, "'" + name_text() + "' is a module, not a value");
     return nullptr;
+  }
+  // `b::T::m` reaches a static method (§6).  An instance method has a
+  // receiver the qualified form cannot supply, so it is not a value here.
+  if (expr->is<QualifiedName>() && expr->as<QualifiedName>().segments.size() == 3 &&
+      sym->kind == SymbolKind::Function && sym->decl != nullptr) {
+    const auto* fn_decl = sym->decl_as_decl();
+    if (fn_decl->is<FunctionDecl>()) {
+      const auto& params = fn_decl->as<FunctionDecl>().params;
+      if (!params.empty() && params.front().name == "self") {
+        error(expr->span,
+              "'" + name_text() +
+                  "' is an instance method; a qualified path reaches static "
+                  "methods only (CONTRACT_MODULE_SYSTEM.md §6)");
+        return nullptr;
+      }
+    }
   }
   const auto* result = resolve_symbol_type(sym);
   if (result == nullptr && sym->kind == SymbolKind::Param) {
