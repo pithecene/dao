@@ -1,0 +1,3 @@
+module dup::first
+
+fn one(): i32 -> 1

@@ -10,6 +10,7 @@ Normative behavior lives in `CLAUDE.md` and `docs/contracts/`.
 | `CLAUDE.md` | Repo constitution and structural invariants |
 | `AGENTS.md` | Contributor and agent guardrails |
 | `README.md` | Project overview |
+| `CHANGELOG.md` | Observable behaviour changes, newest first |
 | `.bonsai.yaml` | Repo-local Bonsai routing hints |
 | `.grove.yaml` | Grove project metadata and consolidation hints |
 | `mise.toml` | mise tool/runtime pins, env-based build parallelism cap |
@@ -178,6 +179,13 @@ Also serves as a playground corpus and early regression corpus.
 Fixtures and golden inputs/outputs for parser/compiler tests.
 
 - `ast/` — golden AST printer output for examples, stdlib, and syntax probes
+- `module/` — on-disk fixtures for host root-file discovery
+  (`smoke/`: transitive imports and a prelude import; `mismatch/`: a
+  located file declaring a different module; `roots/`: a second module
+  root; `duplicate/`: two files declaring one module; `prelude_imports/`:
+  a prelude file importing outside the group; `shadowed_prelude/`: an
+  earlier root mapping an identity the prelude also supplies;
+  `prelude_root/`: a stdlib file compiled as the root)
 - `examples/` — golden stdout of every runnable example (`<name>.out`)
   and `known_failures.txt` naming the examples the compiler cannot build
   yet, checked by `playground_service_test`

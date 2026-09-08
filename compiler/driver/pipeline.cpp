@@ -18,12 +18,7 @@ namespace dao {
 // ---------------------------------------------------------------------------
 
 auto read_file(const std::filesystem::path& path) -> std::string {
-  std::ifstream file(path);
-  if (!file) {
-    std::cerr << "error: could not open: " << path << "\n";
-    std::exit(EXIT_FAILURE);
-  }
-  return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+  return read_text_file(path);
 }
 
 // ---------------------------------------------------------------------------
@@ -44,9 +39,15 @@ void print_location(const SourceMap& source_map, Span span) {
 
 } // namespace
 
+auto in_program_order(std::span<const Diagnostic> diags) -> std::vector<Diagnostic> {
+  std::vector<Diagnostic> ordered(diags.begin(), diags.end());
+  std::ranges::stable_sort(ordered, {}, [](const Diagnostic& diag) { return diag.span.offset; });
+  return ordered;
+}
+
 auto print_error_diagnostics(const SourceMap& source_map,
                              std::span<const Diagnostic> diags) -> bool {
-  for (const auto& diag : diags) {
+  for (const auto& diag : in_program_order(diags)) {
     print_location(source_map, diag.span);
     std::cerr << ": error: " << diag.message << "\n";
   }
@@ -55,7 +56,7 @@ auto print_error_diagnostics(const SourceMap& source_map,
 
 auto print_error_diagnostics(std::string_view filename, const SourceBuffer& source,
                              std::span<const Diagnostic> diags) -> bool {
-  for (const auto& diag : diags) {
+  for (const auto& diag : in_program_order(diags)) {
     auto loc = source.line_col(diag.span.offset);
     std::cerr << filename << ":" << loc.line << ":" << loc.col << ": error: " << diag.message
               << "\n";
@@ -66,7 +67,7 @@ auto print_error_diagnostics(std::string_view filename, const SourceBuffer& sour
 auto print_diagnostics(const SourceMap& source_map,
                        std::span<const Diagnostic> diags) -> bool {
   bool has_errors = false;
-  for (const auto& diag : diags) {
+  for (const auto& diag : in_program_order(diags)) {
     const auto* severity = diag.severity == Severity::Error ? "error" : "warning";
     print_location(source_map, diag.span);
     std::cerr << ": " << severity << ": " << diag.message << "\n";
@@ -110,39 +111,46 @@ auto lex_and_parse(const std::filesystem::path& path) -> ParsedFile {
 // Program stages
 // ---------------------------------------------------------------------------
 
-auto load_program(const std::filesystem::path& user_path) -> Program {
-  auto inputs = load_prelude_inputs(std::filesystem::path(DAO_SOURCE_DIR) / "stdlib");
-  inputs.push_back(read_source_input(user_path, /*is_prelude=*/false));
-  auto program = build_program(std::move(inputs));
+auto load_program(const ProgramRequest& request) -> Program {
+  auto program = request.sources.empty()
+                     ? load_program_from_root(request.root, request.options)
+                     : load_program_from_files(request.sources, request.options);
 
-  if (!program.diagnostics.empty()) {
-    for (const auto& diag : program.diagnostics) {
-      std::cerr << "error: " << diag.message << "\n";
-    }
-    std::exit(EXIT_FAILURE);
-  }
-
+  // Load, graph, lex, and parse diagnostics as one §8.4-ordered stream.
+  // The ones with a location print through the source map; the rest
+  // (position budget, entry selection) have nowhere to point.
+  auto diagnostics = assembly_diagnostics(program);
   bool has_errors = false;
-  for (const auto& file : program.files) {
-    has_errors |= print_error_diagnostics(program.source_map, file->lex.diagnostics);
-    has_errors |= print_error_diagnostics(program.source_map, file->parse.diagnostics);
+  for (const auto& diag : diagnostics.unlocated) {
+    // An unlocated diagnostic keeps its severity: an advisory (a
+    // library set with no entry point) is a warning and does not stop
+    // the command, exactly as a located warning does not.
+    const bool fatal = diag.severity == Severity::Error;
+    std::cerr << (fatal ? "error: " : "warning: ") << diag.message << "\n";
+    has_errors |= fatal;
   }
+  has_errors |= print_error_diagnostics(program.source_map, diagnostics.located);
   if (has_errors || !program.lexed_and_parsed_cleanly()) {
     std::exit(EXIT_FAILURE);
   }
   return program;
 }
 
-auto run_frontend(const std::filesystem::path& path) -> FrontendResult {
-  auto program = load_program(path);
+auto run_frontend(const ProgramRequest& request) -> FrontendResult {
+  auto program = load_program(request);
 
+  // §8.4: diagnostics are emitted in file order, then offset order —
+  // across the whole frontend, not per phase.  Resolution and type
+  // checking are both run, then their diagnostics are merged and sorted
+  // by program offset, which is exactly that order.
   auto resolve_result = resolve(program);
-  bool has_errors =
-      print_error_diagnostics(program.source_map, resolve_result.diagnostics);
-
   TypeContext types;
   auto check_result = typecheck(program, resolve_result, types);
-  has_errors |= print_diagnostics(program.source_map, check_result.diagnostics);
+
+  std::vector<Diagnostic> frontend_diagnostics = resolve_result.diagnostics;
+  frontend_diagnostics.insert(
+      frontend_diagnostics.end(), check_result.diagnostics.begin(), check_result.diagnostics.end());
+  bool has_errors = print_diagnostics(program.source_map, frontend_diagnostics);
 
   if (has_errors) {
     std::exit(EXIT_FAILURE);
@@ -154,26 +162,24 @@ auto run_frontend(const std::filesystem::path& path) -> FrontendResult {
           .typecheck = std::move(check_result)};
 }
 
-auto run_through_hir(const std::filesystem::path& path) -> HirResult {
-  auto frontend = run_frontend(path);
+auto run_through_hir(const ProgramRequest& request) -> HirResult {
+  auto frontend = run_frontend(request);
   HirContext hir_ctx;
   auto hir = build_hir(frontend.program, frontend.resolve, frontend.typecheck, hir_ctx);
 
   bool has_errors = print_error_diagnostics(frontend.program.source_map, hir.diagnostics);
-  if (hir.module == nullptr || has_errors) {
+  if (hir.program == nullptr || has_errors) {
     std::exit(EXIT_FAILURE);
   }
 
-  return {.frontend = std::move(frontend),
-          .hir_ctx = std::move(hir_ctx),
-          .hir = std::move(hir)};
+  return {.frontend = std::move(frontend), .hir_ctx = std::move(hir_ctx), .hir = std::move(hir)};
 }
 
-auto run_through_mir(const std::filesystem::path& path) -> MirResult {
-  auto hir_result = run_through_hir(path);
+auto run_through_mir(const ProgramRequest& request) -> MirResult {
+  auto hir_result = run_through_hir(request);
   const auto& source_map = hir_result.frontend.program.source_map;
   MirContext mir_ctx;
-  auto mir = build_mir(*hir_result.hir.module, mir_ctx, hir_result.frontend.types);
+  auto mir = build_mir(*hir_result.hir.program, mir_ctx, hir_result.frontend.types);
 
   bool has_errors = print_error_diagnostics(source_map, mir.diagnostics);
   if (mir.module == nullptr || has_errors) {
@@ -202,7 +208,7 @@ auto run_through_mir(const std::filesystem::path& path) -> MirResult {
 auto lower_to_llvm(const MirResult& mir, llvm::LLVMContext& llvm_ctx) -> LlvmBackendResult {
   const auto& source_map = mir.hir_result.frontend.program.source_map;
   LlvmBackend backend(llvm_ctx);
-  auto result = backend.lower(*mir.mir.module, &source_map);
+  auto result = backend.lower(*mir.mir.module, &source_map, mir.hir_result.frontend.program.entry);
 
   // Prelude warnings (dropped bodies of prelude functions that use
   // unsupported constructs) are not the user's concern.

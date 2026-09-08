@@ -5,6 +5,7 @@ add_library(dao_backend_llvm STATIC
   llvm_type_lowering.cpp
   llvm_runtime_hooks.cpp
   llvm_backend.cpp
+  llvm_names.cpp
 )
 
 target_include_directories(dao_backend_llvm PUBLIC

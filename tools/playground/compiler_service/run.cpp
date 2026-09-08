@@ -35,7 +35,11 @@ auto slurp(const std::filesystem::path& path) -> std::string {
 auto run_reply(std::string stdout_text,
                std::string stderr_text,
                int exit_code,
-               nlohmann::json diagnostics) -> Reply {
+               nlohmann::json diagnostics,
+               const PlaygroundProgram* prog) -> Reply {
+  if (prog != nullptr) {
+    sort_diagnostics(diagnostics, *prog);
+  }
   return {.status = http_status::ok,
           .body = {
               {"stdout", std::move(stdout_text)},
@@ -45,15 +49,17 @@ auto run_reply(std::string stdout_text,
           }};
 }
 
-auto compile_failed(nlohmann::json diagnostics) -> Reply {
-  return run_reply("", "", -1, std::move(diagnostics));
+auto compile_failed(nlohmann::json diagnostics, const PlaygroundProgram* prog) -> Reply {
+  return run_reply("", "", -1, std::move(diagnostics), prog);
 }
 
-auto compile_failed(nlohmann::json diagnostics, const std::string& fallback_message) -> Reply {
+auto compile_failed(nlohmann::json diagnostics,
+                    const PlaygroundProgram* prog,
+                    const std::string& fallback_message) -> Reply {
   if (diagnostics.empty()) {
-    diagnostics.push_back(make_internal_error(fallback_message));
+    diagnostics.push_back(make_unlocated_diagnostic(fallback_message));
   }
-  return compile_failed(std::move(diagnostics));
+  return compile_failed(std::move(diagnostics), prog);
 }
 
 } // namespace
@@ -65,49 +71,44 @@ void init_run_support() {
 auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
   nlohmann::json diagnostics = nlohmann::json::array();
 
-  auto prog = build_playground_program(ctx.repo_root, std::move(inputs));
-  if (prog.user == nullptr || !prog.program.diagnostics.empty()) {
-    for (const auto& diag : prog.program.diagnostics) {
-      diagnostics.push_back(make_internal_error(diag.message));
-    }
-    return compile_failed(std::move(diagnostics));
+  // Running needs an entry point, so here a missing one is an error
+  // rather than the linker's `undefined main`.
+  auto prog = build_playground_program(ctx.repo_root, std::move(inputs), EntryPolicy::Required);
+  // Graph, lex, and parse diagnostics of every file as one §8.4-ordered
+  // stream, reported before anything can return: a graph error must not
+  // hide the parse error that explains it.
+  collect_program_diagnostics(diagnostics, prog);
+  if (prog.user == nullptr || has_error_severity(prog.program.diagnostics)) {
+    return compile_failed(std::move(diagnostics), &prog);
   }
-
-  // Lex/parse diagnostics of every file; only the editor buffer's are
-  // reported, but any file failing to parse stops the run.
-  bool lex_parse_failed = false;
-  for (const auto& file : prog.program.files) {
-    collect_diagnostics(diagnostics, prog, file->lex.diagnostics);
-    collect_diagnostics(diagnostics, prog, file->parse.diagnostics);
-    lex_parse_failed |= !file->lex.diagnostics.empty() || !file->parse.diagnostics.empty() ||
-                        file->parse.file == nullptr;
-  }
-  if (lex_parse_failed) {
-    return compile_failed(std::move(diagnostics), "prelude failed to parse");
+  // Any file failing to lex or parse stops the run.
+  if (!prog.program.lexed_and_parsed_cleanly()) {
+    return compile_failed(std::move(diagnostics), &prog, "prelude failed to parse");
   }
 
   auto resolve_result = resolve(prog.program);
   collect_diagnostics(diagnostics, prog, resolve_result.diagnostics);
   if (has_error_severity(resolve_result.diagnostics)) {
-    return compile_failed(std::move(diagnostics));
+    return compile_failed(std::move(diagnostics), &prog);
   }
 
   TypeContext types;
   auto check_result = typecheck(prog.program, resolve_result, types);
   collect_diagnostics(diagnostics, prog, check_result.diagnostics);
   if (has_error_severity(check_result.diagnostics)) {
-    return compile_failed(std::move(diagnostics));
+    return compile_failed(std::move(diagnostics), &prog);
   }
 
   HirContext hir_ctx;
   auto hir_result = build_hir(prog.program, resolve_result, check_result, hir_ctx);
   collect_diagnostics(diagnostics, prog, hir_result.diagnostics);
-  if (hir_result.module == nullptr || has_error_severity(hir_result.diagnostics)) {
-    return compile_failed(std::move(diagnostics), "HIR lowering failed without a diagnostic");
+  if (hir_result.program == nullptr || has_error_severity(hir_result.diagnostics)) {
+    return compile_failed(
+        std::move(diagnostics), &prog, "HIR lowering failed without a diagnostic");
   }
 
   MirContext mir_ctx;
-  auto mir_result = build_mir(*hir_result.module, mir_ctx, types);
+  auto mir_result = build_mir(*hir_result.program, mir_ctx, types);
   collect_diagnostics(diagnostics, prog, mir_result.diagnostics);
   bool mono_has_errors = false;
   if (mir_result.module != nullptr) {
@@ -120,18 +121,20 @@ auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
   }
   if (mir_result.module == nullptr || has_error_severity(mir_result.diagnostics) ||
       mono_has_errors) {
-    return compile_failed(std::move(diagnostics), "MIR lowering failed without a diagnostic");
+    return compile_failed(
+        std::move(diagnostics), &prog, "MIR lowering failed without a diagnostic");
   }
 
   // LLVM lowering.
   llvm::LLVMContext llvm_ctx;
   LlvmBackend backend(llvm_ctx);
-  auto llvm_result = backend.lower(*mir_result.module, &prog.program.source_map);
+  auto llvm_result =
+      backend.lower(*mir_result.module, &prog.program.source_map, prog.program.entry);
 
   auto user_diags = without_prelude_warnings(llvm_result.diagnostics, prog);
   collect_diagnostics(diagnostics, prog, user_diags);
   if (llvm_result.module == nullptr || has_error_severity(user_diags)) {
-    return compile_failed(std::move(diagnostics));
+    return compile_failed(std::move(diagnostics), &prog);
   }
 
   // Emit object file in a per-request temp directory.
@@ -144,16 +147,16 @@ auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
 
   std::string emit_error;
   if (!LlvmBackend::emit_object(*llvm_result.module, obj_path.string(), emit_error)) {
-    diagnostics.push_back(make_internal_error("emit object failed: " + emit_error));
-    return compile_failed(std::move(diagnostics));
+    diagnostics.push_back(make_unlocated_diagnostic("emit object failed: " + emit_error));
+    return compile_failed(std::move(diagnostics), &prog);
   }
 
   // Link: cc obj + runtime → executable.
   auto cc_path = llvm::sys::findProgramByName("cc");
   if (!cc_path) {
     std::filesystem::remove(obj_path);
-    diagnostics.push_back(make_internal_error("cannot find 'cc' linker"));
-    return compile_failed(std::move(diagnostics));
+    diagnostics.push_back(make_unlocated_diagnostic("cannot find 'cc' linker"));
+    return compile_failed(std::move(diagnostics), &prog);
   }
 
   auto obj_str = obj_path.string();
@@ -176,8 +179,8 @@ auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
     if (!link_error.empty()) {
       msg += ": " + link_error;
     }
-    diagnostics.push_back(make_internal_error(msg));
-    return compile_failed(std::move(diagnostics));
+    diagnostics.push_back(make_unlocated_diagnostic(msg));
+    return compile_failed(std::move(diagnostics), &prog);
   }
 
   // Execute the program with stdout/stderr capture and timeout.
@@ -218,7 +221,7 @@ auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
   std::filesystem::remove_all(tmp_dir, ec);
 
   return run_reply(
-      std::move(stdout_text), std::move(stderr_text), exit_code, std::move(diagnostics));
+      std::move(stdout_text), std::move(stderr_text), exit_code, std::move(diagnostics), &prog);
 }
 
 auto run(const nlohmann::json& request, const ServiceContext& ctx) -> Reply {

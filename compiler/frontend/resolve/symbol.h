@@ -13,21 +13,21 @@ namespace dao {
 struct Decl;
 struct Stmt;
 struct Expr;
-struct ImportNode;
 struct FieldSpec;
+struct ModuleInfo;
 
 enum class SymbolKind : std::uint8_t {
-  Function,    // top-level fn
-  Type,        // struct or alias
-  Param,       // function parameter
-  Local,       // let binding or for-loop variable
-  Field,       // struct member
-  Module,      // import binding
+  Function,     // top-level fn
+  Type,         // struct or alias
+  Param,        // function parameter
+  Local,        // let binding or for-loop variable
+  Field,        // struct member
+  Module,       // import binding; decl is the bound ModuleInfo, null while unresolved
   Builtin,      // built-in scalar type (i32, f64, bool)
   Predeclared,  // compiler-known predeclared named type (string, void)
-  LambdaParam,    // lambda |x| parameter
-  GenericParam,   // type parameter in generic function/class
-  Concept,        // concept declaration
+  LambdaParam,  // lambda |x| parameter
+  GenericParam, // type parameter in generic function/class
+  Concept,      // concept declaration
 };
 
 auto symbol_kind_name(SymbolKind kind) -> const char*;
@@ -37,6 +37,7 @@ struct Symbol {
   std::string_view name;
   Span decl_span;            // where the symbol was declared (zero for builtins)
   const void* decl;          // declaration node (nullptr for builtins)
+  const ModuleInfo* module = nullptr; // owning module; null for builtins and outside a program
 
   // --- Typed accessors --------------------------------------------------
   // Concentrate the heterogeneous cast at checked choke points.
@@ -53,8 +54,8 @@ struct Symbol {
   [[nodiscard]] auto decl_as_expr() const -> const Expr* {
     return static_cast<const Expr*>(decl);
   }
-  [[nodiscard]] auto decl_as_import() const -> const ImportNode* {
-    return static_cast<const ImportNode*>(decl);
+  [[nodiscard]] auto decl_as_module() const -> const ModuleInfo* {
+    return static_cast<const ModuleInfo*>(decl);
   }
   [[nodiscard]] auto decl_as_field() const -> const FieldSpec* {
     return static_cast<const FieldSpec*>(decl);

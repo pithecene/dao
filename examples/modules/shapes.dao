@@ -1,0 +1,18 @@
+module shapes
+// One module of a multi-file program: a class and an enum that another
+// module imports and names through the binding `shapes`.
+
+class Rect:
+  width: i32
+  height: i32
+
+enum Kind:
+  Square
+  Oblong
+
+fn area(r: Rect): i32 -> r.width * r.height
+
+fn kind_of(r: Rect): Kind
+  if r.width == r.height:
+    return Kind::Square
+  return Kind::Oblong

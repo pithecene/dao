@@ -1,10 +1,13 @@
 #include "frontend/module/program.h"
+#include "frontend/module/module_graph.h"
 
 #include <algorithm>
 #include <cstdlib>
+#include <deque>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <unordered_map>
 
 namespace dao {
 
@@ -36,8 +39,56 @@ auto Program::lexed_and_parsed_cleanly() const -> bool {
   });
 }
 
-auto build_program(std::vector<SourceInput> inputs) -> Program {
+auto Program::module_named(std::string_view display) const -> ModuleInfo* {
+  auto it = by_display.find(display);
+  return it == by_display.end() ? nullptr : it->second;
+}
+
+auto assembly_diagnostics(const Program& program) -> ProgramDiagnostics {
+  ProgramDiagnostics out;
+  for (const auto& diag : program.diagnostics) {
+    // A graph diagnostic points at the declaration or import it is
+    // about; entry selection and the position budget concern the whole
+    // program and have a zero-length span standing for "nowhere".
+    (diag.span.length == 0 ? out.unlocated : out.located).push_back(diag);
+  }
+  for (const auto& file : program.files) {
+    out.located.insert(
+        out.located.end(), file->lex.diagnostics.begin(), file->lex.diagnostics.end());
+    out.located.insert(
+        out.located.end(), file->parse.diagnostics.begin(), file->parse.diagnostics.end());
+  }
+  // Files occupy disjoint, ascending ranges of the program's offset
+  // space, so ordering by offset is exactly file order then offset
+  // order (§8.4).
+  std::ranges::stable_sort(
+      out.located, {}, [](const Diagnostic& diag) { return diag.span.offset; });
+  return out;
+}
+
+auto canonical_or_self(const std::filesystem::path& path) -> std::filesystem::path {
+  std::error_code ec;
+  auto canonical = std::filesystem::weakly_canonical(path, ec);
+  return ec ? path.lexically_normal() : canonical;
+}
+
+namespace {
+
+// ---------------------------------------------------------------------------
+// Layout and graph over a complete input set
+// ---------------------------------------------------------------------------
+
+auto assemble(std::vector<SourceInput> inputs, const GraphInputs& graph) -> Program {
   Program program;
+
+  // file_id order is the prelude group first, then lexical in the
+  // display path (§8.4): a pure function of the file set, so the offset
+  // space and every output are independent of input order, and prelude
+  // declarations precede user files for the passes that still walk one
+  // shared scope in file order.
+  std::ranges::stable_sort(inputs, {}, [](const SourceInput& input) {
+    return std::pair{!input.is_prelude, std::string_view(input.display_path)};
+  });
 
   std::vector<uint64_t> sizes;
   sizes.reserve(inputs.size());
@@ -48,9 +99,9 @@ auto build_program(std::vector<SourceInput> inputs) -> Program {
   }
   if (!position_budget_fits(sizes)) {
     program.diagnostics.push_back(Diagnostic::error(
-        Span{}, "program exceeds the 4 GiB offset space: " +
-                    std::to_string(inputs.size()) + " files, " +
-                    std::to_string(total_bytes) + " bytes"));
+        Span{},
+        "program exceeds the 4 GiB offset space: " + std::to_string(inputs.size()) + " files, " +
+            std::to_string(total_bytes) + " bytes"));
     return program;
   }
 
@@ -58,7 +109,6 @@ auto build_program(std::vector<SourceInput> inputs) -> Program {
     auto& input = inputs[idx];
     auto base = base_offset_for(std::span<const uint64_t>(sizes).first(idx));
     auto file = std::make_unique<SourceFile>(SourceFile{
-        .file_id = static_cast<uint32_t>(idx),
         .display_path = input.display_path,
         .buffer = SourceBuffer(input.display_path, std::move(input.text)),
         .base_offset = base,
@@ -74,39 +124,229 @@ auto build_program(std::vector<SourceInput> inputs) -> Program {
   for (const auto& file : program.files) {
     program.source_map.add(file.get());
   }
+  build_module_graph(program, graph);
   return program;
 }
 
-namespace {
-
 auto display_path_for(const std::filesystem::path& path,
                       const std::filesystem::path& display_root) -> std::string {
+  // Files are ordered by display path (§8.4), so the path must be
+  // NORMALIZED first: `./a.dao`, `b/../a.dao`, and `a.dao` name one
+  // file and must sort as one spelling, or the same set supplied two
+  // ways orders differently and the output differs with it.
+  auto normalized = canonical_or_self(path);
   if (!display_root.empty()) {
-    auto relative = path.lexically_relative(display_root);
+    auto relative = normalized.lexically_relative(canonical_or_self(display_root));
     if (!relative.empty() && *relative.begin() != "..") {
       return relative.generic_string();
     }
   }
-  return path.generic_string();
+  return normalized.generic_string();
 }
+
+// ---------------------------------------------------------------------------
+// Root-file discovery (§8.2–§8.3)
+//
+// Discovery reads a file's imports by parsing it on its own; the final
+// offset-space layout parses it again once the file set is complete.
+// The second parse is what the passes see, so a parse error surfaces
+// there, not here.
+// ---------------------------------------------------------------------------
+
+auto import_identities(const SourceInput& input) -> std::vector<std::string> {
+  SourceBuffer buffer(input.display_path, input.text);
+  auto lexed = lex(buffer);
+  if (!lexed.diagnostics.empty()) {
+    return {};
+  }
+  auto parsed = parse(lexed.tokens);
+  if (parsed.file == nullptr) {
+    return {};
+  }
+  std::vector<std::string> identities;
+  for (const auto* import : parsed.file->imports) {
+    identities.push_back(module_display(import->path.segments));
+  }
+  return identities;
+}
+
+/// `<root>/a/b/c.dao` for the first root that has it.
+auto locate_module(const std::string& identity, const std::vector<std::filesystem::path>& roots)
+    -> std::optional<std::filesystem::path> {
+  std::filesystem::path relative;
+  for (size_t start = 0; start <= identity.size();) {
+    auto end = identity.find("::", start);
+    relative /= identity.substr(start, end == std::string::npos ? std::string::npos : end - start);
+    if (end == std::string::npos) {
+      break;
+    }
+    start = end + 2;
+  }
+  relative += ".dao";
+  for (const auto& root : roots) {
+    auto candidate = root / relative;
+    if (std::filesystem::exists(candidate)) {
+      return candidate;
+    }
+  }
+  return std::nullopt;
+}
+
+struct Discovery {
+  std::vector<SourceInput> inputs;
+  std::unordered_map<std::string, std::string> display_by_canonical; // loaded files
+  GraphInputs graph;
+
+  /// Load the prelude group.  `discovered` collects the files loaded so
+  /// a caller that follows imports can start from them too: what a
+  /// prelude file imports is part of the program, and no user file need
+  /// mention it (§8.2).
+  void add_prelude(const std::filesystem::path& stdlib_root,
+                   std::deque<SourceInput>* discovered = nullptr) {
+    const auto display_root = stdlib_root.parent_path();
+    for (const auto& path : prelude_files(stdlib_root)) {
+      auto input = read_source_input(path, /*is_prelude=*/true, display_root);
+      if (discovered != nullptr) {
+        discovered->push_back(input);
+      }
+      add(path, std::move(input));
+    }
+  }
+
+  /// Add a file to the set unless the same file is already in it, and
+  /// answer the display path the program keeps for it — the spelling of
+  /// the FIRST load, not necessarily this one.  A caller that remembers
+  /// the spelling it passed instead would be naming a file the program
+  /// does not have (§8.4).
+  auto add(const std::filesystem::path& path, SourceInput input) -> const std::string& {
+    auto canonical = canonical_or_self(path).generic_string();
+    auto [it, inserted] = display_by_canonical.emplace(canonical, input.display_path);
+    if (inserted) {
+      inputs.push_back(std::move(input));
+    }
+    return it->second;
+  }
+
+  /// The display path the set already holds for this file, or null.
+  auto display_of(const std::filesystem::path& path) const -> const std::string* {
+    auto it = display_by_canonical.find(canonical_or_self(path).generic_string());
+    return it == display_by_canonical.end() ? nullptr : &it->second;
+  }
+};
 
 } // namespace
 
-auto read_source_input(const std::filesystem::path& path, bool is_prelude,
-                       const std::filesystem::path& display_root) -> SourceInput {
+auto build_program(std::vector<SourceInput> inputs,
+                   std::optional<std::string> entry,
+                   EntryPolicy entry_policy) -> Program {
+  return assemble(std::move(inputs),
+                  GraphInputs{.entry = std::move(entry), .entry_policy = entry_policy});
+}
+
+auto load_program_from_root(const std::filesystem::path& root_file, const ProgramOptions& options)
+    -> Program {
+  std::vector<std::filesystem::path> roots{root_file.parent_path()};
+  roots.insert(roots.end(), options.module_roots.begin(), options.module_roots.end());
+  if (!options.stdlib_root.empty()) {
+    roots.push_back(options.stdlib_root);
+  }
+
+  Discovery discovery;
+  std::deque<SourceInput> pending;
+  if (!options.stdlib_root.empty()) {
+    discovery.add_prelude(options.stdlib_root, &pending);
+  }
+  for (const auto& root : roots) {
+    discovery.graph.searched_roots.push_back(root.empty() ? "." : root.generic_string());
+  }
+
+  // Whether the root owes an entry point is the caller's to say: a
+  // delivered file set must have one, an editor buffer only wants to
+  // be told (§8.1, EntryPolicy).
+  discovery.graph.entry_policy = options.entry_policy;
+  if (const auto* already = discovery.display_of(root_file)) {
+    // The root is also a prelude file (`daoc check stdlib/core/vector.dao`).
+    // The program keeps one copy of it, in the prelude group per §7.6 —
+    // whether a stdlib file belongs to the prelude cannot depend on
+    // whether the command line happened to name it.  What the root
+    // contributes is its ROLE: its module is the entry (§7.7), which
+    // only holds if the root is named by the spelling the program kept.
+    discovery.graph.root_display = *already;
+  } else {
+    // The root is the last thing enqueued: the prelude files are ahead
+    // of it, and each of them is a discovery root of its own.
+    auto root_input = read_source_input(root_file, /*is_prelude=*/false);
+    pending.push_back(root_input);
+    discovery.graph.root_display = discovery.add(root_file, std::move(root_input));
+  }
+
+  while (!pending.empty()) {
+    auto input = std::move(pending.front());
+    pending.pop_front();
+    for (const auto& identity : import_identities(input)) {
+      auto path = locate_module(identity, roots);
+      if (!path) {
+        continue; // the graph reports it, naming the roots searched
+      }
+      if (const auto* already = discovery.display_of(*path)) {
+        discovery.graph.located.push_back({.identity = identity, .display_path = *already});
+        continue;
+      }
+      // The display path read_source_input derived is kept as it is:
+      // overwriting it with the search spelling would key a discovered
+      // file by how the invocation happened to reach it, so the same
+      // program ordered files differently under a relative root than an
+      // absolute one (CONTRACT_MODULE_SYSTEM.md §8.4).
+      auto found = read_source_input(*path, /*is_prelude=*/false);
+      discovery.graph.located.push_back({.identity = identity, .display_path = found.display_path});
+      pending.push_back(found);
+      discovery.add(*path, std::move(found));
+    }
+  }
+  return assemble(std::move(discovery.inputs), discovery.graph);
+}
+
+auto load_program_from_files(const std::vector<std::filesystem::path>& files,
+                             const ProgramOptions& options) -> Program {
+  Discovery discovery;
+  if (!options.stdlib_root.empty()) {
+    discovery.add_prelude(options.stdlib_root);
+  }
+  for (const auto& path : files) {
+    discovery.add(path, read_source_input(path, /*is_prelude=*/false));
+  }
+  discovery.graph.entry = options.entry;
+  discovery.graph.entry_policy = options.entry_policy;
+  return assemble(std::move(discovery.inputs), discovery.graph);
+}
+
+auto read_text_file(const std::filesystem::path& path) -> std::string {
+  // Checked before the open, not after: opening a directory succeeds and
+  // throws on the first read, which terminates the process instead of
+  // reporting anything the caller can act on.
+  std::error_code unused;
+  if (!std::filesystem::is_regular_file(path, unused)) {
+    std::cerr << "error: not a source file: " << path << "\n";
+    std::exit(EXIT_FAILURE);
+  }
   std::ifstream file(path);
   if (!file) {
     std::cerr << "error: could not open: " << path << "\n";
     std::exit(EXIT_FAILURE);
   }
+  return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+}
+
+auto read_source_input(const std::filesystem::path& path,
+                       bool is_prelude,
+                       const std::filesystem::path& display_root) -> SourceInput {
   return {.display_path = display_path_for(path, display_root),
-          .text = {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()},
+          .text = read_text_file(path),
           .is_prelude = is_prelude};
 }
 
-auto load_prelude_inputs(const std::filesystem::path& stdlib_root) -> std::vector<SourceInput> {
-  std::vector<SourceInput> inputs;
-  const auto display_root = stdlib_root.parent_path();
+auto prelude_files(const std::filesystem::path& stdlib_root) -> std::vector<std::filesystem::path> {
+  std::vector<std::filesystem::path> files;
   const std::filesystem::path dirs[] = {stdlib_root / "core", stdlib_root / "io"};
   for (const auto& dir : dirs) {
     if (!std::filesystem::exists(dir)) {
@@ -118,10 +358,17 @@ auto load_prelude_inputs(const std::filesystem::path& stdlib_root) -> std::vecto
         paths.push_back(entry.path());
       }
     }
-    std::sort(paths.begin(), paths.end());
-    for (const auto& path : paths) {
-      inputs.push_back(read_source_input(path, /*is_prelude=*/true, display_root));
-    }
+    std::ranges::sort(paths);
+    files.insert(files.end(), paths.begin(), paths.end());
+  }
+  return files;
+}
+
+auto load_prelude_inputs(const std::filesystem::path& stdlib_root) -> std::vector<SourceInput> {
+  std::vector<SourceInput> inputs;
+  const auto display_root = stdlib_root.parent_path();
+  for (const auto& path : prelude_files(stdlib_root)) {
+    inputs.push_back(read_source_input(path, /*is_prelude=*/true, display_root));
   }
   return inputs;
 }

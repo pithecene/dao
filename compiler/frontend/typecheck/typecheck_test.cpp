@@ -8,7 +8,11 @@
 #include "support/test_utils.h"
 
 #include <boost/ut.hpp>
+
+#include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace boost::ut;
 using namespace dao;
@@ -111,7 +115,923 @@ struct TypecheckPipeline {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Multi-module programs: files named `stdlib/...` form the
+// prelude group; the rest are user modules.
+// ---------------------------------------------------------------------------
+
+struct CheckedProgram {
+  Program program;
+  ResolveResult resolved;
+  TypeCheckResult result;
+};
+
+using NamedSource = std::pair<std::string, std::string>;
+
+auto check_program(std::vector<NamedSource> files) -> CheckedProgram {
+  std::vector<SourceInput> inputs;
+  for (auto& [display, text] : files) {
+    inputs.push_back(
+        {.display_path = display, .text = text, .is_prelude = display.starts_with("stdlib/")});
+  }
+  CheckedProgram checked{.program = build_program(std::move(inputs)), .resolved = {}, .result = {}};
+  checked.resolved = resolve(checked.program);
+  TypeContext types;
+  checked.result = typecheck(checked.program, checked.resolved, types);
+  return checked;
+}
+
+auto all_messages(const CheckedProgram& checked) -> std::string {
+  std::string out;
+  for (const auto& diag : checked.resolved.diagnostics) {
+    out += "[resolve] " + diag.message + " | ";
+  }
+  for (const auto& diag : checked.result.diagnostics) {
+    out += "[check] " + diag.message + " | ";
+  }
+  return out;
+}
+
+auto clean(const CheckedProgram& checked) -> bool {
+  return checked.resolved.diagnostics.empty() && is_ok(checked.result);
+}
+
+// Literals, not std::string objects: boost.ut runs suites after main
+// returns, when namespace-scope objects are already destroyed.
+constexpr const char* kMathModule = "module app::math\n"
+                                    "fn add(a: i32, b: i32): i32 -> a + b\n"
+                                    "fn identity<T>(x: T): T -> x\n"
+                                    "class Point:\n"
+                                    "  x: i32\n"
+                                    "  fn origin(): Point -> Point(0)\n"
+                                    "enum Color:\n"
+                                    "  Red\n"
+                                    "  Green\n"
+                                    "enum class Maybe:\n"
+                                    "  Some(value: i32)\n"
+                                    "  None\n";
+
 } // namespace
+
+suite<"typecheck_qualified_bounds"> typecheck_qualified_bounds = [] {
+  // A bound written `m::Concept` records the import binding at the head
+  // of the path and the concept at its last segment, so reading only the
+  // head left the bound unenforced.
+  const std::string kTraits = "module app::traits\nconcept Reveal:\n  fn reveal(self): i32\n";
+
+  "a qualified concept bound rejects a type that does not conform"_test = [kTraits] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::traits\n"
+         "class Plain:\n  x: i32\n"
+         "fn show<T: traits::Reveal>(v: T): i32 -> v.reveal()\n"
+         "fn main(): i32\n  let p: Plain = Plain(1)\n  return show(p)\n"},
+        {"traits.dao", kTraits},
+    });
+    expect(has_error_containing(checked.result, "does not satisfy concept"))
+        << all_messages(checked);
+  };
+
+  "a bound accepts a type conforming to that very concept"_test = [] {
+    // Same module throughout: conformance is decided by which concept
+    // the `as` clause names, and here it names this one.
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\n"
+         "concept Reveal:\n  fn reveal(self): i32\n"
+         "class Shown:\n  x: i32\n  as Reveal:\n    fn reveal(self): i32 -> self.x\n"
+         "fn show<T: Reveal>(v: T): i32 -> v.reveal()\n"
+         "fn main(): i32\n  let s: Shown = Shown(1)\n  return show(s)\n"},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "conformance to a same-named concept of another module does not count"_test = [kTraits] {
+    // Both modules declare `Reveal`; the bound requires app::traits's.
+    // Comparing spellings accepted the wrong one.
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::traits\n"
+         "concept Reveal:\n  fn reveal(self): i32\n"
+         "class Shown:\n  x: i32\n  as Reveal:\n    fn reveal(self): i32 -> self.x\n"
+         "fn show<T: traits::Reveal>(v: T): i32 -> v.reveal()\n"
+         "fn main(): i32\n  let s: Shown = Shown(1)\n  return show(s)\n"},
+        {"traits.dao", kTraits},
+    });
+    expect(has_error_containing(checked.result, "does not satisfy concept"))
+        << all_messages(checked);
+  };
+
+  "a type conforms to an imported concept through a qualified as clause"_test = [kTraits] {
+    // CONTRACT_MODULE_SYSTEM.md §6 conformance position: `as b::C:`.
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::traits\n"
+         "class Shown:\n  x: i32\n"
+         "  as traits::Reveal:\n    fn reveal(self): i32 -> self.x\n"
+         "fn show<T: traits::Reveal>(v: T): i32 -> v.reveal()\n"
+         "fn main(): i32\n  let s: Shown = Shown(1)\n  return show(s)\n"},
+        {"traits.dao", kTraits},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "extend conforms to an imported concept through a qualified as clause"_test = [kTraits] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::traits\n"
+         "class Shown:\n  x: i32\n"
+         "extend Shown as traits::Reveal:\n  fn reveal(self): i32 -> self.x\n"
+         "fn show<T: traits::Reveal>(v: T): i32 -> v.reveal()\n"
+         "fn main(): i32\n  let s: Shown = Shown(1)\n  return show(s)\n"},
+        {"traits.dao", kTraits},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "a qualified conformance names a concept the module exports"_test = [kTraits] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::traits\n"
+         "class Shown:\n  x: i32\n"
+         "  as traits::Missing:\n    fn reveal(self): i32 -> self.x\n"
+         "fn main(): i32 -> 0\n"},
+        {"traits.dao", kTraits},
+    });
+    bool named = false;
+    for (const auto& diag : checked.resolved.diagnostics) {
+      named = named || diag.message.find("has no concept 'Missing'") != std::string::npos;
+    }
+    expect(named) << all_messages(checked);
+  };
+
+  "another module's extend does not satisfy a bound"_test = [kTraits] {
+    // `app::ext` conforms `Shown` to the BOUND'S OWN concept, naming it
+    // qualified so the conformance genuinely registers — and `app::main`
+    // still must not see it, because the extension is another module's
+    // (§5).  Written unqualified this would pass for the wrong reason:
+    // the bare name resolves to nothing in `app::ext`.
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::traits\n"
+         "class Shown:\n  x: i32\n"
+         "fn show<T: traits::Reveal>(v: T): i32 -> v.reveal()\n"
+         "fn main(): i32\n  let s: Shown = Shown(1)\n  return show(s)\n"},
+        {"traits.dao", kTraits},
+        {"ext.dao",
+         "module app::ext\nimport app::main\nimport app::traits\n"
+         "extend main::Shown as traits::Reveal:\n  fn reveal(self): i32 -> 1\n"},
+    });
+    expect(has_error_containing(checked.result, "does not satisfy concept"))
+        << all_messages(checked);
+  };
+};
+
+suite<"typecheck_nominal_concepts"> typecheck_nominal_concepts = [] {
+  // Two modules may each declare a concept named `C`; every decision about
+  // conformance is about WHICH one (CONTRACT_TYPE_SYSTEM_FOUNDATIONS.md §11).
+  const std::string kA = "module app::a\nconcept C:\n  fn c(self): i32\n";
+  const std::string kB = "module app::b\nconcept C:\n  fn c(self): i32\n";
+
+  "denying one module's concept does not deny another's"_test = [kA, kB] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::a\nimport app::b\n"
+         "class P:\n  x: i32\n  deny a::C\n  as b::C:\n    fn c(self): i32 -> self.x\n"
+         "fn use_it<T: b::C>(v: T): i32 -> v.c()\n"
+         "fn main(): i32\n  let p: P = P(1)\n  return use_it(p)\n"},
+        {"a.dao", kA},
+        {"b.dao", kB},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "as and deny of the same concept is still a contradiction"_test = [kA] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::a\n"
+         "class P:\n  x: i32\n  deny a::C\n  as a::C:\n    fn c(self): i32 -> self.x\n"
+         "fn main(): i32 -> 0\n"},
+        {"a.dao", kA},
+    });
+    expect(has_error_containing(checked.result, "both conforms to and denies"))
+        << all_messages(checked);
+  };
+};
+
+suite<"typecheck_nominal_identity"> typecheck_nominal_identity = [] {
+  // Two modules each declaring `C` must not answer for one another where
+  // the checker substitutes a concept's self type or reaches a class by
+  // a method's name (CONTRACT_TYPE_SYSTEM_FOUNDATIONS.md §11).
+  "an invisible extension does not suppress a derived method"_test = [] {
+    // `app::other` extends i32 with `show`; `app::main` derives Show for
+    // P through its OWN extension.  The invisible one must not stand in
+    // for the visible one and leave P with no method at all.
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\n"
+         "derived concept Show:\n  fn show(self): i32\n"
+         "extend i32 as Show:\n  fn show(self): i32 -> self\n"
+         "class P:\n  x: i32\n"
+         "fn use_it<T: Show>(v: T): i32 -> v.show()\n"
+         "fn main(): i32\n  let p: P = P(1)\n  return use_it(p)\n"},
+        {"other.dao", "module app::other\nextend i32 as Other:\n  fn show(self): i32 -> 9\n"},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+};
+
+suite<"typecheck_type_positions"> typecheck_type_positions = [] {
+  // A type position takes a type.  A name that resolves to something
+  // else is reported there, rather than quietly becoming whatever type
+  // that name happens to denote (CONTRACT_TYPE_SYSTEM_FOUNDATIONS.md
+  // §11).
+  "a qualified function is not a type"_test = [] {
+    auto checked = check_program({
+        {"lib.dao", "module app::lib\nfn helper(): i32 -> 1\n"},
+        {"main.dao",
+         "module app::main\n"
+         "import app::lib\n"
+         "fn takes(p: lib::helper): i32 -> 0\n"
+         "fn main(): i32\n  return 0\n"},
+    });
+    expect(all_messages(checked).find("'lib::helper' is a function, not a type") !=
+           std::string::npos)
+        << all_messages(checked);
+  };
+
+  "a local function is not a type"_test = [] {
+    auto checked = check_program({{"main.dao",
+                                   "module app::main\n"
+                                   "fn helper(): i32 -> 1\n"
+                                   "fn takes(p: helper): i32 -> 0\n"
+                                   "fn main(): i32\n  return 0\n"}});
+    expect(all_messages(checked).find("'helper' is a function, not a type") != std::string::npos)
+        << all_messages(checked);
+  };
+
+  "qualified classes and enums stay accepted"_test = [] {
+    auto checked = check_program({
+        {"lib.dao", "module app::lib\nclass Holder:\n  value: i32\nenum Colour:\n  Red\n"},
+        {"main.dao",
+         "module app::main\n"
+         "import app::lib\n"
+         "fn take(h: lib::Holder): i32 -> h.value\n"
+         "fn pick(c: lib::Colour): i32 -> 0\n"
+         "fn main(): i32\n  return take(lib::Holder(1)) + pick(lib::Colour::Red)\n"},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+};
+
+suite<"typecheck_alias_registration"> typecheck_alias_registration = [] {
+  // An alias names a type that may be declared after it, and the types
+  // it names may themselves name an alias, so neither order can decide
+  // whether the alias registers at all.
+  "aliases resolve to classes and enums declared later"_test = [] {
+    auto checked = check_program({{"main.dao",
+                                   "module app::main\n"
+                                   "type Boxed = Holder\n"
+                                   "type Choice = Colour\n"
+                                   "class Holder:\n  value: i32\n"
+                                   "enum Colour:\n  Red\n  Green\n"
+                                   "fn take(b: Boxed): i32 -> b.value\n"
+                                   "fn pick(c: Choice): i32 -> 0\n"
+                                   "fn main(): i32\n"
+                                   "  let h: Boxed = Holder(7)\n"
+                                   "  return take(h) + pick(Colour::Red)\n"}});
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "an alias to another module's class is usable across the import"_test = [] {
+    auto checked = check_program({
+        {"lib.dao",
+         "module app::lib\n"
+         "type Boxed = Holder\n"
+         "class Holder:\n  value: i32\n"},
+        {"main.dao",
+         "module app::main\n"
+         "import app::lib\n"
+         "fn take(b: lib::Boxed): i32 -> b.value\n"
+         "fn main(): i32\n  return take(lib::Holder(3))\n"},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "an alias chain resolves to any depth in any order"_test = [] {
+    // A alias-of-alias-of-alias, declared before everything it names:
+    // registration repeats until nothing new resolves, so depth and
+    // source order both stop mattering (§4.3).
+    auto checked = check_program({{"main.dao",
+                                   "module app::main\n"
+                                   "type A = B\n"
+                                   "type B = C\n"
+                                   "type C = Holder\n"
+                                   "class Holder:\n  value: i32\n"
+                                   "fn take(a: A): i32 -> a.value\n"
+                                   "fn main(): i32\n"
+                                   "  let h: A = Holder(5)\n"
+                                   "  return take(h)\n"}});
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "an alias whose target never resolves is reported"_test = [] {
+    // Two aliases naming each other: neither ever has a type, and
+    // saying nothing would leave both silently unusable.
+    auto checked = check_program({{"main.dao",
+                                   "module app::main\n"
+                                   "type A = B\n"
+                                   "type B = A\n"
+                                   "fn main(): i32\n  return 0\n"}});
+    expect(all_messages(checked).find("cannot resolve the type aliased by") != std::string::npos)
+        << all_messages(checked);
+  };
+};
+
+suite<"typecheck_derived_visibility"> typecheck_derived_visibility = [] {
+  // Derivation asks whether the fields conform, FROM the deriving class's
+  // module: its own `extend` counts, another module's does not (§5).
+  "a class derives through an extension in its own module"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\n"
+         "derived concept Show:\n  fn show(self): i32\n"
+         "extend i32 as Show:\n  fn show(self): i32 -> self\n"
+         "class P:\n  x: i32\n"
+         "fn use_it<T: Show>(v: T): i32 -> v.show()\n"
+         "fn main(): i32\n  let p: P = P(1)\n  return use_it(p)\n"},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "another module's extension does not make a class derive"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::show\n"
+         "class P:\n  x: i32\n"
+         "fn use_it<T: show::Show>(v: T): i32 -> v.show()\n"
+         "fn main(): i32\n  let p: P = P(1)\n  return use_it(p)\n"},
+        {"show.dao",
+         "module app::show\nderived concept Show:\n  fn show(self): i32\n"
+         "extend i32 as Show:\n  fn show(self): i32 -> self\n"},
+    });
+    expect(!is_ok(checked.result)) << all_messages(checked);
+  };
+};
+
+suite<"typecheck_qualified_members"> typecheck_qualified_members = [] {
+  "a missing static member is not a construction"_test = [] {
+    // Arguments that would make `P(1)` valid must not turn
+    // `lib::P::missing(1)` into a construction of `P`.
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::lib\n"
+         "fn f(): lib::P\n  return lib::P::missing(1)\n"
+         "fn main(): i32 -> 0\n"},
+        {"lib.dao", "module app::lib\nclass P:\n  x: i32\n"},
+    });
+    expect(!clean(checked)) << all_messages(checked);
+  };
+
+  "a qualified type name still constructs"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::lib\n"
+         "fn f(): lib::P\n  return lib::P(1)\n"
+         "fn main(): i32 -> 0\n"},
+        {"lib.dao", "module app::lib\nclass P:\n  x: i32\n"},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+};
+
+suite<"typecheck_extend_scoping"> typecheck_extend_scoping = [] {
+  // CONTRACT_MODULE_SYSTEM.md §5: `extend` methods participate in
+  // method-set lookup within the declaring module; importing a module
+  // does not import them; the prelude is the sole exception.
+  const std::string kExtension =
+      "module app::ext\nextend i32 as Secret:\n  fn secret(self): i32 -> 42\n";
+
+  "an extend method is not visible in another module"_test = [kExtension] {
+    auto checked = check_program({
+        {"main.dao", "module app::main\nfn main(): i32\n  let v: i32 = 1\n  return v.secret()\n"},
+        {"ext.dao", kExtension},
+    });
+    expect(!is_ok(checked.result)) << all_messages(checked);
+  };
+
+  "importing the module still does not import its extend methods"_test = [kExtension] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::ext\n"
+         "fn main(): i32\n  let v: i32 = 1\n  return v.secret()\n"},
+        {"ext.dao", kExtension},
+    });
+    expect(!is_ok(checked.result)) << all_messages(checked);
+  };
+
+  "an extend method is visible in its own module"_test = [] {
+    auto checked = check_program({
+        {"ext.dao",
+         "module app::ext\nextend i32 as Secret:\n  fn secret(self): i32 -> 42\n"
+         "fn use_it(): i32\n  let v: i32 = 1\n  return v.secret()\n"},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "same-named extensions in two modules coexist"_test = [] {
+    // Each module extends i32 with its own `local`; each must see its
+    // own, whatever order the modules are checked in.
+    const std::string a = "module app::a\nextend i32 as A:\n  fn local(self): i32 -> 1\n"
+                          "fn use_a(): i32\n  let v: i32 = 0\n  return v.local()\n";
+    const std::string b = "module app::b\nextend i32 as B:\n  fn local(self): i32 -> 2\n"
+                          "fn use_b(): i32\n  let v: i32 = 0\n  return v.local()\n";
+    auto forward = check_program({{"a.dao", a}, {"b.dao", b}});
+    expect(clean(forward)) << all_messages(forward);
+    auto reversed = check_program({{"b.dao", b}, {"a.dao", a}});
+    expect(clean(reversed)) << all_messages(reversed);
+  };
+
+  "another module's extension is invisible on a class receiver"_test = [] {
+    // The struct fallback used by instantiations must apply the same
+    // rule as the direct lookup.
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nclass Box:\n  x: i32\n"
+         "fn main(): i32\n  let b: Box = Box(1)\n  return b.secret()\n"},
+        {"ext.dao",
+         "module app::ext\nimport app::main\n"
+         "extend main::Box as Secret:\n  fn secret(self): i32 -> 42\n"},
+    });
+    expect(!is_ok(checked.result)) << all_messages(checked);
+  };
+
+  "a prelude extend method is visible everywhere"_test = [] {
+    std::vector<std::string> prelude = {
+        "module core::secret\nextend i32 as Secret:\n  fn secret(self): i32 -> 42\n"};
+    auto checked =
+        check_with_prelude("fn use_it(): i32\n  let v: i32 = 1\n  return v.secret()\n", prelude);
+    expect(is_ok(checked)) << "prelude extend methods reach every module (§5.3)";
+  };
+};
+
+suite<"typecheck_modules"> typecheck_modules = [] {
+  "cross_module_call_checks_arity_and_argument_types"_test = [] {
+    auto arity = check_program({
+        {"main.dao", "module app::main\nimport app::math\nfn main(): i32 -> math::add(1)\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(has_error_containing(arity.result, "expected 2 argument(s), got 1"))
+        << all_messages(arity);
+
+    auto types = check_program({
+        {"main.dao",
+         "module app::main\nimport app::math\nfn main(): i32 -> math::add(1, \"two\")\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(!is_ok(types.result)) << all_messages(types);
+
+    auto ok = check_program({
+        {"main.dao", "module app::main\nimport app::math\nfn main(): i32 -> math::add(1, 2)\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(clean(ok)) << all_messages(ok);
+  };
+
+  "qualified_type_as_parameter_return_and_field"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::math\n"
+         "class Holder:\n  p: math::Point\n"
+         "fn area(p: math::Point): i32 -> p.x\n"
+         "fn make(): math::Point -> math::Point(3)\n"
+         "fn main(): i32\n"
+         "  let h: Holder = Holder(math::Point(1))\n"
+         "  return area(make()) + h.p.x\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "qualified_enum_construction_and_match"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::math\n"
+         "fn f(c: math::Color): i32\n"
+         "  match c:\n"
+         "    math::Color::Red:\n"
+         "      return 1\n"
+         "    math::Color::Green:\n"
+         "      return 2\n"
+         "  return 0\n"
+         "fn g(m: math::Maybe): i32\n"
+         "  match m:\n"
+         "    math::Maybe::Some(value):\n"
+         "      return value\n"
+         "    math::Maybe::None:\n"
+         "      return 0\n"
+         "  return 0\n"
+         "fn main(): i32\n"
+         "  let c: math::Color = math::Color::Red\n"
+         "  let m: math::Maybe = math::Maybe::Some(value = 5)\n"
+         "  return f(c) + g(m)\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(clean(checked)) << all_messages(checked);
+
+    auto bad = check_program({
+        {"main.dao",
+         "module app::main\nimport app::math\n"
+         "fn main(): i32\n  let c: math::Color = math::Color::Blue\n  return 0\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(has_error_containing(bad.result, "'Blue' is not a variant")) << all_messages(bad);
+  };
+
+  "qualified_static_method_call"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::math\n"
+         "fn main(): i32\n  let p: math::Point = math::Point::origin()\n  return p.x\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "cross_module_generic_call_explicit_and_inferred"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::math\n"
+         "fn main(): i32\n"
+         "  let a: i32 = math::identity<i32>(3)\n"
+         "  let b: i32 = math::identity(4)\n"
+         "  return a + b\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "a qualified path reaches static methods only"_test = [] {
+    auto checked = check_program({
+        {"lib.dao", "module lib\nclass P:\n    v: i32\n    fn get(self): i32 -> self.v\n"},
+        {"main.dao", "module app\nimport lib\nfn main(): i32 -> lib::P::get(lib::P(1))\n"},
+    });
+    expect(has_error_containing(checked.result, "is an instance method")) << all_messages(checked);
+  };
+
+  "a resolver-rejected qualified path is diagnosed once in every position"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::math\ntype Bad = math::Missing\n"
+         "fn f(): i32 -> math::Missing\nfn main(): i32 -> 0\n"},
+        {"math.dao", kMathModule},
+    });
+    size_t resolver_said = 0;
+    for (const auto& diag : checked.resolved.diagnostics) {
+      resolver_said += diag.message.find("has no export 'Missing'") != std::string::npos;
+    }
+    expect(resolver_said == 2_u) << all_messages(checked);
+    expect(checked.result.diagnostics.empty())
+        << "the checker restated the resolver: " << all_messages(checked);
+  };
+
+  "an alias of a generic instantiation carries the instantiation's fields"_test = [] {
+    // Aliases used to resolve before class fields were registered, so
+    // `IntBox` cached an empty `Box<i32>` shell that accepted anything.
+    auto checked = check_program({
+        {"lib.dao", "module lib\nclass Box<T>:\n    v: T\n"},
+        {"main.dao",
+         "module app\nimport lib\ntype IntBox = lib::Box<i32>\n"
+         "fn take(b: IntBox): i32 -> b.v\n"
+         "fn ok(): i32 -> take(lib::Box(1))\n"
+         "fn main(): i32 -> take(lib::Box(\"wrong\"))\n"},
+    });
+    expect(has_error_containing(checked.result, "not assignable to parameter type"))
+        << "Box<string> was accepted where IntBox was declared: " << all_messages(checked);
+  };
+
+  "an alias chain through a generic instantiation resolves after fields"_test = [] {
+    // `A` names `B`, which waits for `Box`'s fields.  `A` must wait
+    // too, not be reported unresolvable by a pass that runs before
+    // fields exist.  `P` puts the shell behind a pointer.
+    auto checked = check_program({
+        {"main.dao",
+         "module app\ntype A = B\ntype B = Box<i32>\ntype P = *Box<i32>\n"
+         "class Box<T>:\n    v: T\n"
+         "fn take(a: A, p: P): i32 -> a.v\n"
+         "fn main(): i32 -> 0\n"},
+    });
+    expect(checked.result.diagnostics.empty()) << all_messages(checked);
+  };
+
+  "a module's extend shadows the prelude's for the same receiver and name"_test = [] {
+    // Both extend i32 with `pick`; the module's returns i32, the
+    // prelude's a string.  Lookup is innermost-first, so `x.pick()` in
+    // the module is the module's.
+    auto checked = check_program({
+        {"stdlib/core/p.dao",
+         "module core::p\nconcept Named:\n    fn pick(self): string\n"
+         "extend i32 as Named:\n    fn pick(self): string -> \"s\"\n"},
+        {"app.dao",
+         "module app\nconcept Numbered:\n    fn pick(self): i32\n"
+         "extend i32 as Numbered:\n    fn pick(self): i32 -> 1\n"
+         "fn main(): i32\n  let x: i32 = 1\n  return x.pick()\n"},
+    });
+    expect(checked.result.diagnostics.empty())
+        << "the prelude's pick shadowed the module's: "
+        << (checked.result.diagnostics.empty() ? "" : checked.result.diagnostics.front().message);
+  };
+
+  "a field typed by a deferred generic alias is typed once the alias resolves"_test = [] {
+    // `IntBox` waits for Box's fields; `Holder.box` is typed by it.  The
+    // first field pass leaves `box` null; a second pass after the alias
+    // resolves fills it, so `Holder("x")` is refused.
+    auto checked = check_program({
+        {"lib.dao", "module lib\nclass Box<T>:\n    v: T\n"},
+        {"main.dao",
+         "module app\nimport lib\ntype IntBox = lib::Box<i32>\n"
+         "class Holder:\n    box: IntBox\n"
+         "fn main(): i32\n  let h: Holder = Holder(\"x\")\n  return 0\n"},
+    });
+    expect(!checked.result.diagnostics.empty())
+        << "Holder(\"x\") was accepted: the alias-typed field was left untyped";
+  };
+
+  "nested deferred aliases do not cache an incomplete instantiation"_test = [] {
+    // `Holder<T>` has a field typed by the deferred `IntBox`; `IntHolder`
+    // instantiates Holder and must wait until that field is typed, or
+    // the copy it caches carries the hole and `IntHolder("wrong", 1)`
+    // is accepted.
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nclass Box<T>:\n    v: T\nclass Holder<T>:\n    box: IntBox\n    tag: T\n"
+         "type IntBox = Box<i32>\ntype IntHolder = Holder<i32>\n"
+         "fn take(h: IntHolder): i32 -> h.tag\n"
+         "fn main(): i32 -> take(Holder(\"wrong\", 1))\n"},
+    });
+    expect(!checked.result.diagnostics.empty()) << "Holder(\"wrong\", 1) was accepted";
+  };
+
+  "an untypable field is reported once"_test = [] {
+    auto checked = check_program({
+        {"main.dao", "module app\nclass Broken:\n    value: Missing\nfn main(): i32 -> 0\n"},
+    });
+    size_t said = 0;
+    for (const auto& d : checked.result.diagnostics) {
+      said += d.message.find("unknown type 'Missing'") != std::string::npos;
+    }
+    expect(said == 1_u) << all_messages(checked);
+  };
+
+  "nested instantiated fields must be complete before an alias caches a copy"_test = [] {
+    // Outer's direct field is typed while the instantiated Inner it holds
+    // still has an untyped field; readiness must look all the way down.
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nclass Base<T>:\n    v: T\nclass Inner<T>:\n    dep: IntBase\n    t: T\nclass "
+         "Outer<T>:\n    inner: Inner<i32>\n    t: T\ntype IntBase = Base<i32>\ntype IntOuter = "
+         "Outer<i32>\nfn bad(o: IntOuter): string -> o.inner.dep.v\nfn main(): i32 -> 0\n"},
+    });
+    expect(!checked.result.diagnostics.empty())
+        << "an i32 field was returned as string through an incomplete cached instantiation";
+  };
+
+  "an enum payload typed by a deferred alias is typed once the alias resolves"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nclass Box<T>:\n    v: T\nenum class Wrap:\n    Some(value: IntBox)\n    "
+         "None\ntype IntBox = Box<i32>\nfn main(): i32\n  let w: Wrap = Wrap::Some(value = "
+         "\"wrong\")\n  return 0\n"},
+    });
+    expect(!checked.result.diagnostics.empty())
+        << "Wrap::Some(\"wrong\") was accepted with an untyped payload";
+  };
+
+  "the registration fixpoint converges on progress, not a round count"_test = [] {
+    // Eighteen aliases declared in reverse, each enabling the next: one
+    // registers per pass, so any fixed cap below eighteen leaves the top
+    // of the chain cached with a hole.
+    auto checked = check_program({
+        {"main.dao",
+         "module app\n"
+         "class C0<T>:\n    dep: T\nclass C1<T>:\n    dep: A0\nclass C2<T>:\n    dep: A1\nclass "
+         "C3<T>:\n    dep: A2\nclass C4<T>:\n    dep: A3\nclass C5<T>:\n    dep: A4\nclass "
+         "C6<T>:\n    dep: A5\nclass C7<T>:\n    dep: A6\nclass C8<T>:\n    dep: A7\nclass "
+         "C9<T>:\n    dep: A8\nclass C10<T>:\n    dep: A9\nclass C11<T>:\n    dep: A10\nclass "
+         "C12<T>:\n    dep: A11\nclass C13<T>:\n    dep: A12\nclass C14<T>:\n    dep: A13\nclass "
+         "C15<T>:\n    dep: A14\nclass C16<T>:\n    dep: A15\nclass C17<T>:\n    dep: A16\n"
+         "type A17 = C17<i32>\ntype A16 = C16<i32>\ntype A15 = C15<i32>\ntype A14 = C14<i32>\ntype "
+         "A13 = C13<i32>\ntype A12 = C12<i32>\ntype A11 = C11<i32>\ntype A10 = C10<i32>\ntype A9 = "
+         "C9<i32>\ntype A8 = C8<i32>\ntype A7 = C7<i32>\ntype A6 = C6<i32>\ntype A5 = "
+         "C5<i32>\ntype A4 = C4<i32>\ntype A3 = C3<i32>\ntype A2 = C2<i32>\ntype A1 = "
+         "C1<i32>\ntype A0 = C0<i32>\n"
+         "fn take(a: A17): i32 -> 0\nfn main(): i32 -> take(C17(\"wrong\"))\n"},
+    });
+    expect(!checked.result.diagnostics.empty())
+        << "C17(\"wrong\") was accepted where A17 was declared";
+  };
+
+  "an alias of a generic enum waits for its payloads to be typed"_test = [] {
+    // Wrap's payload is typed by a deferred alias; IntWrap must not cache
+    // an instantiation with that payload still untyped.
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nclass Box<T>:\n    v: T\nenum class Wrap<T>:\n    Some(box: IntBox, t: T)\n  "
+         "  None\ntype IntBox = Box<i32>\ntype IntWrap = Wrap<i32>\nfn main(): i32\n  let w: "
+         "IntWrap = Wrap::Some(box = Box(\"wrong\"), t = 1)\n  return 0\n"},
+    });
+    expect(!checked.result.diagnostics.empty())
+        << "Wrap::Some(box = Box(\"wrong\")) was accepted through an incomplete enum instantiation";
+  };
+
+  "an alias of a generic enum whose payload is a class waits for the class's fields"_test = [] {
+    // Enum registration runs before the first field pass, when Box is
+    // still an empty shell.  The shell is not complete, so IntWrap waits
+    // for it; registered early it stayed shaped as Wrap<T>.  Constructing
+    // a generic enum's variant against an explicit instantiation does not
+    // unify on this branch (pre-existing, independent of aliases), so the
+    // witness is that the alias registers cleanly and types a parameter.
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nclass Box<T>:\n    v: T\nenum class Wrap<T>:\n    Some(box: Box<T>)\n    "
+         "None\ntype IntWrap = Wrap<i32>\nfn take(w: IntWrap): i32 -> 0\nfn main(): i32 -> 0\n"},
+    });
+    expect(checked.result.diagnostics.empty()) << all_messages(checked);
+  };
+
+  "an enum holding itself by value is rejected once its name resolves"_test = [] {
+    // The first provisional pass cannot resolve `Loop` inside its own
+    // variant; the next one can, to the enum itself.  A cycle by value
+    // has no finite size whichever pass sees it.
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nenum class Loop:\n    Node(next: Loop)\n    End\nfn main(): i32 -> 0\n"},
+    });
+    expect(has_error_containing(checked.result, "cannot contain itself by value"))
+        << all_messages(checked);
+  };
+
+  "an enum holding itself by value through a class is rejected"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nenum class Tree:\n    Branch(cell: Cell)\n    Leaf\nclass Cell:\n    tree: "
+         "Tree\nfn main(): i32 -> 0\n"},
+    });
+    expect(has_error_containing(checked.result, "cannot contain itself by value"))
+        << all_messages(checked);
+  };
+
+  "an enum holding itself behind a pointer is accepted"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nenum class Chain:\n    Link(next: *Chain)\n    End\nfn main(): i32 -> 0\n"},
+    });
+    expect(checked.result.diagnostics.empty()) << all_messages(checked);
+  };
+
+  "an enum holding an instantiation of itself by value is rejected"_test = [] {
+    // Loop<i32> is another object of the same declaration; it holds the
+    // enum by value just the same.
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nenum class Loop<T>:\n    Node(value: T, next: Loop<i32>)\n    End\nfn "
+         "main(): i32 -> 0\n"},
+    });
+    expect(has_error_containing(checked.result, "cannot contain itself by value"))
+        << all_messages(checked);
+  };
+
+  "a generic enum and class holding each other by value are rejected, not instantiated"_test = [] {
+    // The cycle is complete in the sense of having no untyped slot,
+    // but nothing finite: IntLoop must not clone it, and
+    // substitution must not follow it forever.
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nclass Cell<T>:\n    loop: Loop<T>\nenum class Loop<T>:\n    Some(cell: "
+         "Cell<T>)\n    None\ntype IntLoop = Loop<i32>\nfn main(): i32 -> 0\n"},
+    });
+    expect(has_error_containing(checked.result, "cannot contain itself by value"))
+        << all_messages(checked);
+  };
+
+  "a class holding itself by value through another class is rejected"_test = [] {
+    auto checked = check_program({
+        {"main.dao", "module app\nclass A:\n    b: B\nclass B:\n    a: A\nfn main(): i32 -> 0\n"},
+    });
+    expect(has_error_containing(checked.result, "cannot contain itself by value"))
+        << all_messages(checked);
+  };
+
+  "a class holding itself behind a pointer is accepted"_test = [] {
+    auto checked = check_program({
+        {"main.dao", "module app\nclass Node:\n    next: *Node\n    v: i32\nfn main(): i32 -> 0\n"},
+    });
+    expect(checked.result.diagnostics.empty()) << all_messages(checked);
+  };
+
+  "an instantiation held through a pointer must be complete before an alias caches a copy"_test =
+      [] {
+        // Substitution clones through the pointer exactly as through a
+        // by-value field, so readiness must look through it too: with
+        // Inner's `dep` still untyped, the copy Outer<i32> caches would
+        // carry the hole behind `inner`.
+        constexpr std::string_view kDecls =
+            "module app\nclass Base<T>:\n    v: T\nclass Inner<T>:\n    dep: IntBase\n    t: "
+            "T\nclass Outer<T>:\n    inner: *Inner<T>\n    t: T\ntype IntBase = Base<i32>\ntype "
+            "IntOuter = Outer<i32>\n";
+        auto bad = check_program({
+            {"main.dao",
+             std::string(kDecls) +
+                 "fn bad(o: IntOuter): i32\n    mode unsafe =>\n        let s: string = "
+                 "(*o.inner).dep.v\n    return 0\nfn main(): i32 -> 0\n"},
+        });
+        expect(!bad.result.diagnostics.empty())
+            << "an i32 field was bound to a string through a pointer to an incomplete copy";
+        auto good = check_program({
+            {"main.dao",
+             std::string(kDecls) + "fn good(o: IntOuter): i32\n    mode unsafe =>\n        let s: "
+                                   "i32 = (*o.inner).dep.v\n    return 0\nfn main(): i32 -> 0\n"},
+        });
+        expect(good.result.diagnostics.empty()) << all_messages(good);
+      };
+
+  "a long alias chain declared in reverse registers in one pass"_test = [] {
+    // Each link registers what it names on demand, so the chain costs
+    // one visit per alias whichever order the declarations come in.
+    constexpr int kLinks = 4000;
+    std::string source = "module app\n";
+    for (int i = 0; i < kLinks; ++i) {
+      source += "type A" + std::to_string(i) + " = A" + std::to_string(i + 1) + "\n";
+    }
+    source += "type A" + std::to_string(kLinks) + " = i32\n";
+    source += "fn take(a: A0): i32 -> a\nfn main(): i32 -> take(1)\n";
+    auto checked = check_program({{"main.dao", source}});
+    expect(checked.result.diagnostics.empty()) << all_messages(checked);
+  };
+
+  "a concept is not a type outside a bound"_test = [] {
+    auto checked = check_program({
+        {"traits.dao", "module app::traits\nconcept Reveal:\n    fn reveal(self): i32\n"},
+        {"main.dao",
+         "module app::main\nimport app::traits\nfn f(x: traits::Reveal): i32 -> 0\n"
+         "fn main(): i32 -> 0\n"},
+    });
+    expect(has_error_containing(checked.result, "is a concept, not a type"))
+        << all_messages(checked);
+  };
+
+  "a resolver-rejected path nested in a type is diagnosed once"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::math\ntype Bad = *math::Missing\n"
+         "fn g(p: math::Point::Extra): i32 -> 0\nfn main(): i32 -> 0\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(checked.result.diagnostics.empty())
+        << "the checker restated the resolver: " << all_messages(checked);
+  };
+
+  "unknown_export_in_type_position_is_a_resolver_error"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::math\nfn f(p: math::Nope): i32 -> 0\nfn main(): i32 -> "
+         "0\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(checked.resolved.diagnostics.size() == 1_u &&
+           checked.resolved.diagnostics[0].message == "module 'app::math' has no export 'Nope'")
+        << all_messages(checked);
+    // ...and the resolver's is the only one: the checker must not add
+    // `unknown type 'Nope'` on top, in the signature or in the body.
+    expect(checked.result.diagnostics.empty())
+        << "the checker restated the resolver's diagnostic: " << all_messages(checked);
+  };
+
+  "prelude_generics_instantiate_identically_regardless_of_module_order"_test = [] {
+    // `aaa` sorts before `core::box` and imports nothing; its signatures
+    // instantiate a prelude generic, which must already be registered.
+    auto checked = check_program({
+        {"stdlib/core/box.dao", "module core::box\nclass Box<T>:\n  v: T\n"},
+        {"aaa.dao",
+         "module aaa\nclass Holder:\n  b: Box<i32>\n"
+         "fn take(h: Holder): i32 -> 0\n"
+         "fn main(): i32\n  let h: Holder = Holder(Box<i32>(1))\n  return take(h)\n"},
+    });
+    expect(clean(checked)) << all_messages(checked);
+  };
+
+  "module_binding_is_not_a_value"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::math\nfn main(): i32\n  let m: i32 = math\n  return 0\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(has_error_containing(checked.result, "'math' is a module, not a value"))
+        << all_messages(checked);
+  };
+};
+
+namespace {} // namespace
 
 // ---------------------------------------------------------------------------
 // Positive: literals and let bindings
@@ -1713,5 +2633,270 @@ suite<"explicit_type_args"> explicit_type_args = [] {
 };
 
 // NOLINTEND(readability-magic-numbers)
+
+// ---------------------------------------------------------------------------
+// `extend` scoping across modules (CONTRACT_MODULE_SYSTEM.md §5, §7.2):
+// a block's methods are in the declaring module's method set only, and
+// the prelude group is the sole exception.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Owns everything a checked multi-module program points into: the
+/// program buffers, the resolver's symbols, and the type universe.
+/// Files under `stdlib/` form the prelude group, as the driver's do.
+struct CheckedModules {
+  Program program;
+  ResolveResult resolve_result;
+  TypeContext types;
+  TypeCheckResult check_result;
+};
+
+auto check_modules(std::vector<std::pair<std::string, std::string>> files)
+    -> std::unique_ptr<CheckedModules> {
+  std::vector<SourceInput> inputs;
+  for (auto& [path, text] : files) {
+    inputs.push_back(
+        {.display_path = path, .text = text, .is_prelude = path.starts_with("stdlib/")});
+  }
+  auto checked = std::make_unique<CheckedModules>();
+  checked->program = build_program(std::move(inputs));
+  checked->resolve_result = resolve(checked->program);
+  checked->check_result = typecheck(checked->program, checked->resolve_result, checked->types);
+  return checked;
+}
+
+/// An `extend` on i32 and a module that uses the method it introduces.
+/// The extending module and the using module are given by the caller,
+/// so the same pair can be placed in the prelude or beside it.
+constexpr const char* kDoublingModule = "module lib\n"
+                                        "concept Doubling:\n"
+                                        "    fn doubled(self): i32\n"
+                                        "extend i32 as Doubling:\n"
+                                        "    fn doubled(self): i32 -> self + self\n"
+                                        "fn here(): i32\n"
+                                        "    let n: i32 = 21\n"
+                                        "    return n.doubled()\n";
+
+constexpr const char* kUsingModule = "module app\n"
+                                     "import lib\n"
+                                     "fn there(): i32\n"
+                                     "    let n: i32 = 21\n"
+                                     "    return n.doubled()\n";
+
+/// A `derived` concept and an `extend` that satisfies it for i32.  A
+/// class whose only field is an i32 derives the concept structurally —
+/// but only from a module where that `extend` is in the method set.
+constexpr const char* kShoutingModule = "module ext\n"
+                                        "derived concept Shout:\n"
+                                        "    fn shout(self): string\n"
+                                        "extend i32 as Shout:\n"
+                                        "    fn shout(self): string -> \"i32\"\n";
+
+constexpr const char* kBoxModule = "module app\n"
+                                   "class Box:\n"
+                                   "    n: i32\n"
+                                   "fn describe(): string\n"
+                                   "    let b: Box = Box(1)\n"
+                                   "    return b.shout()\n";
+
+/// Concept, `extend`, class, and use in one ordinary module: the block
+/// is in the method set of the very module asking whether its class
+/// derives, so the conformance must still be conferred.
+constexpr const char* kSelfShoutingModule = "module solo\n"
+                                            "derived concept Shout:\n"
+                                            "    fn shout(self): string\n"
+                                            "extend i32 as Shout:\n"
+                                            "    fn shout(self): string -> \"i32\"\n"
+                                            "class Box:\n"
+                                            "    n: i32\n"
+                                            "fn describe(): string\n"
+                                            "    let b: Box = Box(1)\n"
+                                            "    return b.shout()\n";
+
+} // namespace
+
+suite<"module_extend_scoping"> module_extend_scoping = [] {
+  "a module's extend method is not in a sibling module's method set"_test = [] {
+    auto checked = check_modules({{"lib.dao", kDoublingModule}, {"app.dao", kUsingModule}});
+    expect(has_error_containing(checked->check_result, "no method 'doubled' on type 'i32'"))
+        << "importing a module must not import its extend methods";
+  };
+
+  "a module sees its own extend methods"_test = [] {
+    // The same block, read from the module that declares it.
+    auto checked = check_modules({{"lib.dao", kDoublingModule}});
+    expect(is_ok(checked->check_result)) << "an extend is invisible in its own module";
+  };
+
+  "a prelude extend method is in every module's method set"_test = [] {
+    auto checked =
+        check_modules({{"stdlib/core/lib.dao", kDoublingModule}, {"app.dao", kUsingModule}});
+    expect(is_ok(checked->check_result))
+        << "the prelude is the exception to module-scoped extend (§7.2)";
+  };
+
+  // Derived conformance is structural: a class derives when its fields
+  // conform, and whether a field type conforms is asked from the
+  // class's own module, not from the program as a whole.
+
+  "a missing import's qualified type is reported once, by the graph"_test = [] {
+    // `import app::missing` is the graph's diagnostic.  The resolver still
+    // records the binding at `missing::T`'s head, with no module behind
+    // it, and the checker used to add `unknown type 'T'` on top -- a
+    // second diagnostic restating the first.
+    auto checked = check_modules(
+        {{"main.dao", "module app\nimport app::missing\n\nfn f(x: missing::T): i32 -> 0\n"}});
+    bool graph_said_missing = false;
+    for (const auto& diag : checked->program.diagnostics) {
+      if (diag.message.find("missing") != std::string::npos) {
+        graph_said_missing = true;
+      }
+    }
+    expect(graph_said_missing) << "the graph must report the missing module";
+    expect(!has_error_containing(checked->check_result, "unknown type"))
+        << "the checker restated the missing import as an unknown type";
+  };
+
+  "a shadowed concept does not inherit the prelude concept's conformances"_test = [] {
+    // The prelude's `Mark` and the module's `Mark` are two concepts.
+    // `extend i32 as Mark` in the prelude confers the prelude's; a bound
+    // on the module's must not be satisfied by it.
+    auto checked = check_modules({
+        {"stdlib/core/mark.dao",
+         "module core::mark\nconcept Mark:\n    fn mark(self): i32\n"
+         "extend i32 as Mark:\n    fn mark(self): i32 -> 1\n"},
+        {"app.dao",
+         "module app\nconcept Mark:\n    fn shout(self): string\n"
+         "fn accept<T: Mark>(x: T): i32 -> 0\n"
+         "fn main(): i32 -> accept(1)\n"},
+    });
+    expect(has_error_containing(checked->check_result, "does not satisfy concept"))
+        << "i32 satisfied the module's Mark through the prelude's extend";
+  };
+
+  "an inline conformance to a shadowed concept is to the module's concept"_test = [] {
+    // The module's `Mark` shadows the prelude's.  `as Mark:` on Box
+    // conforms to the module's; a bound on the prelude's `Mark` must
+    // not be satisfied by it.
+    auto checked = check_modules({
+        {"stdlib/core/mark.dao",
+         "module core::mark\nconcept Mark:\n    fn mark(self): i32\n"
+         "fn accept<T: Mark>(x: T): i32 -> 0\n"},
+        {"app.dao",
+         "module app\nconcept Mark:\n    fn shout(self): string\n"
+         "class Box:\n    n: i32\n    as Mark:\n        fn shout(self): string -> \"box\"\n"
+         "fn main(): i32 -> accept(Box(1))\n"},
+    });
+    expect(has_error_containing(checked->check_result, "does not satisfy concept"))
+        << "Box satisfied the prelude's Mark through a conformance to the module's";
+  };
+
+  "a class conforming to a shadowing concept still derives the prelude's"_test = [] {
+    // The prelude's `Mark` is derived and `i32` satisfies it.  The module
+    // shadows `Mark` and conforms Box to ITS `Mark` inline; that is a
+    // different concept, so Box still derives the prelude's through its
+    // i32 field, and a bound on the prelude's accepts it.
+    auto checked = check_modules({
+        {"stdlib/core/mark.dao",
+         "module core::mark\nderived concept Mark:\n    fn mark(self): i32\n"
+         "extend i32 as Mark:\n    fn mark(self): i32 -> 1\n"
+         "fn accept<T: Mark>(x: T): i32 -> 0\n"},
+        {"app.dao",
+         "module app\nconcept Mark:\n    fn shout(self): string\n"
+         "class Box:\n    n: i32\n    as Mark:\n        fn shout(self): string -> \"box\"\n"
+         "fn main(): i32 -> accept(Box(1))\n"},
+    });
+    expect(is_ok(checked->check_result))
+        << "an inline conformance to the module's Mark blocked deriving the prelude's";
+  };
+
+  "extending a class as the module's concept is not extending it as the prelude's"_test = [] {
+    // The prelude's `Box` denies the prelude's `Mark`.  The module's
+    // `Mark` is a different concept; extending Box as it is allowed.
+    auto checked = check_modules({
+        {"stdlib/core/m.dao",
+         "module core::m\nconcept Mark:\n    fn mark(self): i32\n"
+         "class Box:\n    n: i32\n    deny Mark\n"},
+        {"app.dao",
+         "module app\nconcept Mark:\n    fn shout(self): string\n"
+         "extend Box as Mark:\n    fn shout(self): string -> \"box\"\n"
+         "fn main(): i32 -> 0\n"},
+    });
+    expect(!has_error_containing(checked->check_result, "denies it"))
+        << "the module's Mark was taken for the prelude's: "
+        << (checked->check_result.diagnostics.empty()
+                ? ""
+                : checked->check_result.diagnostics.front().message);
+  };
+
+  "a type's own method outranks a module's extend of the same name"_test = [] {
+    // The prelude's Box has `pick(): i32`; the module extends Box with a
+    // `pick(): string` of its own concept.  Innermost is the type's own
+    // method, so `b.pick()` is the i32 one.
+    auto checked = check_modules({
+        {"stdlib/core/box.dao",
+         "module core::box\nclass Box:\n    n: i32\n    fn pick(self): i32 -> self.n\n"},
+        {"app.dao",
+         "module app\nconcept Alt:\n    fn pick(self): string\n"
+         "extend Box as Alt:\n    fn pick(self): string -> \"x\"\n"
+         "fn main(): i32\n  let b: Box = Box(1)\n  return b.pick()\n"},
+    });
+    expect(is_ok(checked->check_result))
+        << "the module's extend shadowed Box's own pick: "
+        << (checked->check_result.diagnostics.empty()
+                ? ""
+                : checked->check_result.diagnostics.front().message);
+  };
+
+  "an unimported concept's spelling does not reach across modules"_test = [] {
+    // `ext` declares a derived `Shout`; `app` never imports it and writes
+    // `extend i32 as Shout` anyway.  The resolver rejects the name; the
+    // checker must not match it by spelling and let Box derive Shout.
+    auto checked = check_modules({
+        {"ext.dao", "module ext\nderived concept Shout:\n    fn shout(self): i32\n"},
+        {"app.dao",
+         "module app\nextend i32 as Shout:\n    fn shout(self): i32 -> 1\n"
+         "class Box:\n    n: i32\n"
+         "fn main(): i32\n  let b: Box = Box(1)\n  return b.shout()\n"},
+    });
+    expect(has_error_containing(checked->check_result, "shout"))
+        << "Box derived an unimported sibling's concept by spelling";
+  };
+
+  "a generic class's own method outranks a module's extend of an instantiation"_test = [] {
+    auto checked = check_modules({
+        {"stdlib/core/box.dao",
+         "module core::box\nclass Box<T>:\n    v: T\n    fn pick(self): i32 -> 1\n"},
+        {"app.dao",
+         "module app\nconcept Alt:\n    fn pick(self): string\n"
+         "extend Box<i32> as Alt:\n    fn pick(self): string -> \"x\"\n"
+         "fn main(): i32\n  let b: Box<i32> = Box(1)\n  return b.pick()\n"},
+    });
+    expect(is_ok(checked->check_result))
+        << "the extension of Box<i32> shadowed Box's own pick: "
+        << (checked->check_result.diagnostics.empty()
+                ? ""
+                : checked->check_result.diagnostics.front().message);
+  };
+
+  "a sibling module's extend cannot make a class derive"_test = [] {
+    auto checked = check_modules({{"ext.dao", kShoutingModule}, {"app.dao", kBoxModule}});
+    expect(has_error_containing(checked->check_result, "no field or method 'shout' on type 'Box'"))
+        << "a class derived a concept through an extend its module cannot see";
+  };
+
+  "a module's own extend makes its own class derive"_test = [] {
+    auto checked = check_modules({{"solo.dao", kSelfShoutingModule}});
+    expect(is_ok(checked->check_result)) << "a module lost the conformance its own extend confers";
+  };
+
+  "a prelude extend makes a class in any module derive"_test = [] {
+    auto checked =
+        check_modules({{"stdlib/core/ext.dao", kShoutingModule}, {"app.dao", kBoxModule}});
+    expect(is_ok(checked->check_result))
+        << "the prelude's extend must still confer derived conformance everywhere";
+  };
+};
 
 auto main() -> int {} // NOLINT(readability-named-parameter)
