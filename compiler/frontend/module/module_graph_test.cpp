@@ -164,6 +164,43 @@ suite<"module_graph"> module_graph_suite = [] {
         << joined(messages(program));
   };
 
+  "two_cycles_joined_by_an_acyclic_bridge_are_both_reported"_test = [] {
+    // `c` is on no cycle: it imports the b-cycle and the d-cycle imports
+    // it.  Reporting the b-cycle first leaves `c` with nothing left to
+    // import, so a trace walk that assumes every survivor still has an
+    // edge steps off the graph before it reaches the d-cycle.
+    const std::vector<NamedSource> sources = {{"b1.dao", "module b1\nimport b2\n"},
+                                              {"b2.dao", "module b2\nimport b1\n"},
+                                              {"c.dao", "module c\nimport b1\n"},
+                                              {"d.dao", "module d\nimport c\nimport e\n"},
+                                              {"e.dao", "module e\nimport d\n"}};
+    const std::vector<std::string> expected = {"import cycle: b1 -> b2 -> b1",
+                                               "import cycle: d -> e -> d"};
+    auto forward = program_of(sources);
+    expect(messages(forward) == expected) << joined(messages(forward));
+    expect(forward.topo_order.empty()) << "no module of either cycle is ordered";
+
+    // Every permutation of the same set says the same thing (§8.4).
+    auto permuted = sources;
+    std::ranges::sort(permuted);
+    do {
+      auto program = program_of(permuted);
+      expect(messages(program) == expected) << joined(messages(program));
+    } while (std::ranges::next_permutation(permuted).found);
+  };
+
+  "a bridge into a reported cycle is not itself reported"_test = [] {
+    // The bridge and the acyclic dependent are the same rule seen from
+    // two sides: a module is named by a trace only when it is on the
+    // cycle that trace describes.
+    auto program = program_of({{"a.dao", "module a\nimport b\n"},
+                               {"b.dao", "module b\nimport a\n"},
+                               {"bridge.dao", "module bridge\nimport b\n"},
+                               {"top.dao", "module top\nimport bridge\n"}});
+    expect(messages(program) == std::vector<std::string>{"import cycle: a -> b -> a"})
+        << joined(messages(program));
+  };
+
   "import_of_a_prelude_module_resolves"_test = [] {
     std::vector<SourceInput> inputs = {
         {.display_path = "stdlib/core/mini.dao", .text = "module core::mini\n", .is_prelude = true},
@@ -359,13 +396,31 @@ suite<"root_file_discovery"> root_file_discovery_suite = [] {
     expect(said.find("is already declared by") != std::string::npos) << said;
   };
 
+  "an earlier root's mismatch is not excused by a module loaded elsewhere"_test = [] {
+    // The root directory maps `core::x` to a file declaring `core::wrong`
+    // while the prelude supplies a real `core::x`.  §8.3 makes the FIRST
+    // located file the one that must agree: binding the prelude module
+    // instead would let the import name a module the mapping rule never
+    // chose, and the disagreeing file would go unmentioned.
+    auto fixture = fixtures() / "shadowed_prelude";
+    auto program =
+        load_program_from_root(fixture / "main.dao", {.stdlib_root = fixture / "stdlib"});
+    expect(program.diagnostics.size() == 1_u) << joined(messages(program));
+    expect(messages(program)[0].ends_with(
+        "core/x.dao was found for import 'core::x' but declares module 'core::wrong'"))
+        << messages(program)[0];
+    expect(program.module_named("app")->imports.empty()) << "the import binds nothing";
+    expect(program.module_named("core::x") != nullptr)
+        << "the prelude module is still in the program; it is just not what the search found";
+  };
+
   "a prelude file's imports are discovered too"_test = [] {
     // The prelude group is loaded, not discovered, so its own imports
     // were never followed: what a prelude file imports is part of the
     // program even when no user file mentions it (§8.2).
     auto fixture = fixtures() / "prelude_imports";
     auto program = load_program_from_root(
-        fixture / "main.dao", {.module_roots = {fixture}, .stdlib_root = fixture / "stdlib"});
+        fixture / "main.dao", {.stdlib_root = fixture / "stdlib", .module_roots = {fixture}});
     expect(program.diagnostics.empty()) << joined(messages(program));
     expect(program.module_named("ext::thing") != nullptr)
         << "the module a prelude file imports was not discovered";
@@ -382,6 +437,47 @@ suite<"root_file_discovery"> root_file_discovery_suite = [] {
     auto program = load_program_from_root(fixtures() / "roots" / "main" / "main.dao", {});
     expect(program.diagnostics.size() == 1_u) << joined(messages(program));
     expect(messages(program)[0].starts_with("imported module 'ext::thing' not found; searched "));
+  };
+
+  "the roots are named in the order they are searched"_test = [] {
+    // §8.2 fixes the order — the root's directory, each --module-root in
+    // command-line order, then the stdlib root — and the diagnostic is
+    // what tells the user which one was expected to have the file.
+    auto roots = fixtures() / "roots";
+    auto program = load_program_from_root(
+        roots / "main" / "main.dao",
+        {.stdlib_root = roots / "nowhere", .module_roots = {roots / "first", roots / "second"}});
+    auto expected = "; searched " + (roots / "main").generic_string() + " " +
+                    (roots / "first").generic_string() + " " + (roots / "second").generic_string() +
+                    " " + (roots / "nowhere").generic_string();
+    expect(program.diagnostics.size() == 1_u) << joined(messages(program));
+    expect(messages(program)[0].ends_with(expected)) << messages(program)[0];
+  };
+
+  "a root that is also a prelude file keeps its root role"_test = [] {
+    // `daoc check stdlib/core/lib.dao`.  The program holds one copy of
+    // the file, in the prelude group — whether a stdlib file belongs to
+    // the prelude cannot depend on whether the command line named it
+    // (§7.6).  What the root contributes is its role: its module is the
+    // entry (§7.7), and an entry declaring no `fn main` is an error.
+    auto stdlib = fixtures() / "prelude_root" / "stdlib";
+    auto program = load_program_from_root(stdlib / "core" / "lib.dao", {.stdlib_root = stdlib});
+    expect(program.entry != nullptr && program.entry->display == "core::lib")
+        << "the root file selects no entry at all";
+    expect(messages(program) ==
+           std::vector<std::string>{"entry module 'core::lib' (the root file) declares no 'fn "
+                                    "main'"})
+        << joined(messages(program));
+  };
+
+  "a prelude root with main is the entry and is not duplicated"_test = [] {
+    auto stdlib = fixtures() / "prelude_root" / "stdlib";
+    auto program = load_program_from_root(stdlib / "core" / "app.dao", {.stdlib_root = stdlib});
+    expect(program.diagnostics.empty()) << joined(messages(program));
+    expect(program.entry != nullptr && program.entry->display == "core::app");
+    expect(program.files.size() == 2_ul) << "the root is loaded once, not once per role";
+    expect(program.user_files().empty())
+        << "a stdlib file stays in the prelude group when it is also the root";
   };
 };
 

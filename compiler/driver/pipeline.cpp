@@ -116,32 +116,20 @@ auto load_program(const ProgramRequest& request) -> Program {
                      ? load_program_from_root(request.root, request.options)
                      : load_program_from_files(request.sources, request.options);
 
-  // Load and graph diagnostics: located ones (imports, module
-  // declarations) print through the source map; the rest (position
-  // budget, entry selection) have no location.
+  // Load, graph, lex, and parse diagnostics as one §8.4-ordered stream.
+  // The ones with a location print through the source map; the rest
+  // (position budget, entry selection) have nowhere to point.
+  auto diagnostics = assembly_diagnostics(program);
   bool has_errors = false;
-  std::vector<Diagnostic> located;
-  for (const auto& diag : program.diagnostics) {
-    if (diag.span.length == 0) {
-      // An unlocated diagnostic keeps its severity: an advisory (a
-      // library set with no entry point) is a warning and does not stop
-      // the command, exactly as a located warning does not.
-      const bool fatal = diag.severity == Severity::Error;
-      std::cerr << (fatal ? "error: " : "warning: ") << diag.message << "\n";
-      has_errors |= fatal;
-    } else {
-      located.push_back(diag);
-    }
+  for (const auto& diag : diagnostics.unlocated) {
+    // An unlocated diagnostic keeps its severity: an advisory (a
+    // library set with no entry point) is a warning and does not stop
+    // the command, exactly as a located warning does not.
+    const bool fatal = diag.severity == Severity::Error;
+    std::cerr << (fatal ? "error: " : "warning: ") << diag.message << "\n";
+    has_errors |= fatal;
   }
-  // §8.4: located diagnostics are emitted in file order, then offset
-  // order — not grouped by the phase that produced them.  Files occupy
-  // disjoint, ascending ranges of the program's offset space, so sorting
-  // by offset is exactly that order.
-  for (const auto& file : program.files) {
-    located.insert(located.end(), file->lex.diagnostics.begin(), file->lex.diagnostics.end());
-    located.insert(located.end(), file->parse.diagnostics.begin(), file->parse.diagnostics.end());
-  }
-  has_errors |= print_error_diagnostics(program.source_map, located);
+  has_errors |= print_error_diagnostics(program.source_map, diagnostics.located);
   if (has_errors || !program.lexed_and_parsed_cleanly()) {
     std::exit(EXIT_FAILURE);
   }

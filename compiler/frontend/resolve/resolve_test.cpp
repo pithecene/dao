@@ -411,6 +411,80 @@ suite<"resolve_modules"> resolve_modules = [] {
     expect(n != nullptr && n->kind == SymbolKind::Local && n->module != nullptr &&
            n->module->display == "app::main");
   };
+
+  // Overload sets are indexed beside the ordinary declarations of a
+  // scope, so a chain walk that ignores the ordinary ones lets an outer
+  // set answer a name an inner binding owns (§7.4, innermost-first).
+
+  "a declaration shadows an overloaded prelude name"_test = [] {
+    auto resolved = resolve_program({
+        {"stdlib/core/pick.dao",
+         "module core::pick\nfn pick(a: i32): i32 -> 1\nfn pick(a: i32, b: i32): i32 -> 2\n"},
+        {"main.dao", "module app::main\nfn pick(a: i32): i32 -> 3\nfn main(): i32 -> pick(1)\n"},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+    const auto* called = use_in(resolved, "main.dao", "pick(1)");
+    expect(called != nullptr && called->module != nullptr && called->module->display == "app::main")
+        << "the prelude's overload set answered a call the module's own name owns";
+  };
+
+  "a shadowing declaration hides every arity of the outer set"_test = [] {
+    // The module declares one arity; the prelude's two-argument
+    // overload is out of reach behind it, not an alternative to it.
+    auto resolved = resolve_program({
+        {"stdlib/core/pick.dao",
+         "module core::pick\nfn pick(a: i32): i32 -> 1\nfn pick(a: i32, b: i32): i32 -> 2\n"},
+        {"main.dao", "module app::main\nfn pick(a: i32): i32 -> 3\nfn main(): i32 -> pick(1, 2)\n"},
+    });
+    const auto* called = use_in(resolved, "main.dao", "pick(1, 2)");
+    expect(called != nullptr && called->module != nullptr && called->module->display == "app::main")
+        << "a call reached past the shadowing declaration into the prelude";
+  };
+
+  "an import binding shadows an overloaded prelude name"_test = [] {
+    auto resolved = resolve_program({
+        {"stdlib/core/lib.dao",
+         "module core::lib\nfn lib(a: i32): i32 -> 1\nfn lib(a: i32, b: i32): i32 -> 2\n"},
+        {"lib.dao", "module lib\nfn one(): i32 -> 1\n"},
+        {"main.dao",
+         "module app::main\nimport lib\nfn main(): i32\n  let n: i32 = lib::one()\n"
+         "  return lib(1)\n"},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+    const auto* binding = use_in(resolved, "main.dao", "lib(1)");
+    expect(binding != nullptr && binding->kind == SymbolKind::Module)
+        << "the prelude's overload set answered through an import binding of the same name";
+    const auto* exported = use_in(resolved, "main.dao", "one()");
+    expect(exported != nullptr && exported->module != nullptr && exported->module->display == "lib")
+        << "the binding still reaches its own module's export";
+  };
+
+  // A qualified path is checked the same way wherever it appears: the
+  // closed set of forms in §6 is not an expression-only rule.
+
+  "a deeper path in type position is an error"_test = [] {
+    auto resolved = resolve_program({
+        {"lib.dao", "module lib\nclass T:\n  x: i32\n"},
+        {"main.dao", "module app::main\nimport lib\nfn f(x: lib::T::Extra): void\n  return\n"},
+    });
+    expect(messages_of(resolved) ==
+           std::vector<std::string>{"'lib::T::Extra': a path through import binding 'lib' "
+                                    "reaches at most an exported type (imports bind one segment)"})
+        << joined(messages_of(resolved));
+  };
+
+  "a type path binds the exported type at its own segment"_test = [] {
+    auto resolved = resolve_program({
+        {"lib.dao", "module lib\nclass T:\n  x: i32\n"},
+        {"main.dao", "module app::main\nimport lib\nfn f(x: lib::T): void\n  return\n"},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+    const auto* head = use_in(resolved, "main.dao", "lib::T");
+    expect(head != nullptr && head->kind == SymbolKind::Module);
+    const auto* exported = use_in(resolved, "main.dao", "T)");
+    expect(exported != nullptr && exported->kind == SymbolKind::Type && exported->name == "T" &&
+           exported->module != nullptr && exported->module->display == "lib");
+  };
 };
 
 namespace {} // namespace

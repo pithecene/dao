@@ -84,12 +84,25 @@ void cmd_ast(const dao::ProgramRequest& request) {
   }
 }
 
-// Emit semantic token classification for the user file. Output is
-// deterministic. Prelude files are separate program files and are not
-// printed.
+/// The file a single-document dump reports on: the entry module's,
+/// which in root-file mode is the root the command line named.  Not
+/// `user_files().front()` — a discovered import can sort ahead of the
+/// root, and a root that is itself a prelude file leaves that set empty,
+/// where indexing it aborts instead of saying anything.
+auto reported_file(const dao::Program& program) -> const dao::SourceFile& {
+  if (program.entry == nullptr || program.entry->file == nullptr) {
+    std::cerr << "error: no entry module to report on\n";
+    std::exit(EXIT_FAILURE);
+  }
+  return *program.entry->file;
+}
+
+// Emit semantic token classification for the entry module's file.
+// Output is deterministic. The program's other files -- prelude group
+// and imported modules alike -- are not printed.
 void cmd_tokens(const dao::ProgramRequest& request) {
   auto program = dao::load_program(request);
-  const auto& user = *program.user_files().front();
+  const auto& user = reported_file(program);
 
   // Run name resolution for resolve-driven classifications.
   auto resolve_result = dao::resolve(program);
@@ -198,7 +211,7 @@ void cmd_llvm_ir(const dao::ProgramRequest& request) {
 // Extra link inputs (object files, -l flags, -L flags) are forwarded
 // to the system linker.
 void cmd_build(const dao::ProgramRequest& request, std::span<const std::string> link_extras = {}) {
-  const auto& path = request.primary_file();
+  const auto path = request.primary_file();
   // Initialize targets before lowering so the module gets a correct
   // DataLayout for ABI-sensitive struct coercion.
   dao::LlvmBackend::initialize_targets();

@@ -1,0 +1,19 @@
+File
+  Module app::shapes
+  Import app::traits
+  ClassDecl Point
+    Field x: i32
+    Conformance traits::Reveal
+      FunctionDecl reveal
+        Param self
+        ReturnType: i32
+        ExprBody
+          FieldExpr .x
+            Identifier self
+    Deny traits::Hidden
+  ExtendDecl Point as traits::Named
+    FunctionDecl name
+      Param self
+      ReturnType: string
+      ExprBody
+        StringLiteral "point"
