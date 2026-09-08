@@ -1227,48 +1227,41 @@ fn mir_block_targets(bs: BS, block_node_idx: i64): Vector<i64>
         ii = ii + to_i64(1)
   return targets
 
-// A block's position in the function's block list, or -1 for a node
-// that is not one of its blocks.
-fn mir_block_position(position: HashMap<i64>, block_node_idx: i64): i64
-  let found: Option<i64> = position.get(i64_to_string(block_node_idx))
-  match found:
-    Option.Some(pos):
-      return pos
-    Option.None:
-      return to_i64(-1)
-
-// Which blocks a path from the entry block reaches, one flag per block
-// position (1 = reachable), by walking branches transitively: each
-// block is visited once and each edge costs one indexed lookup.  Being
-// a branch target is not enough: a merge block no path reaches can
-// still branch on to the next merge block (nested if/else whose arms
-// all return), and that target is dead too.
+// The blocks a path from the entry block reaches, by walking branches
+// transitively.  Being a branch target is not enough: a merge block no
+// path reaches can still branch on to the next merge block (nested
+// if/else whose arms all return), and that target is dead too.
+//
+// Size bound: MIR opens a block per arm and merge point of a
+// function's `if`/`while` bodies, so a function has as many blocks as
+// it has branches -- tens, not thousands -- and the membership scans
+// below cost blocks x edges of that size.  A scan is also what Dao's
+// value semantics make cheap: Vector.set and HashMap.set copy their
+// storage, so an indexed table would cost the same order and allocate
+// per update besides.
 fn mir_reachable_blocks(bs: BS, blocks_raw: Vector<i64>): Vector<i64>
-  let position: HashMap<i64> = HashMap<i64>::new()
-  let flags: Vector<i64> = Vector<i64>::new()
-  let bi: i64 = to_i64(0)
-  while bi < blocks_raw.length():
-    position = position.set(i64_to_string(blocks_raw.get(bi)), bi)
-    flags = flags.push(to_i64(0))
-    bi = bi + to_i64(1)
+  let reachable: Vector<i64> = Vector<i64>::new()
   if blocks_raw.length() == to_i64(0):
-    return flags
-  let worklist: Vector<i64> = Vector<i64>::new()
-  worklist = worklist.push(to_i64(0))
-  flags = flags.set(to_i64(0), to_i64(1))
+    return reachable
+  reachable = reachable.push(blocks_raw.get(to_i64(0)))
   let next: i64 = to_i64(0)
-  while next < worklist.length():
-    let targets: Vector<i64> = mir_block_targets(bs, blocks_raw.get(worklist.get(next)))
+  while next < reachable.length():
+    let targets: Vector<i64> = mir_block_targets(bs, reachable.get(next))
     let ti: i64 = to_i64(0)
     while ti < targets.length():
-      let pos: i64 = mir_block_position(position, targets.get(ti))
-      if pos >= to_i64(0):
-        if flags.get(pos) == to_i64(0):
-          flags = flags.set(pos, to_i64(1))
-          worklist = worklist.push(pos)
+      if i64_vector_contains(reachable, targets.get(ti)) == false:
+        reachable = reachable.push(targets.get(ti))
       ti = ti + to_i64(1)
     next = next + to_i64(1)
-  return flags
+  return reachable
+
+fn i64_vector_contains(xs: Vector<i64>, x: i64): bool
+  let i: i64 = to_i64(0)
+  while i < xs.length():
+    if xs.get(i) == x:
+      return true
+    i = i + to_i64(1)
+  return false
 
 fn ll_inst_is_terminator(inst: LlInst): bool
   match inst.kind:
@@ -1397,7 +1390,7 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
       // the prologue lives with the body).  Subsequent blocks get
       // their own fresh LlBlock.
       let ll_blocks: Vector<LlBlock> = Vector<LlBlock>::new()
-      let reachable_flags: Vector<i64> = mir_reachable_blocks(bs, blocks_raw)
+      let reachable_blocks: Vector<i64> = mir_reachable_blocks(bs, blocks_raw)
       let block_i: i64 = to_i64(0)
       while block_i < blocks_raw.length():
         let block_node_idx: i64 = blocks_raw.get(block_i)
@@ -1427,7 +1420,7 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
               // reaches; in a reachable block it is a non-void function
               // falling off its end.
               if ll_inst_is_unreachable(last):
-                if reachable_flags.get(block_i) == to_i64(1):
+                if i64_vector_contains(reachable_blocks, block_node_idx):
                   bs = bs_error(bs, "bootstrap llvm backend rejects function '" + name + "': block " + label + " ends without returning a value")
             ll_blocks = ll_blocks.push(LlBlock(label, this_insts))
         block_i = block_i + to_i64(1)
