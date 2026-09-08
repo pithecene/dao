@@ -68,21 +68,15 @@ auto run_program(ProgramRequest inputs, const ServiceContext& ctx) -> Reply {
   // Running needs an entry point, so here a missing one is an error
   // rather than the linker's `undefined main`.
   auto prog = build_playground_program(ctx.repo_root, std::move(inputs), EntryPolicy::Required);
+  // Graph, lex, and parse diagnostics of every file as one §8.4-ordered
+  // stream, reported before anything can return: a graph error must not
+  // hide the parse error that explains it.
+  collect_program_diagnostics(diagnostics, prog);
   if (prog.user == nullptr || has_error_severity(prog.program.diagnostics)) {
-    collect_assembly_diagnostics(diagnostics, prog);
     return compile_failed(std::move(diagnostics));
   }
-
-  // Lex/parse diagnostics of every file; only the editor buffer's are
-  // reported, but any file failing to parse stops the run.
-  bool lex_parse_failed = false;
-  for (const auto& file : prog.program.files) {
-    collect_diagnostics(diagnostics, prog, file->lex.diagnostics);
-    collect_diagnostics(diagnostics, prog, file->parse.diagnostics);
-    lex_parse_failed |= !file->lex.diagnostics.empty() || !file->parse.diagnostics.empty() ||
-                        file->parse.file == nullptr;
-  }
-  if (lex_parse_failed) {
+  // Any file failing to lex or parse stops the run.
+  if (!prog.program.lexed_and_parsed_cleanly()) {
     return compile_failed(std::move(diagnostics), "prelude failed to parse");
   }
 

@@ -1,0 +1,5 @@
+module app
+import core::x
+
+fn main(): i32
+  return 0

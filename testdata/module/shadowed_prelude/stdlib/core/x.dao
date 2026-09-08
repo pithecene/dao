@@ -1,0 +1,3 @@
+module core::x
+
+fn two(): i32 -> 2

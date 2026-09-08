@@ -177,24 +177,18 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   // Advisory: a buffer with no `fn main` is analysable, and the warning
   // is why Run will not work.
   auto prog = build_playground_program(ctx.repo_root, std::move(*inputs), EntryPolicy::Advisory);
+  // Reported before anything can return: graph, lex, and parse are one
+  // §8.4-ordered stream, so a graph error in one file no longer hides
+  // the parse error in another, and assembly that only had a warning
+  // (no entry module) still says so.
+  collect_program_diagnostics(out.diagnostics, prog);
   if (prog.user == nullptr || has_error_severity(prog.program.diagnostics)) {
-    collect_assembly_diagnostics(out.diagnostics, prog);
     return out.reply();
   }
-  // Assembly succeeded but may still have something to say (no entry
-  // module, for one), and that must not be lost.
-  collect_program_diagnostics(out.diagnostics, prog);
 
   add_lexical_tokens(out, prog);
-  for (const auto& file : prog.program.files) {
-    collect_diagnostics(out.diagnostics, prog, file->lex.diagnostics);
-  }
   if (!prog.user->lex.diagnostics.empty()) {
     return out.reply();
-  }
-
-  for (const auto& file : prog.program.files) {
-    collect_diagnostics(out.diagnostics, prog, file->parse.diagnostics);
   }
   if (prog.user->file() == nullptr) {
     return out.reply();
