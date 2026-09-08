@@ -82,6 +82,7 @@ enum class LlInstKind:
   LlRet(value_text: string, value_ty_text: string, has_value: i64)
   LlBr(target_label: string)
   LlCondBr(cond_text: string, then_label: string, else_label: string)
+  LlUnreachable
 
 // A single instruction.  `result_name` is "%N" for value-producing
 // instructions, empty string for effect-only or terminators.
@@ -794,7 +795,7 @@ class LowerStepR:
   bs: BS
   insts: Vector<LlInst>
 
-fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64): LowerStepR
+fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_text: string): LowerStepR
   let node: MirNode = bs.mir_nodes.get(mir_node_idx)
   match node:
     // ---------- constants (inlined as operand text) ----------
@@ -1041,10 +1042,20 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64): LowerStepR
           "")
         insts = insts.push(inst)
       else:
-        let inst: LlInst = LlInst(
-          LlInstKind.LlRet("", "void", to_i64(0)),
-          "")
-        insts = insts.push(inst)
+        if fn_ret_ty_text == "void":
+          let inst: LlInst = LlInst(
+            LlInstKind.LlRet("", "void", to_i64(0)),
+            "")
+          insts = insts.push(inst)
+        else:
+          // A valueless return in a non-void function ends either a block
+          // no path reaches (the merge block after an if/else whose arms
+          // both return) or a genuine fall-through.  `ret void` is invalid
+          // IR in a non-void function either way; `unreachable` is right
+          // for the first case, and the block loop rejects the second by
+          // checking whether any branch reaches the block.
+          let dead: LlInst = LlInst(LlInstKind.LlUnreachable, "")
+          insts = insts.push(dead)
       return LowerStepR(bs, insts)
 
     MirNode.MirBr(target_block):
@@ -1191,6 +1202,67 @@ fn decode_string_literal(raw: string): StrDecode
   return StrDecode(out, bytes + to_i64(1))
 
 // Check whether an LlInst is a terminator (ret / br / cond_br).
+fn ll_inst_is_unreachable(inst: LlInst): bool
+  match inst.kind:
+    LlInstKind.LlUnreachable:
+      return true
+  return false
+
+// The blocks one block branches to.
+fn mir_block_targets(bs: BS, block_node_idx: i64): Vector<i64>
+  let targets: Vector<i64> = Vector<i64>::new()
+  let mb: MirNode = bs.mir_nodes.get(block_node_idx)
+  match mb:
+    MirNode.MirBlock(block_id, inst_list_lp, inst_count):
+      let insts_raw: Vector<i64> = read_mir_list(bs.mir_idx, inst_list_lp)
+      let ii: i64 = to_i64(0)
+      while ii < insts_raw.length():
+        let inst: MirNode = bs.mir_nodes.get(insts_raw.get(ii))
+        match inst:
+          MirNode.MirBr(target_block):
+            targets = targets.push(target_block)
+          MirNode.MirCondBr(cond, then_block, else_block):
+            targets = targets.push(then_block)
+            targets = targets.push(else_block)
+        ii = ii + to_i64(1)
+  return targets
+
+// The blocks a path from the entry block reaches, by walking branches
+// transitively.  Being a branch target is not enough: a merge block no
+// path reaches can still branch on to the next merge block (nested
+// if/else whose arms all return), and that target is dead too.
+//
+// Size bound: MIR opens a block per arm and merge point of a
+// function's `if`/`while` bodies, so a function has as many blocks as
+// it has branches -- tens, not thousands -- and the membership scans
+// below cost blocks x edges of that size.  A scan is also what Dao's
+// value semantics make cheap: Vector.set and HashMap.set copy their
+// storage, so an indexed table would cost the same order and allocate
+// per update besides.
+fn mir_reachable_blocks(bs: BS, blocks_raw: Vector<i64>): Vector<i64>
+  let reachable: Vector<i64> = Vector<i64>::new()
+  if blocks_raw.length() == to_i64(0):
+    return reachable
+  reachable = reachable.push(blocks_raw.get(to_i64(0)))
+  let next: i64 = to_i64(0)
+  while next < reachable.length():
+    let targets: Vector<i64> = mir_block_targets(bs, reachable.get(next))
+    let ti: i64 = to_i64(0)
+    while ti < targets.length():
+      if i64_vector_contains(reachable, targets.get(ti)) == false:
+        reachable = reachable.push(targets.get(ti))
+      ti = ti + to_i64(1)
+    next = next + to_i64(1)
+  return reachable
+
+fn i64_vector_contains(xs: Vector<i64>, x: i64): bool
+  let i: i64 = to_i64(0)
+  while i < xs.length():
+    if xs.get(i) == x:
+      return true
+    i = i + to_i64(1)
+  return false
+
 fn ll_inst_is_terminator(inst: LlInst): bool
   match inst.kind:
     LlInstKind.LlRet(v, t, h):
@@ -1198,6 +1270,8 @@ fn ll_inst_is_terminator(inst: LlInst): bool
     LlInstKind.LlBr(target):
       return true
     LlInstKind.LlCondBr(c, tl, el):
+      return true
+    LlInstKind.LlUnreachable:
       return true
   return false
 
@@ -1316,6 +1390,7 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
       // the prologue lives with the body).  Subsequent blocks get
       // their own fresh LlBlock.
       let ll_blocks: Vector<LlBlock> = Vector<LlBlock>::new()
+      let reachable_blocks: Vector<i64> = mir_reachable_blocks(bs, blocks_raw)
       let block_i: i64 = to_i64(0)
       while block_i < blocks_raw.length():
         let block_node_idx: i64 = blocks_raw.get(block_i)
@@ -1329,7 +1404,7 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
             let ii: i64 = to_i64(0)
             while ii < insts_raw.length():
               let mir_inst_idx: i64 = insts_raw.get(ii)
-              let step: LowerStepR = bs_lower_inst(bs, this_insts, mir_inst_idx)
+              let step: LowerStepR = bs_lower_inst(bs, this_insts, mir_inst_idx, ret_ty_text)
               bs = step.bs
               this_insts = step.insts
               ii = ii + to_i64(1)
@@ -1341,6 +1416,12 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
               let last: LlInst = this_insts.get(this_insts.length() - to_i64(1))
               if ll_inst_is_terminator(last) == false:
                 bs = bs_error(bs, "bootstrap llvm backend expected block terminator in block " + label)
+              // An `unreachable` end is only right in a block no path
+              // reaches; in a reachable block it is a non-void function
+              // falling off its end.
+              if ll_inst_is_unreachable(last):
+                if i64_vector_contains(reachable_blocks, block_node_idx):
+                  bs = bs_error(bs, "bootstrap llvm backend rejects function '" + name + "': block " + label + " ends without returning a value")
             ll_blocks = ll_blocks.push(LlBlock(label, this_insts))
         block_i = block_i + to_i64(1)
 
@@ -1460,6 +1541,8 @@ fn serialize_inst(bs: BS, inst: LlInst): string
       rhs = serialize_br(target)
     LlInstKind.LlCondBr(cond, then_label, else_label):
       rhs = serialize_cond_br(cond, then_label, else_label)
+    LlInstKind.LlUnreachable:
+      rhs = "unreachable"
   if inst.result_name != "":
     return "  " + inst.result_name + " = " + rhs
   return "  " + rhs
@@ -1598,6 +1681,35 @@ fn contains_substring(haystack: string, needle: string): bool
     i = i + to_i64(1)
   return false
 
+// Write a fixture's IR for bootstrap/validate_ir.sh: the text to
+// bootstrap/llvm/out/<name>.ll, and the exit code the program is
+// expected to produce to <name>.exit when the fixture has a main with a
+// known result (a negative expectation means validate only).  The
+// directory is created by the harness.  Returns the number of artifacts
+// that could not be written, so a failed write fails the suite instead
+// of leaving a stale or missing file for validation to miss.
+fn emit_ir(name: string, result: LlvmTextResult, expected_exit: i32): i32
+  if result.ok == false:
+    return 0
+  let path: string = "bootstrap/llvm/out/" + name + ".ll"
+  if write_llvm_text(result, path) == false:
+    print("FAIL " + name + ": could not write " + path)
+    return 1
+  if expected_exit >= 0:
+    let exit_path: string = "bootstrap/llvm/out/" + name + ".exit"
+    if write_file(exit_path, expected_exit.to_string()) == false:
+      print("FAIL " + name + ": could not write " + exit_path)
+      return 1
+  return 0
+
+fn diags_text(diags: Vector<Diagnostic>): string
+  let out: string = ""
+  let i: i64 = to_i64(0)
+  while i < diags.length():
+    out = out + diags.get(i).message + "\n"
+    i = i + to_i64(1)
+  return out
+
 fn check_contains(result: LlvmTextResult, needle: string, test_name: string): bool
   if contains_substring(result.text, needle):
     return true
@@ -1612,13 +1724,15 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 17
+  let total: i32 = 19
+  let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
   // Test 1: minimal_define — fn main(): i32 -> 0 emits define + entry + ret
   // -----------------------------------------------------------------
   let src1: string = "fn main(): i32\n  return 0\n"
   let r1: LlvmTextResult = lower_source_to_llvm_text(src1)
+  write_failures = write_failures + emit_ir("minimal_define", r1, 0)
   if r1.ok:
     let a: bool = check_contains(r1, "define i32 @main", "minimal_define")
     let b: bool = check_contains(r1, "entry:", "minimal_define")
@@ -1636,6 +1750,7 @@ fn main(): i32
   // -----------------------------------------------------------------
   let src2: string = "fn main(): i32\n  let x: i32 = 1\n  return x\n"
   let r2: LlvmTextResult = lower_source_to_llvm_text(src2)
+  write_failures = write_failures + emit_ir("let_store_load", r2, 1)
   if r2.ok:
     let a: bool = check_contains(r2, "alloca i32", "let_store_load")
     let b: bool = check_contains(r2, "store i32 1", "let_store_load")
@@ -1655,6 +1770,7 @@ fn main(): i32
   // -----------------------------------------------------------------
   let src3: string = "fn main(): i32\n  let x: i32 = 1 + 2 * 3\n  return x\n"
   let r3: LlvmTextResult = lower_source_to_llvm_text(src3)
+  write_failures = write_failures + emit_ir("int_arithmetic", r3, 7)
   if r3.ok:
     let a: bool = check_contains(r3, "mul i32 2, 3", "int_arithmetic")
     let b: bool = check_contains(r3, "add i32 1,", "int_arithmetic")
@@ -1670,6 +1786,7 @@ fn main(): i32
   // -----------------------------------------------------------------
   let src4: string = "fn f(x: i32): bool\n  return x < 5\n"
   let r4: LlvmTextResult = lower_source_to_llvm_text(src4)
+  write_failures = write_failures + emit_ir("int_comparison", r4, -1)
   if r4.ok:
     let a: bool = check_contains(r4, "icmp slt i32", "int_comparison")
     let b: bool = check_contains(r4, "ret i1", "int_comparison")
@@ -1685,6 +1802,7 @@ fn main(): i32
   // -----------------------------------------------------------------
   let src5: string = "fn f(x: i32): i32\n  return x\n"
   let r5: LlvmTextResult = lower_source_to_llvm_text(src5)
+  write_failures = write_failures + emit_ir("param_seeding", r5, -1)
   if r5.ok:
     let a: bool = check_contains(r5, "define i32 @f(i32 %arg0)", "param_seeding")
     let b: bool = check_contains(r5, "%slot0 = alloca i32", "param_seeding")
@@ -1704,6 +1822,7 @@ fn main(): i32
   // -----------------------------------------------------------------
   let src6: string = "extern fn puts(s: string): i32\n\nfn main(): i32\n  return 0\n"
   let r6: LlvmTextResult = lower_source_to_llvm_text(src6)
+  write_failures = write_failures + emit_ir("extern_declare", r6, 0)
   if r6.ok:
     let a: bool = check_contains(r6, "declare i32 @puts(ptr %arg0)", "extern_declare")
     let b: bool = check_contains(r6, "define i32 @main()", "extern_declare")
@@ -1719,6 +1838,7 @@ fn main(): i32
   // -----------------------------------------------------------------
   let src7: string = "fn add(a: i32, b: i32): i32\n  return a + b\n\nfn main(): i32\n  return add(1, 2)\n"
   let r7: LlvmTextResult = lower_source_to_llvm_text(src7)
+  write_failures = write_failures + emit_ir("call_extern", r7, 3)
   if r7.ok:
     let a: bool = check_contains(r7, "define i32 @add(i32 %arg0, i32 %arg1)", "call_extern")
     let b: bool = check_contains(r7, "call i32 @add(", "call_extern")
@@ -1734,6 +1854,7 @@ fn main(): i32
   // -----------------------------------------------------------------
   let src8: string = "fn f(x: i32): i32\n  if x > 0\n    return 1\n  else\n    return 2\n"
   let r8: LlvmTextResult = lower_source_to_llvm_text(src8)
+  write_failures = write_failures + emit_ir("if_else_cfg", r8, -1)
   if r8.ok:
     let a: bool = check_contains(r8, "icmp sgt i32", "if_else_cfg")
     let b: bool = check_contains(r8, "br i1 ", "if_else_cfg")
@@ -1753,6 +1874,7 @@ fn main(): i32
   // -----------------------------------------------------------------
   let src9: string = "fn f(n: i32): i32\n  let i: i32 = 0\n  while i < n\n    i = i + 1\n  return i\n"
   let r9: LlvmTextResult = lower_source_to_llvm_text(src9)
+  write_failures = write_failures + emit_ir("while_cfg", r9, -1)
   if r9.ok:
     let a: bool = check_contains(r9, "br label %bb", "while_cfg")
     let b: bool = check_contains(r9, "icmp slt i32", "while_cfg")
@@ -1770,6 +1892,7 @@ fn main(): i32
   // -----------------------------------------------------------------
   let src10: string = "extern fn puts(s: string): i32\n\nfn main(): i32\n  return puts(\"hi\")\n"
   let r10: LlvmTextResult = lower_source_to_llvm_text(src10)
+  write_failures = write_failures + emit_ir("string_global", r10, -1)
   if r10.ok:
     let a: bool = check_contains(r10, "@.str.0 = private unnamed_addr constant", "string_global")
     let b: bool = check_contains(r10, "c\"hi\\00\"", "string_global")
@@ -1787,18 +1910,25 @@ fn main(): i32
   // -----------------------------------------------------------------
   let src11: string = "fn main(): i32\n  let x: i32 = 1 + 2\n  return x\n"
   let r11a: LlvmTextResult = lower_source_to_llvm_text(src11)
+  write_failures = write_failures + emit_ir("deterministic_repeat", r11a, 3)
   let r11b: LlvmTextResult = lower_source_to_llvm_text(src11)
-  if r11a.text == r11b.text:
-    print("PASS deterministic_repeat")
-    pass_count = pass_count + 1
+  // Two identical failures are equal too; only two successful
+  // lowerings prove determinism (and leave an artifact to validate).
+  if r11a.ok and r11b.ok:
+    if r11a.text == r11b.text:
+      print("PASS deterministic_repeat")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL deterministic_repeat: byte drift across runs")
   else:
-    print("FAIL deterministic_repeat: byte drift across runs")
+    print("FAIL deterministic_repeat: ok=false")
 
   // -----------------------------------------------------------------
   // Test 12: struct_field_read — struct field access emits GEP + load
   // -----------------------------------------------------------------
   let src12: string = "class P:\n  x: i32\n  y: i32\n\nfn get_x(p: P): i32\n  return p.x\n"
   let r12: LlvmTextResult = lower_source_to_llvm_text(src12)
+  write_failures = write_failures + emit_ir("struct_field_read", r12, -1)
   if r12.ok:
     let a: bool = check_contains(r12, "%struct.P = type { i32, i32 }", "struct_field_read")
     // Field read on an SSA struct value → extractvalue (NOT GEP —
@@ -1824,6 +1954,7 @@ fn main(): i32
   // -----------------------------------------------------------------
   let src13: string = "class P:\n  x: i32\n  y: i32\n\nfn main(): i32\n  let p: P = P(1, 2)\n  return p.x\n"
   let r13: LlvmTextResult = lower_source_to_llvm_text(src13)
+  write_failures = write_failures + emit_ir("struct_construction", r13, 1)
   if r13.ok:
     let a: bool = check_contains(r13, "%struct.P = type { i32, i32 }", "struct_construction")
     let b: bool = check_contains(r13, "getelementptr inbounds %struct.P", "struct_construction")
@@ -1849,6 +1980,7 @@ fn main(): i32
   // the emitted `call` must be `%struct.P`, NOT `<unsupported>`.
   let src14: string = "class P:\n  x: i32\n  y: i32\n\nfn take(p: P): i32\n  return p.x\n\nfn main(): i32\n  let p: P = P(3, 4)\n  return take(p)\n"
   let r14: LlvmTextResult = lower_source_to_llvm_text(src14)
+  write_failures = write_failures + emit_ir("struct_call_arg", r14, 3)
   if r14.ok:
     let a: bool = check_contains(r14, "define i32 @take(%struct.P", "struct_call_arg")
     let b: bool = check_contains(r14, "call i32 @take(%struct.P", "struct_call_arg")
@@ -1875,6 +2007,7 @@ fn main(): i32
   // signature and `ret` must use `%struct.P`, NOT `<unsupported>`.
   let src15: string = "class P:\n  x: i32\n  y: i32\n\nfn make(): P\n  return P(5, 6)\n\nfn main(): i32\n  let p: P = make()\n  return p.x\n"
   let r15: LlvmTextResult = lower_source_to_llvm_text(src15)
+  write_failures = write_failures + emit_ir("struct_return", r15, 5)
   if r15.ok:
     let a: bool = check_contains(r15, "define %struct.P @make()", "struct_return")
     let b: bool = check_contains(r15, "ret %struct.P", "struct_return")
@@ -1906,6 +2039,7 @@ fn main(): i32
   // invalid IR.
   let src16: string = "class Inner:\n  v: i32\n\nclass Outer:\n  inner: Inner\n\nfn main(): i32\n  let o: Outer = Outer(Inner(42))\n  return 0\n"
   let r16: LlvmTextResult = lower_source_to_llvm_text(src16)
+  write_failures = write_failures + emit_ir("nested_struct_registration", r16, 0)
   if r16.ok:
     let a: bool = check_contains(r16, "%struct.Inner = type { i32 }", "nested_struct_registration")
     let b: bool = check_contains(r16, "%struct.Outer = type { %struct.Inner }", "nested_struct_registration")
@@ -1926,42 +2060,61 @@ fn main(): i32
       di = di + to_i64(1)
 
   // -----------------------------------------------------------------
-  // Test 17: write_ll_artifact — lower source → write .ll artifact to disk
+  // Test 17: write_ll_artifact — lower source → .ll artifact on disk
   // -----------------------------------------------------------------
-  // This test verifies the bootstrap pipeline can lower Dao source to
-  // LLVM IR text.  The write to disk is best-effort — a fixed /tmp
-  // path is used because bootstrap Dao has no mktemp/getenv.  If the
-  // write fails (permissions, missing /tmp, etc.), the test still
-  // passes on the lowering assertion alone; the write failure is
-  // logged as a warning, not a suite failure.
-  //
-  // Manual verification after this test passes:
-  //   clang /tmp/dao_e2e_test.ll -o /tmp/dao_e2e_test && /tmp/dao_e2e_test; echo $?
-  //   expected exit code: 42
+  // The artifact joins the others under bootstrap/llvm/out/, where
+  // bootstrap/validate_ir.sh compiles it with clang, links it against
+  // the runtime, runs it, and checks the exit code (42).
   let e2e_src: string = "fn main(): i32\n  return 42\n"
   let e2e_r: LlvmTextResult = lower_source_to_llvm_text(e2e_src)
+  write_failures = write_failures + emit_ir("write_ll_artifact", e2e_r, 42)
   if e2e_r.ok:
     print("PASS write_ll_artifact (lowering ok)")
     pass_count = pass_count + 1
-    // Best-effort write — not counted toward pass/fail.
-    let wrote: bool = write_llvm_text(e2e_r, "/tmp/dao_e2e_test.ll")
-    if wrote:
-      print("  artifact written to /tmp/dao_e2e_test.ll")
-      print("  manual verify: clang /tmp/dao_e2e_test.ll -o /tmp/dao_e2e_test && /tmp/dao_e2e_test; echo $?")
-      print("  expected exit code: 42")
-    else:
-      print("  warning: write_llvm_text failed (non-hermetic /tmp path); lowering still passed")
   else:
     print("FAIL write_ll_artifact: ok=false")
+
+  // -----------------------------------------------------------------
+  // Test 18: fallthrough_rejected — a non-void function whose entry
+  // block ends without a value is an error, not `unreachable`
+  // -----------------------------------------------------------------
+  let ft_src: string = "fn f(x: i32): i32\n  let y: i32 = x\n"
+  let ft_r: LlvmTextResult = lower_source_to_llvm_text(ft_src)
+  if ft_r.ok:
+    print("FAIL fallthrough_rejected: a function falling off its end was lowered")
+  else:
+    if contains_substring(diags_text(ft_r.diags), "without returning a value"):
+      print("PASS fallthrough_rejected")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL fallthrough_rejected: rejected, but not for falling off the end")
+      print(diags_text(ft_r.diags))
+
+  // -----------------------------------------------------------------
+  // Test 19: nested_total_if — every arm of a nested if/else returns;
+  // the inner merge block branches to the outer one, and neither is
+  // reachable, so both end in `unreachable` and the function is accepted
+  // -----------------------------------------------------------------
+  let nt_src: string = "fn main(): i32\n  let x: i32 = 7\n  if x > 0:\n    if x > 5:\n      return 1\n    else:\n      return 2\n  else:\n    return 3\n"
+  let nt_r: LlvmTextResult = lower_source_to_llvm_text(nt_src)
+  write_failures = write_failures + emit_ir("nested_total_if", nt_r, 1)
+  if nt_r.ok:
+    print("PASS nested_total_if")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL nested_total_if: a function whose every arm returns was rejected")
+    print(diags_text(nt_r.diags))
 
   // -----------------------------------------------------------------
   // Summary
   // -----------------------------------------------------------------
   print("")
   print(i32_to_string(pass_count) + " / " + i32_to_string(total) + " tests passed")
-  if pass_count == total:
+  if write_failures > 0:
+    print(i32_to_string(write_failures) + " IR artifact(s) could not be written")
+  if pass_count == total and write_failures == 0:
     print("ALL TESTS PASSED")
-  else:
-    print("SOME TESTS FAILED")
-  return 0
+    return 0
+  print("SOME TESTS FAILED")
+  return 1
 

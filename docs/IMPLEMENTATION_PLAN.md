@@ -320,7 +320,7 @@ in `bootstrap/shared/base.dao`; assembly via `bootstrap/assemble.sh`.
 Task 29 (bootstrap MIR) is complete — HIR lowered to basic-block MIR
 with 8 tests.
 Task 30 (bootstrap LLVM backend) is complete — MIR lowered to
-deterministic textual LLVM IR with 17 tests.
+deterministic textual LLVM IR with 19 tests.
 
 The Tier A bootstrap frontend-to-IR-to-text pipeline (lex → parse →
 resolve → typecheck → HIR → MIR → LLVM text) is complete.
@@ -615,7 +615,7 @@ identity in every reply while the UI still shows one document.
 
 ### Task 30.5 — Mechanical LLVM Validation
 
-Status: **not started** — Order 2 of the delivery sequence; ahead of
+Status: **complete** — Order 2 of the delivery sequence; ahead of
 further backend complexity.
 
 **Objective**: every bootstrap LLVM fixture proves its emitted IR is
@@ -624,6 +624,16 @@ llvm-as → executable where applicable`), so invalid IR is a unit-test
 failure rather than a manual discovery.  Motivated by the `%0`
 SSA-generation bug the first struct slice exposed, which every
 substring-based LLVM assertion had missed.
+
+The bootstrap LLVM suite (`bootstrap/llvm/impl.dao`) writes the IR of
+every fixture it lowers to `bootstrap/llvm/out/<test>.ll`, plus a
+`<test>.exit` file where the program's result is known.
+`bootstrap/validate_ir.sh` proves each artifact is accepted by LLVM
+(`clang -c -x ir`), links the ones with an expectation against the
+runtime, runs them, and compares exit codes; `task bootstrap-test` runs
+it after the suite.  Invalid IR from the bootstrap backend is a test
+failure rather than a manual discovery — the follow-up Task 30 §14.3
+called for, ahead of the Tier B backend slices.
 
 ### Task 34 — Bootstrap Closure Audit
 
