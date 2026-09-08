@@ -1877,6 +1877,25 @@ suite<"module_extend_scoping"> module_extend_scoping = [] {
         << "an inline conformance to the module's Mark blocked deriving the prelude's";
   };
 
+  "extending a class as the module's concept is not extending it as the prelude's"_test = [] {
+    // The prelude's `Box` denies the prelude's `Mark`.  The module's
+    // `Mark` is a different concept; extending Box as it is allowed.
+    auto checked = check_program({
+        {"stdlib/core/m.dao",
+         "module core::m\nconcept Mark:\n    fn mark(self): i32\n"
+         "class Box:\n    n: i32\n    deny Mark\n"},
+        {"app.dao",
+         "module app\nconcept Mark:\n    fn shout(self): string\n"
+         "extend Box as Mark:\n    fn shout(self): string -> \"box\"\n"
+         "fn main(): i32 -> 0\n"},
+    });
+    expect(!has_error_containing(checked->check_result, "denies it"))
+        << "the module's Mark was taken for the prelude's: "
+        << (checked->check_result.diagnostics.empty()
+                ? ""
+                : checked->check_result.diagnostics.front().message);
+  };
+
   "a sibling module's extend cannot make a class derive"_test = [] {
     auto checked = check_program({{"ext.dao", kShoutingModule}, {"app.dao", kBoxModule}});
     expect(has_error_containing(checked->check_result, "no field or method 'shout' on type 'Box'"))

@@ -892,7 +892,19 @@ void TypeChecker::check_declaration(const Decl* decl) {
       if (dnode != nullptr) {
         if (dnode->is<ClassDecl>()) {
           for (const auto& deny : dnode->as<ClassDecl>().denials) {
-            if (deny.concept_name == ext.concept_name) {
+            // The same concept, by the declaration the resolver bound:
+            // a module's `Mark` is not the prelude's `Mark` the class
+            // denied.  Outside a program the spelling is all there is.
+            auto bound_of = [&](Span at) -> const Decl* {
+              auto it = resolve_.uses.find(at.offset);
+              return it == resolve_.uses.end() ? nullptr : it->second->decl_as_decl();
+            };
+            const auto* denied = bound_of(deny.concept_span);
+            const auto* extended = bound_of(ext.concept_span);
+            const bool same = (denied != nullptr && extended != nullptr)
+                                  ? denied == extended
+                                  : deny.concept_name == ext.concept_name;
+            if (same) {
               error(ext.concept_span,
                     "cannot extend '" + std::string(st->name()) + "' as '" +
                         std::string(ext.concept_name) + "' because the type denies it");

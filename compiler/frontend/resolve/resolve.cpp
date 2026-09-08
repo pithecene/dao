@@ -38,6 +38,24 @@ auto symbol_kind_name(SymbolKind kind) -> const char* {
 
 namespace {
 
+/// The span of segment `i` of a qualified path.  The parser records
+/// one per token; a path built by hand (a test, a synthesized node)
+/// may carry none, in which case the segments are assumed to abut
+/// their `::` separators.
+auto segment_span(const std::vector<std::string_view>& segments,
+                  const std::vector<Span>& spans,
+                  Span whole,
+                  size_t i) -> Span {
+  if (i < spans.size()) {
+    return spans[i];
+  }
+  uint32_t offset = whole.offset;
+  for (size_t k = 0; k < i; ++k) {
+    offset += static_cast<uint32_t>(segments[k].size()) + 2; // "::"
+  }
+  return Span{.offset = offset, .length = static_cast<uint32_t>(segments[i].size())};
+}
+
 // ---------------------------------------------------------------------------
 // Builtin type names — pre-populated into the file scope
 // ---------------------------------------------------------------------------
@@ -277,12 +295,9 @@ private:
     auto binding_name = path.segments.back();
     auto binding_len = static_cast<uint32_t>(binding_name.size());
 
-    // Compute the span of the last segment.
-    uint32_t offset = path.span.offset;
-    for (size_t i = 0; i + 1 < path.segments.size(); ++i) {
-      offset += static_cast<uint32_t>(path.segments[i].size()) + 2; // skip "::"
-    }
-    Span binding_span{.offset = offset, .length = binding_len};
+    Span binding_span =
+        segment_span(path.segments, path.segment_spans, path.span, path.segments.size() - 1);
+    (void)binding_len;
 
     // A prelude module's own declarations go to the shared prelude
     // scope, not to its file scope, so checking the file scope alone
@@ -571,7 +586,7 @@ private:
     if (target == nullptr || target->exports == nullptr) {
       return;
     }
-    auto name_offset = callee.span.offset + static_cast<uint32_t>(qn.segments[0].size()) + 2;
+    auto name_offset = segment_span(qn.segments, qn.segment_spans, callee.span, 1).offset;
     if (auto* match = find_export_overload(target->exports, qn.segments[1], arity)) {
       uses_[name_offset] = match;
     }
@@ -1053,7 +1068,7 @@ private:
     // bindings are not re-exported (§3.2).
     const auto* exports = target->exports;
     auto name = qn.segments[1];
-    auto name_offset = expr.span.offset + static_cast<uint32_t>(qn.segments[0].size()) + 2;
+    auto name_offset = segment_span(qn.segments, qn.segment_spans, expr.span, 1).offset;
     auto* exported = exports->lookup_local(name);
     if (exported == nullptr || exported->kind == SymbolKind::Module) {
       diagnostics_.push_back(Diagnostic::error(
@@ -1069,7 +1084,7 @@ private:
     // b::T::m is a static method of exported type T; b::E::V an enum
     // variant, recorded as the type for the checker to validate.
     auto member = qn.segments[2];
-    auto member_offset = name_offset + static_cast<uint32_t>(name.size()) + 2;
+    auto member_offset = segment_span(qn.segments, qn.segment_spans, expr.span, 2).offset;
     if (exported->kind != SymbolKind::Type) {
       diagnostics_.push_back(Diagnostic::error(
           Span{.offset = member_offset, .length = static_cast<uint32_t>(member.size())},
@@ -1288,7 +1303,8 @@ private:
             const auto* target = sym->decl_as_module();
             if (target != nullptr && target->exports != nullptr) {
               auto name = path.segments[1];
-              auto name_offset = path.span.offset + static_cast<uint32_t>(first_seg.size()) + 2;
+              auto name_offset =
+                  segment_span(path.segments, path.segment_spans, path.span, 1).offset;
               auto* exported = target->exports->lookup_local(name);
               if (exported == nullptr || exported->kind == SymbolKind::Module) {
                 // The export is the module's to have or not; this is the
