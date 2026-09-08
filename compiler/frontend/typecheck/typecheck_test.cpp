@@ -742,6 +742,21 @@ suite<"typecheck_modules"> typecheck_modules = [] {
         << (checked.result.diagnostics.empty() ? "" : checked.result.diagnostics.front().message);
   };
 
+  "a field typed by a deferred generic alias is typed once the alias resolves"_test = [] {
+    // `IntBox` waits for Box's fields; `Holder.box` is typed by it.  The
+    // first field pass leaves `box` null; a second pass after the alias
+    // resolves fills it, so `Holder("x")` is refused.
+    auto checked = check_program({
+        {"lib.dao", "module lib\nclass Box<T>:\n    v: T\n"},
+        {"main.dao",
+         "module app\nimport lib\ntype IntBox = lib::Box<i32>\n"
+         "class Holder:\n    box: IntBox\n"
+         "fn main(): i32\n  let h: Holder = Holder(\"x\")\n  return 0\n"},
+    });
+    expect(!checked.result.diagnostics.empty())
+        << "Holder(\"x\") was accepted: the alias-typed field was left untyped";
+  };
+
   "a concept is not a type outside a bound"_test = [] {
     auto checked = check_program({
         {"traits.dao", "module app::traits\nconcept Reveal:\n    fn reveal(self): i32\n"},
@@ -2598,6 +2613,25 @@ suite<"module_extend_scoping"> module_extend_scoping = [] {
     });
     expect(!has_error_containing(checked->check_result, "denies it"))
         << "the module's Mark was taken for the prelude's: "
+        << (checked->check_result.diagnostics.empty()
+                ? ""
+                : checked->check_result.diagnostics.front().message);
+  };
+
+  "a type's own method outranks a module's extend of the same name"_test = [] {
+    // The prelude's Box has `pick(): i32`; the module extends Box with a
+    // `pick(): string` of its own concept.  Innermost is the type's own
+    // method, so `b.pick()` is the i32 one.
+    auto checked = check_modules({
+        {"stdlib/core/box.dao",
+         "module core::box\nclass Box:\n    n: i32\n    fn pick(self): i32 -> self.n\n"},
+        {"app.dao",
+         "module app\nconcept Alt:\n    fn pick(self): string\n"
+         "extend Box as Alt:\n    fn pick(self): string -> \"x\"\n"
+         "fn main(): i32\n  let b: Box = Box(1)\n  return b.pick()\n"},
+    });
+    expect(is_ok(checked->check_result))
+        << "the module's extend shadowed Box's own pick: "
         << (checked->check_result.diagnostics.empty()
                 ? ""
                 : checked->check_result.diagnostics.front().message);

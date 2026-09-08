@@ -491,6 +491,9 @@ void TypeChecker::register_declarations() {
   while (register_type_aliases(/*report_failures=*/false) > 0) {
   }
   register_type_aliases(/*report_failures=*/true);
+  // A field typed by one of those aliases was left null by the first
+  // field pass; now that the alias exists, the field can be typed.
+  register_struct_fields();
   register_signatures();
 }
 
@@ -2776,14 +2779,16 @@ void TypeChecker::build_method_table() {
     for (const auto* method_decl : cls.methods) {
       const auto& method = method_decl->as<FunctionDecl>();
       const auto* fn_type = build_method_fn_type(method);
-      add_method(MethodKey{struct_type, method.name}, {fn_type, method_decl});
+      add_method(MethodKey{struct_type, method.name},
+                 {fn_type, method_decl, nullptr, /*inherent=*/true});
     }
     // Conformance block methods.
     for (const auto& conf : cls.conformances) {
       for (const auto* method_decl : conf.methods) {
         const auto& method = method_decl->as<FunctionDecl>();
         const auto* fn_type = build_method_fn_type(method);
-        add_method(MethodKey{struct_type, method.name}, {fn_type, method_decl});
+        add_method(MethodKey{struct_type, method.name},
+                   {fn_type, method_decl, nullptr, /*inherent=*/true});
       }
     }
   }
