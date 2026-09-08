@@ -89,15 +89,15 @@ public:
   auto run(Program& program) -> ResolveResult {
     std::vector<Unit> units;
     for (auto* module : program.topo_order) {
-      units.push_back({.file = module->file->parse.file,
-                       .module = module,
-                       .is_prelude = module->is_prelude});
+      units.push_back(
+          {.file = module->file->parse.file, .module = module, .is_prelude = module->is_prelude});
     }
     // A file with no module declaration (already a parse error) still
     // resolves, in a scope of its own, so analysis keeps working.
     for (const auto& file : program.files) {
       if (file->parse.file != nullptr && file->module == nullptr) {
-        units.push_back({.file = file->parse.file, .module = nullptr, .is_prelude = file->is_prelude});
+        units.push_back(
+            {.file = file->parse.file, .module = nullptr, .is_prelude = file->is_prelude});
       }
     }
     return run_units(std::move(units));
@@ -109,10 +109,10 @@ public:
       -> ResolveResult {
     std::vector<Unit> units;
     for (const auto* file : files) {
-      units.push_back({.file = file,
-                       .module = nullptr,
-                       .is_prelude = source_map != nullptr &&
-                                     source_map->is_prelude(file->span.offset)});
+      units.push_back(
+          {.file = file,
+           .module = nullptr,
+           .is_prelude = source_map != nullptr && source_map->is_prelude(file->span.offset)});
     }
     return run_units(std::move(units));
   }
@@ -655,8 +655,7 @@ private:
             tp.name_span,
             "duplicate type parameter '" + std::string(tp.name) + "'"));
       } else {
-        auto* sym = new_symbol(
-            SymbolKind::GenericParam, tp.name, tp.name_span, &decl);
+        auto* sym = new_symbol(SymbolKind::GenericParam, tp.name, tp.name_span, &decl);
         scope->declare(tp.name, sym);
       }
       // Resolve constraint types.
@@ -724,8 +723,7 @@ private:
             field->name_span,
             "duplicate declaration '" + std::string(field->name) + "'"));
       } else {
-        auto* sym =
-            new_symbol(SymbolKind::Field, field->name, field->name_span, field);
+        auto* sym = new_symbol(SymbolKind::Field, field->name, field->name_span, field);
         struct_scope->declare(field->name, sym);
       }
 
@@ -845,8 +843,7 @@ private:
         const auto& fn_decl = method->as<FunctionDecl>();
         auto mangled_name = ctx_.intern(
             target_name + "." + std::string(fn_decl.name));
-        new_symbol(SymbolKind::Function, mangled_name,
-                         fn_decl.name_span, method);
+        new_symbol(SymbolKind::Function, mangled_name, fn_decl.name_span, method);
       }
     }
   }
@@ -872,8 +869,7 @@ private:
             let_stmt.name_span,
             "duplicate declaration '" + std::string(let_stmt.name) + "'"));
       } else {
-        auto* sym =
-            new_symbol(SymbolKind::Local, let_stmt.name, let_stmt.name_span, &stmt);
+        auto* sym = new_symbol(SymbolKind::Local, let_stmt.name, let_stmt.name_span, &stmt);
         scope->declare(let_stmt.name, sym);
       }
       break;
@@ -933,8 +929,7 @@ private:
       // Create block scope for the loop body; declare the loop variable.
       auto* for_scope = ctx_.make_scope(ScopeKind::Block, scope);
       for_scope->set_range(stmt.span);
-      auto* sym = new_symbol(
-          SymbolKind::Local, for_stmt.var, for_stmt.var_span, &stmt);
+      auto* sym = new_symbol(SymbolKind::Local, for_stmt.var, for_stmt.var_span, &stmt);
       for_scope->declare(for_stmt.var, sym);
 
       for (const auto* s : for_stmt.body) {
@@ -980,16 +975,13 @@ private:
         auto* arm_scope = ctx_.make_scope(ScopeKind::Block, scope);
         // Register destructuring bindings as locals in the arm scope.
         for (size_t i = 0; i < arm.bindings.size(); ++i) {
-          auto* sym = new_symbol(
-              SymbolKind::Local, arm.bindings[i], arm.binding_spans[i],
-              nullptr);
+          auto* sym = new_symbol(SymbolKind::Local, arm.bindings[i], arm.binding_spans[i], nullptr);
           arm_scope->declare(arm.bindings[i], sym);
         }
         // Register `as` binding: `Pattern as name:` binds the whole value.
         if (!arm.as_binding.empty()) {
-          auto* as_sym = new_symbol(
-              SymbolKind::Local, arm.as_binding, arm.as_binding_span,
-              nullptr);
+          auto* as_sym =
+              new_symbol(SymbolKind::Local, arm.as_binding, arm.as_binding_span, nullptr);
           arm_scope->declare(arm.as_binding, as_sym);
         }
         for (const auto* body_stmt : arm.body) {
@@ -1027,9 +1019,9 @@ private:
     };
     if (qn.segments.size() > 3) {
       diagnostics_.push_back(Diagnostic::error(
-          expr.span, "'" + path_text() + "': a path through import binding '" +
-                         std::string(binding->name) +
-                         "' reaches at most a type's member (imports bind one segment)"));
+          expr.span,
+          "'" + path_text() + "': a path through import binding '" + std::string(binding->name) +
+              "' reaches at most a type's member (imports bind one segment)"));
       return;
     }
 
