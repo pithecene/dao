@@ -1000,6 +1000,31 @@ private:
     }
   }
 
+  /// The qualified forms through an import binding are a closed set
+  /// (CONTRACT_MODULE_SYSTEM.md §6): a path bottoms out at a type's
+  /// member in expression position (`b::T::m`, `b::E::V`) and at the
+  /// exported type itself in type position (`b::T`).  Anything deeper is
+  /// an error in either position, naming the binding it went through.
+  /// Returns true when the path was rejected.
+  auto reject_deep_path(Span span,
+                        const std::vector<std::string_view>& segments,
+                        size_t deepest,
+                        std::string_view binding,
+                        std::string_view reach) -> bool {
+    if (segments.size() <= deepest) {
+      return false;
+    }
+    std::string path_text;
+    for (auto segment : segments) {
+      path_text += (path_text.empty() ? "" : "::") + std::string(segment);
+    }
+    diagnostics_.push_back(Diagnostic::error(
+        span,
+        "'" + path_text + "': a path through import binding '" + std::string(binding) +
+            "' reaches at most " + std::string(reach) + " (imports bind one segment)"));
+    return true;
+  }
+
   /// `b::name`, `b::E::V`, and `b::T::m` through an import binding
   /// (CONTRACT_MODULE_SYSTEM.md §6).  The binding is recorded at the
   /// head segment and each resolved segment at its own offset, so
@@ -1010,18 +1035,7 @@ private:
     if (target == nullptr) {
       return; // no program, or an import the graph already reported missing
     }
-    auto path_text = [&] {
-      std::string text;
-      for (auto segment : qn.segments) {
-        text += (text.empty() ? "" : "::") + std::string(segment);
-      }
-      return text;
-    };
-    if (qn.segments.size() > 3) {
-      diagnostics_.push_back(Diagnostic::error(
-          expr.span,
-          "'" + path_text() + "': a path through import binding '" + std::string(binding->name) +
-              "' reaches at most a type's member (imports bind one segment)"));
+    if (reject_deep_path(expr.span, qn.segments, 3, binding->name, "a type's member")) {
       return;
     }
 
@@ -1248,18 +1262,25 @@ private:
         auto first_seg = path.segments.front();
         auto* sym = scope->lookup(first_seg);
         if (sym != nullptr && sym->kind == SymbolKind::Module) {
-          uses_[path.span.offset] = sym;
-          // The named type itself is that module's export, recorded at
-          // its own offset: `m::T` in type position is the same symbol
-          // `m::T` in expression position resolves to, and a consumer
-          // (a concept bound, say) needs the type, not the module.
-          const auto* target = sym->decl_as_module();
-          if (target != nullptr && target->exports != nullptr) {
-            auto name = path.segments[1];
-            auto name_offset = path.span.offset + static_cast<uint32_t>(first_seg.size()) + 2;
-            if (auto* exported = target->exports->lookup_local(name);
-                exported != nullptr && exported->kind != SymbolKind::Module) {
-              uses_[name_offset] = exported;
+          // A type path reaches the exported type and stops: `b::T::m`
+          // names a static method, which is not a type, and `b::T::U`
+          // names nothing at all (§6).  Unlike an unknown type name,
+          // which the checker reports, an over-deep path is a module
+          // error and is diagnosed here for both positions alike.
+          if (!reject_deep_path(path.span, path.segments, 2, sym->name, "an exported type")) {
+            uses_[path.span.offset] = sym;
+            // The named type itself is that module's export, recorded at
+            // its own offset: `m::T` in type position is the same symbol
+            // `m::T` in expression position resolves to, and a consumer
+            // (a concept bound, say) needs the type, not the module.
+            const auto* target = sym->decl_as_module();
+            if (target != nullptr && target->exports != nullptr) {
+              auto name = path.segments[1];
+              auto name_offset = path.span.offset + static_cast<uint32_t>(first_seg.size()) + 2;
+              if (auto* exported = target->exports->lookup_local(name);
+                  exported != nullptr && exported->kind != SymbolKind::Module) {
+                uses_[name_offset] = exported;
+              }
             }
           }
         }
