@@ -477,7 +477,7 @@ void TypeChecker::register_declarations() {
   // payloads may name an alias, and aliases may in turn name an enum.
   while (register_type_aliases(/*report_failures=*/false) > 0) {
   }
-  register_enum_variants();
+  register_enum_variants(/*report_failures=*/false);
   while (register_type_aliases(/*report_failures=*/false) > 0) {
   }
   // No failure is final yet: an alias may name one that waits for
@@ -491,15 +491,22 @@ void TypeChecker::register_declarations() {
   // diagnostics discarded -- until nothing more resolves; then the
   // final passes report.
   register_struct_fields(/*report_failures=*/false);
-  for (int round = 0; round < 16; ++round) {
-    size_t registered = register_type_aliases(/*report_failures=*/false);
-    register_struct_fields(/*report_failures=*/false);
-    if (registered == 0) {
+  // Converge on progress, not on a count: a pass that registers an
+  // alias, types a field, or types an enum payload may enable another.
+  // Every declaration can be enabled at most once, so the loop is
+  // bounded by the number of slots; the cap below is a guard against a
+  // defect in that reasoning, never a working limit.
+  for (size_t round = 0; round < 100000; ++round) {
+    size_t progress = register_type_aliases(/*report_failures=*/false);
+    progress += register_enum_variants(/*report_failures=*/false);
+    progress += register_struct_fields(/*report_failures=*/false);
+    if (progress == 0) {
       break;
     }
   }
   fields_registered_ = true;
   register_type_aliases(/*report_failures=*/true);
+  register_enum_variants(/*report_failures=*/true);
   register_struct_fields(/*report_failures=*/true);
   register_signatures();
 }
@@ -539,15 +546,19 @@ auto TypeChecker::aliases_generic_shell(const TypeNode* node) const -> bool {
     return false;
   }
   const auto* decl = it->second->decl_as_decl();
-  // Not ready while the class has no fields yet, or a field the earlier
-  // passes could not type (one typed by an alias still waiting).
+  // Not ready while the class has no fields yet, a field the earlier
+  // passes could not type (one typed by an alias still waiting), or a
+  // by-value field whose own type still has such a hole: an instantiation
+  // clones the whole graph, and a hole anywhere in it would be cloned.
   return std::ranges::any_of(pending_classes_, [decl](const PendingClass& pc) {
     if (pc.decl != decl) {
       return false;
     }
-    const auto& fields = pc.shell->fields();
-    return fields.size() != pc.class_decl->fields.size() ||
-           std::ranges::any_of(fields, [](const StructField& f) { return f.type == nullptr; });
+    if (pc.shell->fields().size() != pc.class_decl->fields.size()) {
+      return true;
+    }
+    std::unordered_set<const Type*> seen;
+    return !type_complete(pc.shell, seen);
   });
 }
 
@@ -662,12 +673,15 @@ void TypeChecker::register_type_names() {
   }
 }
 
-void TypeChecker::register_enum_variants() {
+auto TypeChecker::register_enum_variants(bool report_failures) -> size_t {
   // Register enum types with resolved variant payload types.
   // Unresolved types are kept as nullptr to preserve arity — the
   // primary diagnostic comes from resolve_type_node; dropping the
   // slot would silently mutate the variant shape and produce
-  // misleading secondary errors.
+  // misleading secondary errors.  Registered once, an enum keeps its
+  // identity; later passes revise its payloads in place as the aliases
+  // they name settle.  A provisional pass keeps none of its diagnostics.
+  size_t progress = 0;
   for (const auto* decl : all_decls_) {
     if (decl->kind() != NodeKind::EnumDecl) {
       continue;
@@ -679,13 +693,29 @@ void TypeChecker::register_enum_variants() {
     }
     const auto* sym = decl_it->second;
 
+    const TypeEnum* existing = nullptr;
+    if (auto known = symbol_types_.find(sym);
+        known != symbol_types_.end() && known->second->kind() == TypeKind::Enum) {
+      existing = static_cast<const TypeEnum*>(known->second);
+    }
     std::vector<EnumVariant> variants;
+    size_t variant_index = 0;
     for (const auto& variant : en.variants) {
       std::vector<const Type*> payload_types;
       for (size_t i = 0; i < variant.payload_types.size(); ++i) {
+        auto before = diagnostics_.size();
         const auto* resolved = resolve_type_node(variant.payload_types[i]);
+        if (!report_failures) {
+          diagnostics_.resize(before);
+        }
+        if (resolved != nullptr && existing != nullptr &&
+            variant_index < existing->variants().size() &&
+            i < existing->variants()[variant_index].payload_types.size() &&
+            existing->variants()[variant_index].payload_types[i] == nullptr) {
+          ++progress;
+        }
         payload_types.push_back(resolved);
-        if (resolved == nullptr) {
+        if (resolved == nullptr && report_failures) {
           if (variant.payload_types[i]->is<NamedType>()) {
             const auto& named = variant.payload_types[i]->as<NamedType>();
             if (named.name.segments.size() == 1 && named.name.segments[0] == en.name) {
@@ -699,14 +729,27 @@ void TypeChecker::register_enum_variants() {
         }
       }
       variants.push_back({variant.name, std::move(payload_types), variant.field_names});
+      ++variant_index;
+    }
+    if (existing != nullptr) {
+      // The same object every reference already points at, revised --
+      // as a class shell's fields are (register_struct_fields).
+      const_cast<TypeEnum*>(existing)->set_variants(std::move(variants));
+      continue;
     }
     const auto* enum_type = types_.make_enum(decl, en.name, std::move(variants));
     symbol_types_[sym] = enum_type;
     typed_.set_decl_type(decl, enum_type);
+    for (const auto& v : enum_type->variants()) {
+      progress +=
+          std::ranges::count_if(v.payload_types, [](const Type* t) { return t != nullptr; });
+    }
   }
+  return progress;
 }
 
-void TypeChecker::register_struct_fields(bool report_failures) {
+auto TypeChecker::register_struct_fields(bool report_failures) -> size_t {
+  size_t progress = 0;
   // Sub-pass 1b-ii: resolve class field types now that all type
   // shells (classes and enums) are registered in symbol_types_.
   // Unresolved types are kept as nullptr to preserve arity — same
@@ -717,16 +760,48 @@ void TypeChecker::register_struct_fields(bool report_failures) {
   // it cannot type yet may be typed by a later pass, and one that never
   // is gets reported exactly once, by the final pass.
   for (auto& pending : pending_classes_) {
+    const auto& had = pending.shell->fields();
     std::vector<StructField> fields;
+    size_t index = 0;
     for (const auto* field : pending.class_decl->fields) {
       auto before = diagnostics_.size();
       const auto* field_type = resolve_type_node(field->type);
       if (!report_failures) {
         diagnostics_.resize(before);
       }
+      if (field_type != nullptr && (index >= had.size() || had[index].type == nullptr)) {
+        ++progress;
+      }
       fields.push_back({field->name, field_type});
+      ++index;
     }
     pending.shell->set_fields(std::move(fields));
+  }
+  return progress;
+}
+
+auto TypeChecker::type_complete(const Type* type, std::unordered_set<const Type*>& seen) -> bool {
+  if (type == nullptr) {
+    return false;
+  }
+  if (!seen.insert(type).second) {
+    return true; // a cycle by value is a separate diagnostic; not a hole
+  }
+  switch (type->kind()) {
+  case TypeKind::Struct: {
+    const auto* st = static_cast<const TypeStruct*>(type);
+    return std::ranges::all_of(st->fields(),
+                               [&](const StructField& f) { return type_complete(f.type, seen); });
+  }
+  case TypeKind::Enum: {
+    const auto* en = static_cast<const TypeEnum*>(type);
+    return std::ranges::all_of(en->variants(), [&](const EnumVariant& v) {
+      return std::ranges::all_of(v.payload_types,
+                                 [&](const Type* t) { return type_complete(t, seen); });
+    });
+  }
+  default:
+    return true; // pointers and scalars carry nothing by value
   }
 }
 
