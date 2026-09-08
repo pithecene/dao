@@ -70,6 +70,17 @@ Alternatives considered and set aside:
   path.
 - Reclamation is wholesale: no per-object frees, no destructors, no
   finalization order.  Domains are arenas.
+- A domain does not stay current across a generator suspension: a
+  `resource` block in a generator function may not contain `yield`.
+  Were it allowed, the consumer would run with the generator's domain
+  current (its own allocations landing there), a value yielded from
+  inside the block would be reclaimed under the consumer at the next
+  resume, and an iterator abandoned mid-block would never exit the
+  domain at all.  E0 rejects it in the type checker (`yield` inside a
+  `resource` block: a diagnostic naming the block); detaching a domain
+  at `yield` and reattaching at resume is a non-goal (§11).  A
+  generator *created* inside a domain allocates its frame there and,
+  like any heap-owning value, may not escape it (§3.3).
 
 ### 3.2 What allocates
 
@@ -92,12 +103,20 @@ reclamation is the domain's.  In the root domain it frees as today.
 
 A value allocated in a domain is invalid after the domain is reclaimed.
 The compiler therefore **copies escaping values into the enclosing
-domain at exit**.  A value escapes a domain when, at the domain's exit,
-it is reachable from:
+domain at exit**.  What is copied depends on the exit being taken:
 
-1. a binding declared outside the block that was assigned inside it
-2. the function's return value, when the exit is a `return` from
-   inside the block
+1. at a fall-through or `break` exit: each binding declared outside
+   the block that was assigned inside it *on the path that reaches
+   this exit*.  The region-wide set of such bindings is static; which
+   of them were assigned on the path taken is not (`let out: string`
+   with no initializer, assigned in one arm of an `if` and not the
+   other), so each escaping binding carries a per-region dirty flag —
+   cleared at entry, set at every assignment to it inside the block —
+   and the exit copies a binding only when its flag is set.  A binding
+   never assigned on the path taken is not read, let alone copied.
+2. at a `return` exit from inside the block: the return value.  Outer
+   bindings are not copied on a return exit: the function is leaving
+   them, and nothing reads them afterwards.
 
 Copy-out is type-directed and deep for heap-owning types — `string`,
 `Vector<T>`, `HashMap<V>`, and any class or enum whose fields
@@ -133,11 +152,15 @@ can read off the source.
   only" status with the arena semantics; require every string- and
   frame-producing hook to allocate through the memory hooks; state
   that `__dao_mem_free` on domain memory is a no-op; keep the handle
-  ABI unchanged (it was designed for this) and add one hook,
+  ABI unchanged (it was designed for this) and add two hooks:
   `__dao_mem_alloc_outer(size, align)`, which allocates in the parent
-  of the current domain, for copy-out.  Rule 3/6 of "Ownership and
-  lifetime" change from "leak until process exit" to "owned by the
-  current domain".
+  of the current domain, for copy-out; and
+  `__dao_str_from_bytes(ptr, len)`, which returns a `dao_string` whose
+  buffer is a copy of the bytes owned by the current domain — the
+  string surface today can only inspect and combine strings, and a
+  byte-backed builder (§7) needs a way to make one.  Rule 3/6 of
+  "Ownership and lifetime" change from "leak until process exit" to
+  "owned by the current domain".
 
 ## 5. Runtime design
 
@@ -164,8 +187,11 @@ can read off the source.
   before the exit call, a copy into the enclosing domain for each
   escaping value (§3.3).  The MIR builder already tracks active regions
   and emits exits on every path; it gains, per region, the set of
-  outer bindings assigned within it and the return value on early
-  return.  Copies are emitted through per-type copier functions the
+  outer bindings assigned within it, one dirty flag per such binding
+  (a local the region's entry clears and each assignment inside sets),
+  and, on a `return` exit, the return value.  A fall-through or
+  `break` exit copies each binding under its flag; a `return` exit
+  copies the return value only (§3.3).  Copies are emitted through per-type copier functions the
   backend generates on demand (`dao.copy.<mangled type>`).  The copy
   must be made *before* the exit call — its source is in the domain
   about to be reclaimed — and must land in the *enclosing* domain, so
@@ -191,9 +217,10 @@ can read off the source.
 - Route every string-producing runtime hook through `__dao_mem_alloc`
   (runtime change; no stdlib surface change).
 - Add `core::text::Builder`: a `Vector<u8>`-backed accumulator with
-  `push(string)`, `push_char`, and `to_string()`.  The idiom for
-  assembling text; its growth is amortized and its dead buffers are the
-  domain's.
+  `push(string)`, `push_char`, and `to_string()`, the last through
+  `__dao_str_from_bytes` (§4): one copy of the bytes into a string the
+  current domain owns.  The idiom for assembling text; its growth is
+  amortized and its dead buffers are the domain's.
 
 ## 8. Bootstrap adoption (the reason for the task)
 
@@ -210,7 +237,8 @@ can read off the source.
 
 - **E0 — Runtime arenas.**  Domain stack, chunked arenas, hooks routed
   (strings, conversions, file reads, generator frames); the MIR
-  builder's `break` unwinds only the regions the loop entered (§3.1).
+  builder's `break` unwinds only the regions the loop entered (§3.1);
+  the type checker rejects `yield` inside a `resource` block (§3.1).
   Behaviour unchanged for programs without `resource memory` (root
   domain); programs with blocks reclaim at exit.  No copy-out yet: a value that
   escapes a domain is a use-after-reclaim, so E0 lands with the type
@@ -227,17 +255,23 @@ can read off the source.
 - runtime: enter/alloc/exit reclaims; nested domains; realloc within a
   domain; large allocations; `__dao_mem_free` no-op inside, real
   outside; root domain unchanged
+- runtime: `__dao_str_from_bytes` copies into the current domain
 - MIR: `break` out of a loop inside a `resource` block exits only the
   regions the loop entered (one exit per enter on every path, checked
-  on the MIR text); `break` out of a `for` inside a `resource` still
-  destroys the iterator
+  on the MIR text); `break` out of a `for` inside a `resource`
+  destroys the iterator exactly once (today it is destroyed during
+  unwinding and again in the loop's exit block)
 - backend: copy-out of a string, a `Vector<i32>`, a class holding both;
-  early `return` from nested blocks copies through each; a value not
+  early `return` from nested blocks copies the return value through
+  each and no outer binding; an outer `let out: string` assigned in
+  one `if` arm and not the other is copied only on the path that
+  assigned it (the other path reads no flagless binding); a value not
   escaping is not copied (IR contains no copier call); a callee's
   outermost block copies into the caller's open domain, not the root
   (the caller's domain exit reclaims it)
 - typechecker (E0): escaping heap-owning binding diagnosed; scalar
-  escape not; an escaping generator stays diagnosed after E1
+  escape not; `yield` inside a `resource` block diagnosed; an escaping
+  generator stays diagnosed after E1
 - examples: `resource.dao` extended with an escaping string and an
   escaping vector; output unchanged
 - audit: peak-memory column below 2 GiB for every bootstrap program is
@@ -250,6 +284,9 @@ can read off the source.
 - cross-domain sharing without copying
 - copying a generator out of a domain (its frame would need a
   per-function copy descriptor; escaping generators stay rejected)
+- a domain staying current across a generator suspension (detach at
+  `yield`, reattach at resume, exit on abandonment); `yield` inside a
+  `resource` block stays rejected
 - `mode parallel` interaction (no concurrent domains)
 - `resource` kinds other than `memory`
 
