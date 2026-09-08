@@ -146,15 +146,32 @@ void resolve_edges(Program& program, const GraphInputs& inputs) {
       // somewhere else — a prelude file, another root — does not excuse
       // the file the search actually found, and binding it would let the
       // import name a module the mapping rule never chose.
-      if (const auto* display = located.display_for(identity)) {
-        auto declared = declared_identity(located.file_at(*display));
+      const auto* display = located.display_for(identity);
+      if (display != nullptr) {
+        const auto* found = located.file_at(*display);
+        auto declared = declared_identity(found);
         if (declared != identity) {
+          // The defect is in the file the mapping rule chose, so that is
+          // where the diagnostic points (Task 31 §14): at its module
+          // declaration when it has one, else at the import that found it.
+          const bool has_decl = found != nullptr && found->parse.file != nullptr &&
+                                found->parse.file->module_decl != nullptr;
+          Span where = has_decl ? found->parse.file->module_decl->path.span : import->span;
           program.diagnostics.push_back(Diagnostic::error(
-              import->span,
+              where,
               *display + " was found for import '" + identity + "' but declares " +
                   (declared ? "module '" + *declared + "'" : "no module")));
           continue;
         }
+      } else if (!inputs.root_display.empty()) {
+        // Root-file mode binds an import only to the file the mapping
+        // rule found (§8.3).  A module of that identity that happens to
+        // be loaded from elsewhere -- a prelude file under another name
+        // -- is not what the import asked for, and binding it would hide
+        // that no `x.dao` exists where the rule says it must.
+        program.diagnostics.push_back(
+            Diagnostic::error(import->span, not_found_message(inputs, identity)));
+        continue;
       }
       auto* target = program.module_named(identity);
       if (target == nullptr) {
