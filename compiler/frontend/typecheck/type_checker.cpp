@@ -151,9 +151,10 @@ auto TypeChecker::resolve_type_node(const TypeNode* node) -> const Type* {
     const auto& named = node->as<NamedType>();
     const auto& path = named.name;
     if (path.segments.size() > 2) {
-      error(node->span, "'" + qualified_path_text(path.segments) +
-                            "': a type path through an import binding has one more "
-                            "segment (imports bind one segment)");
+      error(node->span,
+            "'" + qualified_path_text(path.segments) +
+                "': a type path through an import binding has one more "
+                "segment (imports bind one segment)");
       return nullptr;
     }
     auto name = path.segments.back();
@@ -192,9 +193,10 @@ auto TypeChecker::resolve_type_node(const TypeNode* node) -> const Type* {
     // Look up user-defined types via resolver symbols: a plain name at
     // its own offset, `b::T` at T's offset where the resolver recorded
     // the export.
-    auto symbol_offset = path.segments.size() == 1
-                             ? node->span.offset
-                             : path.span.offset + static_cast<uint32_t>(path.segments[0].size()) + 2;
+    auto symbol_offset =
+        path.segments.size() == 1
+            ? node->span.offset
+            : path.span.offset + static_cast<uint32_t>(path.segments[0].size()) + 2;
     auto it = resolve_.uses.find(symbol_offset);
     if (it != resolve_.uses.end()) {
       const auto* sym = it->second;
@@ -1621,9 +1623,8 @@ auto TypeChecker::check_identifier(const Expr* expr) -> const Type* {
   if (sym == nullptr) {
     // An import the graph reported missing leaves its binding without a
     // module; the graph's diagnostic already names the problem.
-    const auto* head = resolve_.uses.contains(expr->span.offset)
-                           ? resolve_.uses.at(expr->span.offset)
-                           : nullptr;
+    const auto* head =
+        resolve_.uses.contains(expr->span.offset) ? resolve_.uses.at(expr->span.offset) : nullptr;
     if (head == nullptr || head->kind != SymbolKind::Module || head->decl != nullptr) {
       error(expr->span, "unresolved identifier '" + name_text() + "'");
     }

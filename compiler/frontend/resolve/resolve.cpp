@@ -1262,8 +1262,9 @@ private:
     }
     if (path.segments.size() > 2) {
       diagnostics_.push_back(Diagnostic::error(
-          path.span, "'" + module_display(path.segments) + "': a type path through import binding '" +
-                         std::string(first_seg) + "' has one more segment (imports bind one segment)"));
+          path.span,
+          "'" + module_display(path.segments) + "': a type path through import binding '" +
+              std::string(first_seg) + "' has one more segment (imports bind one segment)"));
       return;
     }
     auto name = path.segments[1];
