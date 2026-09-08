@@ -111,8 +111,7 @@ private:
 // Top-level entry point.
 // ---------------------------------------------------------------------------
 
-auto build_mir(const HirProgram& program, MirContext& ctx,
-               TypeContext& types) -> MirBuildResult;
+auto build_mir(const HirProgram& program, MirContext& ctx, TypeContext& types) -> MirBuildResult;
 
 } // namespace dao
 

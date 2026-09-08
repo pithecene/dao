@@ -85,7 +85,8 @@ suite<"module_graph"> module_graph_suite = [] {
   };
 
   "independent_modules_order_lexically"_test = [] {
-    auto program = program_of({{"z.dao", "module zeta\n"}, {"a.dao", "module alpha\n"},
+    auto program = program_of({{"z.dao", "module zeta\n"},
+                               {"a.dao", "module alpha\n"},
                                {"m.dao", "module mid\n" + kMain}});
     expect(displays(program.topo_order) == std::vector<std::string>{"alpha", "mid", "zeta"});
   };
@@ -117,19 +118,21 @@ suite<"module_graph"> module_graph_suite = [] {
   };
 
   "two_node_cycle_is_one_diagnostic_with_its_trace"_test = [] {
-    auto program = program_of({{"a.dao", "module a\nimport b\n"}, {"b.dao", "module b\nimport a\n"}});
+    auto program =
+        program_of({{"a.dao", "module a\nimport b\n"}, {"b.dao", "module b\nimport a\n"}});
     expect(messages(program) == std::vector<std::string>{"import cycle: a -> b -> a"})
         << joined(messages(program));
-    expect(program.source_map.file_for(program.diagnostics[0].span.offset)->display_path ==
-           "a.dao")
+    expect(program.source_map.file_for(program.diagnostics[0].span.offset)->display_path == "a.dao")
         << "reported at the import that starts the trace";
     expect(program.topo_order.empty()) << "cycle members are not ordered";
   };
 
   "cycle_trace_is_deterministic_across_input_orders"_test = [] {
-    auto forward = program_of({{"a.dao", "module a\nimport b\n"}, {"b.dao", "module b\nimport c\n"},
+    auto forward = program_of({{"a.dao", "module a\nimport b\n"},
+                               {"b.dao", "module b\nimport c\n"},
                                {"c.dao", "module c\nimport a\n"}});
-    auto reversed = program_of({{"c.dao", "module c\nimport a\n"}, {"b.dao", "module b\nimport c\n"},
+    auto reversed = program_of({{"c.dao", "module c\nimport a\n"},
+                                {"b.dao", "module b\nimport c\n"},
                                 {"a.dao", "module a\nimport b\n"}});
     expect(messages(forward) == messages(reversed)) << joined(messages(forward));
     expect(messages(forward)[0] == "import cycle: a -> b -> c -> a");
@@ -137,7 +140,8 @@ suite<"module_graph"> module_graph_suite = [] {
 
   "input_order_does_not_change_file_ids_or_order"_test = [] {
     auto forward = program_of({{"a.dao", "module a\nimport b\n" + kMain}, {"b.dao", "module b\n"}});
-    auto reversed = program_of({{"b.dao", "module b\n"}, {"a.dao", "module a\nimport b\n" + kMain}});
+    auto reversed =
+        program_of({{"b.dao", "module b\n"}, {"a.dao", "module a\nimport b\n" + kMain}});
     expect(forward.files[0]->display_path == reversed.files[0]->display_path);
     expect(forward.files[0]->base_offset == reversed.files[0]->base_offset);
     expect(displays(forward.topo_order) == displays(reversed.topo_order));
@@ -145,14 +149,16 @@ suite<"module_graph"> module_graph_suite = [] {
   };
 
   "file_without_module_declaration_is_tolerated"_test = [] {
-    auto program = program_of({{"a.dao", "module a\n" + kMain}, {"bare.dao", "fn f(): i32 -> 1\n"}});
+    auto program =
+        program_of({{"a.dao", "module a\n" + kMain}, {"bare.dao", "fn f(): i32 -> 1\n"}});
     expect(program.modules.size() == 1_u);
     expect(program.files[1]->module == nullptr);
     expect(program.entry == program.module_named("a"));
   };
 
   "acyclic_dependent_is_excluded_from_the_trace"_test = [] {
-    auto program = program_of({{"a.dao", "module a\nimport b\n"}, {"b.dao", "module b\nimport a\n"},
+    auto program = program_of({{"a.dao", "module a\nimport b\n"},
+                               {"b.dao", "module b\nimport a\n"},
                                {"d.dao", "module d\nimport a\n"}});
     expect(messages(program) == std::vector<std::string>{"import cycle: a -> b -> a"})
         << joined(messages(program));
@@ -161,7 +167,9 @@ suite<"module_graph"> module_graph_suite = [] {
   "import_of_a_prelude_module_resolves"_test = [] {
     std::vector<SourceInput> inputs = {
         {.display_path = "stdlib/core/mini.dao", .text = "module core::mini\n", .is_prelude = true},
-        {.display_path = "app.dao", .text = "module app\nimport core::mini\n" + kMain, .is_prelude = false},
+        {.display_path = "app.dao",
+         .text = "module app\nimport core::mini\n" + kMain,
+         .is_prelude = false},
     };
     auto program = build_program(std::move(inputs));
     expect(program.diagnostics.empty()) << joined(messages(program));
@@ -172,7 +180,8 @@ suite<"module_graph"> module_graph_suite = [] {
 
 suite<"entry_selection"> entry_selection_suite = [] {
   "explicit_entry_wins"_test = [] {
-    auto program = program_of({{"a.dao", "module a\n" + kMain}, {"b.dao", "module b\n" + kMain}}, "b");
+    auto program =
+        program_of({{"a.dao", "module a\n" + kMain}, {"b.dao", "module b\n" + kMain}}, "b");
     expect(program.diagnostics.empty()) << joined(messages(program));
     expect(program.entry == program.module_named("b"));
   };
@@ -296,12 +305,15 @@ suite<"entry_selection"> entry_selection_suite = [] {
   "entry_not_in_program_is_an_error"_test = [] {
     auto program = program_of({{"a.dao", "module a\n" + kMain}}, "zzz");
     expect(program.entry == nullptr);
-    expect(messages(program) == std::vector<std::string>{"entry module 'zzz' is not in the program"});
+    expect(messages(program) ==
+           std::vector<std::string>{"entry module 'zzz' is not in the program"});
   };
 
   "prelude_main_is_not_a_candidate"_test = [] {
     std::vector<SourceInput> inputs = {
-        {.display_path = "stdlib/core/p.dao", .text = "module core::p\n" + kMain, .is_prelude = true},
+        {.display_path = "stdlib/core/p.dao",
+         .text = "module core::p\n" + kMain,
+         .is_prelude = true},
         {.display_path = "app.dao", .text = "module app\n" + kMain, .is_prelude = false},
     };
     auto program = build_program(std::move(inputs));
@@ -311,9 +323,9 @@ suite<"entry_selection"> entry_selection_suite = [] {
 
 suite<"root_file_discovery"> root_file_discovery_suite = [] {
   "discovers_transitively_and_the_root_is_the_entry"_test = [] {
-    auto program = load_program_from_root(
-        fixtures() / "smoke" / "main.dao",
-        {.stdlib_root = std::filesystem::path(DAO_SOURCE_DIR) / "stdlib"});
+    auto program =
+        load_program_from_root(fixtures() / "smoke" / "main.dao",
+                               {.stdlib_root = std::filesystem::path(DAO_SOURCE_DIR) / "stdlib"});
     expect(program.diagnostics.empty()) << joined(messages(program));
     expect(program.entry != nullptr && program.entry->display == "smoke");
     auto order = displays(program.topo_order);
@@ -321,7 +333,8 @@ suite<"root_file_discovery"> root_file_discovery_suite = [] {
       return std::ranges::find(order, name) - order.begin();
     };
     expect(index("app::util") < index("app::math") && index("app::math") < index("smoke"));
-    expect(index("core::vector") < index("smoke")) << "prelude import resolved to the loaded prelude";
+    expect(index("core::vector") < index("smoke"))
+        << "prelude import resolved to the loaded prelude";
     expect(program.module_named("app::util")->file->display_path.ends_with("app/util.dao"));
   };
 
@@ -346,10 +359,21 @@ suite<"root_file_discovery"> root_file_discovery_suite = [] {
     expect(said.find("is already declared by") != std::string::npos) << said;
   };
 
-  "module_roots_are_searched_after_the_root_directory"_test = [] {
+  "a prelude file's imports are discovered too"_test = [] {
+    // The prelude group is loaded, not discovered, so its own imports
+    // were never followed: what a prelude file imports is part of the
+    // program even when no user file mentions it (§8.2).
+    auto fixture = fixtures() / "prelude_imports";
     auto program = load_program_from_root(
-        fixtures() / "roots" / "main" / "main.dao",
-        {.module_roots = {fixtures() / "roots" / "extra"}});
+        fixture / "main.dao", {.module_roots = {fixture}, .stdlib_root = fixture / "stdlib"});
+    expect(program.diagnostics.empty()) << joined(messages(program));
+    expect(program.module_named("ext::thing") != nullptr)
+        << "the module a prelude file imports was not discovered";
+  };
+
+  "module_roots_are_searched_after_the_root_directory"_test = [] {
+    auto program = load_program_from_root(fixtures() / "roots" / "main" / "main.dao",
+                                          {.module_roots = {fixtures() / "roots" / "extra"}});
     expect(program.diagnostics.empty()) << joined(messages(program));
     expect(displays(program.topo_order) == std::vector<std::string>{"ext::thing", "rooted"});
   };

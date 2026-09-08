@@ -18,12 +18,12 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 
-#include <boost/ut.hpp>
 #include <algorithm>
+#include <boost/ut.hpp>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
-#include <optional>
 
 using namespace boost::ut;
 using namespace dao;
@@ -103,7 +103,6 @@ auto contains(const std::string& haystack, std::string_view needle) -> bool {
 // Type lowering
 // ---------------------------------------------------------------------------
 
-
 /// The same pipeline over an explicit multi-module program: files named
 /// `stdlib/...` form the prelude group, the rest are user modules, and
 /// the entry is `entry` or the unique `fn main`.
@@ -124,8 +123,8 @@ struct LlvmProgramPipeline {
                                std::optional<std::string> entry = {}) {
     std::vector<SourceInput> inputs;
     for (auto& [display, text] : files) {
-      inputs.push_back({.display_path = display, .text = text,
-                        .is_prelude = display.starts_with("stdlib/")});
+      inputs.push_back(
+          {.display_path = display, .text = text, .is_prelude = display.starts_with("stdlib/")});
     }
     program = build_program(std::move(inputs), std::move(entry));
     if (!program.lexed_and_parsed_cleanly() || !program.diagnostics.empty()) {
@@ -183,32 +182,70 @@ struct LlvmProgramPipeline {
   }
 };
 
-
 suite<"module_naming"> module_naming = [] {
   "names_follow_symbol_identity"_test = [] {
     ModuleInfo lib{.display = "app::lib", .is_prelude = false};
     ModuleInfo entry{.display = "app::main", .is_prelude = false};
     ModuleInfo prelude{.display = "core::x", .is_prelude = true};
-    Symbol plain{.kind = SymbolKind::Function, .name = "f", .decl_span = {}, .decl = nullptr, .module = &lib};
-    Symbol lib_main{.kind = SymbolKind::Function, .name = "main", .decl_span = {}, .decl = nullptr, .module = &lib};
-    Symbol entry_main{.kind = SymbolKind::Function, .name = "main", .decl_span = {}, .decl = nullptr, .module = &entry};
-    Symbol builtin{.kind = SymbolKind::Function, .name = "null_ptr", .decl_span = {}, .decl = nullptr, .module = nullptr};
-    Symbol method{.kind = SymbolKind::Function, .name = "Vec.push$i32", .decl_span = {}, .decl = nullptr, .module = &prelude};
+    Symbol plain{.kind = SymbolKind::Function,
+                 .name = "f",
+                 .decl_span = {},
+                 .decl = nullptr,
+                 .module = &lib};
+    Symbol lib_main{.kind = SymbolKind::Function,
+                    .name = "main",
+                    .decl_span = {},
+                    .decl = nullptr,
+                    .module = &lib};
+    Symbol entry_main{.kind = SymbolKind::Function,
+                      .name = "main",
+                      .decl_span = {},
+                      .decl = nullptr,
+                      .module = &entry};
+    Symbol builtin{.kind = SymbolKind::Function,
+                   .name = "null_ptr",
+                   .decl_span = {},
+                   .decl = nullptr,
+                   .module = nullptr};
+    Symbol method{.kind = SymbolKind::Function,
+                  .name = "Vec.push$i32",
+                  .decl_span = {},
+                  .decl = nullptr,
+                  .module = &prelude};
     expect(llvm_function_name(plain, &entry) == "app::lib::f");
-    expect(llvm_function_name(lib_main, &entry) == "app::lib::main") << "main elsewhere is not main";
+    expect(llvm_function_name(lib_main, &entry) == "app::lib::main")
+        << "main elsewhere is not main";
     expect(llvm_function_name(entry_main, &entry) == "main");
     expect(llvm_function_name(builtin, &entry) == "null_ptr") << "no owning module: as written";
-    expect(llvm_function_name(method, &entry) == "core::x::Vec.push$i32") << "method and instantiation mangling kept";
+    expect(llvm_function_name(method, &entry) == "core::x::Vec.push$i32")
+        << "method and instantiation mangling kept";
   };
 
   "intrinsics_are_recognised_by_identity"_test = [] {
     ModuleInfo user{.display = "app::main", .is_prelude = false};
     ModuleInfo prelude{.display = "core::builtins", .is_prelude = true};
-    Symbol user_size_of{.kind = SymbolKind::Function, .name = "size_of", .decl_span = {}, .decl = nullptr, .module = &user};
-    Symbol prelude_size_of{.kind = SymbolKind::Function, .name = "size_of$i32", .decl_span = {}, .decl = nullptr, .module = &prelude};
-    Symbol builtin{.kind = SymbolKind::Function, .name = "ptr_cast", .decl_span = {}, .decl = nullptr, .module = nullptr};
-    Symbol prelude_other{.kind = SymbolKind::Function, .name = "size_offset", .decl_span = {}, .decl = nullptr, .module = &prelude};
-    expect(!is_builtin_intrinsic(user_size_of)) << "a user module's size_of is an ordinary function";
+    Symbol user_size_of{.kind = SymbolKind::Function,
+                        .name = "size_of",
+                        .decl_span = {},
+                        .decl = nullptr,
+                        .module = &user};
+    Symbol prelude_size_of{.kind = SymbolKind::Function,
+                           .name = "size_of$i32",
+                           .decl_span = {},
+                           .decl = nullptr,
+                           .module = &prelude};
+    Symbol builtin{.kind = SymbolKind::Function,
+                   .name = "ptr_cast",
+                   .decl_span = {},
+                   .decl = nullptr,
+                   .module = nullptr};
+    Symbol prelude_other{.kind = SymbolKind::Function,
+                         .name = "size_offset",
+                         .decl_span = {},
+                         .decl = nullptr,
+                         .module = &prelude};
+    expect(!is_builtin_intrinsic(user_size_of))
+        << "a user module's size_of is an ordinary function";
     expect(is_builtin_intrinsic(prelude_size_of));
     expect(is_builtin_intrinsic(builtin));
     expect(!is_builtin_intrinsic(prelude_other)) << "prefix alone is not a match";
@@ -218,7 +255,9 @@ suite<"module_naming"> module_naming = [] {
     LlvmProgramPipeline pipe({
         {"x.dao", "module a::x\nfn add(p: i32, q: i32): i32 -> p + q\n"},
         {"y.dao", "module a::y\nfn add(p: i32, q: i32): i32 -> p * q\n"},
-        {"main.dao", "module a::main\nimport a::x\nimport a::y\nfn main(): i32 -> x::add(2, 3) + y::add(2, 3)\n"},
+        {"main.dao",
+         "module a::main\nimport a::x\nimport a::y\nfn main(): i32 -> x::add(2, 3) + y::add(2, "
+         "3)\n"},
     });
     expect(pipe.llvm_result.module != nullptr) << "lowering failed: " << pipe.problems();
     expect(pipe.function("a::x::add") != nullptr && pipe.function("a::y::add") != nullptr)
@@ -231,10 +270,12 @@ suite<"module_naming"> module_naming = [] {
   };
 
   "main_outside_the_entry_module_is_an_ordinary_function"_test = [] {
-    LlvmProgramPipeline pipe({
-        {"lib.dao", "module a::lib\nfn main(): i32 -> 7\n"},
-        {"app.dao", "module a::app\nimport a::lib\nfn main(): i32 -> lib::main()\n"},
-    }, "a::app");
+    LlvmProgramPipeline pipe(
+        {
+            {"lib.dao", "module a::lib\nfn main(): i32 -> 7\n"},
+            {"app.dao", "module a::app\nimport a::lib\nfn main(): i32 -> lib::main()\n"},
+        },
+        "a::app");
     expect(pipe.llvm_result.module != nullptr) << "lowering failed: " << pipe.problems();
     expect(pipe.function("main") != nullptr);
     expect(pipe.function("a::lib::main") != nullptr) << "the other main is module-qualified";
@@ -403,6 +444,34 @@ suite<"simple_functions"> simple_functions = [] {
       }
     }
     expect(definitions == 2_ul) << "expected two specializations, got " << definitions << "\n"
+                                << pipe.problems() << ir;
+  };
+
+  "one semantic type specializes a generic once"_test = [] {
+    // `Box<i32>` written twice is two type objects — nominal types are
+    // not interned — so keying a specialization by address would build
+    // the same one twice under numbered names.
+    LlvmProgramPipeline pipe({
+        {"main.dao",
+         "module app::main\n"
+         "class Box<T>:\n  value: T\n"
+         "fn ident<T>(v: T): T -> v\n"
+         "fn main(): i32\n"
+         "  let a = Box<i32>(7)\n"
+         "  let b = Box<i32>(9)\n"
+         "  let p = ident(a)\n"
+         "  let q = ident(b)\n"
+         "  return p.value + q.value\n"},
+    });
+    auto ir = pipe.ir();
+    size_t definitions = 0;
+    for (size_t at = ir.find("define"); at != std::string::npos; at = ir.find("define", at + 1)) {
+      auto line = ir.substr(at, ir.find('\n', at) - at);
+      if (line.find("ident$") != std::string::npos) {
+        ++definitions;
+      }
+    }
+    expect(definitions == 1_ul) << "expected one specialization, got " << definitions << "\n"
                                 << pipe.problems() << ir;
   };
 

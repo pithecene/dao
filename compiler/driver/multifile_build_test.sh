@@ -89,6 +89,21 @@ detour=$(build_out --source "$BM/../smoke/app_main.dao" --source "$BM/app_math.d
 [ "$plain" = "$detour" ] || fail "output name changed with path spelling: $plain vs $detour"
 rm -f "$plain"
 
+# Every command that reports puts its diagnostics in file order, not in
+# the order its phase produced them: `a.dao` imports `b.dao`, so the
+# resolver reaches b first while a reader reaches a first.
+mkdir -p "$WORK/phase"
+printf 'module a\nimport b\n\nfn dup(): i32 -> 1\nfn dup(): i32 -> 2\n\nfn main(): i32\n  return 0\n' > "$WORK/phase/a.dao"
+printf 'module b\n\nfn twin(): i32 -> 1\nfn twin(): i32 -> 2\n' > "$WORK/phase/b.dao"
+for cmd in resolve check; do
+  "$DAOC" "$cmd" --source "$WORK/phase/a.dao" --source "$WORK/phase/b.dao" --entry a \
+    > "$WORK/phase-$cmd.txt" 2>&1 || true
+  first=$(grep -n 'a.dao.*duplicate' "$WORK/phase-$cmd.txt" | head -1 | cut -d: -f1)
+  second=$(grep -n 'b.dao.*duplicate' "$WORK/phase-$cmd.txt" | head -1 | cut -d: -f1)
+  [ -n "$first" ] && [ -n "$second" ] || fail "$cmd did not report both files: $(cat "$WORK/phase-$cmd.txt")"
+  [ "$first" -lt "$second" ] || fail "$cmd reported b.dao before a.dao (topological, not file, order)"
+done
+
 # Determinism: the same explicit set in two orders emits identical IR.
 "$DAOC" llvm-ir --source "$BM/app_main.dao" --source "$BM/app_math.dao" --source "$BM/core_fmt.dao" > "$WORK/a.ll" || fail "llvm-ir (order 1) failed"
 "$DAOC" llvm-ir --source "$BM/core_fmt.dao" --source "$BM/app_math.dao" --source "$BM/app_main.dao" > "$WORK/b.ll" || fail "llvm-ir (order 2) failed"

@@ -51,7 +51,8 @@ public:
   // every function is user code.
   // `entry` is the program's entry module: its `main` keeps the name
   // `main`; every other module-owned function is named `<module>::<name>`.
-  auto lower(const MirModule& mir_module, const SourceMap* source_map = nullptr,
+  auto lower(const MirModule& mir_module,
+             const SourceMap* source_map = nullptr,
              const ModuleInfo* entry = nullptr) -> LlvmBackendResult;
 
   // Emit textual LLVM IR to a stream.
@@ -82,22 +83,20 @@ private:
 
   /// A MIR function's source-level signature, for comparing two
   /// declarations of one C symbol without LLVM's type erasure.
-  /// An extern's parameter types followed by its return type, held by
-  /// identity: two declarations agree when they name the same types,
-  /// which their printed forms cannot decide — two distinct classes
-  /// named `Payload` print alike.
-  using ExternSignature = std::vector<const Type*>;
-
-  /// One declaration of a C symbol: its types and the module that
-  /// wrote it.  The module is what makes a diagnostic legible when the
-  /// two signatures print the same, which is exactly the case identity
-  /// comparison exists to catch.
+  /// One declaration of a C symbol.  `identity` is what two
+  /// declarations must agree on: a semantic key per parameter type and
+  /// then the return type.  Neither printed forms nor addresses can
+  /// decide that — two distinct classes named `Payload` print alike,
+  /// and nominal types are not interned, so `Box<i32>` written twice is
+  /// two objects.  `printed` is how the signature reads in a message,
+  /// and `module` says who declared it, which is what makes the message
+  /// legible when two different signatures print the same.
   struct ExternDeclaration {
-    ExternSignature types;
+    std::vector<std::string> identity;
+    std::string printed;
     std::string module;
   };
-  [[nodiscard]] static auto mir_signature(const MirFunction& fn) -> ExternSignature;
-  [[nodiscard]] static auto render_signature(const ExternSignature& signature) -> std::string;
+  [[nodiscard]] static auto extern_declaration(const MirFunction& fn) -> ExternDeclaration;
 
   /// The source signature each extern was first declared with.
   std::unordered_map<std::string, ExternDeclaration> extern_signatures_;

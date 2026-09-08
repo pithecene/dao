@@ -8,10 +8,12 @@
 #include "backend/llvm/llvm_backend.h"
 #include "backend/llvm/llvm_names.h"
 #include "frontend/module/program.h"
+#include "frontend/types/type_identity.h"
 #include "frontend/types/type_printer.h"
 
 #include "backend/llvm/llvm_abi.h"
 #include "backend/llvm/llvm_runtime_hooks.h"
+#include "frontend/resolve/resolve.h"
 #include "ir/mir/mir.h"
 
 #include <llvm/IR/Constants.h>
@@ -42,9 +44,9 @@ namespace dao {
 
 LlvmBackend::LlvmBackend(llvm::LLVMContext& ctx) : ctx_(ctx), types_(ctx) {}
 
-auto LlvmBackend::lower(const MirModule& mir_module, const SourceMap* source_map,
-                        const ModuleInfo* entry)
-    -> LlvmBackendResult {
+auto LlvmBackend::lower(const MirModule& mir_module,
+                        const SourceMap* source_map,
+                        const ModuleInfo* entry) -> LlvmBackendResult {
   module_ = std::make_unique<llvm::Module>("dao_module", ctx_);
   entry_ = entry;
   diagnostics_.clear();
@@ -215,14 +217,11 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
       // (CONTRACT_C_ABI_INTEROP.md §5).  Every declaration records its
       // signature, including the first, which is what later ones are
       // compared against.
-      ExternDeclaration declared{
-          .types = mir_signature(*mir_fn),
-          .module = mir_fn->symbol->module != nullptr ? mir_fn->symbol->module->display : ""};
+      auto declared = extern_declaration(*mir_fn);
       auto [known, first] = extern_signatures_.try_emplace(name, declared);
-      if (!first && known->second.types != declared.types) {
+      if (!first && known->second.identity != declared.identity) {
         auto describe = [](const ExternDeclaration& one) {
-          return "'" + render_signature(one.types) + "'" +
-                 (one.module.empty() ? "" : " (in " + one.module + ")");
+          return "'" + one.printed + "'" + (one.module.empty() ? "" : " (in " + one.module + ")");
         };
         emit_diagnostic(mir_fn->span,
                         "extern '" + name + "' is declared with conflicting signatures: " +
@@ -293,9 +292,10 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
       auto* void_type = llvm::Type::getVoidTy(ctx_);
       auto* resume_fn_type =
           llvm::FunctionType::get(void_type, {ptr_type}, /*isVarArg=*/false);
-      llvm::Function::Create(
-          resume_fn_type, llvm::Function::ExternalLinkage,
-          fn_name(*mir_fn->symbol) + ".resume", module_.get());
+      llvm::Function::Create(resume_fn_type,
+                             llvm::Function::ExternalLinkage,
+                             fn_name(*mir_fn->symbol) + ".resume",
+                             module_.get());
     }
   }
 }
@@ -319,8 +319,7 @@ void LlvmBackend::lower_bodies(const MirModule& mir_module,
         // user code actually calls this function, linking will fail
         // with a clear undefined-reference error.
         if (mir_fn->symbol != nullptr) {
-          auto* llvm_fn =
-              module_->getFunction(fn_name(*mir_fn->symbol));
+          auto* llvm_fn = module_->getFunction(fn_name(*mir_fn->symbol));
           if (llvm_fn != nullptr && !llvm_fn->empty()) {
             llvm_fn->deleteBody();
           }
@@ -1306,27 +1305,24 @@ auto LlvmBackend::lower_field_access(const MirFieldAccess& p,
 /// then the return type, printed from the Dao types rather than their
 /// lowering, so distinctions LLVM erases (every pointer is `ptr`)
 /// survive the comparison.
-auto LlvmBackend::mir_signature(const MirFunction& fn) -> ExternSignature {
-  ExternSignature signature;
+auto LlvmBackend::extern_declaration(const MirFunction& fn) -> ExternDeclaration {
+  ExternDeclaration declared;
+  auto add = [&declared](const Type* type, bool last) {
+    declared.identity.push_back(type_identity_key(type));
+    declared.printed += print_type(type);
+    declared.printed += last ? "" : ",";
+  };
   for (const auto& local : fn.locals) {
     if (!local.is_param) {
       break; // parameters come first
     }
-    signature.push_back(local.type);
+    add(local.type, /*last=*/false);
   }
-  signature.push_back(fn.return_type);
-  return signature;
-}
-
-auto LlvmBackend::render_signature(const ExternSignature& signature) -> std::string {
-  std::string rendered;
-  for (size_t i = 0; i + 1 < signature.size(); ++i) {
-    rendered += print_type(signature[i]);
-    rendered += ',';
-  }
-  rendered += "->";
-  rendered += signature.empty() ? "?" : print_type(signature.back());
-  return rendered;
+  declared.printed += "->";
+  add(fn.return_type, /*last=*/true);
+  declared.module =
+      fn.symbol != nullptr && fn.symbol->module != nullptr ? fn.symbol->module->display : "";
+  return declared;
 }
 
 auto LlvmBackend::fn_name(const Symbol& sym) const -> std::string {
@@ -1943,8 +1939,7 @@ auto LlvmBackend::lower_generator_init(const MirFunction& fn) -> bool {
   }
 
   // Build the generator fat pair: { ptr frame, ptr resume_fn }.
-  auto* resume_fn =
-      module_->getFunction(fn_name(*fn.symbol) + ".resume");
+  auto* resume_fn = module_->getFunction(fn_name(*fn.symbol) + ".resume");
   auto* gen_type = types_.generator_type();
   llvm::Value* gen_val = llvm::UndefValue::get(gen_type);
   gen_val =

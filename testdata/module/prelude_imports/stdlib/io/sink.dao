@@ -1,0 +1,3 @@
+module io::sink
+
+fn sink(): i32 -> 0

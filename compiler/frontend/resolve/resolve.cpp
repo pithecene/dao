@@ -64,6 +64,19 @@ constexpr std::string_view kBuiltinFunctions[] = {
     "ptr_cast",
 };
 
+// The generic intrinsic family.  `null_ptr` and `ptr_cast` are outer
+// builtins as well; the rest are prelude declarations whose bodies the
+// backend replaces.  One list, because the resolver decides who may
+// declare them and the backend decides how they are called, and the
+// two must not drift.
+constexpr std::string_view kPreludeIntrinsics[] = {
+    "size_of",
+    "align_of",
+    "null_ptr",
+    "ptr_offset",
+    "ptr_cast",
+};
+
 // ---------------------------------------------------------------------------
 // Resolver — two-pass name resolution over the AST
 // ---------------------------------------------------------------------------
@@ -76,15 +89,15 @@ public:
   auto run(Program& program) -> ResolveResult {
     std::vector<Unit> units;
     for (auto* module : program.topo_order) {
-      units.push_back({.file = module->file->parse.file,
-                       .module = module,
-                       .is_prelude = module->is_prelude});
+      units.push_back(
+          {.file = module->file->parse.file, .module = module, .is_prelude = module->is_prelude});
     }
     // A file with no module declaration (already a parse error) still
     // resolves, in a scope of its own, so analysis keeps working.
     for (const auto& file : program.files) {
       if (file->parse.file != nullptr && file->module == nullptr) {
-        units.push_back({.file = file->parse.file, .module = nullptr, .is_prelude = file->is_prelude});
+        units.push_back(
+            {.file = file->parse.file, .module = nullptr, .is_prelude = file->is_prelude});
       }
     }
     return run_units(std::move(units));
@@ -96,10 +109,10 @@ public:
       -> ResolveResult {
     std::vector<Unit> units;
     for (const auto* file : files) {
-      units.push_back({.file = file,
-                       .module = nullptr,
-                       .is_prelude = source_map != nullptr &&
-                                     source_map->is_prelude(file->span.offset)});
+      units.push_back(
+          {.file = file,
+           .module = nullptr,
+           .is_prelude = source_map != nullptr && source_map->is_prelude(file->span.offset)});
     }
     return run_units(std::move(units));
   }
@@ -263,7 +276,14 @@ private:
     }
     Span binding_span{.offset = offset, .length = binding_len};
 
+    // A prelude module's own declarations go to the shared prelude
+    // scope, not to its file scope, so checking the file scope alone
+    // let an import silently shadow a declaration of the same module.
+    // Its export table is the one place holding just this module's
+    // names — another prelude module declaring the name is not a
+    // collision here.
     if (current_->scope->lookup_local(binding_name) != nullptr ||
+        current_->exports->lookup_local(binding_name) != nullptr ||
         builtins_->lookup_local(binding_name) != nullptr) {
       diagnostics_.push_back(Diagnostic::error(
           binding_span,
@@ -335,6 +355,16 @@ private:
     // checks only its own scope, so the outer builtins scope is checked
     // here explicitly.
     if (builtins_->lookup_local(name) != nullptr) {
+      diagnostics_.push_back(Diagnostic::error(
+          name_span, "duplicate top-level declaration '" + std::string(name) + "'"));
+      return;
+    }
+
+    // The intrinsic family is the prelude's to declare and the
+    // backend's to answer with inline IR, so a user module cannot
+    // introduce one — shadowing a prelude name is allowed (§7.6), but
+    // not when the name's meaning is the compiler's.
+    if (!current_->is_prelude && is_prelude_intrinsic(name)) {
       diagnostics_.push_back(Diagnostic::error(
           name_span, "duplicate top-level declaration '" + std::string(name) + "'"));
       return;
@@ -625,8 +655,7 @@ private:
             tp.name_span,
             "duplicate type parameter '" + std::string(tp.name) + "'"));
       } else {
-        auto* sym = new_symbol(
-            SymbolKind::GenericParam, tp.name, tp.name_span, &decl);
+        auto* sym = new_symbol(SymbolKind::GenericParam, tp.name, tp.name_span, &decl);
         scope->declare(tp.name, sym);
       }
       // Resolve constraint types.
@@ -694,8 +723,7 @@ private:
             field->name_span,
             "duplicate declaration '" + std::string(field->name) + "'"));
       } else {
-        auto* sym =
-            new_symbol(SymbolKind::Field, field->name, field->name_span, field);
+        auto* sym = new_symbol(SymbolKind::Field, field->name, field->name_span, field);
         struct_scope->declare(field->name, sym);
       }
 
@@ -838,8 +866,7 @@ private:
         const auto& fn_decl = method->as<FunctionDecl>();
         auto mangled_name = ctx_.intern(
             target_name + "." + std::string(fn_decl.name));
-        new_symbol(SymbolKind::Function, mangled_name,
-                         fn_decl.name_span, method);
+        new_symbol(SymbolKind::Function, mangled_name, fn_decl.name_span, method);
       }
     }
   }
@@ -865,8 +892,7 @@ private:
             let_stmt.name_span,
             "duplicate declaration '" + std::string(let_stmt.name) + "'"));
       } else {
-        auto* sym =
-            new_symbol(SymbolKind::Local, let_stmt.name, let_stmt.name_span, &stmt);
+        auto* sym = new_symbol(SymbolKind::Local, let_stmt.name, let_stmt.name_span, &stmt);
         scope->declare(let_stmt.name, sym);
       }
       break;
@@ -926,8 +952,7 @@ private:
       // Create block scope for the loop body; declare the loop variable.
       auto* for_scope = ctx_.make_scope(ScopeKind::Block, scope);
       for_scope->set_range(stmt.span);
-      auto* sym = new_symbol(
-          SymbolKind::Local, for_stmt.var, for_stmt.var_span, &stmt);
+      auto* sym = new_symbol(SymbolKind::Local, for_stmt.var, for_stmt.var_span, &stmt);
       for_scope->declare(for_stmt.var, sym);
 
       for (const auto* s : for_stmt.body) {
@@ -973,16 +998,13 @@ private:
         auto* arm_scope = ctx_.make_scope(ScopeKind::Block, scope);
         // Register destructuring bindings as locals in the arm scope.
         for (size_t i = 0; i < arm.bindings.size(); ++i) {
-          auto* sym = new_symbol(
-              SymbolKind::Local, arm.bindings[i], arm.binding_spans[i],
-              nullptr);
+          auto* sym = new_symbol(SymbolKind::Local, arm.bindings[i], arm.binding_spans[i], nullptr);
           arm_scope->declare(arm.bindings[i], sym);
         }
         // Register `as` binding: `Pattern as name:` binds the whole value.
         if (!arm.as_binding.empty()) {
-          auto* as_sym = new_symbol(
-              SymbolKind::Local, arm.as_binding, arm.as_binding_span,
-              nullptr);
+          auto* as_sym =
+              new_symbol(SymbolKind::Local, arm.as_binding, arm.as_binding_span, nullptr);
           arm_scope->declare(arm.as_binding, as_sym);
         }
         for (const auto* body_stmt : arm.body) {
@@ -1020,9 +1042,9 @@ private:
     };
     if (qn.segments.size() > 3) {
       diagnostics_.push_back(Diagnostic::error(
-          expr.span, "'" + path_text() + "': a path through import binding '" +
-                         std::string(binding->name) +
-                         "' reaches at most a type's member (imports bind one segment)"));
+          expr.span,
+          "'" + path_text() + "': a path through import binding '" + std::string(binding->name) +
+              "' reaches at most a type's member (imports bind one segment)"));
       return;
     }
 
@@ -1240,8 +1262,9 @@ private:
     }
     if (path.segments.size() > 2) {
       diagnostics_.push_back(Diagnostic::error(
-          path.span, "'" + module_display(path.segments) + "': a type path through import binding '" +
-                         std::string(first_seg) + "' has one more segment (imports bind one segment)"));
+          path.span,
+          "'" + module_display(path.segments) + "': a type path through import binding '" +
+              std::string(first_seg) + "' has one more segment (imports bind one segment)"));
       return;
     }
     auto name = path.segments[1];
@@ -1331,6 +1354,13 @@ auto ResolveResult::symbol_for(const Expr& expr) const -> const Symbol* {
     return exported;
   }
   return at(export_offset + static_cast<uint32_t>(qn.segments[1].size()) + 2);
+}
+
+auto is_prelude_intrinsic(std::string_view name) -> bool {
+  return std::ranges::any_of(kPreludeIntrinsics, [name](std::string_view base) {
+    return name == base ||
+           (name.starts_with(base) && name.size() > base.size() && name[base.size()] == '$');
+  });
 }
 
 auto resolve(std::span<const FileNode* const> files, const SourceMap* source_map)

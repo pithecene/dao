@@ -9,6 +9,7 @@ add_library(dao_frontend STATIC
   resolve/resolve.cpp
   types/type.cpp
   types/type_context.cpp
+  types/type_identity.cpp
   types/type_printer.cpp
   typecheck/type_checker.cpp
   typecheck/type_conversion.cpp

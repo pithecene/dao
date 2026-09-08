@@ -1,4 +1,5 @@
 #include "backend/llvm/llvm_names.h"
+#include "frontend/resolve/resolve.h"
 
 #include "frontend/ast/ast.h"
 #include "frontend/module/program.h"
@@ -26,16 +27,14 @@ auto llvm_function_name(const Symbol& sym, const ModuleInfo* entry) -> std::stri
 }
 
 auto is_builtin_intrinsic(const Symbol& sym) -> bool {
+  // Recognition is by ownership: only a prelude module's declaration of
+  // one of these names is the intrinsic.  Which names those are is the
+  // resolver's to say — it is what stops any other module declaring
+  // them — so the family is not written out a second time here.
   if (sym.module != nullptr && !sym.module->is_prelude) {
     return false;
   }
-  // Instantiations carry the template name plus `$<type args>`.
-  for (std::string_view base : {"size_of", "align_of", "null_ptr", "ptr_offset", "ptr_cast"}) {
-    if (sym.name == base || (sym.name.starts_with(base) && sym.name.substr(base.size()).starts_with('$'))) {
-      return true;
-    }
-  }
-  return false;
+  return is_prelude_intrinsic(sym.name);
 }
 
 } // namespace dao
