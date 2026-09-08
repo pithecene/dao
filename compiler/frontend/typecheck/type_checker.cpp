@@ -6,6 +6,25 @@
 
 namespace dao {
 
+namespace {
+/// The program offset of segment `i` of a qualified path, from the spans
+/// the parser recorded; a path built by hand carries none, in which
+/// case the segments are assumed to abut their `::` separators.
+auto segment_offset(const std::vector<std::string_view>& segments,
+                    const std::vector<Span>& spans,
+                    Span whole,
+                    size_t i) -> uint32_t {
+  if (i < spans.size()) {
+    return spans[i].offset;
+  }
+  uint32_t offset = whole.offset;
+  for (size_t k = 0; k < i; ++k) {
+    offset += static_cast<uint32_t>(segments[k].size()) + 2;
+  }
+  return offset;
+}
+} // namespace
+
 // ---------------------------------------------------------------------------
 // Construction
 // ---------------------------------------------------------------------------
@@ -197,10 +216,9 @@ auto TypeChecker::resolve_type_node(const TypeNode* node) -> const Type* {
     // Look up user-defined types via resolver symbols: a plain name at
     // its own offset, `b::T` at T's offset where the resolver recorded
     // the export.
-    auto symbol_offset =
-        path.segments.size() == 1
-            ? node->span.offset
-            : path.span.offset + static_cast<uint32_t>(path.segments[0].size()) + 2;
+    auto symbol_offset = path.segments.size() == 1
+                             ? node->span.offset
+                             : segment_offset(path.segments, path.segment_spans, path.span, 1);
     auto it = resolve_.uses.find(symbol_offset);
     if (it != resolve_.uses.end()) {
       const auto* sym = it->second;
@@ -485,7 +503,7 @@ auto TypeChecker::aliases_generic_shell(const TypeNode* node) const -> bool {
   const auto& path = named.name;
   auto symbol_offset = path.segments.size() == 1
                            ? node->span.offset
-                           : path.span.offset + static_cast<uint32_t>(path.segments[0].size()) + 2;
+                           : segment_offset(path.segments, path.segment_spans, path.span, 1);
   auto it = resolve_.uses.find(symbol_offset);
   if (it == resolve_.uses.end() || it->second->kind != SymbolKind::Type) {
     return false;
@@ -1694,12 +1712,12 @@ auto TypeChecker::symbol_for_use(const Expr* expr) const -> const Symbol* {
   if (head->kind != SymbolKind::Module || qn.segments.size() < 2) {
     return head;
   }
-  auto export_offset = expr->span.offset + static_cast<uint32_t>(qn.segments[0].size()) + 2;
+  auto export_offset = segment_offset(qn.segments, qn.segment_spans, expr->span, 1);
   const auto* exported = at(export_offset);
   if (exported == nullptr || qn.segments.size() < 3) {
     return exported;
   }
-  return at(export_offset + static_cast<uint32_t>(qn.segments[1].size()) + 2);
+  return at(segment_offset(qn.segments, qn.segment_spans, expr->span, 2));
 }
 
 auto TypeChecker::check_identifier(const Expr* expr) -> const Type* {
@@ -2113,7 +2131,7 @@ auto TypeChecker::concept_for_constraint(const TypeNode* constraint) const -> co
   if (head == nullptr || head->kind != SymbolKind::Module || path.segments.size() < 2) {
     return head;
   }
-  auto name_offset = path.span.offset + static_cast<uint32_t>(path.segments.front().size()) + 2;
+  auto name_offset = segment_offset(path.segments, path.segment_spans, path.span, 1);
   return at(name_offset);
 }
 

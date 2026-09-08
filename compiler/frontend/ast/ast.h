@@ -114,6 +114,9 @@ struct TypeNode;
 struct QualifiedPath {
   std::vector<std::string_view> segments;
   Span span;
+  // One span per segment, as the tokens sat in the source: `lib :: x`
+  // is legal, so a consumer cannot place a segment from the text alone.
+  std::vector<Span> segment_spans;
 };
 
 struct Param {
@@ -464,6 +467,7 @@ struct IdentifierExpr {
 
 struct QualifiedName {
   std::vector<std::string_view> segments;
+  std::vector<Span> segment_spans; // one per segment, see QualifiedPath
 };
 
 using ExprPayload = std::variant<BinaryExpr,
