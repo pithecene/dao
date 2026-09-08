@@ -1,0 +1,138 @@
+# Task 34 — Bootstrap Closure Audit
+
+Status: **complete** — first audit generated; rerun with
+`task bootstrap-audit` after every bootstrap slice.
+
+## 1. Objective
+
+Replace the generic "Tier B deferrals" list with a measured answer to one
+question: **what does the Dao compiler's own source corpus need in order
+to be compiled by the Dao compiler?**  The answer defines
+**Tier B-Bootstrap** — enough Tier B to cross the bootstrap — as distinct
+from **Tier B-Parity**, every feature promised for the tier
+(`docs/ROADMAP.md`, "Delivery Sequence").
+
+## 2. Why this task exists now
+
+The Tier B backlog lists generators, monomorphization, modes and
+resources, enum payloads, lambdas, `try`, `for`, indexing, and
+`break`/`continue` as bootstrap deferrals.  Some of those the compiler's
+own sources never use; some they use on every page.  Sequencing the
+backlog by the list rather than by the corpus would spend the next
+several slices on features the crossing does not need.  The audit makes
+the corpus, not the list, the authority.
+
+## 3. Method
+
+Three mechanical measurements, produced by `bootstrap/audit_closure.sh`
+and written to `docs/bootstrap_closure.md` (generated; never edited by
+hand):
+
+1. **Construct inventory.**  The host AST printer over every assembled
+   bootstrap program (`bootstrap/*/*.gen.dao`), counting each printer
+   label.  A construct absent from the inventory is not a bootstrap
+   blocker whatever its Tier B status.
+2. **Forced prelude instantiations.**  The host LLVM lowering of the
+   largest program, listing every `core::` function it instantiates and
+   how often.  This is the stdlib the bootstrap must be able to compile
+   for itself; it is what makes generics and methods the first vertical.
+   Prelude functions are told apart by their module-qualified LLVM
+   names, which the backend emits from Task 31 D4 on; with an earlier
+   backend a full run stops rather than write an empty table, and
+   `--report-only` keeps the last measured one.
+3. **Self-compile matrix.**  The bootstrap pipeline over its own eight
+   programs, stage by stage — `lex`, `parse`, `resolve`, `typecheck`,
+   `hir`, `mir`, `llvm` — recording each pass's own diagnostic count
+   (a pass's list begins with what it was handed; its own diagnostics
+   are the tail) and the earliest failing stage's first diagnostic.
+   The probe lives in `bootstrap/llvm/impl.dao` (`closure_probe`) and
+   runs only when `bootstrap/llvm/out/.closure_probe` exists, which the
+   script creates around its run, so `task bootstrap-test` is unchanged;
+   a probe process does only the probe.  The script runs one process
+   per program and stage (`parse` measures `lex` and `parse`,
+   `typecheck` measures `resolve` and `typecheck` on one pipeline, then
+   `hir`, `mir`, `llvm`), from source each time: a Dao panic aborts the
+   process and must not hide the other lines, and the bootstrap frees
+   nothing, so a stage's cost can only be measured alone.  A program
+   stops at the first stage that dies, and its peak memory and wall
+   time are its deepest stage's — one self-compilation attempt through
+   that stage.  Each process is bounded in virtual memory and wall
+   time (`AUDIT_MEMORY_KB`, `AUDIT_SECONDS`; 6 GiB and 600 s by
+   default) so a runaway run is recorded as such rather than exhausting
+   the machine.  The probe announces its stage and counts on stderr,
+   which is unbuffered, so a killed process still shows where it died.
+   `--report-only` rewrites the document from the last run's records
+   (under `<build dir>/bootstrap_audit`, out of the way of
+   `task bootstrap-test`, which clears `bootstrap/llvm/out`) without
+   re-running the probes, for changes to what the document says rather
+   than to what was measured.
+
+The probe also answers narrower questions cheaply: name any program
+under `bootstrap/<name>/<name>.gen.dao` and a stage in the marker file
+(`<name>`, a tab, the stage) and it is fed through the pipeline the
+same way, so a one-construct program measures what one construct costs
+at each stage, and a source file cut into one program per top-level
+declaration locates a stage's failures by function.
+
+The first blocking diagnostic per program names the construct to
+implement next for that stage.  Diagnostics are the bootstrap's own,
+so the matrix is only as precise as its "unsupported ..." messages;
+sharpening a message sharpens the audit.
+
+## 4. Reading the result
+
+- **Capacity for the large half.**  The matrix records peak memory and
+  wall time per program, each stage measured in its own process.  The
+  first audit found the four smallest programs (3–5k lines) reaching
+  the LLVM stage in 5.5–12 GiB and 17–40 s, and the three largest
+  (7–9k lines) exhausting 16 GiB in `typecheck` or `mir`.  Until that
+  is fixed the `mir` and `llvm` columns of the larger programs cannot
+  be measured, so the bootstrap's memory behaviour (state threaded by
+  value through every lowering step, copying its vectors) sits beside
+  the first construct at the head of Tier B-Bootstrap.
+- **Then the stages in order.**  The first audit's parser column shows
+  the bootstrap parser rejecting 46–285 sites per program ("expected
+  expression").  Probing one-construct programs and each top-level
+  declaration of `typecheck/impl.dao` separately attributes every one of
+  them to a single construct: generic arguments on a qualified name in
+  expression position (`Vector<i64>::new()`, `Option<T>::None` — 150
+  sites in the largest program), which the Tier A parser reads as a
+  comparison and abandons at `::`; one diagnostic per site at statement
+  level, two for nested arguments, three in an argument list.  The
+  document's "Parse-stage attribution" table sets the sites against the
+  parse column and reaches zero when the parser closes it.  Nothing
+  else the corpus writes fails to parse.
+- **Tier B-Bootstrap** = that one parser construct and that capacity
+  work, then what the self-compile matrix rejects at `resolve`,
+  `typecheck`, `mir`, and `llvm` (the histograms name the messages),
+  plus forced prelude functions — the intrinsic family included — the
+  bootstrap cannot yet compile.
+- A stage with zero diagnostics on every program is closed for the
+  corpus.
+- Constructs the inventory does not contain (and prelude functions the
+  corpus does not force) join the backlog *after* the crossing.
+
+## 5. Non-goals
+
+- The audit does not decide implementation order inside
+  Tier B-Bootstrap; the delivery sequence does (methods + generics +
+  monomorphization first, then the execution surface the matrix
+  demands).
+- It does not run the bootstrap's semantic suites under a Dao-built
+  compiler; that is the Stage 2/3 harness (Order 7).
+- It is not a parity table for the module system (`bootstrap/README.md`,
+  Task 33) or for the language contracts.
+
+## 6. Deliverables
+
+- `bootstrap/audit_closure.sh <build dir>` and `task bootstrap-audit`
+- `closure_probe` in `bootstrap/llvm/impl.dao`, opt-in via marker file
+  (`<program>`, tab, `<stage>`), one process per program and stage
+- `docs/bootstrap_closure.md`, generated
+- `IMPLEMENTATION_PLAN.md` entry; `ARCH_INDEX.md` entries
+
+## 7. Keeping it current
+
+Rerun after every bootstrap slice and commit the regenerated document
+with the slice, so the matrix in `main` always describes `main`.  When a
+stage closes for the corpus, its column reads zero across every row.

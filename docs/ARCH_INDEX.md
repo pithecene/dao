@@ -39,6 +39,7 @@ Contracts and explanatory material.
 - `COMPILER_SERVICE_API.md` — explanatory shared analysis payloads for CLI, playground, and LSP
 - `building.md` — build prerequisites, parallelism cap (`DAO_BUILD_JOBS`), and override instructions
 - `tooling_capabilities.md` — generated capability matrix (compiler entry points × playground route × `daoc` command × LSP method) from `tools/playground/compiler_service/service_surface.h`; verified by `playground_service_test`
+- `bootstrap_closure.md` — generated closure audit (Task 34): construct inventory, forced prelude instantiations, per-stage self-compile matrix
 - `language_vision.md` — explanatory design doctrine, stdlib posture, module/namespace design, and GPU strategy
 
 ## `spec/`
@@ -140,6 +141,9 @@ Self-hosting compiler subsystems written in Dao.
   to produce compilable `*.gen.dao` outputs (gitignored build artifacts)
 - `validate_ir.sh` — compiles, links, and runs the IR the LLVM suite
   emits under `llvm/out/` (gitignored), comparing exit codes
+- `audit_closure.sh` — measures the constructs and prelude functions the
+  bootstrap corpus needs and where the bootstrap pipeline stops on its own
+  programs; writes `docs/bootstrap_closure.md`
 - `lexer/` — indentation-aware lexer matching the host compiler's token
   surface; tests in `tests.dao` (Task 20)
 - `parser/` — recursive-descent parser producing arena-indexed AST for

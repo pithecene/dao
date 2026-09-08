@@ -1719,7 +1719,136 @@ fn check_contains(result: LlvmTextResult, needle: string, test_name: string): bo
   print("--- end ---")
   return false
 
+
+// =========================================================================
+// Closure probe: feed one assembled bootstrap program through one stage
+// of the bootstrap pipeline and record what that stage says.  Opt-in --
+// runs only when bootstrap/llvm/out/.closure_probe exists; its content
+// is "<program>\t<stage>" (bootstrap/audit_closure.sh runs one process
+// per program and stage: a Dao panic aborts the process and must not
+// hide the other lines, and the bootstrap frees nothing, so a stage's
+// cost can only be measured alone).  The probe process does nothing
+// else.  The stage's columns are appended to bootstrap/llvm/out/closure.txt:
+//   <program>\t<stage>=<diagnostics>...
+// ("parse" writes lex= and parse=, "typecheck" writes resolve= and
+// typecheck=; the script merges the stages into the program's line and
+// adds peak memory, time, and the earliest failing stage's first
+// diagnostic).  "probe: <program> stage=<stage>", the counts, and each
+// stage's first diagnostic go to stderr, which is not buffered, so a
+// killed process still shows where it died.
+// =========================================================================
+
+// Report a stage's diagnostics on stderr (at most `limit`), one per line,
+// so the audit can histogram what each stage rejects.
+fn closure_report_diags(name: string, stage: string, diags: Vector<Diagnostic>, limit: i64): void
+  closure_report_diags_from(name, stage, diags, to_i64(0), limit)
+
+// The same from index `from`: a pass whose list begins with an earlier
+// pass's diagnostics reports only its own.
+fn closure_report_diags_from(name: string, stage: string, diags: Vector<Diagnostic>, from: i64, limit: i64): void
+  let i: i64 = from
+  while i < diags.length():
+    if i - from >= limit:
+      return
+    eprint("probe: " + name + " diag " + stage + ": " + diags.get(i).message)
+    i = i + to_i64(1)
+
+// The same, for the diagnostics the program pipeline attaches to files,
+// from index `from` (a later pass appends to an earlier pass's list).
+fn closure_report_file_diags(name: string, stage: string, diags: Vector<FileDiagnostic>, from: i64, limit: i64): void
+  let i: i64 = from
+  while i < diags.length():
+    if i - from >= limit:
+      return
+    eprint("probe: " + name + " diag " + stage + ": " + diags.get(i).diag.message)
+    i = i + to_i64(1)
+
+// One stage per process, from source: the bootstrap frees nothing, so
+// a stage's cost can only be measured alone.  `parse` reports the
+// lexer's and the parser's counts (the parser's list begins with the
+// lexer's), `typecheck` the resolver's and the type checker's (one
+// program pipeline, run once), and `hir`, `mir`, `llvm` their own.
+// Each pass's list begins with what it was handed, so a pass's own
+// diagnostics are the tail past that baseline -- counted, reported,
+// and used for the first diagnostic.
+fn closure_probe_stage(name: string, path: string, stage: string): string
+  if file_exists(path) == false:
+    return name + "\tmissing=" + path + "\n"
+  let src: string = read_file(path)
+  let cols: string = ""
+  eprint("probe: " + name + " stage=" + stage)
+  if stage == "parse":
+    let lexed: LexResult = lex(src)
+    let lex_n: i64 = lexed.diagnostics.length()
+    closure_report_diags(name, "lex", lexed.diagnostics, to_i64(50))
+    cols = cols + closure_stage_column(name, "lex", lexed.diagnostics, to_i64(0))
+    let parsed: ParseOutput = parse(src)
+    closure_report_diags_from(name, "parse", parsed.diags, lex_n, to_i64(50))
+    cols = cols + closure_stage_column(name, "parse", parsed.diags, lex_n)
+  if stage == "typecheck":
+    let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+    inputs = inputs.push(SourceInput(path, wrap_test_module(src)))
+    let pg: ProgramGraph = build_program(inputs)
+    let p: Program = program_from_graph(pg)
+    p = program_run_resolve(p)
+    let carried_into_resolve: i64 = pg.diags.length()
+    closure_report_file_diags(name, "resolve", p.resolve.diags, carried_into_resolve, to_i64(50))
+    cols = cols + closure_stage_file_column(name, "resolve", p.resolve.diags, carried_into_resolve)
+    p = program_run_typecheck(p)
+    let carried_into_typecheck: i64 = p.resolve.diags.length()
+    closure_report_file_diags(name, "typecheck", p.diags, carried_into_typecheck, to_i64(50))
+    cols = cols + closure_stage_file_column(name, "typecheck", p.diags, carried_into_typecheck)
+  if stage == "hir":
+    let hir: HirResult = lower_to_hir(src)
+    closure_report_diags(name, "hir", hir.diags, to_i64(50))
+    cols = cols + closure_stage_column(name, "hir", hir.diags, to_i64(0))
+  if stage == "mir":
+    let mir: MirResult = lower_to_mir(src)
+    closure_report_diags(name, "mir", mir.diags, to_i64(50))
+    cols = cols + closure_stage_column(name, "mir", mir.diags, to_i64(0))
+  if stage == "llvm":
+    let ll: LlvmTextResult = lower_source_to_llvm_text(src)
+    closure_report_diags(name, "llvm", ll.diags, to_i64(50))
+    cols = cols + closure_stage_column(name, "llvm", ll.diags, to_i64(0))
+  return name + cols + "\n"
+
+// "\t<stage>=<count>", announcing the count and the stage's first
+// diagnostic on stderr (which survives a later stage's crash).
+fn closure_stage_column(name: string, stage: string, diags: Vector<Diagnostic>, from: i64): string
+  let n: i64 = diags.length() - from
+  eprint("probe: " + name + " " + stage + "=" + i64_to_string(n))
+  if n > to_i64(0):
+    eprint("probe: " + name + " first " + stage + ": " + diags.get(from).message)
+  return "\t" + stage + "=" + i64_to_string(n)
+
+fn closure_stage_file_column(name: string, stage: string, diags: Vector<FileDiagnostic>, from: i64): string
+  let n: i64 = diags.length() - from
+  eprint("probe: " + name + " " + stage + "=" + i64_to_string(n))
+  if n > to_i64(0):
+    eprint("probe: " + name + " first " + stage + ": " + diags.get(from).diag.message)
+  return "\t" + stage + "=" + i64_to_string(n)
+
+// The marker holds "<program>\t<stage>".
+fn closure_probe(marker: string): void
+  let tab: i64 = index_of(marker, "\t")
+  if tab < to_i64(0):
+    eprint("probe: marker must be <program>, a tab, and a stage; got '" + marker + "'")
+    return
+  let which: string = substring(marker, to_i64(0), tab)
+  let stage: string = substring(marker, tab + to_i64(1), length(marker) - tab - to_i64(1))
+  let line: string = closure_probe_stage(which, "bootstrap/" + which + "/" + which + ".gen.dao", stage)
+  let previous: string = ""
+  if file_exists("bootstrap/llvm/out/closure.txt"):
+    previous = read_file("bootstrap/llvm/out/closure.txt")
+  let wrote: bool = write_file("bootstrap/llvm/out/closure.txt", previous + line)
+  print(line)
+
 fn main(): i32
+  // Opt-in probe (bootstrap/audit_closure.sh): the process does only
+  // the probe, so its memory is one stage's and nothing else's.
+  if file_exists("bootstrap/llvm/out/.closure_probe"):
+    closure_probe(read_file("bootstrap/llvm/out/.closure_probe"))
+    return 0
   print("=== bootstrap/llvm: Tier A LLVM backend ===")
   print("")
 
