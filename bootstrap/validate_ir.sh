@@ -24,7 +24,7 @@ if [ ! -d "$OUT" ] || ! ls "$OUT"/*.ll > /dev/null 2>&1; then
 fi
 
 checked=0; accepted=0; ran=0; failures=0
-WORK="$(mktemp -d)"
+WORK="$(mktemp -d)" && [ -n "$WORK" ] || { echo "validate_ir: cannot create a scratch directory"; exit 1; }
 trap 'rm -rf "$WORK"' EXIT
 
 for ll in "$OUT"/*.ll; do
