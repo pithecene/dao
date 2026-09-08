@@ -587,15 +587,16 @@ suite<"mir_concreteness"> mir_concreteness = [] {
   "a builtin whose call sits in a later block is still made concrete"_test = [] {
     // `?` in the argument lowers into blocks: the reference to ptr_cast
     // is emitted before them and its call in the merge block after.
-    MirTestPipeline pipe(
-        "enum class Result<T, E>:\n"
-        "    Ok(v: T)\n"
-        "    Err(e: E)\n"
-        "fn get(): Result<*void, i32> -> Result<*void, i32>::Ok(v = null_ptr<void>())\n"
-        "fn f(): Result<i32, i32>\n"
-        "    mode unsafe =>\n"
-        "        let p = ptr_cast<i32>(get()?)\n"
-        "    return Result<i32, i32>::Ok(v = 0)\n");
+    MirTestPipeline pipe("enum class Result<T, E>:\n"
+                         "    Ok(v: T)\n"
+                         "    Err(e: E)\n"
+                         "fn get(): Result<*void, i32>\n"
+                         "    let r: Result<*void, i32> = Result::Ok(v = null_ptr<void>())\n"
+                         "    return r\n"
+                         "fn f(): Result<i32, i32>\n"
+                         "    mode unsafe =>\n"
+                         "        let p = ptr_cast<i32>(get()?)\n"
+                         "    return Result::Ok(v = 0)\n");
     expect(pipe.check_result.diagnostics.empty())
         << (pipe.check_result.diagnostics.empty() ? "" : pipe.check_result.diagnostics[0].message);
     auto mono =
