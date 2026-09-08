@@ -695,6 +695,43 @@ suite<"typecheck_modules"> typecheck_modules = [] {
         << "the checker restated the resolver: " << all_messages(checked);
   };
 
+  "an alias of a generic instantiation carries the instantiation's fields"_test = [] {
+    // Aliases used to resolve before class fields were registered, so
+    // `IntBox` cached an empty `Box<i32>` shell that accepted anything.
+    auto checked = check_program({
+        {"lib.dao", "module lib\nclass Box<T>:\n    v: T\n"},
+        {"main.dao",
+         "module app\nimport lib\ntype IntBox = lib::Box<i32>\n"
+         "fn take(b: IntBox): i32 -> b.v\n"
+         "fn ok(): i32 -> take(lib::Box(1))\n"
+         "fn main(): i32 -> take(lib::Box(\"wrong\"))\n"},
+    });
+    expect(has_error_containing(checked.result, "not assignable to parameter type"))
+        << "Box<string> was accepted where IntBox was declared: " << all_messages(checked);
+  };
+
+  "a concept is not a type outside a bound"_test = [] {
+    auto checked = check_program({
+        {"traits.dao", "module app::traits\nconcept Reveal:\n    fn reveal(self): i32\n"},
+        {"main.dao",
+         "module app::main\nimport app::traits\nfn f(x: traits::Reveal): i32 -> 0\n"
+         "fn main(): i32 -> 0\n"},
+    });
+    expect(has_error_containing(checked.result, "is a concept, not a type"))
+        << all_messages(checked);
+  };
+
+  "a resolver-rejected path nested in a type is diagnosed once"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::math\ntype Bad = *math::Missing\n"
+         "fn g(p: math::Point::Extra): i32 -> 0\nfn main(): i32 -> 0\n"},
+        {"math.dao", kMathModule},
+    });
+    expect(checked.result.diagnostics.empty())
+        << "the checker restated the resolver: " << all_messages(checked);
+  };
+
   "unknown_export_in_type_position_is_a_resolver_error"_test = [] {
     auto checked = check_program({
         {"main.dao",
@@ -2494,6 +2531,25 @@ suite<"module_extend_scoping"> module_extend_scoping = [] {
     });
     expect(has_error_containing(checked->check_result, "does not satisfy concept"))
         << "Box satisfied the prelude's Mark through a conformance to the module's";
+  };
+
+  "a class conforming to a shadowing concept still derives the prelude's"_test = [] {
+    // The prelude's `Mark` is derived and `i32` satisfies it.  The module
+    // shadows `Mark` and conforms Box to ITS `Mark` inline; that is a
+    // different concept, so Box still derives the prelude's through its
+    // i32 field, and a bound on the prelude's accepts it.
+    auto checked = check_modules({
+        {"stdlib/core/mark.dao",
+         "module core::mark\nderived concept Mark:\n    fn mark(self): i32\n"
+         "extend i32 as Mark:\n    fn mark(self): i32 -> 1\n"
+         "fn accept<T: Mark>(x: T): i32 -> 0\n"},
+        {"app.dao",
+         "module app\nconcept Mark:\n    fn shout(self): string\n"
+         "class Box:\n    n: i32\n    as Mark:\n        fn shout(self): string -> \"box\"\n"
+         "fn main(): i32 -> accept(Box(1))\n"},
+    });
+    expect(is_ok(checked->check_result))
+        << "an inline conformance to the module's Mark blocked deriving the prelude's";
   };
 
   "a sibling module's extend cannot make a class derive"_test = [] {

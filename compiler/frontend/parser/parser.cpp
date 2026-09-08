@@ -255,12 +255,14 @@ private:
     QualifiedPath path;
     const auto& first = consume(TokenKind::Identifier);
     path.segments.push_back(first.text);
+    path.segment_spans.push_back(first.span);
     path.span = first.span;
 
     while (peek_kind() == TokenKind::ColonColon) {
       advance(); // ::
       const auto& seg = consume(TokenKind::Identifier);
       path.segments.push_back(seg.text);
+      path.segment_spans.push_back(seg.span);
       path.span.length = (seg.span.offset + seg.span.length) - path.span.offset;
     }
 
@@ -1614,17 +1616,20 @@ private:
 
     // Qualified name: ident :: ident (:: ident)*
     std::vector<std::string_view> segments;
+    std::vector<Span> segment_spans;
     segments.push_back(first.text);
+    segment_spans.push_back(first.span);
     Span span = first.span;
 
     while (peek_kind() == TokenKind::ColonColon) {
       advance(); // ::
       const auto& seg = consume(TokenKind::Identifier);
       segments.push_back(seg.text);
+      segment_spans.push_back(seg.span);
       span.length = (seg.span.offset + seg.span.length) - span.offset;
     }
 
-    return ctx_.alloc<Expr>(span, QualifiedName{std::move(segments)});
+    return ctx_.alloc<Expr>(span, QualifiedName{std::move(segments), std::move(segment_spans)});
   }
 
   // -----------------------------------------------------------------------
@@ -1687,12 +1692,14 @@ private:
     QualifiedPath path;
     const auto& first = consume(TokenKind::Identifier);
     path.segments.push_back(first.text);
+    path.segment_spans.push_back(first.span);
     path.span = first.span;
 
     while (peek_kind() == TokenKind::ColonColon) {
       advance(); // ::
       const auto& seg = consume(TokenKind::Identifier);
       path.segments.push_back(seg.text);
+      path.segment_spans.push_back(seg.span);
       path.span.length = (seg.span.offset + seg.span.length) - path.span.offset;
     }
 
