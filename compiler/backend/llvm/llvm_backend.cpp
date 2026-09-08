@@ -218,6 +218,11 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
     // bound to whichever came first; one declaration is emitted and a
     // disagreeing signature is a diagnostic rather than a silent pick.
     auto name = fn_name(*mir_fn->symbol);
+    // Whether the name already on the module came from an extern is
+    // decided BEFORE this function records itself: read afterwards, an
+    // extern arriving second would see its own entry and take a Dao
+    // definition for a fellow extern.
+    const bool existing_is_extern = extern_signatures_.contains(name);
     if (mir_fn->is_extern) {
       // Compare the DAO types by identity, not the lowered ones and
       // not their printed form: `*i32` and `*f64` are both an opaque
@@ -245,7 +250,7 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
       // -- is a collision, and lowering the body into the other's
       // declaration would emit a function whose body disagrees with
       // its type.
-      const bool both_extern = mir_fn->is_extern && extern_signatures_.contains(name);
+      const bool both_extern = mir_fn->is_extern && existing_is_extern;
       if (!both_extern) {
         emit_diagnostic(mir_fn->span,
                         "'" + name + "' is both defined in Dao and declared extern; " +
