@@ -28,6 +28,12 @@ auto parse_program_request(const nlohmann::json& request)
     if (!paths.insert(path).second) {
       return std::unexpected(std::format("duplicate file path '{}'", path));
     }
+    // The prelude group is loaded from the repository's `stdlib/`; a
+    // request file under that prefix would collide with a prelude file's
+    // identity and be ranked as one when the reply is ordered.
+    if (path.starts_with("stdlib/")) {
+      return std::unexpected(std::format("file path '{}' is reserved for the prelude", path));
+    }
     parsed.files.push_back({.display_path = std::move(path),
                             .text = file["source"].get<std::string>(),
                             .is_prelude = false});

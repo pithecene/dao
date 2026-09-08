@@ -912,6 +912,24 @@ suite<"playground_service"> playground_service_suite = [] {
         << matrix.string() << " is stale: run `task gen-tooling-surface`";
   };
 
+  "a request file under stdlib is refused"_test = [] {
+    // A request file whose path collides with a prelude file's would be
+    // ranked as the prelude's when diagnostics are ordered.  It is not
+    // a user file the playground can take.
+    json files = json::array({
+        {{"path", "a.dao"}, {"source", "module a\nfn broken(): i32\n  return @\n"}},
+        {{"path", "stdlib/core/builtins.dao"},
+         {"source", "module x\nfn also(): i32\n  return @\n"}},
+    });
+    for (const auto& route : {"analyze", "run"}) {
+      // `call` insists on a 200; this reply is meant to be a 400.
+      auto reply =
+          dispatch(route, json{{"files", files}, {"document", "a.dao"}}, service_context());
+      expect(reply.status == http_status::bad_request)
+          << route << " accepted a request file under stdlib/: " << reply.body.dump();
+    }
+  };
+
   "diagnostics_come_back_in_program_order"_test = [] {
     // Phases are collected one after another, so without a final sort a
     // resolve error in the first file follows a parse error in the
