@@ -30,6 +30,9 @@ struct MethodInfo {
   // The module whose `extend` introduced it; null when it is visible
   // everywhere (a class's own method, or a prelude module's extend).
   const ModuleInfo* owner = nullptr;
+  // Declared by the type itself: outranks every extension of the same
+  // name, so tooling offers it alone where a call would select it.
+  bool inherent = false;
 };
 
 struct TypeCheckResult {

@@ -105,7 +105,7 @@ auto TypeChecker::check(std::span<const FileNode* const> files) -> TypeCheckResu
   // everywhere.
   std::vector<MethodInfo> methods;
   for (const auto& [key, entry] : method_table_) {
-    methods.push_back({key.type, key.name, entry.fn_type, key.owner});
+    methods.push_back({key.type, key.name, entry.fn_type, key.owner, entry.inherent});
   }
 
   return {.typed = std::move(typed_),
@@ -683,7 +683,11 @@ auto TypeChecker::type_conforms_to(const Type* type, const Decl* concept_decl) -
           if (bound != resolve_.uses.end()) {
             return bound->second->decl_as_decl() == concept_decl;
           }
-          return spelled == concept_name;
+          // Unbound inside a program means the resolver rejected the
+          // name; matching it by spelling would let an unimported
+          // sibling's concept in.  Only outside a program is the
+          // spelling all there is.
+          return current_module_ == nullptr && spelled == concept_name;
         };
 
         // deny supersedes everything — if present, the type does not
@@ -731,7 +735,7 @@ auto TypeChecker::type_conforms_to(const Type* type, const Decl* concept_decl) -
         }
         continue;
       }
-      if (ext.concept_name == cpt_name) {
+      if (current_module_ == nullptr && ext.concept_name == cpt_name) {
         return true;
       }
     }
@@ -801,7 +805,7 @@ void TypeChecker::compute_derived_conformances() {
           if (bound != resolve_.uses.end()) {
             return bound->second->decl_as_decl() == concept_decl;
           }
-          return spelled == cpt.name;
+          return current_module_ == nullptr && spelled == cpt.name;
         };
         bool has_explicit = false;
         for (const auto& conf : entry.cls->conformances) {
@@ -901,9 +905,10 @@ void TypeChecker::check_declaration(const Decl* decl) {
             };
             const auto* denied = bound_of(deny.concept_span);
             const auto* extended = bound_of(ext.concept_span);
-            const bool same = (denied != nullptr && extended != nullptr)
-                                  ? denied == extended
-                                  : deny.concept_name == ext.concept_name;
+            const bool same =
+                (denied != nullptr && extended != nullptr)
+                    ? denied == extended
+                    : (current_module_ == nullptr && deny.concept_name == ext.concept_name);
             if (same) {
               error(ext.concept_span,
                     "cannot extend '" + std::string(st->name()) + "' as '" +
@@ -2691,7 +2696,14 @@ auto TypeChecker::lookup_method(const Type* obj_type,
   // substitute into the method's return/param types.
   if (obj_type->kind() == TypeKind::Struct) {
     const auto* concrete_st = static_cast<const TypeStruct*>(obj_type);
-    // Look up the class declaration's generic struct type.
+    // Every registration of this name for the class, whichever generic
+    // or concrete key it sits under, then the same precedence as the
+    // direct lookup: the type's own method, the current module's
+    // extension, the prelude's.  The table is unordered; iteration
+    // order must not decide.
+    const TypeStruct* chosen_st = nullptr;
+    const MethodEntry* chosen = nullptr;
+    int chosen_tier = 3;
     for (const auto& [key, entry] : method_table_) {
       if (key.name != name || key.type == nullptr || key.type->kind() != TypeKind::Struct ||
           !owner_is_visible(key.owner)) {
@@ -2701,20 +2713,29 @@ auto TypeChecker::lookup_method(const Type* obj_type,
       if (generic_st->decl_id() != concrete_st->decl_id()) {
         continue;
       }
-      // Found matching class. Build substitution from generic → concrete
-      // field types.
+      const int tier = entry.inherent                                           ? 0
+                       : (key.owner != nullptr && key.owner == current_module_) ? 1
+                                                                                : 2;
+      if (tier < chosen_tier) {
+        chosen_tier = tier;
+        chosen = &entry;
+        chosen_st = generic_st;
+      }
+    }
+    if (chosen != nullptr) {
+      // Build substitution from generic → concrete field types.
       std::unordered_map<uint32_t, const Type*> bindings;
-      for (size_t i = 0; i < generic_st->fields().size() && i < concrete_st->fields().size(); ++i) {
+      for (size_t i = 0; i < chosen_st->fields().size() && i < concrete_st->fields().size(); ++i) {
         infer_type_bindings(
-            generic_st->fields()[i].type, concrete_st->fields()[i].type, bindings, Span{});
+            chosen_st->fields()[i].type, concrete_st->fields()[i].type, bindings, Span{});
       }
       if (resolved_decl != nullptr) {
-        *resolved_decl = entry.method_decl;
+        *resolved_decl = chosen->method_decl;
       }
       if (bindings.empty()) {
-        return entry.fn_type;
+        return chosen->fn_type;
       }
-      return substitute_generics(entry.fn_type, bindings);
+      return substitute_generics(chosen->fn_type, bindings);
     }
   }
 
