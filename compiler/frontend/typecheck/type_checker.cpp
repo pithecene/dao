@@ -6,6 +6,25 @@
 
 namespace dao {
 
+namespace {
+/// The program offset of segment `i` of a qualified path, from the spans
+/// the parser recorded; a path built by hand carries none, in which
+/// case the segments are assumed to abut their `::` separators.
+auto segment_offset(const std::vector<std::string_view>& segments,
+                    const std::vector<Span>& spans,
+                    Span whole,
+                    size_t i) -> uint32_t {
+  if (i < spans.size()) {
+    return spans[i].offset;
+  }
+  uint32_t offset = whole.offset;
+  for (size_t k = 0; k < i; ++k) {
+    offset += static_cast<uint32_t>(segments[k].size()) + 2;
+  }
+  return offset;
+}
+} // namespace
+
 // ---------------------------------------------------------------------------
 // Construction
 // ---------------------------------------------------------------------------
@@ -151,10 +170,14 @@ auto TypeChecker::resolve_type_node(const TypeNode* node) -> const Type* {
     const auto& named = node->as<NamedType>();
     const auto& path = named.name;
     if (path.segments.size() > 2) {
-      error(node->span,
-            "'" + qualified_path_text(path.segments) +
-                "': a type path through an import binding has one more "
-                "segment (imports bind one segment)");
+      // Through an import binding the resolver has already rejected the
+      // path; only a head that is not a binding is the checker's to say.
+      if (!resolver_owns_path(node)) {
+        error(node->span,
+              "'" + qualified_path_text(path.segments) +
+                  "': a type path through an import binding has one more "
+                  "segment (imports bind one segment)");
+      }
       return nullptr;
     }
     auto name = path.segments.back();
@@ -193,10 +216,9 @@ auto TypeChecker::resolve_type_node(const TypeNode* node) -> const Type* {
     // Look up user-defined types via resolver symbols: a plain name at
     // its own offset, `b::T` at T's offset where the resolver recorded
     // the export.
-    auto symbol_offset =
-        path.segments.size() == 1
-            ? node->span.offset
-            : path.span.offset + static_cast<uint32_t>(path.segments[0].size()) + 2;
+    auto symbol_offset = path.segments.size() == 1
+                             ? node->span.offset
+                             : segment_offset(path.segments, path.segment_spans, path.span, 1);
     auto it = resolve_.uses.find(symbol_offset);
     if (it != resolve_.uses.end()) {
       const auto* sym = it->second;
@@ -213,6 +235,12 @@ auto TypeChecker::resolve_type_node(const TypeNode* node) -> const Type* {
         if (csm != concept_self_map_.end()) {
           return csm->second;
         }
+        // Anywhere else a concept is not a type: it constrains a type
+        // parameter (`<T: Reveal>`), it does not stand for one.
+        error(node->span,
+              "'" + qualified_path_text(path.segments) +
+                  "' is a concept, not a type; use it as a bound (<T: " + std::string(name) + ">)");
+        return nullptr;
       }
       // A type position takes a type.  Without this, a function symbol
       // yields its own function type and a value symbol its value type,
@@ -441,6 +469,7 @@ auto TypeChecker::resolve_symbol_type_for_type_decl(const Symbol* sym) -> const 
 
 void TypeChecker::register_declarations() {
   pending_classes_.clear(); // Reset pass-local state for this file.
+  fields_registered_ = false;
   register_type_names();
   // Aliases come after the class shells they may name, and repeat until
   // a pass registers nothing new: one alias may name another to any
@@ -453,19 +482,66 @@ void TypeChecker::register_declarations() {
   }
   register_type_aliases(/*report_failures=*/true);
   register_struct_fields();
+  fields_registered_ = true;
+  // Aliases of generic instantiations were held back until the classes
+  // they instantiate had fields; they resolve now, to a fixpoint as
+  // before, and only now are their failures final.
+  while (register_type_aliases(/*report_failures=*/false) > 0) {
+  }
+  register_type_aliases(/*report_failures=*/true);
   register_signatures();
 }
 
+auto TypeChecker::aliases_generic_shell(const TypeNode* node) const -> bool {
+  if (fields_registered_ || node == nullptr || !node->is<NamedType>()) {
+    return false;
+  }
+  const auto& named = node->as<NamedType>();
+  if (named.type_args.empty()) {
+    return false;
+  }
+  const auto& path = named.name;
+  auto symbol_offset = path.segments.size() == 1
+                           ? node->span.offset
+                           : segment_offset(path.segments, path.segment_spans, path.span, 1);
+  auto it = resolve_.uses.find(symbol_offset);
+  if (it == resolve_.uses.end() || it->second->kind != SymbolKind::Type) {
+    return false;
+  }
+  const auto* decl = it->second->decl_as_decl();
+  return std::ranges::any_of(pending_classes_,
+                             [decl](const PendingClass& pc) { return pc.decl == decl; });
+}
+
 auto TypeChecker::resolver_owns_path(const TypeNode* node) const -> bool {
-  if (node == nullptr || !node->is<NamedType>()) {
+  if (node == nullptr) {
     return false;
   }
-  const auto& path = node->as<NamedType>().name;
-  if (path.segments.size() < 2) {
+  switch (node->kind()) {
+  case NodeKind::NamedType: {
+    const auto& named = node->as<NamedType>();
+    const auto& path = named.name;
+    if (path.segments.size() >= 2) {
+      auto head = resolve_.uses.find(path.span.offset);
+      if (head != resolve_.uses.end() && head->second->kind == SymbolKind::Module) {
+        return true;
+      }
+    }
+    // `Vec<lib::Missing>`: the failure sits in a type argument.
+    return std::ranges::any_of(named.type_args,
+                               [&](const TypeNode* arg) { return resolver_owns_path(arg); });
+  }
+  case NodeKind::PointerType:
+    return resolver_owns_path(node->as<PointerType>().pointee);
+  case NodeKind::FunctionType: {
+    const auto& ftn = node->as<FunctionTypeNode>();
+    return resolver_owns_path(ftn.return_type) ||
+           std::ranges::any_of(ftn.param_types,
+                               [&](const TypeNode* pt) { return resolver_owns_path(pt); });
+  }
+  default:
     return false;
   }
-  auto head = resolve_.uses.find(path.span.offset);
-  return head != resolve_.uses.end() && head->second->kind == SymbolKind::Module;
 }
 
 auto TypeChecker::register_type_aliases(bool report_failures) -> size_t {
@@ -484,6 +560,14 @@ auto TypeChecker::register_type_aliases(bool report_failures) -> size_t {
       continue; // registered by an earlier run
     }
 
+    // An alias of a generic instantiation (`type IntBox = lib::Box<i32>`)
+    // cannot be resolved before `Box` has its fields: instantiating the
+    // shell would cache a `Box<i32>` with no fields at all, and the
+    // alias would then accept anything.  Such an alias waits for the
+    // pass that runs after fields are registered.
+    if (aliases_generic_shell(alias.type)) {
+      continue;
+    }
     // Resolve the aliased type and cache it so later lookups of the
     // alias name transparently return the underlying type.
     auto before = diagnostics_.size();
@@ -2030,7 +2114,7 @@ auto TypeChecker::concept_for_constraint(const TypeNode* constraint) const -> co
   if (head == nullptr || head->kind != SymbolKind::Module || path.segments.size() < 2) {
     return head;
   }
-  auto name_offset = path.span.offset + static_cast<uint32_t>(path.segments.front().size()) + 2;
+  auto name_offset = segment_offset(path.segments, path.segment_spans, path.span, 1);
   return at(name_offset);
 }
 
