@@ -35,11 +35,13 @@ fi
 
 # The other two shared fixtures: both compilers read them,
 # neither task edits them.  Each is a library set with no `fn main`, so it
-# is CHECKED rather than built — a missing entry is a warning for analysis
-# and an error only when producing an executable.
+# is CHECKED rather than built.  An explicit file set owes an entry
+# module under every command (CONTRACT_MODULE_SYSTEM.md §8.3), and these
+# fixtures are libraries, so each is checked alongside a scratch entry.
 for fixture in cross_module_enum extend_isolation; do
   dir="$ROOT/testdata/bootstrap/multifile/$fixture"
-  args=""
+  printf 'module fixture_main\n\nfn main(): i32\n  return 0\n' > "$WORK/$fixture-main.dao"
+  args="--source $WORK/$fixture-main.dao"
   for f in "$dir"/*.dao; do args="$args --source $f"; done
   # shellcheck disable=SC2086
   if ! "$DAOC" check $args > "$WORK/$fixture.txt" 2>&1; then

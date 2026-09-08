@@ -28,10 +28,11 @@ auto parse_program_request(const nlohmann::json& request)
     if (!paths.insert(path).second) {
       return std::unexpected(std::format("duplicate file path '{}'", path));
     }
-    // The prelude group is loaded from the repository's `stdlib/`; a
-    // request file under that prefix would collide with a prelude file's
-    // identity and be ranked as one when the reply is ordered.
-    if (path.starts_with("stdlib/")) {
+    // The prelude group is `stdlib/core/` and `stdlib/io/`
+    // (CONTRACT_MODULE_SYSTEM.md §7.1); a request file under either would
+    // collide with a prelude file's identity and be ranked as one when
+    // the reply is ordered.  The rest of `stdlib/` is ordinary.
+    if (path.starts_with("stdlib/core/") || path.starts_with("stdlib/io/")) {
       return std::unexpected(std::format("file path '{}' is reserved for the prelude", path));
     }
     parsed.files.push_back({.display_path = std::move(path),

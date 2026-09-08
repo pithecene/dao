@@ -26,4 +26,5 @@ and when, not what is guaranteed.
   files explicitly; `--entry` selects the entry module.  File order,
   diagnostic order, and the default output name are functions of the
   file set rather than of the order of the paths given
-  (`CONTRACT_MODULE_SYSTEM.md` §8.4).
+  (`CONTRACT_MODULE_SYSTEM.md` §9; the file order itself is Task 31
+  §8.4).

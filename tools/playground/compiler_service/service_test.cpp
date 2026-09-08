@@ -926,8 +926,19 @@ suite<"playground_service"> playground_service_suite = [] {
       auto reply =
           dispatch(route, json{{"files", files}, {"document", "a.dao"}}, service_context());
       expect(reply.status == http_status::bad_request)
-          << route << " accepted a request file under stdlib/: " << reply.body.dump();
+          << route << " accepted a request file under the prelude roots: " << reply.body.dump();
     }
+    // Only the prelude roots are reserved: `stdlib/concepts/` is not the
+    // prelude (§7.1) and is an ordinary request file.
+    json outside = json::array({
+        {{"path", "stdlib/concepts/mine.dao"},
+         {"source", "module concepts::mine\nfn f(): i32 -> 1\n"}},
+        {{"path", kTestDocument}, {"source", "module app\nfn main(): i32 -> 0\n"}},
+    });
+    auto ok = dispatch(
+        "analyze", json{{"files", outside}, {"document", kTestDocument}}, service_context());
+    expect(ok.status == http_status::ok)
+        << "a non-prelude stdlib path was refused: " << ok.body.dump();
   };
 
   "diagnostics_come_back_in_program_order"_test = [] {
