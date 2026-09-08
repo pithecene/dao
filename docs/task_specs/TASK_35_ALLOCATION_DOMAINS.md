@@ -15,9 +15,11 @@ applies and the contract states.
 
 ## 2. Why this task exists now
 
-The closure audit measured the bootstrap needing 11–16 GiB and 30–54 s
-to bring its own 3–9k-line programs through its pipeline, and an
-unbounded run was OOM-killed on a 32 GB machine.  The cause is not the
+The closure audit measured the bootstrap needing 5–16 GiB and 16–54 s
+to bring its own 3–9k-line programs through its pipeline (each stage
+measured in its own process; the three largest programs exhaust a
+16 GiB bound before reaching MIR), and an unbounded run was OOM-killed
+on a 32 GB machine.  The cause is not the
 threading of state by value (a class carrying a million-element
 `Vector` through two thousand calls costs 18 MB — the generation-counter
 handle works) but the string model: `__dao_str_concat` and every
@@ -28,9 +30,9 @@ one, so a builder loop retains O(n²) bytes (100k appends of ten bytes:
 will reclaim them") and already reserves the domain handle ABI for
 "future arena semantics without signature churn"; `resource memory`
 already parses, resolves, type-checks, and lowers to paired
-`__dao_mem_resource_enter` / `__dao_mem_resource_exit` calls on every
-control-flow path.  The runtime side is a counter and a no-op.  This
-task fills that in.
+`__dao_mem_resource_enter` / `__dao_mem_resource_exit` calls on
+fall-through and `return` (`break` over-exits today; §3.1).  The
+runtime side is a counter and a no-op.  This task fills that in.
 
 Alternatives considered and set aside:
 
@@ -56,9 +58,16 @@ Alternatives considered and set aside:
   have process lifetime, as today.
 - Entering a block makes its domain current; leaving it — by falling
   off the end, `break`, or `return` — reclaims every allocation the
-  domain made, then restores the enclosing domain.  This is what the
-  existing enter/exit pairing on every path already guarantees
-  structurally.
+  domain made, then restores the enclosing domain.  The MIR builder
+  pairs every enter with an exit on fall-through and on `return`; on
+  `break` it exits *every* active region, including a `resource` that
+  encloses the loop, whose fall-through exit is then emitted again
+  (`compiler/ir/mir/mir_builder.cpp`, `HirBreak` → `emit_region_exits`).
+  That is harmless while exit is a no-op and a double reclaim once it
+  is not, so E0 makes `break` unwind only the regions entered inside
+  the loop (the builder records the active-region depth at loop entry
+  beside the loop's exit block); the pairing is then exact on every
+  path.
 - Reclamation is wholesale: no per-object frees, no destructors, no
   finalization order.  Domains are arenas.
 
@@ -91,10 +100,16 @@ it is reachable from:
    inside the block
 
 Copy-out is type-directed and deep for heap-owning types — `string`,
-`Vector<T>`, `HashMap<V>`, generators, and any class or enum whose
-fields transitively hold one — and a no-op for scalars and pointer
-values (pointers are the author's responsibility, as everywhere in
-`mode unsafe`).  The rule is explicit and predictable: the cost of a
+`Vector<T>`, `HashMap<V>`, and any class or enum whose fields
+transitively hold one — and a no-op for scalars and pointer values
+(pointers are the author's responsibility, as everywhere in `mode
+unsafe`).  A generator is not copied: its frame layout is private to
+the generator function (`CONTRACT_RUNTIME_ABI.md`, generator
+representation), so a copier chosen by the static type `Generator<T>`
+cannot know the frame's size or which of its slots own heap memory.
+An escaping generator stays rejected (the E0 diagnostic remains for
+it) until frames carry a per-function copy descriptor, which is
+outside this task (§11).  The rule is explicit and predictable: the cost of a
 domain is one copy of what leaves it, paid at the boundary the author
 wrote.  Nothing is copied for values that do not leave.
 
@@ -119,7 +134,8 @@ can read off the source.
   frame-producing hook to allocate through the memory hooks; state
   that `__dao_mem_free` on domain memory is a no-op; keep the handle
   ABI unchanged (it was designed for this) and add one hook,
-  `__dao_mem_alloc_in(domain, size, align)`, for copy-out.  Rule 3/6 of "Ownership and
+  `__dao_mem_alloc_outer(size, align)`, which allocates in the parent
+  of the current domain, for copy-out.  Rule 3/6 of "Ownership and
   lifetime" change from "leak until process exit" to "owned by the
   current domain".
 
@@ -153,10 +169,17 @@ can read off the source.
   backend generates on demand (`dao.copy.<mangled type>`).  The copy
   must be made *before* the exit call — its source is in the domain
   about to be reclaimed — and must land in the *enclosing* domain, so
-  copiers allocate through one new hook, `__dao_mem_alloc_in(domain,
-  size, align)`, given the enclosing region's handle (null for the root
-  domain).  The backend has that handle: it is the enclosing
-  `MirResourceEnter`'s value, or null.
+  copiers allocate through one new hook, `__dao_mem_alloc_outer(size,
+  align)`, which allocates in the parent of the current domain: the
+  domain that becomes current at the exit about to happen.  Which
+  domain that is only the runtime knows.  A function whose outermost
+  `resource` block runs while its caller has a domain open must copy
+  into the caller's domain, and no `MirResourceEnter` in the callee
+  names it; a hook taking a handle inferred from the callee's MIR
+  (the enclosing enter, or null for "root") would copy such values
+  into process-lifetime memory and recreate the leak this task
+  removes.  The runtime's domain stack has the answer; the hook asks
+  it.
 - **Type checker.**  Records, for each `resource` block, the outer
   bindings assigned inside it (it already knows binding scopes); no
   new diagnostics in this slice.
@@ -186,9 +209,10 @@ can read off the source.
 ## 9. Delivery
 
 - **E0 — Runtime arenas.**  Domain stack, chunked arenas, hooks routed
-  (strings, conversions, file reads, generator frames).  Behaviour
-  unchanged for programs without `resource memory` (root domain);
-  programs with blocks reclaim at exit.  No copy-out yet: a value that
+  (strings, conversions, file reads, generator frames); the MIR
+  builder's `break` unwinds only the regions the loop entered (§3.1).
+  Behaviour unchanged for programs without `resource memory` (root
+  domain); programs with blocks reclaim at exit.  No copy-out yet: a value that
   escapes a domain is a use-after-reclaim, so E0 lands with the type
   checker **rejecting** escapes (a diagnostic naming the binding) until
   E1 — the conservative rule keeps E0 sound.
@@ -203,11 +227,17 @@ can read off the source.
 - runtime: enter/alloc/exit reclaims; nested domains; realloc within a
   domain; large allocations; `__dao_mem_free` no-op inside, real
   outside; root domain unchanged
-- backend: copy-out of a string, a `Vector<i32>`, a class holding both,
-  a generator; early `return` from nested blocks copies through each;
-  a value not escaping is not copied (IR contains no copier call)
+- MIR: `break` out of a loop inside a `resource` block exits only the
+  regions the loop entered (one exit per enter on every path, checked
+  on the MIR text); `break` out of a `for` inside a `resource` still
+  destroys the iterator
+- backend: copy-out of a string, a `Vector<i32>`, a class holding both;
+  early `return` from nested blocks copies through each; a value not
+  escaping is not copied (IR contains no copier call); a callee's
+  outermost block copies into the caller's open domain, not the root
+  (the caller's domain exit reclaims it)
 - typechecker (E0): escaping heap-owning binding diagnosed; scalar
-  escape not
+  escape not; an escaping generator stays diagnosed after E1
 - examples: `resource.dao` extended with an escaping string and an
   escaping vector; output unchanged
 - audit: peak-memory column below 2 GiB for every bootstrap program is
@@ -218,6 +248,8 @@ can read off the source.
 - garbage collection, reference counting, destructors, or finalizers
 - per-object deallocation inside a domain
 - cross-domain sharing without copying
+- copying a generator out of a domain (its frame would need a
+  per-function copy descriptor; escaping generators stay rejected)
 - `mode parallel` interaction (no concurrent domains)
 - `resource` kinds other than `memory`
 

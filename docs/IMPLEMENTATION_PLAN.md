@@ -543,8 +543,8 @@ by a compiler-applied, contract-stated rule; the runtime's string- and
 frame-producing hooks allocate through the memory hooks instead of
 leaking `malloc`s.  Sequenced ahead of the Tier B-Bootstrap construct
 work because the closure audit (Task 34) found capacity to be the first
-blocker: the bootstrap needs 11–16 GiB per program, and the cause is
-strings that are never freed.  Delivery: E0 runtime arenas with escapes
+blocker: the bootstrap needs 5–16 GiB per program (each stage measured
+alone), and the cause is strings that are never freed.  Delivery: E0 runtime arenas with escapes
 rejected, E1 copy-out, E2 `core::text::Builder`, E3 bootstrap adoption
 measured by the audit's peak-memory column.
 
