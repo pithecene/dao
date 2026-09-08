@@ -96,6 +96,18 @@ auto count_tokens(const std::vector<SemanticToken>& tokens, std::string_view kin
 // NOLINTBEGIN(readability-magic-numbers)
 
 suite<"keyword_classification"> keyword_classification = [] {
+  "a conformance target's binding is use.module even unresolved"_test = [] {
+    // `as typo::Reveal` names a module binding by position.  Whether or
+    // not `typo` resolves, it must not vanish from the token stream --
+    // an editor paints the unresolved segment too.
+    auto result = classify_source_resolved("main.dao",
+                                           "class Point:\n    x: i32\n    as typo::Reveal:\n"
+                                           "        fn reveal(self): i32 -> self.x\n");
+    expect(find_token_at(result, "use.module", "typo") != nullptr)
+        << "the unresolved binding segment was left unclassified";
+    expect(find_token_at(result, "use.type", "Reveal") != nullptr);
+  };
+
   "keyword.fn is classified"_test = [] {
     auto result = classify_source("test.dao", "fn main(): i32\n    0\n");
     expect(find_token(result.tokens, "keyword.fn") != nullptr);

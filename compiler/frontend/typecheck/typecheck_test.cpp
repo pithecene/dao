@@ -2416,6 +2416,24 @@ suite<"module_extend_scoping"> module_extend_scoping = [] {
   // conform, and whether a field type conforms is asked from the
   // class's own module, not from the program as a whole.
 
+  "a missing import's qualified type is reported once, by the graph"_test = [] {
+    // `import app::missing` is the graph's diagnostic.  The resolver still
+    // records the binding at `missing::T`'s head, with no module behind
+    // it, and the checker used to add `unknown type 'T'` on top -- a
+    // second diagnostic restating the first.
+    auto checked = check_modules(
+        {{"main.dao", "module app\nimport app::missing\n\nfn f(x: missing::T): i32 -> 0\n"}});
+    bool graph_said_missing = false;
+    for (const auto& diag : checked->program.diagnostics) {
+      if (diag.message.find("missing") != std::string::npos) {
+        graph_said_missing = true;
+      }
+    }
+    expect(graph_said_missing) << "the graph must report the missing module";
+    expect(!has_error_containing(checked->check_result, "unknown type"))
+        << "the checker restated the missing import as an unknown type";
+  };
+
   "a sibling module's extend cannot make a class derive"_test = [] {
     auto checked = check_modules({{"ext.dao", kShoutingModule}, {"app.dao", kBoxModule}});
     expect(has_error_containing(checked->check_result, "no field or method 'shout' on type 'Box'"))

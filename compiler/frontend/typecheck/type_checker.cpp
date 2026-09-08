@@ -256,6 +256,18 @@ auto TypeChecker::resolve_type_node(const TypeNode* node) -> const Type* {
       return base_type;
     }
 
+    // `b::T` where `b` is an import the graph already reported missing:
+    // the resolver records the binding at the head with no module behind
+    // it, so there is no export table to find `T` in.  One diagnostic
+    // for one missing import; a second one here would only restate it.
+    if (path.segments.size() > 1) {
+      auto head = resolve_.uses.find(path.span.offset);
+      if (head != resolve_.uses.end() && head->second->kind == SymbolKind::Module &&
+          head->second->decl_as_module() == nullptr) {
+        return nullptr;
+      }
+    }
+
     error(node->span, "unknown type '" + std::string(name) + "'");
     return nullptr;
   }

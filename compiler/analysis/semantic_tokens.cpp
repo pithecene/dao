@@ -383,11 +383,11 @@ private:
     }
     visit_methods(st.methods);
     for (const auto& conformance : st.conformances) {
-      classify(conformance.target.concept_span, "use.type");
+      classify_conformance_target(conformance.target);
       visit_methods(conformance.methods);
     }
     for (const auto& denial : st.denials) {
-      classify(denial.target.concept_span, "use.type");
+      classify_conformance_target(denial.target);
     }
   }
 
@@ -422,13 +422,24 @@ private:
     visit_methods(concept_decl.methods);
   }
 
+  /// `as b::Reveal`, `deny b::Reveal`, `extend T as b::Reveal`: the
+  /// binding segment is a module use by its position alone, so it is
+  /// painted whether or not `b` resolved -- an unresolved binding must
+  /// not vanish from the token stream.
+  void classify_conformance_target(const ConformanceTarget& target) {
+    if (!target.module_binding.empty()) {
+      classify(target.binding_span, "use.module");
+    }
+    classify(target.concept_span, "use.type");
+  }
+
   void visit_extend(const Decl& decl) {
     const auto& extend = decl.as<ExtendDecl>();
     if (extend.target_type != nullptr) {
       visit_type(*extend.target_type);
     }
     if (!extend.target.concept_name.empty()) {
-      classify(extend.target.concept_span, "use.type");
+      classify_conformance_target(extend.target);
     }
     visit_methods(extend.methods);
   }
