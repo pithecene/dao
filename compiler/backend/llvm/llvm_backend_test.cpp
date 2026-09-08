@@ -296,6 +296,67 @@ suite<"module_naming"> module_naming = [] {
         << "the prelude's method was chosen over the module's own: " << ir;
   };
 
+  "conflicting extern signatures stop lowering before any body"_test = [] {
+    // Two modules declare one C symbol with LLVM-distinct parameter
+    // types.  The conflict is diagnosed; a body lowered against the
+    // wrong declaration would trip LLVM's own signature assertion
+    // instead.
+    LlvmProgramPipeline pipe({
+        {"x.dao", "module a::x\nextern fn take(v: i32): i32\nfn fx(): i32 -> take(1)\n"},
+        {"y.dao", "module a::y\nextern fn take(v: f64): i32\nfn fy(): i32 -> take(2.0)\n"},
+        {"main.dao",
+         "module a::main\nimport a::x\nimport a::y\nfn main(): i32 -> x::fx() + y::fy()\n"},
+    });
+    expect(pipe.llvm_result.module == nullptr) << "a conflicting extern must not lower";
+    expect(!pipe.llvm_result.diagnostics.empty());
+    bool named = false;
+    for (const auto& diag : pipe.llvm_result.diagnostics) {
+      named |= diag.message.find("conflicting signatures") != std::string::npos;
+    }
+    expect(named) << pipe.problems();
+  };
+
+  "an extern cannot take the entry's place"_test = [] {
+    // `extern fn main(x: f64): f64` in a library and the entry module's
+    // `fn main(): i32` both want the bare name `main`.  Silently
+    // attaching the entry's body to the extern's declaration emits a
+    // function whose body disagrees with its type.
+    LlvmProgramPipeline pipe({
+        {"lib.dao", "module lib\nextern fn main(x: f64): f64\n"},
+        {"main.dao", "module app\nimport lib\nfn main(): i32 -> 0\n"},
+    });
+    expect(pipe.llvm_result.module == nullptr) << "the collision must not lower";
+    bool named = false;
+    for (const auto& diag : pipe.llvm_result.diagnostics) {
+      named |= diag.message.find("'main'") != std::string::npos &&
+               diag.message.find("extern") != std::string::npos;
+    }
+    expect(named) << pipe.problems();
+  };
+
+  "extern signatures do not leak between lowering runs"_test = [] {
+    // One backend, two programs: an extern recorded by the first must
+    // not be compared against the second's declarations.
+    LlvmProgramPipeline first({
+        {"main.dao", "module app\nextern fn take(v: i32): i32\nfn main(): i32 -> take(1)\n"},
+    });
+    LlvmProgramPipeline second({
+        {"main.dao", "module app\nextern fn take(v: f64): i32\nfn main(): i32 -> take(2.0)\n"},
+    });
+    expect(first.mir_result.module != nullptr && second.mir_result.module != nullptr)
+        << first.problems() << second.problems();
+    llvm::LLVMContext ctx;
+    LlvmBackend backend(ctx);
+    auto one =
+        backend.lower(*first.mir_result.module, &first.program.source_map, first.program.entry);
+    auto two =
+        backend.lower(*second.mir_result.module, &second.program.source_map, second.program.entry);
+    expect(one.module != nullptr && one.diagnostics.empty());
+    expect(two.module != nullptr && two.diagnostics.empty())
+        << "the first run's extern constrained the second: "
+        << (two.diagnostics.empty() ? "" : two.diagnostics.front().message);
+  };
+
   "main_outside_the_entry_module_is_an_ordinary_function"_test = [] {
     LlvmProgramPipeline pipe(
         {

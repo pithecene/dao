@@ -394,6 +394,49 @@ suite<"resolve_modules"> resolve_modules = [] {
     expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
   };
 
+  "diagnostics come back in file order, not the order bodies were resolved"_test = [] {
+    // `a` imports `z`, so `z` is resolved first; both name something that
+    // does not exist.  `a.dao` has the earlier file id, so its diagnostic
+    // comes first (§8.4) whatever order the passes walked.
+    auto resolved = resolve_program({
+        {"a.dao", "module a\nimport z\nfn f(): i32 -> nowhere\n"},
+        {"z.dao", "module z\nfn g(): i32 -> missing\n"},
+    });
+    auto said = messages_of(resolved);
+    expect(said.size() == 2_u) << said.size();
+    expect(said.size() == 2_u && said[0].find("nowhere") != std::string::npos)
+        << "z's diagnostic came first: " << (said.empty() ? "" : said[0]);
+  };
+
+  "a shadowed prelude type does not lend its static methods"_test = [] {
+    // The module's `Box` shadows the prelude's (§7.4).  `Box::make` must
+    // then look for `make` on the module's `Box` -- which has none -- and
+    // not reach the prelude's method through the scope chain.
+    auto resolved = resolve_program({
+        {"stdlib/core/b.dao", "module core::b\nclass Box:\n    x: i32\n    fn make(): i32 -> 1\n"},
+        {"app.dao", "module app\nclass Box:\n    y: i32\nfn main(): i32 -> Box::make()\n"},
+    });
+    bool bound_prelude_method = false;
+    bool bound_own_type = false;
+    for (const auto& [offset, sym] : resolved.result.uses) {
+      if (sym == nullptr) {
+        continue;
+      }
+      if (sym->name == "Box.make") {
+        bound_prelude_method = true;
+      }
+      // The module's own `Box` is the one declared in app.dao.
+      if (sym->name == "Box" && sym->kind == SymbolKind::Type) {
+        const auto* declared_in = resolved.program.source_map.file_for(sym->decl_span.offset);
+        if (declared_in != nullptr && declared_in->display_path == "app.dao") {
+          bound_own_type = true;
+        }
+      }
+    }
+    expect(!bound_prelude_method) << "Box::make reached the prelude's method past the module's Box";
+    expect(bound_own_type) << "the module's own Box was not what resolved";
+  };
+
   "modules_own_their_scopes_and_symbols"_test = [] {
     auto resolved = resolve_program({
         {"main.dao",

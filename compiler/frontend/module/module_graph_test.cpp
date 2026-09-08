@@ -382,6 +382,23 @@ suite<"root_file_discovery"> root_file_discovery_suite = [] {
         "lib/util.dao was found for import 'lib::util' but declares module 'lib::other'"))
         << messages(program)[0];
     expect(program.module_named("mismatch")->imports.empty());
+    // Provenance (§14): the defect is the declaration in the file the
+    // mapping rule found, so that is where the diagnostic points.
+    const auto* at = program.source_map.file_for(program.diagnostics[0].span.offset);
+    expect(at != nullptr && at->display_path.ends_with("lib/util.dao"))
+        << "pointed at " << (at ? at->display_path : "nowhere");
+  };
+
+  "an unmapped identity is not satisfied by a prelude file under another name"_test = [] {
+    // `stdlib/core/renamed.dao` declares `core::x`, and the root imports
+    // `core::x`.  No root holds `core/x.dao`, so by the mapping rule the
+    // import is not found -- binding the preloaded module would hide
+    // that the file the rule requires does not exist.
+    auto fixture = fixtures() / "unmapped_prelude";
+    auto program =
+        load_program_from_root(fixture / "main.dao", {.stdlib_root = fixture / "stdlib"});
+    auto said = joined(messages(program));
+    expect(said.find("imported module 'core::x' not found") != std::string::npos) << said;
   };
 
   "a duplicate identity is still named by the mismatch it causes"_test = [] {
