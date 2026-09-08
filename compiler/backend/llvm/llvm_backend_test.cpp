@@ -334,6 +334,23 @@ suite<"module_naming"> module_naming = [] {
     expect(named) << pipe.problems();
   };
 
+  "an extern declared after the entry still collides with it"_test = [] {
+    // Same collision, other order: the entry's `main` is defined first
+    // and a later module declares `extern fn main`.  The detection must
+    // not depend on which arrives first.
+    LlvmProgramPipeline pipe({
+        {"a.dao", "module a\nimport z\nfn main(): i32 -> z::use_it()\n"},
+        {"z.dao", "module z\nextern fn main(x: f64): f64\nfn use_it(): i32 -> 0\n"},
+    });
+    expect(pipe.llvm_result.module == nullptr) << "the collision must not lower";
+    bool named = false;
+    for (const auto& diag : pipe.llvm_result.diagnostics) {
+      named |= diag.message.find("'main'") != std::string::npos &&
+               diag.message.find("extern") != std::string::npos;
+    }
+    expect(named) << pipe.problems();
+  };
+
   "extern signatures do not leak between lowering runs"_test = [] {
     // One backend, two programs: an extern recorded by the first must
     // not be compared against the second's declarations.

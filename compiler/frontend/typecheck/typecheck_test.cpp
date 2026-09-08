@@ -671,6 +671,30 @@ suite<"typecheck_modules"> typecheck_modules = [] {
     expect(clean(checked)) << all_messages(checked);
   };
 
+  "a qualified path reaches static methods only"_test = [] {
+    auto checked = check_program({
+        {"lib.dao", "module lib\nclass P:\n    v: i32\n    fn get(self): i32 -> self.v\n"},
+        {"main.dao", "module app\nimport lib\nfn main(): i32 -> lib::P::get(lib::P(1))\n"},
+    });
+    expect(has_error_containing(checked.result, "is an instance method")) << all_messages(checked);
+  };
+
+  "a resolver-rejected qualified path is diagnosed once in every position"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app::main\nimport app::math\ntype Bad = math::Missing\n"
+         "fn f(): i32 -> math::Missing\nfn main(): i32 -> 0\n"},
+        {"math.dao", kMathModule},
+    });
+    size_t resolver_said = 0;
+    for (const auto& diag : checked.resolved.diagnostics) {
+      resolver_said += diag.message.find("has no export 'Missing'") != std::string::npos;
+    }
+    expect(resolver_said == 2_u) << all_messages(checked);
+    expect(checked.result.diagnostics.empty())
+        << "the checker restated the resolver: " << all_messages(checked);
+  };
+
   "unknown_export_in_type_position_is_a_resolver_error"_test = [] {
     auto checked = check_program({
         {"main.dao",
@@ -2453,6 +2477,23 @@ suite<"module_extend_scoping"> module_extend_scoping = [] {
     });
     expect(has_error_containing(checked->check_result, "does not satisfy concept"))
         << "i32 satisfied the module's Mark through the prelude's extend";
+  };
+
+  "an inline conformance to a shadowed concept is to the module's concept"_test = [] {
+    // The module's `Mark` shadows the prelude's.  `as Mark:` on Box
+    // conforms to the module's; a bound on the prelude's `Mark` must
+    // not be satisfied by it.
+    auto checked = check_modules({
+        {"stdlib/core/mark.dao",
+         "module core::mark\nconcept Mark:\n    fn mark(self): i32\n"
+         "fn accept<T: Mark>(x: T): i32 -> 0\n"},
+        {"app.dao",
+         "module app\nconcept Mark:\n    fn shout(self): string\n"
+         "class Box:\n    n: i32\n    as Mark:\n        fn shout(self): string -> \"box\"\n"
+         "fn main(): i32 -> accept(Box(1))\n"},
+    });
+    expect(has_error_containing(checked->check_result, "does not satisfy concept"))
+        << "Box satisfied the prelude's Mark through a conformance to the module's";
   };
 
   "a sibling module's extend cannot make a class derive"_test = [] {

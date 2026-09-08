@@ -413,7 +413,7 @@ suite<"dot_completion"> dot_completion = [] {
     auto* point_type = pipe.check_result.typed.decl_type(
         pipe.parse_result.file->declarations[0]);
     expect(point_type != nullptr) << "Point type should exist";
-    auto items = query_dot_completions(point_type, pipe.check_result);
+    auto items = query_dot_completions(point_type, pipe.check_result, nullptr);
     expect(has_completion(items, "x")) << "should offer field x";
     expect(has_completion(items, "y")) << "should offer field y";
   };
@@ -427,7 +427,7 @@ suite<"dot_completion"> dot_completion = [] {
         "  fn show(self): string -> __test_hook(self)\n");
     // Get the i32 type via the type context.
     auto* i32_type = pipe.types.i32();
-    auto items = query_dot_completions(i32_type, pipe.check_result);
+    auto items = query_dot_completions(i32_type, pipe.check_result, nullptr);
     expect(has_completion(items, "show")) << "should offer method show";
   };
 
@@ -451,7 +451,7 @@ suite<"dot_completion"> dot_completion = [] {
           type->kind() == TypeKind::Struct) {
         found_call = true;
         // Verify dot completion works with this type.
-        auto items = query_dot_completions(type, pipe.check_result);
+        auto items = query_dot_completions(type, pipe.check_result, nullptr);
         expect(has_completion(items, "x"))
             << "should offer field x on call result";
         expect(has_completion(items, "y"))
@@ -464,7 +464,7 @@ suite<"dot_completion"> dot_completion = [] {
   "dot completion on non-struct returns empty for fields"_test = [] {
     AnalysisPipeline pipe("fn main(): i32 -> 0\n");
     auto* bool_type = pipe.types.bool_type();
-    auto items = query_dot_completions(bool_type, pipe.check_result);
+    auto items = query_dot_completions(bool_type, pipe.check_result, nullptr);
     // bool has no fields, but may have methods from Equatable etc.
     for (const auto& item : items) {
       expect(item.kind != "field")
