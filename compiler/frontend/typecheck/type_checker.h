@@ -319,7 +319,34 @@ private:
     TypeStruct* shell;
   };
   std::vector<PendingClass> pending_classes_;
-  // Set once register_struct_fields has run: aliases of generic
+  // The same, by declaration, for the on-demand pull in
+  // aliases_generic_shell.  Filled once the list is complete.
+  std::unordered_map<const Decl*, PendingClass*> pending_by_decl_;
+  // Declarations whose registration is under way: one reached again
+  // through its own chain (an alias naming itself through another, an
+  // enum whose payload holds it) registers nothing the second time.
+  std::unordered_set<const Decl*> registering_;
+  // Types found complete by value (type_complete): slots only ever
+  // fill, so the answer stands and the walk is not repeated.
+  std::unordered_set<const Type*> complete_types_;
+  // How deep the on-demand pull currently is; bounded (kPullDepthCap)
+  // so a long chain cannot exhaust the stack.
+  size_t pull_depth_ = 0;
+  struct PullDepth {
+    explicit PullDepth(TypeChecker& checker) : checker_(checker) {
+      ++checker_.pull_depth_;
+    }
+    ~PullDepth() {
+      --checker_.pull_depth_;
+    }
+    PullDepth(const PullDepth&) = delete;
+    auto operator=(const PullDepth&) -> PullDepth& = delete;
+    [[nodiscard]] static auto available(const TypeChecker& checker) -> bool;
+
+  private:
+    TypeChecker& checker_;
+  };
+  // Set once the registration fixpoint has run: aliases of generic
   // instantiations wait for it (see aliases_generic_shell).
   bool fields_registered_ = false;
 
@@ -342,30 +369,42 @@ private:
 
   void register_declarations();
   void register_type_names();
-  /// Register every alias whose target now resolves.  Aliases and the
-  /// types they name depend on each other in both directions — an alias
-  /// may name an enum, an enum payload may name an alias — so this runs
-  /// once before the enums and once after.  The final run reports the
-  /// aliases that never resolved; the first stays quiet, since a target
-  /// it cannot see yet may still arrive.
-  /// Returns how many aliases this pass registered, so the caller can
-  /// repeat until a pass adds nothing.
+  /// Register every alias not registered yet.  Returns how many this
+  /// pass registered -- the progress the registration fixpoint
+  /// converges on.  The final run reports the aliases that never
+  /// resolved; a provisional run stays quiet, since a target it cannot
+  /// see yet may still arrive.
   auto register_type_aliases(bool report_failures) -> size_t;
+  /// Register one alias: the aliased type, or null when it does not
+  /// resolve yet (or ever).  Also the on-demand path: a name that
+  /// reaches an unregistered alias registers it first.
+  auto register_type_alias(const Decl* decl, const Symbol* sym, bool report_failures)
+      -> const Type*;
   /// Whether a type node is a path through an import binding, whose
   /// failures the resolver diagnoses (so the checker must not restate).
   [[nodiscard]] auto resolver_owns_path(const TypeNode* node) const -> bool;
-  /// Whether a type node names a generic instantiation of a class whose
-  /// fields are not registered yet (an alias of it must wait).
-  [[nodiscard]] auto aliases_generic_shell(const TypeNode* node) const -> bool;
+  /// Whether a type node names a generic instantiation of a declaration
+  /// that is not complete by value yet (an alias of it must wait).
+  /// Pulls the declaration's slots first, so the answer is current.
+  auto aliases_generic_shell(const TypeNode* node) -> bool;
   /// Each returns how many slots (fields / payloads) went from untyped
   /// to typed in this pass -- the progress the registration fixpoint
   /// converges on.
   auto register_struct_fields(bool report_failures) -> size_t;
+  auto register_class_fields(PendingClass& pending, bool report_failures) -> size_t;
   auto register_enum_variants(bool report_failures) -> size_t;
-  /// Whether a type carries no untyped slot anywhere by value: an
-  /// instantiation cloned from it would otherwise carry the hole.
-  [[nodiscard]] static auto type_complete(const Type* type, std::unordered_set<const Type*>& seen)
-      -> bool;
+  auto register_enum(const Decl* decl, const Symbol* sym, bool report_failures) -> size_t;
+  /// Whether a type carries no untyped slot anywhere substitution would
+  /// clone: an instantiation cloned from it would otherwise carry the
+  /// hole.  Remembers a yes.
+  [[nodiscard]] auto type_complete(const Type* type) -> bool;
+  [[nodiscard]] auto complete_by_value(const Type* type,
+                                       std::unordered_set<const Type*>& seen) const -> bool;
+  /// Whether `target` sits inside `type` by value -- the shape of an
+  /// enum with no finite size.
+  [[nodiscard]] static auto contains_by_value(const Type* type,
+                                              const Type* target,
+                                              std::unordered_set<const Type*>& seen) -> bool;
   void register_signatures();
   void compute_derived_conformances();
   auto type_conforms_to(const Type* type, const Decl* concept_decl) -> bool;

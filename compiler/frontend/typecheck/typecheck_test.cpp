@@ -859,6 +859,76 @@ suite<"typecheck_modules"> typecheck_modules = [] {
     expect(checked.result.diagnostics.empty()) << all_messages(checked);
   };
 
+  "an enum holding itself by value is rejected once its name resolves"_test = [] {
+    // The first provisional pass cannot resolve `Loop` inside its own
+    // variant; the next one can, to the enum itself.  A cycle by value
+    // has no finite size whichever pass sees it.
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nenum class Loop:\n    Node(next: Loop)\n    End\nfn main(): i32 -> 0\n"},
+    });
+    expect(has_error_containing(checked.result, "cannot contain itself by value"))
+        << all_messages(checked);
+  };
+
+  "an enum holding itself by value through a class is rejected"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nenum class Tree:\n    Branch(cell: Cell)\n    Leaf\nclass Cell:\n    tree: "
+         "Tree\nfn main(): i32 -> 0\n"},
+    });
+    expect(has_error_containing(checked.result, "cannot contain itself by value"))
+        << all_messages(checked);
+  };
+
+  "an enum holding itself behind a pointer is accepted"_test = [] {
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nenum class Chain:\n    Link(next: *Chain)\n    End\nfn main(): i32 -> 0\n"},
+    });
+    expect(checked.result.diagnostics.empty()) << all_messages(checked);
+  };
+
+  "an instantiation held through a pointer must be complete before an alias caches a copy"_test =
+      [] {
+        // Substitution clones through the pointer exactly as through a
+        // by-value field, so readiness must look through it too: with
+        // Inner's `dep` still untyped, the copy Outer<i32> caches would
+        // carry the hole behind `inner`.
+        constexpr std::string_view kDecls =
+            "module app\nclass Base<T>:\n    v: T\nclass Inner<T>:\n    dep: IntBase\n    t: "
+            "T\nclass Outer<T>:\n    inner: *Inner<T>\n    t: T\ntype IntBase = Base<i32>\ntype "
+            "IntOuter = Outer<i32>\n";
+        auto bad = check_program({
+            {"main.dao",
+             std::string(kDecls) +
+                 "fn bad(o: IntOuter): i32\n    mode unsafe =>\n        let s: string = "
+                 "(*o.inner).dep.v\n    return 0\nfn main(): i32 -> 0\n"},
+        });
+        expect(!bad.result.diagnostics.empty())
+            << "an i32 field was bound to a string through a pointer to an incomplete copy";
+        auto good = check_program({
+            {"main.dao",
+             std::string(kDecls) + "fn good(o: IntOuter): i32\n    mode unsafe =>\n        let s: "
+                                   "i32 = (*o.inner).dep.v\n    return 0\nfn main(): i32 -> 0\n"},
+        });
+        expect(good.result.diagnostics.empty()) << all_messages(good);
+      };
+
+  "a long alias chain declared in reverse registers in one pass"_test = [] {
+    // Each link registers what it names on demand, so the chain costs
+    // one visit per alias whichever order the declarations come in.
+    constexpr int kLinks = 4000;
+    std::string source = "module app\n";
+    for (int i = 0; i < kLinks; ++i) {
+      source += "type A" + std::to_string(i) + " = A" + std::to_string(i + 1) + "\n";
+    }
+    source += "type A" + std::to_string(kLinks) + " = i32\n";
+    source += "fn take(a: A0): i32 -> a\nfn main(): i32 -> take(1)\n";
+    auto checked = check_program({{"main.dao", source}});
+    expect(checked.result.diagnostics.empty()) << all_messages(checked);
+  };
+
   "a concept is not a type outside a bound"_test = [] {
     auto checked = check_program({
         {"traits.dao", "module app::traits\nconcept Reveal:\n    fn reveal(self): i32\n"},
