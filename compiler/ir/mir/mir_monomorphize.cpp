@@ -668,6 +668,15 @@ auto specialize_call_site(MirInst* inst,
                           MirContext& ctx,
                           TypeContext& types) -> bool {
 
+  // Only a template's reference, or one whose type still carries a
+  // generic parameter (a compiler builtin's), has anything to do
+  // here; an ordinary call is left alone without a scan for its site.
+  auto git = generic_fns.find(fn_ref->symbol);
+  const bool is_template = git != generic_fns.end();
+  if (!is_template && !type_has_generic(inst->type)) {
+    return false;
+  }
+
   // Find the matching MirCall instruction that uses this FnRef.
   const MirCall* call_payload = nullptr;
   for (size_t j = inst_idx + 1; j < block->insts.size(); ++j) {
@@ -679,15 +688,14 @@ auto specialize_call_site(MirInst* inst,
     }
   }
 
-  auto git = generic_fns.find(fn_ref->symbol);
-  if (git == generic_fns.end()) {
+  if (!is_template) {
     // Not a template: a compiler builtin (`null_ptr<T>`, `ptr_cast<T>`)
     // has no body to specialize, but its reference is typed with the
     // builtin's generic signature.  The call's explicit type arguments
     // make that type concrete; the backend keys the builtin on its name
     // and reads the types from the call, so nothing else is needed.
-    if (type_has_generic(inst->type) && call_payload != nullptr &&
-        call_payload->explicit_type_args != nullptr && !call_payload->explicit_type_args->empty()) {
+    if (call_payload != nullptr && call_payload->explicit_type_args != nullptr &&
+        !call_payload->explicit_type_args->empty()) {
       std::unordered_map<uint32_t, const Type*> subst;
       for (size_t i = 0; i < call_payload->explicit_type_args->size(); ++i) {
         subst[static_cast<uint32_t>(i)] = (*call_payload->explicit_type_args)[i];
