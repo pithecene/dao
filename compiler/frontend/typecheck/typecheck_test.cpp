@@ -889,6 +889,46 @@ suite<"typecheck_modules"> typecheck_modules = [] {
     expect(checked.result.diagnostics.empty()) << all_messages(checked);
   };
 
+  "an enum holding an instantiation of itself by value is rejected"_test = [] {
+    // Loop<i32> is another object of the same declaration; it holds the
+    // enum by value just the same.
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nenum class Loop<T>:\n    Node(value: T, next: Loop<i32>)\n    End\nfn "
+         "main(): i32 -> 0\n"},
+    });
+    expect(has_error_containing(checked.result, "cannot contain itself by value"))
+        << all_messages(checked);
+  };
+
+  "a generic enum and class holding each other by value are rejected, not instantiated"_test = [] {
+    // The cycle is complete in the sense of having no untyped slot,
+    // but nothing finite: IntLoop must not clone it, and
+    // substitution must not follow it forever.
+    auto checked = check_program({
+        {"main.dao",
+         "module app\nclass Cell<T>:\n    loop: Loop<T>\nenum class Loop<T>:\n    Some(cell: "
+         "Cell<T>)\n    None\ntype IntLoop = Loop<i32>\nfn main(): i32 -> 0\n"},
+    });
+    expect(has_error_containing(checked.result, "cannot contain itself by value"))
+        << all_messages(checked);
+  };
+
+  "a class holding itself by value through another class is rejected"_test = [] {
+    auto checked = check_program({
+        {"main.dao", "module app\nclass A:\n    b: B\nclass B:\n    a: A\nfn main(): i32 -> 0\n"},
+    });
+    expect(has_error_containing(checked.result, "cannot contain itself by value"))
+        << all_messages(checked);
+  };
+
+  "a class holding itself behind a pointer is accepted"_test = [] {
+    auto checked = check_program({
+        {"main.dao", "module app\nclass Node:\n    next: *Node\n    v: i32\nfn main(): i32 -> 0\n"},
+    });
+    expect(checked.result.diagnostics.empty()) << all_messages(checked);
+  };
+
   "an instantiation held through a pointer must be complete before an alias caches a copy"_test =
       [] {
         // Substitution clones through the pointer exactly as through a

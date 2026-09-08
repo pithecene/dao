@@ -332,6 +332,9 @@ private:
   // How deep the on-demand pull currently is; bounded (kPullDepthCap)
   // so a long chain cannot exhaust the stack.
   size_t pull_depth_ = 0;
+  // Structs and enums substitute_generics is inside of: one reached
+  // again holds itself by value, and is returned as it is.
+  std::unordered_set<const Type*> substituting_;
   struct PullDepth {
     explicit PullDepth(TypeChecker& checker) : checker_(checker) {
       ++checker_.pull_depth_;
@@ -400,11 +403,18 @@ private:
   [[nodiscard]] auto type_complete(const Type* type) -> bool;
   [[nodiscard]] auto complete_by_value(const Type* type,
                                        std::unordered_set<const Type*>& seen) const -> bool;
-  /// Whether `target` sits inside `type` by value -- the shape of an
-  /// enum with no finite size.
+  /// Whether `type` is, or holds by value, a struct or enum of the
+  /// declaration `target` -- the shape of a declaration with no finite
+  /// size.
   [[nodiscard]] static auto contains_by_value(const Type* type,
-                                              const Type* target,
+                                              const Decl* target,
                                               std::unordered_set<const Type*>& seen) -> bool;
+  /// Whether a path by value from `type` returns to a type on it.
+  /// `acyclic` accumulates what has been cleared, so a graph is walked
+  /// once however many paths share it.
+  [[nodiscard]] static auto value_cycle(const Type* type,
+                                        std::unordered_set<const Type*>& on_path,
+                                        std::unordered_set<const Type*>& acyclic) -> bool;
   void register_signatures();
   void compute_derived_conformances();
   auto type_conforms_to(const Type* type, const Decl* concept_decl) -> bool;
