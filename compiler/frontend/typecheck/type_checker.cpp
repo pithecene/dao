@@ -455,10 +455,27 @@ auto TypeChecker::resolve_symbol_type(const Symbol* sym) -> const Type* {
 
 // Helper for Type-kind symbols (structs).
 auto TypeChecker::resolve_symbol_type_for_type_decl(const Symbol* sym) -> const Type* {
-  // Check if it was already registered during pass 1.
   auto it = symbol_types_.find(sym);
   if (it != symbol_types_.end()) {
     return it->second;
+  }
+  // Not registered yet: register it now, on demand, so the name resolves
+  // in the pass that first reaches it whatever the source order -- a
+  // chain of aliases settles link by link, each once.  A class has its
+  // shell from register_type_names; only an alias and an enum have
+  // nothing to point at before they register.
+  const auto* decl = sym->decl_as_decl();
+  if (decl == nullptr || !PullDepth::available(*this)) {
+    return nullptr;
+  }
+  PullDepth depth(*this);
+  if (decl->is<AliasDecl>()) {
+    return register_type_alias(decl, sym, /*report_failures=*/false);
+  }
+  if (decl->is<EnumDeclNode>()) {
+    register_enum(decl, sym, /*report_failures=*/false);
+    it = symbol_types_.find(sym);
+    return it != symbol_types_.end() ? it->second : nullptr;
   }
   return nullptr;
 }
@@ -467,43 +484,44 @@ auto TypeChecker::resolve_symbol_type_for_type_decl(const Symbol* sym) -> const 
 // Pass 1: register declaration types
 // ---------------------------------------------------------------------------
 
-// A guard on the registration fixpoint, not a working limit: every
-// round types at least one slot, so the graph would have to be this
-// deep for the guard to trip -- and if it does, it is reported.
+// A guard on the registration fixpoint, not a working limit: a
+// declaration pulls what it depends on as it registers, so a pass
+// settles everything it reaches and the next confirms it.  The cap is
+// reached only by a defect in that reasoning, and then it is reported.
 constexpr size_t kRegistrationRoundCap = 100000;
+
+// The pull recurses -- a chain of aliases is followed link by link --
+// so its depth is bounded to keep the stack finite on any input.  A
+// chain deeper than this settles a cap's worth of links per fixpoint
+// round instead: still one visit per link, plus a round per cap.
+constexpr size_t kPullDepthCap = 128;
+
+auto TypeChecker::PullDepth::available(const TypeChecker& checker) -> bool {
+  return checker.pull_depth_ < kPullDepthCap;
+}
 
 void TypeChecker::register_declarations() {
   pending_classes_.clear(); // Reset pass-local state for this file.
+  pending_by_decl_.clear();
+  registering_.clear();
+  complete_types_.clear();
   fields_registered_ = false;
   register_type_names();
-  // Aliases come after the class shells they may name, and repeat until
-  // a pass registers nothing new: one alias may name another to any
-  // depth, in any order.  Enums are registered in between because their
-  // payloads may name an alias, and aliases may in turn name an enum.
-  while (register_type_aliases(/*report_failures=*/false) > 0) {
-  }
+  // Each declaration registers what it names as it resolves, on demand
+  // (resolve_symbol_type_for_type_decl, aliases_generic_shell): an alias
+  // naming an alias, an enum payload naming an alias of an
+  // instantiation, an instantiation of a class whose fields name an
+  // alias -- every chain settles in the pass that first reaches it,
+  // whatever the source order, each link visited once.
+  register_type_aliases(/*report_failures=*/false);
   register_enum_variants(/*report_failures=*/false);
-  while (register_type_aliases(/*report_failures=*/false) > 0) {
-  }
-  // No failure is final yet: an alias may name one that waits for
-  // fields (below), and reporting it here would reject a program that
-  // resolves a pass later.
-  // Fields and the aliases that name generic instantiations depend on
-  // each other: `Holder<T>` may have a field typed by `IntBox`, and
-  // `IntHolder = Holder<i32>` must not be instantiated while that field
-  // is still untyped, or the copy it caches would carry the hole.  The
-  // two are driven to a joint fixpoint, every pass provisional -- its
-  // diagnostics discarded -- until nothing more resolves; then the
-  // final passes report.
   register_struct_fields(/*report_failures=*/false);
-  // Converge on progress, not on a count: a pass that registers an
-  // alias, types a field, or types an enum payload may enable another.
-  // Every declaration can be enabled at most once, so the loop is
-  // bounded by the number of slots; the cap below is a guard against a
-  // defect in that reasoning, never a working limit.
-  // Each pass revisits only declarations that still have an untyped
-  // slot, so a round costs the number of unresolved declarations, and
-  // every round resolves at least one or the loop ends.
+  // What remains untyped depends on a slot the pull could not fill in
+  // time: a class whose fields name an instantiation of itself, say.
+  // Every pass is provisional -- its diagnostics discarded -- until
+  // nothing more resolves; then the final passes report.  Progress is
+  // an untyped slot becoming typed, so the loop is bounded by the
+  // number of slots; the cap is a guard, never a working limit.
   bool converged = false;
   for (size_t round = 0; round < kRegistrationRoundCap; ++round) {
     size_t progress = register_type_aliases(/*report_failures=*/false);
@@ -528,7 +546,7 @@ void TypeChecker::register_declarations() {
   register_signatures();
 }
 
-auto TypeChecker::aliases_generic_shell(const TypeNode* node) const -> bool {
+auto TypeChecker::aliases_generic_shell(const TypeNode* node) -> bool {
   if (fields_registered_ || node == nullptr) {
     return false;
   }
@@ -562,30 +580,34 @@ auto TypeChecker::aliases_generic_shell(const TypeNode* node) const -> bool {
   if (it == resolve_.uses.end() || it->second->kind != SymbolKind::Type) {
     return false;
   }
-  // A generic enum: not ready while a payload, or anything a payload
-  // holds by value, is still untyped -- an instantiation clones the
-  // payloads exactly as it clones a class's fields.
-  if (auto registered = symbol_types_.find(it->second);
-      registered != symbol_types_.end() && registered->second != nullptr &&
-      registered->second->kind() == TypeKind::Enum) {
-    std::unordered_set<const Type*> seen;
-    return !type_complete(registered->second, seen);
+  const auto* sym = it->second;
+  const auto* decl = sym->decl_as_decl();
+  if (decl == nullptr) {
+    return false;
   }
-  const auto* decl = it->second->decl_as_decl();
-  // Not ready while the class has no fields yet, a field the earlier
-  // passes could not type (one typed by an alias still waiting), or a
-  // by-value field whose own type still has such a hole: an instantiation
-  // clones the whole graph, and a hole anywhere in it would be cloned.
-  return std::ranges::any_of(pending_classes_, [decl](const PendingClass& pc) {
-    if (pc.decl != decl) {
-      return false;
+  // Pull the declaration's slots now -- the enum's payloads, the
+  // class's fields -- as far as they can be typed yet.  Ready means
+  // complete by value: an instantiation clones exactly that graph, and
+  // a hole anywhere in it would be cloned.  Past the pull's depth the
+  // slots stay as they are, and the answer waits for the next round.
+  const bool pull = PullDepth::available(*this);
+  if (decl->is<EnumDeclNode>()) {
+    if (pull) {
+      PullDepth depth(*this);
+      register_enum(decl, sym, /*report_failures=*/false);
     }
-    if (pc.shell->fields().size() != pc.class_decl->fields.size()) {
-      return true;
-    }
-    std::unordered_set<const Type*> seen;
-    return !type_complete(pc.shell, seen);
-  });
+    auto registered = symbol_types_.find(sym);
+    return registered == symbol_types_.end() || !type_complete(registered->second);
+  }
+  auto pending = pending_by_decl_.find(decl);
+  if (pending == pending_by_decl_.end()) {
+    return false;
+  }
+  if (pull) {
+    PullDepth depth(*this);
+    register_class_fields(*pending->second, /*report_failures=*/false);
+  }
+  return !type_complete(pending->second->shell);
 }
 
 auto TypeChecker::resolver_owns_path(const TypeNode* node) const -> bool {
@@ -632,44 +654,53 @@ auto TypeChecker::register_type_aliases(bool report_failures) -> size_t {
     }
     const auto* sym = decl_it->second;
     if (symbol_types_.contains(sym)) {
-      continue; // registered by an earlier run
+      continue; // registered by an earlier pass, or on demand
     }
-
-    // An alias of a generic instantiation (`type IntBox = lib::Box<i32>`)
-    // cannot be resolved before `Box` has its fields: instantiating the
-    // shell would cache a `Box<i32>` with no fields at all, and the
-    // alias would then accept anything.  Such an alias waits for the
-    // pass that runs after fields are registered.
-    if (aliases_generic_shell(alias.type)) {
-      continue;
-    }
-    // Resolve the aliased type and cache it so later lookups of the
-    // alias name transparently return the underlying type.
-    auto before = diagnostics_.size();
-    const auto* aliased_type = resolve_type_node(alias.type);
-    if (aliased_type != nullptr) {
-      symbol_types_[sym] = aliased_type;
-      typed_.set_decl_type(decl, aliased_type);
+    if (register_type_alias(decl, sym, report_failures) != nullptr) {
       ++registered;
-      continue;
-    }
-    if (!report_failures) {
-      // The target may simply not be registered yet; anything said now
-      // would be said again by the final run.
-      diagnostics_.resize(before);
-      continue;
-    }
-    if (diagnostics_.size() == before && !resolver_owns_path(alias.type)) {
-      // The name resolved to a symbol whose type never materialized —
-      // one alias naming another that names it back, say.  Left
-      // unsaid, the alias is silently unusable everywhere it appears.
-      // A path through an import binding is not that case: the
-      // resolver has already said what is wrong with it.
-      error(alias.name_span,
-            "cannot resolve the type aliased by '" + std::string(alias.name) + "'");
     }
   }
   return registered;
+}
+
+auto TypeChecker::register_type_alias(const Decl* decl, const Symbol* sym, bool report_failures)
+    -> const Type* {
+  const auto& alias = decl->as<AliasDecl>();
+  if (!registering_.insert(decl).second) {
+    return nullptr; // reached again through its own chain: nothing to point at
+  }
+  auto before = diagnostics_.size();
+  const Type* aliased_type = nullptr;
+  // An alias of a generic instantiation (`type IntBox = lib::Box<i32>`)
+  // waits for `Box` to have its fields: instantiating the shell would
+  // cache a `Box<i32>` with no fields at all, and the alias would then
+  // accept anything.
+  if (!aliases_generic_shell(alias.type)) {
+    // Resolve the aliased type and cache it so later lookups of the
+    // alias name transparently return the underlying type.
+    aliased_type = resolve_type_node(alias.type);
+  }
+  registering_.erase(decl);
+  if (aliased_type != nullptr) {
+    symbol_types_[sym] = aliased_type;
+    typed_.set_decl_type(decl, aliased_type);
+    return aliased_type;
+  }
+  if (!report_failures) {
+    // The target may simply not be registered yet; anything said now
+    // would be said again by the final run.
+    diagnostics_.resize(before);
+    return nullptr;
+  }
+  if (diagnostics_.size() == before && !resolver_owns_path(alias.type)) {
+    // The name resolved to a symbol whose type never materialized —
+    // one alias naming another that names it back, say.  Left
+    // unsaid, the alias is silently unusable everywhere it appears.
+    // A path through an import binding is not that case: the
+    // resolver has already said what is wrong with it.
+    error(alias.name_span, "cannot resolve the type aliased by '" + std::string(alias.name) + "'");
+  }
+  return nullptr;
 }
 
 void TypeChecker::register_type_names() {
@@ -697,16 +728,13 @@ void TypeChecker::register_type_names() {
       pending_classes_.push_back({&st, decl, shell});
     }
   }
+  // The list is complete; pointers into it stay valid from here on.
+  for (auto& pending : pending_classes_) {
+    pending_by_decl_[pending.decl] = &pending;
+  }
 }
 
 auto TypeChecker::register_enum_variants(bool report_failures) -> size_t {
-  // Register enum types with resolved variant payload types.
-  // Unresolved types are kept as nullptr to preserve arity — the
-  // primary diagnostic comes from resolve_type_node; dropping the
-  // slot would silently mutate the variant shape and produce
-  // misleading secondary errors.  Registered once, an enum keeps its
-  // identity; later passes revise its payloads in place as the aliases
-  // they name settle.  A provisional pass keeps none of its diagnostics.
   size_t progress = 0;
   for (const auto* decl : all_decls_) {
     if (decl->kind() != NodeKind::EnumDecl) {
@@ -717,71 +745,94 @@ auto TypeChecker::register_enum_variants(bool report_failures) -> size_t {
     if (decl_it == decl_symbols_.end()) {
       continue;
     }
-    const auto* sym = decl_it->second;
+    progress += register_enum(decl, decl_it->second, report_failures);
+  }
+  return progress;
+}
 
-    const TypeEnum* existing = nullptr;
-    if (auto known = symbol_types_.find(sym);
-        known != symbol_types_.end() && known->second->kind() == TypeKind::Enum) {
-      existing = static_cast<const TypeEnum*>(known->second);
-    }
-    if (existing != nullptr && !report_failures) {
-      std::unordered_set<const Type*> seen;
-      if (type_complete(existing, seen)) {
-        continue; // complete by value: nothing a further pass can change
+auto TypeChecker::register_enum(const Decl* decl, const Symbol* sym, bool report_failures)
+    -> size_t {
+  // Register the enum type with resolved variant payload types.
+  // Unresolved types are kept as nullptr to preserve arity — the
+  // primary diagnostic comes from resolve_type_node; dropping the
+  // slot would silently mutate the variant shape and produce
+  // misleading secondary errors.  Registered once, an enum keeps its
+  // identity; later passes revise its payloads in place as the aliases
+  // they name settle.  A provisional pass keeps none of its diagnostics.
+  const auto& en = decl->as<EnumDeclNode>();
+  const TypeEnum* existing = nullptr;
+  if (auto known = symbol_types_.find(sym);
+      known != symbol_types_.end() && known->second->kind() == TypeKind::Enum) {
+    existing = static_cast<const TypeEnum*>(known->second);
+  }
+  if (existing != nullptr && !report_failures && type_complete(existing)) {
+    return 0; // complete by value: nothing a further pass can change
+  }
+  if (!registering_.insert(decl).second) {
+    return 0; // reached again through its own payloads
+  }
+  size_t progress = 0;
+  std::vector<EnumVariant> variants;
+  size_t variant_index = 0;
+  for (const auto& variant : en.variants) {
+    std::vector<const Type*> payload_types;
+    for (size_t i = 0; i < variant.payload_types.size(); ++i) {
+      auto before = diagnostics_.size();
+      const auto* resolved = resolve_type_node(variant.payload_types[i]);
+      if (!report_failures) {
+        diagnostics_.resize(before);
       }
-    }
-    std::vector<EnumVariant> variants;
-    size_t variant_index = 0;
-    for (const auto& variant : en.variants) {
-      std::vector<const Type*> payload_types;
-      for (size_t i = 0; i < variant.payload_types.size(); ++i) {
-        auto before = diagnostics_.size();
-        const auto* resolved = resolve_type_node(variant.payload_types[i]);
-        if (!report_failures) {
-          diagnostics_.resize(before);
-        }
-        if (resolved != nullptr && existing != nullptr &&
-            variant_index < existing->variants().size() &&
-            i < existing->variants()[variant_index].payload_types.size() &&
-            existing->variants()[variant_index].payload_types[i] == nullptr) {
-          ++progress;
-        }
-        payload_types.push_back(resolved);
-        if (resolved == nullptr && report_failures) {
-          if (variant.payload_types[i]->is<NamedType>()) {
-            const auto& named = variant.payload_types[i]->as<NamedType>();
-            if (named.name.segments.size() == 1 && named.name.segments[0] == en.name) {
-              error(variant.payload_types[i]->span,
-                    "enum '" + std::string(en.name) +
-                        "' cannot contain itself by value in variant '" +
-                        std::string(variant.name) + "'; use a pointer (*" + std::string(en.name) +
-                        ") for recursive types");
-            }
+      // A payload holding the enum itself by value -- directly, or
+      // through a class or another enum -- has no finite size.  The
+      // slot stays untyped, and the final pass says why.
+      if (resolved != nullptr && existing != nullptr) {
+        std::unordered_set<const Type*> seen;
+        if (contains_by_value(resolved, existing, seen)) {
+          resolved = nullptr;
+          if (report_failures) {
+            error(variant.payload_types[i]->span,
+                  "enum '" + std::string(en.name) +
+                      "' cannot contain itself by value in variant '" + std::string(variant.name) +
+                      "'; use a pointer (*" + std::string(en.name) + ") for recursive types");
           }
         }
       }
-      variants.push_back({variant.name, std::move(payload_types), variant.field_names});
-      ++variant_index;
+      if (resolved != nullptr && existing != nullptr &&
+          variant_index < existing->variants().size() &&
+          i < existing->variants()[variant_index].payload_types.size() &&
+          existing->variants()[variant_index].payload_types[i] == nullptr) {
+        ++progress;
+      }
+      payload_types.push_back(resolved);
     }
-    if (existing != nullptr) {
-      // The same object every reference already points at, revised --
-      // as a class shell's fields are (register_struct_fields).
-      const_cast<TypeEnum*>(existing)->set_variants(std::move(variants));
-      continue;
-    }
-    const auto* enum_type = types_.make_enum(decl, en.name, std::move(variants));
-    symbol_types_[sym] = enum_type;
-    typed_.set_decl_type(decl, enum_type);
-    for (const auto& v : enum_type->variants()) {
-      progress +=
-          std::ranges::count_if(v.payload_types, [](const Type* t) { return t != nullptr; });
-    }
+    variants.push_back({variant.name, std::move(payload_types), variant.field_names});
+    ++variant_index;
+  }
+  registering_.erase(decl);
+  if (existing != nullptr) {
+    // The same object every reference already points at, revised --
+    // as a class shell's fields are (register_class_fields).
+    const_cast<TypeEnum*>(existing)->set_variants(std::move(variants));
+    return progress;
+  }
+  const auto* enum_type = types_.make_enum(decl, en.name, std::move(variants));
+  symbol_types_[sym] = enum_type;
+  typed_.set_decl_type(decl, enum_type);
+  for (const auto& v : enum_type->variants()) {
+    progress += std::ranges::count_if(v.payload_types, [](const Type* t) { return t != nullptr; });
   }
   return progress;
 }
 
 auto TypeChecker::register_struct_fields(bool report_failures) -> size_t {
   size_t progress = 0;
+  for (auto& pending : pending_classes_) {
+    progress += register_class_fields(pending, report_failures);
+  }
+  return progress;
+}
+
+auto TypeChecker::register_class_fields(PendingClass& pending, bool report_failures) -> size_t {
   // Sub-pass 1b-ii: resolve class field types now that all type
   // shells (classes and enums) are registered in symbol_types_.
   // Unresolved types are kept as nullptr to preserve arity — same
@@ -791,39 +842,55 @@ auto TypeChecker::register_struct_fields(bool report_failures) -> size_t {
   // failure.  A provisional pass keeps none of its diagnostics: a field
   // it cannot type yet may be typed by a later pass, and one that never
   // is gets reported exactly once, by the final pass.
-  for (auto& pending : pending_classes_) {
-    const auto& had = pending.shell->fields();
-    if (!report_failures && had.size() == pending.class_decl->fields.size()) {
-      // Settled only when complete by value all the way down: a field
-      // typed by an instantiation that still carries a hole must be
-      // re-resolved once that hole is filled.
-      std::unordered_set<const Type*> seen;
-      if (type_complete(pending.shell, seen)) {
-        continue;
-      }
-    }
-    std::vector<StructField> fields;
-    size_t index = 0;
-    for (const auto* field : pending.class_decl->fields) {
-      auto before = diagnostics_.size();
-      const auto* field_type = resolve_type_node(field->type);
-      if (!report_failures) {
-        diagnostics_.resize(before);
-      }
-      if (field_type != nullptr && (index >= had.size() || had[index].type == nullptr)) {
-        ++progress;
-      }
-      fields.push_back({field->name, field_type});
-      ++index;
-    }
-    pending.shell->set_fields(std::move(fields));
+  const auto& had = pending.shell->fields();
+  if (!report_failures && had.size() == pending.class_decl->fields.size() &&
+      type_complete(pending.shell)) {
+    // Settled only when complete by value all the way down: a field
+    // typed by an instantiation that still carries a hole must be
+    // re-resolved once that hole is filled.
+    return 0;
   }
+  if (!registering_.insert(pending.decl).second) {
+    return 0; // reached again through its own fields
+  }
+  size_t progress = 0;
+  std::vector<StructField> fields;
+  size_t index = 0;
+  for (const auto* field : pending.class_decl->fields) {
+    auto before = diagnostics_.size();
+    const auto* field_type = resolve_type_node(field->type);
+    if (!report_failures) {
+      diagnostics_.resize(before);
+    }
+    if (field_type != nullptr && (index >= had.size() || had[index].type == nullptr)) {
+      ++progress;
+    }
+    fields.push_back({field->name, field_type});
+    ++index;
+  }
+  pending.shell->set_fields(std::move(fields));
+  registering_.erase(pending.decl);
   return progress;
 }
 
-auto TypeChecker::type_complete(const Type* type, std::unordered_set<const Type*>& seen) -> bool {
+auto TypeChecker::type_complete(const Type* type) -> bool {
+  std::unordered_set<const Type*> seen;
+  if (!complete_by_value(type, seen)) {
+    return false;
+  }
+  // Slots only ever fill, so what is complete stays complete -- and so
+  // is everything the walk reached.
+  complete_types_.insert(seen.begin(), seen.end());
+  return true;
+}
+
+auto TypeChecker::complete_by_value(const Type* type, std::unordered_set<const Type*>& seen) const
+    -> bool {
   if (type == nullptr) {
     return false;
+  }
+  if (complete_types_.contains(type)) {
+    return true;
   }
   if (!seen.insert(type).second) {
     return true; // a cycle by value is a separate diagnostic; not a hole
@@ -838,18 +905,58 @@ auto TypeChecker::type_complete(const Type* type, std::unordered_set<const Type*
         st->fields().size() != decl->as<ClassDecl>().fields.size()) {
       return false;
     }
-    return std::ranges::all_of(st->fields(),
-                               [&](const StructField& f) { return type_complete(f.type, seen); });
+    return std::ranges::all_of(
+        st->fields(), [&](const StructField& f) { return complete_by_value(f.type, seen); });
   }
   case TypeKind::Enum: {
     const auto* en = static_cast<const TypeEnum*>(type);
     return std::ranges::all_of(en->variants(), [&](const EnumVariant& v) {
       return std::ranges::all_of(v.payload_types,
-                                 [&](const Type* t) { return type_complete(t, seen); });
+                                 [&](const Type* t) { return complete_by_value(t, seen); });
+    });
+  }
+  // Substitution clones through these as it does through fields
+  // (substitute_generics), so a hole behind them would be cloned too.
+  case TypeKind::Pointer:
+    return complete_by_value(static_cast<const TypePointer*>(type)->pointee(), seen);
+  case TypeKind::Generator:
+    return complete_by_value(static_cast<const TypeGenerator*>(type)->yield_type(), seen);
+  case TypeKind::Function: {
+    const auto* fn = static_cast<const TypeFunction*>(type);
+    return complete_by_value(fn->return_type(), seen) &&
+           std::ranges::all_of(fn->param_types(),
+                               [&](const Type* t) { return complete_by_value(t, seen); });
+  }
+  default:
+    return true; // scalars carry nothing
+  }
+}
+
+auto TypeChecker::contains_by_value(const Type* type,
+                                    const Type* target,
+                                    std::unordered_set<const Type*>& seen) -> bool {
+  if (type == nullptr || !seen.insert(type).second) {
+    return false;
+  }
+  if (type == target) {
+    return true;
+  }
+  switch (type->kind()) {
+  case TypeKind::Struct: {
+    const auto* st = static_cast<const TypeStruct*>(type);
+    return std::ranges::any_of(st->fields(), [&](const StructField& f) {
+      return contains_by_value(f.type, target, seen);
+    });
+  }
+  case TypeKind::Enum: {
+    const auto* en = static_cast<const TypeEnum*>(type);
+    return std::ranges::any_of(en->variants(), [&](const EnumVariant& v) {
+      return std::ranges::any_of(v.payload_types,
+                                 [&](const Type* t) { return contains_by_value(t, target, seen); });
     });
   }
   default:
-    return true; // pointers and scalars carry nothing by value
+    return false; // behind a pointer the size is finite
   }
 }
 
