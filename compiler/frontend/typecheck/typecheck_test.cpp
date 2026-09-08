@@ -2618,6 +2618,25 @@ suite<"module_extend_scoping"> module_extend_scoping = [] {
                 : checked->check_result.diagnostics.front().message);
   };
 
+  "a type's own method outranks a module's extend of the same name"_test = [] {
+    // The prelude's Box has `pick(): i32`; the module extends Box with a
+    // `pick(): string` of its own concept.  Innermost is the type's own
+    // method, so `b.pick()` is the i32 one.
+    auto checked = check_program({
+        {"stdlib/core/box.dao",
+         "module core::box\nclass Box:\n    n: i32\n    fn pick(self): i32 -> self.n\n"},
+        {"app.dao",
+         "module app\nconcept Alt:\n    fn pick(self): string\n"
+         "extend Box as Alt:\n    fn pick(self): string -> \"x\"\n"
+         "fn main(): i32\n  let b: Box = Box(1)\n  return b.pick()\n"},
+    });
+    expect(is_ok(checked->check_result))
+        << "the module's extend shadowed Box's own pick: "
+        << (checked->check_result.diagnostics.empty()
+                ? ""
+                : checked->check_result.diagnostics.front().message);
+  };
+
   "a sibling module's extend cannot make a class derive"_test = [] {
     auto checked = check_modules({{"ext.dao", kShoutingModule}, {"app.dao", kBoxModule}});
     expect(has_error_containing(checked->check_result, "no field or method 'shout' on type 'Box'"))
