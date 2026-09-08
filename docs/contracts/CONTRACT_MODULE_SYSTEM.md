@@ -102,6 +102,11 @@ never satisfied from another module.
 7. Only prelude modules may declare names carrying the `__dao_`
    prefix, which `CONTRACT_RUNTIME_ABI.md` reserves for runtime hooks.
    Such a declaration in any other module is an error.
+8. Only prelude modules may declare the intrinsic family `size_of`,
+   `align_of`, and `ptr_offset`: these are prelude declarations whose
+   bodies the backend replaces with inline IR, so a declaration bearing
+   one of those names in any other module is an error.  Rule 4 does
+   not apply to them.
 
 Scope order, outermost to innermost:
 

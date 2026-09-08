@@ -25,5 +25,5 @@ and when, not what is guaranteed.
   offset space.  `daoc <command> <root.dao>` discovers; `--source` names
   files explicitly; `--entry` selects the entry module.  File order,
   diagnostic order, and the default output name are functions of the
-  file set rather than of the order or spelling of the paths given
+  file set rather than of the order of the paths given
   (`CONTRACT_MODULE_SYSTEM.md` §8.4).

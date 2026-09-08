@@ -253,8 +253,8 @@ Compiler builtins and predeclared names (`i32`, `string`, `void`,
 module, prelude included (`CONTRACT_MODULE_SYSTEM.md` §7.6).  The
 `size_of` / `align_of` / `ptr_offset` family is NOT among them: those
 are prelude declarations (`stdlib/core/builtins.dao`), reserved to the
-prelude by the same rule that reserves the `__dao_` prefix, whose
-bodies the backend replaces with inline IR (§12).  They are generic
+prelude by `CONTRACT_MODULE_SYSTEM.md` §7.8 as the `__dao_` prefix is
+by §7.7, whose bodies the backend replaces with inline IR (§12).  They are generic
 (`size_of<T>()`), which the builtins scope — whose symbols carry no
 declaration to instantiate — cannot express.  Operator ruling
 (2026-09-07), raised by review round 7 as a spec conflict: the
