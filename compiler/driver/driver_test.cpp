@@ -236,6 +236,23 @@ suite<"driver_cli"> driver_cli_suite = [] {
         << second_wins.err << second_wins.out;
   };
 
+  "an explicit set with no entry is an error even under check"_test = [] {
+    const Scratch scratch("explicit-no-entry");
+    auto a = scratch.file("a.dao", "module a\n\nfn one(): i32 -> 1\n");
+    auto b = scratch.file("b.dao", "module b\n\nfn two(): i32 -> 2\n");
+    auto checked = run_daoc(scratch,
+                            {"check",
+                             "--source",
+                             a.string(),
+                             "--source",
+                             b.string(),
+                             "--stdlib-root",
+                             scratch.stdlib.string()});
+    expect(checked.exit_code != 0)
+        << "an explicit set without an entry was accepted: " << checked.out;
+    expect(checked.err_says("no entry module")) << checked.err;
+  };
+
   "an unfound import names every root, in the order they were searched"_test = [] {
     const Scratch scratch("searched-roots");
     auto root =
@@ -299,11 +316,10 @@ suite<"driver_cli"> driver_cli_suite = [] {
     auto named = sources({"--entry", "app"});
     expect(named.exit_code == 0) << named.err;
 
-    // Only a build owes an entry point (§8.1); an analysis command says
-    // what is missing and carries on, so the check succeeds and the
-    // selection is still reported by name.
+    // An explicit file set owes an entry module whatever the command
+    // (§8.3): naming one that declares no `fn main` is an error.
     auto without_main = sources({"--entry", "lib"});
-    expect(without_main.exit_code == 0) << without_main.err;
+    expect(without_main.exit_code != 0) << without_main.out;
     expect(without_main.err_says("entry module 'lib' (--entry) declares no 'fn main'"))
         << without_main.err;
   };
