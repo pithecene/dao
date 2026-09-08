@@ -204,7 +204,8 @@ int64_t __dao_str_length(const struct dao_string *s);
 int32_t __dao_str_char_at(const struct dao_string *s, int64_t index);
 
 // Extract a substring starting at `start` with byte length `len`.
-// Traps if the range is out of bounds. Returns a heap-allocated copy.
+// Traps if the range is out of bounds. Returns a copy owned by the
+// current domain.
 struct dao_string __dao_str_substring(const struct dao_string *s,
                                       int64_t start, int64_t len);
 

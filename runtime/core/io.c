@@ -44,7 +44,8 @@ void __dao_io_write_stderr(const struct dao_string *msg) {
   fputc('\n', stderr);
 }
 
-// Read an entire file into a heap-allocated string. Traps on error.
+// Read an entire file into a string owned by the current domain.
+// Traps on error.
 struct dao_string __dao_io_read_file(const struct dao_string *path) {
   if (path == NULL || path->ptr == NULL || path->len <= 0) {
     fprintf(stderr, "dao: read_file: empty path\n");

@@ -49,13 +49,16 @@ Laws:
    the domain wholesale.  Domains nest; the innermost open block's
    domain is current; outside every block the process is the domain.
 7. A value allocated in a domain does not outlive it.  A heap-owning
-   value — a string, a generator, or a class or enum holding one by
-   value — may not leave the block: the compiler rejects a store to a
-   binding declared outside the block (directly, or through a field
-   or index rooted at it) and a `return` of such a value from inside
-   the block.  Copy-out — the compiler copying what leaves into the
-   enclosing domain — is Task 35 E1 and amends this law when it lands.
-   Pointer values are the author's responsibility, as everywhere.
+   value — a string, a generator, or a class or enum holding one of
+   those or a raw pointer field by value (an aggregate with a raw
+   pointer field is taken to own what it points at, as `Vector` and
+   `HashMap` do) — may not leave the block: the compiler rejects a
+   store to a binding declared outside the block (directly, or through
+   a field or index rooted at it), a `return` of such a value from
+   inside the block, and a `?` that would return one.  Copy-out — the
+   compiler copying what leaves into the enclosing domain — is Task 35
+   E1 and amends this law when it lands.  A pointer value itself is
+   the author's responsibility, as everywhere.
 8. A `resource memory` block may not contain `yield`: a domain cannot
    stay current across a suspension.
 

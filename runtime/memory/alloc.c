@@ -89,8 +89,13 @@ static void *domain_alloc(struct dao_domain *domain, size_t size, size_t align) 
   size_t needed = size + align;
   size_t capacity = domain->next_chunk_size;
   if (needed > capacity) {
-    capacity = needed; // its own chunk; the growth sequence is unaffected
-  } else if (domain->next_chunk_size < (size_t)kChunkMax) {
+    capacity = needed;
+  }
+  // Growth stays geometric whatever the request, so a domain's chunk
+  // list is logarithmic in the bytes it holds (past kChunkMax each
+  // request that large gets its own chunk: at 8 MiB apiece, a few
+  // thousand at most on any machine).  That bounds every walk of it.
+  if (domain->next_chunk_size < (size_t)kChunkMax) {
     domain->next_chunk_size *= 2;
   }
   chunk = chunk_new(domain, capacity);
@@ -101,7 +106,10 @@ static void *domain_alloc(struct dao_domain *domain, size_t size, size_t align) 
 
 // Whether `ptr` lies in a chunk of an open domain.  Addresses are
 // compared as integers: relational comparison of pointers into
-// different allocations is undefined in C.
+// different allocations is undefined in C.  The walk is bounded by the
+// open domains times their chunk lists, which grow geometrically
+// (domain_alloc); it runs only for a free or a reallocation while a
+// block is open.
 static int domain_owns(const void *ptr) {
   uintptr_t p = (uintptr_t)ptr;
   for (const struct dao_domain *d = current_domain; d != NULL; d = d->parent) {
