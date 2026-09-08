@@ -2030,11 +2030,16 @@ fn main(): i32
   let r11a: LlvmTextResult = lower_source_to_llvm_text(src11)
   write_failures = write_failures + emit_ir("deterministic_repeat", r11a, 3)
   let r11b: LlvmTextResult = lower_source_to_llvm_text(src11)
-  if r11a.text == r11b.text:
-    print("PASS deterministic_repeat")
-    pass_count = pass_count + 1
+  // Two identical failures are equal too; only two successful
+  // lowerings prove determinism (and leave an artifact to validate).
+  if r11a.ok and r11b.ok:
+    if r11a.text == r11b.text:
+      print("PASS deterministic_repeat")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL deterministic_repeat: byte drift across runs")
   else:
-    print("FAIL deterministic_repeat: byte drift across runs")
+    print("FAIL deterministic_repeat: ok=false")
 
   // -----------------------------------------------------------------
   // Test 12: struct_field_read — struct field access emits GEP + load
