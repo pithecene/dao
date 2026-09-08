@@ -22,12 +22,12 @@ extern "C" {
 struct dao_domain;
 
 // Open a new domain under the current one and make it current.
-struct dao_domain *dao_domain_push(void);
+struct dao_domain* dao_domain_push(void);
 
 // Close `domain` and every domain opened inside it that is still open,
 // reclaiming all their memory, and make its parent current.  Traps if
 // `domain` is not open: an exit without its enter is a compiler defect.
-void dao_domain_pop(struct dao_domain *domain);
+void dao_domain_pop(struct dao_domain* domain);
 
 // Bytes currently held by open domains (chunk capacity, all domains).
 // For tests and measurement; zero when only the root domain is open.

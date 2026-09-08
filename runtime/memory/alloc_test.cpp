@@ -20,7 +20,9 @@ using namespace boost::ut;
 
 namespace {
 
-auto text(const dao_string& s) -> std::string { return {s.ptr, static_cast<size_t>(s.len)}; }
+auto text(const dao_string& s) -> std::string {
+  return {s.ptr, static_cast<size_t>(s.len)};
+}
 
 auto literal(const char* s) -> dao_string {
   return {.ptr = s, .len = static_cast<int64_t>(std::strlen(s))};
@@ -94,17 +96,18 @@ suite<"domain_realloc_and_free"> domain_realloc_and_free = [] {
   "freeing domain memory is a no-op; freeing root memory frees"_test = [] {
     void* root = __dao_mem_alloc(32, 8);
     __dao_mem_free(root); // returns to the system: no crash, no leak
+    void* root_kept = __dao_mem_alloc(32, 8);
     void* handle = __dao_mem_resource_enter();
-    auto held = dao_domain_bytes_held();
     void* inside = __dao_mem_alloc(32, 8);
+    auto held = dao_domain_bytes_held();
     __dao_mem_free(inside);
-    expect(eq(dao_domain_bytes_held(), held == 0 ? dao_domain_bytes_held() : held));
-    // Root memory freed while a block is open still frees.
-    void* root_inside = nullptr;
+    expect(eq(dao_domain_bytes_held(), held)); // still the domain's, until exit
+    // Root memory freed while a block is open is root memory: it frees.
+    __dao_mem_free(root_kept);
+    expect(eq(dao_domain_bytes_held(), held));
     __dao_mem_resource_exit(handle);
-    root_inside = __dao_mem_alloc(32, 8);
-    __dao_mem_free(root_inside);
     expect(eq(dao_domain_depth(), int64_t{0}));
+    expect(eq(dao_domain_bytes_held(), int64_t{0}));
   };
 
   "realloc of root memory inside a block moves it into the block"_test = [] {
@@ -169,4 +172,5 @@ suite<"domain_outer_and_strings"> domain_outer_and_strings = [] {
 
 // NOLINTEND(readability-magic-numbers)
 
-auto main() -> int {}
+auto main() -> int {
+}

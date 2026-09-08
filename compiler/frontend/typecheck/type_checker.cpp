@@ -3000,6 +3000,14 @@ auto TypeChecker::check_try(const Expr* expr) -> const Type* {
     error(expr->span, "'?' operator can only be used inside a function with a return type");
     return nullptr;
   }
+  // `?` returns from inside the block on the error path -- through the
+  // block's exit -- so it is a return of the function's result type.
+  if (!ctx_.resource_blocks.empty() && owns_heap_memory(ctx_.return_type)) {
+    error(expr->span,
+          "'?' inside resource block '" + std::string(ctx_.resource_blocks.back().name) +
+              "' returns a value that owns heap memory: a value allocated in the block does "
+              "not outlive it");
+  }
 
   const auto& variants = enum_type->variants();
 

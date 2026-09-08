@@ -99,12 +99,15 @@ static void *domain_alloc(struct dao_domain *domain, size_t size, size_t align) 
   return chunk->base + start;
 }
 
-// Whether `ptr` lies in a chunk of an open domain.
+// Whether `ptr` lies in a chunk of an open domain.  Addresses are
+// compared as integers: relational comparison of pointers into
+// different allocations is undefined in C.
 static int domain_owns(const void *ptr) {
-  const char *p = (const char *)ptr;
+  uintptr_t p = (uintptr_t)ptr;
   for (const struct dao_domain *d = current_domain; d != NULL; d = d->parent) {
     for (const struct dao_chunk *c = d->chunks; c != NULL; c = c->next) {
-      if (p >= c->base && p < c->base + c->capacity) {
+      uintptr_t base = (uintptr_t)c->base;
+      if (p >= base && p - base < (uintptr_t)c->capacity) {
         return 1;
       }
     }

@@ -95,10 +95,10 @@ struct dao_string __dao_conv_f64_to_string(double x) {
 }
 
 struct dao_string __dao_conv_bool_to_string(bool x) {
-  if (x) {
-    return (struct dao_string){.ptr = "true", .len = 4};
-  }
-  return (struct dao_string){.ptr = "false", .len = 5};
+  // A fresh buffer like every other conversion: the contract says so,
+  // and a domain-owned result never outlives its domain by aliasing a
+  // literal.
+  return x ? conv_str_dup("true", 4) : conv_str_dup("false", 5);
 }
 
 // ---------------------------------------------------------------------------

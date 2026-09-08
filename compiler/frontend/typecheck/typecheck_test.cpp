@@ -1337,6 +1337,29 @@ suite<"typecheck_resource_domains"> typecheck_resource_domains = [] {
     expect(is_ok(result));
   };
 
+  "propagating an error that owns heap memory from inside a block is rejected"_test = [] {
+    // `?` leaves the block on its error path exactly as a return does.
+    auto result = check_source(
+        "enum class Result<T, E>:\n    Ok(v: T)\n    Err(e: E)\nfn fail(): Result<i32, string>\n   "
+        " let r: Result<i32, string> = Result::Err(e = \"boom\")\n    return r\n"
+        "fn f(): Result<i32, string>\n"
+        "    resource memory pool =>\n"
+        "        let v: i32 = fail()?\n"
+        "    return Result::Ok(v = 0)\n");
+    expect(has_error_containing(result, "'?' inside resource block 'pool'"));
+  };
+
+  "propagating a scalar error from inside a block is fine"_test = [] {
+    auto result = check_source(
+        "enum class Result<T, E>:\n    Ok(v: T)\n    Err(e: E)\nfn fail(): Result<i32, i32>\n    "
+        "let r: Result<i32, i32> = Result::Err(e = 1)\n    return r\n"
+        "fn f(): Result<i32, i32>\n"
+        "    resource memory pool =>\n"
+        "        let v: i32 = fail()?\n"
+        "    return Result::Ok(v = 0)\n");
+    expect(is_ok(result)) << (result.diagnostics.empty() ? "" : result.diagnostics[0].message);
+  };
+
   "yield inside a block is rejected"_test = [] {
     auto result = check_source("fn gen(): Generator<i32>\n"
                                "    resource memory pool =>\n"
