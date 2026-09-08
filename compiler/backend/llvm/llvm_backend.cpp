@@ -13,6 +13,7 @@
 
 #include "backend/llvm/llvm_abi.h"
 #include "backend/llvm/llvm_runtime_hooks.h"
+#include "frontend/resolve/resolve.h"
 #include "ir/mir/mir.h"
 
 #include <llvm/IR/Constants.h>

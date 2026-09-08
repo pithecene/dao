@@ -2662,6 +2662,14 @@ void TypeChecker::build_method_table() {
   //    For each (type, derived_concept), register each concept method
   //    with the type. Resolve the concrete extend implementation for dispatch.
   for (const auto& [type, concepts] : derived_conformances_) {
+    // Asked from the deriving class's module, as derivation itself was
+    // (§5): this pass runs after compute_derived_conformances() has
+    // cleared the current module, and without restoring it every
+    // non-prelude extension is invisible — the class's own included.
+    ModuleScope derived_in(current_module_,
+                           type != nullptr && type->kind() == TypeKind::Struct
+                               ? declaring_module(static_cast<const TypeStruct*>(type)->decl_id())
+                               : nullptr);
     for (const auto* concept_decl : concepts) {
       const auto& cpt = concept_decl->as<ConceptDecl>();
       ConceptSelfMapGuard guard(concept_self_map_, concept_decl);

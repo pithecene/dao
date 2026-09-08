@@ -346,6 +346,18 @@ suite<"root_file_discovery"> root_file_discovery_suite = [] {
     expect(said.find("is already declared by") != std::string::npos) << said;
   };
 
+  "a prelude file's imports are discovered too"_test = [] {
+    // The prelude group is loaded, not discovered, so its own imports
+    // were never followed: what a prelude file imports is part of the
+    // program even when no user file mentions it (§8.2).
+    auto fixture = fixtures() / "prelude_imports";
+    auto program = load_program_from_root(
+        fixture / "main.dao", {.module_roots = {fixture}, .stdlib_root = fixture / "stdlib"});
+    expect(program.diagnostics.empty()) << joined(messages(program));
+    expect(program.module_named("ext::thing") != nullptr)
+        << "the module a prelude file imports was not discovered";
+  };
+
   "module_roots_are_searched_after_the_root_directory"_test = [] {
     auto program = load_program_from_root(
         fixtures() / "roots" / "main" / "main.dao",

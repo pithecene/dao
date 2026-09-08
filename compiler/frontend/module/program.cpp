@@ -174,10 +174,19 @@ struct Discovery {
   std::unordered_map<std::string, std::string> display_by_canonical; // loaded files
   GraphInputs graph;
 
-  void add_prelude(const std::filesystem::path& stdlib_root) {
+  /// Load the prelude group.  `discovered` collects the files loaded so
+  /// a caller that follows imports can start from them too: what a
+  /// prelude file imports is part of the program, and no user file need
+  /// mention it (§8.2).
+  void add_prelude(const std::filesystem::path& stdlib_root,
+                   std::deque<SourceInput>* discovered = nullptr) {
     const auto display_root = stdlib_root.parent_path();
     for (const auto& path : prelude_files(stdlib_root)) {
-      add(path, read_source_input(path, /*is_prelude=*/true, display_root));
+      auto input = read_source_input(path, /*is_prelude=*/true, display_root);
+      if (discovered != nullptr) {
+        discovered->push_back(input);
+      }
+      add(path, std::move(input));
     }
   }
 
@@ -213,18 +222,20 @@ auto load_program_from_root(const std::filesystem::path& root_file, const Progra
   }
 
   Discovery discovery;
+  std::deque<SourceInput> pending;
   if (!options.stdlib_root.empty()) {
-    discovery.add_prelude(options.stdlib_root);
+    discovery.add_prelude(options.stdlib_root, &pending);
   }
   for (const auto& root : roots) {
     discovery.graph.searched_roots.push_back(root.empty() ? "." : root.generic_string());
   }
 
-  std::deque<SourceInput> pending;
   pending.push_back(read_source_input(root_file, /*is_prelude=*/false));
-  discovery.graph.root_display = pending.front().display_path;
+  // The root is the last thing enqueued: the prelude files are ahead of
+  // it, and each of them is a discovery root of its own.
+  discovery.graph.root_display = pending.back().display_path;
   discovery.graph.entry_policy = options.entry_policy;
-  discovery.add(root_file, pending.front());
+  discovery.add(root_file, pending.back());
 
   while (!pending.empty()) {
     auto input = std::move(pending.front());
