@@ -662,19 +662,22 @@ document.
 First audit: the corpus uses classes, payload enums with `match`,
 `if`/`while`/`break`, generics through `Vector<T>` and its methods,
 strings, and generators via `range` — no lambdas, `for`, modes,
-resources, pipelines, or concepts.  The blocker is capacity, not a
-construct: the bootstrap needs on the order of 16 GiB to carry even
-its smallest programs (3–4k lines) to the LLVM stage, where it panics,
-and exhausts that bound in `typecheck`/`hir`/`mir` on the larger ones.
-Per stage, `lex` is clean; the bootstrap parser rejects one construct
-at every site it occurs — generic arguments on a qualified name in
-expression position (`Vector<i64>::new()`) — and the resolver and type
-checker report their own gaps past those sites (the histograms name
-the messages); `mir` rejects `break` and synthesized literals; `llvm`
-panics where reached.  Tier B-Bootstrap therefore starts with the
+resources, pipelines, or concepts.  Measured one stage per process
+(the bootstrap frees nothing, so a stage's cost can only be measured
+alone), the four smallest programs (3–5k lines) reach the LLVM stage
+in 5.5–12 GiB and 17–40 s and panic there on an out-of-bounds token
+index; the three largest (7–9k lines) exhaust 16 GiB in `typecheck`
+or `mir`.  Capacity is therefore the blocker for the large half of the
+corpus, and a construct for the rest: `lex` is clean; the bootstrap
+parser rejects one construct at every site it occurs — generic
+arguments on a qualified name in expression position
+(`Vector<i64>::new()`) — and the resolver and type checker report their
+own gaps past those sites (the histograms name the messages); `mir`
+rejects `break` and synthesized literals; `llvm` panics where reached.
+Tier B-Bootstrap therefore starts with that parser construct and the
 bootstrap's memory behaviour (value-threaded state copying its vectors
-at every step), then that parser construct, then the resolver, type
-checker, MIR, and LLVM rejections the histograms name.
+at every step) side by side, then the resolver, type checker, MIR, and
+LLVM rejections the histograms name.
 
 ### Task 33 — Bootstrap Module-System Parity
 

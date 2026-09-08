@@ -54,10 +54,17 @@ INVENTORY="$(awk -v labels="$LABELS" 'BEGIN { n = split(labels, a, "\n"); for (i
 #    functions are told apart by their module-qualified LLVM names
 #    (`core::...`), which the backend emits from Task 31 D4 on; an
 #    earlier backend names everything bare, and this section cannot be
-#    measured with it.
+#    measured with it.  The intrinsic family (`size_of`, `align_of`,
+#    `ptr_offset`; CONTRACT_MODULE_SYSTEM.md §7 rule 8) never reaches
+#    LLVM as a definition -- the host lowers each specialization inline
+#    -- so it is counted from the MIR, where every specialization is a
+#    `fn_ref <name>$<type>`.
 INSTANCES="$("$DAOC" llvm-ir bootstrap/llvm/llvm.gen.dao 2>/dev/null \
   | grep -oE 'define [^@]*@"core::[^"]*"' | sed -E 's/.*@"//; s/"$//; s/\$.*//' | sort | uniq -c | sort -rn)"
 INSTANCES_TABLE="$(echo "$INSTANCES" | awk 'NF {printf "| `%s` | %s |\n", $2, $1}')"
+INTRINSICS="$("$DAOC" mir bootstrap/llvm/llvm.gen.dao 2>/dev/null \
+  | grep -oE 'fn_ref (size_of|align_of|ptr_offset)\$[^ ]+' | sed 's/^fn_ref //' | sort -u | sed 's/\$.*//' | uniq -c | sort -rn)"
+INTRINSICS_TABLE="$(echo "$INTRINSICS" | awk 'NF {printf "| `%s` (intrinsic; inlined by the host) | %s |\n", $2, $1}')"
 if [ -z "$INSTANCES_TABLE" ]; then
   if [ "$REPORT_ONLY" -eq 1 ] && [ -f "$DOC" ]; then
     # Keep what the last run measured rather than publish an empty table.
@@ -68,42 +75,63 @@ if [ -z "$INSTANCES_TABLE" ]; then
   fi
 fi
 
-# 3. Self-compile probe: one process per program, because a Dao panic
-#    aborts the process; a program that panics gets a line naming the
-#    stage it died in and the panic message.
+# 3. Self-compile probe: one process per program and stage, from source.
+#    The bootstrap frees nothing, so a stage's cost can only be measured
+#    alone; and a Dao panic aborts the process, so a program that panics
+#    gets a line naming the stage it died in and the panic message.
+#    Stages run in pipeline order and stop at the first that dies: every
+#    later one would die the same way.
 # Each probe is bounded (virtual memory and wall time) so a runaway
 # bootstrap run is recorded as such instead of exhausting the machine.
 LIMIT_KB="${AUDIT_MEMORY_KB:-6291456}"   # 6 GiB
 LIMIT_S="${AUDIT_SECONDS:-600}"
+STAGES="parse typecheck hir mir llvm"
 if [ "$REPORT_ONLY" -eq 0 ]; then
 "$DAOC" build bootstrap/llvm/llvm.gen.dao > /dev/null || { echo "audit: building llvm.gen failed"; exit 1; }
 rm -f "$OUT/closure.txt"
 for p in $PROGRAMS; do
-  printf '%s' "$p" > "$OUT/.closure_probe"
-  start=$SECONDS
-  ( ulimit -v "$LIMIT_KB"; /usr/bin/time -f 'probe: peak_rss_kb=%M' -o "$OUT/probe-$p.time" timeout "$LIMIT_S" ./bootstrap/llvm/llvm.gen ) > "$OUT/probe-$p.log" 2>&1
-  status=$?
-  elapsed=$((SECONDS - start))
-  peak_kb="$(grep -oE 'peak_rss_kb=[0-9]+' "$OUT/probe-$p.time" 2>/dev/null | tail -1 | cut -d= -f2)"
-  peak_mb=$(( ${peak_kb:-0} / 1024 ))
-  if grep -q "^$p	" "$OUT/closure.txt" 2>/dev/null; then
-    sed -i "s|^$p	|$p	peak_mb=$peak_mb	seconds=$elapsed	|" "$OUT/closure.txt"
-  else
-    stage="$(grep -oE "^probe: $p stage=[a-z]+" "$OUT/probe-$p.log" | tail -1 | sed 's/.*stage=//')"
+  : > "$OUT/probe-$p.log"
+  record="$p"
+  why=""
+  for stage in $STAGES; do
+    printf '%s\t%s' "$p" "$stage" > "$OUT/.closure_probe"
+    rm -f "$OUT/closure.txt"
+    start=$SECONDS
+    ( ulimit -v "$LIMIT_KB"; /usr/bin/time -f 'probe: peak_rss_kb=%M' -o "$OUT/probe-$p.time" timeout "$LIMIT_S" ./bootstrap/llvm/llvm.gen ) > "$OUT/probe-$p-$stage.log" 2>&1
+    status=$?
+    elapsed=$((SECONDS - start))
+    cat "$OUT/probe-$p-$stage.log" >> "$OUT/probe-$p.log"
+    peak_kb="$(grep -oE 'peak_rss_kb=[0-9]+' "$OUT/probe-$p.time" 2>/dev/null | tail -1 | cut -d= -f2)"
+    peak_mb=$(( ${peak_kb:-0} / 1024 ))
+    # The deepest stage attempted is the cost of one self-compilation
+    # attempt through that stage: its peak and time are the program's.
+    deepest="$stage"; deepest_peak=$peak_mb; deepest_seconds=$elapsed
+    if [ -f "$OUT/closure.txt" ] && grep -q "^$p	" "$OUT/closure.txt"; then
+      record="$record$(grep "^$p	" "$OUT/closure.txt" | head -1 | sed "s/^$p//")"
+      continue
+    fi
     if [ "$status" -eq 124 ]; then
       why="exceeded ${LIMIT_S}s"
-    elif grep -q 'dao panic:' "$OUT/probe-$p.log"; then
-      why="panic: $(grep -m1 -oE 'dao panic: .*' "$OUT/probe-$p.log" | sed 's/^dao panic: //')"
+    elif grep -q 'dao panic:' "$OUT/probe-$p-$stage.log"; then
+      why="panic: $(grep -m1 -oE 'dao panic: .*' "$OUT/probe-$p-$stage.log" | sed 's/^dao panic: //')"
     else
       why="process died (status $status; memory bound $((LIMIT_KB / 1048576)) GiB)"
     fi
-    # Stage counts and an earlier stage's first diagnostic survive on
-    # stderr even when a later stage kills the process.
-    counts="$(grep -oE "^probe: $p (lex|parse|resolve|typecheck|hir|mir|llvm)=[0-9]+" "$OUT/probe-$p.log" | sed "s/^probe: $p //" | tr '\n' '\t')"
-    earlier="$(grep -m1 -oE "^probe: $p first=.*" "$OUT/probe-$p.log" | sed "s/^probe: $p first=//")"
-    printf '%s\tpeak_mb=%s\tseconds=%s\t%sfirst=%s\n' "$p" "$peak_mb" "$elapsed" "$counts" "${earlier:+$earlier; then }in ${stage:-?}: $why" >> "$OUT/closure.txt"
+    # Stage counts and a first diagnostic survive on stderr even when the
+    # stage dies part-way.
+    counts="$(grep -oE "^probe: $p (lex|parse|resolve|typecheck|hir|mir|llvm)=[0-9]+" "$OUT/probe-$p-$stage.log" | sed "s/^probe: $p //" | tr '\n' '\t' | sed 's/\t$//')"
+    [ -n "$counts" ] && record="$record	$counts"
+    break
+  done
+  earlier="$(grep -m1 -oE "^probe: $p first [a-z]+: .*" "$OUT/probe-$p.log" | sed "s/^probe: $p first //")"
+  if [ -n "$why" ]; then
+    first="${earlier:+$earlier; then }in ${deepest}: $why"
+  else
+    first="$earlier"
   fi
+  printf '%s\tpeak_mb=%s\tseconds=%s\tfirst=%s\n' "$record" "$deepest_peak" "$deepest_seconds" "$first" >> "$OUT/closure.merged"
 done
+mv "$OUT/closure.merged" "$OUT/closure.txt"
 rm -f "$OUT/.closure_probe"
 fi
 [ -f "$OUT/closure.txt" ] || { echo "audit: no probe outputs under $OUT to report on"; exit 1; }
@@ -142,14 +170,21 @@ generic_qualified_sites() {
   echo "| Function | Instantiations |"
   echo "|---|---|"
   echo "$INSTANCES_TABLE"
+  echo "$INTRINSICS_TABLE"
+  echo
+  echo "The intrinsic family is counted from the MIR (distinct specializations"
+  echo "of each), since the host lowers every specialization inline and emits no"
+  echo "definition for it."
   echo
   echo "## 3. The bootstrap pipeline over its own programs"
   echo
   echo "Diagnostics per stage when each program is fed through the bootstrap"
   echo "pipeline, and the earliest failing stage's first diagnostic."
   echo
-  echo "Each program ran in its own process bounded to $((LIMIT_KB / 1048576)) GiB of"
-  echo "virtual memory and ${LIMIT_S} s; peak memory is the process's maximum resident set."
+  echo "Each stage ran in its own process from source, bounded to $((LIMIT_KB / 1048576)) GiB of"
+  echo "virtual memory and ${LIMIT_S} s (the bootstrap frees nothing, so a stage's cost"
+  echo "can only be measured alone); peak memory and time are the deepest stage's --"
+  echo "one self-compilation attempt through that stage."
   echo
   echo "| Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |"
   echo "|---|---|---|---|---|---|---|---|---|---|---|"

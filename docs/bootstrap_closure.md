@@ -10,28 +10,28 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 73404 |
-| `CallExpr` | 22044 |
-| `Callee` | 22044 |
-| `FieldExpr` | 20828 |
-| `Args` | 19928 |
-| `BinaryExpr` | 10317 |
-| `LetStatement` | 9930 |
+| `Identifier` | 73379 |
+| `CallExpr` | 22019 |
+| `Callee` | 22019 |
+| `FieldExpr` | 20806 |
+| `Args` | 19907 |
+| `BinaryExpr` | 10274 |
+| `LetStatement` | 9929 |
 | `Value` | 7915 |
 | `Target` | 7915 |
 | `Assignment` | 7915 |
-| `IntLiteral` | 7667 |
-| `Condition` | 6434 |
-| `Then` | 5217 |
-| `IfStatement` | 5217 |
-| `ReturnStatement` | 5138 |
-| `StringLiteral` | 4463 |
-| `Param` | 3527 |
+| `IntLiteral` | 7666 |
+| `Condition` | 6428 |
+| `Then` | 5211 |
+| `IfStatement` | 5211 |
+| `ReturnStatement` | 5141 |
+| `StringLiteral` | 4433 |
+| `Param` | 3536 |
 | `Pattern` | 2466 |
 | `Arm` | 2466 |
 | `BoolLiteral` | 2367 |
-| `ReturnType` | 1484 |
-| `FunctionDecl` | 1484 |
+| `ReturnType` | 1486 |
+| `FunctionDecl` | 1486 |
 | `Else` | 1268 |
 | `WhileStatement` | 1217 |
 | `Variant` | 1155 |
@@ -40,7 +40,7 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 | `TypeArgs` | 822 |
 | `Scrutinee` | 542 |
 | `MatchStatement` | 542 |
-| `ExpressionStatement` | 490 |
+| `ExpressionStatement` | 475 |
 | `ClassDecl` | 239 |
 | `BreakStatement` | 64 |
 | `EnumDecl` | 27 |
@@ -188,25 +188,34 @@ bootstrap must compile for itself.
 | `core::convert::f32_to_i64` | 1 |
 | `core::convert::f32_to_i32` | 1 |
 | `core::convert::f32_to_f64` | 1 |
+| `size_of` (intrinsic; inlined by the host) | 23 |
+| `ptr_offset` (intrinsic; inlined by the host) | 23 |
+| `align_of` (intrinsic; inlined by the host) | 23 |
+
+The intrinsic family is counted from the MIR (distinct specializations
+of each), since the host lowers every specialization inline and emits no
+definition for it.
 
 ## 3. The bootstrap pipeline over its own programs
 
 Diagnostics per stage when each program is fed through the bootstrap
 pipeline, and the earliest failing stage's first diagnostic.
 
-Each program ran in its own process bounded to 16 GiB of
-virtual memory and 600 s; peak memory is the process's maximum resident set.
+Each stage ran in its own process from source, bounded to 16 GiB of
+virtual memory and 600 s (the bootstrap frees nothing, so a stage's cost
+can only be measured alone); peak memory and time are the deepest stage's --
+one self-compilation attempt through that stage.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 15796 | 49 | 0 | 46 | 346 | 427 | 0 | 16 |  | parse: expected expression; then in llvm: panic: allocation failed (size=1179648, align=8) |
-| parser | 14866 | 46 | 0 | 52 | 385 | 347 | 0 | 19 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 13409 | 41 | 0 | 57 | 380 | 386 | 0 | 16 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 15771 | 64 | 0 | 132 | 933 | 595 | 0 |  |  | parse: expected expression; then in mir: panic: allocation failed (size=2359296, align=8) |
-| typecheck | 16270 | 69 | 0 | 246 | 1650 | 939 |  |  |  | parse: expected expression; then in hir: panic: allocation failed (size=65536, align=4) |
-| hir | 16233 | 55 | 0 | 253 | 2149 | 1150 |  |  |  | parse: expected expression; then in hir: panic: allocation failed (size=262144, align=8) |
-| mir | 16269 | 52 | 0 | 285 | 2465 |  |  |  |  | parse: expected expression; then in typecheck: panic: allocation failed (size=524288, align=8) |
-| llvm | 19 | 1 |  |  |  |  |  |  |  | in lex: process died (status 139; memory bound 16 GiB) |
+| lexer | 6855 | 19 | 0 | 46 | 346 | 427 | 0 | 16 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 6151 | 17 | 0 | 52 | 385 | 347 | 0 | 19 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 5544 | 16 | 0 | 57 | 380 | 386 | 0 | 16 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 11669 | 39 | 0 | 132 | 933 | 595 | 0 | 57 |  | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 15007 | 51 | 0 | 246 | 1650 | 939 | 0 |  |  | parse: expected expression; then in mir: panic: allocation failed (size=2359296, align=8) |
+| hir | 15943 | 51 | 0 | 253 | 2149 | 1150 | 0 |  |  | parse: expected expression; then in mir: panic: allocation failed (size=1179648, align=8) |
+| mir | 16271 | 53 | 0 | 285 | 2465 |  |  |  |  | parse: expected expression; then in typecheck: panic: allocation failed (size=524288, align=8) |
+| llvm | 15 | 0 |  |  |  |  |  |  |  | in parse: process died (status 139; memory bound 16 GiB) |
 
 ### What each stage rejects
 
@@ -282,6 +291,9 @@ named, not inferred.
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
 - `typecheck` ×3: type mismatch in assignment: expected bool, got void
+- `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×9: unsupported assignment target
+- `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 
 **typecheck**
 
