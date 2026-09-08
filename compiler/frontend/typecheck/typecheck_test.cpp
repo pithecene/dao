@@ -742,6 +742,21 @@ suite<"typecheck_modules"> typecheck_modules = [] {
         << (checked.result.diagnostics.empty() ? "" : checked.result.diagnostics.front().message);
   };
 
+  "a field typed by a deferred generic alias is typed once the alias resolves"_test = [] {
+    // `IntBox` waits for Box's fields; `Holder.box` is typed by it.  The
+    // first field pass leaves `box` null; a second pass after the alias
+    // resolves fills it, so `Holder("x")` is refused.
+    auto checked = check_program({
+        {"lib.dao", "module lib\nclass Box<T>:\n    v: T\n"},
+        {"main.dao",
+         "module app\nimport lib\ntype IntBox = lib::Box<i32>\n"
+         "class Holder:\n    box: IntBox\n"
+         "fn main(): i32\n  let h: Holder = Holder(\"x\")\n  return 0\n"},
+    });
+    expect(!checked.result.diagnostics.empty())
+        << "Holder(\"x\") was accepted: the alias-typed field was left untyped";
+  };
+
   "a concept is not a type outside a bound"_test = [] {
     auto checked = check_program({
         {"traits.dao", "module app::traits\nconcept Reveal:\n    fn reveal(self): i32\n"},

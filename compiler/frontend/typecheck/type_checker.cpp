@@ -491,6 +491,9 @@ void TypeChecker::register_declarations() {
   while (register_type_aliases(/*report_failures=*/false) > 0) {
   }
   register_type_aliases(/*report_failures=*/true);
+  // A field typed by one of those aliases was left null by the first
+  // field pass; now that the alias exists, the field can be typed.
+  register_struct_fields();
   register_signatures();
 }
 
