@@ -228,14 +228,25 @@ private:
   std::unordered_map<MethodKey, std::vector<MethodEntry>, MethodKeyHash> method_table_;
 
   /// The method a lookup from the current module should see, or null.
+  /// Innermost-first (CONTRACT_MODULE_SYSTEM.md §7.4): the type's own
+  /// method, then the current module's `extend`, then the prelude's --
+  /// entries are stored prelude-first, so "first visible" would let a
+  /// prelude extension shadow the module's own.
   [[nodiscard]] auto visible_entry(const std::vector<MethodEntry>& entries) const
       -> const MethodEntry* {
+    const MethodEntry* fallback = nullptr;
     for (const auto& entry : entries) {
-      if (extend_is_visible(entry.extend_module)) {
+      if (!extend_is_visible(entry.extend_module)) {
+        continue;
+      }
+      if (entry.extend_module == nullptr || entry.extend_module == current_module_) {
         return &entry;
       }
+      if (fallback == nullptr) {
+        fallback = &entry;
+      }
     }
-    return nullptr;
+    return fallback;
   }
 
   /// Record a method unless one with the same scope is already there

@@ -710,6 +710,38 @@ suite<"typecheck_modules"> typecheck_modules = [] {
         << "Box<string> was accepted where IntBox was declared: " << all_messages(checked);
   };
 
+  "an alias chain through a generic instantiation resolves after fields"_test = [] {
+    // `A` names `B`, which waits for `Box`'s fields.  `A` must wait
+    // too, not be reported unresolvable by a pass that runs before
+    // fields exist.  `P` puts the shell behind a pointer.
+    auto checked = check_program({
+        {"main.dao",
+         "module app\ntype A = B\ntype B = Box<i32>\ntype P = *Box<i32>\n"
+         "class Box<T>:\n    v: T\n"
+         "fn take(a: A, p: P): i32 -> a.v\n"
+         "fn main(): i32 -> 0\n"},
+    });
+    expect(checked.result.diagnostics.empty()) << all_messages(checked);
+  };
+
+  "a module's extend shadows the prelude's for the same receiver and name"_test = [] {
+    // Both extend i32 with `pick`; the module's returns i32, the
+    // prelude's a string.  Lookup is innermost-first, so `x.pick()` in
+    // the module is the module's.
+    auto checked = check_program({
+        {"stdlib/core/p.dao",
+         "module core::p\nconcept Named:\n    fn pick(self): string\n"
+         "extend i32 as Named:\n    fn pick(self): string -> \"s\"\n"},
+        {"app.dao",
+         "module app\nconcept Numbered:\n    fn pick(self): i32\n"
+         "extend i32 as Numbered:\n    fn pick(self): i32 -> 1\n"
+         "fn main(): i32\n  let x: i32 = 1\n  return x.pick()\n"},
+    });
+    expect(checked.result.diagnostics.empty())
+        << "the prelude's pick shadowed the module's: "
+        << (checked.result.diagnostics.empty() ? "" : checked.result.diagnostics.front().message);
+  };
+
   "a concept is not a type outside a bound"_test = [] {
     auto checked = check_program({
         {"traits.dao", "module app::traits\nconcept Reveal:\n    fn reveal(self): i32\n"},
@@ -2550,6 +2582,25 @@ suite<"module_extend_scoping"> module_extend_scoping = [] {
     });
     expect(is_ok(checked->check_result))
         << "an inline conformance to the module's Mark blocked deriving the prelude's";
+  };
+
+  "extending a class as the module's concept is not extending it as the prelude's"_test = [] {
+    // The prelude's `Box` denies the prelude's `Mark`.  The module's
+    // `Mark` is a different concept; extending Box as it is allowed.
+    auto checked = check_modules({
+        {"stdlib/core/m.dao",
+         "module core::m\nconcept Mark:\n    fn mark(self): i32\n"
+         "class Box:\n    n: i32\n    deny Mark\n"},
+        {"app.dao",
+         "module app\nconcept Mark:\n    fn shout(self): string\n"
+         "extend Box as Mark:\n    fn shout(self): string -> \"box\"\n"
+         "fn main(): i32 -> 0\n"},
+    });
+    expect(!has_error_containing(checked->check_result, "denies it"))
+        << "the module's Mark was taken for the prelude's: "
+        << (checked->check_result.diagnostics.empty()
+                ? ""
+                : checked->check_result.diagnostics.front().message);
   };
 
   "a sibling module's extend cannot make a class derive"_test = [] {
