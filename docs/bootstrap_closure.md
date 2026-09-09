@@ -10,37 +10,37 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 75076 |
-| `CallExpr` | 22801 |
-| `Callee` | 22801 |
-| `FieldExpr` | 21332 |
-| `Args` | 20475 |
-| `BinaryExpr` | 10355 |
-| `LetStatement` | 10083 |
-| `Value` | 8100 |
-| `Target` | 8100 |
-| `Assignment` | 8100 |
-| `IntLiteral` | 7795 |
-| `Condition` | 6541 |
-| `Then` | 5308 |
-| `IfStatement` | 5308 |
-| `ReturnStatement` | 5238 |
-| `StringLiteral` | 4474 |
-| `Param` | 3638 |
-| `Pattern` | 2508 |
-| `Arm` | 2508 |
-| `BoolLiteral` | 2442 |
-| `ReturnType` | 1551 |
-| `FunctionDecl` | 1551 |
-| `Else` | 1289 |
-| `WhileStatement` | 1233 |
-| `Variant` | 1155 |
+| `Identifier` | 75491 |
+| `CallExpr` | 22928 |
+| `Callee` | 22928 |
+| `FieldExpr` | 21451 |
+| `Args` | 20599 |
+| `BinaryExpr` | 10386 |
+| `LetStatement` | 10155 |
+| `Value` | 8109 |
+| `Target` | 8109 |
+| `Assignment` | 8109 |
+| `IntLiteral` | 7810 |
+| `Condition` | 6559 |
+| `Then` | 5324 |
+| `IfStatement` | 5324 |
+| `ReturnStatement` | 5279 |
+| `StringLiteral` | 4503 |
+| `Param` | 3654 |
+| `Pattern` | 2534 |
+| `Arm` | 2534 |
+| `BoolLiteral` | 2446 |
+| `ReturnType` | 1559 |
+| `FunctionDecl` | 1559 |
+| `Else` | 1294 |
+| `WhileStatement` | 1235 |
+| `Variant` | 1166 |
 | `Field` | 1048 |
 | `UnaryExpr` | 999 |
 | `TypeArgs` | 954 |
-| `Scrutinee` | 568 |
-| `MatchStatement` | 568 |
-| `ExpressionStatement` | 486 |
+| `Scrutinee` | 569 |
+| `MatchStatement` | 569 |
+| `ExpressionStatement` | 495 |
 | `ClassDecl` | 247 |
 | `BreakStatement` | 64 |
 | `ResourceBlock` | 39 |
@@ -234,14 +234,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 51 | 0 | 0 | 0 | 336 | 397 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 51 | 0 | 0 | 0 | 435 | 321 | 0 | 31 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 54 | 1 | 0 | 0 | 359 | 356 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 108 | 1 | 0 | 0 | 881 | 557 | 0 | 59 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 201 | 1 | 0 | 0 | 1554 | 891 | 0 | 128 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 292 | 2 | 0 | 231 | 2050 | 1105 | 0 | 161 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 309 | 2 | 0 | 1029 | 2318 | 1059 | 0 | 206 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 418 | 1 | 0 | 1623 | 2806 | 1092 | 0 | 259 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 59 | 0 | 0 | 0 | 339 | 397 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 55 | 0 | 0 | 0 | 444 | 323 | 0 | 32 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 56 | 1 | 0 | 0 | 362 | 356 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 109 | 1 | 0 | 0 | 891 | 558 | 0 | 59 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 201 | 1 | 0 | 0 | 1565 | 891 | 0 | 128 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 299 | 2 | 0 | 0 | 2075 | 1109 | 0 | 161 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 315 | 1 | 0 | 0 | 2387 | 1066 | 0 | 210 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 413 | 2 | 0 | 0 | 2874 | 1099 | 0 | 263 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 
@@ -277,7 +277,7 @@ named, not inferred.
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
 - `typecheck` ×1: type mismatch in '-': i64 vs i32
-- `mir` ×22: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×23: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `mir` ×1: unsupported assignment target
 
@@ -331,8 +331,6 @@ named, not inferred.
 
 **hir**
 
-- `parse` ×47: expected declaration (fn, extern, class, enum, type, concept, or extend)
-- `parse` ×3: expected expression
 - `resolve` ×22: unknown name 'char_at'
 - `resolve` ×11: unknown name 'Vector'
 - `resolve` ×6: unknown name 'Span'
@@ -349,8 +347,6 @@ named, not inferred.
 
 **mir**
 
-- `parse` ×47: expected declaration (fn, extern, class, enum, type, concept, or extend)
-- `parse` ×3: expected expression
 - `resolve` ×22: unknown name 'char_at'
 - `resolve` ×11: unknown name 'Vector'
 - `resolve` ×6: unknown name 'Span'
@@ -367,8 +363,6 @@ named, not inferred.
 
 **llvm**
 
-- `parse` ×47: expected declaration (fn, extern, class, enum, type, concept, or extend)
-- `parse` ×3: expected expression
 - `resolve` ×22: unknown name 'char_at'
 - `resolve` ×11: unknown name 'Vector'
 - `resolve` ×6: unknown name 'Span'
@@ -389,13 +383,12 @@ Every parse-stage rejection in the first audit was one construct: generic
 arguments on a qualified name in expression position
 (`Vector<i64>::new()`, `HashMap<i64>::new()`), read as the comparison
 `Vector < i64 > ...` — one diagnostic per site at statement level, more
-inside argument lists.  Task 36 taught the parser that construct; the
-parse column is zero for every program whose sources hold no
-`resource` block, and every remaining parse diagnostic is the
-`resource memory` block (Task 35 E3) — one "expected expression" per
-block, then one "expected declaration" per statement the parser skips
-recovering — the parser's next construct.  Sites per program against
-the parse column above:
+inside argument lists.  Task 36 taught the parser that construct, which
+left the `resource memory` blocks Task 35 E3 placed in the pipeline
+drivers (one "expected expression" per block, then one "expected
+declaration" per statement skipped recovering); Task 37 taught it those.
+The parse column is closed for the corpus; the resolve column is the
+next.  Sites per program against the parse column above:
 
 | Program | `Type<Args>::` sites | `resource` blocks | parse diagnostics |
 |---|---|---|---|
@@ -404,9 +397,9 @@ the parse column above:
 | graph | 67 | 0 | 0 |
 | resolver | 98 | 0 | 0 |
 | typecheck | 137 | 0 | 0 |
-| hir | 156 | 4 | 231 |
-| mir | 172 | 10 | 1029 |
-| llvm | 210 | 25 | 1623 |
+| hir | 156 | 4 | 0 |
+| mir | 172 | 10 | 0 |
+| llvm | 210 | 25 | 0 |
 
 ## 4. Reading the matrix
 

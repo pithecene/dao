@@ -91,7 +91,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 68
+  let total: i32 = 70
 
   // -----------------------------------------------------------------
   // Expression tests
@@ -585,8 +585,29 @@ fn main(): i32
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------
-  // Summary
+  // Resource blocks (Task 37)
   // -----------------------------------------------------------------
+
+  // Test 49: `resource memory pool =>` and its suite parse to ResourceS
+  // with two body statements; the `let` after the dedent is a sibling.
+  let src49: string = "fn f(): i64\n  let n: i64 = 0\n  resource memory pool =>\n    n = 1\n    n = n + 1\n  let m: i64 = n\n  return m\n"
+  let r49: ParseOutput = parse(src49)
+  if expect_no_parse_errors_po("resource_block_no_err", r49):
+    pass_count = pass_count + 1
+  let res_ok: bool = false
+  let ri: i64 = 0
+  while ri < r49.nodes.length():
+    match r49.nodes.get(ri):
+      Node.ResourceS(kind_tidx, name_tidx, body_lp):
+        if r49.idx.get(body_lp) == 2:
+          res_ok = true
+    ri = ri + 1
+  if res_ok:
+    print("PASS resource_block_two_stmts")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL resource_block_two_stmts: expected a ResourceS with a two-statement body")
+
 
   print("")
   print("--- results ---")

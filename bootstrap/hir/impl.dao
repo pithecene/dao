@@ -47,6 +47,7 @@ enum class HirNode:
   HirAssign(target: i64, value: i64)
   HirIf(cond: i64, then_lp: i64, else_lp: i64)
   HirWhile(cond: i64, body_lp: i64)
+  HirResource(kind: i64, name: i64, body_lp: i64)
   HirFor(var_name: i64, iter: i64, body_lp: i64)
   HirReturn(value: i64)
   HirBreak(tok: i64)
@@ -474,6 +475,9 @@ fn lower_stmt(hs: HS, node_idx: i64): HirR
       return lower_if_stmt(hs, cond, then_lp, else_lp)
     Node.WhileS(cond, body_lp):
       return lower_while_stmt(hs, cond, body_lp)
+    Node.ResourceS(kind_tidx, name_tidx, body_lp):
+      let body_fl: HirFlush = lower_body_stmts(hs, body_lp)
+      return hs_add_node(body_fl.hs, HirNode.HirResource(kind_tidx, name_tidx, body_fl.list_pos))
     Node.ForS(var_tidx, iter_node, body_lp):
       return lower_for_stmt(hs, var_tidx, iter_node, body_lp)
     Node.ReturnS(val_node):
@@ -1135,6 +1139,8 @@ fn hir_node_kind(node: HirNode): string
       return "HirIf"
     HirNode.HirWhile(a, b):
       return "HirWhile"
+    HirNode.HirResource(a, b, c):
+      return "HirResource"
     HirNode.HirFor(a, b, c):
       return "HirFor"
     HirNode.HirReturn(a):
@@ -1400,7 +1406,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 22
+  let total: i32 = 23
 
   // Test 1: simple_fn
   let src1: string = "fn add(a: i32, b: i32): i32\n  return a + b\n"
@@ -1916,6 +1922,24 @@ fn main(): i32
       print("FAIL lower_to_hir_respects_own_module: empty HIR")
   else:
     print("FAIL lower_to_hir_respects_own_module: root < 0")
+
+  // -----------------------------------------------------------------
+  // Test 23: resource_block_lowers — the block keeps its identity in
+  // HIR (HirResource) with its body lowered.
+  // -----------------------------------------------------------------
+  let src23: string = "fn f(): i64\n  let n: i64 = 0\n  resource memory pool =>\n    n = 1\n  return n\n"
+  let r23: HirResult = lower_to_hir(src23)
+  let has_resource: bool = false
+  let hi: i64 = 0
+  while hi < hir_count_nodes(r23):
+    if hir_get_kind_at(r23, hi) == "HirResource":
+      has_resource = true
+    hi = hi + 1
+  if r23.root >= 0 and has_resource and hir_count_diags(r23) == 0:
+    print("PASS resource_block_lowers")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL resource_block_lowers: expected a HirResource node and no diagnostics")
 
   // -----------------------------------------------------------------
   // Summary

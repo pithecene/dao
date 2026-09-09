@@ -603,7 +603,7 @@ by the typecheck histogram once the parse column is zero.
 
 ### Task 37 — Bootstrap Pipeline: `resource` Blocks
 
-Status: **spec** — `docs/task_specs/TASK_37_BOOTSTRAP_RESOURCE_BLOCKS.md`;
+Status: **complete** — `docs/task_specs/TASK_37_BOOTSTRAP_RESOURCE_BLOCKS.md`;
 the second Tier B-Bootstrap construct, the one left in the audit's
 parse column after Task 36.
 

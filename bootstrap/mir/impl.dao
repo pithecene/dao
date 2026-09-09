@@ -512,6 +512,11 @@ fn mir_lower_stmt(br: BlockR, hir_node_idx: i64): BlockR
       return mir_lower_if_stmt(br, cond, then_lp, else_lp)
     HirNode.HirWhile(cond, body_lp):
       return mir_lower_while_stmt(br, cond, body_lp)
+    HirNode.HirResource(kind, name, body_lp):
+      // The block's body, in place: the domain it names is a Tier B
+      // deferral (bootstrap/README.md), so the bootstrap's output reclaims
+      // nothing at the block's exit.
+      return lower_stmt_list(br, body_lp)
   // Unsupported statement kind (Tier A): HirBreak, HirFor, etc.  Emit
   // a diagnostic so downstream consumers observe the failure instead
   // of seeing valid-looking MIR with silently-dropped control flow.
@@ -884,7 +889,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 8
+  let total: i32 = 9
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -1038,6 +1043,21 @@ fn main(): i32
       print("FAIL while_stmt: no MirBr")
   else:
     print("FAIL while_stmt: no MirCondBr")
+
+  // -----------------------------------------------------------------
+  // Test 9: resource block lowers as its body — the same instruction
+  // kinds as the plain body, no diagnostic.
+  // -----------------------------------------------------------------
+  let src9: string = "fn main(): i32\n  let x: i32 = 0\n  resource memory pool =>\n    x = 1\n  return x\n"
+  let r9: MirResult = lower_to_mir(src9)
+  if r9.root >= 0:
+    if mir_contains_kind(r9, "MirStore") and mir_contains_kind(r9, "MirReturn") and r9.diags.length() == 0:
+      print("PASS resource_block_body")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL resource_block_body: expected MirStore + MirReturn and no diagnostics, got " + i64_to_string(r9.diags.length()) + " diagnostics")
+  else:
+    print("FAIL resource_block_body: root < 0")
 
   // -----------------------------------------------------------------
   // Summary

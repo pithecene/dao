@@ -796,6 +796,7 @@ enum class Node:
   AssignS(target: i64, value: i64)
   IfS(cond: i64, then_lp: i64, else_lp: i64)
   WhileS(cond: i64, body_lp: i64)
+  ResourceS(kind: i64, name: i64, body_lp: i64)
   ForS(var_tok: i64, iter: i64, body_lp: i64)
   ReturnS(value: i64)
   BreakS(tok: i64)
@@ -1623,6 +1624,8 @@ fn parse_statement(pc: PC, ps: PS): PR
     return ps_add_node(ps3, Node.BreakS(tidx))
   if tk_name(k) == tk_name(TK.KwMatch):
     return parse_match_stmt(pc, ps)
+  if tk_name(k) == tk_name(TK.KwResource):
+    return parse_resource_stmt(pc, ps)
 
   // Expression or assignment
   let expr: PR = parse_expr(pc, ps)
@@ -1726,6 +1729,19 @@ fn parse_while_stmt(pc: PC, ps: PS): PR
   let ps3: PS = expect(pc, cond.ps, TK.Colon)
   let body: PR = parse_suite(pc, ps3)
   return ps_add_node(body.ps, Node.WhileS(cond.node, body.node))
+
+// `resource <kind> <name> =>` and its suite: the block's kind and name
+// are kept as token indexes; the domain they name is the host's to
+// lower (Task 37).
+fn parse_resource_stmt(pc: PC, ps: PS): PR
+  let ps2: PS = ps_advance(pc, ps)
+  let kind_tidx: i64 = ps2.pos
+  let ps3: PS = expect(pc, ps2, TK.Identifier)
+  let name_tidx: i64 = ps3.pos
+  let ps4: PS = expect(pc, ps3, TK.Identifier)
+  let ps5: PS = expect(pc, ps4, TK.FatArrow)
+  let body: PR = parse_suite(pc, ps5)
+  return ps_add_node(body.ps, Node.ResourceS(kind_tidx, name_tidx, body.node))
 
 fn parse_for_stmt(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
@@ -2507,6 +2523,8 @@ fn node_kind_name(n: Node): string
       return "IfS"
     Node.WhileS(a, b):
       return "WhileS"
+    Node.ResourceS(a, b, c):
+      return "ResourceS"
     Node.ForS(a, b, c):
       return "ForS"
     Node.ReturnS(a):

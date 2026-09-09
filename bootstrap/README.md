@@ -75,7 +75,8 @@ slice of Dao syntax.
 - Declarations: `fn` (block + expression-bodied), `extern fn`, `class`
   (fields only), `enum` (with payloads), `type` alias
 - Statements: `let`, assignment, `if`/`else`/`else if`, `while`,
-  `for...in`, `return`, `break`, `match`, expression statements
+  `for...in`, `return`, `break`, `match`, `resource <kind> <name> =>`
+  blocks, expression statements
 - Expressions: full precedence tower (pipe through primary), call,
   call-site type arguments (`Type<Args>::member(args)`, `f<Args>(args)`),
   field access, index, try (`?`), lambda, list literals, qualified
@@ -87,7 +88,7 @@ slice of Dao syntax.
 
 - `concept`, `derived concept`, `extend`
 - Class methods and conformance blocks
-- `mode` / `resource` blocks
+- `mode` blocks
 - `yield`
 - Function types (`fn(T): R`)
 - Generic parameter bounds and `where` clauses
@@ -232,8 +233,9 @@ constants (int/float/bool/string), binary/unary ops, let/assign,
 calls (with `MirFnRef` callees), returns, field-access reads,
 if/else, while.
 
-**Tier B deferrals**: generators, monomorphization, mode/resource
-region enter/exit, enum construction/discriminant/payload, lambda
+**Tier B deferrals**: generators, monomorphization, the domain of a
+`resource` block (its body lowers in place: no arena, no copy-out at
+exit — Task 37 §5), `mode` blocks, enum construction/discriminant/payload, lambda
 / closures, try operator, for-over-iterable, index expressions,
 break/continue.
 
