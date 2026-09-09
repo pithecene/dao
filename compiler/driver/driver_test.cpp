@@ -465,6 +465,23 @@ suite<"driver_cli"> driver_cli_suite = [] {
                              "  text: string\n\n"
                              "  fn copy_out(self): string\n"
                              "    return self.text\n\n"
+                             "class Wrap<T>:\n"
+                             "  item: T\n\n"
+                             "  fn copy_out(self): Wrap<i32>\n"
+                             "    return Wrap(0)\n\n"
+                             "class Tag<T>:\n"
+                             "  text: string\n\n"
+                             "  fn copy_out(self): Tag<i32>\n"
+                             "    return Tag(\"wrong\")\n\n"
+                             "class Stat:\n"
+                             "  text: string\n\n"
+                             "  fn copy_out(value: Stat): Stat\n"
+                             "    return Stat(\"wrong\")\n\n"
+                             "class Gen:\n"
+                             "  text: string\n\n"
+                             "  fn copy_out<U>(self): Gen\n"
+                             "    return Gen(\"wrong\")\n\n"
+
                              "enum class Slot:\n"
                              "  Empty\n"
                              "  Full(text: string)\n\n"
@@ -479,6 +496,11 @@ suite<"driver_cli"> driver_cli_suite = [] {
                              "  let label: Label = Label(\"l\", 1)\n"
                              "  let odd: Odd = Odd(\"o\")\n"
                              "  let other: Other = Other(\"o\")\n"
+                             "  let wrap: Wrap<string> = Wrap(\"w\")\n"
+                             "  let tag: Tag<string> = Tag(\"t\")\n"
+                             "  let stat: Stat = Stat(\"s\")\n"
+                             "  let gen: Gen = Gen(\"g\")\n"
+
                              "  let slot: Slot = Slot::Empty\n"
                              "  resource memory pool =>\n"
                              "    box = Box(\"in\")\n"
@@ -486,6 +508,11 @@ suite<"driver_cli"> driver_cli_suite = [] {
                              "    label = Label(\"in\", 2)\n"
                              "    odd = Odd(\"in\")\n"
                              "    other = Other(\"in\")\n"
+                             "    wrap = Wrap(\"in\")\n"
+                             "    tag = Tag(\"in\")\n"
+                             "    stat = Stat(\"in\")\n"
+                             "    gen = Gen(\"in\")\n"
+
                              "    slot = Slot::Full(text = \"in\")\n"
                              "  return label.count\n");
     auto dumped = run_daoc(scratch, {"mir", root.string()});
@@ -507,11 +534,68 @@ suite<"driver_cli"> driver_cli_suite = [] {
       expect(dumped.out.compare(at, 15, "fn copy_out$i64") == 0)
           << "an identity copy_out specialization was left behind: " << dumped.out.substr(at, 40);
     }
-    // A method named copy_out with another signature is not the copier.
-    for (auto not_a_copier : {"fn_ref Odd.copy_out ", "fn_ref Other.copy_out "}) {
+    // A method named copy_out with another signature is not the copier:
+    // extra parameters, another return type, another instantiation of
+    // the class (even one a phantom parameter cannot tell apart), no
+    // receiver at all, or type parameters of its own.
+    for (auto not_a_copier : {"fn_ref Odd.copy_out ",
+                              "fn_ref Other.copy_out ",
+                              "fn_ref Wrap.copy_out",
+                              "fn_ref Tag.copy_out",
+                              "fn_ref Stat.copy_out",
+                              "fn_ref Gen.copy_out"}) {
       expect(dumped.out.find(not_a_copier) == std::string::npos)
           << "`" << not_a_copier << "` was taken for the copier: " << dumped.out;
     }
+  };
+
+  "a copier declared in a conformance block is diagnosed"_test = [] {
+    // Conformance-block methods are lowered without a symbol, so such a
+    // copy_out cannot be called; the class must declare it directly.
+    const Scratch scratch("copy-out-conformance");
+    auto root = scratch.file("main.dao",
+                             "module app::main\n\n"
+                             "concept Copier:\n"
+                             "  fn copy_out(self): Conf\n\n"
+                             "class Conf:\n"
+                             "  text: string\n\n"
+                             "  as Copier:\n"
+                             "    fn copy_out(self): Conf\n"
+                             "      return Conf(self.text)\n\n"
+                             "fn main(): i32\n"
+                             "  let conf: Conf = Conf(\"c\")\n"
+                             "  resource memory pool =>\n"
+                             "    conf = Conf(\"in\")\n"
+                             "  return 0\n");
+    auto dumped = run_daoc(scratch, {"mir", root.string()});
+    expect(dumped.exit_code != 0) << "a conformance-block copier was silently ignored";
+    expect(dumped.err_says("declares its copy_out inside a conformance block")) << dumped.err;
+  };
+
+  "an extension's copy_out is not the class's copier"_test = [] {
+    // An `extend` method is emitted under the same `<Class>.copy_out`
+    // symbol shape; only a method the class declares itself copies it.
+    const Scratch scratch("copy-out-extension");
+    auto root = scratch.file("main.dao",
+                             "module app::main\n\n"
+                             "class Label:\n"
+                             "  name: string\n\n"
+                             "concept Copier:\n"
+                             "  fn copy_out(self): Label\n\n"
+                             "extend Label as Copier:\n"
+                             "  fn copy_out(self): Label\n"
+                             "    return Label(\"wrong\")\n\n"
+                             "fn main(): i32\n"
+                             "  let label: Label = Label(\"l\")\n"
+                             "  resource memory pool =>\n"
+                             "    label = Label(\"in\")\n"
+                             "  return 0\n");
+    auto dumped = run_daoc(scratch, {"mir", root.string()});
+    expect(dumped.exit_code == 0) << dumped.err;
+    expect(dumped.out.find("fn_ref Label.copy_out ") == std::string::npos)
+        << "the extension's copy_out was taken for the copier: " << dumped.out;
+    expect(dumped.out.find("fn_ref copy_out_string ") != std::string::npos)
+        << "the label was not copied field by field: " << dumped.out;
   };
 
   "a container of generators may not leave a resource block"_test = [] {
@@ -530,6 +614,35 @@ suite<"driver_cli"> driver_cli_suite = [] {
     auto checked = run_daoc(scratch, {"check", root.string()});
     expect(checked.exit_code != 0) << "a vector of generators left the block";
     expect(checked.err_says("a generator cannot be copied out of the block")) << checked.err;
+
+    // Pointers among the elements are pointer values, the author's.
+    auto pointers =
+        scratch.file("pointers.dao",
+                     "module app::pointers\n\n"
+                     "fn main(): i32\n"
+                     "  let ptrs: Vector<*Generator<i32>> = Vector<*Generator<i32>>::new()\n"
+                     "  resource memory pool =>\n"
+                     "    ptrs = ptrs.push(null_ptr<Generator<i32>>())\n"
+                     "  return 0\n");
+    auto accepted = run_daoc(scratch, {"check", pointers.string()});
+    expect(accepted.exit_code == 0) << accepted.err;
+
+    // Meeting `*Generator<i32>` as a value first must not hide the same
+    // type met afterwards as a container's storage.
+    auto both = scratch.file(
+        "both.dao",
+        "module app::both\n\n"
+        "class Both:\n"
+        "  ptrs: Vector<*Generator<i32>>\n"
+        "  gens: Vector<Generator<i32>>\n\n"
+        "fn main(): i32\n"
+        "  let b: Both = Both(Vector<*Generator<i32>>::new(), Vector<Generator<i32>>::new())\n"
+        "  resource memory pool =>\n"
+        "    b = Both(Vector<*Generator<i32>>::new(), Vector<Generator<i32>>::new())\n"
+        "  return 0\n");
+    auto rejected = run_daoc(scratch, {"check", both.string()});
+    expect(rejected.exit_code != 0) << "a class holding generators after pointers left the block";
+    expect(rejected.err_says("a generator cannot be copied out of the block")) << rejected.err;
   };
 
   "a stdlib file compiled as the root keeps its root role"_test = [] {
