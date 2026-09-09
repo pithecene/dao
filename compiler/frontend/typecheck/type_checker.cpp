@@ -1797,9 +1797,16 @@ void TypeChecker::check_mode_block(const Stmt* stmt) {
 
 void TypeChecker::check_resource_block(const Stmt* stmt) {
   const auto& rb = stmt->as<ResourceBlock>();
-  ctx_.resource_blocks.push_back({.span = stmt->span, .name = rb.resource_name});
+  // Only `resource memory` is an allocation domain; another kind's body
+  // is checked without the domain rules.
+  const bool is_domain = rb.resource_kind == "memory";
+  if (is_domain) {
+    ctx_.resource_blocks.push_back({.span = stmt->span, .name = rb.resource_name});
+  }
   check_body(rb.body);
-  ctx_.resource_blocks.pop_back();
+  if (is_domain) {
+    ctx_.resource_blocks.pop_back();
+  }
 }
 
 auto TypeChecker::place_root_symbol(const Expr* expr) const -> const Symbol* {

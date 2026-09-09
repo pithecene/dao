@@ -1360,6 +1360,18 @@ suite<"typecheck_resource_domains"> typecheck_resource_domains = [] {
     expect(is_ok(result)) << (result.diagnostics.empty() ? "" : result.diagnostics[0].message);
   };
 
+  "a resource block of another kind is not an allocation domain"_test = [] {
+    // Only `resource memory` opens a domain; the escape and `yield`
+    // rules do not apply to another kind's block.
+    auto result = check_source("fn f(): string\n"
+                               "    let out: string = \"\"\n"
+                               "    resource gpu compute =>\n"
+                               "        out = \"made inside\"\n"
+                               "        return out\n"
+                               "    return out\n");
+    expect(is_ok(result)) << (result.diagnostics.empty() ? "" : result.diagnostics[0].message);
+  };
+
   "yield inside a block is rejected"_test = [] {
     auto result = check_source("fn gen(): Generator<i32>\n"
                                "    resource memory pool =>\n"
