@@ -1488,6 +1488,14 @@ suite<"typecheck_resource_domains"> typecheck_resource_domains = [] {
     expect(is_ok(partial));
     expect(!has_warning_containing(partial, "is the whole body"));
 
+    // Only a memory block is a domain: another resource kind as the
+    // whole body costs its callers nothing and is left alone.
+    auto gpu = check_source("fn h(): i32\n"
+                            "    resource gpu compute =>\n"
+                            "        return 1\n");
+    expect(is_ok(gpu));
+    expect(!has_warning_containing(gpu, "is the whole body"));
+
     // A concept's default method is a body like any other.
     auto concept_default = check_source("concept Sized:\n"
                                         "    fn size(self): i32\n"
