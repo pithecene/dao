@@ -21,21 +21,27 @@ qualified name `Vector::new` and whose call-site type arguments are
 ## 2. Why this task exists now
 
 `docs/bootstrap_closure.md` §3 measured, after Task 35, that every
-bootstrap program reaches its parse stage under 150 MiB and that every
-parse-stage diagnostic is this construct: 53–208 sites per program,
-84–2008 diagnostics (one per site at statement level, more inside
-argument lists), and every later stage's histogram is dominated by its
-shadow — `unknown name 'Vector'`, `unknown name 'new'` — because the
-sites parsed as comparisons carry no callee.
+bootstrap program reaches its parse stage under 160 MiB (the llvm
+program peaks at 156) and that every parse-stage diagnostic is this
+construct: 53–208 sites per program, 84–2008 diagnostics (one per site
+at statement level, more inside argument lists), and every later
+stage's histogram is dominated by its shadow — `unknown name 'Vector'`,
+`unknown name 'new'` — because the sites parsed as comparisons carry no
+callee.
 
-The corpus uses exactly two shapes:
+The construct has two shapes.  The compiler sources (the tracked
+`bootstrap/**/*.dao`, test strings excluded) use one; the prelude the
+corpus instantiates (`docs/bootstrap_closure.md` §2), which the
+bootstrap must compile for itself, uses the other:
 
-| Shape | Sites in `bootstrap/**/*.dao` |
-|---|---|
-| `Vector<T>::new(`, `HashMap<V>::new(` | 385 |
-| `identity<T>(` | 5 |
+| Shape | Sites in the compiler sources | Sites in `stdlib/core` |
+|---|---|---|
+| `Vector<T>::new(`, `HashMap<V>::new(` — a static call on a generic type | 268 | — |
+| `f<T>(…)` — a call with explicit type arguments (`size_of`, `align_of`, `ptr_cast`, `null_ptr`, `copy_out`, …) | 0 | 48 |
 
-No bare `Type<Args>::Variant` without a call occurs; none is in scope.
+Both shapes are one rule in the host parser and are read together;
+the second is covered by goldens rather than by the corpus.  No bare
+`Type<Args>::Variant` without a call occurs; none is in scope.
 
 ## 3. Syntax scope
 
@@ -66,15 +72,21 @@ already (the type grammar depends on it); no lexer change.
 CallE(callee: i64, args_lp: i64, arg_count: i64, targs_lp: i64, targ_count: i64)
 ```
 
-`targs_lp` is a flushed list of type nodes (`NamedT`/`GenericT`/
-`PointerT`), `targ_count` its length; a call without type arguments has
-`targ_count = 0`.  Shape 1 lowers to
+`targs_lp` is a flushed list of type nodes — whatever `parse_type`
+produces: `NamedT`, `GenericT`, `PointerT`, or `QualNameE` for a
+qualified type such as `mod::T` — and `targ_count` its length; a call
+without type arguments has `targ_count = 0`.  Shape 1 lowers to
 `CallE(QualNameE([Name, member]), args, targs)`; shape 2 to
 `CallE(IdentE(Name), args, targs)` (or a `QualNameE` callee when the
-name was qualified).  The callee shape is the one the resolver already
-handles for `Type::member` (a `Type` prefix with remaining segments is
-recorded and left to the type checker); only the type arguments are
-new.
+name was qualified).
+
+Parity with the host is the type-argument list.  The callee shape
+differs on purpose: the host parser spells a static call's callee as
+one `IdentifierExpr` named `Type.method` (a host-internal mangling its
+own resolver expects), while the bootstrap keeps the qualified name
+`QualNameE([Type, member])`, which its resolver already handles for
+`Type::member` (a `Type` prefix with remaining segments is recorded
+and left to the type checker).  Only the type arguments are new.
 
 `node_kind_name` keeps reporting `CallE`; the bootstrap has no AST
 printer, and its goldens assert node kinds and child counts.
@@ -122,9 +134,10 @@ the stack), containing:
 2. `parse_postfix` speculation and both call shapes.
 3. Resolver / type checker / HIR arms updated (pass-through).
 4. Parser golden tests (§8) and the audit rerun (§8).
-5. `bootstrap/README.md`: call-site type arguments join the parser's
-   Tier A expression list; `docs/IMPLEMENTATION_PLAN.md` Task 36 entry
-   and the Tier B-Bootstrap paragraph of Task 34.
+5. `bootstrap/README.md`: the parser section gains a **Tier
+   B-Bootstrap coverage** list (as the LLVM section's "Tier B coverage
+   (added)") naming call-site type arguments; the Tier A list stays as
+   it is.  `docs/IMPLEMENTATION_PLAN.md`: the Task 36 entry.
 
 ## 8. Tests
 
