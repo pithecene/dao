@@ -469,6 +469,14 @@ suite<"driver_cli"> driver_cli_suite = [] {
                              "  item: T\n\n"
                              "  fn copy_out(self): Wrap<i32>\n"
                              "    return Wrap(0)\n\n"
+                             "class Tag<T>:\n"
+                             "  text: string\n\n"
+                             "  fn copy_out(self): Tag<i32>\n"
+                             "    return Tag(\"wrong\")\n\n"
+                             "class Stat:\n"
+                             "  text: string\n\n"
+                             "  fn copy_out(value: Stat): Stat\n"
+                             "    return Stat(\"wrong\")\n\n"
                              "enum class Slot:\n"
                              "  Empty\n"
                              "  Full(text: string)\n\n"
@@ -484,6 +492,8 @@ suite<"driver_cli"> driver_cli_suite = [] {
                              "  let odd: Odd = Odd(\"o\")\n"
                              "  let other: Other = Other(\"o\")\n"
                              "  let wrap: Wrap<string> = Wrap(\"w\")\n"
+                             "  let tag: Tag<string> = Tag(\"t\")\n"
+                             "  let stat: Stat = Stat(\"s\")\n"
                              "  let slot: Slot = Slot::Empty\n"
                              "  resource memory pool =>\n"
                              "    box = Box(\"in\")\n"
@@ -492,6 +502,8 @@ suite<"driver_cli"> driver_cli_suite = [] {
                              "    odd = Odd(\"in\")\n"
                              "    other = Other(\"in\")\n"
                              "    wrap = Wrap(\"in\")\n"
+                             "    tag = Tag(\"in\")\n"
+                             "    stat = Stat(\"in\")\n"
                              "    slot = Slot::Full(text = \"in\")\n"
                              "  return label.count\n");
     auto dumped = run_daoc(scratch, {"mir", root.string()});
@@ -513,9 +525,15 @@ suite<"driver_cli"> driver_cli_suite = [] {
       expect(dumped.out.compare(at, 15, "fn copy_out$i64") == 0)
           << "an identity copy_out specialization was left behind: " << dumped.out.substr(at, 40);
     }
-    // A method named copy_out with another signature is not the copier.
-    for (auto not_a_copier :
-         {"fn_ref Odd.copy_out ", "fn_ref Other.copy_out ", "fn_ref Wrap.copy_out"}) {
+    // A method named copy_out with another signature is not the copier:
+    // extra parameters, another return type, another instantiation of
+    // the class (even one a phantom parameter cannot tell apart), or no
+    // receiver at all.
+    for (auto not_a_copier : {"fn_ref Odd.copy_out ",
+                              "fn_ref Other.copy_out ",
+                              "fn_ref Wrap.copy_out",
+                              "fn_ref Tag.copy_out",
+                              "fn_ref Stat.copy_out"}) {
       expect(dumped.out.find(not_a_copier) == std::string::npos)
           << "`" << not_a_copier << "` was taken for the copier: " << dumped.out;
     }

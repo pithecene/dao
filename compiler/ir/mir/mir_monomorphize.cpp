@@ -791,7 +791,7 @@ auto specialize_call_site(MirInst* inst,
 } // namespace
 
 // ---------------------------------------------------------------------------
-// copy_out expansion (Task 35 E1)
+// copy_out expansion
 // ---------------------------------------------------------------------------
 //
 // The prelude's `copy_out<T>(x)` is the identity.  A call to it whose T
@@ -852,65 +852,73 @@ auto function_type_of(const MirFunction* fn, TypeContext& types) -> const Type* 
   return types.function_type(std::move(params), fn->return_type);
 }
 
-// A class's own `copy_out(self)`, template or not: the way a class that
-// owns raw memory (Vector, HashMap) copies what only it knows the extent
-// of.  A method's symbol is named `<Class>.copy_out`.
+// A class's own copier, decided from its declaration: the method named
+// `copy_out` that takes `self` and nothing else and returns the class's
+// own type spelled as the class names itself, type parameters included
+// (`Wrap<T>` for `class Wrap<T>`).  Decided there rather than from MIR
+// shapes: a static `copy_out(value: Label): Label` has one parameter but
+// no receiver, and a phantom type parameter leaves `Tag<i32>` and
+// `Tag<string>` with the same fields.
 struct MethodRef {
   const Symbol* symbol = nullptr;
   const MirFunction* fn = nullptr;
 };
 
+auto names_only(const QualifiedPath& path, std::string_view name) -> bool {
+  return path.segments.size() == 1 && path.segments[0] == name;
+}
+
+auto copier_decl_of(const ClassDecl& cls) -> const Decl* {
+  for (const auto* method : cls.methods) {
+    const auto& fn = method->as<FunctionDecl>();
+    if (fn.name != "copy_out" || fn.params.size() != 1 || fn.params[0].name != "self" ||
+        fn.params[0].type != nullptr || fn.return_type == nullptr ||
+        !fn.return_type->is<NamedType>()) {
+      continue;
+    }
+    const auto& returned = fn.return_type->as<NamedType>();
+    if (!names_only(returned.name, cls.name) ||
+        returned.type_args.size() != cls.type_params.size()) {
+      continue;
+    }
+    bool own_parameters = true;
+    for (size_t i = 0; i < returned.type_args.size(); ++i) {
+      const auto* arg = returned.type_args[i];
+      own_parameters = own_parameters && arg->is<NamedType>() &&
+                       arg->as<NamedType>().type_args.empty() &&
+                       names_only(arg->as<NamedType>().name, cls.type_params[i].name);
+    }
+    if (own_parameters) {
+      return method;
+    }
+  }
+  return nullptr;
+}
+
 auto find_copy_out_method(const TypeStruct* receiver,
                           const MirModule& module,
                           const std::unordered_map<const Symbol*, MirFunction*>& generic_templates)
     -> MethodRef {
-  // The class's own methods: an `extend` may add a `copy_out` under the
-  // same `<Class>.copy_out` symbol shape, and is not the class's copier.
   const auto* class_decl = receiver->decl_id();
   if (class_decl == nullptr || class_decl->kind() != NodeKind::ClassDecl) {
     return {};
   }
-  const auto& own_methods = class_decl->as<ClassDecl>().methods;
-  auto declared_by_class = [&](const Symbol* sym) {
-    return sym != nullptr &&
-           std::ranges::find(own_methods, sym->decl_as_decl()) != own_methods.end();
-  };
-  // The copier is exactly `copy_out(self)` returning the receiver's own
-  // type, type arguments included (`Box<T>` returning `Box<i32>` is not
-  // it); a method of that name with any other signature is an ordinary
-  // method.
-  auto is_copier = [&](const MirFunction* fn) {
-    size_t params = 0;
-    for (const auto& local : fn->locals) {
-      if (!local.is_param) {
-        break;
-      }
-      ++params;
-    }
-    if (params != 1 || fn->locals[0].type == nullptr || fn->return_type == nullptr) {
-      return false;
-    }
-    return type_identity_key(fn->return_type) == type_identity_key(fn->locals[0].type);
-  };
-  auto is_method_of_receiver = [&](const Symbol* sym, const MirFunction* fn) {
-    if (!declared_by_class(sym) || !sym->name.ends_with(".copy_out") || fn->locals.empty() ||
-        !fn->locals[0].is_param || fn->locals[0].type == nullptr ||
-        fn->locals[0].type->kind() != TypeKind::Struct) {
-      return false;
-    }
-    return static_cast<const TypeStruct*>(fn->locals[0].type)->decl_id() == class_decl;
-  };
+  const auto* copier = copier_decl_of(class_decl->as<ClassDecl>());
+  if (copier == nullptr) {
+    return {};
+  }
   // The template first: a specialization already made for another
   // receiver (`Vector.copy_out$string` when `Vector<i64>` is being
-  // copied) shares the class and must not answer for it; the template
-  // is specialized for this receiver by the call's own type arguments.
+  // copied) shares the declaration and must not answer for it; the
+  // template is specialized for this receiver by the call's own type
+  // arguments.
   for (const auto& [sym, fn] : generic_templates) {
-    if (is_method_of_receiver(sym, fn) && is_copier(fn)) {
+    if (sym != nullptr && sym->decl_as_decl() == copier) {
       return {sym, fn};
     }
   }
   for (const auto* fn : module.functions) {
-    if (is_method_of_receiver(fn->symbol, fn) && is_copier(fn)) {
+    if (fn->symbol != nullptr && fn->symbol->decl_as_decl() == copier) {
       return {fn->symbol, fn};
     }
   }
