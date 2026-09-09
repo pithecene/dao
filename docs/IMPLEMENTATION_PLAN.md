@@ -561,7 +561,7 @@ typecheck program).  Both now write in place for the latest value
 with versioned slots (maps) and an overwrite log (vectors), so a
 stale value still reads exactly its own.  The audit's peak column
 (`docs/bootstrap_closure.md`, 6 GiB probe bound) fell from 5.5–16 GiB
-to 45–170 MiB for every program, stage times to a second or less, and
+to 45–127 MiB for every program, stage times to a second or less, and
 §10's acceptance bar — every program under 2 GiB — is met.  The
 llvm stage's `Vector.get` panic and the llvm program's parse crash are
 earlier bootstrap defects, not memory.
