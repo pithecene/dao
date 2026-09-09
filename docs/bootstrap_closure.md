@@ -234,14 +234,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 48 | 1 | 0 | 84 | 369 | 431 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 47 | 1 | 0 | 90 | 408 | 351 | 0 | 19 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 45 | 0 | 0 | 95 | 403 | 390 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 72 | 0 | 0 | 170 | 956 | 599 | 0 | 57 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 94 | 1 | 0 | 284 | 1673 | 943 | 0 | 126 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 127 | 1 | 0 | 528 | 2180 | 1154 | 0 | 159 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 127 | 1 | 0 | 1340 | 2455 | 1113 | 0 | 204 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 19 | 0 | — | — | — | — | — | — | — | in parse: process died (status 139; memory bound 6 GiB) |
+| lexer | 50 | 0 | 0 | 84 | 369 | 431 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 46 | 0 | 0 | 90 | 408 | 351 | 0 | 19 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 46 | 1 | 0 | 95 | 403 | 390 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 75 | 1 | 0 | 170 | 956 | 599 | 0 | 57 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 96 | 1 | 0 | 284 | 1673 | 943 | 0 | 126 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 137 | 1 | 0 | 528 | 2180 | 1154 | 0 | 159 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 144 | 1 | 0 | 1340 | 2455 | 1113 | 0 | 204 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 18 | 0 | — | — | — | — | — | — | — | in parse: process died (status 139; memory bound 6 GiB) |
 
 ### What each stage rejects
 
