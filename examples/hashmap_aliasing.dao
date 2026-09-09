@@ -1,0 +1,81 @@
+module examples::hashmap_aliasing
+
+// A map value is a value: writes through a later value are invisible
+// to an earlier one, whether the write filled a slot in place (the
+// latest value) or forked fresh storage (a stale one).
+
+fn show(label: string, m: HashMap<i64>, key: string): void
+  match m.get(key):
+    Option.Some(v):
+      print(label + " " + key + " = " + v.to_string())
+    Option.None:
+      print(label + " has no " + key)
+
+fn main(): i32
+  let m: HashMap<i64> = HashMap<i64>::new()
+  m = m.set("a", 1)
+  let old: HashMap<i64> = m
+  m = m.set("b", 2)
+  m = m.set("a", 10)
+  print(m.length())
+  print(old.length())
+  show("m", m, "a")
+  show("m", m, "b")
+  show("old", old, "a")
+  show("old", old, "b")
+  let fork: HashMap<i64> = old.set("c", 3)
+  show("fork", fork, "a")
+  show("fork", fork, "b")
+  show("fork", fork, "c")
+  show("m", m, "c")
+  // A stale value's update of a key it already holds forks and wins.
+  let refresh: HashMap<i64> = old.set("a", 9)
+  show("refresh", refresh, "a")
+  show("old", old, "a")
+  print(refresh.length())
+  // An update while the storage is full grows and still wins.
+  let full: HashMap<i64> = HashMap<i64>::new()
+  let f: i64 = 0
+  while f < 6:
+    full = full.set("f" + f.to_string(), f)
+    f = f + 1
+  full = full.set("f0", 60)
+  show("full", full, "f0")
+  print(full.length())
+  let before: HashMap<i64> = m
+  let i: i64 = 0
+  while i < 200:
+    m = m.set("k" + i.to_string(), i)
+    i = i + 1
+  print(m.length())
+  print(before.length())
+  show("m", m, "k199")
+  show("before", before, "k0")
+  // Compaction keeps one slot per key, the newest the value sees, at
+  // its own stamp: a value made from the compacted map reads it, and a
+  // later write past it is invisible to that value.
+  let churn: HashMap<i64> = HashMap<i64>::new()
+  let c: i64 = 0
+  while c < 5:
+    churn = churn.set("z", c)
+    c = c + 1
+  let mid: HashMap<i64> = churn
+  churn = churn.set("y", 1)
+  churn = churn.set("w", 2)
+  let later: HashMap<i64> = churn
+  churn = churn.set("z", 40)
+  show("churn", churn, "z")
+  show("churn", churn, "y")
+  show("churn", churn, "w")
+  show("later", later, "z")
+  show("mid", mid, "z")
+  print(churn.length())
+  let out: HashMap<i64> = HashMap<i64>::new()
+  resource memory pool =>
+    let inner: HashMap<i64> = HashMap<i64>::new()
+    inner = inner.set("x", 7)
+    inner = inner.set("x", 8)
+    out = inner
+  show("out", out, "x")
+  print(out.length())
+  return 0

@@ -1,0 +1,27 @@
+2
+1
+m a = 10
+m b = 2
+old a = 1
+old has no b
+fork a = 1
+fork has no b
+fork c = 3
+m has no c
+refresh a = 9
+old a = 1
+1
+full f0 = 60
+6
+202
+2
+m k199 = 199
+before has no k0
+churn z = 40
+churn y = 1
+churn w = 2
+later z = 4
+mid z = 4
+3
+out x = 8
+1

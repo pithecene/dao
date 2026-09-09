@@ -1,0 +1,522 @@
+File
+  Module examples::hashmap_aliasing
+  FunctionDecl show
+    Param label: string
+    Param m: HashMap<i64>
+    Param key: string
+    ReturnType: void
+    MatchStatement
+      Scrutinee
+        CallExpr
+          Callee
+            FieldExpr .get
+              Identifier m
+          Args
+            Identifier key
+      Arm
+        Pattern
+          FieldExpr .Some
+            Identifier Option
+        ExpressionStatement
+          CallExpr
+            Callee
+              Identifier print
+            Args
+              BinaryExpr +
+                BinaryExpr +
+                  BinaryExpr +
+                    BinaryExpr +
+                      Identifier label
+                      StringLiteral " "
+                    Identifier key
+                  StringLiteral " = "
+                CallExpr
+                  Callee
+                    FieldExpr .to_string
+                      Identifier v
+      Arm
+        Pattern
+          FieldExpr .None
+            Identifier Option
+        ExpressionStatement
+          CallExpr
+            Callee
+              Identifier print
+            Args
+              BinaryExpr +
+                BinaryExpr +
+                  Identifier label
+                  StringLiteral " has no "
+                Identifier key
+  FunctionDecl main
+    ReturnType: i32
+    LetStatement m: HashMap<i64>
+      CallExpr
+        Callee
+          Identifier HashMap.new
+        TypeArgs
+          i64
+    Assignment
+      Target
+        Identifier m
+      Value
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier m
+          Args
+            StringLiteral "a"
+            IntLiteral 1
+    LetStatement old: HashMap<i64>
+      Identifier m
+    Assignment
+      Target
+        Identifier m
+      Value
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier m
+          Args
+            StringLiteral "b"
+            IntLiteral 2
+    Assignment
+      Target
+        Identifier m
+      Value
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier m
+          Args
+            StringLiteral "a"
+            IntLiteral 10
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier m
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier old
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "m"
+          Identifier m
+          StringLiteral "a"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "m"
+          Identifier m
+          StringLiteral "b"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "old"
+          Identifier old
+          StringLiteral "a"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "old"
+          Identifier old
+          StringLiteral "b"
+    LetStatement fork: HashMap<i64>
+      CallExpr
+        Callee
+          FieldExpr .set
+            Identifier old
+        Args
+          StringLiteral "c"
+          IntLiteral 3
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "fork"
+          Identifier fork
+          StringLiteral "a"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "fork"
+          Identifier fork
+          StringLiteral "b"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "fork"
+          Identifier fork
+          StringLiteral "c"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "m"
+          Identifier m
+          StringLiteral "c"
+    LetStatement refresh: HashMap<i64>
+      CallExpr
+        Callee
+          FieldExpr .set
+            Identifier old
+        Args
+          StringLiteral "a"
+          IntLiteral 9
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "refresh"
+          Identifier refresh
+          StringLiteral "a"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "old"
+          Identifier old
+          StringLiteral "a"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier refresh
+    LetStatement full: HashMap<i64>
+      CallExpr
+        Callee
+          Identifier HashMap.new
+        TypeArgs
+          i64
+    LetStatement f: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier f
+          IntLiteral 6
+      Assignment
+        Target
+          Identifier full
+        Value
+          CallExpr
+            Callee
+              FieldExpr .set
+                Identifier full
+            Args
+              BinaryExpr +
+                StringLiteral "f"
+                CallExpr
+                  Callee
+                    FieldExpr .to_string
+                      Identifier f
+              Identifier f
+      Assignment
+        Target
+          Identifier f
+        Value
+          BinaryExpr +
+            Identifier f
+            IntLiteral 1
+    Assignment
+      Target
+        Identifier full
+      Value
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier full
+          Args
+            StringLiteral "f0"
+            IntLiteral 60
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "full"
+          Identifier full
+          StringLiteral "f0"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier full
+    LetStatement before: HashMap<i64>
+      Identifier m
+    LetStatement i: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          IntLiteral 200
+      Assignment
+        Target
+          Identifier m
+        Value
+          CallExpr
+            Callee
+              FieldExpr .set
+                Identifier m
+            Args
+              BinaryExpr +
+                StringLiteral "k"
+                CallExpr
+                  Callee
+                    FieldExpr .to_string
+                      Identifier i
+              Identifier i
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            IntLiteral 1
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier m
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier before
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "m"
+          Identifier m
+          StringLiteral "k199"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "before"
+          Identifier before
+          StringLiteral "k0"
+    LetStatement churn: HashMap<i64>
+      CallExpr
+        Callee
+          Identifier HashMap.new
+        TypeArgs
+          i64
+    LetStatement c: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier c
+          IntLiteral 5
+      Assignment
+        Target
+          Identifier churn
+        Value
+          CallExpr
+            Callee
+              FieldExpr .set
+                Identifier churn
+            Args
+              StringLiteral "z"
+              Identifier c
+      Assignment
+        Target
+          Identifier c
+        Value
+          BinaryExpr +
+            Identifier c
+            IntLiteral 1
+    LetStatement mid: HashMap<i64>
+      Identifier churn
+    Assignment
+      Target
+        Identifier churn
+      Value
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier churn
+          Args
+            StringLiteral "y"
+            IntLiteral 1
+    Assignment
+      Target
+        Identifier churn
+      Value
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier churn
+          Args
+            StringLiteral "w"
+            IntLiteral 2
+    LetStatement later: HashMap<i64>
+      Identifier churn
+    Assignment
+      Target
+        Identifier churn
+      Value
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier churn
+          Args
+            StringLiteral "z"
+            IntLiteral 40
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "churn"
+          Identifier churn
+          StringLiteral "z"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "churn"
+          Identifier churn
+          StringLiteral "y"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "churn"
+          Identifier churn
+          StringLiteral "w"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "later"
+          Identifier later
+          StringLiteral "z"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "mid"
+          Identifier mid
+          StringLiteral "z"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier churn
+    LetStatement out: HashMap<i64>
+      CallExpr
+        Callee
+          Identifier HashMap.new
+        TypeArgs
+          i64
+    ResourceBlock memory pool
+      LetStatement inner: HashMap<i64>
+        CallExpr
+          Callee
+            Identifier HashMap.new
+          TypeArgs
+            i64
+      Assignment
+        Target
+          Identifier inner
+        Value
+          CallExpr
+            Callee
+              FieldExpr .set
+                Identifier inner
+            Args
+              StringLiteral "x"
+              IntLiteral 7
+      Assignment
+        Target
+          Identifier inner
+        Value
+          CallExpr
+            Callee
+              FieldExpr .set
+                Identifier inner
+            Args
+              StringLiteral "x"
+              IntLiteral 8
+      Assignment
+        Target
+          Identifier out
+        Value
+          Identifier inner
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "out"
+          Identifier out
+          StringLiteral "x"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier out
+    ReturnStatement
+      IntLiteral 0
