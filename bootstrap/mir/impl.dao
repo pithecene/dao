@@ -708,93 +708,96 @@ fn lower_function(ms: MS, hir_fn_idx: i64): MirR
 // =========================================================================
 
 fn lower_to_mir(src: string): MirResult
-  // Route through the program pipeline so MS sees the same
-  // composite-keyed uses_map as the HIR pass does.
-  let wrapped: string = wrap_test_module(src)
-  let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs = inputs.push(SourceInput("test.dao", wrapped))
-  let pg: ProgramGraph = build_program(inputs)
-  let p: Program = program_from_graph(pg)
-  p = program_run_resolve(p)
-  p = program_run_typecheck(p)
-  p = program_run_hir(p)
+  // One domain per stage: its scratch is reclaimed at the exit and
+  // only the result leaves, copied into the caller's domain.
+  resource memory stage =>
+    // Route through the program pipeline so MS sees the same
+    // composite-keyed uses_map as the HIR pass does.
+    let wrapped: string = wrap_test_module(src)
+    let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+    inputs = inputs.push(SourceInput("test.dao", wrapped))
+    let pg: ProgramGraph = build_program(inputs)
+    let p: Program = program_from_graph(pg)
+    p = program_run_resolve(p)
+    p = program_run_typecheck(p)
+    p = program_run_hir(p)
 
-  // Lower from HirResult constructed off the single module.
-  let mid: i64 = to_i64(0)
-  let sf: SourceFile = program_file_of_module(p, mid)
-  let po: ParseOutput = sf.parse_output
-  let hs: HS = HS(po.nodes, po.idx, po.toks, sf.source_text, p.resolve.symbols, p.typecheck.types, p.typecheck.type_info, p.typecheck.expr_types, p.typecheck.sym_types, p.resolve.uses, Vector<HirNode>::new(), Vector<i64>::new(), Vector<Diagnostic>::new(), mid, sf.file_id)
-  let result: HirR = lower_file(hs, po.root)
-  let final_hs: HS = result.hs
+    // Lower from HirResult constructed off the single module.
+    let mid: i64 = to_i64(0)
+    let sf: SourceFile = program_file_of_module(p, mid)
+    let po: ParseOutput = sf.parse_output
+    let hs: HS = HS(po.nodes, po.idx, po.toks, sf.source_text, p.resolve.symbols, p.typecheck.types, p.typecheck.type_info, p.typecheck.expr_types, p.typecheck.sym_types, p.resolve.uses, Vector<HirNode>::new(), Vector<i64>::new(), Vector<Diagnostic>::new(), mid, sf.file_id)
+    let result: HirR = lower_file(hs, po.root)
+    let final_hs: HS = result.hs
 
-  let ms: MS = MS(
-    final_hs.hir_nodes,
-    final_hs.hir_idx,
-    final_hs.types,
-    final_hs.type_info,
-    final_hs.toks,
-    final_hs.src,
-    p.resolve.symbols,
-    p.typecheck.sym_types,
-    p.resolve.uses,
-    Vector<MirNode>::new(),
-    Vector<i64>::new(),
-    Vector<Diagnostic>::new(),
-    sf.file_id,
-    to_i64(-1),
-    Vector<i64>::new(),
-    Vector<i64>::new(),
-    HashMap<i64>::new(),
-    to_i64(0))
+    let ms: MS = MS(
+      final_hs.hir_nodes,
+      final_hs.hir_idx,
+      final_hs.types,
+      final_hs.type_info,
+      final_hs.toks,
+      final_hs.src,
+      p.resolve.symbols,
+      p.typecheck.sym_types,
+      p.resolve.uses,
+      Vector<MirNode>::new(),
+      Vector<i64>::new(),
+      Vector<Diagnostic>::new(),
+      sf.file_id,
+      to_i64(-1),
+      Vector<i64>::new(),
+      Vector<i64>::new(),
+      HashMap<i64>::new(),
+      to_i64(0))
 
-  // Build a HirResult-shaped wrapper so the rest of lowering reads
-  // from `hir.root` etc.
-  let hir_root: i64 = result.hir
+    // Build a HirResult-shaped wrapper so the rest of lowering reads
+    // from `hir.root` etc.
+    let hir_root: i64 = result.hir
 
-  // Walk the HIR root (HirFile or HirModule) and lower each function
-  // declaration.
-  let fn_indices: Vector<i64> = Vector<i64>::new()
-  let root_node: HirNode = ms.hir_nodes.get(hir_root)
-  match root_node:
-    HirNode.HirFile(decls_lp):
-      let decls: Vector<i64> = read_hir_list(ms.hir_idx, decls_lp)
-      let i: i64 = to_i64(0)
-      while i < decls.length():
-        let decl_idx: i64 = decls.get(i)
-        let decl_node: HirNode = ms.hir_nodes.get(decl_idx)
-        match decl_node:
-          HirNode.HirFunction(n, tp, p, rt, b, ie, co):
-            let r: MirR = lower_function(ms, decl_idx)
-            ms = r.ms
-            if r.mir >= 0:
-              fn_indices = fn_indices.push(r.mir)
-        i = i + to_i64(1)
-    HirNode.HirProgram(module_list_lp):
-      let modules: Vector<i64> = read_hir_list(ms.hir_idx, module_list_lp)
-      let mi: i64 = to_i64(0)
-      while mi < modules.length():
-        let mod_idx: i64 = modules.get(mi)
-        let mod_node: HirNode = ms.hir_nodes.get(mod_idx)
-        match mod_node:
-          HirNode.HirModule(nt, decls_lp, module_id):
-            let decls: Vector<i64> = read_hir_list(ms.hir_idx, decls_lp)
-            let i: i64 = to_i64(0)
-            while i < decls.length():
-              let decl_idx: i64 = decls.get(i)
-              let decl_node: HirNode = ms.hir_nodes.get(decl_idx)
-              match decl_node:
-                HirNode.HirFunction(n, tp, p, rt, b, ie, co):
-                  let r: MirR = lower_function(ms, decl_idx)
-                  ms = r.ms
-                  if r.mir >= 0:
-                    fn_indices = fn_indices.push(r.mir)
-              i = i + to_i64(1)
-        mi = mi + to_i64(1)
+    // Walk the HIR root (HirFile or HirModule) and lower each function
+    // declaration.
+    let fn_indices: Vector<i64> = Vector<i64>::new()
+    let root_node: HirNode = ms.hir_nodes.get(hir_root)
+    match root_node:
+      HirNode.HirFile(decls_lp):
+        let decls: Vector<i64> = read_hir_list(ms.hir_idx, decls_lp)
+        let i: i64 = to_i64(0)
+        while i < decls.length():
+          let decl_idx: i64 = decls.get(i)
+          let decl_node: HirNode = ms.hir_nodes.get(decl_idx)
+          match decl_node:
+            HirNode.HirFunction(n, tp, p, rt, b, ie, co):
+              let r: MirR = lower_function(ms, decl_idx)
+              ms = r.ms
+              if r.mir >= 0:
+                fn_indices = fn_indices.push(r.mir)
+          i = i + to_i64(1)
+      HirNode.HirProgram(module_list_lp):
+        let modules: Vector<i64> = read_hir_list(ms.hir_idx, module_list_lp)
+        let mi: i64 = to_i64(0)
+        while mi < modules.length():
+          let mod_idx: i64 = modules.get(mi)
+          let mod_node: HirNode = ms.hir_nodes.get(mod_idx)
+          match mod_node:
+            HirNode.HirModule(nt, decls_lp, module_id):
+              let decls: Vector<i64> = read_hir_list(ms.hir_idx, decls_lp)
+              let i: i64 = to_i64(0)
+              while i < decls.length():
+                let decl_idx: i64 = decls.get(i)
+                let decl_node: HirNode = ms.hir_nodes.get(decl_idx)
+                match decl_node:
+                  HirNode.HirFunction(n, tp, p, rt, b, ie, co):
+                    let r: MirR = lower_function(ms, decl_idx)
+                    ms = r.ms
+                    if r.mir >= 0:
+                      fn_indices = fn_indices.push(r.mir)
+                i = i + to_i64(1)
+          mi = mi + to_i64(1)
 
-  // Emit MirModule root.
-  let fl: MirFlush = mir_flush_list(ms, fn_indices)
-  let root_r: MirR = ms_add_node(fl.ms, MirNode.MirModule(fl.list_pos, fn_indices.length()))
-  return MirResult(root_r.ms.mir_nodes, root_r.ms.mir_idx, root_r.ms.diags, root_r.mir)
+    // Emit MirModule root.
+    let fl: MirFlush = mir_flush_list(ms, fn_indices)
+    let root_r: MirR = ms_add_node(fl.ms, MirNode.MirModule(fl.list_pos, fn_indices.length()))
+    return MirResult(root_r.ms.mir_nodes, root_r.ms.mir_idx, root_r.ms.diags, root_r.mir)
 
 // =========================================================================
 // Section 68: Node kind name (for tests and debug)

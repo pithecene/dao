@@ -1911,67 +1911,70 @@ fn build_module_ts(tc: TC, types: Vector<DaoType>, type_info: Vector<i64>, sym_t
 // that every required method has a matching signature on the
 // implementing type's method set. Body correctness is pass2's job.
 fn program_run_typecheck(p: Program): Program
-  p = program_init_typecheck(p)
+  // One domain per stage: its scratch is reclaimed at the exit and
+  // only the result leaves, copied into the caller's domain.
+  resource memory stage =>
+    p = program_init_typecheck(p)
 
-  // Accumulators — threaded across all modules.
-  let types: Vector<DaoType> = p.typecheck.types
-  let type_info: Vector<i64> = p.typecheck.type_info
-  let sym_types: Vector<i64> = p.typecheck.sym_types
-  let expr_types: HashMap<i64> = p.typecheck.expr_types
-  let variant_set: HashMap<i64> = HashMap<i64>::new()
-  // Seed diagnostics from the resolve pass only (the pre-typecheck
-  // baseline), NOT from p.diags which may already include typecheck
-  // diagnostics from a prior run. This prevents diagnostic
-  // duplication on reentrant calls — same guard pattern as
-  // program_init_typecheck's initialized flag.
-  let all_diags: Vector<FileDiagnostic> = p.resolve.diags
+    // Accumulators — threaded across all modules.
+    let types: Vector<DaoType> = p.typecheck.types
+    let type_info: Vector<i64> = p.typecheck.type_info
+    let sym_types: Vector<i64> = p.typecheck.sym_types
+    let expr_types: HashMap<i64> = p.typecheck.expr_types
+    let variant_set: HashMap<i64> = HashMap<i64>::new()
+    // Seed diagnostics from the resolve pass only (the pre-typecheck
+    // baseline), NOT from p.diags which may already include typecheck
+    // diagnostics from a prior run. This prevents diagnostic
+    // duplication on reentrant calls — same guard pattern as
+    // program_init_typecheck's initialized flag.
+    let all_diags: Vector<FileDiagnostic> = p.resolve.diags
 
-  // --- Program Pass 1: register declarations in topo order ---
-  let ti: i64 = 0
-  while ti < p.graph.topo_order.length():
-    let mid: i64 = p.graph.topo_order.get(ti)
-    let tc: TC = build_module_tc(p, mid)
-    let sf: SourceFile = program_file_of_module(p, mid)
-    let po: ParseOutput = sf.parse_output
-    let ts: TS = build_module_ts(tc, types, type_info, sym_types, expr_types, variant_set)
-    ts = tc_pass1(ts, po.root)
-    // Save accumulated state.
-    types = ts.types
-    type_info = ts.type_info
-    sym_types = ts.sym_types
-    expr_types = ts.expr_types
-    variant_set = ts.variant_set
-    // Merge per-module diagnostics.
-    let di: i64 = 0
-    while di < ts.diags.length():
-      all_diags = all_diags.push(FileDiagnostic(sf.file_id, sf.path, ts.diags.get(di)))
-      di = di + 1
-    ti = ti + 1
+    // --- Program Pass 1: register declarations in topo order ---
+    let ti: i64 = 0
+    while ti < p.graph.topo_order.length():
+      let mid: i64 = p.graph.topo_order.get(ti)
+      let tc: TC = build_module_tc(p, mid)
+      let sf: SourceFile = program_file_of_module(p, mid)
+      let po: ParseOutput = sf.parse_output
+      let ts: TS = build_module_ts(tc, types, type_info, sym_types, expr_types, variant_set)
+      ts = tc_pass1(ts, po.root)
+      // Save accumulated state.
+      types = ts.types
+      type_info = ts.type_info
+      sym_types = ts.sym_types
+      expr_types = ts.expr_types
+      variant_set = ts.variant_set
+      // Merge per-module diagnostics.
+      let di: i64 = 0
+      while di < ts.diags.length():
+        all_diags = all_diags.push(FileDiagnostic(sf.file_id, sf.path, ts.diags.get(di)))
+        di = di + 1
+      ti = ti + 1
 
-  // --- Program Pass 2: check bodies in topo order ---
-  let t2i: i64 = 0
-  while t2i < p.graph.topo_order.length():
-    let mid: i64 = p.graph.topo_order.get(t2i)
-    let tc: TC = build_module_tc(p, mid)
-    let sf: SourceFile = program_file_of_module(p, mid)
-    let po: ParseOutput = sf.parse_output
-    let ts: TS = build_module_ts(tc, types, type_info, sym_types, expr_types, variant_set)
-    ts = tc_pass2(ts, po.root)
-    // Save accumulated state (types/sym_types may grow in pass2
-    // via function-body-level type inference, though rare).
-    types = ts.types
-    type_info = ts.type_info
-    sym_types = ts.sym_types
-    expr_types = ts.expr_types
-    // Merge diagnostics.
-    let di: i64 = 0
-    while di < ts.diags.length():
-      all_diags = all_diags.push(FileDiagnostic(sf.file_id, sf.path, ts.diags.get(di)))
-      di = di + 1
-    t2i = t2i + 1
+    // --- Program Pass 2: check bodies in topo order ---
+    let t2i: i64 = 0
+    while t2i < p.graph.topo_order.length():
+      let mid: i64 = p.graph.topo_order.get(t2i)
+      let tc: TC = build_module_tc(p, mid)
+      let sf: SourceFile = program_file_of_module(p, mid)
+      let po: ParseOutput = sf.parse_output
+      let ts: TS = build_module_ts(tc, types, type_info, sym_types, expr_types, variant_set)
+      ts = tc_pass2(ts, po.root)
+      // Save accumulated state (types/sym_types may grow in pass2
+      // via function-body-level type inference, though rare).
+      types = ts.types
+      type_info = ts.type_info
+      sym_types = ts.sym_types
+      expr_types = ts.expr_types
+      // Merge diagnostics.
+      let di: i64 = 0
+      while di < ts.diags.length():
+        all_diags = all_diags.push(FileDiagnostic(sf.file_id, sf.path, ts.diags.get(di)))
+        di = di + 1
+      t2i = t2i + 1
 
-  let td: TypeCheckData = TypeCheckData(true, types, type_info, sym_types, expr_types)
-  return Program(p.graph, p.resolve, td, p.hir, all_diags)
+    let td: TypeCheckData = TypeCheckData(true, types, type_info, sym_types, expr_types)
+    return Program(p.graph, p.resolve, td, p.hir, all_diags)
 
 // =========================================================================
 // Section 46b: Legacy single-file typecheck adapter

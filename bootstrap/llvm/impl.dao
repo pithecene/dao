@@ -277,7 +277,7 @@ fn bs_type_text(types: Vector<DaoType>, type_idx: i64): string
 fn mangle_symbol_name(raw: string): string
   // "app::math::add" → "@app_math_add"
   // Per TASK_30 §9: replace each "::" pair with a single "_".
-  let out: string = "@"
+  let out: Builder = Builder::new().push("@")
   let i: i64 = to_i64(0)
   let n: i64 = length(raw)
   while i < n:
@@ -289,18 +289,18 @@ fn mangle_symbol_name(raw: string): string
       if i + to_i64(1) < n:
         let next: string = substring(raw, i + to_i64(1), to_i64(1))
         if next == ":":
-          out = out + "_"
+          out = out.push("_")
           i = i + to_i64(2)
         else:
-          out = out + ch
+          out = out.push(ch)
           i = i + to_i64(1)
       else:
-        out = out + ch
+        out = out.push(ch)
         i = i + to_i64(1)
     else:
-      out = out + ch
+      out = out.push(ch)
       i = i + to_i64(1)
-  return out
+  return out.to_string()
 
 fn mangle_function_sym(symbols: Vector<Symbol>, sym_idx: i64): string
   if sym_idx < 0:
@@ -1140,7 +1140,7 @@ fn decode_string_literal(raw: string): StrDecode
       if substring(raw, n - to_i64(1), to_i64(1)) == "\"":
         start = to_i64(1)
         end = n - to_i64(1)
-  let out: string = ""
+  let out: Builder = Builder::new()
   let bytes: i64 = to_i64(0)
   let i: i64 = start
   while i < end:
@@ -1150,56 +1150,56 @@ fn decode_string_literal(raw: string): StrDecode
       if i + to_i64(1) < end:
         let esc: string = substring(raw, i + to_i64(1), to_i64(1))
         if esc == "\\":
-          out = out + "\\5C"
+          out = out.push("\\5C")
           bytes = bytes + to_i64(1)
           i = i + to_i64(2)
         else:
           if esc == "\"":
-            out = out + "\\22"
+            out = out.push("\\22")
             bytes = bytes + to_i64(1)
             i = i + to_i64(2)
           else:
             if esc == "n":
-              out = out + "\\0A"
+              out = out.push("\\0A")
               bytes = bytes + to_i64(1)
               i = i + to_i64(2)
             else:
               if esc == "t":
-                out = out + "\\09"
+                out = out.push("\\09")
                 bytes = bytes + to_i64(1)
                 i = i + to_i64(2)
               else:
                 if esc == "r":
-                  out = out + "\\0D"
+                  out = out.push("\\0D")
                   bytes = bytes + to_i64(1)
                   i = i + to_i64(2)
                 else:
                   if esc == "0":
-                    out = out + "\\00"
+                    out = out.push("\\00")
                     bytes = bytes + to_i64(1)
                     i = i + to_i64(2)
                   else:
                     // Unknown escape — emit literal backslash + char.
-                    out = out + "\\5C" + esc
+                    out = out.push("\\5C" + esc)
                     bytes = bytes + to_i64(2)
                     i = i + to_i64(2)
       else:
         // Trailing lone backslash — emit as hex.
-        out = out + "\\5C"
+        out = out.push("\\5C")
         bytes = bytes + to_i64(1)
         i = i + to_i64(1)
     else:
       if ch == "\"":
         // Unescaped quote inside — hex-escape for LLVM.
-        out = out + "\\22"
+        out = out.push("\\22")
         bytes = bytes + to_i64(1)
         i = i + to_i64(1)
       else:
-        out = out + ch
+        out = out.push(ch)
         bytes = bytes + to_i64(1)
         i = i + to_i64(1)
   // +1 for trailing NUL.
-  return StrDecode(out, bytes + to_i64(1))
+  return StrDecode(out.to_string(), bytes + to_i64(1))
 
 // Check whether an LlInst is a terminator (ret / br / cond_br).
 fn ll_inst_is_unreachable(inst: LlInst): bool
@@ -1485,15 +1485,15 @@ fn serialize_fcmp(pred: string, lhs: string, rhs: string, ty: LlType): string
   return "fcmp " + pred + " " + serialize_ll_type(ty) + " " + lhs + ", " + rhs
 
 fn serialize_call(callee: string, args: CallArgs, ret_ty_text: string): string
-  let out: string = "call " + ret_ty_text + " " + callee + "("
+  let out: Builder = Builder::new().push("call " + ret_ty_text + " " + callee + "(")
   let i: i64 = to_i64(0)
   while i < args.arg_texts.length():
     if i > to_i64(0):
-      out = out + ", "
-    out = out + args.arg_ty_texts.get(i) + " " + args.arg_texts.get(i)
+      out = out.push(", ")
+    out = out.push(args.arg_ty_texts.get(i) + " " + args.arg_texts.get(i))
     i = i + to_i64(1)
-  out = out + ")"
-  return out
+  out = out.push(")")
+  return out.to_string()
 
 fn serialize_gep_string(gname: string, length_incl_nul: i64): string
   return "getelementptr inbounds [" + i64_to_string(length_incl_nul) + " x i8], ptr " + gname + ", i64 0, i64 0"
@@ -1548,91 +1548,94 @@ fn serialize_inst(bs: BS, inst: LlInst): string
   return "  " + rhs
 
 fn serialize_block(bs: BS, blk: LlBlock): string
-  let out: string = blk.label + ":\n"
+  let out: Builder = Builder::new().push(blk.label + ":\n")
   let i: i64 = to_i64(0)
   while i < blk.insts.length():
-    out = out + serialize_inst(bs, blk.insts.get(i)) + "\n"
+    out = out.push(serialize_inst(bs, blk.insts.get(i)) + "\n")
     i = i + to_i64(1)
-  return out
+  return out.to_string()
 
 fn serialize_params(params: Vector<LlParam>): string
-  let out: string = ""
+  let out: Builder = Builder::new()
   let i: i64 = to_i64(0)
   while i < params.length():
     if i > to_i64(0):
-      out = out + ", "
+      out = out.push(", ")
     let p: LlParam = params.get(i)
-    out = out + p.ty_text + " " + p.name
+    out = out.push(p.ty_text + " " + p.name)
     i = i + to_i64(1)
-  return out
+  return out.to_string()
 
 fn serialize_function(bs: BS, llfn: LlFunction): string
   if llfn.is_extern > to_i64(0):
     return "declare " + llfn.ret_ty_text + " " + llfn.name + "(" + serialize_params(llfn.params) + ")\n"
-  let out: string = "define " + llfn.ret_ty_text + " " + llfn.name + "(" + serialize_params(llfn.params) + ") {\n"
+  let out: Builder = Builder::new().push("define " + llfn.ret_ty_text + " " + llfn.name + "(" + serialize_params(llfn.params) + ") {\n")
   let i: i64 = to_i64(0)
   while i < llfn.blocks.length():
-    out = out + serialize_block(bs, llfn.blocks.get(i))
+    out = out.push(serialize_block(bs, llfn.blocks.get(i)))
     i = i + to_i64(1)
-  out = out + "}\n"
-  return out
+  out = out.push("}\n")
+  return out.to_string()
 
 fn serialize_global(g: LlGlobal): string
   // Emit as: @.str.N = private unnamed_addr constant [LEN x i8] c"bytes\00"
   return g.name + " = private unnamed_addr constant [" + i64_to_string(g.length) + " x i8] c\"" + g.bytes + "\\00\"\n"
 
 fn serialize_module(bs: BS): string
-  let out: string = ""
+  let out: Builder = Builder::new()
   // Struct type definitions first.
   let si: i64 = to_i64(0)
   while si < bs.struct_defs.length():
     let sd: LlStructDef = bs.struct_defs.get(si)
-    out = out + sd.ll_name + " = type { "
+    out = out.push(sd.ll_name + " = type { ")
     let fi: i64 = to_i64(0)
     while fi < sd.field_ty_texts.length():
       if fi > to_i64(0):
-        out = out + ", "
-      out = out + sd.field_ty_texts.get(fi)
+        out = out.push(", ")
+      out = out.push(sd.field_ty_texts.get(fi))
       fi = fi + to_i64(1)
-    out = out + " }\n"
+    out = out.push(" }\n")
     si = si + to_i64(1)
   if bs.struct_defs.length() > to_i64(0):
-    out = out + "\n"
+    out = out.push("\n")
   // Globals next.
   let gi: i64 = to_i64(0)
   while gi < bs.globals.length():
-    out = out + serialize_global(bs.globals.get(gi))
+    out = out.push(serialize_global(bs.globals.get(gi)))
     gi = gi + to_i64(1)
   if bs.globals.length() > to_i64(0):
-    out = out + "\n"
+    out = out.push("\n")
   // Extern declares next.
   let ei: i64 = to_i64(0)
   while ei < bs.extern_decls.length():
-    out = out + serialize_function(bs, bs.extern_decls.get(ei))
+    out = out.push(serialize_function(bs, bs.extern_decls.get(ei)))
     ei = ei + to_i64(1)
   if bs.extern_decls.length() > to_i64(0):
-    out = out + "\n"
+    out = out.push("\n")
   // Function definitions last.
   let fi: i64 = to_i64(0)
   while fi < bs.functions.length():
-    out = out + serialize_function(bs, bs.functions.get(fi))
+    out = out.push(serialize_function(bs, bs.functions.get(fi)))
     if fi + to_i64(1) < bs.functions.length():
-      out = out + "\n"
+      out = out.push("\n")
     fi = fi + to_i64(1)
-  return out
+  return out.to_string()
 
 // =========================================================================
 // Section 91: Public API
 // =========================================================================
 
 fn lower_mir_to_llvm_text(input: MirBackendInput): LlvmTextResult
-  let bs: BS = bs_new(input)
-  bs = lower_mir_to_ll_module(bs, input.mir.root)
-  let text: string = serialize_module(bs)
-  let ok: bool = true
-  if bs.had_error > to_i64(0):
-    ok = false
-  return LlvmTextResult(text, bs.diags, ok)
+  // One domain per stage: its scratch is reclaimed at the exit and
+  // only the result leaves, copied into the caller's domain.
+  resource memory stage =>
+    let bs: BS = bs_new(input)
+    bs = lower_mir_to_ll_module(bs, input.mir.root)
+    let text: string = serialize_module(bs)
+    let ok: bool = true
+    if bs.had_error > to_i64(0):
+      ok = false
+    return LlvmTextResult(text, bs.diags, ok)
 
 // Convenience adapter: run the bootstrap pipeline on a bare snippet
 // (same wrap/run-pipeline path as Task 29's lower_to_mir, but keep
@@ -1703,12 +1706,12 @@ fn emit_ir(name: string, result: LlvmTextResult, expected_exit: i32): i32
   return 0
 
 fn diags_text(diags: Vector<Diagnostic>): string
-  let out: string = ""
+  let out: Builder = Builder::new()
   let i: i64 = to_i64(0)
   while i < diags.length():
-    out = out + diags.get(i).message + "\n"
+    out = out.push(diags.get(i).message + "\n")
     i = i + to_i64(1)
-  return out
+  return out.to_string()
 
 fn check_contains(result: LlvmTextResult, needle: string, test_name: string): bool
   if contains_substring(result.text, needle):

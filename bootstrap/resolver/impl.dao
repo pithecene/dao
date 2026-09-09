@@ -1171,8 +1171,11 @@ fn program_from_graph(pg: ProgramGraph): Program
 // value.  `p.diags` mirrors the resolve pass's diagnostics; later
 // passes append to it.
 fn program_run_resolve(p: Program): Program
-  let rr: ProgramResolveResult = resolve_program(p.graph)
-  return Program(p.graph, rr, p.typecheck, p.hir, rr.diags)
+  // One domain per stage: its scratch is reclaimed at the exit and
+  // only the result leaves, copied into the caller's domain.
+  resource memory stage =>
+    let rr: ProgramResolveResult = resolve_program(p.graph)
+    return Program(p.graph, rr, p.typecheck, p.hir, rr.diags)
 
 // Fetch a module entry by program-wide module id.
 fn program_module(p: Program, mid: i64): ModuleEntry
