@@ -88,6 +88,9 @@ class HS:
   module_id: i64                 // current module id (used in composite keys)
   file_id: i64                   // current file id (used in composite keys)
 
+fn hir_result_empty(): HirResult
+  return HirResult(Vector<HirNode>::new(), Vector<i64>::new(), Vector<DaoType>::new(), Vector<i64>::new(), Vector<Token>::new(), "", Vector<Diagnostic>::new(), to_i64(-1))
+
 class HirResult:
   hir_nodes: Vector<HirNode>
   hir_idx: Vector<i64>
@@ -1080,7 +1083,9 @@ fn lower_to_hir(src: string): HirResult
   let wrapped: string = wrap_test_module(src)
   let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
   inputs = inputs.push(SourceInput("test.dao", wrapped))
-  let pg: ProgramGraph = build_program(inputs)
+  let pg: ProgramGraph = program_graph_empty()
+  resource memory graph =>
+    pg = build_program(inputs)
   let p: Program = program_from_graph(pg)
   // Each stage in its own domain: its scratch is reclaimed at the exit and the result is copied out.
   resource memory resolve =>
@@ -1095,7 +1100,9 @@ fn lower_to_hir(src: string): HirResult
   let hs: HS = HS(po.nodes, po.idx, po.toks, sf.source_text, p.resolve.symbols, p.typecheck.types, p.typecheck.type_info, p.typecheck.expr_types, p.typecheck.sym_types, p.resolve.uses, Vector<HirNode>::new(), Vector<i64>::new(), Vector<Diagnostic>::new(), mid, sf.file_id)
 
   // Lower
-  let result: HirR = lower_file(hs, po.root)
+  let result: HirR = HirR(hs, to_i64(-1))
+  resource memory hir_lowering =>
+    result = lower_file(hs, po.root)
   let final_hs: HS = result.hs
 
   return HirResult(final_hs.hir_nodes, final_hs.hir_idx, final_hs.types, final_hs.type_info, final_hs.toks, final_hs.src, final_hs.diags, result.hir)

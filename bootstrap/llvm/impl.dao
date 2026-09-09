@@ -129,6 +129,8 @@ class LlModule:
 // Section 81: Backend result / input shapes
 // =========================================================================
 
+fn llvm_text_result_empty(): LlvmTextResult -> LlvmTextResult("", Vector<Diagnostic>::new(), false)
+
 class LlvmTextResult:
   text: string
   diags: Vector<Diagnostic>
@@ -1646,7 +1648,9 @@ fn lower_to_mir_backend_input(src: string): MirBackendInput
   let wrapped: string = wrap_test_module(src)
   let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
   inputs = inputs.push(SourceInput("test.dao", wrapped))
-  let pg: ProgramGraph = build_program(inputs)
+  let pg: ProgramGraph = program_graph_empty()
+  resource memory graph =>
+    pg = build_program(inputs)
   let p: Program = program_from_graph(pg)
   // Each stage in its own domain: its scratch is reclaimed at the exit and the result is copied out.
   resource memory resolve =>
@@ -1659,7 +1663,9 @@ fn lower_to_mir_backend_input(src: string): MirBackendInput
   // lower_to_mir runs its own pipeline internally (wasted work, but
   // fine for tests).  We take its MirResult and pair with p's symbols
   // + types plus the single source file's tokens/source text.
-  let mir: MirResult = lower_to_mir(src)
+  let mir: MirResult = mir_result_empty()
+  resource memory mir =>
+    mir = lower_to_mir(src)
   let sf: SourceFile = program_file_of_module(p, to_i64(0))
   let po: ParseOutput = sf.parse_output
   return MirBackendInput(mir, p.resolve.symbols, p.typecheck.types, p.typecheck.type_info, po.toks, sf.source_text)
@@ -1786,17 +1792,23 @@ fn closure_probe_stage(name: string, path: string, stage: string): string
   let cols: string = ""
   eprint("probe: " + name + " stage=" + stage)
   if stage == "parse":
-    let lexed: LexResult = lex(src)
+    let lexed: LexResult = lex_result_empty()
+    resource memory lex =>
+      lexed = lex(src)
     let lex_n: i64 = lexed.diagnostics.length()
     closure_report_diags(name, "lex", lexed.diagnostics, to_i64(50))
     cols = cols + closure_stage_column(name, "lex", lexed.diagnostics, to_i64(0))
-    let parsed: ParseOutput = parse(src)
+    let parsed: ParseOutput = parse_output_empty()
+    resource memory parse =>
+      parsed = parse(src)
     closure_report_diags_from(name, "parse", parsed.diags, lex_n, to_i64(50))
     cols = cols + closure_stage_column(name, "parse", parsed.diags, lex_n)
   if stage == "typecheck":
     let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
     inputs = inputs.push(SourceInput(path, wrap_test_module(src)))
-    let pg: ProgramGraph = build_program(inputs)
+    let pg: ProgramGraph = program_graph_empty()
+    resource memory graph =>
+      pg = build_program(inputs)
     let p: Program = program_from_graph(pg)
     // Each stage in its own domain: its scratch is reclaimed at the exit and the result is copied out.
     resource memory resolve =>
@@ -1810,15 +1822,21 @@ fn closure_probe_stage(name: string, path: string, stage: string): string
     closure_report_file_diags(name, "typecheck", p.diags, carried_into_typecheck, to_i64(50))
     cols = cols + closure_stage_file_column(name, "typecheck", p.diags, carried_into_typecheck)
   if stage == "hir":
-    let hir: HirResult = lower_to_hir(src)
+    let hir: HirResult = hir_result_empty()
+    resource memory hir =>
+      hir = lower_to_hir(src)
     closure_report_diags(name, "hir", hir.diags, to_i64(50))
     cols = cols + closure_stage_column(name, "hir", hir.diags, to_i64(0))
   if stage == "mir":
-    let mir: MirResult = lower_to_mir(src)
+    let mir: MirResult = mir_result_empty()
+    resource memory mir =>
+      mir = lower_to_mir(src)
     closure_report_diags(name, "mir", mir.diags, to_i64(50))
     cols = cols + closure_stage_column(name, "mir", mir.diags, to_i64(0))
   if stage == "llvm":
-    let ll: LlvmTextResult = lower_source_to_llvm_text(src)
+    let ll: LlvmTextResult = llvm_text_result_empty()
+    resource memory llvm =>
+      ll = lower_source_to_llvm_text(src)
     closure_report_diags(name, "llvm", ll.diags, to_i64(50))
     cols = cols + closure_stage_column(name, "llvm", ll.diags, to_i64(0))
   return name + cols + "\n"

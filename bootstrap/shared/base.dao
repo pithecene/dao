@@ -121,6 +121,10 @@ class Token:
   offset: i64
   len: i64
 
+// A placeholder for a binding a stage's block assigns over: `let` needs
+// a value, and the stage's own is made inside the stage's domain.
+fn lex_result_empty(): LexResult -> LexResult(Vector<Token>::new(), Vector<Diagnostic>::new())
+
 class LexResult:
   tokens: Vector<Token>
   diagnostics: Vector<Diagnostic>
@@ -831,6 +835,9 @@ class PS:
 class PR:
   ps: PS
   node: i64
+
+fn parse_output_empty(): ParseOutput
+  return ParseOutput(Vector<Token>::new(), "", Vector<Node>::new(), Vector<i64>::new(), Vector<Diagnostic>::new(), to_i64(-1))
 
 class ParseOutput:
   toks: Vector<Token>
@@ -2509,6 +2516,9 @@ class FileDiagnostic:
   file_id: i64            // -1 for graph-level diagnostics
   path: string            // source file path (empty for graph-level)
   diag: Diagnostic
+
+fn program_graph_empty(): ProgramGraph
+  return ProgramGraph(Vector<SourceFile>::new(), Vector<ModuleEntry>::new(), Vector<i64>::new(), to_i64(0), Vector<i64>::new(), Vector<FileDiagnostic>::new())
 
 class ProgramGraph:
   files: Vector<SourceFile>
