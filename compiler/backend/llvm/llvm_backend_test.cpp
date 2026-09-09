@@ -1349,6 +1349,11 @@ suite<"runtime_abi"> runtime_abi = [] {
     expect(from_bytes->getReturnType()->isStructTy()) << "returns dao.string";
     expect(from_bytes->arg_size() == 2u) << "bytes, len";
 
+    auto* copy_outer = module->getFunction("__dao_str_copy_outer");
+    expect(copy_outer != nullptr) << "str_copy_outer declared";
+    expect(copy_outer->getReturnType()->isStructTy()) << "returns dao.string";
+    expect(copy_outer->arg_size() == 1u) << "s";
+
     // Equality hooks
     auto* eq_i32 = module->getFunction("__dao_eq_i32");
     expect(eq_i32 != nullptr) << "eq_i32 declared";
@@ -1439,6 +1444,7 @@ suite<"runtime_abi"> runtime_abi = [] {
     expect(LlvmRuntimeHooks::is_runtime_hook("__dao_str_compare"));
     expect(LlvmRuntimeHooks::is_runtime_hook("__dao_mem_alloc_outer"));
     expect(LlvmRuntimeHooks::is_runtime_hook("__dao_str_from_bytes"));
+    expect(LlvmRuntimeHooks::is_runtime_hook("__dao_str_copy_outer"));
     expect(!LlvmRuntimeHooks::is_runtime_hook("__write_stdout"));
     expect(!LlvmRuntimeHooks::is_runtime_hook("user_function"));
   };

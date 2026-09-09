@@ -907,7 +907,8 @@ void MirBuilder::emit_region_exits_from(size_t depth, Span span) {
 }
 
 void MirBuilder::emit_region_exit(const ActiveRegion& region, Span span, const Carried* carried) {
-  if (std::holds_alternative<MirResourceExit>(region.exit_payload)) {
+  const auto* exit = std::get_if<MirResourceExit>(&region.exit_payload);
+  if (exit != nullptr && exit->region_kind == "memory") {
     // What leaves the domain is copied one domain outward before the
     // exit reclaims it.  A block or loop being left copies each
     // escaping binding the block stored to; a function being left

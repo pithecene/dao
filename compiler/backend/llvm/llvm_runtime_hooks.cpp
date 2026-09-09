@@ -418,6 +418,10 @@ void LlvmRuntimeHooks::declare_string_hooks() {
   auto* bytes_ptr = llvm::PointerType::getUnqual(ctx);
   ensure_declared(runtime_hooks::kStrFromBytes,
                   llvm::FunctionType::get(str_type, {bytes_ptr, i64}, false));
+
+  // __dao_str_copy_outer(s: *dao.string): dao.string
+  ensure_declared(runtime_hooks::kStrCopyOuter,
+                  llvm::FunctionType::get(str_type, {str_ptr}, false));
 }
 
 // ---------------------------------------------------------------------------
