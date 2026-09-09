@@ -553,8 +553,9 @@ buffers are the domain's.  The bootstrap pipeline drivers open one
 block per stage call and the LLVM text serializer assembles through
 `Builder` (E3); the audit's peak column (`docs/bootstrap_closure.md`,
 6 GiB probe bound) fell from 5.5–16 GiB to 1.5–1.9 GiB for the lexer,
-parser, and graph programs and 2.9 GiB for the resolver, while the
-typecheck stage of the four largest programs still exceeds the bound.
+parser, and graph programs and 3.1 GiB for the resolver; the typecheck,
+hir, and mir programs still exceed the bound in their typecheck stage,
+and the llvm program dies in parse as before.
 E3's acceptance bar (§10) — every program under 2 GiB — is not met
 yet: the typecheck stage's own scratch (its expression-key strings and
 forked tables) must run in domains of its own before E3 is delivered.
