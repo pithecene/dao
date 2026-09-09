@@ -1326,7 +1326,11 @@ void TypeChecker::check_declaration(const Decl* decl) {
     break;
   case NodeKind::ConceptDecl:
     // Concept default method bodies are abstract over `self`'s type.
-    // Full checking requires concept-level type reasoning (deferred).
+    // Full checking requires concept-level type reasoning (deferred);
+    // the shape of a body needs none.
+    for (const auto* method : decl->as<ConceptDecl>().methods) {
+      warn_whole_body_domain(method->as<FunctionDecl>());
+    }
     break;
   case NodeKind::ExtendDecl: {
     // Check bodies of conformance methods with self_type set to the
@@ -1434,15 +1438,7 @@ void TypeChecker::check_function(const Decl* decl) {
     }
   } else {
     // Block-bodied: check statements.
-    if (fn.body.size() == 1 && fn.body[0]->kind() == NodeKind::ResourceBlock) {
-      // A domain spanning the whole body is a policy hidden from every
-      // caller: each pays a copy of the result, and none can share a
-      // domain across calls.  The block belongs at the call site.
-      warning(fn.body[0]->span,
-              "resource block '" + std::string(fn.body[0]->as<ResourceBlock>().resource_name) +
-                  "' is the whole body of '" + std::string(fn.name) +
-                  "': open the domain where the function is called instead");
-    }
+    warn_whole_body_domain(fn);
     check_body(fn.body);
   }
 
@@ -3519,6 +3515,19 @@ void TypeChecker::error(Span span, std::string message) {
 
 void TypeChecker::warning(Span span, std::string message) {
   diagnostics_.push_back(Diagnostic::warning(span, std::move(message)));
+}
+
+void TypeChecker::warn_whole_body_domain(const FunctionDecl& fn) {
+  // A domain spanning the whole body is a policy hidden from every
+  // caller: each pays a copy of the result, and none can share a
+  // domain across calls.  The block belongs at the call site.
+  if (fn.body.size() != 1 || fn.body[0]->kind() != NodeKind::ResourceBlock) {
+    return;
+  }
+  warning(fn.body[0]->span,
+          "resource block '" + std::string(fn.body[0]->as<ResourceBlock>().resource_name) +
+              "' is the whole body of '" + std::string(fn.name) +
+              "': open the domain where the function is called instead");
 }
 
 // ---------------------------------------------------------------------------

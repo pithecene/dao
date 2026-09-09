@@ -1487,6 +1487,15 @@ suite<"typecheck_resource_domains"> typecheck_resource_domains = [] {
                                 "    return n\n");
     expect(is_ok(partial));
     expect(!has_warning_containing(partial, "is the whole body"));
+
+    // A concept's default method is a body like any other.
+    auto concept_default = check_source("concept Sized:\n"
+                                        "    fn size(self): i32\n"
+                                        "        resource memory pool =>\n"
+                                        "            return 1\n");
+    expect(has_warning_containing(concept_default,
+                                  "resource block 'pool' is the whole body of 'size'"))
+        << (concept_default.diagnostics.empty() ? "" : concept_default.diagnostics[0].message);
   };
 
   "yield inside a block is rejected"_test = [] {
