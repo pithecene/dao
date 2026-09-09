@@ -36,7 +36,69 @@ fn scratch_in_pool(): i64
     size = length(text)
   return size
 
+class Label:
+  text: string
+  count: i32
+
+// What leaves a block is copied into the enclosing domain at its exit:
+// the string assigned to an outer binding, the vector grown inside, the
+// field stored through an outer class value, and a value returned from
+// inside the block.
+fn escaping_string(): string
+  let out: string = "before"
+  resource memory pool =>
+    let inner: string = "made"
+    inner = inner + " inside"
+    out = inner
+  return out
+
+fn escaping_vector(): i64
+  let items: Vector<i64> = Vector<i64>::new()
+  resource memory pool =>
+    let i: i64 = 0
+    while i < 5:
+      items = items.push(i * 10)
+      i = i + 1
+  let total: i64 = 0
+  let j: i64 = 0
+  while j < items.length():
+    total = total + items.get(j)
+    j = j + 1
+  return total
+
+fn escaping_field(): string
+  let label: Label = Label("", 0)
+  resource memory pool =>
+    label.text = "stored" + " through a field"
+    label.count = 2
+  return label.text
+
+fn returned_from_block(flag: i32): string
+  resource memory pool =>
+    let made: string = "returned" + " from inside"
+    if flag > 0:
+      return made
+  return "fell through"
+
+fn nested_escape(): string
+  let out: string = ""
+  resource memory outer =>
+    resource memory inner =>
+      out = "crossed" + " two blocks"
+  return out
+
 fn main(): i32
+  print("escaping_string:")
+  print(escaping_string())
+  print("escaping_vector:")
+  print(escaping_vector())
+  print("escaping_field:")
+  print(escaping_field())
+  print("returned_from_block:")
+  print(returned_from_block(1))
+  print(returned_from_block(0))
+  print("nested_escape:")
+  print(nested_escape())
   print("scratch_in_pool:")
   print(scratch_in_pool())
   print("compute_in_pool:")

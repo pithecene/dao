@@ -86,6 +86,24 @@ class Vector<T>:
 
   fn length(self): i64 -> self.len
 
+  // A copy of this vector, buffer and elements, in the enclosing
+  // domain: what `copy_out` does for a vector.  Elements are copied
+  // out one by one, so a vector of strings leaves with its strings.
+  fn copy_out(self): Vector<T>
+    let elem_size: i64 = size_of<T>()
+    let data_raw = __dao_mem_alloc_outer(elem_size * self.cap, align_of<T>())
+    let gen_raw = __dao_mem_alloc_outer(size_of<i64>(), align_of<i64>())
+    mode unsafe =>
+      let data = ptr_cast<T>(data_raw)
+      let i: i64 = 0
+      while i < self.len:
+        *ptr_offset(data, i) = copy_out<T>(*ptr_offset(self.data, i))
+        i = i + 1
+      let gen = ptr_cast<i64>(gen_raw)
+      *gen = self.len
+      return Vector(data, self.len, self.cap, gen)
+    panic("unreachable")
+
   fn iter(self): Generator<T>
     let i: i64 = 0
     while i < self.len:

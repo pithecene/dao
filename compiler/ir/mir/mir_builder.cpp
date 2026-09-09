@@ -1,6 +1,8 @@
 #include "ir/mir/mir_builder.h"
 
+#include "frontend/module/program.h"
 #include "frontend/types/type.h"
+#include "frontend/types/type_ownership.h"
 #include "frontend/types/type_printer.h"
 #include "support/variant.h"
 
@@ -161,6 +163,23 @@ auto covering(Span lhs, Span rhs) -> Span {
 } // namespace
 
 auto MirBuilder::build(const HirProgram& program) -> MirBuildResult {
+  // The prelude's copy_out, for the exits of resource blocks.
+  copy_out_symbol_ = nullptr;
+  copy_out_type_ = nullptr;
+  for (const auto* module : program.modules) {
+    if (module->module == nullptr || !module->module->is_prelude) {
+      continue;
+    }
+    for (const auto* decl : module->declarations) {
+      const auto* fn = std::get_if<HirFunction>(&decl->payload);
+      if (fn == nullptr || fn->symbol == nullptr || fn->symbol->name != "copy_out" ||
+          fn->params.size() != 1) {
+        continue;
+      }
+      copy_out_symbol_ = fn->symbol;
+      copy_out_type_ = types_.function_type({fn->params[0].type}, fn->return_type);
+    }
+  }
   auto* mir_mod = ctx_.alloc<MirModule>();
   current_module_ = mir_mod;
   generic_templates_.clear();
@@ -278,6 +297,18 @@ void MirBuilder::lower_stmt(const HirStmt& stmt) {
         auto val = lower_expr_value(*assign.value);
         emit_effect(stmt.span,
                     MirStore{ctx_.alloc<MirPlace>(place), val});
+        // A store rooted at a binding a resource block copies out marks
+        // it dirty for that block: its exit copies only what was stored.
+        for (const auto& region : active_regions_) {
+          for (const auto& escape : region.escapes) {
+            if (escape.binding.id == place.local.id) {
+              auto set = emit_value(types_.bool_type(), stmt.span, MirConstBool{true});
+              auto* flag_place = ctx_.alloc<MirPlace>();
+              flag_place->local = escape.flag;
+              emit_effect(stmt.span, MirStore{flag_place, set});
+            }
+          }
+        }
       },
       [&](const HirIf& hir_if) {
         auto cond_val = lower_expr_value(*hir_if.condition);
@@ -429,7 +460,9 @@ void MirBuilder::lower_stmt(const HirStmt& stmt) {
         if (has_val) {
           ret_val = lower_expr_value(*ret.value);
         }
-        emit_region_exits(stmt.span);
+        emit_region_exits(stmt.span,
+                          {.value = has_val ? &ret_val : nullptr,
+                           .type = has_val ? current_fn_->return_type : nullptr});
         emit_terminator(stmt.span, MirReturn{ret_val, has_val});
       },
       [&](const HirExprStmt& expr_stmt) {
@@ -458,11 +491,26 @@ void MirBuilder::lower_stmt(const HirStmt& stmt) {
             types_.pointer_to(types_.void_type()), stmt.span,
             MirResourceEnter{res.resource_kind, res.resource_name});
 
-        active_regions_.push_back(
-            {.exit_payload = MirResourceExit{res.resource_kind,
-                                             res.resource_name,
-                                             domain_handle},
-             .span = stmt.span});
+        ActiveRegion region{
+            .exit_payload = MirResourceExit{res.resource_kind, res.resource_name, domain_handle},
+            .span = stmt.span,
+            .escapes = {}};
+        // One dirty flag per escaping binding, clear at entry; every
+        // store rooted at the binding inside the block sets it.
+        for (const auto* symbol : res.escapes) {
+          auto local = symbol_to_local_.find(symbol);
+          if (local == symbol_to_local_.end()) {
+            continue;
+          }
+          const Type* type = current_fn_->locals[local->second.id].type;
+          auto flag = declare_local(nullptr, types_.bool_type(), stmt.span);
+          auto clear = emit_value(types_.bool_type(), stmt.span, MirConstBool{false});
+          auto* flag_place = ctx_.alloc<MirPlace>();
+          flag_place->local = flag;
+          emit_effect(stmt.span, MirStore{flag_place, clear});
+          region.escapes.push_back({.binding = local->second, .type = type, .flag = flag});
+        }
+        active_regions_.push_back(region);
 
         for (const auto* s : res.body) {
           lower_stmt(*s);
@@ -471,9 +519,7 @@ void MirBuilder::lower_stmt(const HirStmt& stmt) {
         active_regions_.pop_back();
 
         if (!block_terminated()) {
-          emit_effect(stmt.span,
-                      MirResourceExit{res.resource_kind, res.resource_name,
-                                      domain_handle});
+          emit_region_exit(region, stmt.span, nullptr);
         }
       },
   }, stmt.payload);
@@ -601,7 +647,7 @@ auto MirBuilder::lower_expr_value(const HirExpr& expr) -> MirValueId {
           auto err_result = emit_value(
               current_fn_->return_type, expr.span,
               MirEnumConstruct{ret_enum_type, 1, err_args});
-          emit_region_exits(expr.span);
+          emit_region_exits(expr.span, {.value = &err_result, .type = current_fn_->return_type});
           emit_terminator(expr.span, MirReturn{err_result, true});
         } else {
           // Option: construct Option.None (variant 1, no payload).
@@ -611,7 +657,7 @@ auto MirBuilder::lower_expr_value(const HirExpr& expr) -> MirValueId {
           auto none_result = emit_value(
               current_fn_->return_type, expr.span,
               MirEnumConstruct{ret_enum_type, 1, empty_args});
-          emit_region_exits(expr.span);
+          emit_region_exits(expr.span, {.value = &none_result, .type = current_fn_->return_type});
           emit_terminator(expr.span, MirReturn{none_result, true});
         }
 
@@ -848,14 +894,67 @@ auto MirBuilder::block_terminated() const -> bool {
   return is_terminator(current_block_->insts.back()->kind());
 }
 
-void MirBuilder::emit_region_exits(Span span) {
-  emit_region_exits_from(0, span);
+void MirBuilder::emit_region_exits(Span span, Carried carried) {
+  for (size_t i = active_regions_.size(); i > 0; --i) {
+    emit_region_exit(active_regions_[i - 1], span, &carried);
+  }
 }
 
 void MirBuilder::emit_region_exits_from(size_t depth, Span span) {
   for (size_t i = active_regions_.size(); i > depth; --i) {
-    emit_effect(span, active_regions_[i - 1].exit_payload);
+    emit_region_exit(active_regions_[i - 1], span, nullptr);
   }
+}
+
+void MirBuilder::emit_region_exit(const ActiveRegion& region, Span span, const Carried* carried) {
+  if (std::holds_alternative<MirResourceExit>(region.exit_payload)) {
+    // What leaves the domain is copied one domain outward before the
+    // exit reclaims it.  A block or loop being left copies each
+    // escaping binding the block stored to; a function being left
+    // copies only what it returns -- its bindings are not read again.
+    if (carried != nullptr) {
+      if (carried->value != nullptr && carried->type != nullptr) {
+        *carried->value = emit_copy_out(*carried->value, carried->type, span);
+      }
+      emit_effect(span, region.exit_payload);
+      return;
+    }
+    for (const auto& escape : region.escapes) {
+      auto* flag_place = ctx_.alloc<MirPlace>();
+      flag_place->local = escape.flag;
+      auto dirty = emit_value(types_.bool_type(), span, MirLoad{flag_place});
+      auto* copy_bb = fresh_block();
+      auto* next_bb = fresh_block();
+      emit_terminator(span, MirCondBr{dirty, copy_bb->id, next_bb->id});
+      switch_to_block(copy_bb);
+      auto* binding_place = ctx_.alloc<MirPlace>();
+      binding_place->local = escape.binding;
+      auto current = emit_value(escape.type, span, MirLoad{binding_place});
+      auto copied = emit_copy_out(current, escape.type, span);
+      auto* store_place = ctx_.alloc<MirPlace>();
+      store_place->local = escape.binding;
+      emit_effect(span, MirStore{store_place, copied});
+      emit_terminator(span, MirBr{next_bb->id});
+      switch_to_block(next_bb);
+    }
+  }
+  emit_effect(span, region.exit_payload);
+}
+
+auto MirBuilder::emit_copy_out(MirValueId value, const Type* type, Span span) -> MirValueId {
+  if (type == nullptr || !owns_heap_memory(type)) {
+    return value;
+  }
+  if (copy_out_symbol_ == nullptr) {
+    error(span, "internal: no prelude `copy_out` to copy a value out of a resource block");
+    return value;
+  }
+  auto callee = emit_value(copy_out_type_, span, MirFnRef{copy_out_symbol_});
+  auto* args = ctx_.alloc<std::vector<MirValueId>>();
+  args->push_back(value);
+  auto* type_args = ctx_.alloc<std::vector<const Type*>>();
+  type_args->push_back(type);
+  return emit_value(type, span, MirCall{callee, args, type_args});
 }
 
 void MirBuilder::error(Span span, std::string message) {

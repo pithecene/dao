@@ -92,8 +92,242 @@ File
               Identifier text
     ReturnStatement
       Identifier size
+  ClassDecl Label
+    Field text: string
+    Field count: i32
+  FunctionDecl escaping_string
+    ReturnType: string
+    LetStatement out: string
+      StringLiteral "before"
+    ResourceBlock memory pool
+      LetStatement inner: string
+        StringLiteral "made"
+      Assignment
+        Target
+          Identifier inner
+        Value
+          BinaryExpr +
+            Identifier inner
+            StringLiteral " inside"
+      Assignment
+        Target
+          Identifier out
+        Value
+          Identifier inner
+    ReturnStatement
+      Identifier out
+  FunctionDecl escaping_vector
+    ReturnType: i64
+    LetStatement items: Vector<i64>
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          i64
+    ResourceBlock memory pool
+      LetStatement i: i64
+        IntLiteral 0
+      WhileStatement
+        Condition
+          BinaryExpr <
+            Identifier i
+            IntLiteral 5
+        Assignment
+          Target
+            Identifier items
+          Value
+            CallExpr
+              Callee
+                FieldExpr .push
+                  Identifier items
+              Args
+                BinaryExpr *
+                  Identifier i
+                  IntLiteral 10
+        Assignment
+          Target
+            Identifier i
+          Value
+            BinaryExpr +
+              Identifier i
+              IntLiteral 1
+    LetStatement total: i64
+      IntLiteral 0
+    LetStatement j: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier j
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier items
+      Assignment
+        Target
+          Identifier total
+        Value
+          BinaryExpr +
+            Identifier total
+            CallExpr
+              Callee
+                FieldExpr .get
+                  Identifier items
+              Args
+                Identifier j
+      Assignment
+        Target
+          Identifier j
+        Value
+          BinaryExpr +
+            Identifier j
+            IntLiteral 1
+    ReturnStatement
+      Identifier total
+  FunctionDecl escaping_field
+    ReturnType: string
+    LetStatement label: Label
+      CallExpr
+        Callee
+          Identifier Label
+        Args
+          StringLiteral ""
+          IntLiteral 0
+    ResourceBlock memory pool
+      Assignment
+        Target
+          FieldExpr .text
+            Identifier label
+        Value
+          BinaryExpr +
+            StringLiteral "stored"
+            StringLiteral " through a field"
+      Assignment
+        Target
+          FieldExpr .count
+            Identifier label
+        Value
+          IntLiteral 2
+    ReturnStatement
+      FieldExpr .text
+        Identifier label
+  FunctionDecl returned_from_block
+    Param flag: i32
+    ReturnType: string
+    ResourceBlock memory pool
+      LetStatement made: string
+        BinaryExpr +
+          StringLiteral "returned"
+          StringLiteral " from inside"
+      IfStatement
+        Condition
+          BinaryExpr >
+            Identifier flag
+            IntLiteral 0
+        Then
+          ReturnStatement
+            Identifier made
+    ReturnStatement
+      StringLiteral "fell through"
+  FunctionDecl nested_escape
+    ReturnType: string
+    LetStatement out: string
+      StringLiteral ""
+    ResourceBlock memory outer
+      ResourceBlock memory inner
+        Assignment
+          Target
+            Identifier out
+          Value
+            BinaryExpr +
+              StringLiteral "crossed"
+              StringLiteral " two blocks"
+    ReturnStatement
+      Identifier out
   FunctionDecl main
     ReturnType: i32
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          StringLiteral "escaping_string:"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier escaping_string
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          StringLiteral "escaping_vector:"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier escaping_vector
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          StringLiteral "escaping_field:"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier escaping_field
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          StringLiteral "returned_from_block:"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier returned_from_block
+            Args
+              IntLiteral 1
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier returned_from_block
+            Args
+              IntLiteral 0
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          StringLiteral "nested_escape:"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier nested_escape
     ExpressionStatement
       CallExpr
         Callee

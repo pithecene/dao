@@ -1259,13 +1259,88 @@ suite<"typecheck_void"> typecheck_void = [] {
 // ---------------------------------------------------------------------------
 
 suite<"typecheck_resource_domains"> typecheck_resource_domains = [] {
-  "a heap-owning binding declared outside a block may not be stored to inside it"_test = [] {
+  "a heap-owning binding declared outside a block is copied out, not rejected"_test = [] {
     auto result = check_source("fn f(): i32\n"
                                "    let out: string = \"\"\n"
                                "    resource memory pool =>\n"
                                "        out = \"made inside\"\n"
                                "    return 0\n");
-    expect(has_error_containing(result, "declared outside resource block 'pool'"));
+    expect(is_ok(result)) << (result.diagnostics.empty() ? "" : result.diagnostics[0].message);
+  };
+
+  "a generator binding declared outside a block may not be stored to inside it"_test = [] {
+    auto result = check_source("fn gen(): Generator<i32>\n"
+                               "    yield 1\n"
+                               "fn f(): i32\n"
+                               "    let g: Generator<i32> = gen()\n"
+                               "    resource memory pool =>\n"
+                               "        g = gen()\n"
+                               "    return 0\n");
+    expect(has_error_containing(result, "a generator cannot be copied out of the block"));
+  };
+
+  "the outer bindings a block stores to are recorded for its exits"_test = [] {
+    // The recorded escapes key on the block's statement, so the AST is
+    // kept here rather than going through check_source.
+    SourceBuffer buf("test.dao",
+                     wrap_with_test_module("class Box:\n"
+                                           "    text: string\n"
+                                           "fn f(): i32\n"
+                                           "    let out: string = \"\"\n"
+                                           "    let box: Box = Box(\"\")\n"
+                                           "    let count: i32 = 0\n"
+                                           "    resource memory outer =>\n"
+                                           "        let inner: string = \"\"\n"
+                                           "        resource memory pool =>\n"
+                                           "            out = \"made inside\"\n"
+                                           "            box.text = \"made inside\"\n"
+                                           "            count = 1\n"
+                                           "            inner = \"made inside\"\n"
+                                           "            out = \"again\"\n"
+                                           "    return 0\n"));
+    auto lex_result = lex(buf);
+    auto parse_result = parse(lex_result.tokens);
+    auto resolve_result = resolve(*parse_result.file);
+    TypeContext types;
+    auto result = typecheck(*parse_result.file, resolve_result, types);
+    expect(is_ok(result)) << (result.diagnostics.empty() ? "" : result.diagnostics[0].message);
+
+    const Stmt* outer = nullptr;
+    const Stmt* pool = nullptr;
+    for (const auto* decl : parse_result.file->declarations) {
+      if (decl->kind() != NodeKind::FunctionDecl) {
+        continue;
+      }
+      for (const auto* stmt : decl->as<FunctionDecl>().body) {
+        if (stmt->kind() != NodeKind::ResourceBlock) {
+          continue;
+        }
+        outer = stmt;
+        for (const auto* nested : stmt->as<ResourceBlock>().body) {
+          if (nested->kind() == NodeKind::ResourceBlock) {
+            pool = nested;
+          }
+        }
+      }
+    }
+    expect(outer != nullptr && pool != nullptr) << "the blocks were not found";
+
+    auto names = [](const std::vector<const Symbol*>* escapes) {
+      std::vector<std::string> out;
+      if (escapes != nullptr) {
+        for (const auto* symbol : *escapes) {
+          out.emplace_back(symbol->name);
+        }
+      }
+      return out;
+    };
+    // Heap-owning bindings only, once each, in first-store order; `inner`
+    // is outside the inner block but declared by the outer one.
+    expect(names(result.typed.resource_escapes(pool)) ==
+           std::vector<std::string>{"out", "box", "inner"})
+        << "inner block escapes: " << names(result.typed.resource_escapes(pool)).size();
+    expect(names(result.typed.resource_escapes(outer)) == std::vector<std::string>{"out", "box"})
+        << "outer block escapes: " << names(result.typed.resource_escapes(outer)).size();
   };
 
   "a scalar binding declared outside a block may be stored to inside it"_test = [] {
@@ -1286,7 +1361,7 @@ suite<"typecheck_resource_domains"> typecheck_resource_domains = [] {
     expect(is_ok(result));
   };
 
-  "a store through a field roots at the outer binding"_test = [] {
+  "a store through a field roots at the outer binding and is copied out"_test = [] {
     auto result = check_source("class Box:\n"
                                "    text: string\n"
                                "fn f(): i32\n"
@@ -1294,7 +1369,7 @@ suite<"typecheck_resource_domains"> typecheck_resource_domains = [] {
                                "    resource memory pool =>\n"
                                "        box.text = \"made inside\"\n"
                                "    return 0\n");
-    expect(has_error_containing(result, "'box' is declared outside resource block 'pool'"));
+    expect(is_ok(result)) << (result.diagnostics.empty() ? "" : result.diagnostics[0].message);
   };
 
   "a class of scalars may be stored to through a field inside a block"_test = [] {
@@ -1309,23 +1384,22 @@ suite<"typecheck_resource_domains"> typecheck_resource_domains = [] {
     expect(is_ok(result));
   };
 
-  "the innermost block decides: an outer block's binding stored to from an inner one"_test = [] {
+  "an outer block's binding stored to from an inner block is copied out of it"_test = [] {
     auto result = check_source("fn f(): i32\n"
                                "    resource memory outer =>\n"
                                "        let s: string = \"\"\n"
                                "        resource memory inner =>\n"
                                "            s = \"made inside\"\n"
                                "    return 0\n");
-    expect(has_error_containing(result, "declared outside resource block 'inner'"));
+    expect(is_ok(result)) << (result.diagnostics.empty() ? "" : result.diagnostics[0].message);
   };
 
-  "returning a heap-owning value from inside a block is rejected"_test = [] {
+  "returning a heap-owning value from inside a block is copied out"_test = [] {
     auto result = check_source("fn f(): string\n"
                                "    resource memory pool =>\n"
                                "        return \"made inside\"\n"
                                "    return \"\"\n");
-    expect(has_error_containing(
-        result, "returning a value that owns heap memory from inside resource block 'pool'"));
+    expect(is_ok(result)) << (result.diagnostics.empty() ? "" : result.diagnostics[0].message);
   };
 
   "returning a scalar from inside a block is fine"_test = [] {
@@ -1337,7 +1411,7 @@ suite<"typecheck_resource_domains"> typecheck_resource_domains = [] {
     expect(is_ok(result));
   };
 
-  "propagating an error that owns heap memory from inside a block is rejected"_test = [] {
+  "propagating an error that owns heap memory from inside a block is copied out"_test = [] {
     // `?` leaves the block on its error path exactly as a return does.
     auto result = check_source(
         "enum class Result<T, E>:\n    Ok(v: T)\n    Err(e: E)\nfn fail(): Result<i32, string>\n   "
@@ -1346,7 +1420,7 @@ suite<"typecheck_resource_domains"> typecheck_resource_domains = [] {
         "    resource memory pool =>\n"
         "        let v: i32 = fail()?\n"
         "    return Result::Ok(v = 0)\n");
-    expect(has_error_containing(result, "'?' inside resource block 'pool'"));
+    expect(is_ok(result)) << (result.diagnostics.empty() ? "" : result.diagnostics[0].message);
   };
 
   "propagating a scalar error from inside a block is fine"_test = [] {

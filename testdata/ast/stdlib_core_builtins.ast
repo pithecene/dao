@@ -18,3 +18,8 @@ File
     ReturnType: *T
     ExprBody
       Identifier ptr
+  FunctionDecl copy_out<T>
+    Param x: T
+    ReturnType: T
+    ExprBody
+      Identifier x

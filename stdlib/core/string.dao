@@ -7,6 +7,10 @@ extern fn __dao_str_index_of(s: string, needle: string): i64
 extern fn __dao_str_starts_with(s: string, prefix: string): bool
 extern fn __dao_str_ends_with(s: string, suffix: string): bool
 extern fn __dao_str_compare(a: string, b: string): i32
+extern fn __dao_str_copy_outer(s: string): string
+
+// A copy of `s` in the enclosing domain (what `copy_out` does for a string).
+fn copy_out_string(s: string): string -> __dao_str_copy_outer(s)
 
 fn concat(a: string, b: string): string -> __dao_str_concat(a, b)
 fn length(s: string): i64 -> __dao_str_length(s)

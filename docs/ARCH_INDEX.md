@@ -71,7 +71,7 @@ Source-facing compiler pipeline.
 - `ast/` — syntax tree / declaration and expression representation
 - `diagnostics/` — spans, reporting, and source diagnostics plumbing
 - `resolve/` — name resolution: scope chain, symbol binding, and identifier resolution
-- `types/` — canonical semantic type universe: type kinds, interning, context, printing
+- `types/` — canonical semantic type universe: type kinds, interning, context, printing, heap-ownership classification
 - `typecheck/` — first type-checking pass: side-table typing, assignability, expression/statement validation, diagnostics
 - surface-to-HIR lowering lives in `compiler/ir/hir/` (the HIR builder); there is no separate `lower/` root
 
@@ -80,7 +80,7 @@ Source-facing compiler pipeline.
 Compiler-internal target-agnostic representations.
 
 - `hir/` — typed, symbol-linked HIR: arena-owned node hierarchy, AST-to-HIR builder, and debug printer
-- `mir/` — basic-block MIR with typed instructions, place/value distinction, HIR-to-MIR builder, monomorphization pass, and debug printer
+- `mir/` — basic-block MIR with typed instructions, place/value distinction, HIR-to-MIR builder, monomorphization pass (also expands `copy_out` per concrete type), and debug printer
 
 ### `compiler/backend/`
 

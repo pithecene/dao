@@ -6,3 +6,6 @@ module core::memory
 extern fn __dao_mem_alloc(size: i64, align: i64): *void
 extern fn __dao_mem_realloc(ptr: *void, old_size: i64, new_size: i64, align: i64): *void
 extern fn __dao_mem_free(ptr: *void): void
+// Allocate in the parent of the current domain: for what must outlive
+// the current `resource memory` block (copy-out).
+extern fn __dao_mem_alloc_outer(size: i64, align: i64): *void

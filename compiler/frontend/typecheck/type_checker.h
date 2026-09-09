@@ -43,10 +43,11 @@ struct TypeCheckResult {
 // CheckContext — per-function / per-scope typing context.
 // ---------------------------------------------------------------------------
 
-/// A `resource memory` block being checked: its extent (bindings declared
-/// inside it fall within) and its name, for diagnostics.
+/// A `resource memory` block being checked: the statement (its span is
+/// the extent bindings declared inside it fall within, and the escapes
+/// recorded for it key on it) and its name, for diagnostics.
 struct ResourceBlockScope {
-  Span span;
+  const Stmt* stmt;
   std::string_view name;
 };
 
@@ -440,11 +441,6 @@ private:
   /// The binding a place is rooted at (`box.inner.text` roots at `box`),
   /// or null for a place rooted at no binding (a dereference).
   [[nodiscard]] auto place_root_symbol(const Expr* expr) const -> const Symbol*;
-  /// Whether a value of this type owns heap memory -- a string, a
-  /// generator, or a class or enum holding one, or a raw pointer field,
-  /// by value.  Such a value allocated inside a `resource memory` block
-  /// does not outlive it.
-  [[nodiscard]] auto owns_heap_memory(const Type* type) const -> bool;
   /// Reject a store, inside a resource block, to a heap-owning binding
   /// declared outside it.
   void check_store_escapes_domain(const Expr* target);

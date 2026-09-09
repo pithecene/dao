@@ -270,6 +270,10 @@ void __dao_mem_free(void *ptr);
 // A string owned by the current domain holding a copy of `len` bytes.
 struct dao_string __dao_str_from_bytes(const char* bytes, int64_t len);
 
+// A copy of `s` owned by the parent of the current domain: the domain
+// that becomes current when the current block is left (copy-out).
+struct dao_string __dao_str_copy_outer(const struct dao_string* s);
+
 // ---------------------------------------------------------------------------
 // Runtime hook declarations — Panic domain
 // ---------------------------------------------------------------------------

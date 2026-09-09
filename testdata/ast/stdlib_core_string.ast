@@ -32,6 +32,18 @@ File
     Param a: string
     Param b: string
     ReturnType: i32
+  ExternFunctionDecl __dao_str_copy_outer
+    Param s: string
+    ReturnType: string
+  FunctionDecl copy_out_string
+    Param s: string
+    ReturnType: string
+    ExprBody
+      CallExpr
+        Callee
+          Identifier __dao_str_copy_outer
+        Args
+          Identifier s
   FunctionDecl concat
     Param a: string
     Param b: string

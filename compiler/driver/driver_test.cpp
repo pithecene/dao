@@ -440,6 +440,50 @@ suite<"driver_cli"> driver_cli_suite = [] {
         << "the imported user module is missing: " << dumped.out;
   };
 
+  "what leaves a resource block is copied out per type"_test = [] {
+    // The MIR the driver hands the backend carries the copies the
+    // block's exit makes: a class with its own `copy_out` through that
+    // method (the prelude's Vector through its specialization), a
+    // string through the prelude's copy, a plain class field by field,
+    // an enum per variant -- and no identity `copy_out$T` left behind
+    // for any of them (a non-owning T is the only one that keeps it).
+    const Scratch scratch("copy-out-mir");
+    auto root = scratch.file("main.dao",
+                             "module app::main\n\n"
+                             "class Box:\n"
+                             "  text: string\n\n"
+                             "  fn copy_out(self): Box\n"
+                             "    return Box(self.text)\n\n"
+                             "class Label:\n"
+                             "  name: string\n"
+                             "  count: i32\n\n"
+                             "enum class Slot:\n"
+                             "  Empty\n"
+                             "  Full(text: string)\n\n"
+                             "fn main(): i32\n"
+                             "  let box: Box = Box(\"b\")\n"
+                             "  let items: Vector<string> = Vector<string>::new()\n"
+                             "  let label: Label = Label(\"l\", 1)\n"
+                             "  let slot: Slot = Slot::Empty\n"
+                             "  resource memory pool =>\n"
+                             "    box = Box(\"in\")\n"
+                             "    items = items.push(\"in\")\n"
+                             "    label = Label(\"in\", 2)\n"
+                             "    slot = Slot::Full(text = \"in\")\n"
+                             "  return label.count\n");
+    auto dumped = run_daoc(scratch, {"mir", root.string()});
+    expect(dumped.exit_code == 0) << dumped.err;
+    for (auto expected : {"fn_ref Box.copy_out ",
+                          "fn_ref Vector.copy_out$string ",
+                          "fn_ref copy_out_string ",
+                          "enum_discriminant"}) {
+      expect(dumped.out.find(expected) != std::string::npos)
+          << "no `" << expected << "` in the MIR: " << dumped.out;
+    }
+    expect(dumped.out.find("fn copy_out$") == std::string::npos)
+        << "an identity copy_out specialization was left behind: " << dumped.out;
+  };
+
   "a stdlib file compiled as the root keeps its root role"_test = [] {
     const Scratch scratch("prelude-root");
     auto library = scratch.file("stdlib/core/lib.dao", "module core::lib\n\nfn one(): i32 -> 1\n");

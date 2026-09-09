@@ -533,15 +533,20 @@ See `docs/task_specs/TASK_30_BOOTSTRAP_LLVM_BACKEND.md` and
 
 ### Task 35 — Allocation Domains
 
-Status: **E0 delivered** — `docs/task_specs/TASK_35_ALLOCATION_DOMAINS.md`;
+Status: **E1 delivered** — `docs/task_specs/TASK_35_ALLOCATION_DOMAINS.md`;
 `resource memory` is an arena: the runtime keeps a domain stack of
 chunked arenas, every string-, frame-, and file-producing hook
 allocates through the memory hooks, `__dao_mem_free` is a no-op on
-domain memory, `__dao_mem_alloc_outer` and `__dao_str_from_bytes` are
-declared for E1/E2, the MIR builder's `break` leaves only the regions
-its loop entered, and the type checker rejects a heap-owning value
-leaving a block and `yield` inside one.  E1 copy-out, E2
-`core::text::Builder`, and E3 bootstrap adoption remain.
+domain memory, and the MIR builder's `break` leaves only the regions
+its loop entered (E0).  What leaves a block is copied out (E1): the
+type checker records per block the outer bindings stored to inside
+it, the MIR builder calls the prelude intrinsic `copy_out<T>` at each
+exit — under a dirty flag per binding, and for the value a `return`
+or `?` carries — and the monomorphizer expands each call by concrete
+type: `__dao_str_copy_outer` for strings, a class's own `copy_out`
+method (`Vector`, `HashMap`), field by field otherwise.  A generator
+leaving a block and `yield` inside one stay rejected.  E2
+`core::text::Builder` and E3 bootstrap adoption remain.
 
 **Objective**: make `resource memory <name> =>` a real arena: every
 allocation inside comes from the domain and is reclaimed wholesale at
