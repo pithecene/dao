@@ -652,6 +652,21 @@ auto build_value_types(const MirFunction* fn)
   return value_types;
 }
 
+// The call each callee value feeds, function-wide: a reference and its
+// call need not share a block (an argument containing `?` puts the
+// call in the merge block that follows).
+auto build_call_index(const MirFunction* fn) -> std::unordered_map<uint32_t, const MirCall*> {
+  std::unordered_map<uint32_t, const MirCall*> calls_by_callee;
+  for (const auto* blk : fn->blocks) {
+    for (const auto* inst : blk->insts) {
+      if (const auto* call = std::get_if<MirCall>(&inst->payload)) {
+        calls_by_callee[call->callee.id] = call;
+      }
+    }
+  }
+  return calls_by_callee;
+}
+
 // ---------------------------------------------------------------------------
 // Process a single call site that references a generic function.
 // Returns true if a new specialization was created.
@@ -659,8 +674,7 @@ auto build_value_types(const MirFunction* fn)
 
 auto specialize_call_site(MirInst* inst,
                           MirFnRef* fn_ref,
-                          const MirBlock* block,
-                          size_t inst_idx,
+                          const std::unordered_map<uint32_t, const MirCall*>& calls_by_callee,
                           const std::unordered_map<uint32_t, const Type*>& value_types,
                           const std::unordered_map<const Symbol*, MirFunction*>& generic_fns,
                           SpecializationState& state,
@@ -668,20 +682,36 @@ auto specialize_call_site(MirInst* inst,
                           MirContext& ctx,
                           TypeContext& types) -> bool {
 
+  // Only a template's reference, or one whose type still carries a
+  // generic parameter (a compiler builtin's), has anything to do
+  // here; an ordinary call is left alone without a scan for its site.
   auto git = generic_fns.find(fn_ref->symbol);
-  if (git == generic_fns.end()) {
+  const bool is_template = git != generic_fns.end();
+  if (!is_template && !type_has_generic(inst->type)) {
     return false;
   }
 
-  // Find the matching MirCall instruction that uses this FnRef.
+  // The call this reference feeds, wherever in the function it sits.
   const MirCall* call_payload = nullptr;
-  for (size_t j = inst_idx + 1; j < block->insts.size(); ++j) {
-    auto* candidate = std::get_if<MirCall>(&block->insts[j]->payload);
-    if (candidate != nullptr &&
-        candidate->callee.id == inst->result.id) {
-      call_payload = candidate;
-      break;
+  if (auto found = calls_by_callee.find(inst->result.id); found != calls_by_callee.end()) {
+    call_payload = found->second;
+  }
+
+  if (!is_template) {
+    // Not a template: a compiler builtin (`null_ptr<T>`, `ptr_cast<T>`)
+    // has no body to specialize, but its reference is typed with the
+    // builtin's generic signature.  The call's explicit type arguments
+    // make that type concrete; the backend keys the builtin on its name
+    // and reads the types from the call, so nothing else is needed.
+    if (call_payload != nullptr && call_payload->explicit_type_args != nullptr &&
+        !call_payload->explicit_type_args->empty()) {
+      std::unordered_map<uint32_t, const Type*> subst;
+      for (size_t i = 0; i < call_payload->explicit_type_args->size(); ++i) {
+        subst[static_cast<uint32_t>(i)] = (*call_payload->explicit_type_args)[i];
+      }
+      inst->type = substitute_type(inst->type, subst, types);
     }
+    return false;
   }
 
   if (call_payload == nullptr || call_payload->args == nullptr) {
@@ -771,10 +801,10 @@ auto monomorphize(
   // The MIR builder already separated generic function bodies into
   // templates (not in module.functions).  No scanning needed.
   //
-  // When generic_templates is empty, skip specialization but still
-  // run the concreteness invariant check below — the check must fire
-  // even for programs with no generics, to catch synthetic residue.
-  const bool has_templates = !generic_templates.empty();
+  // The call-site pass runs at least once even when there are no
+  // templates: a reference to a compiler builtin (`null_ptr<T>`) is
+  // made concrete there, template or not.  The concreteness check
+  // below runs regardless, to catch synthetic residue.
 
   // Specialization cache: (generic fn, type args) → specialized fn.
   SpecializationState state;
@@ -782,7 +812,7 @@ auto monomorphize(
   // Phase 2+3+4: iterate until no new specializations are produced.
   // Use index-based iteration because specialize_call_site() may
   // push_back new functions, invalidating range-for iterators.
-  bool changed = has_templates;
+  bool changed = true;
   while (changed) {
     changed = false;
 
@@ -790,8 +820,10 @@ auto monomorphize(
     for (size_t fn_idx = 0; fn_idx < fn_count; ++fn_idx) {
       auto* fn = module.functions[fn_idx];
 
-      // Build per-function value-type index for O(1) arg type lookups.
+      // Per-function indexes: value types for O(1) argument lookups,
+      // and the call each callee value feeds.
       auto value_types = build_value_types(fn);
+      auto calls_by_callee = build_call_index(fn);
 
       for (auto* block : fn->blocks) {
         for (size_t inst_idx = 0; inst_idx < block->insts.size();
@@ -804,8 +836,7 @@ auto monomorphize(
 
           if (specialize_call_site(inst,
                                    fn_ref,
-                                   block,
-                                   inst_idx,
+                                   calls_by_callee,
                                    value_types,
                                    generic_templates,
                                    state,

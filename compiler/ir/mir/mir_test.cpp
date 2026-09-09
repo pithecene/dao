@@ -560,9 +560,53 @@ suite<"mir_generator"> mir_generator = [] {
 // ---------------------------------------------------------------------------
 
 suite<"mir_concreteness"> mir_concreteness = [] {
+  "compiler builtins with explicit type arguments leave no generic residue"_test = [] {
+    // null_ptr<T> and ptr_cast<T> have no template to specialize; the
+    // reference to them is typed with the builtin's generic signature
+    // and must be made concrete from the call's type arguments.
+    MirTestPipeline pipe("fn main(): i32\n"
+                         "    let p: *i32 = null_ptr<i32>()\n"
+                         "    mode unsafe =>\n"
+                         "        let q = ptr_cast<i32>(null_ptr<void>())\n"
+                         "        if q != null_ptr<i32>():\n"
+                         "            return 1\n"
+                         "    return 0\n");
+    expect(pipe.check_result.diagnostics.empty())
+        << (pipe.check_result.diagnostics.empty() ? "" : pipe.check_result.diagnostics[0].message);
+    auto mono =
+        monomorphize(*pipe.module(), pipe.mir_ctx, pipe.types, pipe.mir_result.generic_templates);
+    expect(mono.diagnostics.empty())
+        << "unexpected concreteness diagnostics: "
+        << (mono.diagnostics.empty() ? "" : mono.diagnostics[0].message) << "\n"
+        << pipe.dump();
+  };
+
   // After monomorphization, module.functions must contain only
   // type-concrete bodies.  Generic declarations live in
   // generic_templates and are cloned+specialized on demand.
+  "a builtin whose call sits in a later block is still made concrete"_test = [] {
+    // `?` in the argument lowers into blocks: the reference to ptr_cast
+    // is emitted before them and its call in the merge block after.
+    MirTestPipeline pipe("enum class Result<T, E>:\n"
+                         "    Ok(v: T)\n"
+                         "    Err(e: E)\n"
+                         "fn get(): Result<*void, i32>\n"
+                         "    let r: Result<*void, i32> = Result::Ok(v = null_ptr<void>())\n"
+                         "    return r\n"
+                         "fn f(): Result<i32, i32>\n"
+                         "    mode unsafe =>\n"
+                         "        let p = ptr_cast<i32>(get()?)\n"
+                         "    return Result::Ok(v = 0)\n");
+    expect(pipe.check_result.diagnostics.empty())
+        << (pipe.check_result.diagnostics.empty() ? "" : pipe.check_result.diagnostics[0].message);
+    auto mono =
+        monomorphize(*pipe.module(), pipe.mir_ctx, pipe.types, pipe.mir_result.generic_templates);
+    expect(mono.diagnostics.empty())
+        << "unexpected concreteness diagnostics: "
+        << (mono.diagnostics.empty() ? "" : mono.diagnostics[0].message) << "\n"
+        << pipe.dump();
+  };
+
   "monomorphization produces no concreteness diagnostics"_test = [] {
     MirTestPipeline pipe(
         "fn id<T>(x: T): T -> x\n"
