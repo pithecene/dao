@@ -457,31 +457,79 @@ suite<"driver_cli"> driver_cli_suite = [] {
                              "class Label:\n"
                              "  name: string\n"
                              "  count: i32\n\n"
+                             "class Odd:\n"
+                             "  text: string\n\n"
+                             "  fn copy_out(self, extra: i32): Odd\n"
+                             "    return Odd(self.text)\n\n"
+                             "class Other:\n"
+                             "  text: string\n\n"
+                             "  fn copy_out(self): string\n"
+                             "    return self.text\n\n"
                              "enum class Slot:\n"
                              "  Empty\n"
                              "  Full(text: string)\n\n"
+                             "fn numbers(): i64\n"
+                             "  let nums: Vector<i64> = Vector<i64>::new()\n"
+                             "  resource memory pool =>\n"
+                             "    nums = nums.push(1)\n"
+                             "  return nums.length()\n\n"
                              "fn main(): i32\n"
                              "  let box: Box = Box(\"b\")\n"
                              "  let items: Vector<string> = Vector<string>::new()\n"
                              "  let label: Label = Label(\"l\", 1)\n"
+                             "  let odd: Odd = Odd(\"o\")\n"
+                             "  let other: Other = Other(\"o\")\n"
                              "  let slot: Slot = Slot::Empty\n"
                              "  resource memory pool =>\n"
                              "    box = Box(\"in\")\n"
                              "    items = items.push(\"in\")\n"
                              "    label = Label(\"in\", 2)\n"
+                             "    odd = Odd(\"in\")\n"
+                             "    other = Other(\"in\")\n"
                              "    slot = Slot::Full(text = \"in\")\n"
                              "  return label.count\n");
     auto dumped = run_daoc(scratch, {"mir", root.string()});
     expect(dumped.exit_code == 0) << dumped.err;
+    // Each vector element type gets its own copier: the string one is
+    // made first and must not answer for the i64 one.
     for (auto expected : {"fn_ref Box.copy_out ",
                           "fn_ref Vector.copy_out$string ",
+                          "fn_ref Vector.copy_out$i64 ",
                           "fn_ref copy_out_string ",
                           "enum_discriminant"}) {
       expect(dumped.out.find(expected) != std::string::npos)
           << "no `" << expected << "` in the MIR: " << dumped.out;
     }
-    expect(dumped.out.find("fn copy_out$") == std::string::npos)
-        << "an identity copy_out specialization was left behind: " << dumped.out;
+    // The one identity specialization is for Vector<i64>'s non-owning
+    // element type; every owning type's copy was expanded.
+    for (size_t at = dumped.out.find("fn copy_out$"); at != std::string::npos;
+         at = dumped.out.find("fn copy_out$", at + 1)) {
+      expect(dumped.out.compare(at, 15, "fn copy_out$i64") == 0)
+          << "an identity copy_out specialization was left behind: " << dumped.out.substr(at, 40);
+    }
+    // A method named copy_out with another signature is not the copier.
+    for (auto not_a_copier : {"fn_ref Odd.copy_out ", "fn_ref Other.copy_out "}) {
+      expect(dumped.out.find(not_a_copier) == std::string::npos)
+          << "`" << not_a_copier << "` was taken for the copier: " << dumped.out;
+    }
+  };
+
+  "a container of generators may not leave a resource block"_test = [] {
+    // A vector reaches its elements through a raw pointer; a generator
+    // among them has no copier, so the store is rejected up front.
+    const Scratch scratch("copy-out-generator-container");
+    auto root = scratch.file("main.dao",
+                             "module app::main\n\n"
+                             "fn gen(): Generator<i32>\n"
+                             "  yield 1\n\n"
+                             "fn main(): i32\n"
+                             "  let items: Vector<Generator<i32>> = Vector<Generator<i32>>::new()\n"
+                             "  resource memory pool =>\n"
+                             "    items = items.push(gen())\n"
+                             "  return 0\n");
+    auto checked = run_daoc(scratch, {"check", root.string()});
+    expect(checked.exit_code != 0) << "a vector of generators left the block";
+    expect(checked.err_says("a generator cannot be copied out of the block")) << checked.err;
   };
 
   "a stdlib file compiled as the root keeps its root role"_test = [] {

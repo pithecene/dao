@@ -863,22 +863,42 @@ auto find_copy_out_method(const TypeStruct* receiver,
                           const MirModule& module,
                           const std::unordered_map<const Symbol*, MirFunction*>& generic_templates)
     -> MethodRef {
-  auto matches = [&](const Symbol* sym, const MirFunction* fn) {
+  // The receiver's class, when `sym` names a `copy_out` method on it.
+  auto self_class_of = [&](const Symbol* sym, const MirFunction* fn) -> const TypeStruct* {
     if (sym == nullptr || !sym->name.ends_with(".copy_out") || fn->locals.empty() ||
         !fn->locals[0].is_param || fn->locals[0].type == nullptr ||
         fn->locals[0].type->kind() != TypeKind::Struct) {
-      return false;
+      return nullptr;
     }
-    return static_cast<const TypeStruct*>(fn->locals[0].type)->decl_id() == receiver->decl_id();
+    const auto* self_type = static_cast<const TypeStruct*>(fn->locals[0].type);
+    return self_type->decl_id() == receiver->decl_id() ? self_type : nullptr;
   };
-  for (const auto* fn : module.functions) {
-    if (matches(fn->symbol, fn)) {
-      return {fn->symbol, fn};
+  // The copier is exactly `copy_out(self)` returning the class; a method
+  // of that name with any other signature is an ordinary method.
+  auto is_copier = [&](const MirFunction* fn) {
+    size_t params = 0;
+    for (const auto& local : fn->locals) {
+      if (!local.is_param) {
+        break;
+      }
+      ++params;
+    }
+    return params == 1 && fn->return_type != nullptr &&
+           fn->return_type->kind() == TypeKind::Struct &&
+           static_cast<const TypeStruct*>(fn->return_type)->decl_id() == receiver->decl_id();
+  };
+  // The template first: a specialization already made for another
+  // receiver (`Vector.copy_out$string` when `Vector<i64>` is being
+  // copied) shares the class and must not answer for it; the template
+  // is specialized for this receiver by the call's own type arguments.
+  for (const auto& [sym, fn] : generic_templates) {
+    if (self_class_of(sym, fn) != nullptr && is_copier(fn)) {
+      return {sym, fn};
     }
   }
-  for (const auto& [sym, fn] : generic_templates) {
-    if (matches(sym, fn)) {
-      return {sym, fn};
+  for (const auto* fn : module.functions) {
+    if (self_class_of(fn->symbol, fn) != nullptr && is_copier(fn)) {
+      return {fn->symbol, fn};
     }
   }
   return {};
@@ -964,7 +984,8 @@ auto expand_copy_out_calls(MirFunction* fn,
                            const std::unordered_map<const Symbol*, MirFunction*>& generic_templates,
                            const CopyOutHooks& hooks,
                            MirContext& ctx,
-                           TypeContext& types) -> bool {
+                           TypeContext& types,
+                           std::vector<Diagnostic>& diagnostics) -> bool {
   if (hooks.copy_out_decl == nullptr) {
     return false;
   }
@@ -998,6 +1019,16 @@ auto expand_copy_out_calls(MirFunction* fn,
       }
       const Type* type = inst->type;
       if (type == nullptr || type_has_generic(type) || !owns_heap_memory(type)) {
+        continue;
+      }
+      // A generator has no copier (its frame layout is the generator's
+      // own); one reached here came through a container's element type,
+      // past the checker's rule, and is rejected rather than aliased.
+      if (holds_generator(type)) {
+        diagnostics.push_back(
+            Diagnostic::error(inst->span,
+                              "a generator cannot be copied out of a resource block: a '" +
+                                  print_type(type) + "' leaves one through a container"));
         continue;
       }
       MirValueId value = (*call->args)[0];
@@ -1180,7 +1211,8 @@ auto monomorphize(
 
       // Copies out of a domain first, per concrete type, so that what a
       // copy_out call becomes is what gets specialized below.
-      if (expand_copy_out_calls(fn, module, generic_templates, copy_out_hooks, ctx, types)) {
+      if (expand_copy_out_calls(
+              fn, module, generic_templates, copy_out_hooks, ctx, types, result.diagnostics)) {
         changed = true;
       }
 
