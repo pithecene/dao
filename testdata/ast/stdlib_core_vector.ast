@@ -292,6 +292,15 @@ File
               FieldExpr .cap
                 Identifier l
           Then
+            LetStatement owner: *void
+              CallExpr
+                Callee
+                  Identifier ptr_cast
+                TypeArgs
+                  void
+                Args
+                  FieldExpr .data
+                    Identifier self
             LetStatement cap: i64
               BinaryExpr *
                 FieldExpr .cap
@@ -317,8 +326,9 @@ File
                 Args
                   CallExpr
                     Callee
-                      Identifier __dao_mem_alloc
+                      Identifier __dao_mem_alloc_owner
                     Args
+                      Identifier owner
                       BinaryExpr *
                         CallExpr
                           Callee
@@ -340,8 +350,9 @@ File
                 Args
                   CallExpr
                     Callee
-                      Identifier __dao_mem_alloc
+                      Identifier __dao_mem_alloc_owner
                     Args
+                      Identifier owner
                       BinaryExpr *
                         CallExpr
                           Callee
@@ -363,8 +374,9 @@ File
                 Args
                   CallExpr
                     Callee
-                      Identifier __dao_mem_alloc
+                      Identifier __dao_mem_alloc_owner
                     Args
+                      Identifier owner
                       BinaryExpr *
                         CallExpr
                           Callee

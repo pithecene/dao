@@ -260,6 +260,66 @@ File
           Identifier print
         Args
           Identifier total
+    LetStatement base: Vector<i64>
+      CallExpr
+        Callee
+          FieldExpr .push
+            CallExpr
+              Callee
+                FieldExpr .push
+                  CallExpr
+                    Callee
+                      FieldExpr .push
+                        CallExpr
+                          Callee
+                            Identifier Vector.new
+                          TypeArgs
+                            i64
+                    Args
+                      IntLiteral 1
+              Args
+                IntLiteral 2
+        Args
+          IntLiteral 3
+    LetStatement keep: Vector<i64>
+      Identifier base
+    ResourceBlock memory inside
+      Assignment
+        Target
+          Identifier base
+        Value
+          CallExpr
+            Callee
+              FieldExpr .set
+                Identifier base
+            Args
+              IntLiteral 0
+              IntLiteral 9
+      Assignment
+        Target
+          Identifier base
+        Value
+          CallExpr
+            Callee
+              FieldExpr .set
+                Identifier base
+            Args
+              IntLiteral 1
+              IntLiteral 8
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "base"
+          Identifier base
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "keep"
+          Identifier keep
     LetStatement out: Vector<i64>
       CallExpr
         Callee

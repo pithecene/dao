@@ -138,6 +138,35 @@ suite<"domain_outer_and_strings"> domain_outer_and_strings = [] {
     expect(eq(dao_domain_bytes_held(), int64_t{0}));
   };
 
+  "alloc_owner lands in the domain owning the pointer, however deep the block"_test = [] {
+    void* outer = __dao_mem_resource_enter();
+    auto* storage = static_cast<char*>(__dao_mem_alloc(100, 8)); // the outer block's
+    void* inner = __dao_mem_resource_enter();
+    (void)__dao_mem_alloc(100, 8); // the inner block's own memory
+    auto* attached = static_cast<char*>(__dao_mem_alloc_owner(storage, 64, 8));
+    std::memcpy(attached, "attached", 9);
+    auto held_with_inner = dao_domain_bytes_held();
+    __dao_mem_resource_exit(inner);
+    // The inner block's chunk is gone; the outer's, holding both, remains.
+    expect(dao_domain_bytes_held() < held_with_inner);
+    expect(dao_domain_bytes_held() > int64_t{100});
+    expect(eq(std::string(attached), std::string("attached")));
+    __dao_mem_resource_exit(outer);
+    expect(eq(dao_domain_bytes_held(), int64_t{0}));
+  };
+
+  "alloc_owner for root memory is root memory, inside a block or not"_test = [] {
+    auto* storage = static_cast<char*>(__dao_mem_alloc(16, 8)); // root: no block open
+    void* handle = __dao_mem_resource_enter();
+    auto* attached = static_cast<char*>(__dao_mem_alloc_owner(storage, 16, 8));
+    std::memcpy(attached, "root", 5);
+    __dao_mem_resource_exit(handle);
+    expect(eq(dao_domain_bytes_held(), int64_t{0}));
+    expect(eq(std::string(attached), std::string("root")));
+    __dao_mem_free(attached);
+    __dao_mem_free(storage);
+  };
+
   "alloc_outer in the outermost block is root memory"_test = [] {
     void* handle = __dao_mem_resource_enter();
     auto* p = static_cast<char*>(__dao_mem_alloc_outer(16, 8));

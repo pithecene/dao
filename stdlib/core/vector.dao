@@ -70,12 +70,16 @@ class Vector<T>:
       let l: VecLogHead = *self.log
       let values: *T = *self.log_value
       if l.len == l.cap:
+        // The log lives with the buffer, in the domain that owns it:
+        // a set inside a deeper block must not attach storage the
+        // block reclaims to a buffer an outer value still reads.
+        let owner: *void = ptr_cast<void>(self.data)
         let cap: i64 = l.cap * 2
         if cap < 8:
           cap = 8
-        let ni: *i64 = ptr_cast<i64>(__dao_mem_alloc(size_of<i64>() * cap, align_of<i64>()))
-        let ns: *i64 = ptr_cast<i64>(__dao_mem_alloc(size_of<i64>() * cap, align_of<i64>()))
-        let nv: *T = ptr_cast<T>(__dao_mem_alloc(size_of<T>() * cap, align_of<T>()))
+        let ni: *i64 = ptr_cast<i64>(__dao_mem_alloc_owner(owner, size_of<i64>() * cap, align_of<i64>()))
+        let ns: *i64 = ptr_cast<i64>(__dao_mem_alloc_owner(owner, size_of<i64>() * cap, align_of<i64>()))
+        let nv: *T = ptr_cast<T>(__dao_mem_alloc_owner(owner, size_of<T>() * cap, align_of<T>()))
         let k: i64 = 0
         while k < l.len:
           *ptr_offset(ni, k) = *ptr_offset(l.index, k)

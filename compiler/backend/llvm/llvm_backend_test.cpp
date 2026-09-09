@@ -1344,6 +1344,11 @@ suite<"runtime_abi"> runtime_abi = [] {
     expect(alloc_outer->getReturnType()->isPointerTy()) << "returns ptr";
     expect(alloc_outer->arg_size() == 2u) << "size, align";
 
+    auto* alloc_owner = module->getFunction("__dao_mem_alloc_owner");
+    expect(alloc_owner != nullptr) << "mem_alloc_owner declared";
+    expect(alloc_owner->getReturnType()->isPointerTy()) << "returns ptr";
+    expect(alloc_owner->arg_size() == 3u) << "owner, size, align";
+
     auto* from_bytes = module->getFunction("__dao_str_from_bytes");
     expect(from_bytes != nullptr) << "str_from_bytes declared";
     expect(from_bytes->getReturnType()->isStructTy()) << "returns dao.string";
@@ -1443,6 +1448,7 @@ suite<"runtime_abi"> runtime_abi = [] {
     expect(LlvmRuntimeHooks::is_runtime_hook("__dao_str_ends_with"));
     expect(LlvmRuntimeHooks::is_runtime_hook("__dao_str_compare"));
     expect(LlvmRuntimeHooks::is_runtime_hook("__dao_mem_alloc_outer"));
+    expect(LlvmRuntimeHooks::is_runtime_hook("__dao_mem_alloc_owner"));
     expect(LlvmRuntimeHooks::is_runtime_hook("__dao_str_from_bytes"));
     expect(LlvmRuntimeHooks::is_runtime_hook("__dao_str_copy_outer"));
     expect(!LlvmRuntimeHooks::is_runtime_hook("__write_stdout"));

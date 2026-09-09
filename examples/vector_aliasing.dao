@@ -38,6 +38,15 @@ fn main(): i32
   for x in v.iter():
     total = total + x
   print(total)
+  // An alias outside a block keeps its elements when the block's value
+  // sets in place: the log lives with the buffer, not with the block.
+  let base: Vector<i64> = Vector<i64>::new().push(1).push(2).push(3)
+  let keep: Vector<i64> = base
+  resource memory inside =>
+    base = base.set(0, 9)
+    base = base.set(1, 8)
+  show("base", base)
+  show("keep", keep)
   let out: Vector<i64> = Vector<i64>::new()
   resource memory pool =>
     let inner: Vector<i64> = Vector<i64>::new()
