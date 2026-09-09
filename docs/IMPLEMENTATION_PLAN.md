@@ -533,7 +533,7 @@ See `docs/task_specs/TASK_30_BOOTSTRAP_LLVM_BACKEND.md` and
 
 ### Task 35 — Allocation Domains
 
-Status: **E1 delivered** — `docs/task_specs/TASK_35_ALLOCATION_DOMAINS.md`;
+Status: **E2 delivered** — `docs/task_specs/TASK_35_ALLOCATION_DOMAINS.md`;
 `resource memory` is an arena: the runtime keeps a domain stack of
 chunked arenas, every string-, frame-, and file-producing hook
 allocates through the memory hooks, `__dao_mem_free` is a no-op on
@@ -545,8 +545,11 @@ exit — under a dirty flag per binding, and for the value a `return`
 or `?` carries — and the monomorphizer expands each call by concrete
 type: `__dao_str_copy_outer` for strings, a class's own `copy_out`
 method (`Vector`, `HashMap`), field by field otherwise.  A generator
-leaving a block and `yield` inside one stay rejected.  E2
-`core::text::Builder` and E3 bootstrap adoption remain.
+leaving a block and `yield` inside one stay rejected.  Text is
+assembled through `core::text::Builder` (E2): a `Vector<u8>` that
+grows amortized and becomes a string once, through
+`__dao_str_from_bytes`, so a loop of appends is linear and its dead
+buffers are the domain's.  E3 bootstrap adoption remains.
 
 **Objective**: make `resource memory <name> =>` a real arena: every
 allocation inside comes from the domain and is reclaimed wholesale at

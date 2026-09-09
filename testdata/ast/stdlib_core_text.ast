@@ -1,0 +1,123 @@
+File
+  Module core::text
+  ExternFunctionDecl __dao_str_from_bytes
+    Param bytes: *u8
+    Param len: i64
+    ReturnType: string
+  ClassDecl Builder
+    Field bytes: Vector<u8>
+    FunctionDecl new
+      ReturnType: Builder
+      ReturnStatement
+        CallExpr
+          Callee
+            Identifier Builder
+          Args
+            CallExpr
+              Callee
+                Identifier Vector.new
+              TypeArgs
+                u8
+    FunctionDecl push
+      Param self
+      Param s: string
+      ReturnType: Builder
+      LetStatement out: Vector<u8>
+        FieldExpr .bytes
+          Identifier self
+      LetStatement n: i64
+        CallExpr
+          Callee
+            Identifier length
+          Args
+            Identifier s
+      LetStatement i: i64
+        IntLiteral 0
+      WhileStatement
+        Condition
+          BinaryExpr <
+            Identifier i
+            Identifier n
+        Assignment
+          Target
+            Identifier out
+          Value
+            CallExpr
+              Callee
+                FieldExpr .push
+                  Identifier out
+              Args
+                CallExpr
+                  Callee
+                    Identifier u32_to_u8
+                  Args
+                    CallExpr
+                      Callee
+                        Identifier i32_to_u32
+                      Args
+                        CallExpr
+                          Callee
+                            Identifier char_at
+                          Args
+                            Identifier s
+                            Identifier i
+        Assignment
+          Target
+            Identifier i
+          Value
+            BinaryExpr +
+              Identifier i
+              IntLiteral 1
+      ReturnStatement
+        CallExpr
+          Callee
+            Identifier Builder
+          Args
+            Identifier out
+    FunctionDecl push_char
+      Param self
+      Param c: i32
+      ReturnType: Builder
+      ReturnStatement
+        CallExpr
+          Callee
+            Identifier Builder
+          Args
+            CallExpr
+              Callee
+                FieldExpr .push
+                  FieldExpr .bytes
+                    Identifier self
+              Args
+                CallExpr
+                  Callee
+                    Identifier u32_to_u8
+                  Args
+                    CallExpr
+                      Callee
+                        Identifier i32_to_u32
+                      Args
+                        Identifier c
+    FunctionDecl length
+      Param self
+      ReturnType: i64
+      ExprBody
+        CallExpr
+          Callee
+            FieldExpr .length
+              FieldExpr .bytes
+                Identifier self
+    FunctionDecl to_string
+      Param self
+      ReturnType: string
+      ReturnStatement
+        CallExpr
+          Callee
+            Identifier __dao_str_from_bytes
+          Args
+            FieldExpr .data
+              FieldExpr .bytes
+                Identifier self
+            FieldExpr .len
+              FieldExpr .bytes
+                Identifier self

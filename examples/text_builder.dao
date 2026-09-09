@@ -1,0 +1,42 @@
+module examples::text_builder
+
+// Assembling text: a Builder grows its byte buffer amortized and makes
+// the string once, where `+` in a loop would copy the whole result
+// every round.  Inside a resource block the builder's scratch buffers
+// belong to the block; what is copied out is the string.
+
+fn join_numbers(count: i64): string
+  let b: Builder = Builder::new()
+  let i: i64 = 0
+  while i < count:
+    if i > 0:
+      b = b.push(", ")
+    b = b.push(i64_to_string(i))
+    i = i + 1
+  return b.to_string()
+
+fn bracketed(inner: string): string
+  let b: Builder = Builder::new().push_char(91).push(inner).push_char(93)
+  return b.to_string()
+
+fn built_in_a_block(count: i64): string
+  let out: string = ""
+  resource memory scratch =>
+    let b: Builder = Builder::new()
+    let i: i64 = 0
+    while i < count:
+      b = b.push("ab")
+      i = i + 1
+    out = b.to_string()
+  return out
+
+fn main(): i32
+  print(join_numbers(5))
+  print(bracketed("text"))
+  let long: string = built_in_a_block(1000)
+  print(length(long))
+  print(substring(long, 0, 6))
+  let empty: Builder = Builder::new()
+  print(empty.length())
+  print(length(empty.to_string()))
+  return 0
