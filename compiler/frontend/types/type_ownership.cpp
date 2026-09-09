@@ -47,7 +47,13 @@ auto owns_heap_memory(const Type* type) -> bool {
 
 namespace {
 
-auto holds_generator_impl(const Type* t, std::unordered_set<const Type*>& seen) -> bool {
+// `stored` says whether `t` is reached as a field or payload of an
+// aggregate: a raw pointer there is how a container owns its elements
+// (`Vector<T>` holds `*T`), so what it points at is held; a pointer
+// value on its own is the author's responsibility, as everywhere, and
+// holds nothing.
+auto holds_generator_impl(const Type* t, bool stored, std::unordered_set<const Type*>& seen)
+    -> bool {
   if (t == nullptr || !seen.insert(t).second) {
     return false;
   }
@@ -55,19 +61,19 @@ auto holds_generator_impl(const Type* t, std::unordered_set<const Type*>& seen) 
   case TypeKind::Generator:
     return true;
   case TypeKind::Pointer:
-    // A container reaches its elements through a raw pointer (`Vector<T>`
-    // holds `*T`): what it points at is held.
-    return holds_generator_impl(static_cast<const TypePointer*>(t)->pointee(), seen);
+    return stored &&
+           holds_generator_impl(static_cast<const TypePointer*>(t)->pointee(), true, seen);
   case TypeKind::Struct: {
     const auto* st = static_cast<const TypeStruct*>(t);
-    return std::ranges::any_of(
-        st->fields(), [&](const StructField& f) { return holds_generator_impl(f.type, seen); });
+    return std::ranges::any_of(st->fields(), [&](const StructField& f) {
+      return holds_generator_impl(f.type, true, seen);
+    });
   }
   case TypeKind::Enum: {
     const auto* en = static_cast<const TypeEnum*>(t);
     return std::ranges::any_of(en->variants(), [&](const EnumVariant& v) {
-      return std::ranges::any_of(v.payload_types,
-                                 [&](const Type* p) { return holds_generator_impl(p, seen); });
+      return std::ranges::any_of(
+          v.payload_types, [&](const Type* p) { return holds_generator_impl(p, true, seen); });
     });
   }
   default:
@@ -79,7 +85,7 @@ auto holds_generator_impl(const Type* t, std::unordered_set<const Type*>& seen) 
 
 auto holds_generator(const Type* type) -> bool {
   std::unordered_set<const Type*> seen;
-  return holds_generator_impl(type, seen);
+  return holds_generator_impl(type, false, seen);
 }
 
 } // namespace dao

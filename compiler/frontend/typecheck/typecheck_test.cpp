@@ -1343,6 +1343,21 @@ suite<"typecheck_resource_domains"> typecheck_resource_domains = [] {
         << "outer block escapes: " << names(result.typed.resource_escapes(outer)).size();
   };
 
+  "a raw pointer to a generator is the author's, not an escape"_test = [] {
+    // A pointer value holds nothing (as everywhere in `mode unsafe`);
+    // only a container reaching a generator through its pointer field
+    // is holding one.
+    auto result = check_source("fn gen(): Generator<i32>\n"
+                               "    yield 1\n"
+                               "fn f(): *Generator<i32>\n"
+                               "    let p: *Generator<i32> = null_ptr<Generator<i32>>()\n"
+                               "    resource memory pool =>\n"
+                               "        p = null_ptr<Generator<i32>>()\n"
+                               "        return p\n"
+                               "    return p\n");
+    expect(is_ok(result)) << (result.diagnostics.empty() ? "" : result.diagnostics[0].message);
+  };
+
   "a scalar binding declared outside a block may be stored to inside it"_test = [] {
     auto result = check_source("fn f(): i32\n"
                                "    let total: i32 = 0\n"
