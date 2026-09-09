@@ -51,6 +51,25 @@ fn main(): i32
   print(before.length())
   show("m", m, "k199")
   show("before", before, "k0")
+  // Compaction keeps one slot per key, the newest the value sees, at
+  // its own stamp: a value made from the compacted map reads it, and a
+  // later write past it is invisible to that value.
+  let churn: HashMap<i64> = HashMap<i64>::new()
+  let c: i64 = 0
+  while c < 5:
+    churn = churn.set("z", c)
+    c = c + 1
+  let mid: HashMap<i64> = churn
+  churn = churn.set("y", 1)
+  churn = churn.set("w", 2)
+  let later: HashMap<i64> = churn
+  churn = churn.set("z", 40)
+  show("churn", churn, "z")
+  show("churn", churn, "y")
+  show("churn", churn, "w")
+  show("later", later, "z")
+  show("mid", mid, "z")
+  print(churn.length())
   let out: HashMap<i64> = HashMap<i64>::new()
   resource memory pool =>
     let inner: HashMap<i64> = HashMap<i64>::new()
