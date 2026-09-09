@@ -561,8 +561,10 @@ typecheck program).  Both now write in place for the latest value
 with versioned slots (maps) and an overwrite log (vectors), so a
 stale value still reads exactly its own.  The audit's peak column
 (`docs/bootstrap_closure.md`, 6 GiB probe bound) fell from 5.5–16 GiB
-to 46–156 MiB for every program, stage times to a second or less, and
-§10's acceptance bar — every program under 2 GiB — is met.  The
+to 51–418 MiB for every program (the larger figures once the parser
+reads the corpus's static calls, Task 36), stage times to two seconds
+or less, and §10's acceptance bar — every program under 2 GiB — is
+met.  The
 llvm stage's `Vector.get` panic is an earlier bootstrap defect, not
 memory.  (The llvm program's parse-stage crash was the host backend
 allocating a loop's temporaries per iteration — fixed on the host side;
@@ -582,7 +584,7 @@ measured by the audit's peak-memory column.
 
 ### Task 36 — Bootstrap Parser: Call-Site Type Arguments
 
-Status: **spec** — `docs/task_specs/TASK_36_BOOTSTRAP_CALL_SITE_TYPE_ARGUMENTS.md`;
+Status: **complete** — `docs/task_specs/TASK_36_BOOTSTRAP_CALL_SITE_TYPE_ARGUMENTS.md`;
 the first Tier B-Bootstrap construct, sequenced by the closure audit.
 
 **Objective**: the bootstrap parser reads `Type<Args>::member(args)` and

@@ -159,7 +159,7 @@ fn ts_node_span(ts: TS, node_idx: i64): Span
       return ts_tok_span(ts, op_tidx)
     Node.UnaryE(op_tidx, operand):
       return ts_tok_span(ts, op_tidx)
-    Node.CallE(callee, args_lp, arg_count):
+    Node.CallE(callee, args_lp, arg_count, targs_lp, targ_count):
       return ts_node_span(ts, callee)
     Node.FieldE(obj, field_tidx):
       return ts_tok_span(ts, field_tidx)
@@ -1012,7 +1012,7 @@ fn check_expr(ts: TS, node_idx: i64): TS
       return check_binary_expr(ts, node_idx, op_tidx, left, right)
     Node.UnaryE(op_tidx, operand):
       return check_unary_expr(ts, node_idx, op_tidx, operand)
-    Node.CallE(callee, args_lp, arg_count):
+    Node.CallE(callee, args_lp, arg_count, targs_lp, targ_count):
       return check_call_expr(ts, node_idx, callee, args_lp, arg_count)
     Node.FieldE(obj, field_tidx):
       return check_field_expr(ts, node_idx, obj, field_tidx)

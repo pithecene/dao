@@ -147,15 +147,6 @@ fn scope_lookup_local(rs: RS, name: string): i64
 // Section 20: List reading helpers
 // =========================================================================
 
-fn read_list(idx_data: Vector<i64>, lp: i64): Vector<i64>
-  let count: i64 = idx_data.get(lp)
-  let result: Vector<i64> = Vector<i64>::new()
-  let i: i64 = 0
-  while i < count:
-    result = result.push(idx_data.get(lp - count + i))
-    i = i + 1
-  return result
-
 fn read_pairs(idx_data: Vector<i64>, lp: i64): Vector<i64>
   let count: i64 = idx_data.get(lp)
   let total: i64 = count * 2
@@ -371,13 +362,21 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
       return resolve_expr(r, right)
     Node.UnaryE(op_tidx, operand):
       return resolve_expr(rs, operand)
-    Node.CallE(callee, args_lp, arg_count):
+    Node.CallE(callee, args_lp, arg_count, targs_lp, targ_count):
       let r: RS = resolve_expr(rs, callee)
       let args: Vector<i64> = read_list(r.rc.idx_data, args_lp)
       let i: i64 = 0
       while i < args.length():
         r = resolve_expr(r, args.get(i))
         i = i + 1
+      // Call-site type arguments are type nodes; binding them to the
+      // callee's type parameters is the type checker's, later.
+      if targ_count > 0:
+        let targs: Vector<i64> = read_list(r.rc.idx_data, targs_lp)
+        let ti: i64 = 0
+        while ti < targs.length():
+          r = resolve_type_node(r, targs.get(ti))
+          ti = ti + 1
       return r
     Node.IndexE(obj, idx_expr):
       let r: RS = resolve_expr(rs, obj)

@@ -77,6 +77,7 @@ slice of Dao syntax.
 - Statements: `let`, assignment, `if`/`else`/`else if`, `while`,
   `for...in`, `return`, `break`, `match`, expression statements
 - Expressions: full precedence tower (pipe through primary), call,
+  call-site type arguments (`Type<Args>::member(args)`, `f<Args>(args)`),
   field access, index, try (`?`), lambda, list literals, qualified
   names
 - Types: named, generic instantiation (`Vector<Token>`), pointer

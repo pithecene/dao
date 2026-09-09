@@ -158,6 +158,9 @@ fi
 generic_qualified_sites() {
   grep -o -E '[A-Z][A-Za-z]*<[^;()=]*>::' "bootstrap/$1/$1.gen.dao" 2>/dev/null | wc -l
 }
+resource_block_sites() {
+  grep -c -E '^[[:space:]]*resource[[:space:]]+[a-z]+[[:space:]]+[A-Za-z_]+[[:space:]]*=>' "bootstrap/$1/$1.gen.dao" 2>/dev/null
+}
 
 {
   echo "# Bootstrap Closure — Dao"
@@ -243,21 +246,23 @@ generic_qualified_sites() {
   done
   echo "### Parse-stage attribution"
   echo
-  echo "Every parse-stage rejection in the first audit is one construct: generic"
+  echo "Every parse-stage rejection in the first audit was one construct: generic"
   echo "arguments on a qualified name in expression position"
-  echo "(\`Vector<i64>::new()\`, \`HashMap<i64>::new()\`, \`Option<T>::None\`)."
-  echo "The bootstrap parser reads \`Vector<i64>\` as the comparison"
-  echo "\`Vector < i64 > ...\` and stops at \`::\` with \"expected expression\";"
-  echo "one diagnostic per site at statement level, two for nested arguments,"
-  echo "three inside an argument list (the \"expected RParen, got Identifier\""
-  echo "lines) — measured by feeding one-construct programs through the probe."
-  echo "Sites per program against the parse column above:"
+  echo "(\`Vector<i64>::new()\`, \`HashMap<i64>::new()\`), read as the comparison"
+  echo "\`Vector < i64 > ...\` — one diagnostic per site at statement level, more"
+  echo "inside argument lists.  Task 36 taught the parser that construct; the"
+  echo "parse column is zero for every program whose sources hold no"
+  echo "\`resource\` block, and every remaining parse diagnostic is the"
+  echo "\`resource memory\` block (Task 35 E3) — one \"expected expression\" per"
+  echo "block, then one \"expected declaration\" per statement the parser skips"
+  echo "recovering — the parser's next construct.  Sites per program against"
+  echo "the parse column above:"
   echo
-  echo "| Program | \`Type<Args>::\` sites | parse diagnostics |"
-  echo "|---|---|---|"
+  echo "| Program | \`Type<Args>::\` sites | \`resource\` blocks | parse diagnostics |"
+  echo "|---|---|---|---|"
   for p in $PROGRAMS; do
     parse="$(grep "^$p	" "$AUDIT_OUT/closure.txt" | grep -oE '	parse=[0-9]+' | sed 's/.*=//')"
-    echo "| $p | $(generic_qualified_sites "$p") | ${parse:-—} |"
+    echo "| $p | $(generic_qualified_sites "$p") | $(resource_block_sites "$p") | ${parse:-—} |"
   done
   echo
   echo "## 4. Reading the matrix"

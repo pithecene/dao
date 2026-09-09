@@ -1,6 +1,6 @@
 # Task 36 — Bootstrap Parser: Call-Site Type Arguments
 
-Status: implementation spec
+Status: implemented
 Phase: Tier B-Bootstrap, first construct (after Task 35's capacity work)
 Scope: the bootstrap parser accepts generic arguments on a callee in
 expression position — `Type<Args>::method(args)` and `f<Args>(args)` —
@@ -103,10 +103,11 @@ one helper used by both paths, so a third copy is never written.
 ## 6. Downstream stages (in scope: pass-through only)
 
 Every `match` over `Node` is closed, so the resolver, type checker, and
-HIR lowering each update their `CallE` arm to the five-field shape.  In
-this task they ignore the type arguments; the resolver resolves the
-callee and arguments as today, so `Vector<i64>::new()` resolves its
-`Vector` prefix and records the use.  Binding the type arguments —
+HIR lowering each update their `CallE` arm to the five-field shape.  The
+resolver resolves the type arguments as type nodes (as it does a
+generic type's arguments) beside the callee and arguments, so
+`Vector<i64>::new()` resolves its `Vector` prefix and records the use;
+the type checker and HIR lowering ignore them in this task.  Binding the type arguments —
 instantiating `new` for `Vector<i64>` in the bootstrap type checker —
 is the next Tier B-Bootstrap slice, sequenced by the audit's typecheck
 histogram once the parse column is zero.
@@ -139,9 +140,16 @@ Parser goldens in `bootstrap/parser/tests.dao`:
   leaves the comparison reading).
 - `Vector<i64>::new().push(1)` → `FieldE`/`CallE` chain on the result.
 
-Corpus: the closure audit rerun on the head shows `parse = 0` for all
-eight programs — the acceptance test — and the resolver histogram no
-longer lists `unknown name 'Vector'` / `'new'`.
+Corpus: the closure audit rerun on the head shows `parse = 0` for the
+five programs whose sources hold no `resource` block (lexer, parser,
+graph, resolver, typecheck) — the acceptance test — and every
+remaining parse diagnostic in the other three is the `resource memory`
+block Task 35 E3 put into the HIR test driver and the probe (39 sites;
+the bootstrap parser's next construct, deferred in `bootstrap/README.md`).
+The resolver histogram still names `Vector`: the type checker binds
+nothing yet, so a static call's `Vector` prefix is now reached and
+left unresolved as a class in expression position — the next slice's
+first item.
 
 Self-parse: `task bootstrap-test` (the parser's self-parse of real Dao
 source) passes.

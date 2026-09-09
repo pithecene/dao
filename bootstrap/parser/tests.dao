@@ -91,7 +91,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 51
+  let total: i32 = 68
 
   // -----------------------------------------------------------------
   // Expression tests
@@ -157,7 +157,7 @@ fn main(): i32
     let outer: Node = r10a.ps.nodes.get(r10a.node)
     let ok_nested: bool = false
     match outer:
-      Node.CallE(callee, list_pos, arg_count):
+      Node.CallE(callee, list_pos, arg_count, targs_lp, targ_count):
         // Read count from idx list at list_pos
         let cnt: i64 = r10a.ps.idx.get(list_pos)
         if cnt == 2:
@@ -461,6 +461,127 @@ fn main(): i32
   let src40: string = "concept Showable:\n  fn show(self): string\n  fn size(self): i64\n"
   let r40: ParseOutput = parse(src40)
   if expect_no_parse_errors_po("concept_multi_sig_no_err", r40):
+    pass_count = pass_count + 1
+
+  // -----------------------------------------------------------------
+  // Call-site type arguments (Task 36)
+  // -----------------------------------------------------------------
+
+  // Test 41: Static call on a generic type: CallE, callee QualNameE of
+  // two segments, one type argument.
+  let r41: PR = parse_expr_str("Vector<i64>::new()")
+  if expect_node_kind("targs_static_call", r41, r41.node, "CallE"):
+    pass_count = pass_count + 1
+  if r41.node >= 0:
+    let shape_ok: bool = false
+    match r41.ps.nodes.get(r41.node):
+      Node.CallE(callee, args_lp, arg_count, targs_lp, targ_count):
+        if targ_count == 1 and r41.ps.idx.get(targs_lp) == 1 and arg_count == 0:
+          match r41.ps.nodes.get(callee):
+            Node.QualNameE(seg_lp, seg_count):
+              if seg_count == 2:
+                shape_ok = true
+    if shape_ok:
+      print("PASS targs_static_call_shape")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL targs_static_call_shape: expected QualNameE(2 segments) callee, 1 type arg, 0 args")
+  if expect_no_parse_errors("targs_static_call_no_err", r41):
+    pass_count = pass_count + 1
+
+  // Test 42: Nested type argument; `>>` closes both.
+  let r42: PR = parse_expr_str("HashMap<Vector<i64>>::new()")
+  if expect_node_kind("targs_nested", r42, r42.node, "CallE"):
+    pass_count = pass_count + 1
+  if r42.node >= 0:
+    let nested_ok: bool = false
+    match r42.ps.nodes.get(r42.node):
+      Node.CallE(callee, args_lp, arg_count, targs_lp, targ_count):
+        if targ_count == 1:
+          // The list's one item sits just before its count.
+          let targ: i64 = r42.ps.idx.get(targs_lp - 1)
+          match r42.ps.nodes.get(targ):
+            Node.GenericT(name, alp, acount):
+              nested_ok = true
+    if nested_ok:
+      print("PASS targs_nested_generic")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL targs_nested_generic: expected a GenericT type argument")
+  if expect_no_parse_errors("targs_nested_no_err", r42):
+    pass_count = pass_count + 1
+
+  // Test 43: Explicit type arguments on a plain call.
+  let r43: PR = parse_expr_str("identity<i64>(x)")
+  if expect_node_kind("targs_plain_call", r43, r43.node, "CallE"):
+    pass_count = pass_count + 1
+  if r43.node >= 0:
+    let plain_ok: bool = false
+    match r43.ps.nodes.get(r43.node):
+      Node.CallE(callee, args_lp, arg_count, targs_lp, targ_count):
+        if targ_count == 1 and arg_count == 1:
+          match r43.ps.nodes.get(callee):
+            Node.IdentE(t):
+              plain_ok = true
+    if plain_ok:
+      print("PASS targs_plain_call_shape")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL targs_plain_call_shape: expected IdentE callee, 1 type arg, 1 arg")
+
+  // Test 44: A comparison stays a comparison.
+  let r44: PR = parse_expr_str("a < b")
+  if expect_node_kind("lt_is_comparison", r44, r44.node, "BinaryE"):
+    pass_count = pass_count + 1
+
+  // Test 45: Two comparisons; `>` closes no type list.
+  let r45: PR = parse_expr_str("a < b > c")
+  if expect_node_kind("lt_gt_is_two_comparisons", r45, r45.node, "BinaryE"):
+    pass_count = pass_count + 1
+  if expect_no_parse_errors("lt_gt_no_err", r45):
+    pass_count = pass_count + 1
+
+  // Test 46: A comparison as a call argument.
+  let r46: PR = parse_expr_str("f(a < b)")
+  if expect_node_kind("call_with_comparison", r46, r46.node, "CallE"):
+    pass_count = pass_count + 1
+  if r46.node >= 0:
+    let cmp_arg_ok: bool = false
+    match r46.ps.nodes.get(r46.node):
+      Node.CallE(callee, args_lp, arg_count, targs_lp, targ_count):
+        if arg_count == 1 and targ_count == 0:
+          let arg0: i64 = r46.ps.idx.get(args_lp - 1)
+          match r46.ps.nodes.get(arg0):
+            Node.BinaryE(op, l, r):
+              cmp_arg_ok = true
+    if cmp_arg_ok:
+      print("PASS call_with_comparison_arg")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL call_with_comparison_arg: expected one BinaryE argument and no type args")
+
+  // Test 47: A method call on the static call's result.
+  let r47: PR = parse_expr_str("Vector<i64>::new().push(1)")
+  if expect_node_kind("targs_then_method", r47, r47.node, "CallE"):
+    pass_count = pass_count + 1
+  if r47.node >= 0:
+    let chain_ok: bool = false
+    match r47.ps.nodes.get(r47.node):
+      Node.CallE(callee, args_lp, arg_count, targs_lp, targ_count):
+        match r47.ps.nodes.get(callee):
+          Node.FieldE(obj, field):
+            chain_ok = true
+    if chain_ok:
+      print("PASS targs_then_method_chain")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL targs_then_method_chain: expected a FieldE callee")
+
+  // Test 48: A type list that fails to parse leaves the comparison.
+  let r48: PR = parse_expr_str("x < 3 > (y)")
+  if expect_node_kind("bad_type_list_is_comparison", r48, r48.node, "BinaryE"):
+    pass_count = pass_count + 1
+  if expect_no_parse_errors("bad_type_list_no_err", r48):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------

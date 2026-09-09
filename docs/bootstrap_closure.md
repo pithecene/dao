@@ -10,38 +10,38 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 73594 |
-| `CallExpr` | 22294 |
-| `Callee` | 22294 |
-| `FieldExpr` | 20876 |
-| `Args` | 20024 |
-| `BinaryExpr` | 10227 |
-| `LetStatement` | 9929 |
-| `Value` | 7934 |
-| `Target` | 7934 |
-| `Assignment` | 7934 |
-| `IntLiteral` | 7693 |
-| `Condition` | 6429 |
-| `Then` | 5212 |
-| `IfStatement` | 5212 |
-| `ReturnStatement` | 5163 |
-| `StringLiteral` | 4436 |
-| `Param` | 3536 |
-| `Pattern` | 2466 |
-| `Arm` | 2466 |
-| `BoolLiteral` | 2368 |
-| `ReturnType` | 1516 |
-| `FunctionDecl` | 1516 |
-| `Else` | 1268 |
-| `WhileStatement` | 1217 |
+| `Identifier` | 75076 |
+| `CallExpr` | 22801 |
+| `Callee` | 22801 |
+| `FieldExpr` | 21332 |
+| `Args` | 20475 |
+| `BinaryExpr` | 10355 |
+| `LetStatement` | 10083 |
+| `Value` | 8100 |
+| `Target` | 8100 |
+| `Assignment` | 8100 |
+| `IntLiteral` | 7795 |
+| `Condition` | 6541 |
+| `Then` | 5308 |
+| `IfStatement` | 5308 |
+| `ReturnStatement` | 5238 |
+| `StringLiteral` | 4474 |
+| `Param` | 3638 |
+| `Pattern` | 2508 |
+| `Arm` | 2508 |
+| `BoolLiteral` | 2442 |
+| `ReturnType` | 1551 |
+| `FunctionDecl` | 1551 |
+| `Else` | 1289 |
+| `WhileStatement` | 1233 |
 | `Variant` | 1155 |
-| `Field` | 1016 |
-| `UnaryExpr` | 975 |
-| `TypeArgs` | 935 |
-| `Scrutinee` | 542 |
-| `MatchStatement` | 542 |
-| `ExpressionStatement` | 476 |
-| `ClassDecl` | 239 |
+| `Field` | 1048 |
+| `UnaryExpr` | 999 |
+| `TypeArgs` | 954 |
+| `Scrutinee` | 568 |
+| `MatchStatement` | 568 |
+| `ExpressionStatement` | 486 |
+| `ClassDecl` | 247 |
 | `BreakStatement` | 64 |
 | `ResourceBlock` | 39 |
 | `EnumDecl` | 27 |
@@ -234,14 +234,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 49 | 1 | 0 | 84 | 369 | 431 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 47 | 0 | 0 | 90 | 408 | 351 | 0 | 19 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 44 | 0 | 0 | 95 | 403 | 390 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 74 | 0 | 0 | 170 | 956 | 599 | 0 | 57 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 94 | 0 | 0 | 284 | 1673 | 943 | 0 | 126 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 146 | 1 | 0 | 528 | 2180 | 1154 | 0 | 159 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 140 | 1 | 0 | 1340 | 2455 | 1113 | 0 | 204 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 156 | 1 | 0 | 2008 | 2981 | 1157 | 0 | 257 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 51 | 0 | 0 | 0 | 336 | 397 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 51 | 0 | 0 | 0 | 435 | 321 | 0 | 31 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 54 | 1 | 0 | 0 | 359 | 356 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 108 | 1 | 0 | 0 | 881 | 557 | 0 | 59 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 201 | 1 | 0 | 0 | 1554 | 891 | 0 | 128 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 292 | 2 | 0 | 231 | 2050 | 1105 | 0 | 161 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 309 | 2 | 0 | 1029 | 2318 | 1059 | 0 | 206 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 418 | 1 | 0 | 1623 | 2806 | 1092 | 0 | 259 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 
@@ -251,178 +251,162 @@ named, not inferred.
 
 **lexer**
 
-- `parse` ×35: expected expression
-- `parse` ×13: expected declaration (fn, extern, class, enum, type, concept, or extend)
-- `parse` ×2: expected RParen, got Identifier
 - `resolve` ×22: unknown name 'char_at'
-- `resolve` ×8: unknown name 'Vector'
-- `resolve` ×7: unknown name 'new'
-- `resolve` ×5: unknown name 'Span'
-- `resolve` ×5: unknown name 'make_error'
-- `typecheck` ×29: type mismatch in '+': i64 vs i32
+- `resolve` ×11: unknown name 'Vector'
+- `resolve` ×6: unknown name 'Span'
+- `resolve` ×6: unknown name 'make_error'
+- `resolve` ×3: unknown name 'to_i64'
+- `typecheck` ×34: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `typecheck` ×3: type mismatch in assignment: expected bool, got void
+- `typecheck` ×1: type mismatch in '-': i64 vs i32
+- `mir` ×9: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
-- `mir` ×7: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×1: unsupported assignment target
 
 **parser**
 
-- `parse` ×35: expected expression
-- `parse` ×13: expected declaration (fn, extern, class, enum, type, concept, or extend)
-- `parse` ×2: expected RParen, got Identifier
 - `resolve` ×22: unknown name 'char_at'
-- `resolve` ×8: unknown name 'Vector'
-- `resolve` ×7: unknown name 'new'
-- `resolve` ×5: unknown name 'Span'
-- `resolve` ×5: unknown name 'make_error'
-- `typecheck` ×29: type mismatch in '+': i64 vs i32
+- `resolve` ×11: unknown name 'Vector'
+- `resolve` ×6: unknown name 'Span'
+- `resolve` ×6: unknown name 'make_error'
+- `resolve` ×3: unknown name 'to_i64'
+- `typecheck` ×34: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `typecheck` ×3: type mismatch in assignment: expected bool, got void
-- `mir` ×10: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `typecheck` ×1: type mismatch in '-': i64 vs i32
+- `mir` ×22: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `mir` ×1: unsupported assignment target
 
 **graph**
 
-- `parse` ×35: expected expression
-- `parse` ×13: expected declaration (fn, extern, class, enum, type, concept, or extend)
-- `parse` ×2: expected RParen, got Identifier
 - `resolve` ×22: unknown name 'char_at'
-- `resolve` ×8: unknown name 'Vector'
-- `resolve` ×7: unknown name 'new'
-- `resolve` ×5: unknown name 'Span'
-- `resolve` ×5: unknown name 'make_error'
-- `typecheck` ×29: type mismatch in '+': i64 vs i32
+- `resolve` ×11: unknown name 'Vector'
+- `resolve` ×6: unknown name 'Span'
+- `resolve` ×6: unknown name 'make_error'
+- `resolve` ×3: unknown name 'to_i64'
+- `typecheck` ×34: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `typecheck` ×3: type mismatch in assignment: expected bool, got void
+- `typecheck` ×1: type mismatch in '-': i64 vs i32
+- `mir` ×9: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
-- `mir` ×7: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×1: unsupported assignment target
 
 **resolver**
 
-- `parse` ×35: expected expression
-- `parse` ×13: expected declaration (fn, extern, class, enum, type, concept, or extend)
-- `parse` ×2: expected RParen, got Identifier
 - `resolve` ×22: unknown name 'char_at'
-- `resolve` ×8: unknown name 'Vector'
-- `resolve` ×7: unknown name 'new'
-- `resolve` ×5: unknown name 'Span'
-- `resolve` ×5: unknown name 'make_error'
-- `typecheck` ×29: type mismatch in '+': i64 vs i32
+- `resolve` ×11: unknown name 'Vector'
+- `resolve` ×6: unknown name 'Span'
+- `resolve` ×6: unknown name 'make_error'
+- `resolve` ×3: unknown name 'to_i64'
+- `typecheck` ×34: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `typecheck` ×3: type mismatch in assignment: expected bool, got void
+- `typecheck` ×1: type mismatch in '-': i64 vs i32
 - `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×9: unsupported assignment target
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 
 **typecheck**
 
-- `parse` ×35: expected expression
-- `parse` ×13: expected declaration (fn, extern, class, enum, type, concept, or extend)
-- `parse` ×2: expected RParen, got Identifier
 - `resolve` ×22: unknown name 'char_at'
-- `resolve` ×8: unknown name 'Vector'
-- `resolve` ×7: unknown name 'new'
-- `resolve` ×5: unknown name 'Span'
-- `resolve` ×5: unknown name 'make_error'
-- `typecheck` ×29: type mismatch in '+': i64 vs i32
+- `resolve` ×11: unknown name 'Vector'
+- `resolve` ×6: unknown name 'Span'
+- `resolve` ×6: unknown name 'make_error'
+- `resolve` ×3: unknown name 'to_i64'
+- `typecheck` ×34: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `typecheck` ×3: type mismatch in assignment: expected bool, got void
+- `typecheck` ×1: type mismatch in '-': i64 vs i32
 - `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×9: unsupported assignment target
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 
 **hir**
 
-- `parse` ×35: expected expression
-- `parse` ×13: expected declaration (fn, extern, class, enum, type, concept, or extend)
-- `parse` ×2: expected RParen, got Identifier
+- `parse` ×47: expected declaration (fn, extern, class, enum, type, concept, or extend)
+- `parse` ×3: expected expression
 - `resolve` ×22: unknown name 'char_at'
-- `resolve` ×8: unknown name 'Vector'
-- `resolve` ×7: unknown name 'new'
-- `resolve` ×5: unknown name 'Span'
-- `resolve` ×5: unknown name 'make_error'
-- `typecheck` ×29: type mismatch in '+': i64 vs i32
+- `resolve` ×11: unknown name 'Vector'
+- `resolve` ×6: unknown name 'Span'
+- `resolve` ×6: unknown name 'make_error'
+- `resolve` ×3: unknown name 'to_i64'
+- `typecheck` ×34: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `typecheck` ×3: type mismatch in assignment: expected bool, got void
+- `typecheck` ×1: type mismatch in '-': i64 vs i32
 - `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×9: unsupported assignment target
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 
 **mir**
 
-- `parse` ×35: expected expression
-- `parse` ×13: expected declaration (fn, extern, class, enum, type, concept, or extend)
-- `parse` ×2: expected RParen, got Identifier
+- `parse` ×47: expected declaration (fn, extern, class, enum, type, concept, or extend)
+- `parse` ×3: expected expression
 - `resolve` ×22: unknown name 'char_at'
-- `resolve` ×8: unknown name 'Vector'
-- `resolve` ×7: unknown name 'new'
-- `resolve` ×5: unknown name 'Span'
-- `resolve` ×5: unknown name 'make_error'
-- `typecheck` ×29: type mismatch in '+': i64 vs i32
+- `resolve` ×11: unknown name 'Vector'
+- `resolve` ×6: unknown name 'Span'
+- `resolve` ×6: unknown name 'make_error'
+- `resolve` ×3: unknown name 'to_i64'
+- `typecheck` ×34: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `typecheck` ×3: type mismatch in assignment: expected bool, got void
+- `typecheck` ×1: type mismatch in '-': i64 vs i32
 - `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×9: unsupported assignment target
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 
 **llvm**
 
-- `parse` ×35: expected expression
-- `parse` ×13: expected declaration (fn, extern, class, enum, type, concept, or extend)
-- `parse` ×2: expected RParen, got Identifier
+- `parse` ×47: expected declaration (fn, extern, class, enum, type, concept, or extend)
+- `parse` ×3: expected expression
 - `resolve` ×22: unknown name 'char_at'
-- `resolve` ×8: unknown name 'Vector'
-- `resolve` ×7: unknown name 'new'
-- `resolve` ×5: unknown name 'Span'
-- `resolve` ×5: unknown name 'make_error'
-- `typecheck` ×29: type mismatch in '+': i64 vs i32
+- `resolve` ×11: unknown name 'Vector'
+- `resolve` ×6: unknown name 'Span'
+- `resolve` ×6: unknown name 'make_error'
+- `resolve` ×3: unknown name 'to_i64'
+- `typecheck` ×34: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `typecheck` ×3: type mismatch in assignment: expected bool, got void
+- `typecheck` ×1: type mismatch in '-': i64 vs i32
 - `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×9: unsupported assignment target
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 
 ### Parse-stage attribution
 
-Every parse-stage rejection in the first audit is one construct: generic
+Every parse-stage rejection in the first audit was one construct: generic
 arguments on a qualified name in expression position
-(`Vector<i64>::new()`, `HashMap<i64>::new()`, `Option<T>::None`).
-The bootstrap parser reads `Vector<i64>` as the comparison
-`Vector < i64 > ...` and stops at `::` with "expected expression";
-one diagnostic per site at statement level, two for nested arguments,
-three inside an argument list (the "expected RParen, got Identifier"
-lines) — measured by feeding one-construct programs through the probe.
-Sites per program against the parse column above:
+(`Vector<i64>::new()`, `HashMap<i64>::new()`), read as the comparison
+`Vector < i64 > ...` — one diagnostic per site at statement level, more
+inside argument lists.  Task 36 taught the parser that construct; the
+parse column is zero for every program whose sources hold no
+`resource` block, and every remaining parse diagnostic is the
+`resource memory` block (Task 35 E3) — one "expected expression" per
+block, then one "expected declaration" per statement the parser skips
+recovering — the parser's next construct.  Sites per program against
+the parse column above:
 
-| Program | `Type<Args>::` sites | parse diagnostics |
-|---|---|---|
-| lexer | 53 | 84 |
-| parser | 55 | 90 |
-| graph | 64 | 95 |
-| resolver | 96 | 170 |
-| typecheck | 135 | 284 |
-| hir | 154 | 528 |
-| mir | 170 | 1340 |
-| llvm | 208 | 2008 |
+| Program | `Type<Args>::` sites | `resource` blocks | parse diagnostics |
+|---|---|---|---|
+| lexer | 56 | 0 | 0 |
+| parser | 61 | 0 | 0 |
+| graph | 67 | 0 | 0 |
+| resolver | 98 | 0 | 0 |
+| typecheck | 137 | 0 | 0 |
+| hir | 156 | 4 | 231 |
+| mir | 172 | 10 | 1029 |
+| llvm | 210 | 25 | 1623 |
 
 ## 4. Reading the matrix
 
