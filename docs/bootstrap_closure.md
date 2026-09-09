@@ -10,41 +10,44 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 73383 |
-| `CallExpr` | 22021 |
-| `Callee` | 22021 |
-| `FieldExpr` | 20806 |
-| `Args` | 19909 |
-| `BinaryExpr` | 10277 |
+| `Identifier` | 73594 |
+| `CallExpr` | 22294 |
+| `Callee` | 22294 |
+| `FieldExpr` | 20876 |
+| `Args` | 20024 |
+| `BinaryExpr` | 10227 |
 | `LetStatement` | 9929 |
-| `Value` | 7915 |
-| `Target` | 7915 |
-| `Assignment` | 7915 |
-| `IntLiteral` | 7667 |
+| `Value` | 7934 |
+| `Target` | 7934 |
+| `Assignment` | 7934 |
+| `IntLiteral` | 7693 |
 | `Condition` | 6429 |
 | `Then` | 5212 |
 | `IfStatement` | 5212 |
-| `ReturnStatement` | 5142 |
-| `StringLiteral` | 4435 |
+| `ReturnStatement` | 5163 |
+| `StringLiteral` | 4436 |
 | `Param` | 3536 |
 | `Pattern` | 2466 |
 | `Arm` | 2466 |
-| `BoolLiteral` | 2367 |
-| `ReturnType` | 1486 |
-| `FunctionDecl` | 1486 |
+| `BoolLiteral` | 2368 |
+| `ReturnType` | 1516 |
+| `FunctionDecl` | 1516 |
 | `Else` | 1268 |
 | `WhileStatement` | 1217 |
 | `Variant` | 1155 |
 | `Field` | 1016 |
-| `UnaryExpr` | 957 |
-| `TypeArgs` | 822 |
+| `UnaryExpr` | 975 |
+| `TypeArgs` | 935 |
 | `Scrutinee` | 542 |
 | `MatchStatement` | 542 |
 | `ExpressionStatement` | 476 |
 | `ClassDecl` | 239 |
 | `BreakStatement` | 64 |
+| `ResourceBlock` | 39 |
 | `EnumDecl` | 27 |
+| `QualifiedName` | 16 |
 | `EnumClassDecl` | 14 |
+| `ExprBody` | 9 |
 | `Module` | 8 |
 | `File` | 8 |
 
@@ -56,23 +59,31 @@ bootstrap must compile for itself.
 
 | Function | Instantiations |
 |---|---|
-| `core::vector::Vector.push` | 22 |
-| `core::vector::Vector.new` | 22 |
-| `core::vector::Vector.length` | 22 |
+| `core::vector::Vector.push` | 23 |
+| `core::vector::Vector.new` | 23 |
+| `core::vector::Vector.length` | 23 |
 | `core::vector::Vector.get` | 22 |
+| `core::vector::Vector.copy_out` | 21 |
 | `core::vector::Vector.set` | 6 |
 | `core::range::range` | 5 |
+| `core::builtins::copy_out` | 5 |
 | `core::to_string::i64_to_string` | 1 |
 | `core::to_string::i32_to_string` | 1 |
 | `core::to_string::f64_to_string` | 1 |
 | `core::to_string::f32_to_string` | 1 |
 | `core::to_string::bool_to_string` | 1 |
+| `core::text::Builder.to_string` | 1 |
+| `core::text::Builder.push_char` | 1 |
+| `core::text::Builder.push` | 1 |
+| `core::text::Builder.new` | 1 |
+| `core::text::Builder.length` | 1 |
 | `core::string::substring` | 1 |
 | `core::string::str_compare` | 1 |
 | `core::string::starts_with` | 1 |
 | `core::string::length` | 1 |
 | `core::string::index_of` | 1 |
 | `core::string::ends_with` | 1 |
+| `core::string::copy_out_string` | 1 |
 | `core::string::concat` | 1 |
 | `core::string::char_at` | 1 |
 | `core::range::range.resume` | 1 |
@@ -142,6 +153,7 @@ bootstrap must compile for itself.
 | `core::hashmap::HashMap.set` | 1 |
 | `core::hashmap::HashMap.new` | 1 |
 | `core::hashmap::HashMap.get` | 1 |
+| `core::hashmap::HashMap.copy_out` | 1 |
 | `core::hashmap::hash_index` | 1 |
 | `core::equatable::u8.eq` | 1 |
 | `core::equatable::u64.eq` | 1 |
@@ -188,9 +200,9 @@ bootstrap must compile for itself.
 | `core::convert::f32_to_i64` | 1 |
 | `core::convert::f32_to_i32` | 1 |
 | `core::convert::f32_to_f64` | 1 |
-| `size_of` (intrinsic; inlined by the host) | 23 |
-| `ptr_offset` (intrinsic; inlined by the host) | 23 |
-| `align_of` (intrinsic; inlined by the host) | 23 |
+| `size_of` (intrinsic; inlined by the host) | 24 |
+| `ptr_offset` (intrinsic; inlined by the host) | 24 |
+| `align_of` (intrinsic; inlined by the host) | 24 |
 
 The intrinsic family is counted from the MIR (distinct specializations
 of each), since the host lowers every specialization inline and emits no
@@ -201,9 +213,10 @@ definition for it.
 Diagnostics per stage when each program is fed through the bootstrap
 pipeline, and the earliest failing stage's first diagnostic.
 
-Each stage ran in its own process from source, bounded to 16 GiB of
-virtual memory and 600 s (the bootstrap frees nothing, so a stage's cost
-can only be measured alone); peak memory and time are the deepest stage's --
+Each stage ran in its own process from source, bounded to 6 GiB of
+virtual memory and 600 s (one process per stage, so a stage's peak is its
+own: a process running the whole pipeline would hold every earlier stage's
+result while measuring the next); peak memory and time are the deepest stage's --
 one self-compilation attempt through that stage.
 
 A stage the program never reached reads as —; the last column says where
@@ -211,14 +224,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 6854 | 19 | 0 | 46 | 346 | 427 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 6151 | 17 | 0 | 52 | 385 | 347 | 0 | 19 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 5543 | 16 | 0 | 57 | 380 | 386 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 11667 | 35 | 0 | 132 | 933 | 595 | 0 | 57 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 15006 | 52 | 0 | 246 | 1650 | 939 | 0 | — | — | parse: expected expression; then in mir: panic: allocation failed (size=2359296, align=8) |
-| hir | 15942 | 52 | 0 | 253 | 2149 | 1150 | 0 | — | — | parse: expected expression; then in mir: panic: allocation failed (size=1179648, align=8) |
-| mir | 16270 | 54 | 0 | 285 | 2465 | — | — | — | — | parse: expected expression; then in typecheck: panic: allocation failed (size=524288, align=8) |
-| llvm | 16 | 1 | — | — | — | — | — | — | — | in parse: process died (status 139; memory bound 16 GiB) |
+| lexer | 1956 | 11 | 0 | 84 | 369 | 431 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 1734 | 10 | 0 | 90 | 408 | 351 | 0 | 19 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 1546 | 9 | 0 | 95 | 403 | 390 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 3177 | 20 | 0 | 170 | 956 | 599 | 0 | 57 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 6069 | 29 | 0 | 284 | 1673 | — | — | — | — | parse: expected expression; then in typecheck: panic: allocation failed (size=8388608, align=1) |
+| hir | 6065 | 34 | 0 | 528 | 2180 | — | — | — | — | parse: expected expression; then in typecheck: panic: allocation failed (size=8388608, align=1) |
+| mir | 6070 | 34 | 0 | 1340 | 2455 | — | — | — | — | parse: expected expression; then in typecheck: panic: allocation failed (size=8388608, align=1) |
+| llvm | 16 | 0 | — | — | — | — | — | — | — | in parse: process died (status 139; memory bound 6 GiB) |
 
 ### What each stage rejects
 
@@ -228,14 +241,15 @@ named, not inferred.
 
 **lexer**
 
-- `parse` ×45: expected expression
-- `parse` ×1: expected RParen, got Identifier
+- `parse` ×35: expected expression
+- `parse` ×13: expected declaration (fn, extern, class, enum, type, concept, or extend)
+- `parse` ×2: expected RParen, got Identifier
 - `resolve` ×22: unknown name 'char_at'
-- `resolve` ×6: unknown name 'Span'
-- `resolve` ×6: unknown name 'make_error'
-- `resolve` ×5: unknown name 'Vector'
-- `resolve` ×5: unknown name 'new'
-- `typecheck` ×30: type mismatch in '+': i64 vs i32
+- `resolve` ×8: unknown name 'Vector'
+- `resolve` ×7: unknown name 'new'
+- `resolve` ×5: unknown name 'Span'
+- `resolve` ×5: unknown name 'make_error'
+- `typecheck` ×29: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
@@ -246,14 +260,15 @@ named, not inferred.
 
 **parser**
 
-- `parse` ×48: expected expression
+- `parse` ×35: expected expression
+- `parse` ×13: expected declaration (fn, extern, class, enum, type, concept, or extend)
 - `parse` ×2: expected RParen, got Identifier
 - `resolve` ×22: unknown name 'char_at'
-- `resolve` ×6: unknown name 'Span'
-- `resolve` ×6: unknown name 'make_error'
-- `resolve` ×5: unknown name 'Vector'
-- `resolve` ×5: unknown name 'new'
-- `typecheck` ×30: type mismatch in '+': i64 vs i32
+- `resolve` ×8: unknown name 'Vector'
+- `resolve` ×7: unknown name 'new'
+- `resolve` ×5: unknown name 'Span'
+- `resolve` ×5: unknown name 'make_error'
+- `typecheck` ×29: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
@@ -264,14 +279,15 @@ named, not inferred.
 
 **graph**
 
-- `parse` ×49: expected expression
-- `parse` ×1: expected RParen, got Identifier
+- `parse` ×35: expected expression
+- `parse` ×13: expected declaration (fn, extern, class, enum, type, concept, or extend)
+- `parse` ×2: expected RParen, got Identifier
 - `resolve` ×22: unknown name 'char_at'
-- `resolve` ×6: unknown name 'Span'
-- `resolve` ×6: unknown name 'make_error'
-- `resolve` ×5: unknown name 'Vector'
-- `resolve` ×5: unknown name 'new'
-- `typecheck` ×30: type mismatch in '+': i64 vs i32
+- `resolve` ×8: unknown name 'Vector'
+- `resolve` ×7: unknown name 'new'
+- `resolve` ×5: unknown name 'Span'
+- `resolve` ×5: unknown name 'make_error'
+- `typecheck` ×29: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
@@ -282,14 +298,15 @@ named, not inferred.
 
 **resolver**
 
-- `parse` ×47: expected expression
-- `parse` ×3: expected RParen, got Identifier
+- `parse` ×35: expected expression
+- `parse` ×13: expected declaration (fn, extern, class, enum, type, concept, or extend)
+- `parse` ×2: expected RParen, got Identifier
 - `resolve` ×22: unknown name 'char_at'
-- `resolve` ×6: unknown name 'Span'
-- `resolve` ×6: unknown name 'make_error'
-- `resolve` ×5: unknown name 'Vector'
-- `resolve` ×5: unknown name 'new'
-- `typecheck` ×30: type mismatch in '+': i64 vs i32
+- `resolve` ×8: unknown name 'Vector'
+- `resolve` ×7: unknown name 'new'
+- `resolve` ×5: unknown name 'Span'
+- `resolve` ×5: unknown name 'make_error'
+- `typecheck` ×29: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
@@ -300,43 +317,36 @@ named, not inferred.
 
 **typecheck**
 
-- `parse` ×47: expected expression
-- `parse` ×3: expected RParen, got Identifier
+- `parse` ×35: expected expression
+- `parse` ×13: expected declaration (fn, extern, class, enum, type, concept, or extend)
+- `parse` ×2: expected RParen, got Identifier
 - `resolve` ×22: unknown name 'char_at'
-- `resolve` ×6: unknown name 'Span'
-- `resolve` ×6: unknown name 'make_error'
-- `resolve` ×5: unknown name 'Vector'
-- `resolve` ×5: unknown name 'new'
-- `typecheck` ×30: type mismatch in '+': i64 vs i32
-- `typecheck` ×8: type mismatch: cannot assign i32 to i64
-- `typecheck` ×4: unknown type in annotation
-- `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `typecheck` ×3: type mismatch in assignment: expected bool, got void
+- `resolve` ×8: unknown name 'Vector'
+- `resolve` ×7: unknown name 'new'
+- `resolve` ×5: unknown name 'Span'
+- `resolve` ×5: unknown name 'make_error'
 
 **hir**
 
-- `parse` ×47: expected expression
-- `parse` ×3: expected RParen, got Identifier
+- `parse` ×35: expected expression
+- `parse` ×13: expected declaration (fn, extern, class, enum, type, concept, or extend)
+- `parse` ×2: expected RParen, got Identifier
 - `resolve` ×22: unknown name 'char_at'
-- `resolve` ×6: unknown name 'Span'
-- `resolve` ×6: unknown name 'make_error'
-- `resolve` ×5: unknown name 'Vector'
-- `resolve` ×5: unknown name 'new'
-- `typecheck` ×30: type mismatch in '+': i64 vs i32
-- `typecheck` ×8: type mismatch: cannot assign i32 to i64
-- `typecheck` ×4: unknown type in annotation
-- `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `typecheck` ×3: type mismatch in assignment: expected bool, got void
+- `resolve` ×8: unknown name 'Vector'
+- `resolve` ×7: unknown name 'new'
+- `resolve` ×5: unknown name 'Span'
+- `resolve` ×5: unknown name 'make_error'
 
 **mir**
 
-- `parse` ×47: expected expression
-- `parse` ×3: expected RParen, got Identifier
+- `parse` ×35: expected expression
+- `parse` ×13: expected declaration (fn, extern, class, enum, type, concept, or extend)
+- `parse` ×2: expected RParen, got Identifier
 - `resolve` ×22: unknown name 'char_at'
-- `resolve` ×6: unknown name 'Span'
-- `resolve` ×6: unknown name 'make_error'
-- `resolve` ×5: unknown name 'Vector'
-- `resolve` ×5: unknown name 'new'
+- `resolve` ×8: unknown name 'Vector'
+- `resolve` ×7: unknown name 'new'
+- `resolve` ×5: unknown name 'Span'
+- `resolve` ×5: unknown name 'make_error'
 
 ### Parse-stage attribution
 
@@ -352,14 +362,14 @@ Sites per program against the parse column above:
 
 | Program | `Type<Args>::` sites | parse diagnostics |
 |---|---|---|
-| lexer | 42 | 46 |
-| parser | 44 | 52 |
-| graph | 53 | 57 |
-| resolver | 85 | 132 |
-| typecheck | 124 | 246 |
-| hir | 137 | 253 |
-| mir | 150 | 285 |
-| llvm | 187 | — |
+| lexer | 53 | 84 |
+| parser | 55 | 90 |
+| graph | 64 | 95 |
+| resolver | 96 | 170 |
+| typecheck | 135 | 284 |
+| hir | 154 | 528 |
+| mir | 170 | 1340 |
+| llvm | 208 | — |
 
 ## 4. Reading the matrix
 
