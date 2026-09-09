@@ -1,144 +1,201 @@
 File
   Module core::vector
+  ClassDecl VecLogHead
+    Field index: *i64
+    Field stamp: *i64
+    Field len: i64
+    Field cap: i64
+  FunctionDecl vec_log_head_new
+    Param outer: bool
+    ReturnType: *VecLogHead
+    LetStatement raw: *void
+      CallExpr
+        Callee
+          Identifier null_ptr
+        TypeArgs
+          void
+    IfStatement
+      Condition
+        Identifier outer
+      Then
+        Assignment
+          Target
+            Identifier raw
+          Value
+            CallExpr
+              Callee
+                Identifier __dao_mem_alloc_outer
+              Args
+                CallExpr
+                  Callee
+                    Identifier size_of
+                  TypeArgs
+                    VecLogHead
+                CallExpr
+                  Callee
+                    Identifier align_of
+                  TypeArgs
+                    VecLogHead
+      Else
+        Assignment
+          Target
+            Identifier raw
+          Value
+            CallExpr
+              Callee
+                Identifier __dao_mem_alloc
+              Args
+                CallExpr
+                  Callee
+                    Identifier size_of
+                  TypeArgs
+                    VecLogHead
+                CallExpr
+                  Callee
+                    Identifier align_of
+                  TypeArgs
+                    VecLogHead
+    ModeBlock unsafe
+      LetStatement head: *VecLogHead
+        CallExpr
+          Callee
+            Identifier ptr_cast
+          TypeArgs
+            VecLogHead
+          Args
+            Identifier raw
+      Assignment
+        Target
+          UnaryExpr *
+            Identifier head
+        Value
+          CallExpr
+            Callee
+              Identifier VecLogHead
+            Args
+              CallExpr
+                Callee
+                  Identifier null_ptr
+                TypeArgs
+                  i64
+              CallExpr
+                Callee
+                  Identifier null_ptr
+                TypeArgs
+                  i64
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 0
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 0
+      ReturnStatement
+        Identifier head
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier panic
+        Args
+          StringLiteral "unreachable"
+  FunctionDecl vec_log_values_new<T>
+    Param outer: bool
+    ReturnType: **T
+    LetStatement raw: *void
+      CallExpr
+        Callee
+          Identifier null_ptr
+        TypeArgs
+          void
+    IfStatement
+      Condition
+        Identifier outer
+      Then
+        Assignment
+          Target
+            Identifier raw
+          Value
+            CallExpr
+              Callee
+                Identifier __dao_mem_alloc_outer
+              Args
+                CallExpr
+                  Callee
+                    Identifier size_of
+                  TypeArgs
+                    *T
+                CallExpr
+                  Callee
+                    Identifier align_of
+                  TypeArgs
+                    *T
+      Else
+        Assignment
+          Target
+            Identifier raw
+          Value
+            CallExpr
+              Callee
+                Identifier __dao_mem_alloc
+              Args
+                CallExpr
+                  Callee
+                    Identifier size_of
+                  TypeArgs
+                    *T
+                CallExpr
+                  Callee
+                    Identifier align_of
+                  TypeArgs
+                    *T
+    ModeBlock unsafe
+      LetStatement cell: **T
+        CallExpr
+          Callee
+            Identifier ptr_cast
+          TypeArgs
+            *T
+          Args
+            Identifier raw
+      Assignment
+        Target
+          UnaryExpr *
+            Identifier cell
+        Value
+          CallExpr
+            Callee
+              Identifier null_ptr
+            TypeArgs
+              T
+      ReturnStatement
+        Identifier cell
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier panic
+        Args
+          StringLiteral "unreachable"
   ClassDecl Vector<T>
     Field data: *T
     Field len: i64
     Field cap: i64
     Field gen: *i64
-    FunctionDecl push
-      Param self
-      Param elem: T
+    Field version: i64
+    Field log: *VecLogHead
+    Field log_value: **T
+    FunctionDecl new
       ReturnType: Vector<T>
       ModeBlock unsafe
-        IfStatement
-          Condition
-            BinaryExpr <
-              FieldExpr .len
-                Identifier self
-              FieldExpr .cap
-                Identifier self
-          Then
-            IfStatement
-              Condition
-                BinaryExpr ==
-                  UnaryExpr *
-                    FieldExpr .gen
-                      Identifier self
-                  FieldExpr .len
-                    Identifier self
-              Then
-                Assignment
-                  Target
-                    UnaryExpr *
-                      CallExpr
-                        Callee
-                          Identifier ptr_offset
-                        Args
-                          FieldExpr .data
-                            Identifier self
-                          FieldExpr .len
-                            Identifier self
-                  Value
-                    Identifier elem
-                Assignment
-                  Target
-                    UnaryExpr *
-                      FieldExpr .gen
-                        Identifier self
-                  Value
-                    BinaryExpr +
-                      FieldExpr .len
-                        Identifier self
-                      IntLiteral 1
-                ReturnStatement
-                  CallExpr
-                    Callee
-                      Identifier Vector
-                    Args
-                      FieldExpr .data
-                        Identifier self
-                      BinaryExpr +
-                        FieldExpr .len
-                          Identifier self
-                        IntLiteral 1
-                      FieldExpr .cap
-                        Identifier self
-                      FieldExpr .gen
-                        Identifier self
-            LetStatement fork_cap: i64
-              FieldExpr .cap
-                Identifier self
-            LetStatement fork_raw
-              CallExpr
-                Callee
-                  Identifier __dao_mem_alloc
-                Args
-                  BinaryExpr *
-                    CallExpr
-                      Callee
-                        Identifier size_of
-                      TypeArgs
-                        T
-                    Identifier fork_cap
-                  CallExpr
-                    Callee
-                      Identifier align_of
-                    TypeArgs
-                      T
-            LetStatement fork_data
-              CallExpr
-                Callee
-                  Identifier ptr_cast
-                TypeArgs
-                  T
-                Args
-                  Identifier fork_raw
-            LetStatement fi: i64
-              IntLiteral 0
-            WhileStatement
-              Condition
-                BinaryExpr <
-                  Identifier fi
-                  FieldExpr .len
-                    Identifier self
-              Assignment
-                Target
-                  UnaryExpr *
-                    CallExpr
-                      Callee
-                        Identifier ptr_offset
-                      Args
-                        Identifier fork_data
-                        Identifier fi
-                Value
-                  UnaryExpr *
-                    CallExpr
-                      Callee
-                        Identifier ptr_offset
-                      Args
-                        FieldExpr .data
-                          Identifier self
-                        Identifier fi
-              Assignment
-                Target
-                  Identifier fi
-                Value
-                  BinaryExpr +
-                    Identifier fi
-                    IntLiteral 1
-            Assignment
-              Target
-                UnaryExpr *
-                  CallExpr
-                    Callee
-                      Identifier ptr_offset
-                    Args
-                      Identifier fork_data
-                      FieldExpr .len
-                        Identifier self
-              Value
-                Identifier elem
-            LetStatement fork_gen_raw
+        LetStatement gen: *i64
+          CallExpr
+            Callee
+              Identifier ptr_cast
+            TypeArgs
+              i64
+            Args
               CallExpr
                 Callee
                   Identifier __dao_mem_alloc
@@ -153,110 +210,266 @@ File
                       Identifier align_of
                     TypeArgs
                       i64
-            LetStatement fork_gen
+        Assignment
+          Target
+            UnaryExpr *
+              Identifier gen
+          Value
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 0
+        ReturnStatement
+          CallExpr
+            Callee
+              Identifier Vector
+            Args
+              CallExpr
+                Callee
+                  Identifier null_ptr
+                TypeArgs
+                  T
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 0
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 0
+              Identifier gen
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 0
+              CallExpr
+                Callee
+                  Identifier vec_log_head_new
+                Args
+                  BoolLiteral false
+              CallExpr
+                Callee
+                  Identifier vec_log_values_new
+                TypeArgs
+                  T
+                Args
+                  BoolLiteral false
+      ExpressionStatement
+        CallExpr
+          Callee
+            Identifier panic
+          Args
+            StringLiteral "unreachable"
+    FunctionDecl length
+      Param self
+      ReturnType: i64
+      ExprBody
+        FieldExpr .len
+          Identifier self
+    FunctionDecl log_overwrite
+      Param self
+      Param index: i64
+      Param stamp: i64
+      ReturnType: void
+      ModeBlock unsafe
+        LetStatement l: VecLogHead
+          UnaryExpr *
+            FieldExpr .log
+              Identifier self
+        LetStatement values: *T
+          UnaryExpr *
+            FieldExpr .log_value
+              Identifier self
+        IfStatement
+          Condition
+            BinaryExpr ==
+              FieldExpr .len
+                Identifier l
+              FieldExpr .cap
+                Identifier l
+          Then
+            LetStatement cap: i64
+              BinaryExpr *
+                FieldExpr .cap
+                  Identifier l
+                IntLiteral 2
+            IfStatement
+              Condition
+                BinaryExpr <
+                  Identifier cap
+                  IntLiteral 8
+              Then
+                Assignment
+                  Target
+                    Identifier cap
+                  Value
+                    IntLiteral 8
+            LetStatement ni: *i64
               CallExpr
                 Callee
                   Identifier ptr_cast
                 TypeArgs
                   i64
                 Args
-                  Identifier fork_gen_raw
+                  CallExpr
+                    Callee
+                      Identifier __dao_mem_alloc
+                    Args
+                      BinaryExpr *
+                        CallExpr
+                          Callee
+                            Identifier size_of
+                          TypeArgs
+                            i64
+                        Identifier cap
+                      CallExpr
+                        Callee
+                          Identifier align_of
+                        TypeArgs
+                          i64
+            LetStatement ns: *i64
+              CallExpr
+                Callee
+                  Identifier ptr_cast
+                TypeArgs
+                  i64
+                Args
+                  CallExpr
+                    Callee
+                      Identifier __dao_mem_alloc
+                    Args
+                      BinaryExpr *
+                        CallExpr
+                          Callee
+                            Identifier size_of
+                          TypeArgs
+                            i64
+                        Identifier cap
+                      CallExpr
+                        Callee
+                          Identifier align_of
+                        TypeArgs
+                          i64
+            LetStatement nv: *T
+              CallExpr
+                Callee
+                  Identifier ptr_cast
+                TypeArgs
+                  T
+                Args
+                  CallExpr
+                    Callee
+                      Identifier __dao_mem_alloc
+                    Args
+                      BinaryExpr *
+                        CallExpr
+                          Callee
+                            Identifier size_of
+                          TypeArgs
+                            T
+                        Identifier cap
+                      CallExpr
+                        Callee
+                          Identifier align_of
+                        TypeArgs
+                          T
+            LetStatement k: i64
+              IntLiteral 0
+            WhileStatement
+              Condition
+                BinaryExpr <
+                  Identifier k
+                  FieldExpr .len
+                    Identifier l
+              Assignment
+                Target
+                  UnaryExpr *
+                    CallExpr
+                      Callee
+                        Identifier ptr_offset
+                      Args
+                        Identifier ni
+                        Identifier k
+                Value
+                  UnaryExpr *
+                    CallExpr
+                      Callee
+                        Identifier ptr_offset
+                      Args
+                        FieldExpr .index
+                          Identifier l
+                        Identifier k
+              Assignment
+                Target
+                  UnaryExpr *
+                    CallExpr
+                      Callee
+                        Identifier ptr_offset
+                      Args
+                        Identifier ns
+                        Identifier k
+                Value
+                  UnaryExpr *
+                    CallExpr
+                      Callee
+                        Identifier ptr_offset
+                      Args
+                        FieldExpr .stamp
+                          Identifier l
+                        Identifier k
+              Assignment
+                Target
+                  UnaryExpr *
+                    CallExpr
+                      Callee
+                        Identifier ptr_offset
+                      Args
+                        Identifier nv
+                        Identifier k
+                Value
+                  UnaryExpr *
+                    CallExpr
+                      Callee
+                        Identifier ptr_offset
+                      Args
+                        Identifier values
+                        Identifier k
+              Assignment
+                Target
+                  Identifier k
+                Value
+                  BinaryExpr +
+                    Identifier k
+                    IntLiteral 1
+            Assignment
+              Target
+                Identifier l
+              Value
+                CallExpr
+                  Callee
+                    Identifier VecLogHead
+                  Args
+                    Identifier ni
+                    Identifier ns
+                    FieldExpr .len
+                      Identifier l
+                    Identifier cap
+            Assignment
+              Target
+                Identifier values
+              Value
+                Identifier nv
             Assignment
               Target
                 UnaryExpr *
-                  Identifier fork_gen
-              Value
-                BinaryExpr +
-                  FieldExpr .len
+                  FieldExpr .log_value
                     Identifier self
-                  IntLiteral 1
-            ReturnStatement
-              CallExpr
-                Callee
-                  Identifier Vector
-                Args
-                  Identifier fork_data
-                  BinaryExpr +
-                    FieldExpr .len
-                      Identifier self
-                    IntLiteral 1
-                  Identifier fork_cap
-                  Identifier fork_gen
-        LetStatement new_cap: i64
-          BinaryExpr *
-            FieldExpr .cap
-              Identifier self
-            IntLiteral 2
-        IfStatement
-          Condition
-            BinaryExpr ==
-              FieldExpr .cap
-                Identifier self
-              IntLiteral 0
-          Then
-            Assignment
-              Target
-                Identifier new_cap
               Value
-                IntLiteral 8
-        LetStatement new_data_raw
-          CallExpr
-            Callee
-              Identifier __dao_mem_alloc
-            Args
-              BinaryExpr *
-                CallExpr
-                  Callee
-                    Identifier size_of
-                  TypeArgs
-                    T
-                Identifier new_cap
-              CallExpr
-                Callee
-                  Identifier align_of
-                TypeArgs
-                  T
-        LetStatement new_data
-          CallExpr
-            Callee
-              Identifier ptr_cast
-            TypeArgs
-              T
-            Args
-              Identifier new_data_raw
-        LetStatement i: i64
-          IntLiteral 0
-        WhileStatement
-          Condition
-            BinaryExpr <
-              Identifier i
-              FieldExpr .len
-                Identifier self
-          Assignment
-            Target
-              UnaryExpr *
-                CallExpr
-                  Callee
-                    Identifier ptr_offset
-                  Args
-                    Identifier new_data
-                    Identifier i
-            Value
-              UnaryExpr *
-                CallExpr
-                  Callee
-                    Identifier ptr_offset
-                  Args
-                    FieldExpr .data
-                      Identifier self
-                    Identifier i
-          Assignment
-            Target
-              Identifier i
-            Value
-              BinaryExpr +
-                Identifier i
-                IntLiteral 1
+                Identifier nv
         Assignment
           Target
             UnaryExpr *
@@ -264,61 +477,64 @@ File
                 Callee
                   Identifier ptr_offset
                 Args
-                  Identifier new_data
+                  FieldExpr .index
+                    Identifier l
                   FieldExpr .len
-                    Identifier self
+                    Identifier l
           Value
-            Identifier elem
-        LetStatement new_gen_raw
-          CallExpr
-            Callee
-              Identifier __dao_mem_alloc
-            Args
-              CallExpr
-                Callee
-                  Identifier size_of
-                TypeArgs
-                  i64
-              CallExpr
-                Callee
-                  Identifier align_of
-                TypeArgs
-                  i64
-        LetStatement new_gen
-          CallExpr
-            Callee
-              Identifier ptr_cast
-            TypeArgs
-              i64
-            Args
-              Identifier new_gen_raw
+            Identifier index
         Assignment
           Target
             UnaryExpr *
-              Identifier new_gen
+              CallExpr
+                Callee
+                  Identifier ptr_offset
+                Args
+                  FieldExpr .stamp
+                    Identifier l
+                  FieldExpr .len
+                    Identifier l
           Value
-            BinaryExpr +
-              FieldExpr .len
+            Identifier stamp
+        Assignment
+          Target
+            UnaryExpr *
+              CallExpr
+                Callee
+                  Identifier ptr_offset
+                Args
+                  Identifier values
+                  FieldExpr .len
+                    Identifier l
+          Value
+            UnaryExpr *
+              CallExpr
+                Callee
+                  Identifier ptr_offset
+                Args
+                  FieldExpr .data
+                    Identifier self
+                  Identifier index
+        Assignment
+          Target
+            UnaryExpr *
+              FieldExpr .log
                 Identifier self
-              IntLiteral 1
-        ReturnStatement
-          CallExpr
-            Callee
-              Identifier Vector
-            Args
-              Identifier new_data
-              BinaryExpr +
-                FieldExpr .len
-                  Identifier self
-                IntLiteral 1
-              Identifier new_cap
-              Identifier new_gen
-      ExpressionStatement
-        CallExpr
-          Callee
-            Identifier panic
-          Args
-            StringLiteral "unreachable"
+          Value
+            CallExpr
+              Callee
+                Identifier VecLogHead
+              Args
+                FieldExpr .index
+                  Identifier l
+                FieldExpr .stamp
+                  Identifier l
+                BinaryExpr +
+                  FieldExpr .len
+                    Identifier l
+                  IntLiteral 1
+                FieldExpr .cap
+                  Identifier l
     FunctionDecl get
       Param self
       Param index: i64
@@ -349,6 +565,129 @@ File
               Args
                 StringLiteral "Vector.get: index out of bounds"
       ModeBlock unsafe
+        IfStatement
+          Condition
+            BinaryExpr ==
+              UnaryExpr *
+                FieldExpr .gen
+                  Identifier self
+              FieldExpr .version
+                Identifier self
+          Then
+            ReturnStatement
+              UnaryExpr *
+                CallExpr
+                  Callee
+                    Identifier ptr_offset
+                  Args
+                    FieldExpr .data
+                      Identifier self
+                    Identifier index
+        LetStatement l: VecLogHead
+          UnaryExpr *
+            FieldExpr .log
+              Identifier self
+        LetStatement best: i64
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              UnaryExpr -
+                IntLiteral 1
+        LetStatement best_stamp: i64
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 0
+        LetStatement k: i64
+          IntLiteral 0
+        WhileStatement
+          Condition
+            BinaryExpr <
+              Identifier k
+              FieldExpr .len
+                Identifier l
+          IfStatement
+            Condition
+              BinaryExpr ==
+                UnaryExpr *
+                  CallExpr
+                    Callee
+                      Identifier ptr_offset
+                    Args
+                      FieldExpr .index
+                        Identifier l
+                      Identifier k
+                Identifier index
+            Then
+              LetStatement stamp: i64
+                UnaryExpr *
+                  CallExpr
+                    Callee
+                      Identifier ptr_offset
+                    Args
+                      FieldExpr .stamp
+                        Identifier l
+                      Identifier k
+              IfStatement
+                Condition
+                  BinaryExpr >
+                    Identifier stamp
+                    FieldExpr .version
+                      Identifier self
+                Then
+                  IfStatement
+                    Condition
+                      BinaryExpr or
+                        BinaryExpr <
+                          Identifier best
+                          CallExpr
+                            Callee
+                              Identifier to_i64
+                            Args
+                              IntLiteral 0
+                        BinaryExpr <
+                          Identifier stamp
+                          Identifier best_stamp
+                    Then
+                      Assignment
+                        Target
+                          Identifier best
+                        Value
+                          Identifier k
+                      Assignment
+                        Target
+                          Identifier best_stamp
+                        Value
+                          Identifier stamp
+          Assignment
+            Target
+              Identifier k
+            Value
+              BinaryExpr +
+                Identifier k
+                IntLiteral 1
+        IfStatement
+          Condition
+            BinaryExpr >=
+              Identifier best
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 0
+          Then
+            ReturnStatement
+              UnaryExpr *
+                CallExpr
+                  Callee
+                    Identifier ptr_offset
+                  Args
+                    UnaryExpr *
+                      FieldExpr .log_value
+                        Identifier self
+                    Identifier best
         ReturnStatement
           UnaryExpr *
             CallExpr
@@ -358,6 +697,379 @@ File
                 FieldExpr .data
                   Identifier self
                 Identifier index
+      ExpressionStatement
+        CallExpr
+          Callee
+            Identifier panic
+          Args
+            StringLiteral "unreachable"
+    FunctionDecl refreshed
+      Param self
+      Param cap: i64
+      Param outer: bool
+      ReturnType: Vector<T>
+      LetStatement data_raw: *void
+        CallExpr
+          Callee
+            Identifier null_ptr
+          TypeArgs
+            void
+      LetStatement gen_raw: *void
+        CallExpr
+          Callee
+            Identifier null_ptr
+          TypeArgs
+            void
+      IfStatement
+        Condition
+          Identifier outer
+        Then
+          Assignment
+            Target
+              Identifier data_raw
+            Value
+              CallExpr
+                Callee
+                  Identifier __dao_mem_alloc_outer
+                Args
+                  BinaryExpr *
+                    CallExpr
+                      Callee
+                        Identifier size_of
+                      TypeArgs
+                        T
+                    Identifier cap
+                  CallExpr
+                    Callee
+                      Identifier align_of
+                    TypeArgs
+                      T
+          Assignment
+            Target
+              Identifier gen_raw
+            Value
+              CallExpr
+                Callee
+                  Identifier __dao_mem_alloc_outer
+                Args
+                  CallExpr
+                    Callee
+                      Identifier size_of
+                    TypeArgs
+                      i64
+                  CallExpr
+                    Callee
+                      Identifier align_of
+                    TypeArgs
+                      i64
+        Else
+          Assignment
+            Target
+              Identifier data_raw
+            Value
+              CallExpr
+                Callee
+                  Identifier __dao_mem_alloc
+                Args
+                  BinaryExpr *
+                    CallExpr
+                      Callee
+                        Identifier size_of
+                      TypeArgs
+                        T
+                    Identifier cap
+                  CallExpr
+                    Callee
+                      Identifier align_of
+                    TypeArgs
+                      T
+          Assignment
+            Target
+              Identifier gen_raw
+            Value
+              CallExpr
+                Callee
+                  Identifier __dao_mem_alloc
+                Args
+                  CallExpr
+                    Callee
+                      Identifier size_of
+                    TypeArgs
+                      i64
+                  CallExpr
+                    Callee
+                      Identifier align_of
+                    TypeArgs
+                      i64
+      ModeBlock unsafe
+        LetStatement data: *T
+          CallExpr
+            Callee
+              Identifier ptr_cast
+            TypeArgs
+              T
+            Args
+              Identifier data_raw
+        LetStatement i: i64
+          IntLiteral 0
+        WhileStatement
+          Condition
+            BinaryExpr <
+              Identifier i
+              FieldExpr .len
+                Identifier self
+          IfStatement
+            Condition
+              Identifier outer
+            Then
+              Assignment
+                Target
+                  UnaryExpr *
+                    CallExpr
+                      Callee
+                        Identifier ptr_offset
+                      Args
+                        Identifier data
+                        Identifier i
+                Value
+                  CallExpr
+                    Callee
+                      Identifier copy_out
+                    TypeArgs
+                      T
+                    Args
+                      CallExpr
+                        Callee
+                          FieldExpr .get
+                            Identifier self
+                        Args
+                          Identifier i
+            Else
+              Assignment
+                Target
+                  UnaryExpr *
+                    CallExpr
+                      Callee
+                        Identifier ptr_offset
+                      Args
+                        Identifier data
+                        Identifier i
+                Value
+                  CallExpr
+                    Callee
+                      FieldExpr .get
+                        Identifier self
+                    Args
+                      Identifier i
+          Assignment
+            Target
+              Identifier i
+            Value
+              BinaryExpr +
+                Identifier i
+                IntLiteral 1
+        LetStatement gen: *i64
+          CallExpr
+            Callee
+              Identifier ptr_cast
+            TypeArgs
+              i64
+            Args
+              Identifier gen_raw
+        Assignment
+          Target
+            UnaryExpr *
+              Identifier gen
+          Value
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 0
+        ReturnStatement
+          CallExpr
+            Callee
+              Identifier Vector
+            Args
+              Identifier data
+              FieldExpr .len
+                Identifier self
+              Identifier cap
+              Identifier gen
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 0
+              CallExpr
+                Callee
+                  Identifier vec_log_head_new
+                Args
+                  Identifier outer
+              CallExpr
+                Callee
+                  Identifier vec_log_values_new
+                TypeArgs
+                  T
+                Args
+                  Identifier outer
+      ExpressionStatement
+        CallExpr
+          Callee
+            Identifier panic
+          Args
+            StringLiteral "unreachable"
+    FunctionDecl push
+      Param self
+      Param elem: T
+      ReturnType: Vector<T>
+      ModeBlock unsafe
+        IfStatement
+          Condition
+            BinaryExpr <
+              FieldExpr .len
+                Identifier self
+              FieldExpr .cap
+                Identifier self
+          Then
+            IfStatement
+              Condition
+                BinaryExpr ==
+                  UnaryExpr *
+                    FieldExpr .gen
+                      Identifier self
+                  FieldExpr .version
+                    Identifier self
+              Then
+                Assignment
+                  Target
+                    UnaryExpr *
+                      CallExpr
+                        Callee
+                          Identifier ptr_offset
+                        Args
+                          FieldExpr .data
+                            Identifier self
+                          FieldExpr .len
+                            Identifier self
+                  Value
+                    Identifier elem
+                LetStatement stamp: i64
+                  BinaryExpr +
+                    FieldExpr .version
+                      Identifier self
+                    IntLiteral 1
+                Assignment
+                  Target
+                    UnaryExpr *
+                      FieldExpr .gen
+                        Identifier self
+                  Value
+                    Identifier stamp
+                ReturnStatement
+                  CallExpr
+                    Callee
+                      Identifier Vector
+                    Args
+                      FieldExpr .data
+                        Identifier self
+                      BinaryExpr +
+                        FieldExpr .len
+                          Identifier self
+                        IntLiteral 1
+                      FieldExpr .cap
+                        Identifier self
+                      FieldExpr .gen
+                        Identifier self
+                      Identifier stamp
+                      FieldExpr .log
+                        Identifier self
+                      FieldExpr .log_value
+                        Identifier self
+        LetStatement cap: i64
+          FieldExpr .cap
+            Identifier self
+        IfStatement
+          Condition
+            BinaryExpr >=
+              FieldExpr .len
+                Identifier self
+              Identifier cap
+          Then
+            Assignment
+              Target
+                Identifier cap
+              Value
+                BinaryExpr *
+                  Identifier cap
+                  IntLiteral 2
+            IfStatement
+              Condition
+                BinaryExpr <
+                  Identifier cap
+                  IntLiteral 8
+              Then
+                Assignment
+                  Target
+                    Identifier cap
+                  Value
+                    IntLiteral 8
+        LetStatement fresh: Vector<T>
+          CallExpr
+            Callee
+              FieldExpr .refreshed
+                Identifier self
+            Args
+              Identifier cap
+              BoolLiteral false
+        Assignment
+          Target
+            UnaryExpr *
+              CallExpr
+                Callee
+                  Identifier ptr_offset
+                Args
+                  FieldExpr .data
+                    Identifier fresh
+                  FieldExpr .len
+                    Identifier fresh
+          Value
+            Identifier elem
+        Assignment
+          Target
+            UnaryExpr *
+              FieldExpr .gen
+                Identifier fresh
+          Value
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 1
+        ReturnStatement
+          CallExpr
+            Callee
+              Identifier Vector
+            Args
+              FieldExpr .data
+                Identifier fresh
+              BinaryExpr +
+                FieldExpr .len
+                  Identifier fresh
+                IntLiteral 1
+              FieldExpr .cap
+                Identifier fresh
+              FieldExpr .gen
+                Identifier fresh
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 1
+              FieldExpr .log
+                Identifier fresh
+              FieldExpr .log_value
+                Identifier fresh
       ExpressionStatement
         CallExpr
           Callee
@@ -394,66 +1106,75 @@ File
                 Identifier panic
               Args
                 StringLiteral "Vector.set: index out of bounds"
-      LetStatement new_data_raw
-        CallExpr
-          Callee
-            Identifier __dao_mem_alloc
-          Args
-            BinaryExpr *
+      ModeBlock unsafe
+        IfStatement
+          Condition
+            BinaryExpr ==
+              UnaryExpr *
+                FieldExpr .gen
+                  Identifier self
+              FieldExpr .version
+                Identifier self
+          Then
+            LetStatement stamp: i64
+              BinaryExpr +
+                FieldExpr .version
+                  Identifier self
+                IntLiteral 1
+            ExpressionStatement
               CallExpr
                 Callee
-                  Identifier size_of
-                TypeArgs
-                  T
-              FieldExpr .cap
-                Identifier self
-            CallExpr
-              Callee
-                Identifier align_of
-              TypeArgs
-                T
-      ModeBlock unsafe
-        LetStatement new_data
+                  FieldExpr .log_overwrite
+                    Identifier self
+                Args
+                  Identifier index
+                  Identifier stamp
+            Assignment
+              Target
+                UnaryExpr *
+                  CallExpr
+                    Callee
+                      Identifier ptr_offset
+                    Args
+                      FieldExpr .data
+                        Identifier self
+                      Identifier index
+              Value
+                Identifier elem
+            Assignment
+              Target
+                UnaryExpr *
+                  FieldExpr .gen
+                    Identifier self
+              Value
+                Identifier stamp
+            ReturnStatement
+              CallExpr
+                Callee
+                  Identifier Vector
+                Args
+                  FieldExpr .data
+                    Identifier self
+                  FieldExpr .len
+                    Identifier self
+                  FieldExpr .cap
+                    Identifier self
+                  FieldExpr .gen
+                    Identifier self
+                  Identifier stamp
+                  FieldExpr .log
+                    Identifier self
+                  FieldExpr .log_value
+                    Identifier self
+        LetStatement fresh: Vector<T>
           CallExpr
             Callee
-              Identifier ptr_cast
-            TypeArgs
-              T
-            Args
-              Identifier new_data_raw
-        LetStatement i: i64
-          IntLiteral 0
-        WhileStatement
-          Condition
-            BinaryExpr <
-              Identifier i
-              FieldExpr .len
+              FieldExpr .refreshed
                 Identifier self
-          Assignment
-            Target
-              UnaryExpr *
-                CallExpr
-                  Callee
-                    Identifier ptr_offset
-                  Args
-                    Identifier new_data
-                    Identifier i
-            Value
-              UnaryExpr *
-                CallExpr
-                  Callee
-                    Identifier ptr_offset
-                  Args
-                    FieldExpr .data
-                      Identifier self
-                    Identifier i
-          Assignment
-            Target
-              Identifier i
-            Value
-              BinaryExpr +
-                Identifier i
-                IntLiteral 1
+            Args
+              FieldExpr .cap
+                Identifier self
+              BoolLiteral false
         Assignment
           Target
             UnaryExpr *
@@ -461,181 +1182,62 @@ File
                 Callee
                   Identifier ptr_offset
                 Args
-                  Identifier new_data
+                  FieldExpr .data
+                    Identifier fresh
                   Identifier index
           Value
             Identifier elem
-        LetStatement new_gen_raw
-          CallExpr
-            Callee
-              Identifier __dao_mem_alloc
-            Args
-              CallExpr
-                Callee
-                  Identifier size_of
-                TypeArgs
-                  i64
-              CallExpr
-                Callee
-                  Identifier align_of
-                TypeArgs
-                  i64
-        LetStatement new_gen
-          CallExpr
-            Callee
-              Identifier ptr_cast
-            TypeArgs
-              i64
-            Args
-              Identifier new_gen_raw
         Assignment
           Target
             UnaryExpr *
-              Identifier new_gen
+              FieldExpr .gen
+                Identifier fresh
           Value
-            FieldExpr .len
-              Identifier self
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 1
         ReturnStatement
           CallExpr
             Callee
               Identifier Vector
             Args
-              Identifier new_data
+              FieldExpr .data
+                Identifier fresh
               FieldExpr .len
-                Identifier self
+                Identifier fresh
               FieldExpr .cap
-                Identifier self
-              Identifier new_gen
+                Identifier fresh
+              FieldExpr .gen
+                Identifier fresh
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 1
+              FieldExpr .log
+                Identifier fresh
+              FieldExpr .log_value
+                Identifier fresh
       ExpressionStatement
         CallExpr
           Callee
             Identifier panic
           Args
             StringLiteral "unreachable"
-    FunctionDecl length
-      Param self
-      ReturnType: i64
-      ExprBody
-        FieldExpr .len
-          Identifier self
     FunctionDecl copy_out
       Param self
       ReturnType: Vector<T>
-      LetStatement elem_size: i64
+      ReturnStatement
         CallExpr
           Callee
-            Identifier size_of
-          TypeArgs
-            T
-      LetStatement data_raw
-        CallExpr
-          Callee
-            Identifier __dao_mem_alloc_outer
-          Args
-            BinaryExpr *
-              Identifier elem_size
-              FieldExpr .cap
-                Identifier self
-            CallExpr
-              Callee
-                Identifier align_of
-              TypeArgs
-                T
-      LetStatement gen_raw
-        CallExpr
-          Callee
-            Identifier __dao_mem_alloc_outer
-          Args
-            CallExpr
-              Callee
-                Identifier size_of
-              TypeArgs
-                i64
-            CallExpr
-              Callee
-                Identifier align_of
-              TypeArgs
-                i64
-      ModeBlock unsafe
-        LetStatement data
-          CallExpr
-            Callee
-              Identifier ptr_cast
-            TypeArgs
-              T
-            Args
-              Identifier data_raw
-        LetStatement i: i64
-          IntLiteral 0
-        WhileStatement
-          Condition
-            BinaryExpr <
-              Identifier i
-              FieldExpr .len
-                Identifier self
-          Assignment
-            Target
-              UnaryExpr *
-                CallExpr
-                  Callee
-                    Identifier ptr_offset
-                  Args
-                    Identifier data
-                    Identifier i
-            Value
-              CallExpr
-                Callee
-                  Identifier copy_out
-                TypeArgs
-                  T
-                Args
-                  UnaryExpr *
-                    CallExpr
-                      Callee
-                        Identifier ptr_offset
-                      Args
-                        FieldExpr .data
-                          Identifier self
-                        Identifier i
-          Assignment
-            Target
-              Identifier i
-            Value
-              BinaryExpr +
-                Identifier i
-                IntLiteral 1
-        LetStatement gen
-          CallExpr
-            Callee
-              Identifier ptr_cast
-            TypeArgs
-              i64
-            Args
-              Identifier gen_raw
-        Assignment
-          Target
-            UnaryExpr *
-              Identifier gen
-          Value
-            FieldExpr .len
+            FieldExpr .refreshed
               Identifier self
-        ReturnStatement
-          CallExpr
-            Callee
-              Identifier Vector
-            Args
-              Identifier data
-              FieldExpr .len
-                Identifier self
-              FieldExpr .cap
-                Identifier self
-              Identifier gen
-      ExpressionStatement
-        CallExpr
-          Callee
-            Identifier panic
           Args
-            StringLiteral "unreachable"
+            FieldExpr .cap
+              Identifier self
+            BoolLiteral true
     FunctionDecl iter
       Param self
       ReturnType: Generator<T>
@@ -647,16 +1249,13 @@ File
             Identifier i
             FieldExpr .len
               Identifier self
-        ModeBlock unsafe
-          YieldStatement
-            UnaryExpr *
-              CallExpr
-                Callee
-                  Identifier ptr_offset
-                Args
-                  FieldExpr .data
-                    Identifier self
-                  Identifier i
+        YieldStatement
+          CallExpr
+            Callee
+              FieldExpr .get
+                Identifier self
+            Args
+              Identifier i
         Assignment
           Target
             Identifier i
@@ -664,56 +1263,3 @@ File
             BinaryExpr +
               Identifier i
               IntLiteral 1
-    FunctionDecl new
-      ReturnType: Vector<T>
-      LetStatement zero: i64
-        IntLiteral 0
-      ModeBlock unsafe
-        LetStatement gen_raw
-          CallExpr
-            Callee
-              Identifier __dao_mem_alloc
-            Args
-              CallExpr
-                Callee
-                  Identifier size_of
-                TypeArgs
-                  i64
-              CallExpr
-                Callee
-                  Identifier align_of
-                TypeArgs
-                  i64
-        LetStatement gen
-          CallExpr
-            Callee
-              Identifier ptr_cast
-            TypeArgs
-              i64
-            Args
-              Identifier gen_raw
-        Assignment
-          Target
-            UnaryExpr *
-              Identifier gen
-          Value
-            Identifier zero
-        ReturnStatement
-          CallExpr
-            Callee
-              Identifier Vector
-            Args
-              CallExpr
-                Callee
-                  Identifier null_ptr
-                TypeArgs
-                  T
-              Identifier zero
-              Identifier zero
-              Identifier gen
-      ExpressionStatement
-        CallExpr
-          Callee
-            Identifier panic
-          Args
-            StringLiteral "unreachable"

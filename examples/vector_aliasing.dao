@@ -1,0 +1,48 @@
+module examples::vector_aliasing
+
+// A vector value is a value: a later value's in-place set or push is
+// invisible to an earlier one, a stale value's write forks, and what
+// leaves a resource block is the vector as that value saw it.
+
+fn show(label: string, v: Vector<i64>): void
+  let b: Builder = Builder::new().push(label).push(":")
+  let i: i64 = 0
+  while i < v.length():
+    b = b.push(" ").push(i64_to_string(v.get(i)))
+    i = i + 1
+  print(b.to_string())
+
+fn main(): i32
+  let v: Vector<i64> = Vector<i64>::new()
+  v = v.push(1).push(2).push(3)
+  let old: Vector<i64> = v
+  v = v.set(1, 20)
+  v = v.push(4)
+  v = v.set(1, 200)
+  v = v.set(0, 100)
+  show("v", v)
+  show("old", old)
+  let fork: Vector<i64> = old.set(2, 30)
+  show("fork", fork)
+  show("old", old)
+  show("v", v)
+  let grown: Vector<i64> = v
+  let i: i64 = 0
+  while i < 100:
+    v = v.push(i)
+    i = i + 1
+  print(v.length())
+  print(grown.length())
+  print(grown.get(1))
+  let total: i64 = 0
+  for x in v.iter():
+    total = total + x
+  print(total)
+  let out: Vector<i64> = Vector<i64>::new()
+  resource memory pool =>
+    let inner: Vector<i64> = Vector<i64>::new()
+    inner = inner.push(7).push(8)
+    inner = inner.set(0, 9)
+    out = inner
+  show("out", out)
+  return 0
