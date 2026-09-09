@@ -56,10 +56,11 @@ Laws:
    ran on the path taken; the value a `return` or `?` carries out of
    the block is copied at that exit.  The copy follows the static
    type: a `string` by its bytes; a class or enum field by field,
-   unless the class declares a method `copy_out(self)` returning its
-   own type, which the compiler calls instead (`Vector` and `HashMap`
-   do, since their raw pointer field owns what it points at; a method
-   of that name with any other signature is an ordinary method);
+   unless the class itself declares a method `copy_out(self)` returning
+   its own type, type arguments included, which the compiler calls
+   instead (`Vector` and `HashMap` do, since their raw pointer field
+   owns what it points at; a method of that name with any other
+   signature, or supplied by an `extend`, is an ordinary method);
    scalars and pointer values unchanged.  A generator is not copied:
    the compiler rejects a generator leaving a block -- by itself, or
    inside a class or container that holds one, through a raw pointer
