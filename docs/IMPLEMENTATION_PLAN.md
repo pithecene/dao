@@ -613,9 +613,10 @@ parse column after Task 36.
 MIR carry the `resource memory <name> =>` blocks Task 35 E3 placed in
 the pipeline drivers and the probe (4, 10, and 25 blocks in the hir,
 mir, and llvm programs; 231, 1029, and 1623 parse diagnostics), so
-every bootstrap program parses clean.  The block's body is compiled;
-the domain itself — arena, copy-out at exit — is a documented MIR
-deferral in the bootstrap.
+every bootstrap program parses clean.  The block reaches HIR; MIR
+rejects it fail-closed (`CONTRACT_MIR_BOUNDARY.md` §4: a resource
+region must not disappear before backend lowering) until the domain's
+MIR representation lands.
 
 ### Task 31 — Host Multi-file Compilation
 
