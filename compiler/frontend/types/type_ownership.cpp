@@ -49,9 +49,10 @@ namespace {
 
 // `stored` says whether `t` is reached as a field or payload of an
 // aggregate: a raw pointer there is how a container owns its elements
-// (`Vector<T>` holds `*T`), so what it points at is held; a pointer
-// value on its own is the author's responsibility, as everywhere, and
-// holds nothing.
+// (`Vector<T>` holds `*T`), so what it points at is held -- as a value,
+// so a pointer among the elements (`Vector<*Generator<i32>>`) is again
+// a pointer value on its own, the author's responsibility as
+// everywhere, and holds nothing.
 auto holds_generator_impl(const Type* t, bool stored, std::unordered_set<const Type*>& seen)
     -> bool {
   if (t == nullptr || !seen.insert(t).second) {
@@ -62,7 +63,7 @@ auto holds_generator_impl(const Type* t, bool stored, std::unordered_set<const T
     return true;
   case TypeKind::Pointer:
     return stored &&
-           holds_generator_impl(static_cast<const TypePointer*>(t)->pointee(), true, seen);
+           holds_generator_impl(static_cast<const TypePointer*>(t)->pointee(), false, seen);
   case TypeKind::Struct: {
     const auto* st = static_cast<const TypeStruct*>(t);
     return std::ranges::any_of(st->fields(), [&](const StructField& f) {

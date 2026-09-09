@@ -614,6 +614,18 @@ suite<"driver_cli"> driver_cli_suite = [] {
     auto checked = run_daoc(scratch, {"check", root.string()});
     expect(checked.exit_code != 0) << "a vector of generators left the block";
     expect(checked.err_says("a generator cannot be copied out of the block")) << checked.err;
+
+    // Pointers among the elements are pointer values, the author's.
+    auto pointers =
+        scratch.file("pointers.dao",
+                     "module app::pointers\n\n"
+                     "fn main(): i32\n"
+                     "  let ptrs: Vector<*Generator<i32>> = Vector<*Generator<i32>>::new()\n"
+                     "  resource memory pool =>\n"
+                     "    ptrs = ptrs.push(null_ptr<Generator<i32>>())\n"
+                     "  return 0\n");
+    auto accepted = run_daoc(scratch, {"check", pointers.string()});
+    expect(accepted.exit_code == 0) << accepted.err;
   };
 
   "a stdlib file compiled as the root keeps its root role"_test = [] {
