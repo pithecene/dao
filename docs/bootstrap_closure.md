@@ -218,8 +218,9 @@ Diagnostics per stage when each program is fed through the bootstrap
 pipeline, and the earliest failing stage's first diagnostic.
 
 Each stage ran in its own process from source, bounded to 6 GiB of
-virtual memory and 600 s (the bootstrap frees nothing, so a stage's cost
-can only be measured alone); peak memory and time are the deepest stage's --
+virtual memory and 600 s (one process per stage, so a stage's peak is its
+own: a process running the whole pipeline would hold every earlier stage's
+result while measuring the next); peak memory and time are the deepest stage's --
 one self-compilation attempt through that stage.
 
 A stage the program never reached reads as —; the last column says where

@@ -82,8 +82,9 @@ if [ -z "$INSTANCES_TABLE" ]; then
 fi
 
 # 3. Self-compile probe: one process per program and stage, from source.
-#    The bootstrap frees nothing, so a stage's cost can only be measured
-#    alone; and a Dao panic aborts the process, so a program that panics
+#    One process per stage so a stage's peak is its own -- a process
+#    running the whole pipeline would hold every earlier stage's result
+#    while measuring the next; and a Dao panic aborts the process, so a program that panics
 #    gets a line naming the stage it died in and the panic message.
 #    Stages run in pipeline order and stop at the first that dies: every
 #    later one would die the same way.
@@ -194,8 +195,9 @@ generic_qualified_sites() {
   echo "pipeline, and the earliest failing stage's first diagnostic."
   echo
   echo "Each stage ran in its own process from source, bounded to $((LIMIT_KB / 1048576)) GiB of"
-  echo "virtual memory and ${LIMIT_S} s (the bootstrap frees nothing, so a stage's cost"
-  echo "can only be measured alone); peak memory and time are the deepest stage's --"
+  echo "virtual memory and ${LIMIT_S} s (one process per stage, so a stage's peak is its"
+  echo "own: a process running the whole pipeline would hold every earlier stage's"
+  echo "result while measuring the next); peak memory and time are the deepest stage's --"
   echo "one self-compilation attempt through that stage."
   echo
   echo "A stage the program never reached reads as —; the last column says where"
