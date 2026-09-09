@@ -143,10 +143,11 @@ class HashMap<V>:
 
   fn contains(self, key: string): bool -> self.visible_slot(key) >= to_i64(0)
 
-  // Fresh storage of `cap` slots holding the entries this value sees;
-  // in the enclosing domain when `outer` is set.
-  fn compacted(self, cap: i64, outer: bool): HashMap<V>
-    let fresh: HashStorage<V> = HashStorage<V>::fresh(cap, outer)
+  // Fresh storage of `cap` slots holding the entries this value sees,
+  // in the current domain.  No entry is copied out here, so an ordinary
+  // set never instantiates the value type's copier.
+  fn compacted(self, cap: i64): HashMap<V>
+    let fresh: HashStorage<V> = HashStorage<V>::fresh(cap, false)
     let s: HashStorage<V> = self.storage
     mode unsafe =>
       let j: i64 = 0
@@ -157,10 +158,7 @@ class HashMap<V>:
             let key: string = *ptr_offset(s.keys, j)
             // Only the slot this value reads for the key is carried over.
             if self.visible_slot(key) == j:
-              if outer:
-                fresh.fill(copy_out_string(key), copy_out<V>(*ptr_offset(s.vals, j)))
-              else:
-                fresh.fill(key, *ptr_offset(s.vals, j))
+              fresh.fill(key, *ptr_offset(s.vals, j))
         j = j + 1
       return HashMap(fresh, *fresh.gen, self.count)
     panic("unreachable")
@@ -170,7 +168,20 @@ class HashMap<V>:
   fn copy_out(self): HashMap<V>
     if self.storage.cap == to_i64(0):
       return HashMap<V>::new()
-    return self.compacted(self.storage.cap, true)
+    let fresh: HashStorage<V> = HashStorage<V>::fresh(self.storage.cap, true)
+    let s: HashStorage<V> = self.storage
+    mode unsafe =>
+      let j: i64 = 0
+      while j < s.cap:
+        let stamp: i64 = *ptr_offset(s.stamps, j)
+        if stamp != to_i64(0):
+          if stamp <= self.version:
+            let key: string = *ptr_offset(s.keys, j)
+            if self.visible_slot(key) == j:
+              fresh.fill(copy_out_string(key), copy_out<V>(*ptr_offset(s.vals, j)))
+        j = j + 1
+      return HashMap(fresh, *fresh.gen, self.count)
+    panic("unreachable")
 
   fn set(self, key: string, value: V): HashMap<V>
     let s: HashStorage<V> = self.storage
@@ -194,4 +205,4 @@ class HashMap<V>:
       new_cap = to_i64(8)
     while (self.count + to_i64(1)) * to_i64(4) > new_cap * to_i64(3):
       new_cap = new_cap * to_i64(2)
-    return self.compacted(new_cap, false).set(key, value)
+    return self.compacted(new_cap).set(key, value)

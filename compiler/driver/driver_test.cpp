@@ -648,6 +648,23 @@ suite<"driver_cli"> driver_cli_suite = [] {
     auto rejected = run_daoc(scratch, {"check", both.string()});
     expect(rejected.exit_code != 0) << "a class holding generators after pointers left the block";
     expect(rejected.err_says("a generator cannot be copied out of the block")) << rejected.err;
+
+    // Outside any block, containers of generators are ordinary: their
+    // pushes and sets copy nothing out, so no copier is instantiated.
+    auto plain =
+        scratch.file("plain.dao",
+                     "module app::plain\n\n"
+                     "fn gen(): Generator<i32>\n"
+                     "  yield 1\n\n"
+                     "fn main(): i32\n"
+                     "  let items: Vector<Generator<i32>> = Vector<Generator<i32>>::new()\n"
+                     "  items = items.push(gen())\n"
+                     "  items = items.set(0, gen())\n"
+                     "  let named: HashMap<Generator<i32>> = HashMap<Generator<i32>>::new()\n"
+                     "  named = named.set(\"g\", gen())\n"
+                     "  return 0\n");
+    auto lowered = run_daoc(scratch, {"mir", plain.string()});
+    expect(lowered.exit_code == 0) << lowered.err;
   };
 
   "a stdlib file compiled as the root keeps its root role"_test = [] {

@@ -131,32 +131,21 @@ class Vector<T>:
       latest = *self.gen == self.version
     if latest:
       return self
-    return self.refreshed(self.cap, false)
+    return self.refreshed(self.cap)
 
   // A fresh buffer of `cap` slots holding what this value sees, in the
-  // current domain or, when `outer` is set, in the enclosing one with
-  // each element copied out.
-  fn refreshed(self, cap: i64, outer: bool): Vector<T>
-    let data_raw: *void = null_ptr<void>()
-    let gen_raw: *void = null_ptr<void>()
-    if outer:
-      data_raw = __dao_mem_alloc_outer(size_of<T>() * cap, align_of<T>())
-      gen_raw = __dao_mem_alloc_outer(size_of<i64>(), align_of<i64>())
-    else:
-      data_raw = __dao_mem_alloc(size_of<T>() * cap, align_of<T>())
-      gen_raw = __dao_mem_alloc(size_of<i64>(), align_of<i64>())
+  // current domain.  No element is copied out here, so an ordinary push
+  // or set never instantiates an element type's copier.
+  fn refreshed(self, cap: i64): Vector<T>
     mode unsafe =>
-      let data: *T = ptr_cast<T>(data_raw)
+      let data: *T = ptr_cast<T>(__dao_mem_alloc(size_of<T>() * cap, align_of<T>()))
       let i: i64 = 0
       while i < self.len:
-        if outer:
-          *ptr_offset(data, i) = copy_out<T>(self.get(i))
-        else:
-          *ptr_offset(data, i) = self.get(i)
+        *ptr_offset(data, i) = self.get(i)
         i = i + 1
-      let gen: *i64 = ptr_cast<i64>(gen_raw)
+      let gen: *i64 = ptr_cast<i64>(__dao_mem_alloc(size_of<i64>(), align_of<i64>()))
       *gen = to_i64(0)
-      return Vector(data, self.len, cap, gen, to_i64(0), vec_log_head_new(outer), vec_log_values_new<T>(outer))
+      return Vector(data, self.len, cap, gen, to_i64(0), vec_log_head_new(false), vec_log_values_new<T>(false))
     panic("unreachable")
 
   fn push(self, elem: T): Vector<T>
@@ -175,7 +164,7 @@ class Vector<T>:
         cap = cap * 2
         if cap < 8:
           cap = 8
-      let fresh: Vector<T> = self.refreshed(cap, false)
+      let fresh: Vector<T> = self.refreshed(cap)
       *ptr_offset(fresh.data, fresh.len) = elem
       *fresh.gen = to_i64(1)
       return Vector(fresh.data, fresh.len + 1, fresh.cap, fresh.gen, to_i64(1), fresh.log, fresh.log_value)
@@ -194,7 +183,7 @@ class Vector<T>:
         *ptr_offset(self.data, index) = elem
         *self.gen = stamp
         return Vector(self.data, self.len, self.cap, self.gen, stamp, self.log, self.log_value)
-      let fresh: Vector<T> = self.refreshed(self.cap, false)
+      let fresh: Vector<T> = self.refreshed(self.cap)
       *ptr_offset(fresh.data, index) = elem
       *fresh.gen = to_i64(1)
       return Vector(fresh.data, fresh.len, fresh.cap, fresh.gen, to_i64(1), fresh.log, fresh.log_value)
@@ -204,7 +193,16 @@ class Vector<T>:
   // domain: what `copy_out` does for a vector.  Elements are copied
   // out one by one, so a vector of strings leaves with its strings.
   fn copy_out(self): Vector<T>
-    return self.refreshed(self.cap, true)
+    mode unsafe =>
+      let data: *T = ptr_cast<T>(__dao_mem_alloc_outer(size_of<T>() * self.cap, align_of<T>()))
+      let i: i64 = 0
+      while i < self.len:
+        *ptr_offset(data, i) = copy_out<T>(self.get(i))
+        i = i + 1
+      let gen: *i64 = ptr_cast<i64>(__dao_mem_alloc_outer(size_of<i64>(), align_of<i64>()))
+      *gen = to_i64(0)
+      return Vector(data, self.len, self.cap, gen, to_i64(0), vec_log_head_new(true), vec_log_values_new<T>(true))
+    panic("unreachable")
 
   fn iter(self): Generator<T>
     let i: i64 = 0
