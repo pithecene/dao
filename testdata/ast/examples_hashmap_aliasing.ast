@@ -344,6 +344,123 @@ File
           StringLiteral "before"
           Identifier before
           StringLiteral "k0"
+    LetStatement churn: HashMap<i64>
+      CallExpr
+        Callee
+          Identifier HashMap.new
+        TypeArgs
+          i64
+    LetStatement c: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier c
+          IntLiteral 5
+      Assignment
+        Target
+          Identifier churn
+        Value
+          CallExpr
+            Callee
+              FieldExpr .set
+                Identifier churn
+            Args
+              StringLiteral "z"
+              Identifier c
+      Assignment
+        Target
+          Identifier c
+        Value
+          BinaryExpr +
+            Identifier c
+            IntLiteral 1
+    LetStatement mid: HashMap<i64>
+      Identifier churn
+    Assignment
+      Target
+        Identifier churn
+      Value
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier churn
+          Args
+            StringLiteral "y"
+            IntLiteral 1
+    Assignment
+      Target
+        Identifier churn
+      Value
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier churn
+          Args
+            StringLiteral "w"
+            IntLiteral 2
+    LetStatement later: HashMap<i64>
+      Identifier churn
+    Assignment
+      Target
+        Identifier churn
+      Value
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier churn
+          Args
+            StringLiteral "z"
+            IntLiteral 40
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "churn"
+          Identifier churn
+          StringLiteral "z"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "churn"
+          Identifier churn
+          StringLiteral "y"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "churn"
+          Identifier churn
+          StringLiteral "w"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "later"
+          Identifier later
+          StringLiteral "z"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "mid"
+          Identifier mid
+          StringLiteral "z"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier churn
     LetStatement out: HashMap<i64>
       CallExpr
         Callee

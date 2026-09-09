@@ -17,5 +17,11 @@ full f0 = 60
 2
 m k199 = 199
 before has no k0
+churn z = 40
+churn y = 1
+churn w = 2
+later z = 4
+mid z = 4
+3
 out x = 8
 1

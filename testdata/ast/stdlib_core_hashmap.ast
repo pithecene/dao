@@ -490,6 +490,166 @@ File
                 Identifier self
           Value
             Identifier stamp
+    FunctionDecl adopt
+      Param self
+      Param key: string
+      Param value: V
+      Param stamp: i64
+      ReturnType: void
+      ModeBlock unsafe
+        LetStatement idx: i64
+          CallExpr
+            Callee
+              Identifier hash_index
+            Args
+              CallExpr
+                Callee
+                  Identifier hash_string
+                Args
+                  Identifier key
+              FieldExpr .cap
+                Identifier self
+        WhileStatement
+          Condition
+            BinaryExpr !=
+              UnaryExpr *
+                CallExpr
+                  Callee
+                    Identifier ptr_offset
+                  Args
+                    FieldExpr .stamps
+                      Identifier self
+                    Identifier idx
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 0
+          IfStatement
+            Condition
+              BinaryExpr ==
+                UnaryExpr *
+                  CallExpr
+                    Callee
+                      Identifier ptr_offset
+                    Args
+                      FieldExpr .keys
+                        Identifier self
+                      Identifier idx
+                Identifier key
+            Then
+              IfStatement
+                Condition
+                  BinaryExpr >
+                    Identifier stamp
+                    UnaryExpr *
+                      CallExpr
+                        Callee
+                          Identifier ptr_offset
+                        Args
+                          FieldExpr .stamps
+                            Identifier self
+                          Identifier idx
+                Then
+                  Assignment
+                    Target
+                      UnaryExpr *
+                        CallExpr
+                          Callee
+                            Identifier ptr_offset
+                          Args
+                            FieldExpr .vals
+                              Identifier self
+                            Identifier idx
+                    Value
+                      Identifier value
+                  Assignment
+                    Target
+                      UnaryExpr *
+                        CallExpr
+                          Callee
+                            Identifier ptr_offset
+                          Args
+                            FieldExpr .stamps
+                              Identifier self
+                            Identifier idx
+                    Value
+                      Identifier stamp
+              ReturnStatement
+          Assignment
+            Target
+              Identifier idx
+            Value
+              BinaryExpr +
+                Identifier idx
+                IntLiteral 1
+          IfStatement
+            Condition
+              BinaryExpr >=
+                Identifier idx
+                FieldExpr .cap
+                  Identifier self
+            Then
+              Assignment
+                Target
+                  Identifier idx
+                Value
+                  CallExpr
+                    Callee
+                      Identifier to_i64
+                    Args
+                      IntLiteral 0
+        Assignment
+          Target
+            UnaryExpr *
+              CallExpr
+                Callee
+                  Identifier ptr_offset
+                Args
+                  FieldExpr .keys
+                    Identifier self
+                  Identifier idx
+          Value
+            Identifier key
+        Assignment
+          Target
+            UnaryExpr *
+              CallExpr
+                Callee
+                  Identifier ptr_offset
+                Args
+                  FieldExpr .vals
+                    Identifier self
+                  Identifier idx
+          Value
+            Identifier value
+        Assignment
+          Target
+            UnaryExpr *
+              CallExpr
+                Callee
+                  Identifier ptr_offset
+                Args
+                  FieldExpr .stamps
+                    Identifier self
+                  Identifier idx
+          Value
+            Identifier stamp
+        Assignment
+          Target
+            UnaryExpr *
+              FieldExpr .used
+                Identifier self
+          Value
+            BinaryExpr +
+              UnaryExpr *
+                FieldExpr .used
+                  Identifier self
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 1
   ClassDecl HashMap<V>
     Field storage: HashStorage<V>
     Field version: i64
@@ -813,41 +973,29 @@ File
                     FieldExpr .version
                       Identifier self
                 Then
-                  LetStatement key: string
-                    UnaryExpr *
-                      CallExpr
-                        Callee
-                          Identifier ptr_offset
-                        Args
-                          FieldExpr .keys
-                            Identifier s
-                          Identifier j
-                  IfStatement
-                    Condition
-                      BinaryExpr ==
-                        CallExpr
-                          Callee
-                            FieldExpr .visible_slot
-                              Identifier self
-                          Args
-                            Identifier key
-                        Identifier j
-                    Then
-                      ExpressionStatement
-                        CallExpr
-                          Callee
-                            FieldExpr .fill
-                              Identifier fresh
-                          Args
-                            Identifier key
-                            UnaryExpr *
-                              CallExpr
-                                Callee
-                                  Identifier ptr_offset
-                                Args
-                                  FieldExpr .vals
-                                    Identifier s
-                                  Identifier j
+                  ExpressionStatement
+                    CallExpr
+                      Callee
+                        FieldExpr .adopt
+                          Identifier fresh
+                      Args
+                        UnaryExpr *
+                          CallExpr
+                            Callee
+                              Identifier ptr_offset
+                            Args
+                              FieldExpr .keys
+                                Identifier s
+                              Identifier j
+                        UnaryExpr *
+                          CallExpr
+                            Callee
+                              Identifier ptr_offset
+                            Args
+                              FieldExpr .vals
+                                Identifier s
+                              Identifier j
+                        Identifier stamp
           Assignment
             Target
               Identifier j
@@ -855,15 +1003,22 @@ File
               BinaryExpr +
                 Identifier j
                 IntLiteral 1
+        Assignment
+          Target
+            UnaryExpr *
+              FieldExpr .gen
+                Identifier fresh
+          Value
+            FieldExpr .version
+              Identifier self
         ReturnStatement
           CallExpr
             Callee
               Identifier HashMap
             Args
               Identifier fresh
-              UnaryExpr *
-                FieldExpr .gen
-                  Identifier fresh
+              FieldExpr .version
+                Identifier self
               FieldExpr .count
                 Identifier self
       ExpressionStatement
@@ -893,6 +1048,16 @@ File
                 Identifier HashMap.new
               TypeArgs
                 V
+      LetStatement seen: HashStorage<V>
+        FieldExpr .storage
+          CallExpr
+            Callee
+              FieldExpr .compacted
+                Identifier self
+            Args
+              FieldExpr .cap
+                FieldExpr .storage
+                  Identifier self
       LetStatement fresh: HashStorage<V>
         CallExpr
           Callee
@@ -904,9 +1069,6 @@ File
               FieldExpr .storage
                 Identifier self
             BoolLiteral true
-      LetStatement s: HashStorage<V>
-        FieldExpr .storage
-          Identifier self
       ModeBlock unsafe
         LetStatement j: i64
           IntLiteral 0
@@ -915,78 +1077,56 @@ File
             BinaryExpr <
               Identifier j
               FieldExpr .cap
-                Identifier s
-          LetStatement stamp: i64
-            UnaryExpr *
-              CallExpr
-                Callee
-                  Identifier ptr_offset
-                Args
-                  FieldExpr .stamps
-                    Identifier s
-                  Identifier j
+                Identifier seen
           IfStatement
             Condition
               BinaryExpr !=
-                Identifier stamp
+                UnaryExpr *
+                  CallExpr
+                    Callee
+                      Identifier ptr_offset
+                    Args
+                      FieldExpr .stamps
+                        Identifier seen
+                      Identifier j
                 CallExpr
                   Callee
                     Identifier to_i64
                   Args
                     IntLiteral 0
             Then
-              IfStatement
-                Condition
-                  BinaryExpr <=
-                    Identifier stamp
-                    FieldExpr .version
-                      Identifier self
-                Then
-                  LetStatement key: string
-                    UnaryExpr *
-                      CallExpr
-                        Callee
-                          Identifier ptr_offset
-                        Args
-                          FieldExpr .keys
-                            Identifier s
-                          Identifier j
-                  IfStatement
-                    Condition
-                      BinaryExpr ==
-                        CallExpr
-                          Callee
-                            FieldExpr .visible_slot
-                              Identifier self
-                          Args
-                            Identifier key
-                        Identifier j
-                    Then
-                      ExpressionStatement
-                        CallExpr
-                          Callee
-                            FieldExpr .fill
-                              Identifier fresh
-                          Args
-                            CallExpr
-                              Callee
-                                Identifier copy_out_string
-                              Args
-                                Identifier key
-                            CallExpr
-                              Callee
-                                Identifier copy_out
-                              TypeArgs
-                                V
-                              Args
-                                UnaryExpr *
-                                  CallExpr
-                                    Callee
-                                      Identifier ptr_offset
-                                    Args
-                                      FieldExpr .vals
-                                        Identifier s
-                                      Identifier j
+              ExpressionStatement
+                CallExpr
+                  Callee
+                    FieldExpr .fill
+                      Identifier fresh
+                  Args
+                    CallExpr
+                      Callee
+                        Identifier copy_out_string
+                      Args
+                        UnaryExpr *
+                          CallExpr
+                            Callee
+                              Identifier ptr_offset
+                            Args
+                              FieldExpr .keys
+                                Identifier seen
+                              Identifier j
+                    CallExpr
+                      Callee
+                        Identifier copy_out
+                      TypeArgs
+                        V
+                      Args
+                        UnaryExpr *
+                          CallExpr
+                            Callee
+                              Identifier ptr_offset
+                            Args
+                              FieldExpr .vals
+                                Identifier seen
+                              Identifier j
           Assignment
             Target
               Identifier j

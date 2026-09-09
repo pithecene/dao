@@ -95,6 +95,30 @@ class HashStorage<V>:
       *self.used = *self.used + to_i64(1)
       *self.gen = stamp
 
+  // Take `key` at the stamp it was written at into storage no value
+  // reads yet: the slot already holding the key is replaced when
+  // `stamp` is later than its own, else the first empty slot from the
+  // key's bucket is filled.  For compaction only -- storage some value
+  // reads takes writes through `fill`, whose stamp is its own.  One
+  // probe per call, of expected constant length at the load bound
+  // `set` keeps (three quarters).
+  fn adopt(self, key: string, value: V, stamp: i64): void
+    mode unsafe =>
+      let idx: i64 = hash_index(hash_string(key), self.cap)
+      while *ptr_offset(self.stamps, idx) != to_i64(0):
+        if *ptr_offset(self.keys, idx) == key:
+          if stamp > *ptr_offset(self.stamps, idx):
+            *ptr_offset(self.vals, idx) = value
+            *ptr_offset(self.stamps, idx) = stamp
+          return
+        idx = idx + 1
+        if idx >= self.cap:
+          idx = to_i64(0)
+      *ptr_offset(self.keys, idx) = key
+      *ptr_offset(self.vals, idx) = value
+      *ptr_offset(self.stamps, idx) = stamp
+      *self.used = *self.used + to_i64(1)
+
 class HashMap<V>:
   storage: HashStorage<V>
   version: i64   // the stamp this value reads at
@@ -144,8 +168,12 @@ class HashMap<V>:
   fn contains(self, key: string): bool -> self.visible_slot(key) >= to_i64(0)
 
   // Fresh storage of `cap` slots holding the entries this value sees,
-  // in the current domain.  No entry is copied out here, so an ordinary
-  // set never instantiates the value type's copier.
+  // in the current domain, one slot per key at the stamp it was written
+  // at, so the compacted map reads at this value's version.  One pass
+  // over the old slots: every slot this value can see is adopted, and
+  // a key's later slot replaces its earlier one.  No entry is copied
+  // out here, so an ordinary set never instantiates the value type's
+  // copier.
   fn compacted(self, cap: i64): HashMap<V>
     let fresh: HashStorage<V> = HashStorage<V>::fresh(cap, false)
     let s: HashStorage<V> = self.storage
@@ -155,30 +183,25 @@ class HashMap<V>:
         let stamp: i64 = *ptr_offset(s.stamps, j)
         if stamp != to_i64(0):
           if stamp <= self.version:
-            let key: string = *ptr_offset(s.keys, j)
-            // Only the slot this value reads for the key is carried over.
-            if self.visible_slot(key) == j:
-              fresh.fill(key, *ptr_offset(s.vals, j))
+            fresh.adopt(*ptr_offset(s.keys, j), *ptr_offset(s.vals, j), stamp)
         j = j + 1
-      return HashMap(fresh, *fresh.gen, self.count)
+      *fresh.gen = self.version
+      return HashMap(fresh, self.version, self.count)
     panic("unreachable")
 
   // A copy of this map's entries in the enclosing domain: what
-  // `copy_out` does for a map.
+  // `copy_out` does for a map.  The entries are compacted first, in
+  // the current domain, so each key is copied out once.
   fn copy_out(self): HashMap<V>
     if self.storage.cap == to_i64(0):
       return HashMap<V>::new()
+    let seen: HashStorage<V> = self.compacted(self.storage.cap).storage
     let fresh: HashStorage<V> = HashStorage<V>::fresh(self.storage.cap, true)
-    let s: HashStorage<V> = self.storage
     mode unsafe =>
       let j: i64 = 0
-      while j < s.cap:
-        let stamp: i64 = *ptr_offset(s.stamps, j)
-        if stamp != to_i64(0):
-          if stamp <= self.version:
-            let key: string = *ptr_offset(s.keys, j)
-            if self.visible_slot(key) == j:
-              fresh.fill(copy_out_string(key), copy_out<V>(*ptr_offset(s.vals, j)))
+      while j < seen.cap:
+        if *ptr_offset(seen.stamps, j) != to_i64(0):
+          fresh.fill(copy_out_string(*ptr_offset(seen.keys, j)), copy_out<V>(*ptr_offset(seen.vals, j)))
         j = j + 1
       return HashMap(fresh, *fresh.gen, self.count)
     panic("unreachable")
