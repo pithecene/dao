@@ -486,7 +486,6 @@ private:
   // --- Diagnostics ---
 
   void error(Span span, std::string message);
-  void warning(Span span, std::string message);
   /// Warn when a function's whole body is one `resource` block.
   void warn_whole_body_domain(const FunctionDecl& fn);
 
