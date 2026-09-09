@@ -533,8 +533,15 @@ See `docs/task_specs/TASK_30_BOOTSTRAP_LLVM_BACKEND.md` and
 
 ### Task 35 — Allocation Domains
 
-Status: **spec** — `docs/task_specs/TASK_35_ALLOCATION_DOMAINS.md`;
-implementation not started.
+Status: **E0 delivered** — `docs/task_specs/TASK_35_ALLOCATION_DOMAINS.md`;
+`resource memory` is an arena: the runtime keeps a domain stack of
+chunked arenas, every string-, frame-, and file-producing hook
+allocates through the memory hooks, `__dao_mem_free` is a no-op on
+domain memory, `__dao_mem_alloc_outer` and `__dao_str_from_bytes` are
+declared for E1/E2, the MIR builder's `break` leaves only the regions
+its loop entered, and the type checker rejects a heap-owning value
+leaving a block and `yield` inside one.  E1 copy-out, E2
+`core::text::Builder`, and E3 bootstrap adoption remain.
 
 **Objective**: make `resource memory <name> =>` a real arena: every
 allocation inside comes from the domain and is reclaimed wholesale at

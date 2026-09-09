@@ -1338,6 +1338,17 @@ suite<"runtime_abi"> runtime_abi = [] {
     expect(exists_fn != nullptr) << "file_exists declared";
     expect(exists_fn->getReturnType()->isIntegerTy(1)) << "returns bool";
 
+    // Domain hooks
+    auto* alloc_outer = module->getFunction("__dao_mem_alloc_outer");
+    expect(alloc_outer != nullptr) << "mem_alloc_outer declared";
+    expect(alloc_outer->getReturnType()->isPointerTy()) << "returns ptr";
+    expect(alloc_outer->arg_size() == 2u) << "size, align";
+
+    auto* from_bytes = module->getFunction("__dao_str_from_bytes");
+    expect(from_bytes != nullptr) << "str_from_bytes declared";
+    expect(from_bytes->getReturnType()->isStructTy()) << "returns dao.string";
+    expect(from_bytes->arg_size() == 2u) << "bytes, len";
+
     // Equality hooks
     auto* eq_i32 = module->getFunction("__dao_eq_i32");
     expect(eq_i32 != nullptr) << "eq_i32 declared";
@@ -1426,6 +1437,8 @@ suite<"runtime_abi"> runtime_abi = [] {
     expect(LlvmRuntimeHooks::is_runtime_hook("__dao_str_starts_with"));
     expect(LlvmRuntimeHooks::is_runtime_hook("__dao_str_ends_with"));
     expect(LlvmRuntimeHooks::is_runtime_hook("__dao_str_compare"));
+    expect(LlvmRuntimeHooks::is_runtime_hook("__dao_mem_alloc_outer"));
+    expect(LlvmRuntimeHooks::is_runtime_hook("__dao_str_from_bytes"));
     expect(!LlvmRuntimeHooks::is_runtime_hook("__write_stdout"));
     expect(!LlvmRuntimeHooks::is_runtime_hook("user_function"));
   };

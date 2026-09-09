@@ -23,7 +23,22 @@ fn early_return(flag: i32): i32
     let x: i32 = 42
   return 0
 
+fn scratch_in_pool(): i64
+  // Everything the block allocates -- every intermediate string here --
+  // is the block's, reclaimed when it ends; only the length leaves.
+  let size: i64 = 0
+  resource memory scratch =>
+    let text: string = ""
+    let i: i32 = 0
+    while i < 100:
+      text = text + "ab"
+      i = i + 1
+    size = length(text)
+  return size
+
 fn main(): i32
+  print("scratch_in_pool:")
+  print(scratch_in_pool())
   print("compute_in_pool:")
   print(compute_in_pool())
   print("nested_domains:")

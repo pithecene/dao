@@ -1,23 +1,16 @@
 // resource.c — Scoped resource domain hooks.
 //
-// Current implementation: scope/lifetime bookkeeping only.
-// Enter returns a sentinel token; exit accepts and discards it.
-// The handle ABI is designed so future arena/allocator-domain
-// implementations fit without signature churn.
+// `resource memory <name> =>` enters a domain and leaves it on every
+// control-flow path; the domain is the arena every allocation inside
+// the block lands in (runtime/memory/domain.h).  The handle is the
+// domain itself, opaque to compiled code.
 
 #include "dao_abi.h"
 
-#include <stdint.h>
+#include "../memory/domain.h"
 
-// Monotonic domain counter. Each enter call returns a unique
-// non-null token so the compiler can verify scope pairing.
-static uint64_t next_domain_id = 1;
-
-void *__dao_mem_resource_enter(void) {
-  // NOLINTNEXTLINE(performance-no-int-to-ptr)
-  return (void *)(uintptr_t)(next_domain_id++);
-}
+void *__dao_mem_resource_enter(void) { return dao_domain_push(); }
 
 void __dao_mem_resource_exit(void *domain) {
-  (void)domain; // Bookkeeping only; no-op in current implementation.
+  dao_domain_pop((struct dao_domain *)domain);
 }

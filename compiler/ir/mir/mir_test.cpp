@@ -70,6 +70,15 @@ auto contains(const std::string& haystack, std::string_view needle) -> bool {
   return haystack.find(needle) != std::string::npos;
 }
 
+auto count_of(const std::string& haystack, std::string_view needle) -> size_t {
+  size_t count = 0;
+  for (auto pos = haystack.find(needle); pos != std::string::npos;
+       pos = haystack.find(needle, pos + needle.size())) {
+    ++count;
+  }
+  return count;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -291,6 +300,78 @@ suite<"mir_resource"> mir_resource = [] {
 // ---------------------------------------------------------------------------
 // Dao-specific: early return inside region
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Dao-specific: `break` leaves only the regions the loop entered
+// ---------------------------------------------------------------------------
+
+suite<"mir_break_unwinding"> mir_break_unwinding = [] {
+  "break out of a loop inside a resource block leaves the block open"_test = [] {
+    // The block's own end exits it; a break inside the loop must not.
+    // One enter, one exit.
+    MirTestPipeline pipe("fn f(x: i32): i32\n"
+                         "    resource memory pool =>\n"
+                         "        while x > 0:\n"
+                         "            if x == 3:\n"
+                         "                break\n"
+                         "            x = x - 1\n"
+                         "    return x\n");
+    auto dump = pipe.dump();
+    expect(eq(count_of(dump, "resource_enter memory pool"), size_t{1})) << dump;
+    expect(eq(count_of(dump, "resource_exit memory pool"), size_t{1})) << dump;
+  };
+
+  "break out of a loop leaves a resource block entered inside the loop"_test = [] {
+    // The block is inside the loop body: the break path exits it (the
+    // fall-through end of the block exits it too, on its own path).
+    MirTestPipeline pipe("fn f(x: i32): i32\n"
+                         "    while x > 0:\n"
+                         "        resource memory pool =>\n"
+                         "            if x == 3:\n"
+                         "                break\n"
+                         "            x = x - 1\n"
+                         "    return x\n");
+    auto dump = pipe.dump();
+    expect(eq(count_of(dump, "resource_enter memory pool"), size_t{1})) << dump;
+    expect(eq(count_of(dump, "resource_exit memory pool"), size_t{2})) << dump;
+  };
+
+  "break out of a for loop inside a resource block destroys the iterator once"_test = [] {
+    // The loop's exit block destroys the iterator; the break must not
+    // destroy it again, nor exit the enclosing block.
+    MirTestPipeline pipe("fn gen(): Generator<i32>\n"
+                         "    yield 1\n"
+                         "    yield 2\n"
+                         "fn f(): i32\n"
+                         "    let total: i32 = 0\n"
+                         "    resource memory pool =>\n"
+                         "        for v in gen():\n"
+                         "            if v == 2:\n"
+                         "                break\n"
+                         "            total = total + v\n"
+                         "    return total\n");
+    auto dump = pipe.dump();
+    expect(eq(count_of(dump, "iter_destroy"), size_t{1})) << dump;
+    expect(eq(count_of(dump, "resource_exit memory pool"), size_t{1})) << dump;
+  };
+
+  "return inside a for loop inside a resource block leaves both"_test = [] {
+    // A return leaves every region: the iterator and the block.
+    MirTestPipeline pipe("fn gen(): Generator<i32>\n"
+                         "    yield 1\n"
+                         "fn f(): i32\n"
+                         "    resource memory pool =>\n"
+                         "        for v in gen():\n"
+                         "            if v == 1:\n"
+                         "                return v\n"
+                         "    return 0\n");
+    auto dump = pipe.dump();
+    // The return path and the loop's exit block each destroy the iterator.
+    expect(eq(count_of(dump, "iter_destroy"), size_t{2})) << dump;
+    // The return path and the block's fall-through each exit the block.
+    expect(eq(count_of(dump, "resource_exit memory pool"), size_t{2})) << dump;
+  };
+};
 
 suite<"mir_region_early_return"> mir_region_early_return = [] {
   "early return inside mode emits mode_exit before return"_test = [] {

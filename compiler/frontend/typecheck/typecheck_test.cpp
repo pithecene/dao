@@ -1254,6 +1254,132 @@ suite<"typecheck_void"> typecheck_void = [] {
 // Positive: pointer operations
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Resource blocks: what is allocated in a domain does not leave it
+// ---------------------------------------------------------------------------
+
+suite<"typecheck_resource_domains"> typecheck_resource_domains = [] {
+  "a heap-owning binding declared outside a block may not be stored to inside it"_test = [] {
+    auto result = check_source("fn f(): i32\n"
+                               "    let out: string = \"\"\n"
+                               "    resource memory pool =>\n"
+                               "        out = \"made inside\"\n"
+                               "    return 0\n");
+    expect(has_error_containing(result, "declared outside resource block 'pool'"));
+  };
+
+  "a scalar binding declared outside a block may be stored to inside it"_test = [] {
+    auto result = check_source("fn f(): i32\n"
+                               "    let total: i32 = 0\n"
+                               "    resource memory pool =>\n"
+                               "        total = 5\n"
+                               "    return total\n");
+    expect(is_ok(result));
+  };
+
+  "a binding declared inside the block is the block's to reclaim"_test = [] {
+    auto result = check_source("fn f(): i32\n"
+                               "    resource memory pool =>\n"
+                               "        let scratch: string = \"a\"\n"
+                               "        scratch = scratch + \"b\"\n"
+                               "    return 0\n");
+    expect(is_ok(result));
+  };
+
+  "a store through a field roots at the outer binding"_test = [] {
+    auto result = check_source("class Box:\n"
+                               "    text: string\n"
+                               "fn f(): i32\n"
+                               "    let box: Box = Box(\"\")\n"
+                               "    resource memory pool =>\n"
+                               "        box.text = \"made inside\"\n"
+                               "    return 0\n");
+    expect(has_error_containing(result, "'box' is declared outside resource block 'pool'"));
+  };
+
+  "a class of scalars may be stored to through a field inside a block"_test = [] {
+    auto result = check_source("class Pair:\n"
+                               "    a: i32\n"
+                               "    b: i32\n"
+                               "fn f(): i32\n"
+                               "    let p: Pair = Pair(1, 2)\n"
+                               "    resource memory pool =>\n"
+                               "        p.a = 3\n"
+                               "    return p.a\n");
+    expect(is_ok(result));
+  };
+
+  "the innermost block decides: an outer block's binding stored to from an inner one"_test = [] {
+    auto result = check_source("fn f(): i32\n"
+                               "    resource memory outer =>\n"
+                               "        let s: string = \"\"\n"
+                               "        resource memory inner =>\n"
+                               "            s = \"made inside\"\n"
+                               "    return 0\n");
+    expect(has_error_containing(result, "declared outside resource block 'inner'"));
+  };
+
+  "returning a heap-owning value from inside a block is rejected"_test = [] {
+    auto result = check_source("fn f(): string\n"
+                               "    resource memory pool =>\n"
+                               "        return \"made inside\"\n"
+                               "    return \"\"\n");
+    expect(has_error_containing(
+        result, "returning a value that owns heap memory from inside resource block 'pool'"));
+  };
+
+  "returning a scalar from inside a block is fine"_test = [] {
+    auto result = check_source("fn f(flag: i32): i32\n"
+                               "    resource memory pool =>\n"
+                               "        if flag > 0:\n"
+                               "            return flag\n"
+                               "    return 0\n");
+    expect(is_ok(result));
+  };
+
+  "propagating an error that owns heap memory from inside a block is rejected"_test = [] {
+    // `?` leaves the block on its error path exactly as a return does.
+    auto result = check_source(
+        "enum class Result<T, E>:\n    Ok(v: T)\n    Err(e: E)\nfn fail(): Result<i32, string>\n   "
+        " let r: Result<i32, string> = Result::Err(e = \"boom\")\n    return r\n"
+        "fn f(): Result<i32, string>\n"
+        "    resource memory pool =>\n"
+        "        let v: i32 = fail()?\n"
+        "    return Result::Ok(v = 0)\n");
+    expect(has_error_containing(result, "'?' inside resource block 'pool'"));
+  };
+
+  "propagating a scalar error from inside a block is fine"_test = [] {
+    auto result = check_source(
+        "enum class Result<T, E>:\n    Ok(v: T)\n    Err(e: E)\nfn fail(): Result<i32, i32>\n    "
+        "let r: Result<i32, i32> = Result::Err(e = 1)\n    return r\n"
+        "fn f(): Result<i32, i32>\n"
+        "    resource memory pool =>\n"
+        "        let v: i32 = fail()?\n"
+        "    return Result::Ok(v = 0)\n");
+    expect(is_ok(result)) << (result.diagnostics.empty() ? "" : result.diagnostics[0].message);
+  };
+
+  "a resource block of another kind is not an allocation domain"_test = [] {
+    // Only `resource memory` opens a domain; the escape and `yield`
+    // rules do not apply to another kind's block.
+    auto result = check_source("fn f(): string\n"
+                               "    let out: string = \"\"\n"
+                               "    resource gpu compute =>\n"
+                               "        out = \"made inside\"\n"
+                               "        return out\n"
+                               "    return out\n");
+    expect(is_ok(result)) << (result.diagnostics.empty() ? "" : result.diagnostics[0].message);
+  };
+
+  "yield inside a block is rejected"_test = [] {
+    auto result = check_source("fn gen(): Generator<i32>\n"
+                               "    resource memory pool =>\n"
+                               "        yield 1\n");
+    expect(has_error_containing(result, "'yield' inside resource block 'pool'"));
+  };
+};
+
 suite<"typecheck_pointers"> typecheck_pointers = [] {
   "address-of and deref in unsafe"_test = [] {
     auto result = check_source(

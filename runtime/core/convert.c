@@ -3,11 +3,10 @@
 // Implements: scalar-to-string, numeric type conversions
 // Authority:  docs/contracts/CONTRACT_RUNTIME_ABI.md
 //
-// String conversion results are heap-allocated via malloc.  The caller
-// owns the memory; in the current runtime there is no automatic
-// deallocation — these allocations leak until process exit.  Future
-// arena/GC integration will reclaim them.  Matches the convention used
-// by __dao_str_concat in string.c.
+// String conversion results are allocated through __dao_mem_alloc and
+// so belong to the current domain: reclaimed with the block inside
+// `resource memory`, process-lifetime in the root domain.  Matches the
+// convention used by __dao_str_concat in string.c.
 //
 // Earlier versions returned pointers to thread-local static buffers,
 // which silently corrupted any data structure (e.g. HashMap keys) that
@@ -24,17 +23,12 @@
 #include <string.h>
 
 // Helper: format into a stack buffer of known size, then duplicate
-// into a fresh heap allocation sized to the actual length.  Returns
-// an empty string on OOM rather than crashing (same posture as
-// __dao_str_concat).
+// into an allocation of the current domain sized to the actual length.
 static struct dao_string conv_str_dup(const char *buf, int len) {
   if (len <= 0) {
     return (struct dao_string){.ptr = NULL, .len = 0};
   }
-  char *heap = (char *)malloc((size_t)len);
-  if (heap == NULL) {
-    return (struct dao_string){.ptr = NULL, .len = 0};
-  }
+  char *heap = (char *)__dao_mem_alloc(len, 1);
   memcpy(heap, buf, (size_t)len);
   return (struct dao_string){.ptr = heap, .len = len};
 }
@@ -100,10 +94,10 @@ struct dao_string __dao_conv_f64_to_string(double x) {
 }
 
 struct dao_string __dao_conv_bool_to_string(bool x) {
-  if (x) {
-    return (struct dao_string){.ptr = "true", .len = 4};
-  }
-  return (struct dao_string){.ptr = "false", .len = 5};
+  // A fresh buffer like every other conversion: the contract says so,
+  // and a domain-owned result never outlives its domain by aliasing a
+  // literal.
+  return x ? conv_str_dup("true", 4) : conv_str_dup("false", 5);
 }
 
 // ---------------------------------------------------------------------------

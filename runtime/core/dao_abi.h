@@ -45,7 +45,8 @@ void __dao_io_write_stdout(const struct dao_string *msg);
 // Write a string to stderr followed by a newline.
 void __dao_io_write_stderr(const struct dao_string *msg);
 
-// Read an entire file into a heap-allocated string. Traps on error.
+// Read an entire file into a string owned by the current domain.
+// Traps on error.
 struct dao_string __dao_io_read_file(const struct dao_string *path);
 
 // Write a string to a file. Returns true on success, false on failure.
@@ -77,16 +78,11 @@ bool __dao_eq_string(const struct dao_string *a, const struct dao_string *b);
 // ---------------------------------------------------------------------------
 
 // Scalar-to-string conversions return a dao_string by value.
-// The returned ptr points to a freshly malloc-allocated buffer owned
-// by the caller; successive calls return distinct buffers, so the
-// result may be stored in long-lived data structures (e.g. HashMap
-// keys) without copying.  Matches the convention used by
-// __dao_str_concat.  In the current runtime these allocations are
-// not automatically freed — they leak until process exit.
-//
-// __dao_conv_bool_to_string is a documented exception: it returns a
-// pointer to a static string literal ("true" or "false"), which is
-// safe because the value set has exactly two entries.
+// The returned ptr points to a fresh buffer allocated through
+// __dao_mem_alloc -- owned by the current domain, like every other
+// string-producing hook; successive calls return distinct buffers, so
+// the result may be stored in long-lived data structures (e.g. HashMap
+// keys) without copying.
 struct dao_string __dao_conv_i8_to_string(int8_t x);
 struct dao_string __dao_conv_i16_to_string(int16_t x);
 struct dao_string __dao_conv_i32_to_string(int32_t x);
@@ -194,8 +190,10 @@ void __dao_gen_free(void *ptr);
 // ---------------------------------------------------------------------------
 
 // Concatenate two strings, returning the result by value.
-// The returned ptr points to a freshly malloc-allocated buffer
-// owned by the caller. Not automatically freed in the current runtime.
+// The returned ptr points to a fresh buffer allocated through
+// __dao_mem_alloc: owned by the current domain, reclaimed with it
+// inside a `resource memory` block, process-lifetime in the root
+// domain (as every string-producing hook below).
 struct dao_string __dao_str_concat(const struct dao_string *a,
                                    const struct dao_string *b);
 
@@ -206,7 +204,8 @@ int64_t __dao_str_length(const struct dao_string *s);
 int32_t __dao_str_char_at(const struct dao_string *s, int64_t index);
 
 // Extract a substring starting at `start` with byte length `len`.
-// Traps if the range is out of bounds. Returns a heap-allocated copy.
+// Traps if the range is out of bounds. Returns a copy owned by the
+// current domain.
 struct dao_string __dao_str_substring(const struct dao_string *s,
                                       int64_t start, int64_t len);
 
@@ -233,22 +232,29 @@ int64_t __dao_str_hash(const struct dao_string *s);
 // Runtime hook declarations — Memory/resource domain
 // ---------------------------------------------------------------------------
 
-// Enter a scoped resource domain. Returns an opaque domain handle.
-// Current implementation: scope/lifetime bookkeeping only.
-// Arena-based allocation semantics are deferred.
+// Enter a scoped resource domain: an arena that becomes the current
+// allocation domain until the matching exit.  Returns an opaque handle.
 void *__dao_mem_resource_enter(void);
 
-// Exit a scoped resource domain. Takes the handle returned by enter.
+// Exit a scoped resource domain, reclaiming every allocation it made
+// (and every domain still open inside it).  Takes the handle returned
+// by enter; the enclosing domain becomes current again.
 void __dao_mem_resource_exit(void *domain);
 
 // ---------------------------------------------------------------------------
 // Runtime hook declarations — Allocation domain
 // ---------------------------------------------------------------------------
 
-// Allocate size bytes with the given alignment. Traps on failure.
-// aligned_alloc requires size to be a multiple of alignment; the
-// implementation rounds up internally.
+// Allocate size bytes with the given alignment in the current domain.
+// Traps on failure.  In the root domain (outside every `resource
+// memory` block) this is the system allocator; inside a block the
+// memory belongs to the block's domain and is reclaimed with it.
 void *__dao_mem_alloc(int64_t size, int64_t align);
+
+// Allocate in the parent of the current domain: the domain that
+// becomes current when the current block is left.  For values that
+// must outlive the block (copy-out).  In the root domain, the root.
+void* __dao_mem_alloc_outer(int64_t size, int64_t align);
 
 // Resize allocation. Traps on failure. ptr may be null (acts as alloc).
 // old_size is the number of bytes to preserve from the old allocation.
@@ -257,8 +263,12 @@ void *__dao_mem_alloc(int64_t size, int64_t align);
 void *__dao_mem_realloc(void *ptr, int64_t old_size, int64_t new_size,
                         int64_t align);
 
-// Free allocation. Null is a no-op.
+// Free allocation. Null is a no-op, and so is domain memory: a domain
+// is reclaimed whole when its block is left.
 void __dao_mem_free(void *ptr);
+
+// A string owned by the current domain holding a copy of `len` bytes.
+struct dao_string __dao_str_from_bytes(const char* bytes, int64_t len);
 
 // ---------------------------------------------------------------------------
 // Runtime hook declarations — Panic domain

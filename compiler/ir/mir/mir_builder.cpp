@@ -341,7 +341,7 @@ void MirBuilder::lower_stmt(const HirStmt& stmt) {
                         MirCondBr{cond_val, body_bb->id, exit_bb->id});
 
         switch_to_block(body_bb);
-        loop_exit_stack_.push_back(exit_bb->id);
+        loop_exit_stack_.push_back({exit_bb->id, active_regions_.size()});
         for (const auto* s : hir_while.body) {
           lower_stmt(*s);
         }
@@ -387,11 +387,14 @@ void MirBuilder::lower_stmt(const HirStmt& stmt) {
         emit_effect(stmt.span, MirStore{place, next_val});
 
         // Push iterator cleanup so early returns inside the body
-        // emit MirIterDestroy before the return terminator.
+        // emit MirIterDestroy before the return terminator.  A `break`
+        // does not: it branches to the exit block, which destroys the
+        // iterator itself, so the loop's region depth is taken after
+        // this push.
         active_regions_.push_back(
             ActiveRegion{MirIterDestroy{iter_val}, stmt.span});
 
-        loop_exit_stack_.push_back(exit_bb->id);
+        loop_exit_stack_.push_back({exit_bb->id, active_regions_.size()});
         for (const auto* s : hir_for.body) {
           lower_stmt(*s);
         }
@@ -408,10 +411,12 @@ void MirBuilder::lower_stmt(const HirStmt& stmt) {
       },
       [&](const HirBreak&) {
         if (!loop_exit_stack_.empty()) {
-          // Emit region exits (mode/resource cleanup) before branching
-          // out of the loop, same as early return.
-          emit_region_exits(stmt.span);
-          emit_terminator(stmt.span, MirBr{loop_exit_stack_.back()});
+          // Leave the regions entered inside the loop (mode/resource
+          // cleanup) before branching out of it.  A region enclosing
+          // the loop is not left: its block continues after the loop.
+          const auto& loop = loop_exit_stack_.back();
+          emit_region_exits_from(loop.region_depth, stmt.span);
+          emit_terminator(stmt.span, MirBr{loop.exit_block});
         }
       },
       [&](const HirYield& yield) {
@@ -844,9 +849,12 @@ auto MirBuilder::block_terminated() const -> bool {
 }
 
 void MirBuilder::emit_region_exits(Span span) {
-  for (auto it = active_regions_.rbegin(); it != active_regions_.rend();
-       ++it) {
-    emit_effect(span, it->exit_payload);
+  emit_region_exits_from(0, span);
+}
+
+void MirBuilder::emit_region_exits_from(size_t depth, Span span) {
+  for (size_t i = active_regions_.size(); i > depth; --i) {
+    emit_effect(span, active_regions_[i - 1].exit_payload);
   }
 }
 

@@ -1601,6 +1601,7 @@ void TypeChecker::check_assignment(const Stmt* stmt) {
     error(assign.value->span,
           "cannot assign '" + print_type(value_type) + "' to '" + print_type(target_type) + "'");
   }
+  check_store_escapes_domain(assign.target);
 }
 
 void TypeChecker::check_if(const Stmt* stmt) {
@@ -1663,6 +1664,14 @@ void TypeChecker::check_yield(const Stmt* stmt) {
   if (ctx_.return_type == nullptr || ctx_.return_type->kind() != TypeKind::Generator) {
     error(stmt->span, "yield is only valid inside a generator function");
     return;
+  }
+  // A domain cannot stay current across a suspension: the consumer
+  // would run with it current and a yielded value would be reclaimed
+  // under the consumer at the next resume.
+  if (!ctx_.resource_blocks.empty()) {
+    error(stmt->span,
+          "'yield' inside resource block '" + std::string(ctx_.resource_blocks.back().name) +
+              "': a resource block cannot stay open across a suspension");
   }
 
   // The yielded value must match the Generator's element type.
@@ -1788,7 +1797,89 @@ void TypeChecker::check_mode_block(const Stmt* stmt) {
 
 void TypeChecker::check_resource_block(const Stmt* stmt) {
   const auto& rb = stmt->as<ResourceBlock>();
+  // Only `resource memory` is an allocation domain; another kind's body
+  // is checked without the domain rules.
+  const bool is_domain = rb.resource_kind == "memory";
+  if (is_domain) {
+    ctx_.resource_blocks.push_back({.span = stmt->span, .name = rb.resource_name});
+  }
   check_body(rb.body);
+  if (is_domain) {
+    ctx_.resource_blocks.pop_back();
+  }
+}
+
+auto TypeChecker::place_root_symbol(const Expr* expr) const -> const Symbol* {
+  switch (expr->kind()) {
+  case NodeKind::Identifier:
+    return symbol_for_use(expr);
+  case NodeKind::FieldExpr:
+    return place_root_symbol(expr->as<FieldExpr>().object);
+  case NodeKind::IndexExpr:
+    return place_root_symbol(expr->as<IndexExpr>().object);
+  default:
+    return nullptr; // a dereference: a pointer's target is the author's to manage
+  }
+}
+
+auto TypeChecker::owns_heap_memory(const Type* type) const -> bool {
+  std::unordered_set<const Type*> seen;
+  auto walk = [&](auto& self, const Type* t) -> bool {
+    if (t == nullptr || !seen.insert(t).second) {
+      return false;
+    }
+    switch (t->kind()) {
+    case TypeKind::Named:
+      return static_cast<const TypeNamed*>(t)->name() == "string";
+    case TypeKind::Generator:
+      return true;
+    case TypeKind::GenericParam:
+      return true; // may be instantiated with an owning type
+    case TypeKind::Struct: {
+      // A raw pointer field is how a class owns heap memory (Vector,
+      // HashMap): counted as owning, since the class reaches it.
+      const auto* st = static_cast<const TypeStruct*>(t);
+      return std::ranges::any_of(st->fields(), [&](const StructField& f) {
+        return f.type != nullptr && (f.type->kind() == TypeKind::Pointer || self(self, f.type));
+      });
+    }
+    case TypeKind::Enum: {
+      const auto* en = static_cast<const TypeEnum*>(t);
+      return std::ranges::any_of(en->variants(), [&](const EnumVariant& v) {
+        return std::ranges::any_of(v.payload_types, [&](const Type* p) {
+          return p != nullptr && (p->kind() == TypeKind::Pointer || self(self, p));
+        });
+      });
+    }
+    default:
+      return false; // scalars, and a pointer value itself: the author's responsibility
+    }
+  };
+  return walk(walk, type);
+}
+
+void TypeChecker::check_store_escapes_domain(const Expr* target) {
+  if (ctx_.resource_blocks.empty()) {
+    return;
+  }
+  const auto* root = place_root_symbol(target);
+  if (root == nullptr) {
+    return;
+  }
+  const auto& block = ctx_.resource_blocks.back();
+  const bool declared_inside = root->decl_span.offset >= block.span.offset &&
+                               root->decl_span.offset < block.span.offset + block.span.length;
+  if (declared_inside) {
+    return;
+  }
+  const auto* root_type = resolve_symbol_type(root);
+  if (root_type == nullptr || !owns_heap_memory(root_type)) {
+    return;
+  }
+  error(target->span,
+        "'" + std::string(root->name) + "' is declared outside resource block '" +
+            std::string(block.name) +
+            "' and stored to inside it: a value allocated in the block does not outlive it");
 }
 
 void TypeChecker::check_return(const Stmt* stmt) {
@@ -1809,6 +1900,11 @@ void TypeChecker::check_return(const Stmt* stmt) {
       error(ret.value->span,
             "return type '" + print_type(val_type) + "' does not match function return type '" +
                 print_type(ctx_.return_type) + "'");
+    } else if (!ctx_.resource_blocks.empty() && owns_heap_memory(val_type)) {
+      error(ret.value->span,
+            "returning a value that owns heap memory from inside resource block '" +
+                std::string(ctx_.resource_blocks.back().name) +
+                "': a value allocated in the block does not outlive it");
     }
   } else {
     // Bare return — valid for void functions and generator functions.
@@ -2910,6 +3006,14 @@ auto TypeChecker::check_try(const Expr* expr) -> const Type* {
   if (ctx_.return_type == nullptr) {
     error(expr->span, "'?' operator can only be used inside a function with a return type");
     return nullptr;
+  }
+  // `?` returns from inside the block on the error path -- through the
+  // block's exit -- so it is a return of the function's result type.
+  if (!ctx_.resource_blocks.empty() && owns_heap_memory(ctx_.return_type)) {
+    error(expr->span,
+          "'?' inside resource block '" + std::string(ctx_.resource_blocks.back().name) +
+              "' returns a value that owns heap memory: a value allocated in the block does "
+              "not outlive it");
   }
 
   const auto& variants = enum_type->variants();

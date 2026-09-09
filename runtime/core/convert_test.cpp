@@ -1,7 +1,7 @@
 // convert_test.cpp — Runtime-level tests for scalar-to-string conversion hooks.
 //
-// These tests verify that each conversion hook returns a freshly
-// heap-allocated buffer rather than a pointer to a shared static
+// These tests verify that each conversion hook returns a fresh buffer
+// owned by the current domain rather than a pointer to a shared static
 // buffer.  Returning a static buffer silently corrupted any data
 // structure (e.g. HashMap keys) that stored the returned string:
 // the next conversion call overwrote the previous contents in place.
@@ -66,10 +66,9 @@ suite<"conv_to_string_fresh"> conv_to_string_fresh = [] {
     expect(s1.ptr != s2.ptr);
   };
 
-  // bool_to_string returns string literals ("true" / "false") which
-  // are deliberately shared globals — this is safe because bool only
-  // has two values.  Verify the two distinct strings.
-  "bool_to_string literals"_test = [] {
+  // bool_to_string returns a fresh buffer owned by the current domain,
+  // like every other conversion.  Verify the two distinct strings.
+  "bool_to_string returns fresh buffers"_test = [] {
     auto st = __dao_conv_bool_to_string(true);
     auto sf = __dao_conv_bool_to_string(false);
     expect(eq(st.len, int64_t{4}));
