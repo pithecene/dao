@@ -140,6 +140,7 @@ inline constexpr std::string_view kMemAlloc   = "__dao_mem_alloc";
 inline constexpr std::string_view kMemRealloc = "__dao_mem_realloc";
 inline constexpr std::string_view kMemFree    = "__dao_mem_free";
 inline constexpr std::string_view kMemAllocOuter = "__dao_mem_alloc_outer";
+inline constexpr std::string_view kMemAllocOwner = "__dao_mem_alloc_owner";
 
 // Panic domain
 inline constexpr std::string_view kPanic = "__dao_panic";
@@ -249,6 +250,7 @@ inline constexpr std::string_view kAllHooks[] = {
     kMemRealloc,
     kMemFree,
     kMemAllocOuter,
+    kMemAllocOwner,
     kPanic,
     kStrConcat,
     kStrLength,

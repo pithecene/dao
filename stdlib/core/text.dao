@@ -32,6 +32,9 @@ class Builder:
 
   fn length(self): i64 -> self.bytes.length()
 
-  // One copy of the bytes, as a string the current domain owns.
+  // One copy of the bytes, as a string the current domain owns.  The
+  // bytes are read as this builder's value sees them, so a later write
+  // through another value of the same buffer is invisible here.
   fn to_string(self): string
-    return __dao_str_from_bytes(self.bytes.data, self.bytes.len)
+    let bytes: Vector<u8> = self.bytes.snapshot()
+    return __dao_str_from_bytes(bytes.data, bytes.len)

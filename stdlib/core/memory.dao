@@ -9,3 +9,7 @@ extern fn __dao_mem_free(ptr: *void): void
 // Allocate in the parent of the current domain: for what must outlive
 // the current `resource memory` block (copy-out).
 extern fn __dao_mem_alloc_outer(size: i64, align: i64): *void
+// Allocate in the domain that owns `owner`: for what a container
+// attaches to storage it already owns, so it lives as long as the
+// storage however deep the block that makes it.
+extern fn __dao_mem_alloc_owner(owner: *void, size: i64, align: i64): *void

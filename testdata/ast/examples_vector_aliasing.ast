@@ -1,0 +1,529 @@
+File
+  Module examples::vector_aliasing
+  FunctionDecl show
+    Param label: string
+    Param v: Vector<i64>
+    ReturnType: void
+    LetStatement b: Builder
+      CallExpr
+        Callee
+          FieldExpr .push
+            CallExpr
+              Callee
+                FieldExpr .push
+                  CallExpr
+                    Callee
+                      QualifiedName Builder::new
+              Args
+                Identifier label
+        Args
+          StringLiteral ":"
+    LetStatement i: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier v
+      Assignment
+        Target
+          Identifier b
+        Value
+          CallExpr
+            Callee
+              FieldExpr .push
+                CallExpr
+                  Callee
+                    FieldExpr .push
+                      Identifier b
+                  Args
+                    StringLiteral " "
+            Args
+              CallExpr
+                Callee
+                  Identifier i64_to_string
+                Args
+                  CallExpr
+                    Callee
+                      FieldExpr .get
+                        Identifier v
+                    Args
+                      Identifier i
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            IntLiteral 1
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .to_string
+                Identifier b
+  FunctionDecl main
+    ReturnType: i32
+    LetStatement v: Vector<i64>
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          i64
+    Assignment
+      Target
+        Identifier v
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              CallExpr
+                Callee
+                  FieldExpr .push
+                    CallExpr
+                      Callee
+                        FieldExpr .push
+                          Identifier v
+                      Args
+                        IntLiteral 1
+                Args
+                  IntLiteral 2
+          Args
+            IntLiteral 3
+    LetStatement old: Vector<i64>
+      Identifier v
+    Assignment
+      Target
+        Identifier v
+      Value
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier v
+          Args
+            IntLiteral 1
+            IntLiteral 20
+    Assignment
+      Target
+        Identifier v
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier v
+          Args
+            IntLiteral 4
+    Assignment
+      Target
+        Identifier v
+      Value
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier v
+          Args
+            IntLiteral 1
+            IntLiteral 200
+    Assignment
+      Target
+        Identifier v
+      Value
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier v
+          Args
+            IntLiteral 0
+            IntLiteral 100
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "v"
+          Identifier v
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "old"
+          Identifier old
+    LetStatement fork: Vector<i64>
+      CallExpr
+        Callee
+          FieldExpr .set
+            Identifier old
+        Args
+          IntLiteral 2
+          IntLiteral 30
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "fork"
+          Identifier fork
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "old"
+          Identifier old
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "v"
+          Identifier v
+    LetStatement grown: Vector<i64>
+      Identifier v
+    LetStatement i: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          IntLiteral 100
+      Assignment
+        Target
+          Identifier v
+        Value
+          CallExpr
+            Callee
+              FieldExpr .push
+                Identifier v
+            Args
+              Identifier i
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            IntLiteral 1
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier v
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier grown
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .get
+                Identifier grown
+            Args
+              IntLiteral 1
+    LetStatement total: i64
+      IntLiteral 0
+    ForStatement x
+      Iterable
+        CallExpr
+          Callee
+            FieldExpr .iter
+              Identifier v
+      Assignment
+        Target
+          Identifier total
+        Value
+          BinaryExpr +
+            Identifier total
+            Identifier x
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          Identifier total
+    LetStatement base: Vector<i64>
+      CallExpr
+        Callee
+          FieldExpr .push
+            CallExpr
+              Callee
+                FieldExpr .push
+                  CallExpr
+                    Callee
+                      FieldExpr .push
+                        CallExpr
+                          Callee
+                            Identifier Vector.new
+                          TypeArgs
+                            i64
+                    Args
+                      IntLiteral 1
+              Args
+                IntLiteral 2
+        Args
+          IntLiteral 3
+    LetStatement keep: Vector<i64>
+      Identifier base
+    ResourceBlock memory inside
+      Assignment
+        Target
+          Identifier base
+        Value
+          CallExpr
+            Callee
+              FieldExpr .set
+                Identifier base
+            Args
+              IntLiteral 0
+              IntLiteral 9
+      Assignment
+        Target
+          Identifier base
+        Value
+          CallExpr
+            Callee
+              FieldExpr .set
+                Identifier base
+            Args
+              IntLiteral 1
+              IntLiteral 8
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "base"
+          Identifier base
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "keep"
+          Identifier keep
+    LetStatement bytes: Vector<u8>
+      CallExpr
+        Callee
+          FieldExpr .push
+            CallExpr
+              Callee
+                FieldExpr .push
+                  CallExpr
+                    Callee
+                      Identifier Vector.new
+                    TypeArgs
+                      u8
+              Args
+                IntLiteral 65
+        Args
+          IntLiteral 66
+    LetStatement before: Builder
+      CallExpr
+        Callee
+          Identifier Builder
+        Args
+          Identifier bytes
+    Assignment
+      Target
+        Identifier bytes
+      Value
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier bytes
+          Args
+            IntLiteral 0
+            IntLiteral 67
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .to_string
+                Identifier before
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .to_string
+                CallExpr
+                  Callee
+                    Identifier Builder
+                  Args
+                    Identifier bytes
+    LetStatement r0: Vector<i64>
+      CallExpr
+        Callee
+          FieldExpr .push
+            CallExpr
+              Callee
+                FieldExpr .push
+                  CallExpr
+                    Callee
+                      Identifier Vector.new
+                    TypeArgs
+                      i64
+              Args
+                IntLiteral 0
+        Args
+          IntLiteral 0
+    LetStatement r1: Vector<i64>
+      CallExpr
+        Callee
+          FieldExpr .set
+            Identifier r0
+        Args
+          IntLiteral 0
+          IntLiteral 1
+    LetStatement r2: Vector<i64>
+      CallExpr
+        Callee
+          FieldExpr .set
+            Identifier r1
+        Args
+          IntLiteral 0
+          IntLiteral 2
+    LetStatement r3: Vector<i64>
+      CallExpr
+        Callee
+          FieldExpr .set
+            CallExpr
+              Callee
+                FieldExpr .set
+                  Identifier r2
+              Args
+                IntLiteral 0
+                IntLiteral 3
+        Args
+          IntLiteral 1
+          IntLiteral 5
+    LetStatement n: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier n
+          IntLiteral 20
+      Assignment
+        Target
+          Identifier r3
+        Value
+          CallExpr
+            Callee
+              FieldExpr .set
+                Identifier r3
+            Args
+              IntLiteral 1
+              Identifier n
+      Assignment
+        Target
+          Identifier n
+        Value
+          BinaryExpr +
+            Identifier n
+            IntLiteral 1
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "r0"
+          Identifier r0
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "r1"
+          Identifier r1
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "r2"
+          Identifier r2
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "r3"
+          Identifier r3
+    LetStatement out: Vector<i64>
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          i64
+    ResourceBlock memory pool
+      LetStatement inner: Vector<i64>
+        CallExpr
+          Callee
+            Identifier Vector.new
+          TypeArgs
+            i64
+      Assignment
+        Target
+          Identifier inner
+        Value
+          CallExpr
+            Callee
+              FieldExpr .push
+                CallExpr
+                  Callee
+                    FieldExpr .push
+                      Identifier inner
+                  Args
+                    IntLiteral 7
+            Args
+              IntLiteral 8
+      Assignment
+        Target
+          Identifier inner
+        Value
+          CallExpr
+            Callee
+              FieldExpr .set
+                Identifier inner
+            Args
+              IntLiteral 0
+              IntLiteral 9
+      Assignment
+        Target
+          Identifier out
+        Value
+          Identifier inner
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "out"
+          Identifier out
+    ReturnStatement
+      IntLiteral 0

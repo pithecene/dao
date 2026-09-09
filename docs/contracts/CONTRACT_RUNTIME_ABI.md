@@ -100,6 +100,7 @@ Examples:
 | `__dao_mem_realloc`       | `(ptr: *void, old_size: i64, new_size: i64, align: i64): *void` |
 | `__dao_mem_free`          | `(ptr: *void): void`                 |
 | `__dao_mem_alloc_outer`   | `(size: i64, align: i64): *void`     |
+| `__dao_mem_alloc_owner`   | `(owner: *void, size: i64, align: i64): *void` |
 | `__dao_str_from_bytes`    | `(bytes: *u8, len: i64): string`     |
 | `__dao_str_copy_outer`    | `(s: string): string`                |
 | `__dao_conv_i32_to_f64`  | `(x: i32): f64`                       |
@@ -286,6 +287,11 @@ Allocation semantics (Task 35):
   domain (the root, when the current block is the outermost), for
   values that must outlive the block; which domain that is only the
   runtime's domain stack knows
+- `__dao_mem_alloc_owner` allocates in the domain that owns `owner`
+  (the root, when no open domain does): for what a container attaches
+  to storage it already owns, such as a log of the slots it overwrote,
+  so the attachment lives exactly as long as the storage however deep
+  the block that makes it
 - a value allocated in a domain is invalid after the domain's exit.
   The compiler copies what leaves a block into the enclosing domain
   at the exit (`CONTRACT_EXECUTION_CONTEXTS.md`, law 7): a string

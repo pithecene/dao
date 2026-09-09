@@ -110,14 +110,18 @@ File
     FunctionDecl to_string
       Param self
       ReturnType: string
+      LetStatement bytes: Vector<u8>
+        CallExpr
+          Callee
+            FieldExpr .snapshot
+              FieldExpr .bytes
+                Identifier self
       ReturnStatement
         CallExpr
           Callee
             Identifier __dao_str_from_bytes
           Args
             FieldExpr .data
-              FieldExpr .bytes
-                Identifier self
+              Identifier bytes
             FieldExpr .len
-              FieldExpr .bytes
-                Identifier self
+              Identifier bytes

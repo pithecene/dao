@@ -110,18 +110,22 @@ static void *domain_alloc(struct dao_domain *domain, size_t size, size_t align) 
 // open domains times their chunk lists, which grow geometrically
 // (domain_alloc); it runs only for a free or a reallocation while a
 // block is open.
-static int domain_owns(const void *ptr) {
+// The open domain whose chunks hold `ptr`, or NULL: the root's, or no
+// domain's at all.
+static struct dao_domain *domain_holding(const void *ptr) {
   uintptr_t p = (uintptr_t)ptr;
-  for (const struct dao_domain *d = current_domain; d != NULL; d = d->parent) {
+  for (struct dao_domain *d = current_domain; d != NULL; d = d->parent) {
     for (const struct dao_chunk *c = d->chunks; c != NULL; c = c->next) {
       uintptr_t base = (uintptr_t)c->base;
       if (p >= base && p - base < (uintptr_t)c->capacity) {
-        return 1;
+        return d;
       }
     }
   }
-  return 0;
+  return NULL;
 }
+
+static int domain_owns(const void *ptr) { return domain_holding(ptr) != NULL; }
 
 static void domain_release(struct dao_domain *domain) {
   struct dao_chunk *chunk = domain->chunks;
@@ -208,6 +212,14 @@ void *__dao_mem_alloc_outer(int64_t size, int64_t align) {
     return root_alloc(size, align);
   }
   return domain_alloc(current_domain->parent, (size_t)(size < 0 ? 0 : size), (size_t)align);
+}
+
+void *__dao_mem_alloc_owner(const void *owner, int64_t size, int64_t align) {
+  struct dao_domain *domain = domain_holding(owner);
+  if (domain == NULL) {
+    return root_alloc(size, align);
+  }
+  return domain_alloc(domain, (size_t)(size < 0 ? 0 : size), (size_t)align);
 }
 
 void *__dao_mem_realloc(void *ptr, int64_t old_size, int64_t new_size,

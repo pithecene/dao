@@ -59,14 +59,19 @@ bootstrap must compile for itself.
 
 | Function | Instantiations |
 |---|---|
+| `core::vector::Vector.refreshed` | 23 |
 | `core::vector::Vector.push` | 23 |
 | `core::vector::Vector.new` | 23 |
 | `core::vector::Vector.length` | 23 |
-| `core::vector::Vector.get` | 22 |
+| `core::vector::Vector.get` | 23 |
+| `core::vector::vec_log_values_new` | 23 |
 | `core::vector::Vector.copy_out` | 21 |
 | `core::vector::Vector.set` | 6 |
+| `core::vector::Vector.log_overwrite` | 6 |
 | `core::range::range` | 5 |
 | `core::builtins::copy_out` | 5 |
+| `core::vector::Vector.snapshot` | 1 |
+| `core::vector::vec_log_head_new` | 1 |
 | `core::to_string::i64_to_string` | 1 |
 | `core::to_string::i32_to_string` | 1 |
 | `core::to_string::f64_to_string` | 1 |
@@ -205,9 +210,9 @@ bootstrap must compile for itself.
 | `core::convert::f32_to_i64` | 1 |
 | `core::convert::f32_to_i32` | 1 |
 | `core::convert::f32_to_f64` | 1 |
-| `size_of` (intrinsic; inlined by the host) | 23 |
+| `size_of` (intrinsic; inlined by the host) | 47 |
+| `align_of` (intrinsic; inlined by the host) | 47 |
 | `ptr_offset` (intrinsic; inlined by the host) | 23 |
-| `align_of` (intrinsic; inlined by the host) | 23 |
 
 The intrinsic family is counted from the MIR (distinct specializations
 of each), since the host lowers every specialization inline and emits no
@@ -229,14 +234,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 1254 | 1 | 0 | 84 | 369 | 431 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 1123 | 1 | 0 | 90 | 408 | 351 | 0 | 19 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 993 | 1 | 0 | 95 | 403 | 390 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 2132 | 2 | 0 | 170 | 956 | 599 | 0 | 57 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 4042 | 19 | 0 | 284 | 1673 | 943 | 0 | — | — | parse: expected expression; then in mir: panic: allocation failed (size=8388608, align=1) |
-| hir | 4036 | 19 | 0 | 528 | 2180 | 1154 | 0 | — | — | parse: expected expression; then in mir: panic: allocation failed (size=8388608, align=1) |
-| mir | 4046 | 18 | 0 | 1340 | 2455 | 1113 | 0 | — | — | parse: expected expression; then in mir: panic: allocation failed (size=8388608, align=1) |
-| llvm | 18 | 1 | — | — | — | — | — | — | — | in parse: process died (status 139; memory bound 6 GiB) |
+| lexer | 50 | 0 | 0 | 84 | 369 | 431 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 46 | 0 | 0 | 90 | 408 | 351 | 0 | 19 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 46 | 1 | 0 | 95 | 403 | 390 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 75 | 1 | 0 | 170 | 956 | 599 | 0 | 57 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 96 | 1 | 0 | 284 | 1673 | 943 | 0 | 126 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 137 | 1 | 0 | 528 | 2180 | 1154 | 0 | 159 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 144 | 1 | 0 | 1340 | 2455 | 1113 | 0 | 204 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 18 | 0 | — | — | — | — | — | — | — | in parse: process died (status 139; memory bound 6 GiB) |
 
 ### What each stage rejects
 
@@ -335,6 +340,9 @@ named, not inferred.
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
 - `typecheck` ×3: type mismatch in assignment: expected bool, got void
+- `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×9: unsupported assignment target
+- `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 
 **hir**
 
@@ -351,6 +359,9 @@ named, not inferred.
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
 - `typecheck` ×3: type mismatch in assignment: expected bool, got void
+- `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×9: unsupported assignment target
+- `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 
 **mir**
 
@@ -367,6 +378,9 @@ named, not inferred.
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
 - `typecheck` ×3: type mismatch in assignment: expected bool, got void
+- `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×9: unsupported assignment target
+- `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 
 ### Parse-stage attribution
 

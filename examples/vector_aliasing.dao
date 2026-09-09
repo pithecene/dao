@@ -1,0 +1,78 @@
+module examples::vector_aliasing
+
+// A vector value is a value: a later value's in-place set or push is
+// invisible to an earlier one, a stale value's write forks, and what
+// leaves a resource block is the vector as that value saw it.
+
+fn show(label: string, v: Vector<i64>): void
+  let b: Builder = Builder::new().push(label).push(":")
+  let i: i64 = 0
+  while i < v.length():
+    b = b.push(" ").push(i64_to_string(v.get(i)))
+    i = i + 1
+  print(b.to_string())
+
+fn main(): i32
+  let v: Vector<i64> = Vector<i64>::new()
+  v = v.push(1).push(2).push(3)
+  let old: Vector<i64> = v
+  v = v.set(1, 20)
+  v = v.push(4)
+  v = v.set(1, 200)
+  v = v.set(0, 100)
+  show("v", v)
+  show("old", old)
+  let fork: Vector<i64> = old.set(2, 30)
+  show("fork", fork)
+  show("old", old)
+  show("v", v)
+  let grown: Vector<i64> = v
+  let i: i64 = 0
+  while i < 100:
+    v = v.push(i)
+    i = i + 1
+  print(v.length())
+  print(grown.length())
+  print(grown.get(1))
+  let total: i64 = 0
+  for x in v.iter():
+    total = total + x
+  print(total)
+  // An alias outside a block keeps its elements when the block's value
+  // sets in place: the log lives with the buffer, not with the block.
+  let base: Vector<i64> = Vector<i64>::new().push(1).push(2).push(3)
+  let keep: Vector<i64> = base
+  resource memory inside =>
+    base = base.set(0, 9)
+    base = base.set(1, 8)
+  show("base", base)
+  show("keep", keep)
+  // A builder over a vector reads the vector as its own value saw it,
+  // whatever a later value of the buffer overwrote in place.
+  let bytes: Vector<u8> = Vector<u8>::new().push(65).push(66)
+  let before: Builder = Builder(bytes)
+  bytes = bytes.set(0, 67)
+  print(before.to_string())
+  print(Builder(bytes).to_string())
+  // The log is read per slot: values of one buffer are each exact
+  // after repeated sets of the same slot, through a log that grew.
+  let r0: Vector<i64> = Vector<i64>::new().push(0).push(0)
+  let r1: Vector<i64> = r0.set(0, 1)
+  let r2: Vector<i64> = r1.set(0, 2)
+  let r3: Vector<i64> = r2.set(0, 3).set(1, 5)
+  let n: i64 = 0
+  while n < 20:
+    r3 = r3.set(1, n)
+    n = n + 1
+  show("r0", r0)
+  show("r1", r1)
+  show("r2", r2)
+  show("r3", r3)
+  let out: Vector<i64> = Vector<i64>::new()
+  resource memory pool =>
+    let inner: Vector<i64> = Vector<i64>::new()
+    inner = inner.push(7).push(8)
+    inner = inner.set(0, 9)
+    out = inner
+  show("out", out)
+  return 0

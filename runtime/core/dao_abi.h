@@ -256,6 +256,12 @@ void *__dao_mem_alloc(int64_t size, int64_t align);
 // must outlive the block (copy-out).  In the root domain, the root.
 void* __dao_mem_alloc_outer(int64_t size, int64_t align);
 
+// Allocate in the domain that owns `owner` -- the root, when no open
+// domain does.  For what a container attaches to storage it already
+// owns (a log of the slots it overwrote), so the attachment lives
+// exactly as long as the storage, however deep the block that makes it.
+void* __dao_mem_alloc_owner(const void* owner, int64_t size, int64_t align);
+
 // Resize allocation. Traps on failure. ptr may be null (acts as alloc).
 // old_size is the number of bytes to preserve from the old allocation.
 // Preserves alignment for alignments within max_align_t; for stronger
