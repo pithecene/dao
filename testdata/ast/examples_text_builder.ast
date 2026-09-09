@@ -1,0 +1,207 @@
+File
+  Module examples::text_builder
+  FunctionDecl join_numbers
+    Param count: i64
+    ReturnType: string
+    LetStatement b: Builder
+      CallExpr
+        Callee
+          QualifiedName Builder::new
+    LetStatement i: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          Identifier count
+      IfStatement
+        Condition
+          BinaryExpr >
+            Identifier i
+            IntLiteral 0
+        Then
+          Assignment
+            Target
+              Identifier b
+            Value
+              CallExpr
+                Callee
+                  FieldExpr .push
+                    Identifier b
+                Args
+                  StringLiteral ", "
+      Assignment
+        Target
+          Identifier b
+        Value
+          CallExpr
+            Callee
+              FieldExpr .push
+                Identifier b
+            Args
+              CallExpr
+                Callee
+                  Identifier i64_to_string
+                Args
+                  Identifier i
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            IntLiteral 1
+    ReturnStatement
+      CallExpr
+        Callee
+          FieldExpr .to_string
+            Identifier b
+  FunctionDecl bracketed
+    Param inner: string
+    ReturnType: string
+    LetStatement b: Builder
+      CallExpr
+        Callee
+          FieldExpr .push_char
+            CallExpr
+              Callee
+                FieldExpr .push
+                  CallExpr
+                    Callee
+                      FieldExpr .push_char
+                        CallExpr
+                          Callee
+                            QualifiedName Builder::new
+                    Args
+                      IntLiteral 91
+              Args
+                Identifier inner
+        Args
+          IntLiteral 93
+    ReturnStatement
+      CallExpr
+        Callee
+          FieldExpr .to_string
+            Identifier b
+  FunctionDecl built_in_a_block
+    Param count: i64
+    ReturnType: string
+    LetStatement out: string
+      StringLiteral ""
+    ResourceBlock memory scratch
+      LetStatement b: Builder
+        CallExpr
+          Callee
+            QualifiedName Builder::new
+      LetStatement i: i64
+        IntLiteral 0
+      WhileStatement
+        Condition
+          BinaryExpr <
+            Identifier i
+            Identifier count
+        Assignment
+          Target
+            Identifier b
+          Value
+            CallExpr
+              Callee
+                FieldExpr .push
+                  Identifier b
+              Args
+                StringLiteral "ab"
+        Assignment
+          Target
+            Identifier i
+          Value
+            BinaryExpr +
+              Identifier i
+              IntLiteral 1
+      Assignment
+        Target
+          Identifier out
+        Value
+          CallExpr
+            Callee
+              FieldExpr .to_string
+                Identifier b
+    ReturnStatement
+      Identifier out
+  FunctionDecl main
+    ReturnType: i32
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier join_numbers
+            Args
+              IntLiteral 5
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier bracketed
+            Args
+              StringLiteral "text"
+    LetStatement long: string
+      CallExpr
+        Callee
+          Identifier built_in_a_block
+        Args
+          IntLiteral 1000
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier length
+            Args
+              Identifier long
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier substring
+            Args
+              Identifier long
+              IntLiteral 0
+              IntLiteral 6
+    LetStatement empty: Builder
+      CallExpr
+        Callee
+          QualifiedName Builder::new
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier empty
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier length
+            Args
+              CallExpr
+                Callee
+                  FieldExpr .to_string
+                    Identifier empty
+    ReturnStatement
+      IntLiteral 0

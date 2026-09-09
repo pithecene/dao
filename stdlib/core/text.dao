@@ -1,0 +1,37 @@
+module core::text
+
+// Text is assembled in a Builder: a Vector<u8> of bytes that grows
+// amortized, turned into a string once, by one copy into the current
+// domain.  `a = a + piece` in a loop copies the whole accumulated
+// string every round -- quadratic in the result -- and leaves every
+// intermediate behind; a builder leaves only its dead buffers, which
+// the domain reclaims.
+
+// A string of `len` bytes copied from `bytes`, owned by the current domain.
+extern fn __dao_str_from_bytes(bytes: *u8, len: i64): string
+
+class Builder:
+  bytes: Vector<u8>
+
+  fn new(): Builder
+    return Builder(Vector<u8>::new())
+
+  // The builder with the bytes of `s` appended.
+  fn push(self, s: string): Builder
+    let out: Vector<u8> = self.bytes
+    let n: i64 = length(s)
+    let i: i64 = 0
+    while i < n:
+      out = out.push(u32_to_u8(i32_to_u32(char_at(s, i))))
+      i = i + 1
+    return Builder(out)
+
+  // The builder with one byte appended, given as `char_at` gives it.
+  fn push_char(self, c: i32): Builder
+    return Builder(self.bytes.push(u32_to_u8(i32_to_u32(c))))
+
+  fn length(self): i64 -> self.bytes.length()
+
+  // One copy of the bytes, as a string the current domain owns.
+  fn to_string(self): string
+    return __dao_str_from_bytes(self.bytes.data, self.bytes.len)
