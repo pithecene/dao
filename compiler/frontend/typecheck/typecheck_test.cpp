@@ -58,6 +58,15 @@ auto has_error_containing(const TypeCheckResult& result, std::string_view sub)
   return false;
 }
 
+auto has_warning_containing(const TypeCheckResult& result, std::string_view sub) -> bool {
+  for (const auto& diag : result.diagnostics) {
+    if (diag.severity == Severity::Warning && diag.message.find(sub) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /// Returns true if there are no type-check errors.
 auto is_ok(const TypeCheckResult& result) -> bool {
   for (const auto& diag : result.diagnostics) {
@@ -1459,6 +1468,42 @@ suite<"typecheck_resource_domains"> typecheck_resource_domains = [] {
                                "        return out\n"
                                "    return out\n");
     expect(is_ok(result)) << (result.diagnostics.empty() ? "" : result.diagnostics[0].message);
+  };
+
+  "a resource block that is a function's whole body is warned about"_test = [] {
+    // The domain belongs at the call site; a body that is one block
+    // hides the policy from every caller.  Sound, so a warning.
+    auto whole = check_source("fn f(): i32\n"
+                              "    resource memory pool =>\n"
+                              "        return 1\n");
+    expect(is_ok(whole));
+    expect(has_warning_containing(whole, "resource block 'pool' is the whole body of 'f'"))
+        << (whole.diagnostics.empty() ? "" : whole.diagnostics[0].message);
+
+    auto partial = check_source("fn g(): i32\n"
+                                "    let n: i32 = 0\n"
+                                "    resource memory pool =>\n"
+                                "        n = 1\n"
+                                "    return n\n");
+    expect(is_ok(partial));
+    expect(!has_warning_containing(partial, "is the whole body"));
+
+    // Only a memory block is a domain: another resource kind as the
+    // whole body costs its callers nothing and is left alone.
+    auto gpu = check_source("fn h(): i32\n"
+                            "    resource gpu compute =>\n"
+                            "        return 1\n");
+    expect(is_ok(gpu));
+    expect(!has_warning_containing(gpu, "is the whole body"));
+
+    // A concept's default method is a body like any other.
+    auto concept_default = check_source("concept Sized:\n"
+                                        "    fn size(self): i32\n"
+                                        "        resource memory pool =>\n"
+                                        "            return 1\n");
+    expect(has_warning_containing(concept_default,
+                                  "resource block 'pool' is the whole body of 'size'"))
+        << (concept_default.diagnostics.empty() ? "" : concept_default.diagnostics[0].message);
   };
 
   "yield inside a block is rejected"_test = [] {

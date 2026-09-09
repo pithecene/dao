@@ -238,10 +238,13 @@ can read off the source.
 
 ## 8. Bootstrap adoption (the reason for the task)
 
-- Each pipeline stage runs inside a `resource memory` block whose
-  result is copied out (one copy of a `LexResult` / `ParseOutput` / …
-  per stage), so a stage's scratch — every intermediate string, every
-  abandoned vector buffer — is reclaimed when the stage ends.
+- Each pipeline stage *call*, in the pipeline drivers, opens its own
+  `resource memory` block whose result is copied out (one copy of a
+  `LexResult` / `ParseOutput` / … per stage), so a stage's scratch —
+  every intermediate string, every abandoned vector buffer — is
+  reclaimed when the stage ends.  The stage functions themselves stay
+  plain: a block that is a function's whole body would hide the
+  domain from every caller (`CONTRACT_EXECUTION_CONTEXTS.md`, law 9).
 - The LLVM text serializer and the diagnostic builders use
   `core::text::Builder`.
 - `bootstrap/audit_closure.sh` then measures the result: the peak-memory
