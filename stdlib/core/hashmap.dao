@@ -95,30 +95,6 @@ class HashStorage<V>:
       *self.used = *self.used + to_i64(1)
       *self.gen = stamp
 
-  // Take `key` at the stamp it was written at into storage no value
-  // reads yet: the slot already holding the key is replaced when
-  // `stamp` is later than its own, else the first empty slot from the
-  // key's bucket is filled.  For compaction only -- storage some value
-  // reads takes writes through `fill`, whose stamp is its own.  One
-  // probe per call, of expected constant length at the load bound
-  // `set` keeps (three quarters).
-  fn adopt(self, key: string, value: V, stamp: i64): void
-    mode unsafe =>
-      let idx: i64 = hash_index(hash_string(key), self.cap)
-      while *ptr_offset(self.stamps, idx) != to_i64(0):
-        if *ptr_offset(self.keys, idx) == key:
-          if stamp > *ptr_offset(self.stamps, idx):
-            *ptr_offset(self.vals, idx) = value
-            *ptr_offset(self.stamps, idx) = stamp
-          return
-        idx = idx + 1
-        if idx >= self.cap:
-          idx = to_i64(0)
-      *ptr_offset(self.keys, idx) = key
-      *ptr_offset(self.vals, idx) = value
-      *ptr_offset(self.stamps, idx) = stamp
-      *self.used = *self.used + to_i64(1)
-
 class HashMap<V>:
   storage: HashStorage<V>
   version: i64   // the stamp this value reads at
@@ -170,10 +146,12 @@ class HashMap<V>:
   // Fresh storage of `cap` slots holding the entries this value sees,
   // in the current domain, one slot per key at the stamp it was written
   // at, so the compacted map reads at this value's version.  One pass
-  // over the old slots: every slot this value can see is adopted, and
-  // a key's later slot replaces its earlier one.  No entry is copied
-  // out here, so an ordinary set never instantiates the value type's
-  // copier.
+  // over the old slots, each probed once into the fresh storage -- of
+  // expected constant length at the load bound `set` keeps -- where a
+  // key's later slot replaces its earlier one.  The fresh storage is
+  // written directly: no value reads it yet, so no view can change.
+  // No entry is copied out here, so an ordinary set never instantiates
+  // the value type's copier.
   fn compacted(self, cap: i64): HashMap<V>
     let fresh: HashStorage<V> = HashStorage<V>::fresh(cap, false)
     let s: HashStorage<V> = self.storage
@@ -183,7 +161,27 @@ class HashMap<V>:
         let stamp: i64 = *ptr_offset(s.stamps, j)
         if stamp != to_i64(0):
           if stamp <= self.version:
-            fresh.adopt(*ptr_offset(s.keys, j), *ptr_offset(s.vals, j), stamp)
+            let key: string = *ptr_offset(s.keys, j)
+            let idx: i64 = hash_index(hash_string(key), cap)
+            let placed: bool = false
+            while placed == false:
+              let held: i64 = *ptr_offset(fresh.stamps, idx)
+              if held == to_i64(0):
+                *ptr_offset(fresh.keys, idx) = key
+                *ptr_offset(fresh.vals, idx) = *ptr_offset(s.vals, j)
+                *ptr_offset(fresh.stamps, idx) = stamp
+                *fresh.used = *fresh.used + to_i64(1)
+                placed = true
+              else:
+                if *ptr_offset(fresh.keys, idx) == key:
+                  if stamp > held:
+                    *ptr_offset(fresh.vals, idx) = *ptr_offset(s.vals, j)
+                    *ptr_offset(fresh.stamps, idx) = stamp
+                  placed = true
+                else:
+                  idx = idx + 1
+                  if idx >= cap:
+                    idx = to_i64(0)
         j = j + 1
       *fresh.gen = self.version
       return HashMap(fresh, self.version, self.count)
