@@ -28,6 +28,20 @@ fn main(): i32
   show("fork", fork, "b")
   show("fork", fork, "c")
   show("m", m, "c")
+  // A stale value's update of a key it already holds forks and wins.
+  let refresh: HashMap<i64> = old.set("a", 9)
+  show("refresh", refresh, "a")
+  show("old", old, "a")
+  print(refresh.length())
+  // An update while the storage is full grows and still wins.
+  let full: HashMap<i64> = HashMap<i64>::new()
+  let f: i64 = 0
+  while f < 6:
+    full = full.set("f" + f.to_string(), f)
+    f = f + 1
+  full = full.set("f0", 60)
+  show("full", full, "f0")
+  print(full.length())
   let before: HashMap<i64> = m
   let i: i64 = 0
   while i < 200:

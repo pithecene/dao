@@ -8,6 +8,11 @@ fork a = 1
 fork has no b
 fork c = 3
 m has no c
+refresh a = 9
+old a = 1
+1
+full f0 = 60
+6
 202
 2
 m k199 = 199
