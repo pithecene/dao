@@ -1,7 +1,9 @@
 #include "frontend/types/type_ownership.h"
 
 #include <algorithm>
+#include <set>
 #include <unordered_set>
+#include <utility>
 
 namespace dao {
 
@@ -53,9 +55,13 @@ namespace {
 // so a pointer among the elements (`Vector<*Generator<i32>>`) is again
 // a pointer value on its own, the author's responsibility as
 // everywhere, and holds nothing.
-auto holds_generator_impl(const Type* t, bool stored, std::unordered_set<const Type*>& seen)
-    -> bool {
-  if (t == nullptr || !seen.insert(t).second) {
+// A type is visited once per way of reaching it: `*Generator<i32>` met
+// as a value (holding nothing) must still be looked into when met later
+// as a container's storage.
+using Visited = std::set<std::pair<const Type*, bool>>;
+
+auto holds_generator_impl(const Type* t, bool stored, Visited& seen) -> bool {
+  if (t == nullptr || !seen.insert({t, stored}).second) {
     return false;
   }
   switch (t->kind()) {
@@ -85,7 +91,7 @@ auto holds_generator_impl(const Type* t, bool stored, std::unordered_set<const T
 } // namespace
 
 auto holds_generator(const Type* type) -> bool {
-  std::unordered_set<const Type*> seen;
+  Visited seen;
   return holds_generator_impl(type, false, seen);
 }
 

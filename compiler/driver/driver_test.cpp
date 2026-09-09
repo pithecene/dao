@@ -626,6 +626,23 @@ suite<"driver_cli"> driver_cli_suite = [] {
                      "  return 0\n");
     auto accepted = run_daoc(scratch, {"check", pointers.string()});
     expect(accepted.exit_code == 0) << accepted.err;
+
+    // Meeting `*Generator<i32>` as a value first must not hide the same
+    // type met afterwards as a container's storage.
+    auto both = scratch.file(
+        "both.dao",
+        "module app::both\n\n"
+        "class Both:\n"
+        "  ptrs: Vector<*Generator<i32>>\n"
+        "  gens: Vector<Generator<i32>>\n\n"
+        "fn main(): i32\n"
+        "  let b: Both = Both(Vector<*Generator<i32>>::new(), Vector<Generator<i32>>::new())\n"
+        "  resource memory pool =>\n"
+        "    b = Both(Vector<*Generator<i32>>::new(), Vector<Generator<i32>>::new())\n"
+        "  return 0\n");
+    auto rejected = run_daoc(scratch, {"check", both.string()});
+    expect(rejected.exit_code != 0) << "a class holding generators after pointers left the block";
+    expect(rejected.err_says("a generator cannot be copied out of the block")) << rejected.err;
   };
 
   "a stdlib file compiled as the root keeps its root role"_test = [] {
