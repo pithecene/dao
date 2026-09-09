@@ -150,10 +150,14 @@ bootstrap must compile for itself.
 | `core::math::abs_f64` | 1 |
 | `core::math::abs` | 1 |
 | `core::hashmap::hash_string` | 1 |
+| `core::hashmap::HashMap.visible_slot` | 1 |
 | `core::hashmap::HashMap.set` | 1 |
 | `core::hashmap::HashMap.new` | 1 |
 | `core::hashmap::HashMap.get` | 1 |
+| `core::hashmap::HashMap.fill` | 1 |
 | `core::hashmap::HashMap.copy_out` | 1 |
+| `core::hashmap::HashMap.contains` | 1 |
+| `core::hashmap::HashMap.compacted` | 1 |
 | `core::hashmap::hash_index` | 1 |
 | `core::equatable::u8.eq` | 1 |
 | `core::equatable::u64.eq` | 1 |
@@ -200,9 +204,9 @@ bootstrap must compile for itself.
 | `core::convert::f32_to_i64` | 1 |
 | `core::convert::f32_to_i32` | 1 |
 | `core::convert::f32_to_f64` | 1 |
-| `size_of` (intrinsic; inlined by the host) | 24 |
-| `ptr_offset` (intrinsic; inlined by the host) | 24 |
-| `align_of` (intrinsic; inlined by the host) | 24 |
+| `size_of` (intrinsic; inlined by the host) | 23 |
+| `ptr_offset` (intrinsic; inlined by the host) | 23 |
+| `align_of` (intrinsic; inlined by the host) | 23 |
 
 The intrinsic family is counted from the MIR (distinct specializations
 of each), since the host lowers every specialization inline and emits no
@@ -223,14 +227,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 1956 | 11 | 0 | 84 | 369 | 431 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 1734 | 10 | 0 | 90 | 408 | 351 | 0 | 19 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 1546 | 9 | 0 | 95 | 403 | 390 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 3177 | 20 | 0 | 170 | 956 | 599 | 0 | 57 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 6069 | 29 | 0 | 284 | 1673 | — | — | — | — | parse: expected expression; then in typecheck: panic: allocation failed (size=8388608, align=1) |
-| hir | 6065 | 34 | 0 | 528 | 2180 | — | — | — | — | parse: expected expression; then in typecheck: panic: allocation failed (size=8388608, align=1) |
-| mir | 6070 | 34 | 0 | 1340 | 2455 | — | — | — | — | parse: expected expression; then in typecheck: panic: allocation failed (size=8388608, align=1) |
-| llvm | 16 | 0 | — | — | — | — | — | — | — | in parse: process died (status 139; memory bound 6 GiB) |
+| lexer | 1266 | 1 | 0 | 84 | 369 | 431 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 1113 | 1 | 0 | 90 | 408 | 351 | 0 | 19 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 993 | 1 | 0 | 95 | 403 | 390 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 2131 | 2 | 0 | 170 | 956 | 599 | 0 | 57 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 4050 | 18 | 0 | 284 | 1673 | 943 | 0 | — | — | parse: expected expression; then in mir: panic: allocation failed (size=8388608, align=1) |
+| hir | 4039 | 16 | 0 | 528 | 2180 | 1154 | 0 | — | — | parse: expected expression; then in mir: panic: allocation failed (size=8388608, align=1) |
+| mir | 4077 | 17 | 0 | 1340 | 2455 | 1113 | 0 | — | — | parse: expected expression; then in mir: panic: allocation failed (size=8388608, align=1) |
+| llvm | 18 | 0 | — | — | — | — | — | — | — | in parse: process died (status 139; memory bound 6 GiB) |
 
 ### What each stage rejects
 
@@ -324,6 +328,11 @@ named, not inferred.
 - `resolve` ×7: unknown name 'new'
 - `resolve` ×5: unknown name 'Span'
 - `resolve` ×5: unknown name 'make_error'
+- `typecheck` ×29: type mismatch in '+': i64 vs i32
+- `typecheck` ×8: type mismatch: cannot assign i32 to i64
+- `typecheck` ×4: unknown type in annotation
+- `typecheck` ×3: type mismatch in '==': i64 vs i32
+- `typecheck` ×3: type mismatch in assignment: expected bool, got void
 
 **hir**
 
@@ -335,6 +344,11 @@ named, not inferred.
 - `resolve` ×7: unknown name 'new'
 - `resolve` ×5: unknown name 'Span'
 - `resolve` ×5: unknown name 'make_error'
+- `typecheck` ×29: type mismatch in '+': i64 vs i32
+- `typecheck` ×8: type mismatch: cannot assign i32 to i64
+- `typecheck` ×4: unknown type in annotation
+- `typecheck` ×3: type mismatch in '==': i64 vs i32
+- `typecheck` ×3: type mismatch in assignment: expected bool, got void
 
 **mir**
 
@@ -346,6 +360,11 @@ named, not inferred.
 - `resolve` ×7: unknown name 'new'
 - `resolve` ×5: unknown name 'Span'
 - `resolve` ×5: unknown name 'make_error'
+- `typecheck` ×29: type mismatch in '+': i64 vs i32
+- `typecheck` ×8: type mismatch: cannot assign i32 to i64
+- `typecheck` ×4: unknown type in annotation
+- `typecheck` ×3: type mismatch in '==': i64 vs i32
+- `typecheck` ×3: type mismatch in assignment: expected bool, got void
 
 ### Parse-stage attribution
 

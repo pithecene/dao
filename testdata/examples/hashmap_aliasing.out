@@ -1,0 +1,16 @@
+2
+1
+m a = 10
+m b = 2
+old a = 1
+old has no b
+fork a = 1
+fork has no b
+fork c = 3
+m has no c
+202
+2
+m k199 = 199
+before has no k0
+out x = 8
+1
