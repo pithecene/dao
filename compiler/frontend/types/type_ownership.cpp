@@ -54,6 +54,10 @@ auto holds_generator_impl(const Type* t, std::unordered_set<const Type*>& seen) 
   switch (t->kind()) {
   case TypeKind::Generator:
     return true;
+  case TypeKind::Pointer:
+    // A container reaches its elements through a raw pointer (`Vector<T>`
+    // holds `*T`): what it points at is held.
+    return holds_generator_impl(static_cast<const TypePointer*>(t)->pointee(), seen);
   case TypeKind::Struct: {
     const auto* st = static_cast<const TypeStruct*>(t);
     return std::ranges::any_of(
