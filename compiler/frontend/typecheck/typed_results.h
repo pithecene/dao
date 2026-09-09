@@ -72,7 +72,7 @@ public:
   }
 
   // --- Resource blocks: the outer bindings a block stores to, which
-  //     its exits copy into the enclosing domain (Task 35 E1) ---
+  //     its exits copy into the enclosing domain ---
   void add_resource_escape(const Stmt* block, const Symbol* binding) {
     // A block stores to a handful of outer bindings; a list keeps their
     // order, which the MIR builder's flags and copies follow.
