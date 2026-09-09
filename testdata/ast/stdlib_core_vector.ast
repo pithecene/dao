@@ -1,8 +1,10 @@
 File
   Module core::vector
   ClassDecl VecLogHead
-    Field index: *i64
     Field stamp: *i64
+    Field next: *i64
+    Field first: *i64
+    Field last: *i64
     Field len: i64
     Field cap: i64
   FunctionDecl vec_log_head_new
@@ -73,6 +75,16 @@ File
             Callee
               Identifier VecLogHead
             Args
+              CallExpr
+                Callee
+                  Identifier null_ptr
+                TypeArgs
+                  i64
+              CallExpr
+                Callee
+                  Identifier null_ptr
+                TypeArgs
+                  i64
               CallExpr
                 Callee
                   Identifier null_ptr
@@ -284,6 +296,141 @@ File
           UnaryExpr *
             FieldExpr .log_value
               Identifier self
+        LetStatement owner: *void
+          CallExpr
+            Callee
+              Identifier ptr_cast
+            TypeArgs
+              void
+            Args
+              FieldExpr .data
+                Identifier self
+        IfStatement
+          Condition
+            BinaryExpr ==
+              FieldExpr .cap
+                Identifier l
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 0
+          Then
+            LetStatement nf: *i64
+              CallExpr
+                Callee
+                  Identifier ptr_cast
+                TypeArgs
+                  i64
+                Args
+                  CallExpr
+                    Callee
+                      Identifier __dao_mem_alloc_owner
+                    Args
+                      Identifier owner
+                      BinaryExpr *
+                        CallExpr
+                          Callee
+                            Identifier size_of
+                          TypeArgs
+                            i64
+                        FieldExpr .cap
+                          Identifier self
+                      CallExpr
+                        Callee
+                          Identifier align_of
+                        TypeArgs
+                          i64
+            LetStatement nl: *i64
+              CallExpr
+                Callee
+                  Identifier ptr_cast
+                TypeArgs
+                  i64
+                Args
+                  CallExpr
+                    Callee
+                      Identifier __dao_mem_alloc_owner
+                    Args
+                      Identifier owner
+                      BinaryExpr *
+                        CallExpr
+                          Callee
+                            Identifier size_of
+                          TypeArgs
+                            i64
+                        FieldExpr .cap
+                          Identifier self
+                      CallExpr
+                        Callee
+                          Identifier align_of
+                        TypeArgs
+                          i64
+            LetStatement s: i64
+              IntLiteral 0
+            WhileStatement
+              Condition
+                BinaryExpr <
+                  Identifier s
+                  FieldExpr .cap
+                    Identifier self
+              Assignment
+                Target
+                  UnaryExpr *
+                    CallExpr
+                      Callee
+                        Identifier ptr_offset
+                      Args
+                        Identifier nf
+                        Identifier s
+                Value
+                  CallExpr
+                    Callee
+                      Identifier to_i64
+                    Args
+                      UnaryExpr -
+                        IntLiteral 1
+              Assignment
+                Target
+                  UnaryExpr *
+                    CallExpr
+                      Callee
+                        Identifier ptr_offset
+                      Args
+                        Identifier nl
+                        Identifier s
+                Value
+                  CallExpr
+                    Callee
+                      Identifier to_i64
+                    Args
+                      UnaryExpr -
+                        IntLiteral 1
+              Assignment
+                Target
+                  Identifier s
+                Value
+                  BinaryExpr +
+                    Identifier s
+                    IntLiteral 1
+            Assignment
+              Target
+                Identifier l
+              Value
+                CallExpr
+                  Callee
+                    Identifier VecLogHead
+                  Args
+                    FieldExpr .stamp
+                      Identifier l
+                    FieldExpr .next
+                      Identifier l
+                    Identifier nf
+                    Identifier nl
+                    FieldExpr .len
+                      Identifier l
+                    FieldExpr .cap
+                      Identifier l
         IfStatement
           Condition
             BinaryExpr ==
@@ -292,15 +439,6 @@ File
               FieldExpr .cap
                 Identifier l
           Then
-            LetStatement owner: *void
-              CallExpr
-                Callee
-                  Identifier ptr_cast
-                TypeArgs
-                  void
-                Args
-                  FieldExpr .data
-                    Identifier self
             LetStatement cap: i64
               BinaryExpr *
                 FieldExpr .cap
@@ -317,7 +455,7 @@ File
                     Identifier cap
                   Value
                     IntLiteral 8
-            LetStatement ni: *i64
+            LetStatement ns: *i64
               CallExpr
                 Callee
                   Identifier ptr_cast
@@ -341,7 +479,7 @@ File
                           Identifier align_of
                         TypeArgs
                           i64
-            LetStatement ns: *i64
+            LetStatement nn: *i64
               CallExpr
                 Callee
                   Identifier ptr_cast
@@ -404,24 +542,6 @@ File
                       Callee
                         Identifier ptr_offset
                       Args
-                        Identifier ni
-                        Identifier k
-                Value
-                  UnaryExpr *
-                    CallExpr
-                      Callee
-                        Identifier ptr_offset
-                      Args
-                        FieldExpr .index
-                          Identifier l
-                        Identifier k
-              Assignment
-                Target
-                  UnaryExpr *
-                    CallExpr
-                      Callee
-                        Identifier ptr_offset
-                      Args
                         Identifier ns
                         Identifier k
                 Value
@@ -431,6 +551,24 @@ File
                         Identifier ptr_offset
                       Args
                         FieldExpr .stamp
+                          Identifier l
+                        Identifier k
+              Assignment
+                Target
+                  UnaryExpr *
+                    CallExpr
+                      Callee
+                        Identifier ptr_offset
+                      Args
+                        Identifier nn
+                        Identifier k
+                Value
+                  UnaryExpr *
+                    CallExpr
+                      Callee
+                        Identifier ptr_offset
+                      Args
+                        FieldExpr .next
                           Identifier l
                         Identifier k
               Assignment
@@ -465,8 +603,12 @@ File
                   Callee
                     Identifier VecLogHead
                   Args
-                    Identifier ni
                     Identifier ns
+                    Identifier nn
+                    FieldExpr .first
+                      Identifier l
+                    FieldExpr .last
+                      Identifier l
                     FieldExpr .len
                       Identifier l
                     Identifier cap
@@ -482,19 +624,9 @@ File
                     Identifier self
               Value
                 Identifier nv
-        Assignment
-          Target
-            UnaryExpr *
-              CallExpr
-                Callee
-                  Identifier ptr_offset
-                Args
-                  FieldExpr .index
-                    Identifier l
-                  FieldExpr .len
-                    Identifier l
-          Value
-            Identifier index
+        LetStatement entry: i64
+          FieldExpr .len
+            Identifier l
         Assignment
           Target
             UnaryExpr *
@@ -504,8 +636,7 @@ File
                 Args
                   FieldExpr .stamp
                     Identifier l
-                  FieldExpr .len
-                    Identifier l
+                  Identifier entry
           Value
             Identifier stamp
         Assignment
@@ -515,9 +646,25 @@ File
                 Callee
                   Identifier ptr_offset
                 Args
-                  Identifier values
-                  FieldExpr .len
+                  FieldExpr .next
                     Identifier l
+                  Identifier entry
+          Value
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                UnaryExpr -
+                  IntLiteral 1
+        Assignment
+          Target
+            UnaryExpr *
+              CallExpr
+                Callee
+                  Identifier ptr_offset
+                Args
+                  Identifier values
+                  Identifier entry
           Value
             UnaryExpr *
               CallExpr
@@ -527,6 +674,62 @@ File
                   FieldExpr .data
                     Identifier self
                   Identifier index
+        LetStatement tail: i64
+          UnaryExpr *
+            CallExpr
+              Callee
+                Identifier ptr_offset
+              Args
+                FieldExpr .last
+                  Identifier l
+                Identifier index
+        IfStatement
+          Condition
+            BinaryExpr <
+              Identifier tail
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 0
+          Then
+            Assignment
+              Target
+                UnaryExpr *
+                  CallExpr
+                    Callee
+                      Identifier ptr_offset
+                    Args
+                      FieldExpr .first
+                        Identifier l
+                      Identifier index
+              Value
+                Identifier entry
+          Else
+            Assignment
+              Target
+                UnaryExpr *
+                  CallExpr
+                    Callee
+                      Identifier ptr_offset
+                    Args
+                      FieldExpr .next
+                        Identifier l
+                      Identifier tail
+              Value
+                Identifier entry
+        Assignment
+          Target
+            UnaryExpr *
+              CallExpr
+                Callee
+                  Identifier ptr_offset
+                Args
+                  FieldExpr .last
+                    Identifier l
+                  Identifier index
+          Value
+            Identifier entry
         Assignment
           Target
             UnaryExpr *
@@ -537,13 +740,16 @@ File
               Callee
                 Identifier VecLogHead
               Args
-                FieldExpr .index
-                  Identifier l
                 FieldExpr .stamp
                   Identifier l
+                FieldExpr .next
+                  Identifier l
+                FieldExpr .first
+                  Identifier l
+                FieldExpr .last
+                  Identifier l
                 BinaryExpr +
-                  FieldExpr .len
-                    Identifier l
+                  Identifier entry
                   IntLiteral 1
                 FieldExpr .cap
                   Identifier l
@@ -599,107 +805,71 @@ File
           UnaryExpr *
             FieldExpr .log
               Identifier self
-        LetStatement best: i64
-          CallExpr
-            Callee
-              Identifier to_i64
-            Args
-              UnaryExpr -
-                IntLiteral 1
-        LetStatement best_stamp: i64
-          CallExpr
-            Callee
-              Identifier to_i64
-            Args
-              IntLiteral 0
-        LetStatement k: i64
-          IntLiteral 0
-        WhileStatement
-          Condition
-            BinaryExpr <
-              Identifier k
-              FieldExpr .len
-                Identifier l
-          IfStatement
-            Condition
-              BinaryExpr ==
-                UnaryExpr *
-                  CallExpr
-                    Callee
-                      Identifier ptr_offset
-                    Args
-                      FieldExpr .index
-                        Identifier l
-                      Identifier k
-                Identifier index
-            Then
-              LetStatement stamp: i64
-                UnaryExpr *
-                  CallExpr
-                    Callee
-                      Identifier ptr_offset
-                    Args
-                      FieldExpr .stamp
-                        Identifier l
-                      Identifier k
-              IfStatement
-                Condition
-                  BinaryExpr >
-                    Identifier stamp
-                    FieldExpr .version
-                      Identifier self
-                Then
-                  IfStatement
-                    Condition
-                      BinaryExpr or
-                        BinaryExpr <
-                          Identifier best
-                          CallExpr
-                            Callee
-                              Identifier to_i64
-                            Args
-                              IntLiteral 0
-                        BinaryExpr <
-                          Identifier stamp
-                          Identifier best_stamp
-                    Then
-                      Assignment
-                        Target
-                          Identifier best
-                        Value
-                          Identifier k
-                      Assignment
-                        Target
-                          Identifier best_stamp
-                        Value
-                          Identifier stamp
-          Assignment
-            Target
-              Identifier k
-            Value
-              BinaryExpr +
-                Identifier k
-                IntLiteral 1
         IfStatement
           Condition
-            BinaryExpr >=
-              Identifier best
+            BinaryExpr >
+              FieldExpr .cap
+                Identifier l
               CallExpr
                 Callee
                   Identifier to_i64
                 Args
                   IntLiteral 0
           Then
-            ReturnStatement
+            LetStatement k: i64
               UnaryExpr *
                 CallExpr
                   Callee
                     Identifier ptr_offset
                   Args
+                    FieldExpr .first
+                      Identifier l
+                    Identifier index
+            WhileStatement
+              Condition
+                BinaryExpr >=
+                  Identifier k
+                  CallExpr
+                    Callee
+                      Identifier to_i64
+                    Args
+                      IntLiteral 0
+              IfStatement
+                Condition
+                  BinaryExpr >
                     UnaryExpr *
-                      FieldExpr .log_value
-                        Identifier self
-                    Identifier best
+                      CallExpr
+                        Callee
+                          Identifier ptr_offset
+                        Args
+                          FieldExpr .stamp
+                            Identifier l
+                          Identifier k
+                    FieldExpr .version
+                      Identifier self
+                Then
+                  ReturnStatement
+                    UnaryExpr *
+                      CallExpr
+                        Callee
+                          Identifier ptr_offset
+                        Args
+                          UnaryExpr *
+                            FieldExpr .log_value
+                              Identifier self
+                          Identifier k
+              Assignment
+                Target
+                  Identifier k
+                Value
+                  UnaryExpr *
+                    CallExpr
+                      Callee
+                        Identifier ptr_offset
+                      Args
+                        FieldExpr .next
+                          Identifier l
+                        Identifier k
         ReturnStatement
           UnaryExpr *
             CallExpr

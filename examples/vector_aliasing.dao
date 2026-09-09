@@ -54,6 +54,20 @@ fn main(): i32
   bytes = bytes.set(0, 67)
   print(before.to_string())
   print(Builder(bytes).to_string())
+  // The log is read per slot: values of one buffer are each exact
+  // after repeated sets of the same slot, through a log that grew.
+  let r0: Vector<i64> = Vector<i64>::new().push(0).push(0)
+  let r1: Vector<i64> = r0.set(0, 1)
+  let r2: Vector<i64> = r1.set(0, 2)
+  let r3: Vector<i64> = r2.set(0, 3).set(1, 5)
+  let n: i64 = 0
+  while n < 20:
+    r3 = r3.set(1, n)
+    n = n + 1
+  show("r0", r0)
+  show("r1", r1)
+  show("r2", r2)
+  show("r3", r3)
   let out: Vector<i64> = Vector<i64>::new()
   resource memory pool =>
     let inner: Vector<i64> = Vector<i64>::new()

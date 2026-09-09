@@ -10,15 +10,22 @@ module core::vector
 // overwrites, so an older value still reads its own through the log.
 // A value that is not the latest copies what it sees before writing.
 // Linear use is therefore O(n) in total, and an older value is exact.
+// The log is chained per slot, so an older value's read of a slot
+// costs the overwrites of that slot up to its own stamp, and a value
+// older than every overwrite reads in constant time.
 
 // The values a buffer's sets overwrote, shared by every value of the
-// buffer through pointers, so a log that grows stays visible to all:
-// the slot indexes and write stamps in one header, the values behind
-// one cell (a class holding a `*T` of its own parameter cannot be
-// instantiated inside `Vector<T>` yet).
+// buffer through pointers, so a log that grows stays visible to all.
+// Entries are in write order; each slot's entries form a chain from
+// `first` through `next` to `last`, so a slot's history is read
+// without scanning the log.  The write stamps and chain links sit in
+// one header, the values behind one cell (a class holding a `*T` of
+// its own parameter cannot be instantiated inside `Vector<T>` yet).
 class VecLogHead:
-  index: *i64
-  stamp: *i64
+  stamp: *i64   // per entry: the write that overwrote the slot
+  next: *i64    // per entry: the slot's next entry, or -1
+  first: *i64   // per buffer slot: its earliest entry, or -1
+  last: *i64    // per buffer slot: its latest entry, or -1
   len: i64
   cap: i64
 
@@ -30,7 +37,7 @@ fn vec_log_head_new(outer: bool): *VecLogHead
     raw = __dao_mem_alloc(size_of<VecLogHead>(), align_of<VecLogHead>())
   mode unsafe =>
     let head: *VecLogHead = ptr_cast<VecLogHead>(raw)
-    *head = VecLogHead(null_ptr<i64>(), null_ptr<i64>(), to_i64(0), to_i64(0))
+    *head = VecLogHead(null_ptr<i64>(), null_ptr<i64>(), null_ptr<i64>(), null_ptr<i64>(), to_i64(0), to_i64(0))
     return head
   panic("unreachable")
 
@@ -69,34 +76,53 @@ class Vector<T>:
     mode unsafe =>
       let l: VecLogHead = *self.log
       let values: *T = *self.log_value
+      // The log lives with the buffer, in the domain that owns it: a
+      // set inside a deeper block must not attach storage the block
+      // reclaims to a buffer an outer value still reads.
+      let owner: *void = ptr_cast<void>(self.data)
+      if l.cap == to_i64(0):
+        // A chain head and tail per slot; a buffer's capacity is fixed
+        // for its life, so they are sized once.
+        let nf: *i64 = ptr_cast<i64>(__dao_mem_alloc_owner(owner, size_of<i64>() * self.cap, align_of<i64>()))
+        let nl: *i64 = ptr_cast<i64>(__dao_mem_alloc_owner(owner, size_of<i64>() * self.cap, align_of<i64>()))
+        let s: i64 = 0
+        while s < self.cap:
+          *ptr_offset(nf, s) = to_i64(-1)
+          *ptr_offset(nl, s) = to_i64(-1)
+          s = s + 1
+        l = VecLogHead(l.stamp, l.next, nf, nl, l.len, l.cap)
       if l.len == l.cap:
-        // The log lives with the buffer, in the domain that owns it:
-        // a set inside a deeper block must not attach storage the
-        // block reclaims to a buffer an outer value still reads.
-        let owner: *void = ptr_cast<void>(self.data)
         let cap: i64 = l.cap * 2
         if cap < 8:
           cap = 8
-        let ni: *i64 = ptr_cast<i64>(__dao_mem_alloc_owner(owner, size_of<i64>() * cap, align_of<i64>()))
         let ns: *i64 = ptr_cast<i64>(__dao_mem_alloc_owner(owner, size_of<i64>() * cap, align_of<i64>()))
+        let nn: *i64 = ptr_cast<i64>(__dao_mem_alloc_owner(owner, size_of<i64>() * cap, align_of<i64>()))
         let nv: *T = ptr_cast<T>(__dao_mem_alloc_owner(owner, size_of<T>() * cap, align_of<T>()))
         let k: i64 = 0
         while k < l.len:
-          *ptr_offset(ni, k) = *ptr_offset(l.index, k)
           *ptr_offset(ns, k) = *ptr_offset(l.stamp, k)
+          *ptr_offset(nn, k) = *ptr_offset(l.next, k)
           *ptr_offset(nv, k) = *ptr_offset(values, k)
           k = k + 1
-        l = VecLogHead(ni, ns, l.len, cap)
+        l = VecLogHead(ns, nn, l.first, l.last, l.len, cap)
         values = nv
         *self.log_value = nv
-      *ptr_offset(l.index, l.len) = index
-      *ptr_offset(l.stamp, l.len) = stamp
-      *ptr_offset(values, l.len) = *ptr_offset(self.data, index)
-      *self.log = VecLogHead(l.index, l.stamp, l.len + 1, l.cap)
+      let entry: i64 = l.len
+      *ptr_offset(l.stamp, entry) = stamp
+      *ptr_offset(l.next, entry) = to_i64(-1)
+      *ptr_offset(values, entry) = *ptr_offset(self.data, index)
+      let tail: i64 = *ptr_offset(l.last, index)
+      if tail < to_i64(0):
+        *ptr_offset(l.first, index) = entry
+      else:
+        *ptr_offset(l.next, tail) = entry
+      *ptr_offset(l.last, index) = entry
+      *self.log = VecLogHead(l.stamp, l.next, l.first, l.last, entry + 1, l.cap)
 
   // The element at `index` as this value sees it: the buffer's slot,
   // unless a later write overwrote it, in which case the value the
-  // earliest such write logged.
+  // earliest such write logged -- the slot's first entry past this
+  // value's stamp, its entries being in write order.
   fn get(self, index: i64): T
     if index < 0:
       panic("Vector.get: index out of bounds")
@@ -106,19 +132,12 @@ class Vector<T>:
       if *self.gen == self.version:
         return *ptr_offset(self.data, index)
       let l: VecLogHead = *self.log
-      let best: i64 = to_i64(-1)
-      let best_stamp: i64 = to_i64(0)
-      let k: i64 = 0
-      while k < l.len:
-        if *ptr_offset(l.index, k) == index:
-          let stamp: i64 = *ptr_offset(l.stamp, k)
-          if stamp > self.version:
-            if best < to_i64(0) or stamp < best_stamp:
-              best = k
-              best_stamp = stamp
-        k = k + 1
-      if best >= to_i64(0):
-        return *ptr_offset(*self.log_value, best)
+      if l.cap > to_i64(0):
+        let k: i64 = *ptr_offset(l.first, index)
+        while k >= to_i64(0):
+          if *ptr_offset(l.stamp, k) > self.version:
+            return *ptr_offset(*self.log_value, k)
+          k = *ptr_offset(l.next, k)
       return *ptr_offset(self.data, index)
     panic("unreachable")
 

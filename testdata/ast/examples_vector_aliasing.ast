@@ -375,6 +375,105 @@ File
                     Identifier Builder
                   Args
                     Identifier bytes
+    LetStatement r0: Vector<i64>
+      CallExpr
+        Callee
+          FieldExpr .push
+            CallExpr
+              Callee
+                FieldExpr .push
+                  CallExpr
+                    Callee
+                      Identifier Vector.new
+                    TypeArgs
+                      i64
+              Args
+                IntLiteral 0
+        Args
+          IntLiteral 0
+    LetStatement r1: Vector<i64>
+      CallExpr
+        Callee
+          FieldExpr .set
+            Identifier r0
+        Args
+          IntLiteral 0
+          IntLiteral 1
+    LetStatement r2: Vector<i64>
+      CallExpr
+        Callee
+          FieldExpr .set
+            Identifier r1
+        Args
+          IntLiteral 0
+          IntLiteral 2
+    LetStatement r3: Vector<i64>
+      CallExpr
+        Callee
+          FieldExpr .set
+            CallExpr
+              Callee
+                FieldExpr .set
+                  Identifier r2
+              Args
+                IntLiteral 0
+                IntLiteral 3
+        Args
+          IntLiteral 1
+          IntLiteral 5
+    LetStatement n: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier n
+          IntLiteral 20
+      Assignment
+        Target
+          Identifier r3
+        Value
+          CallExpr
+            Callee
+              FieldExpr .set
+                Identifier r3
+            Args
+              IntLiteral 1
+              Identifier n
+      Assignment
+        Target
+          Identifier n
+        Value
+          BinaryExpr +
+            Identifier n
+            IntLiteral 1
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "r0"
+          Identifier r0
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "r1"
+          Identifier r1
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "r2"
+          Identifier r2
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier show
+        Args
+          StringLiteral "r3"
+          Identifier r3
     LetStatement out: Vector<i64>
       CallExpr
         Callee
