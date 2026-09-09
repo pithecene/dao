@@ -36,387 +36,17 @@ File
             Identifier cap
     ReturnStatement
       Identifier idx
-  ClassDecl HashMap<V>
-    Field key_data: *string
-    Field val_data: *V
-    Field stamp_data: *i64
+  ClassDecl HashStorage<V>
+    Field keys: *string
+    Field vals: *V
+    Field stamps: *i64
     Field cap: i64
     Field used: *i64
     Field gen: *i64
-    Field version: i64
-    Field count: i64
-    FunctionDecl new
-      ReturnType: HashMap<V>
-      ReturnStatement
-        CallExpr
-          Callee
-            Identifier HashMap
-          Args
-            CallExpr
-              Callee
-                Identifier null_ptr
-              TypeArgs
-                string
-            CallExpr
-              Callee
-                Identifier null_ptr
-              TypeArgs
-                V
-            CallExpr
-              Callee
-                Identifier null_ptr
-              TypeArgs
-                i64
-            CallExpr
-              Callee
-                Identifier to_i64
-              Args
-                IntLiteral 0
-            CallExpr
-              Callee
-                Identifier null_ptr
-              TypeArgs
-                i64
-            CallExpr
-              Callee
-                Identifier null_ptr
-              TypeArgs
-                i64
-            CallExpr
-              Callee
-                Identifier to_i64
-              Args
-                IntLiteral 0
-            CallExpr
-              Callee
-                Identifier to_i64
-              Args
-                IntLiteral 0
-    FunctionDecl length
-      Param self
-      ReturnType: i64
-      ExprBody
-        FieldExpr .count
-          Identifier self
-    FunctionDecl visible_slot
-      Param self
-      Param key: string
-      ReturnType: i64
-      IfStatement
-        Condition
-          BinaryExpr ==
-            FieldExpr .cap
-              Identifier self
-            CallExpr
-              Callee
-                Identifier to_i64
-              Args
-                IntLiteral 0
-        Then
-          ReturnStatement
-            CallExpr
-              Callee
-                Identifier to_i64
-              Args
-                UnaryExpr -
-                  IntLiteral 1
-      LetStatement idx: i64
-        CallExpr
-          Callee
-            Identifier hash_index
-          Args
-            CallExpr
-              Callee
-                Identifier hash_string
-              Args
-                Identifier key
-            FieldExpr .cap
-              Identifier self
-      LetStatement best: i64
-        CallExpr
-          Callee
-            Identifier to_i64
-          Args
-            UnaryExpr -
-              IntLiteral 1
-      LetStatement best_stamp: i64
-        CallExpr
-          Callee
-            Identifier to_i64
-          Args
-            IntLiteral 0
-      ModeBlock unsafe
-        LetStatement probes: i64
-          IntLiteral 0
-        WhileStatement
-          Condition
-            BinaryExpr <
-              Identifier probes
-              FieldExpr .cap
-                Identifier self
-          LetStatement stamp: i64
-            UnaryExpr *
-              CallExpr
-                Callee
-                  Identifier ptr_offset
-                Args
-                  FieldExpr .stamp_data
-                    Identifier self
-                  Identifier idx
-          IfStatement
-            Condition
-              BinaryExpr ==
-                Identifier stamp
-                CallExpr
-                  Callee
-                    Identifier to_i64
-                  Args
-                    IntLiteral 0
-            Then
-              ReturnStatement
-                Identifier best
-          IfStatement
-            Condition
-              BinaryExpr <=
-                Identifier stamp
-                FieldExpr .version
-                  Identifier self
-            Then
-              IfStatement
-                Condition
-                  BinaryExpr ==
-                    UnaryExpr *
-                      CallExpr
-                        Callee
-                          Identifier ptr_offset
-                        Args
-                          FieldExpr .key_data
-                            Identifier self
-                          Identifier idx
-                    Identifier key
-                Then
-                  IfStatement
-                    Condition
-                      BinaryExpr >
-                        Identifier stamp
-                        Identifier best_stamp
-                    Then
-                      Assignment
-                        Target
-                          Identifier best
-                        Value
-                          Identifier idx
-                      Assignment
-                        Target
-                          Identifier best_stamp
-                        Value
-                          Identifier stamp
-          Assignment
-            Target
-              Identifier idx
-            Value
-              BinaryExpr +
-                Identifier idx
-                IntLiteral 1
-          IfStatement
-            Condition
-              BinaryExpr >=
-                Identifier idx
-                FieldExpr .cap
-                  Identifier self
-            Then
-              Assignment
-                Target
-                  Identifier idx
-                Value
-                  CallExpr
-                    Callee
-                      Identifier to_i64
-                    Args
-                      IntLiteral 0
-          Assignment
-            Target
-              Identifier probes
-            Value
-              BinaryExpr +
-                Identifier probes
-                IntLiteral 1
-      ReturnStatement
-        Identifier best
-    FunctionDecl get
-      Param self
-      Param key: string
-      ReturnType: Option<V>
-      LetStatement slot: i64
-        CallExpr
-          Callee
-            FieldExpr .visible_slot
-              Identifier self
-          Args
-            Identifier key
-      IfStatement
-        Condition
-          BinaryExpr <
-            Identifier slot
-            CallExpr
-              Callee
-                Identifier to_i64
-              Args
-                IntLiteral 0
-        Then
-          ReturnStatement
-            QualifiedName Option::None
-      ModeBlock unsafe
-        ReturnStatement
-          CallExpr
-            Callee
-              QualifiedName Option::Some
-            Args
-              UnaryExpr *
-                CallExpr
-                  Callee
-                    Identifier ptr_offset
-                  Args
-                    FieldExpr .val_data
-                      Identifier self
-                    Identifier slot
-      ExpressionStatement
-        CallExpr
-          Callee
-            Identifier panic
-          Args
-            StringLiteral "unreachable"
-    FunctionDecl contains
-      Param self
-      Param key: string
-      ReturnType: bool
-      ExprBody
-        BinaryExpr >=
-          CallExpr
-            Callee
-              FieldExpr .visible_slot
-                Identifier self
-            Args
-              Identifier key
-          CallExpr
-            Callee
-              Identifier to_i64
-            Args
-              IntLiteral 0
-    FunctionDecl fill
-      Param self
-      Param key: string
-      Param value: V
-      Param stamp: i64
-      ReturnType: void
-      ModeBlock unsafe
-        LetStatement idx: i64
-          CallExpr
-            Callee
-              Identifier hash_index
-            Args
-              CallExpr
-                Callee
-                  Identifier hash_string
-                Args
-                  Identifier key
-              FieldExpr .cap
-                Identifier self
-        WhileStatement
-          Condition
-            BinaryExpr !=
-              UnaryExpr *
-                CallExpr
-                  Callee
-                    Identifier ptr_offset
-                  Args
-                    FieldExpr .stamp_data
-                      Identifier self
-                    Identifier idx
-              CallExpr
-                Callee
-                  Identifier to_i64
-                Args
-                  IntLiteral 0
-          Assignment
-            Target
-              Identifier idx
-            Value
-              BinaryExpr +
-                Identifier idx
-                IntLiteral 1
-          IfStatement
-            Condition
-              BinaryExpr >=
-                Identifier idx
-                FieldExpr .cap
-                  Identifier self
-            Then
-              Assignment
-                Target
-                  Identifier idx
-                Value
-                  CallExpr
-                    Callee
-                      Identifier to_i64
-                    Args
-                      IntLiteral 0
-        Assignment
-          Target
-            UnaryExpr *
-              CallExpr
-                Callee
-                  Identifier ptr_offset
-                Args
-                  FieldExpr .key_data
-                    Identifier self
-                  Identifier idx
-          Value
-            Identifier key
-        Assignment
-          Target
-            UnaryExpr *
-              CallExpr
-                Callee
-                  Identifier ptr_offset
-                Args
-                  FieldExpr .val_data
-                    Identifier self
-                  Identifier idx
-          Value
-            Identifier value
-        Assignment
-          Target
-            UnaryExpr *
-              CallExpr
-                Callee
-                  Identifier ptr_offset
-                Args
-                  FieldExpr .stamp_data
-                    Identifier self
-                  Identifier idx
-          Value
-            Identifier stamp
-        Assignment
-          Target
-            UnaryExpr *
-              FieldExpr .used
-                Identifier self
-          Value
-            BinaryExpr +
-              UnaryExpr *
-                FieldExpr .used
-                  Identifier self
-              CallExpr
-                Callee
-                  Identifier to_i64
-                Args
-                  IntLiteral 1
-    FunctionDecl compacted
-      Param self
+    FunctionDecl fresh
       Param cap: i64
       Param outer: bool
-      ReturnType: HashMap<V>
+      ReturnType: HashStorage<V>
       LetStatement key_bytes: i64
         BinaryExpr *
           CallExpr
@@ -705,11 +335,11 @@ File
               Callee
                 Identifier to_i64
               Args
-                IntLiteral 1
-        LetStatement fresh: HashMap<V>
+                IntLiteral 0
+        ReturnStatement
           CallExpr
             Callee
-              Identifier HashMap
+              Identifier HashStorage
             Args
               CallExpr
                 Callee
@@ -729,13 +359,427 @@ File
               Identifier cap
               Identifier used
               Identifier gen
+      ExpressionStatement
+        CallExpr
+          Callee
+            Identifier panic
+          Args
+            StringLiteral "unreachable"
+    FunctionDecl fill
+      Param self
+      Param key: string
+      Param value: V
+      ReturnType: void
+      ModeBlock unsafe
+        LetStatement idx: i64
+          CallExpr
+            Callee
+              Identifier hash_index
+            Args
+              CallExpr
+                Callee
+                  Identifier hash_string
+                Args
+                  Identifier key
+              FieldExpr .cap
+                Identifier self
+        WhileStatement
+          Condition
+            BinaryExpr !=
+              UnaryExpr *
+                CallExpr
+                  Callee
+                    Identifier ptr_offset
+                  Args
+                    FieldExpr .stamps
+                      Identifier self
+                    Identifier idx
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 0
+          Assignment
+            Target
+              Identifier idx
+            Value
+              BinaryExpr +
+                Identifier idx
+                IntLiteral 1
+          IfStatement
+            Condition
+              BinaryExpr >=
+                Identifier idx
+                FieldExpr .cap
+                  Identifier self
+            Then
+              Assignment
+                Target
+                  Identifier idx
+                Value
+                  CallExpr
+                    Callee
+                      Identifier to_i64
+                    Args
+                      IntLiteral 0
+        LetStatement stamp: i64
+          BinaryExpr +
+            UnaryExpr *
+              FieldExpr .gen
+                Identifier self
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 1
+        Assignment
+          Target
+            UnaryExpr *
+              CallExpr
+                Callee
+                  Identifier ptr_offset
+                Args
+                  FieldExpr .keys
+                    Identifier self
+                  Identifier idx
+          Value
+            Identifier key
+        Assignment
+          Target
+            UnaryExpr *
+              CallExpr
+                Callee
+                  Identifier ptr_offset
+                Args
+                  FieldExpr .vals
+                    Identifier self
+                  Identifier idx
+          Value
+            Identifier value
+        Assignment
+          Target
+            UnaryExpr *
+              CallExpr
+                Callee
+                  Identifier ptr_offset
+                Args
+                  FieldExpr .stamps
+                    Identifier self
+                  Identifier idx
+          Value
+            Identifier stamp
+        Assignment
+          Target
+            UnaryExpr *
+              FieldExpr .used
+                Identifier self
+          Value
+            BinaryExpr +
+              UnaryExpr *
+                FieldExpr .used
+                  Identifier self
               CallExpr
                 Callee
                   Identifier to_i64
                 Args
                   IntLiteral 1
-              FieldExpr .count
+        Assignment
+          Target
+            UnaryExpr *
+              FieldExpr .gen
                 Identifier self
+          Value
+            Identifier stamp
+  ClassDecl HashMap<V>
+    Field storage: HashStorage<V>
+    Field version: i64
+    Field count: i64
+    FunctionDecl new
+      ReturnType: HashMap<V>
+      LetStatement none: HashStorage<V>
+        CallExpr
+          Callee
+            Identifier HashStorage
+          Args
+            CallExpr
+              Callee
+                Identifier null_ptr
+              TypeArgs
+                string
+            CallExpr
+              Callee
+                Identifier null_ptr
+              TypeArgs
+                V
+            CallExpr
+              Callee
+                Identifier null_ptr
+              TypeArgs
+                i64
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 0
+            CallExpr
+              Callee
+                Identifier null_ptr
+              TypeArgs
+                i64
+            CallExpr
+              Callee
+                Identifier null_ptr
+              TypeArgs
+                i64
+      ReturnStatement
+        CallExpr
+          Callee
+            Identifier HashMap
+          Args
+            Identifier none
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 0
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 0
+    FunctionDecl length
+      Param self
+      ReturnType: i64
+      ExprBody
+        FieldExpr .count
+          Identifier self
+    FunctionDecl visible_slot
+      Param self
+      Param key: string
+      ReturnType: i64
+      LetStatement s: HashStorage<V>
+        FieldExpr .storage
+          Identifier self
+      IfStatement
+        Condition
+          BinaryExpr ==
+            FieldExpr .cap
+              Identifier s
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 0
+        Then
+          ReturnStatement
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                UnaryExpr -
+                  IntLiteral 1
+      LetStatement idx: i64
+        CallExpr
+          Callee
+            Identifier hash_index
+          Args
+            CallExpr
+              Callee
+                Identifier hash_string
+              Args
+                Identifier key
+            FieldExpr .cap
+              Identifier s
+      LetStatement best: i64
+        CallExpr
+          Callee
+            Identifier to_i64
+          Args
+            UnaryExpr -
+              IntLiteral 1
+      LetStatement best_stamp: i64
+        CallExpr
+          Callee
+            Identifier to_i64
+          Args
+            IntLiteral 0
+      ModeBlock unsafe
+        LetStatement probes: i64
+          IntLiteral 0
+        WhileStatement
+          Condition
+            BinaryExpr <
+              Identifier probes
+              FieldExpr .cap
+                Identifier s
+          LetStatement stamp: i64
+            UnaryExpr *
+              CallExpr
+                Callee
+                  Identifier ptr_offset
+                Args
+                  FieldExpr .stamps
+                    Identifier s
+                  Identifier idx
+          IfStatement
+            Condition
+              BinaryExpr ==
+                Identifier stamp
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 0
+            Then
+              ReturnStatement
+                Identifier best
+          IfStatement
+            Condition
+              BinaryExpr <=
+                Identifier stamp
+                FieldExpr .version
+                  Identifier self
+            Then
+              IfStatement
+                Condition
+                  BinaryExpr ==
+                    UnaryExpr *
+                      CallExpr
+                        Callee
+                          Identifier ptr_offset
+                        Args
+                          FieldExpr .keys
+                            Identifier s
+                          Identifier idx
+                    Identifier key
+                Then
+                  IfStatement
+                    Condition
+                      BinaryExpr >
+                        Identifier stamp
+                        Identifier best_stamp
+                    Then
+                      Assignment
+                        Target
+                          Identifier best
+                        Value
+                          Identifier idx
+                      Assignment
+                        Target
+                          Identifier best_stamp
+                        Value
+                          Identifier stamp
+          Assignment
+            Target
+              Identifier idx
+            Value
+              BinaryExpr +
+                Identifier idx
+                IntLiteral 1
+          IfStatement
+            Condition
+              BinaryExpr >=
+                Identifier idx
+                FieldExpr .cap
+                  Identifier s
+            Then
+              Assignment
+                Target
+                  Identifier idx
+                Value
+                  CallExpr
+                    Callee
+                      Identifier to_i64
+                    Args
+                      IntLiteral 0
+          Assignment
+            Target
+              Identifier probes
+            Value
+              BinaryExpr +
+                Identifier probes
+                IntLiteral 1
+      ReturnStatement
+        Identifier best
+    FunctionDecl get
+      Param self
+      Param key: string
+      ReturnType: Option<V>
+      LetStatement slot: i64
+        CallExpr
+          Callee
+            FieldExpr .visible_slot
+              Identifier self
+          Args
+            Identifier key
+      IfStatement
+        Condition
+          BinaryExpr <
+            Identifier slot
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 0
+        Then
+          ReturnStatement
+            QualifiedName Option::None
+      ModeBlock unsafe
+        ReturnStatement
+          CallExpr
+            Callee
+              QualifiedName Option::Some
+            Args
+              UnaryExpr *
+                CallExpr
+                  Callee
+                    Identifier ptr_offset
+                  Args
+                    FieldExpr .vals
+                      FieldExpr .storage
+                        Identifier self
+                    Identifier slot
+      ExpressionStatement
+        CallExpr
+          Callee
+            Identifier panic
+          Args
+            StringLiteral "unreachable"
+    FunctionDecl contains
+      Param self
+      Param key: string
+      ReturnType: bool
+      ExprBody
+        BinaryExpr >=
+          CallExpr
+            Callee
+              FieldExpr .visible_slot
+                Identifier self
+            Args
+              Identifier key
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 0
+    FunctionDecl compacted
+      Param self
+      Param cap: i64
+      Param outer: bool
+      ReturnType: HashMap<V>
+      LetStatement fresh: HashStorage<V>
+        CallExpr
+          Callee
+            Identifier HashStorage.fresh
+          TypeArgs
+            V
+          Args
+            Identifier cap
+            Identifier outer
+      LetStatement s: HashStorage<V>
+        FieldExpr .storage
+          Identifier self
+      ModeBlock unsafe
         LetStatement j: i64
           IntLiteral 0
         WhileStatement
@@ -743,15 +787,15 @@ File
             BinaryExpr <
               Identifier j
               FieldExpr .cap
-                Identifier self
+                Identifier s
           LetStatement stamp: i64
             UnaryExpr *
               CallExpr
                 Callee
                   Identifier ptr_offset
                 Args
-                  FieldExpr .stamp_data
-                    Identifier self
+                  FieldExpr .stamps
+                    Identifier s
                   Identifier j
           IfStatement
             Condition
@@ -776,8 +820,8 @@ File
                         Callee
                           Identifier ptr_offset
                         Args
-                          FieldExpr .key_data
-                            Identifier self
+                          FieldExpr .keys
+                            Identifier s
                           Identifier j
                   IfStatement
                     Condition
@@ -816,14 +860,9 @@ File
                                         Callee
                                           Identifier ptr_offset
                                         Args
-                                          FieldExpr .val_data
-                                            Identifier self
+                                          FieldExpr .vals
+                                            Identifier s
                                           Identifier j
-                                CallExpr
-                                  Callee
-                                    Identifier to_i64
-                                  Args
-                                    IntLiteral 1
                         Else
                           ExpressionStatement
                             CallExpr
@@ -837,14 +876,9 @@ File
                                     Callee
                                       Identifier ptr_offset
                                     Args
-                                      FieldExpr .val_data
-                                        Identifier self
+                                      FieldExpr .vals
+                                        Identifier s
                                       Identifier j
-                                CallExpr
-                                  Callee
-                                    Identifier to_i64
-                                  Args
-                                    IntLiteral 1
           Assignment
             Target
               Identifier j
@@ -853,7 +887,16 @@ File
                 Identifier j
                 IntLiteral 1
         ReturnStatement
-          Identifier fresh
+          CallExpr
+            Callee
+              Identifier HashMap
+            Args
+              Identifier fresh
+              UnaryExpr *
+                FieldExpr .gen
+                  Identifier fresh
+              FieldExpr .count
+                Identifier self
       ExpressionStatement
         CallExpr
           Callee
@@ -867,7 +910,8 @@ File
         Condition
           BinaryExpr ==
             FieldExpr .cap
-              Identifier self
+              FieldExpr .storage
+                Identifier self
             CallExpr
               Callee
                 Identifier to_i64
@@ -887,19 +931,23 @@ File
               Identifier self
           Args
             FieldExpr .cap
-              Identifier self
+              FieldExpr .storage
+                Identifier self
             BoolLiteral true
     FunctionDecl set
       Param self
       Param key: string
       Param value: V
       ReturnType: HashMap<V>
+      LetStatement s: HashStorage<V>
+        FieldExpr .storage
+          Identifier self
       ModeBlock unsafe
         IfStatement
           Condition
             BinaryExpr >
               FieldExpr .cap
-                Identifier self
+                Identifier s
               CallExpr
                 Callee
                   Identifier to_i64
@@ -911,7 +959,7 @@ File
                 BinaryExpr ==
                   UnaryExpr *
                     FieldExpr .gen
-                      Identifier self
+                      Identifier s
                   FieldExpr .version
                     Identifier self
               Then
@@ -922,7 +970,7 @@ File
                         BinaryExpr +
                           UnaryExpr *
                             FieldExpr .used
-                              Identifier self
+                              Identifier s
                           CallExpr
                             Callee
                               Identifier to_i64
@@ -935,7 +983,7 @@ File
                             IntLiteral 4
                       BinaryExpr *
                         FieldExpr .cap
-                          Identifier self
+                          Identifier s
                         CallExpr
                           Callee
                             Identifier to_i64
@@ -949,31 +997,14 @@ File
                             Identifier self
                         Args
                           Identifier key
-                    LetStatement stamp: i64
-                      BinaryExpr +
-                        FieldExpr .version
-                          Identifier self
-                        CallExpr
-                          Callee
-                            Identifier to_i64
-                          Args
-                            IntLiteral 1
                     ExpressionStatement
                       CallExpr
                         Callee
                           FieldExpr .fill
-                            Identifier self
+                            Identifier s
                         Args
                           Identifier key
                           Identifier value
-                          Identifier stamp
-                    Assignment
-                      Target
-                        UnaryExpr *
-                          FieldExpr .gen
-                            Identifier self
-                      Value
-                        Identifier stamp
                     LetStatement count: i64
                       FieldExpr .count
                         Identifier self
@@ -999,23 +1030,14 @@ File
                         Callee
                           Identifier HashMap
                         Args
-                          FieldExpr .key_data
-                            Identifier self
-                          FieldExpr .val_data
-                            Identifier self
-                          FieldExpr .stamp_data
-                            Identifier self
-                          FieldExpr .cap
-                            Identifier self
-                          FieldExpr .used
-                            Identifier self
-                          FieldExpr .gen
-                            Identifier self
-                          Identifier stamp
+                          Identifier s
+                          UnaryExpr *
+                            FieldExpr .gen
+                              Identifier s
                           Identifier count
       LetStatement new_cap: i64
         FieldExpr .cap
-          Identifier self
+          Identifier s
       IfStatement
         Condition
           BinaryExpr <
@@ -1070,74 +1092,17 @@ File
                   Identifier to_i64
                 Args
                   IntLiteral 2
-      LetStatement fresh: HashMap<V>
-        CallExpr
-          Callee
-            FieldExpr .compacted
-              Identifier self
-          Args
-            Identifier new_cap
-            BoolLiteral false
-      LetStatement known: bool
-        CallExpr
-          Callee
-            FieldExpr .contains
-              Identifier fresh
-          Args
-            Identifier key
-      ExpressionStatement
-        CallExpr
-          Callee
-            FieldExpr .fill
-              Identifier fresh
-          Args
-            Identifier key
-            Identifier value
-            CallExpr
-              Callee
-                Identifier to_i64
-              Args
-                IntLiteral 1
-      LetStatement count: i64
-        FieldExpr .count
-          Identifier fresh
-      IfStatement
-        Condition
-          BinaryExpr ==
-            Identifier known
-            BoolLiteral false
-        Then
-          Assignment
-            Target
-              Identifier count
-            Value
-              BinaryExpr +
-                Identifier count
-                CallExpr
-                  Callee
-                    Identifier to_i64
-                  Args
-                    IntLiteral 1
       ReturnStatement
         CallExpr
           Callee
-            Identifier HashMap
+            FieldExpr .set
+              CallExpr
+                Callee
+                  FieldExpr .compacted
+                    Identifier self
+                Args
+                  Identifier new_cap
+                  BoolLiteral false
           Args
-            FieldExpr .key_data
-              Identifier fresh
-            FieldExpr .val_data
-              Identifier fresh
-            FieldExpr .stamp_data
-              Identifier fresh
-            FieldExpr .cap
-              Identifier fresh
-            FieldExpr .used
-              Identifier fresh
-            FieldExpr .gen
-              Identifier fresh
-            CallExpr
-              Callee
-                Identifier to_i64
-              Args
-                IntLiteral 1
-            Identifier count
+            Identifier key
+            Identifier value

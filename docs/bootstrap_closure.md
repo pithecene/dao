@@ -150,11 +150,12 @@ bootstrap must compile for itself.
 | `core::math::abs_f64` | 1 |
 | `core::math::abs` | 1 |
 | `core::hashmap::hash_string` | 1 |
+| `core::hashmap::HashStorage.fresh` | 1 |
+| `core::hashmap::HashStorage.fill` | 1 |
 | `core::hashmap::HashMap.visible_slot` | 1 |
 | `core::hashmap::HashMap.set` | 1 |
 | `core::hashmap::HashMap.new` | 1 |
 | `core::hashmap::HashMap.get` | 1 |
-| `core::hashmap::HashMap.fill` | 1 |
 | `core::hashmap::HashMap.copy_out` | 1 |
 | `core::hashmap::HashMap.contains` | 1 |
 | `core::hashmap::HashMap.compacted` | 1 |
@@ -228,14 +229,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 1266 | 1 | 0 | 84 | 369 | 431 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 1113 | 1 | 0 | 90 | 408 | 351 | 0 | 19 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 1254 | 1 | 0 | 84 | 369 | 431 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 1123 | 1 | 0 | 90 | 408 | 351 | 0 | 19 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
 | graph | 993 | 1 | 0 | 95 | 403 | 390 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 2131 | 2 | 0 | 170 | 956 | 599 | 0 | 57 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 4050 | 18 | 0 | 284 | 1673 | 943 | 0 | — | — | parse: expected expression; then in mir: panic: allocation failed (size=8388608, align=1) |
-| hir | 4039 | 16 | 0 | 528 | 2180 | 1154 | 0 | — | — | parse: expected expression; then in mir: panic: allocation failed (size=8388608, align=1) |
-| mir | 4077 | 17 | 0 | 1340 | 2455 | 1113 | 0 | — | — | parse: expected expression; then in mir: panic: allocation failed (size=8388608, align=1) |
-| llvm | 18 | 0 | — | — | — | — | — | — | — | in parse: process died (status 139; memory bound 6 GiB) |
+| resolver | 2132 | 2 | 0 | 170 | 956 | 599 | 0 | 57 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 4042 | 19 | 0 | 284 | 1673 | 943 | 0 | — | — | parse: expected expression; then in mir: panic: allocation failed (size=8388608, align=1) |
+| hir | 4036 | 19 | 0 | 528 | 2180 | 1154 | 0 | — | — | parse: expected expression; then in mir: panic: allocation failed (size=8388608, align=1) |
+| mir | 4046 | 18 | 0 | 1340 | 2455 | 1113 | 0 | — | — | parse: expected expression; then in mir: panic: allocation failed (size=8388608, align=1) |
+| llvm | 18 | 1 | — | — | — | — | — | — | — | in parse: process died (status 139; memory bound 6 GiB) |
 
 ### What each stage rejects
 
