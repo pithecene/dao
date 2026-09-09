@@ -715,6 +715,37 @@ File
             Identifier panic
           Args
             StringLiteral "unreachable"
+    FunctionDecl snapshot
+      Param self
+      ReturnType: Vector<T>
+      LetStatement latest: bool
+        BoolLiteral false
+      ModeBlock unsafe
+        Assignment
+          Target
+            Identifier latest
+          Value
+            BinaryExpr ==
+              UnaryExpr *
+                FieldExpr .gen
+                  Identifier self
+              FieldExpr .version
+                Identifier self
+      IfStatement
+        Condition
+          Identifier latest
+        Then
+          ReturnStatement
+            Identifier self
+      ReturnStatement
+        CallExpr
+          Callee
+            FieldExpr .refreshed
+              Identifier self
+          Args
+            FieldExpr .cap
+              Identifier self
+            BoolLiteral false
     FunctionDecl refreshed
       Param self
       Param cap: i64

@@ -47,6 +47,13 @@ fn main(): i32
     base = base.set(1, 8)
   show("base", base)
   show("keep", keep)
+  // A builder over a vector reads the vector as its own value saw it,
+  // whatever a later value of the buffer overwrote in place.
+  let bytes: Vector<u8> = Vector<u8>::new().push(65).push(66)
+  let before: Builder = Builder(bytes)
+  bytes = bytes.set(0, 67)
+  print(before.to_string())
+  print(Builder(bytes).to_string())
   let out: Vector<i64> = Vector<i64>::new()
   resource memory pool =>
     let inner: Vector<i64> = Vector<i64>::new()

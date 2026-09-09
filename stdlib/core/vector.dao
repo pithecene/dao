@@ -122,6 +122,17 @@ class Vector<T>:
       return *ptr_offset(self.data, index)
     panic("unreachable")
 
+  // This value's elements in one buffer no later write touched: the
+  // buffer itself when this value is the latest, else a fresh copy of
+  // what this value sees.  For readers of the raw buffer.
+  fn snapshot(self): Vector<T>
+    let latest: bool = false
+    mode unsafe =>
+      latest = *self.gen == self.version
+    if latest:
+      return self
+    return self.refreshed(self.cap, false)
+
   // A fresh buffer of `cap` slots holding what this value sees, in the
   // current domain or, when `outer` is set, in the enclosing one with
   // each element copied out.

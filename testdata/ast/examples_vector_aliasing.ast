@@ -320,6 +320,61 @@ File
         Args
           StringLiteral "keep"
           Identifier keep
+    LetStatement bytes: Vector<u8>
+      CallExpr
+        Callee
+          FieldExpr .push
+            CallExpr
+              Callee
+                FieldExpr .push
+                  CallExpr
+                    Callee
+                      Identifier Vector.new
+                    TypeArgs
+                      u8
+              Args
+                IntLiteral 65
+        Args
+          IntLiteral 66
+    LetStatement before: Builder
+      CallExpr
+        Callee
+          Identifier Builder
+        Args
+          Identifier bytes
+    Assignment
+      Target
+        Identifier bytes
+      Value
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier bytes
+          Args
+            IntLiteral 0
+            IntLiteral 67
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .to_string
+                Identifier before
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .to_string
+                CallExpr
+                  Callee
+                    Identifier Builder
+                  Args
+                    Identifier bytes
     LetStatement out: Vector<i64>
       CallExpr
         Callee
