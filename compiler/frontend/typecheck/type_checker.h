@@ -486,6 +486,7 @@ private:
   // --- Diagnostics ---
 
   void error(Span span, std::string message);
+  void warning(Span span, std::string message);
 
   // --- Helpers ---
 

@@ -68,6 +68,11 @@ Laws:
    author's responsibility, as everywhere.
 8. A `resource memory` block may not contain `yield`: a domain cannot
    stay current across a suspension.
+9. A `resource` block scopes part of a body.  A block that is a
+   function's whole body is a domain policy hidden from every caller --
+   each pays a copy of the result, none can share a domain across
+   calls -- and is diagnosed (a warning: the program is sound); the
+   block belongs at the call site.
 
 ## Intent
 

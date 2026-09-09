@@ -1434,6 +1434,15 @@ void TypeChecker::check_function(const Decl* decl) {
     }
   } else {
     // Block-bodied: check statements.
+    if (fn.body.size() == 1 && fn.body[0]->kind() == NodeKind::ResourceBlock) {
+      // A domain spanning the whole body is a policy hidden from every
+      // caller: each pays a copy of the result, and none can share a
+      // domain across calls.  The block belongs at the call site.
+      warning(fn.body[0]->span,
+              "resource block '" + std::string(fn.body[0]->as<ResourceBlock>().resource_name) +
+                  "' is the whole body of '" + std::string(fn.name) +
+                  "': open the domain where the function is called instead");
+    }
     check_body(fn.body);
   }
 
@@ -3506,6 +3515,10 @@ auto TypeChecker::check_list_literal(const Expr* expr) -> const Type* {
 
 void TypeChecker::error(Span span, std::string message) {
   diagnostics_.push_back(Diagnostic::error(span, std::move(message)));
+}
+
+void TypeChecker::warning(Span span, std::string message) {
+  diagnostics_.push_back(Diagnostic::warning(span, std::move(message)));
 }
 
 // ---------------------------------------------------------------------------
