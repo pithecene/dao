@@ -590,9 +590,11 @@ the first Tier B-Bootstrap construct, sequenced by the closure audit.
 **Objective**: the bootstrap parser reads `Type<Args>::member(args)` and
 `f<Args>(args)` as the host does — a call carrying type arguments — so
 the audit's parse column reaches zero.  Every parse-stage rejection in
-the corpus is this one construct (385 static calls on `Vector<T>` /
-`HashMap<V>`, 5 explicit-argument calls); the resolver's and type
-checker's histograms are dominated by its shadow.
+the corpus is this one construct (268 static calls on `Vector<T>` /
+`HashMap<V>` in the compiler sources; the explicit-argument shape has
+48 sites in the prelude the corpus instantiates and none in the
+compiler sources); the resolver's and type checker's histograms are
+dominated by its shadow.
 
 Delivery: `Node.CallE` gains the type-argument list (the host's
 `CallExpr.type_args`); `parse_postfix` speculates on `<` after a name
@@ -611,9 +613,10 @@ parse column after Task 36.
 MIR carry the `resource memory <name> =>` blocks Task 35 E3 placed in
 the pipeline drivers and the probe (4, 10, and 25 blocks in the hir,
 mir, and llvm programs; 231, 1029, and 1623 parse diagnostics), so
-every bootstrap program parses clean.  The block's body is compiled;
-the domain itself — arena, copy-out at exit — is a documented MIR
-deferral in the bootstrap.
+every bootstrap program parses clean.  The block reaches HIR; MIR
+rejects it fail-closed (`CONTRACT_MIR_BOUNDARY.md` §4: a resource
+region must not disappear before backend lowering) until the domain's
+MIR representation lands.
 
 ### Task 31 — Host Multi-file Compilation
 
