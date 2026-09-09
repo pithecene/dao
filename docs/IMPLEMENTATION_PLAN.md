@@ -533,7 +533,7 @@ See `docs/task_specs/TASK_30_BOOTSTRAP_LLVM_BACKEND.md` and
 
 ### Task 35 — Allocation Domains
 
-Status: **E3 delivered, acceptance pending** — `docs/task_specs/TASK_35_ALLOCATION_DOMAINS.md`;
+Status: **E3 in progress** — `docs/task_specs/TASK_35_ALLOCATION_DOMAINS.md`;
 `resource memory` is an arena: the runtime keeps a domain stack of
 chunked arenas, every string-, frame-, and file-producing hook
 allocates through the memory hooks, `__dao_mem_free` is a no-op on
@@ -555,8 +555,9 @@ block per stage call and the LLVM text serializer assembles through
 6 GiB probe bound) fell from 5.5–16 GiB to 1.5–1.9 GiB for the lexer,
 parser, and graph programs and 2.9 GiB for the resolver, while the
 typecheck stage of the four largest programs still exceeds the bound.
-The acceptance bar — every program under 2 GiB — is not met; the
-typecheck stage's own scratch is the next target.
+E3's acceptance bar (§10) — every program under 2 GiB — is not met
+yet: the typecheck stage's own scratch (its expression-key strings and
+forked tables) must run in domains of its own before E3 is delivered.
 
 **Objective**: make `resource memory <name> =>` a real arena: every
 allocation inside comes from the domain and is reclaimed wholesale at
