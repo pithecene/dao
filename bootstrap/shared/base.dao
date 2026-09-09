@@ -380,380 +380,377 @@ fn emit2(tokens: Vector<Token>, kind: TK, pos: i64): Vector<Token>
   return tokens.push(Token(kind, pos, two))
 
 fn lex(src: string): LexResult
-  // One domain per stage: its scratch is reclaimed at the exit and
-  // only the result leaves, copied into the caller's domain.
-  resource memory stage =>
-    let src_len: i64 = length(src)
-    let pos: i64 = 0
-    let tokens: Vector<Token> = Vector<Token>::new()
-    let diags: Vector<Diagnostic> = Vector<Diagnostic>::new()
-    let indent_stack: Vector<i64> = Vector<i64>::new()
-    let zero: i64 = 0
-    let one: i64 = 1
-    indent_stack = indent_stack.push(zero)
-    let paren_depth: i64 = 0
-    let at_line_start: bool = true
+  let src_len: i64 = length(src)
+  let pos: i64 = 0
+  let tokens: Vector<Token> = Vector<Token>::new()
+  let diags: Vector<Diagnostic> = Vector<Diagnostic>::new()
+  let indent_stack: Vector<i64> = Vector<i64>::new()
+  let zero: i64 = 0
+  let one: i64 = 1
+  indent_stack = indent_stack.push(zero)
+  let paren_depth: i64 = 0
+  let at_line_start: bool = true
 
-    while pos < src_len:
-      let handled: bool = false
+  while pos < src_len:
+    let handled: bool = false
 
-      // --- Handle line-start indentation ---
-      if at_line_start:
-        handled = true
-        let line_begin: i64 = pos
-        let spaces: i64 = 0
-        while pos < src_len:
-          let lc: i32 = char_at(src, pos)
-          if lc == 32:
+    // --- Handle line-start indentation ---
+    if at_line_start:
+      handled = true
+      let line_begin: i64 = pos
+      let spaces: i64 = 0
+      while pos < src_len:
+        let lc: i32 = char_at(src, pos)
+        if lc == 32:
+          spaces = spaces + 1
+          pos = pos + 1
+        else:
+          if lc == 9:
+            diags = diags.push(make_error(Span(pos, one), "tabs are not allowed in Dao source"))
+            tokens = tokens.push(Token(TK.Error, pos, one))
             spaces = spaces + 1
             pos = pos + 1
           else:
-            if lc == 9:
-              diags = diags.push(make_error(Span(pos, one), "tabs are not allowed in Dao source"))
-              tokens = tokens.push(Token(TK.Error, pos, one))
-              spaces = spaces + 1
-              pos = pos + 1
-            else:
-              break
+            break
 
-        // Detect blank/comment lines and skip them.
-        let skip_line: bool = false
-        if pos < src_len:
-          let lc: i32 = char_at(src, pos)
-          if lc == 10:
+      // Detect blank/comment lines and skip them.
+      let skip_line: bool = false
+      if pos < src_len:
+        let lc: i32 = char_at(src, pos)
+        if lc == 10:
+          pos = pos + 1
+          skip_line = true
+        else:
+          if lc == 13:
             pos = pos + 1
+            if pos < src_len:
+              if char_at(src, pos) == 10:
+                pos = pos + 1
             skip_line = true
           else:
-            if lc == 13:
-              pos = pos + 1
-              if pos < src_len:
-                if char_at(src, pos) == 10:
-                  pos = pos + 1
-              skip_line = true
-            else:
-              if lc == 47:
-                if pos + 1 < src_len:
-                  if char_at(src, pos + 1) == 47:
-                    while pos < src_len:
-                      if char_at(src, pos) == 10:
-                        break
-                      pos = pos + 1
-                    if pos < src_len:
-                      pos = pos + 1
-                    skip_line = true
+            if lc == 47:
+              if pos + 1 < src_len:
+                if char_at(src, pos + 1) == 47:
+                  while pos < src_len:
+                    if char_at(src, pos) == 10:
+                      break
+                    pos = pos + 1
+                  if pos < src_len:
+                    pos = pos + 1
+                  skip_line = true
 
-        if skip_line == false:
-          // Emit INDENT / DEDENT (only outside parens).
+      if skip_line == false:
+        // Emit INDENT / DEDENT (only outside parens).
+        if paren_depth == 0:
+          let current_indent: i64 = indent_stack.get(indent_stack.length() - 1)
+          if spaces > current_indent:
+            indent_stack = indent_stack.push(spaces)
+            tokens = tokens.push(Token(TK.Indent, line_begin, spaces))
+          else:
+            if spaces < current_indent:
+              while indent_stack.length() > 1:
+                if indent_stack.get(indent_stack.length() - 1) <= spaces:
+                  break
+                indent_stack = vec_pop(indent_stack)
+                tokens = tokens.push(Token(TK.Dedent, line_begin, zero))
+              if indent_stack.get(indent_stack.length() - 1) != spaces:
+                diags = diags.push(make_error(Span(line_begin, spaces), "inconsistent indentation"))
+                tokens = tokens.push(Token(TK.Error, line_begin, spaces))
+        at_line_start = false
+
+    // --- Non-indent token processing ---
+    if handled == false:
+      let ch: i32 = char_at(src, pos)
+
+      // Skip horizontal whitespace.
+      if ch == 32:
+        pos = pos + 1
+        handled = true
+
+      // Newlines.
+      else:
+        if ch == 10:
           if paren_depth == 0:
-            let current_indent: i64 = indent_stack.get(indent_stack.length() - 1)
-            if spaces > current_indent:
-              indent_stack = indent_stack.push(spaces)
-              tokens = tokens.push(Token(TK.Indent, line_begin, spaces))
-            else:
-              if spaces < current_indent:
-                while indent_stack.length() > 1:
-                  if indent_stack.get(indent_stack.length() - 1) <= spaces:
-                    break
-                  indent_stack = vec_pop(indent_stack)
-                  tokens = tokens.push(Token(TK.Dedent, line_begin, zero))
-                if indent_stack.get(indent_stack.length() - 1) != spaces:
-                  diags = diags.push(make_error(Span(line_begin, spaces), "inconsistent indentation"))
-                  tokens = tokens.push(Token(TK.Error, line_begin, spaces))
-          at_line_start = false
-
-      // --- Non-indent token processing ---
-      if handled == false:
-        let ch: i32 = char_at(src, pos)
-
-        // Skip horizontal whitespace.
-        if ch == 32:
+            tokens = emit1(tokens, TK.Newline, pos)
           pos = pos + 1
+          at_line_start = true
           handled = true
-
-        // Newlines.
         else:
-          if ch == 10:
-            if paren_depth == 0:
-              tokens = emit1(tokens, TK.Newline, pos)
+          if ch == 13:
             pos = pos + 1
+            if pos < src_len:
+              if char_at(src, pos) == 10:
+                pos = pos + 1
+            if paren_depth == 0:
+              tokens = emit1(tokens, TK.Newline, pos - 1)
             at_line_start = true
             handled = true
+
+          // Comments (// to end of line).
           else:
-            if ch == 13:
-              pos = pos + 1
-              if pos < src_len:
-                if char_at(src, pos) == 10:
-                  pos = pos + 1
-              if paren_depth == 0:
-                tokens = emit1(tokens, TK.Newline, pos - 1)
-              at_line_start = true
-              handled = true
-
-            // Comments (// to end of line).
-            else:
-              if ch == 47:
-                if pos + 1 < src_len:
-                  if char_at(src, pos + 1) == 47:
-                    while pos < src_len:
-                      if char_at(src, pos) == 10:
-                        break
-                      pos = pos + 1
-                    handled = true
-
-        // String literals.
-        if handled == false:
-          if ch == 34:
-            let str_start: i64 = pos
-            pos = pos + 1
-            let str_terminated: bool = false
-            let str_done: bool = false
-            while pos < src_len:
-              if str_done == false:
-                let sc: i32 = char_at(src, pos)
-                if sc == 34:
-                  pos = pos + 1
-                  str_done = true
-                  str_terminated = true
-                else:
-                  if sc == 92:
+            if ch == 47:
+              if pos + 1 < src_len:
+                if char_at(src, pos + 1) == 47:
+                  while pos < src_len:
+                    if char_at(src, pos) == 10:
+                      break
                     pos = pos + 1
-                    if pos < src_len:
-                      pos = pos + 1
-                  else:
-                    if sc == 10:
-                      diags = diags.push(make_error(Span(str_start, pos - str_start), "unterminated string literal"))
-                      str_done = true
-                    else:
-                      pos = pos + 1
-              else:
-                break
-            if str_done == false:
-              diags = diags.push(make_error(Span(str_start, pos - str_start), "unterminated string literal"))
-            if str_terminated:
-              tokens = tokens.push(Token(TK.StringLiteral, str_start, pos - str_start))
-            else:
-              tokens = tokens.push(Token(TK.Error, str_start, pos - str_start))
-            handled = true
-
-        // Numbers.
-        if handled == false:
-          if is_digit(ch):
-            let num_start: i64 = pos
-            while pos < src_len:
-              if is_digit(char_at(src, pos)) == false:
-                break
-              pos = pos + 1
-            let is_float: bool = false
-            if pos < src_len:
-              if char_at(src, pos) == 46:
-                if pos + 1 < src_len:
-                  if is_digit(char_at(src, pos + 1)):
-                    is_float = true
-                    pos = pos + 1
-                    while pos < src_len:
-                      if is_digit(char_at(src, pos)) == false:
-                        break
-                      pos = pos + 1
-            if is_float:
-              tokens = tokens.push(Token(TK.FloatLiteral, num_start, pos - num_start))
-            else:
-              tokens = tokens.push(Token(TK.IntLiteral, num_start, pos - num_start))
-            handled = true
-
-        // Identifiers and keywords.
-        if handled == false:
-          if is_alpha(ch):
-            let id_start: i64 = pos
-            while pos < src_len:
-              if is_alnum(char_at(src, pos)) == false:
-                break
-              pos = pos + 1
-            let kind: TK = classify_keyword(src, id_start, pos - id_start)
-            tokens = tokens.push(Token(kind, id_start, pos - id_start))
-            handled = true
-
-        // Multi-character operators: :  ::
-        if handled == false:
-          if ch == 58:
-            if pos + 1 < src_len:
-              if char_at(src, pos + 1) == 58:
-                tokens = emit2(tokens, TK.ColonColon, pos)
-                pos = pos + 2
-                handled = true
-            if handled == false:
-              tokens = emit1(tokens, TK.Colon, pos)
-              pos = pos + 1
-              handled = true
-
-        // =  ==  =>
-        if handled == false:
-          if ch == 61:
-            if pos + 1 < src_len:
-              let nx: i32 = char_at(src, pos + 1)
-              if nx == 61:
-                tokens = emit2(tokens, TK.EqEq, pos)
-                pos = pos + 2
-                handled = true
-              else:
-                if nx == 62:
-                  tokens = emit2(tokens, TK.FatArrow, pos)
-                  pos = pos + 2
                   handled = true
-            if handled == false:
-              tokens = emit1(tokens, TK.Eq, pos)
-              pos = pos + 1
-              handled = true
 
-        // !  !=
-        if handled == false:
-          if ch == 33:
-            if pos + 1 < src_len:
-              if char_at(src, pos + 1) == 61:
-                tokens = emit2(tokens, TK.BangEq, pos)
+      // String literals.
+      if handled == false:
+        if ch == 34:
+          let str_start: i64 = pos
+          pos = pos + 1
+          let str_terminated: bool = false
+          let str_done: bool = false
+          while pos < src_len:
+            if str_done == false:
+              let sc: i32 = char_at(src, pos)
+              if sc == 34:
+                pos = pos + 1
+                str_done = true
+                str_terminated = true
+              else:
+                if sc == 92:
+                  pos = pos + 1
+                  if pos < src_len:
+                    pos = pos + 1
+                else:
+                  if sc == 10:
+                    diags = diags.push(make_error(Span(str_start, pos - str_start), "unterminated string literal"))
+                    str_done = true
+                  else:
+                    pos = pos + 1
+            else:
+              break
+          if str_done == false:
+            diags = diags.push(make_error(Span(str_start, pos - str_start), "unterminated string literal"))
+          if str_terminated:
+            tokens = tokens.push(Token(TK.StringLiteral, str_start, pos - str_start))
+          else:
+            tokens = tokens.push(Token(TK.Error, str_start, pos - str_start))
+          handled = true
+
+      // Numbers.
+      if handled == false:
+        if is_digit(ch):
+          let num_start: i64 = pos
+          while pos < src_len:
+            if is_digit(char_at(src, pos)) == false:
+              break
+            pos = pos + 1
+          let is_float: bool = false
+          if pos < src_len:
+            if char_at(src, pos) == 46:
+              if pos + 1 < src_len:
+                if is_digit(char_at(src, pos + 1)):
+                  is_float = true
+                  pos = pos + 1
+                  while pos < src_len:
+                    if is_digit(char_at(src, pos)) == false:
+                      break
+                    pos = pos + 1
+          if is_float:
+            tokens = tokens.push(Token(TK.FloatLiteral, num_start, pos - num_start))
+          else:
+            tokens = tokens.push(Token(TK.IntLiteral, num_start, pos - num_start))
+          handled = true
+
+      // Identifiers and keywords.
+      if handled == false:
+        if is_alpha(ch):
+          let id_start: i64 = pos
+          while pos < src_len:
+            if is_alnum(char_at(src, pos)) == false:
+              break
+            pos = pos + 1
+          let kind: TK = classify_keyword(src, id_start, pos - id_start)
+          tokens = tokens.push(Token(kind, id_start, pos - id_start))
+          handled = true
+
+      // Multi-character operators: :  ::
+      if handled == false:
+        if ch == 58:
+          if pos + 1 < src_len:
+            if char_at(src, pos + 1) == 58:
+              tokens = emit2(tokens, TK.ColonColon, pos)
+              pos = pos + 2
+              handled = true
+          if handled == false:
+            tokens = emit1(tokens, TK.Colon, pos)
+            pos = pos + 1
+            handled = true
+
+      // =  ==  =>
+      if handled == false:
+        if ch == 61:
+          if pos + 1 < src_len:
+            let nx: i32 = char_at(src, pos + 1)
+            if nx == 61:
+              tokens = emit2(tokens, TK.EqEq, pos)
+              pos = pos + 2
+              handled = true
+            else:
+              if nx == 62:
+                tokens = emit2(tokens, TK.FatArrow, pos)
                 pos = pos + 2
                 handled = true
-            if handled == false:
-              tokens = emit1(tokens, TK.Bang, pos)
-              pos = pos + 1
-              handled = true
+          if handled == false:
+            tokens = emit1(tokens, TK.Eq, pos)
+            pos = pos + 1
+            handled = true
 
-        // <  <=
-        if handled == false:
-          if ch == 60:
-            if pos + 1 < src_len:
-              if char_at(src, pos + 1) == 61:
-                tokens = emit2(tokens, TK.LtEq, pos)
-                pos = pos + 2
-                handled = true
-            if handled == false:
-              tokens = emit1(tokens, TK.Lt, pos)
-              pos = pos + 1
+      // !  !=
+      if handled == false:
+        if ch == 33:
+          if pos + 1 < src_len:
+            if char_at(src, pos + 1) == 61:
+              tokens = emit2(tokens, TK.BangEq, pos)
+              pos = pos + 2
               handled = true
+          if handled == false:
+            tokens = emit1(tokens, TK.Bang, pos)
+            pos = pos + 1
+            handled = true
 
-        // >  >=
-        if handled == false:
-          if ch == 62:
-            if pos + 1 < src_len:
-              if char_at(src, pos + 1) == 61:
-                tokens = emit2(tokens, TK.GtEq, pos)
-                pos = pos + 2
-                handled = true
-            if handled == false:
-              tokens = emit1(tokens, TK.Gt, pos)
-              pos = pos + 1
+      // <  <=
+      if handled == false:
+        if ch == 60:
+          if pos + 1 < src_len:
+            if char_at(src, pos + 1) == 61:
+              tokens = emit2(tokens, TK.LtEq, pos)
+              pos = pos + 2
               handled = true
+          if handled == false:
+            tokens = emit1(tokens, TK.Lt, pos)
+            pos = pos + 1
+            handled = true
 
-        // -  ->
-        if handled == false:
-          if ch == 45:
-            if pos + 1 < src_len:
-              if char_at(src, pos + 1) == 62:
-                tokens = emit2(tokens, TK.Arrow, pos)
-                pos = pos + 2
-                handled = true
-            if handled == false:
-              tokens = emit1(tokens, TK.Minus, pos)
-              pos = pos + 1
+      // >  >=
+      if handled == false:
+        if ch == 62:
+          if pos + 1 < src_len:
+            if char_at(src, pos + 1) == 61:
+              tokens = emit2(tokens, TK.GtEq, pos)
+              pos = pos + 2
               handled = true
+          if handled == false:
+            tokens = emit1(tokens, TK.Gt, pos)
+            pos = pos + 1
+            handled = true
 
-        // |  |>
-        if handled == false:
-          if ch == 124:
-            if pos + 1 < src_len:
-              if char_at(src, pos + 1) == 62:
-                tokens = emit2(tokens, TK.PipeGt, pos)
-                pos = pos + 2
-                handled = true
-            if handled == false:
-              tokens = emit1(tokens, TK.Pipe, pos)
-              pos = pos + 1
+      // -  ->
+      if handled == false:
+        if ch == 45:
+          if pos + 1 < src_len:
+            if char_at(src, pos + 1) == 62:
+              tokens = emit2(tokens, TK.Arrow, pos)
+              pos = pos + 2
               handled = true
+          if handled == false:
+            tokens = emit1(tokens, TK.Minus, pos)
+            pos = pos + 1
+            handled = true
 
-        // Single-character tokens and delimiters.
-        if handled == false:
-          if ch == 43:
-            tokens = emit1(tokens, TK.Plus, pos)
+      // |  |>
+      if handled == false:
+        if ch == 124:
+          if pos + 1 < src_len:
+            if char_at(src, pos + 1) == 62:
+              tokens = emit2(tokens, TK.PipeGt, pos)
+              pos = pos + 2
+              handled = true
+          if handled == false:
+            tokens = emit1(tokens, TK.Pipe, pos)
+            pos = pos + 1
+            handled = true
+
+      // Single-character tokens and delimiters.
+      if handled == false:
+        if ch == 43:
+          tokens = emit1(tokens, TK.Plus, pos)
+          pos = pos + 1
+          handled = true
+        else:
+          if ch == 42:
+            tokens = emit1(tokens, TK.Star, pos)
             pos = pos + 1
             handled = true
           else:
-            if ch == 42:
-              tokens = emit1(tokens, TK.Star, pos)
+            if ch == 47:
+              tokens = emit1(tokens, TK.Slash, pos)
               pos = pos + 1
               handled = true
             else:
-              if ch == 47:
-                tokens = emit1(tokens, TK.Slash, pos)
+              if ch == 37:
+                tokens = emit1(tokens, TK.Percent, pos)
                 pos = pos + 1
                 handled = true
               else:
-                if ch == 37:
-                  tokens = emit1(tokens, TK.Percent, pos)
+                if ch == 38:
+                  tokens = emit1(tokens, TK.Amp, pos)
                   pos = pos + 1
                   handled = true
                 else:
-                  if ch == 38:
-                    tokens = emit1(tokens, TK.Amp, pos)
+                  if ch == 46:
+                    tokens = emit1(tokens, TK.Dot, pos)
                     pos = pos + 1
                     handled = true
                   else:
-                    if ch == 46:
-                      tokens = emit1(tokens, TK.Dot, pos)
+                    if ch == 44:
+                      tokens = emit1(tokens, TK.Comma, pos)
                       pos = pos + 1
                       handled = true
                     else:
-                      if ch == 44:
-                        tokens = emit1(tokens, TK.Comma, pos)
+                      if ch == 63:
+                        tokens = emit1(tokens, TK.Question, pos)
                         pos = pos + 1
                         handled = true
-                      else:
-                        if ch == 63:
-                          tokens = emit1(tokens, TK.Question, pos)
-                          pos = pos + 1
-                          handled = true
 
-        // Delimiters (track paren depth).
-        if handled == false:
-          if ch == 40:
-            tokens = emit1(tokens, TK.LParen, pos)
-            paren_depth = paren_depth + 1
+      // Delimiters (track paren depth).
+      if handled == false:
+        if ch == 40:
+          tokens = emit1(tokens, TK.LParen, pos)
+          paren_depth = paren_depth + 1
+          pos = pos + 1
+          handled = true
+        else:
+          if ch == 41:
+            tokens = emit1(tokens, TK.RParen, pos)
+            if paren_depth > 0:
+              paren_depth = paren_depth - 1
             pos = pos + 1
             handled = true
           else:
-            if ch == 41:
-              tokens = emit1(tokens, TK.RParen, pos)
-              if paren_depth > 0:
-                paren_depth = paren_depth - 1
+            if ch == 91:
+              tokens = emit1(tokens, TK.LBracket, pos)
+              paren_depth = paren_depth + 1
               pos = pos + 1
               handled = true
             else:
-              if ch == 91:
-                tokens = emit1(tokens, TK.LBracket, pos)
-                paren_depth = paren_depth + 1
+              if ch == 93:
+                tokens = emit1(tokens, TK.RBracket, pos)
+                if paren_depth > 0:
+                  paren_depth = paren_depth - 1
                 pos = pos + 1
                 handled = true
-              else:
-                if ch == 93:
-                  tokens = emit1(tokens, TK.RBracket, pos)
-                  if paren_depth > 0:
-                    paren_depth = paren_depth - 1
-                  pos = pos + 1
-                  handled = true
 
-        // Unknown character.
-        if handled == false:
-          diags = diags.push(make_error(Span(pos, one), "unexpected character"))
-          tokens = emit1(tokens, TK.Error, pos)
-          pos = pos + 1
+      // Unknown character.
+      if handled == false:
+        diags = diags.push(make_error(Span(pos, one), "unexpected character"))
+        tokens = emit1(tokens, TK.Error, pos)
+        pos = pos + 1
 
-    // --- Emit remaining DEDENTs ---
-    while indent_stack.length() > 1:
-      indent_stack = vec_pop(indent_stack)
-      tokens = tokens.push(Token(TK.Dedent, pos, zero))
+  // --- Emit remaining DEDENTs ---
+  while indent_stack.length() > 1:
+    indent_stack = vec_pop(indent_stack)
+    tokens = tokens.push(Token(TK.Dedent, pos, zero))
 
-    // --- Emit EOF ---
-    tokens = tokens.push(Token(TK.Eof, pos, zero))
+  // --- Emit EOF ---
+  tokens = tokens.push(Token(TK.Eof, pos, zero))
 
-    return LexResult(tokens, diags)
+  return LexResult(tokens, diags)
 
 // =========================================================================
 // Section 6: AST node definitions
@@ -2344,14 +2341,11 @@ fn parse_file(pc: PC, ps: PS): PR
 // =========================================================================
 
 fn parse(src: string): ParseOutput
-  // One domain per stage: its scratch is reclaimed at the exit and
-  // only the result leaves, copied into the caller's domain.
-  resource memory stage =>
-    let lr: LexResult = lex(src)
-    let pc: PC = PC(lr.tokens, src)
-    let ps: PS = PS(to_i64(0), Vector<Node>::new(), Vector<i64>::new(), lr.diagnostics)
-    let result: PR = parse_file(pc, ps)
-    return ParseOutput(pc.toks, pc.src, result.ps.nodes, result.ps.idx, result.ps.diags, result.node)
+  let lr: LexResult = lex(src)
+  let pc: PC = PC(lr.tokens, src)
+  let ps: PS = PS(to_i64(0), Vector<Node>::new(), Vector<i64>::new(), lr.diagnostics)
+  let result: PR = parse_file(pc, ps)
+  return ParseOutput(pc.toks, pc.src, result.ps.nodes, result.ps.idx, result.ps.diags, result.node)
 
 // =========================================================================
 // Section 16: Node kind name (for test output)
@@ -2669,236 +2663,233 @@ fn topo_sort(modules: Vector<ModuleEntry>, edges: Vector<i64>, edge_count: i64):
 
 // Build a module graph from source inputs.
 fn build_program(inputs: Vector<SourceInput>): ProgramGraph
-  // One domain per stage: its scratch is reclaimed at the exit and
-  // only the result leaves, copied into the caller's domain.
-  resource memory stage =>
-    // Sort inputs by path for deterministic file_id assignment.
-    // (Simple insertion sort — input counts are small for bootstrap.)
-    let sorted: Vector<SourceInput> = Vector<SourceInput>::new()
-    let si: i64 = 0
-    while si < inputs.length():
-      let inp: SourceInput = inputs.get(si)
-      let insert_at: i64 = sorted.length()
-      let j: i64 = 0
-      while j < sorted.length():
-        let existing: SourceInput = sorted.get(j)
-        if str_compare(inp.path, existing.path) < 0:
-          insert_at = j
-          j = sorted.length()
-        j = j + 1
-      // Insert at position by rebuilding (COW vectors, small N).
-      let new_sorted: Vector<SourceInput> = Vector<SourceInput>::new()
-      j = 0
-      while j < sorted.length() + 1:
-        if j == insert_at:
-          new_sorted = new_sorted.push(inp)
-        if j < sorted.length():
-          new_sorted = new_sorted.push(sorted.get(j))
-        j = j + 1
-      sorted = new_sorted
-      si = si + 1
+  // Sort inputs by path for deterministic file_id assignment.
+  // (Simple insertion sort — input counts are small for bootstrap.)
+  let sorted: Vector<SourceInput> = Vector<SourceInput>::new()
+  let si: i64 = 0
+  while si < inputs.length():
+    let inp: SourceInput = inputs.get(si)
+    let insert_at: i64 = sorted.length()
+    let j: i64 = 0
+    while j < sorted.length():
+      let existing: SourceInput = sorted.get(j)
+      if str_compare(inp.path, existing.path) < 0:
+        insert_at = j
+        j = sorted.length()
+      j = j + 1
+    // Insert at position by rebuilding (COW vectors, small N).
+    let new_sorted: Vector<SourceInput> = Vector<SourceInput>::new()
+    j = 0
+    while j < sorted.length() + 1:
+      if j == insert_at:
+        new_sorted = new_sorted.push(inp)
+      if j < sorted.length():
+        new_sorted = new_sorted.push(sorted.get(j))
+      j = j + 1
+    sorted = new_sorted
+    si = si + 1
 
-    // Parse each file and extract module declarations.
-    let files: Vector<SourceFile> = Vector<SourceFile>::new()
-    let modules: Vector<ModuleEntry> = Vector<ModuleEntry>::new()
-    let diags: Vector<FileDiagnostic> = Vector<FileDiagnostic>::new()
-    let fi: i64 = 0
-    while fi < sorted.length():
-      let inp: SourceInput = sorted.get(fi)
-      let po: ParseOutput = parse(inp.source_text)
-      // Merge parse diagnostics with file provenance.
-      let di: i64 = 0
-      while di < po.diags.length():
-        diags = diags.push(FileDiagnostic(fi, inp.path, po.diags.get(di)))
-        di = di + 1
-      // Extract module declaration from FileN root.
-      let mod_name: string = ""
-      let root_node: Node = po.nodes.get(po.root)
-      match root_node:
-        Node.FileN(mod_decl, imports_lp, decls_lp):
-          if mod_decl >= 0:
-            mod_name = extract_module_name(po, mod_decl)
-      if mod_name == "":
-        diags = diags.push(FileDiagnostic(fi, inp.path, make_error(Span(to_i64(0), to_i64(0)), "file '" + inp.path + "' has no module declaration")))
+  // Parse each file and extract module declarations.
+  let files: Vector<SourceFile> = Vector<SourceFile>::new()
+  let modules: Vector<ModuleEntry> = Vector<ModuleEntry>::new()
+  let diags: Vector<FileDiagnostic> = Vector<FileDiagnostic>::new()
+  let fi: i64 = 0
+  while fi < sorted.length():
+    let inp: SourceInput = sorted.get(fi)
+    let po: ParseOutput = parse(inp.source_text)
+    // Merge parse diagnostics with file provenance.
+    let di: i64 = 0
+    while di < po.diags.length():
+      diags = diags.push(FileDiagnostic(fi, inp.path, po.diags.get(di)))
+      di = di + 1
+    // Extract module declaration from FileN root.
+    let mod_name: string = ""
+    let root_node: Node = po.nodes.get(po.root)
+    match root_node:
+      Node.FileN(mod_decl, imports_lp, decls_lp):
+        if mod_decl >= 0:
+          mod_name = extract_module_name(po, mod_decl)
+    if mod_name == "":
+      diags = diags.push(FileDiagnostic(fi, inp.path, make_error(Span(to_i64(0), to_i64(0)), "file '" + inp.path + "' has no module declaration")))
+      files = files.push(SourceFile(fi, inp.path, inp.source_text, po, to_i64(-1)))
+    else:
+      // Check for duplicate module declarations.
+      let existing: i64 = find_module_by_name(modules, mod_name)
+      if existing >= 0:
+        let dup_entry: ModuleEntry = modules.get(existing)
+        let dup_file: SourceFile = files.get(dup_entry.file_id)
+        diags = diags.push(FileDiagnostic(fi, inp.path, make_error(Span(to_i64(0), to_i64(0)), "duplicate module '" + mod_name + "' declared in '" + dup_file.path + "' and '" + inp.path + "'")))
         files = files.push(SourceFile(fi, inp.path, inp.source_text, po, to_i64(-1)))
       else:
-        // Check for duplicate module declarations.
-        let existing: i64 = find_module_by_name(modules, mod_name)
-        if existing >= 0:
-          let dup_entry: ModuleEntry = modules.get(existing)
-          let dup_file: SourceFile = files.get(dup_entry.file_id)
-          diags = diags.push(FileDiagnostic(fi, inp.path, make_error(Span(to_i64(0), to_i64(0)), "duplicate module '" + mod_name + "' declared in '" + dup_file.path + "' and '" + inp.path + "'")))
-          files = files.push(SourceFile(fi, inp.path, inp.source_text, po, to_i64(-1)))
-        else:
-          let mid: i64 = modules.length()
-          modules = modules.push(ModuleEntry(mid, fi, mod_name))
-          files = files.push(SourceFile(fi, inp.path, inp.source_text, po, mid))
-      fi = fi + 1
+        let mid: i64 = modules.length()
+        modules = modules.push(ModuleEntry(mid, fi, mod_name))
+        files = files.push(SourceFile(fi, inp.path, inp.source_text, po, mid))
+    fi = fi + 1
 
-    // Build import edges.
-    let edges: Vector<i64> = Vector<i64>::new()
-    let ec: i64 = 0
-    fi = 0
-    while fi < files.length():
-      let sf: SourceFile = files.get(fi)
-      if sf.module_id >= 0:
-        let root_n: Node = sf.parse_output.nodes.get(sf.parse_output.root)
-        match root_n:
-          Node.FileN(mod_decl, imports_lp, decls_lp):
-            let imps: Vector<i64> = pg_read_list(sf.parse_output.idx, imports_lp)
-            let ii: i64 = 0
-            while ii < imps.length():
-              let imp_name: string = extract_import_name(sf.parse_output, imps.get(ii))
-              let target: i64 = find_module_by_name(modules, imp_name)
-              let sf_mod_name: string = modules.get(sf.module_id).name
-              if target < 0:
-                diags = diags.push(FileDiagnostic(sf.file_id, sf.path, make_error(Span(to_i64(0), to_i64(0)), "imported module '" + imp_name + "' not found in compilation set")))
+  // Build import edges.
+  let edges: Vector<i64> = Vector<i64>::new()
+  let ec: i64 = 0
+  fi = 0
+  while fi < files.length():
+    let sf: SourceFile = files.get(fi)
+    if sf.module_id >= 0:
+      let root_n: Node = sf.parse_output.nodes.get(sf.parse_output.root)
+      match root_n:
+        Node.FileN(mod_decl, imports_lp, decls_lp):
+          let imps: Vector<i64> = pg_read_list(sf.parse_output.idx, imports_lp)
+          let ii: i64 = 0
+          while ii < imps.length():
+            let imp_name: string = extract_import_name(sf.parse_output, imps.get(ii))
+            let target: i64 = find_module_by_name(modules, imp_name)
+            let sf_mod_name: string = modules.get(sf.module_id).name
+            if target < 0:
+              diags = diags.push(FileDiagnostic(sf.file_id, sf.path, make_error(Span(to_i64(0), to_i64(0)), "imported module '" + imp_name + "' not found in compilation set")))
+            else:
+              if target == sf.module_id:
+                diags = diags.push(FileDiagnostic(sf.file_id, sf.path, make_error(Span(to_i64(0), to_i64(0)), "module '" + sf_mod_name + "' imports itself")))
               else:
-                if target == sf.module_id:
-                  diags = diags.push(FileDiagnostic(sf.file_id, sf.path, make_error(Span(to_i64(0), to_i64(0)), "module '" + sf_mod_name + "' imports itself")))
-                else:
-                  // Edge: dependency → dependent (target must come before importer in topo order)
-                  edges = edges.push(target)
-                  edges = edges.push(sf.module_id)
-                  ec = ec + 1
-              ii = ii + 1
-      fi = fi + 1
+                // Edge: dependency → dependent (target must come before importer in topo order)
+                edges = edges.push(target)
+                edges = edges.push(sf.module_id)
+                ec = ec + 1
+            ii = ii + 1
+    fi = fi + 1
 
-    // Topological sort.
-    let topo: Vector<i64> = topo_sort(modules, edges, ec)
+  // Topological sort.
+  let topo: Vector<i64> = topo_sort(modules, edges, ec)
 
-    // Cycle detection: if topo result is shorter than module count,
-    // there is a cycle.  Find actual cycle members (not just Kahn
-    // leftovers, which include acyclic dependents of cycles) and
-    // trace a concrete import path.
-    if topo.length() < modules.length():
-      // Mark which modules made it into topo order.
-      let in_topo: Vector<i64> = Vector<i64>::new()
-      let ti: i64 = 0
-      while ti < modules.length():
-        in_topo = in_topo.push(to_i64(0))
-        ti = ti + 1
-      ti = 0
-      while ti < topo.length():
-        in_topo = in_topo.set(topo.get(ti), to_i64(1))
-        ti = ti + 1
-      // For each unprocessed node, check if it can reach itself
-      // (i.e. it is actually in a cycle, not just downstream of one).
-      // Collect actual cycle members.
-      let on_cycle: Vector<i64> = Vector<i64>::new()
-      ti = 0
-      while ti < modules.length():
-        on_cycle = on_cycle.push(to_i64(0))
-        ti = ti + 1
-      ti = 0
-      while ti < modules.length():
-        if in_topo.get(ti) == 0:
-          if on_cycle.get(ti) == 0:
-            // DFS from ti following import edges within the unprocessed
-            // set.  Track the path; if we revisit ti, everything on the
-            // path from ti onward is a cycle member.
-            // Use a fixed-size path with a depth pointer (no pop needed).
-            let path: Vector<i64> = Vector<i64>::new()
-            path = path.push(ti)
-            let path_depth: i64 = 1
-            let visited: Vector<i64> = Vector<i64>::new()
-            let vi: i64 = 0
-            while vi < modules.length():
-              visited = visited.push(to_i64(0))
-              vi = vi + 1
-            visited = visited.set(ti, to_i64(1))
-            // Track which edges we've tried from each depth to allow backtracking.
-            // edge_cursor[depth] = next edge index to try from path[depth].
-            let edge_cursor: Vector<i64> = Vector<i64>::new()
-            edge_cursor = edge_cursor.push(to_i64(0))
-            let found: bool = false
-            let walk_done: bool = false
-            while walk_done == false:
-              let cur: i64 = path.get(path_depth - 1)
-              let cursor: i64 = edge_cursor.get(path_depth - 1)
-              // Find next unvisited import target from cur.
-              let next: i64 = to_i64(-1)
-              let ei: i64 = cursor
-              while ei < ec:
-                let from: i64 = edges.get(ei * 2 + 1)
-                let to_mod: i64 = edges.get(ei * 2)
-                if from == cur:
-                  if in_topo.get(to_mod) == 0:
-                    if to_mod == ti:
-                      found = true
-                      walk_done = true
-                      next = to_mod
-                      ei = ec
-                    else:
-                      if visited.get(to_mod) == 0:
-                        next = to_mod
-                        // Save cursor past this edge for backtracking.
-                        edge_cursor = edge_cursor.set(path_depth - 1, ei + 1)
-                        ei = ec
-                ei = ei + 1
-              if found:
-                let pi: i64 = 0
-                while pi < path_depth:
-                  on_cycle = on_cycle.set(path.get(pi), to_i64(1))
-                  pi = pi + 1
-              else:
-                if next < 0:
-                  // Dead end — backtrack.
-                  path_depth = path_depth - 1
-                  if path_depth == 0:
-                    walk_done = true
-                else:
-                  visited = visited.set(next, to_i64(1))
-                  if path_depth < path.length():
-                    path = path.set(path_depth, next)
-                  else:
-                    path = path.push(next)
-                  path_depth = path_depth + 1
-                  // Initialize cursor for new depth.
-                  if path_depth - 1 < edge_cursor.length():
-                    edge_cursor = edge_cursor.set(path_depth - 1, to_i64(0))
-                  else:
-                    edge_cursor = edge_cursor.push(to_i64(0))
-        ti = ti + 1
-      // Now trace a concrete cycle path from the first cycle member.
-      let start: i64 = to_i64(-1)
-      ti = 0
-      while ti < modules.length():
-        if on_cycle.get(ti) == 1:
-          if start < 0:
-            start = ti
-        ti = ti + 1
-      if start >= 0:
-        let cycle_path: string = modules.get(start).name
-        let cur_node: i64 = start
-        let trace_done: bool = false
-        let max_steps: i64 = modules.length() + 1
-        let step: i64 = 0
-        while trace_done == false:
-          if step >= max_steps:
-            trace_done = true
-          else:
-            // Follow import edges staying within actual cycle members.
+  // Cycle detection: if topo result is shorter than module count,
+  // there is a cycle.  Find actual cycle members (not just Kahn
+  // leftovers, which include acyclic dependents of cycles) and
+  // trace a concrete import path.
+  if topo.length() < modules.length():
+    // Mark which modules made it into topo order.
+    let in_topo: Vector<i64> = Vector<i64>::new()
+    let ti: i64 = 0
+    while ti < modules.length():
+      in_topo = in_topo.push(to_i64(0))
+      ti = ti + 1
+    ti = 0
+    while ti < topo.length():
+      in_topo = in_topo.set(topo.get(ti), to_i64(1))
+      ti = ti + 1
+    // For each unprocessed node, check if it can reach itself
+    // (i.e. it is actually in a cycle, not just downstream of one).
+    // Collect actual cycle members.
+    let on_cycle: Vector<i64> = Vector<i64>::new()
+    ti = 0
+    while ti < modules.length():
+      on_cycle = on_cycle.push(to_i64(0))
+      ti = ti + 1
+    ti = 0
+    while ti < modules.length():
+      if in_topo.get(ti) == 0:
+        if on_cycle.get(ti) == 0:
+          // DFS from ti following import edges within the unprocessed
+          // set.  Track the path; if we revisit ti, everything on the
+          // path from ti onward is a cycle member.
+          // Use a fixed-size path with a depth pointer (no pop needed).
+          let path: Vector<i64> = Vector<i64>::new()
+          path = path.push(ti)
+          let path_depth: i64 = 1
+          let visited: Vector<i64> = Vector<i64>::new()
+          let vi: i64 = 0
+          while vi < modules.length():
+            visited = visited.push(to_i64(0))
+            vi = vi + 1
+          visited = visited.set(ti, to_i64(1))
+          // Track which edges we've tried from each depth to allow backtracking.
+          // edge_cursor[depth] = next edge index to try from path[depth].
+          let edge_cursor: Vector<i64> = Vector<i64>::new()
+          edge_cursor = edge_cursor.push(to_i64(0))
+          let found: bool = false
+          let walk_done: bool = false
+          while walk_done == false:
+            let cur: i64 = path.get(path_depth - 1)
+            let cursor: i64 = edge_cursor.get(path_depth - 1)
+            // Find next unvisited import target from cur.
             let next: i64 = to_i64(-1)
-            let ei: i64 = 0
+            let ei: i64 = cursor
             while ei < ec:
               let from: i64 = edges.get(ei * 2 + 1)
               let to_mod: i64 = edges.get(ei * 2)
-              if from == cur_node:
-                if on_cycle.get(to_mod) == 1:
-                  next = to_mod
-                  ei = ec
+              if from == cur:
+                if in_topo.get(to_mod) == 0:
+                  if to_mod == ti:
+                    found = true
+                    walk_done = true
+                    next = to_mod
+                    ei = ec
+                  else:
+                    if visited.get(to_mod) == 0:
+                      next = to_mod
+                      // Save cursor past this edge for backtracking.
+                      edge_cursor = edge_cursor.set(path_depth - 1, ei + 1)
+                      ei = ec
               ei = ei + 1
-            if next < 0:
+            if found:
+              let pi: i64 = 0
+              while pi < path_depth:
+                on_cycle = on_cycle.set(path.get(pi), to_i64(1))
+                pi = pi + 1
+            else:
+              if next < 0:
+                // Dead end — backtrack.
+                path_depth = path_depth - 1
+                if path_depth == 0:
+                  walk_done = true
+              else:
+                visited = visited.set(next, to_i64(1))
+                if path_depth < path.length():
+                  path = path.set(path_depth, next)
+                else:
+                  path = path.push(next)
+                path_depth = path_depth + 1
+                // Initialize cursor for new depth.
+                if path_depth - 1 < edge_cursor.length():
+                  edge_cursor = edge_cursor.set(path_depth - 1, to_i64(0))
+                else:
+                  edge_cursor = edge_cursor.push(to_i64(0))
+      ti = ti + 1
+    // Now trace a concrete cycle path from the first cycle member.
+    let start: i64 = to_i64(-1)
+    ti = 0
+    while ti < modules.length():
+      if on_cycle.get(ti) == 1:
+        if start < 0:
+          start = ti
+      ti = ti + 1
+    if start >= 0:
+      let cycle_path: string = modules.get(start).name
+      let cur_node: i64 = start
+      let trace_done: bool = false
+      let max_steps: i64 = modules.length() + 1
+      let step: i64 = 0
+      while trace_done == false:
+        if step >= max_steps:
+          trace_done = true
+        else:
+          // Follow import edges staying within actual cycle members.
+          let next: i64 = to_i64(-1)
+          let ei: i64 = 0
+          while ei < ec:
+            let from: i64 = edges.get(ei * 2 + 1)
+            let to_mod: i64 = edges.get(ei * 2)
+            if from == cur_node:
+              if on_cycle.get(to_mod) == 1:
+                next = to_mod
+                ei = ec
+            ei = ei + 1
+          if next < 0:
+            trace_done = true
+          else:
+            cycle_path = cycle_path + " -> " + modules.get(next).name
+            if next == start:
               trace_done = true
             else:
-              cycle_path = cycle_path + " -> " + modules.get(next).name
-              if next == start:
-                trace_done = true
-              else:
-                cur_node = next
-            step = step + 1
-        diags = diags.push(FileDiagnostic(to_i64(-1), "", make_error(Span(to_i64(0), to_i64(0)), "import cycle detected: " + cycle_path)))
+              cur_node = next
+          step = step + 1
+      diags = diags.push(FileDiagnostic(to_i64(-1), "", make_error(Span(to_i64(0), to_i64(0)), "import cycle detected: " + cycle_path)))
 
-    return ProgramGraph(files, modules, edges, ec, topo, diags)
+  return ProgramGraph(files, modules, edges, ec, topo, diags)
 

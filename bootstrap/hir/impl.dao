@@ -1004,71 +1004,68 @@ fn build_module_hs(p: Program, mid: i64): HS
 // Requires: `program_run_resolve` and `program_run_typecheck` have
 // already populated `p.resolve` and `p.typecheck`.
 fn program_run_hir(p: Program): Program
-  // One domain per stage: its scratch is reclaimed at the exit and
-  // only the result leaves, copied into the caller's domain.
-  resource memory stage =>
-    // Guard: if HIR is already initialized, return unchanged. Same
-    // pattern as program_init_typecheck — prevents diagnostic
-    // duplication on reentrant calls.
-    if p.hir.initialized:
-      return p
-    let hir_nodes: Vector<HirNode> = Vector<HirNode>::new()
-    let hir_idx: Vector<i64> = Vector<i64>::new()
-    let module_indices: Vector<i64> = Vector<i64>::new()
-    // Seed diagnostics from the resolve baseline (the pre-typecheck/
-    // pre-HIR stable baseline), NOT from p.diags which may include
-    // prior pass diagnostics. Same pattern as program_run_typecheck.
-    let all_diags: Vector<FileDiagnostic> = p.resolve.diags
+  // Guard: if HIR is already initialized, return unchanged. Same
+  // pattern as program_init_typecheck — prevents diagnostic
+  // duplication on reentrant calls.
+  if p.hir.initialized:
+    return p
+  let hir_nodes: Vector<HirNode> = Vector<HirNode>::new()
+  let hir_idx: Vector<i64> = Vector<i64>::new()
+  let module_indices: Vector<i64> = Vector<i64>::new()
+  // Seed diagnostics from the resolve baseline (the pre-typecheck/
+  // pre-HIR stable baseline), NOT from p.diags which may include
+  // prior pass diagnostics. Same pattern as program_run_typecheck.
+  let all_diags: Vector<FileDiagnostic> = p.resolve.diags
 
-    let ti: i64 = 0
-    while ti < p.graph.topo_order.length():
-      let mid: i64 = p.graph.topo_order.get(ti)
-      let sf: SourceFile = program_file_of_module(p, mid)
-      let po: ParseOutput = sf.parse_output
-      let hs: HS = HS(po.nodes, po.idx, po.toks, sf.source_text, p.resolve.symbols, p.typecheck.types, p.typecheck.type_info, p.typecheck.expr_types, p.typecheck.sym_types, p.resolve.uses, hir_nodes, hir_idx, Vector<Diagnostic>::new(), mid, sf.file_id)
+  let ti: i64 = 0
+  while ti < p.graph.topo_order.length():
+    let mid: i64 = p.graph.topo_order.get(ti)
+    let sf: SourceFile = program_file_of_module(p, mid)
+    let po: ParseOutput = sf.parse_output
+    let hs: HS = HS(po.nodes, po.idx, po.toks, sf.source_text, p.resolve.symbols, p.typecheck.types, p.typecheck.type_info, p.typecheck.expr_types, p.typecheck.sym_types, p.resolve.uses, hir_nodes, hir_idx, Vector<Diagnostic>::new(), mid, sf.file_id)
 
-      let file_r: HirR = lower_file(hs, po.root)
-      // Extract the HirFile's decls_lp and wrap in HirModule.
-      hir_nodes = file_r.hs.hir_nodes
-      hir_idx = file_r.hs.hir_idx
-      let file_node: HirNode = hir_nodes.get(file_r.hir)
-      let module_decls_lp: i64 = to_i64(-1)
-      match file_node:
-        HirNode.HirFile(dlp):
-          module_decls_lp = dlp
-      // Extract module name token from the ModuleDeclN node.
-      let mod_name_tok: i64 = to_i64(-1)
-      let root_node: Node = po.nodes.get(po.root)
-      match root_node:
-        Node.FileN(mod_decl, imp_lp, dec_lp):
-          if mod_decl >= 0:
-            let md_node: Node = po.nodes.get(mod_decl)
-            match md_node:
-              Node.ModuleDeclN(path_lp, seg_count):
-                if seg_count > 0:
-                  // First segment token of the module path.
-                  mod_name_tok = po.idx.get(path_lp - seg_count)
-      // Emit HirModule wrapping the file's decls.
-      let mod_idx: i64 = hir_nodes.length()
-      hir_nodes = hir_nodes.push(HirNode.HirModule(mod_name_tok, module_decls_lp, mid))
-      module_indices = module_indices.push(mod_idx)
-      // Merge diagnostics.
-      let di: i64 = 0
-      while di < file_r.hs.diags.length():
-        all_diags = all_diags.push(FileDiagnostic(sf.file_id, sf.path, file_r.hs.diags.get(di)))
-        di = di + 1
-      ti = ti + 1
+    let file_r: HirR = lower_file(hs, po.root)
+    // Extract the HirFile's decls_lp and wrap in HirModule.
+    hir_nodes = file_r.hs.hir_nodes
+    hir_idx = file_r.hs.hir_idx
+    let file_node: HirNode = hir_nodes.get(file_r.hir)
+    let module_decls_lp: i64 = to_i64(-1)
+    match file_node:
+      HirNode.HirFile(dlp):
+        module_decls_lp = dlp
+    // Extract module name token from the ModuleDeclN node.
+    let mod_name_tok: i64 = to_i64(-1)
+    let root_node: Node = po.nodes.get(po.root)
+    match root_node:
+      Node.FileN(mod_decl, imp_lp, dec_lp):
+        if mod_decl >= 0:
+          let md_node: Node = po.nodes.get(mod_decl)
+          match md_node:
+            Node.ModuleDeclN(path_lp, seg_count):
+              if seg_count > 0:
+                // First segment token of the module path.
+                mod_name_tok = po.idx.get(path_lp - seg_count)
+    // Emit HirModule wrapping the file's decls.
+    let mod_idx: i64 = hir_nodes.length()
+    hir_nodes = hir_nodes.push(HirNode.HirModule(mod_name_tok, module_decls_lp, mid))
+    module_indices = module_indices.push(mod_idx)
+    // Merge diagnostics.
+    let di: i64 = 0
+    while di < file_r.hs.diags.length():
+      all_diags = all_diags.push(FileDiagnostic(sf.file_id, sf.path, file_r.hs.diags.get(di)))
+      di = di + 1
+    ti = ti + 1
 
-    // Emit HirProgram root. Build a temporary HS to use hir_flush_list.
-    let tmp_hs: HS = HS(Vector<Node>::new(), Vector<i64>::new(), Vector<Token>::new(), "", Vector<Symbol>::new(), Vector<DaoType>::new(), Vector<i64>::new(), HashMap<i64>::new(), Vector<i64>::new(), HashMap<i64>::new(), hir_nodes, hir_idx, Vector<Diagnostic>::new(), to_i64(-1), to_i64(-1))
-    let mod_fl: HirFlush = hir_flush_list(tmp_hs, module_indices)
-    hir_nodes = mod_fl.hs.hir_nodes
-    hir_idx = mod_fl.hs.hir_idx
-    let prog_idx: i64 = hir_nodes.length()
-    hir_nodes = hir_nodes.push(HirNode.HirProgram(mod_fl.list_pos))
+  // Emit HirProgram root. Build a temporary HS to use hir_flush_list.
+  let tmp_hs: HS = HS(Vector<Node>::new(), Vector<i64>::new(), Vector<Token>::new(), "", Vector<Symbol>::new(), Vector<DaoType>::new(), Vector<i64>::new(), HashMap<i64>::new(), Vector<i64>::new(), HashMap<i64>::new(), hir_nodes, hir_idx, Vector<Diagnostic>::new(), to_i64(-1), to_i64(-1))
+  let mod_fl: HirFlush = hir_flush_list(tmp_hs, module_indices)
+  hir_nodes = mod_fl.hs.hir_nodes
+  hir_idx = mod_fl.hs.hir_idx
+  let prog_idx: i64 = hir_nodes.length()
+  hir_nodes = hir_nodes.push(HirNode.HirProgram(mod_fl.list_pos))
 
-    let hd: HirData = HirData(true, prog_idx, hir_nodes.length(), p.graph.topo_order.length())
-    return Program(p.graph, p.resolve, p.typecheck, hd, all_diags)
+  let hd: HirData = HirData(true, prog_idx, hir_nodes.length(), p.graph.topo_order.length())
+  return Program(p.graph, p.resolve, p.typecheck, hd, all_diags)
 
 // =========================================================================
 // Section 58b: Legacy single-file HIR adapter
@@ -1085,8 +1082,11 @@ fn lower_to_hir(src: string): HirResult
   inputs = inputs.push(SourceInput("test.dao", wrapped))
   let pg: ProgramGraph = build_program(inputs)
   let p: Program = program_from_graph(pg)
-  p = program_run_resolve(p)
-  p = program_run_typecheck(p)
+  // Each stage in its own domain: its scratch is reclaimed at the exit and the result is copied out.
+  resource memory resolve =>
+    p = program_run_resolve(p)
+  resource memory typecheck =>
+    p = program_run_typecheck(p)
 
   // Single module at mid=0.
   let mid: i64 = to_i64(0)

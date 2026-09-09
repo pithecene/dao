@@ -1626,16 +1626,17 @@ fn serialize_module(bs: BS): string
 // =========================================================================
 
 fn lower_mir_to_llvm_text(input: MirBackendInput): LlvmTextResult
-  // One domain per stage: its scratch is reclaimed at the exit and
-  // only the result leaves, copied into the caller's domain.
-  resource memory stage =>
-    let bs: BS = bs_new(input)
+  let bs: BS = bs_new(input)
+  // Each stage in its own domain: its scratch is reclaimed at the exit and the result is copied out.
+  resource memory lowering =>
     bs = lower_mir_to_ll_module(bs, input.mir.root)
-    let text: string = serialize_module(bs)
-    let ok: bool = true
-    if bs.had_error > to_i64(0):
-      ok = false
-    return LlvmTextResult(text, bs.diags, ok)
+  let text: string = ""
+  resource memory serializing =>
+    text = serialize_module(bs)
+  let ok: bool = true
+  if bs.had_error > to_i64(0):
+    ok = false
+  return LlvmTextResult(text, bs.diags, ok)
 
 // Convenience adapter: run the bootstrap pipeline on a bare snippet
 // (same wrap/run-pipeline path as Task 29's lower_to_mir, but keep
@@ -1647,9 +1648,13 @@ fn lower_to_mir_backend_input(src: string): MirBackendInput
   inputs = inputs.push(SourceInput("test.dao", wrapped))
   let pg: ProgramGraph = build_program(inputs)
   let p: Program = program_from_graph(pg)
-  p = program_run_resolve(p)
-  p = program_run_typecheck(p)
-  p = program_run_hir(p)
+  // Each stage in its own domain: its scratch is reclaimed at the exit and the result is copied out.
+  resource memory resolve =>
+    p = program_run_resolve(p)
+  resource memory typecheck =>
+    p = program_run_typecheck(p)
+  resource memory hir =>
+    p = program_run_hir(p)
 
   // lower_to_mir runs its own pipeline internally (wasted work, but
   // fine for tests).  We take its MirResult and pair with p's symbols
@@ -1793,11 +1798,14 @@ fn closure_probe_stage(name: string, path: string, stage: string): string
     inputs = inputs.push(SourceInput(path, wrap_test_module(src)))
     let pg: ProgramGraph = build_program(inputs)
     let p: Program = program_from_graph(pg)
-    p = program_run_resolve(p)
+    // Each stage in its own domain: its scratch is reclaimed at the exit and the result is copied out.
+    resource memory resolve =>
+      p = program_run_resolve(p)
     let carried_into_resolve: i64 = pg.diags.length()
     closure_report_file_diags(name, "resolve", p.resolve.diags, carried_into_resolve, to_i64(50))
     cols = cols + closure_stage_file_column(name, "resolve", p.resolve.diags, carried_into_resolve)
-    p = program_run_typecheck(p)
+    resource memory typecheck =>
+      p = program_run_typecheck(p)
     let carried_into_typecheck: i64 = p.resolve.diags.length()
     closure_report_file_diags(name, "typecheck", p.diags, carried_into_typecheck, to_i64(50))
     cols = cols + closure_stage_file_column(name, "typecheck", p.diags, carried_into_typecheck)
