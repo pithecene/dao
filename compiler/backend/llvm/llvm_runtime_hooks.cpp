@@ -346,6 +346,9 @@ void LlvmRuntimeHooks::declare_alloc_hooks() {
   // __dao_mem_free(ptr): void
   ensure_declared(runtime_hooks::kMemFree,
                   llvm::FunctionType::get(void_ty, {ptr}, false));
+
+  // __dao_mem_alloc_outer(size: i64, align: i64): ptr
+  ensure_declared(runtime_hooks::kMemAllocOuter, llvm::FunctionType::get(ptr, {i64, i64}, false));
 }
 
 // ---------------------------------------------------------------------------
@@ -410,6 +413,11 @@ void LlvmRuntimeHooks::declare_string_hooks() {
   // __dao_hash_string(s: *dao.string): i64
   ensure_declared(runtime_hooks::kStrHash,
                   llvm::FunctionType::get(i64, {str_ptr}, false));
+
+  // __dao_str_from_bytes(bytes: *u8, len: i64): dao.string
+  auto* bytes_ptr = llvm::PointerType::getUnqual(ctx);
+  ensure_declared(runtime_hooks::kStrFromBytes,
+                  llvm::FunctionType::get(str_type, {bytes_ptr, i64}, false));
 }
 
 // ---------------------------------------------------------------------------
