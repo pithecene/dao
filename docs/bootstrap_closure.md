@@ -10,22 +10,22 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 73383 |
-| `CallExpr` | 22021 |
-| `Callee` | 22021 |
-| `FieldExpr` | 20806 |
-| `Args` | 19909 |
-| `BinaryExpr` | 10277 |
+| `Identifier` | 73384 |
+| `CallExpr` | 22107 |
+| `Callee` | 22107 |
+| `FieldExpr` | 20876 |
+| `Args` | 19963 |
+| `BinaryExpr` | 10227 |
 | `LetStatement` | 9929 |
-| `Value` | 7915 |
-| `Target` | 7915 |
-| `Assignment` | 7915 |
+| `Value` | 7916 |
+| `Target` | 7916 |
+| `Assignment` | 7916 |
 | `IntLiteral` | 7667 |
 | `Condition` | 6429 |
 | `Then` | 5212 |
 | `IfStatement` | 5212 |
 | `ReturnStatement` | 5142 |
-| `StringLiteral` | 4435 |
+| `StringLiteral` | 4424 |
 | `Param` | 3536 |
 | `Pattern` | 2466 |
 | `Arm` | 2466 |
@@ -44,6 +44,8 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 | `ClassDecl` | 239 |
 | `BreakStatement` | 64 |
 | `EnumDecl` | 27 |
+| `ResourceBlock` | 19 |
+| `QualifiedName` | 16 |
 | `EnumClassDecl` | 14 |
 | `Module` | 8 |
 | `File` | 8 |
@@ -56,23 +58,31 @@ bootstrap must compile for itself.
 
 | Function | Instantiations |
 |---|---|
-| `core::vector::Vector.push` | 22 |
-| `core::vector::Vector.new` | 22 |
-| `core::vector::Vector.length` | 22 |
+| `core::vector::Vector.push` | 23 |
+| `core::vector::Vector.new` | 23 |
+| `core::vector::Vector.length` | 23 |
 | `core::vector::Vector.get` | 22 |
+| `core::vector::Vector.copy_out` | 20 |
 | `core::vector::Vector.set` | 6 |
 | `core::range::range` | 5 |
+| `core::builtins::copy_out` | 4 |
 | `core::to_string::i64_to_string` | 1 |
 | `core::to_string::i32_to_string` | 1 |
 | `core::to_string::f64_to_string` | 1 |
 | `core::to_string::f32_to_string` | 1 |
 | `core::to_string::bool_to_string` | 1 |
+| `core::text::Builder.to_string` | 1 |
+| `core::text::Builder.push_char` | 1 |
+| `core::text::Builder.push` | 1 |
+| `core::text::Builder.new` | 1 |
+| `core::text::Builder.length` | 1 |
 | `core::string::substring` | 1 |
 | `core::string::str_compare` | 1 |
 | `core::string::starts_with` | 1 |
 | `core::string::length` | 1 |
 | `core::string::index_of` | 1 |
 | `core::string::ends_with` | 1 |
+| `core::string::copy_out_string` | 1 |
 | `core::string::concat` | 1 |
 | `core::string::char_at` | 1 |
 | `core::range::range.resume` | 1 |
@@ -142,6 +152,7 @@ bootstrap must compile for itself.
 | `core::hashmap::HashMap.set` | 1 |
 | `core::hashmap::HashMap.new` | 1 |
 | `core::hashmap::HashMap.get` | 1 |
+| `core::hashmap::HashMap.copy_out` | 1 |
 | `core::hashmap::hash_index` | 1 |
 | `core::equatable::u8.eq` | 1 |
 | `core::equatable::u64.eq` | 1 |
@@ -188,9 +199,9 @@ bootstrap must compile for itself.
 | `core::convert::f32_to_i64` | 1 |
 | `core::convert::f32_to_i32` | 1 |
 | `core::convert::f32_to_f64` | 1 |
-| `size_of` (intrinsic; inlined by the host) | 23 |
-| `ptr_offset` (intrinsic; inlined by the host) | 23 |
-| `align_of` (intrinsic; inlined by the host) | 23 |
+| `size_of` (intrinsic; inlined by the host) | 24 |
+| `ptr_offset` (intrinsic; inlined by the host) | 24 |
+| `align_of` (intrinsic; inlined by the host) | 24 |
 
 The intrinsic family is counted from the MIR (distinct specializations
 of each), since the host lowers every specialization inline and emits no
@@ -201,7 +212,7 @@ definition for it.
 Diagnostics per stage when each program is fed through the bootstrap
 pipeline, and the earliest failing stage's first diagnostic.
 
-Each stage ran in its own process from source, bounded to 16 GiB of
+Each stage ran in its own process from source, bounded to 6 GiB of
 virtual memory and 600 s (the bootstrap frees nothing, so a stage's cost
 can only be measured alone); peak memory and time are the deepest stage's --
 one self-compilation attempt through that stage.
@@ -211,14 +222,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 6854 | 19 | 0 | 46 | 346 | 427 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 6151 | 17 | 0 | 52 | 385 | 347 | 0 | 19 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 5543 | 16 | 0 | 57 | 380 | 386 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 11667 | 35 | 0 | 132 | 933 | 595 | 0 | 57 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 15006 | 52 | 0 | 246 | 1650 | 939 | 0 | — | — | parse: expected expression; then in mir: panic: allocation failed (size=2359296, align=8) |
-| hir | 15942 | 52 | 0 | 253 | 2149 | 1150 | 0 | — | — | parse: expected expression; then in mir: panic: allocation failed (size=1179648, align=8) |
-| mir | 16270 | 54 | 0 | 285 | 2465 | — | — | — | — | parse: expected expression; then in typecheck: panic: allocation failed (size=524288, align=8) |
-| llvm | 16 | 1 | — | — | — | — | — | — | — | in parse: process died (status 139; memory bound 16 GiB) |
+| lexer | 1943 | 11 | 0 | 46 | 347 | 428 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 1719 | 10 | 0 | 52 | 386 | 348 | 0 | 19 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 1532 | 9 | 0 | 57 | 381 | 387 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 2994 | 21 | 0 | 132 | 934 | 596 | 0 | 57 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 6052 | 27 | 0 | 246 | 1651 | — | — | — | — | parse: expected expression; then in typecheck: panic: allocation failed (size=8388608, align=1) |
+| hir | 6054 | 29 | 0 | 436 | 2143 | — | — | — | — | parse: expected expression; then in typecheck: panic: allocation failed (size=8388608, align=1) |
+| mir | 6057 | 29 | 0 | 1195 | 2409 | — | — | — | — | parse: expected expression; then in typecheck: panic: allocation failed (size=8388608, align=1) |
+| llvm | 15 | 0 | — | — | — | — | — | — | — | in parse: process died (status 139; memory bound 6 GiB) |
 
 ### What each stage rejects
 
@@ -307,11 +318,6 @@ named, not inferred.
 - `resolve` ×6: unknown name 'make_error'
 - `resolve` ×5: unknown name 'Vector'
 - `resolve` ×5: unknown name 'new'
-- `typecheck` ×30: type mismatch in '+': i64 vs i32
-- `typecheck` ×8: type mismatch: cannot assign i32 to i64
-- `typecheck` ×4: unknown type in annotation
-- `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `typecheck` ×3: type mismatch in assignment: expected bool, got void
 
 **hir**
 
@@ -322,11 +328,6 @@ named, not inferred.
 - `resolve` ×6: unknown name 'make_error'
 - `resolve` ×5: unknown name 'Vector'
 - `resolve` ×5: unknown name 'new'
-- `typecheck` ×30: type mismatch in '+': i64 vs i32
-- `typecheck` ×8: type mismatch: cannot assign i32 to i64
-- `typecheck` ×4: unknown type in annotation
-- `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `typecheck` ×3: type mismatch in assignment: expected bool, got void
 
 **mir**
 
@@ -357,8 +358,8 @@ Sites per program against the parse column above:
 | graph | 53 | 57 |
 | resolver | 85 | 132 |
 | typecheck | 124 | 246 |
-| hir | 137 | 253 |
-| mir | 150 | 285 |
+| hir | 137 | 436 |
+| mir | 150 | 1195 |
 | llvm | 187 | — |
 
 ## 4. Reading the matrix
