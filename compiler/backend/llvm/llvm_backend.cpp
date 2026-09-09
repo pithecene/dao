@@ -529,6 +529,13 @@ auto LlvmBackend::lower_function(const MirFunction& fn) -> bool {
 // Block lowering
 // ---------------------------------------------------------------------------
 
+auto LlvmBackend::entry_alloca(FunctionState& state, llvm::Type* type, const llvm::Twine& name)
+    -> llvm::AllocaInst* {
+  auto* entry = &state.llvm_fn->getEntryBlock();
+  llvm::IRBuilder<> at_entry(entry, entry->begin());
+  return at_entry.CreateAlloca(type, nullptr, name);
+}
+
 auto LlvmBackend::lower_block(const MirBlock& block,
                                 FunctionState& state) -> bool {
   auto* target_block = state.blocks[block.id.id];
@@ -875,8 +882,8 @@ auto LlvmBackend::lower_binary(const MirBinary& p, const MirInst& inst,
         emit_diagnostic(inst.span, "string concat hook not declared");
         return false;
       }
-      auto* lhs_tmp = state.builder->CreateAlloca(str_type, nullptr, "str.lhs");
-      auto* rhs_tmp = state.builder->CreateAlloca(str_type, nullptr, "str.rhs");
+      auto* lhs_tmp = entry_alloca(state, str_type, "str.lhs");
+      auto* rhs_tmp = entry_alloca(state, str_type, "str.rhs");
       state.builder->CreateStore(lhs, lhs_tmp);
       state.builder->CreateStore(rhs, rhs_tmp);
       result = state.builder->CreateCall(
@@ -889,8 +896,8 @@ auto LlvmBackend::lower_binary(const MirBinary& p, const MirInst& inst,
         emit_diagnostic(inst.span, "string equality hook not declared");
         return false;
       }
-      auto* lhs_tmp = state.builder->CreateAlloca(str_type, nullptr, "str.lhs");
-      auto* rhs_tmp = state.builder->CreateAlloca(str_type, nullptr, "str.rhs");
+      auto* lhs_tmp = entry_alloca(state, str_type, "str.lhs");
+      auto* rhs_tmp = entry_alloca(state, str_type, "str.rhs");
       state.builder->CreateStore(lhs, lhs_tmp);
       state.builder->CreateStore(rhs, rhs_tmp);
       result = state.builder->CreateCall(
@@ -1451,8 +1458,7 @@ auto LlvmBackend::lower_call(const MirCall& p, const MirInst& inst,
           auto* param_type = llvm_fn_type->getParamType(i);
           if (param_type->isPointerTy() &&
               arg_val->getType() == types_.string_type()) {
-            auto* tmp = state.builder->CreateAlloca(
-                types_.string_type(), nullptr, "str.arg");
+            auto* tmp = entry_alloca(state, types_.string_type(), "str.arg");
             state.builder->CreateStore(arg_val, tmp);
             arg_val = tmp;
           }
@@ -1485,7 +1491,7 @@ auto LlvmBackend::lower_call(const MirCall& p, const MirInst& inst,
       callee_fn->arg_size() > 0 &&
       callee_fn->hasParamAttribute(0, llvm::Attribute::StructRet)) {
     // Indirect struct return: allocate space and pass as first arg.
-    sret_alloca = state.builder->CreateAlloca(expected_ret, nullptr, "sret");
+    sret_alloca = entry_alloca(state, expected_ret, "sret");
     args.push_back(sret_alloca);
     llvm_param_idx = 1;
   }
@@ -1501,7 +1507,7 @@ auto LlvmBackend::lower_call(const MirCall& p, const MirInst& inst,
       if (llvm_param_idx < callee_fn->getFunctionType()->getNumParams()) {
         auto* param_type = callee_fn->getFunctionType()->getParamType(llvm_param_idx);
         if (param_type->isPointerTy() && arg_val->getType() == types_.string_type()) {
-          auto* tmp = state.builder->CreateAlloca(types_.string_type(), nullptr, "str.arg");
+          auto* tmp = entry_alloca(state, types_.string_type(), "str.arg");
           state.builder->CreateStore(arg_val, tmp);
           arg_val = tmp;
           args.push_back(arg_val);
@@ -1519,13 +1525,13 @@ auto LlvmBackend::lower_call(const MirCall& p, const MirInst& inst,
             struct_ty, module_->getDataLayout(), ctx_);
         if (coercion.indirect) {
           // Indirect: alloca + store + pass pointer.
-          auto* tmp = state.builder->CreateAlloca(struct_ty, nullptr, "byval.arg");
+          auto* tmp = entry_alloca(state, struct_ty, "byval.arg");
           state.builder->CreateStore(arg_val, tmp);
           args.push_back(tmp);
           llvm_param_idx++;
         } else {
           // Direct: store struct to memory, load as coerced types.
-          auto* tmp = state.builder->CreateAlloca(struct_ty, nullptr, "coerce.arg");
+          auto* tmp = entry_alloca(state, struct_ty, "coerce.arg");
           state.builder->CreateStore(arg_val, tmp);
           for (size_t ci = 0; ci < coercion.coerced_types.size(); ++ci) {
             auto* coerced_ty = coercion.coerced_types[ci];
@@ -1545,7 +1551,7 @@ auto LlvmBackend::lower_call(const MirCall& p, const MirInst& inst,
       if (arg_val->getType()->isStructTy() &&
           llvm_param_idx < callee_fn->getFunctionType()->getNumParams() &&
           callee_fn->hasParamAttribute(llvm_param_idx, llvm::Attribute::ByVal)) {
-        auto* tmp = state.builder->CreateAlloca(arg_val->getType(), nullptr, "byval.arg");
+        auto* tmp = entry_alloca(state, arg_val->getType(), "byval.arg");
         state.builder->CreateStore(arg_val, tmp);
         args.push_back(tmp);
         llvm_param_idx++;
@@ -1570,7 +1576,7 @@ auto LlvmBackend::lower_call(const MirCall& p, const MirInst& inst,
     if (expected_ret != nullptr && llvm::isa<llvm::StructType>(expected_ret) &&
         call->getType() != expected_ret) {
       // Direct coerced return: store coerced value, load as struct.
-      auto* tmp = state.builder->CreateAlloca(expected_ret, nullptr, "coerce.ret");
+      auto* tmp = entry_alloca(state, expected_ret, "coerce.ret");
       state.builder->CreateStore(call, tmp);
       auto* loaded = state.builder->CreateLoad(expected_ret, tmp, "coerce.ret.load");
       state.values[inst.result.id] = loaded;
@@ -1664,7 +1670,7 @@ auto LlvmBackend::lower_enum_construct(const MirEnumConstruct& p,
       llvm::StructType::get(ctx_, field_types, /*isPacked=*/false);
 
   // Allocate the enum struct on the stack.
-  auto* alloca = state.builder->CreateAlloca(llvm_type, nullptr, "enum.tmp");
+  auto* alloca = entry_alloca(state, llvm_type, "enum.tmp");
 
   // Store discriminant (field 0).
   auto* tag_ptr = state.builder->CreateStructGEP(llvm_type, alloca, 0, "enum.tag");
@@ -1759,7 +1765,7 @@ auto LlvmBackend::lower_enum_payload(const MirEnumPayload& p,
 
   // Alloca the enum value, then GEP into the payload region, bitcast,
   // and load the requested field.
-  auto* alloca = state.builder->CreateAlloca(llvm_enum_type, nullptr, "enum.ext");
+  auto* alloca = entry_alloca(state, llvm_enum_type, "enum.ext");
   state.builder->CreateStore(enum_val, alloca);
 
   auto* payload_ptr = state.builder->CreateStructGEP(

@@ -234,14 +234,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 50 | 0 | 0 | 84 | 369 | 431 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 46 | 0 | 0 | 90 | 408 | 351 | 0 | 19 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 46 | 1 | 0 | 95 | 403 | 390 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 75 | 1 | 0 | 170 | 956 | 599 | 0 | 57 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 96 | 1 | 0 | 284 | 1673 | 943 | 0 | 126 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 137 | 1 | 0 | 528 | 2180 | 1154 | 0 | 159 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 144 | 1 | 0 | 1340 | 2455 | 1113 | 0 | 204 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 18 | 0 | — | — | — | — | — | — | — | in parse: process died (status 139; memory bound 6 GiB) |
+| lexer | 49 | 1 | 0 | 84 | 369 | 431 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 47 | 0 | 0 | 90 | 408 | 351 | 0 | 19 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 44 | 0 | 0 | 95 | 403 | 390 | 0 | 16 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 74 | 0 | 0 | 170 | 956 | 599 | 0 | 57 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 94 | 0 | 0 | 284 | 1673 | 943 | 0 | 126 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 146 | 1 | 0 | 528 | 2180 | 1154 | 0 | 159 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 140 | 1 | 0 | 1340 | 2455 | 1113 | 0 | 204 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 156 | 1 | 0 | 2008 | 2981 | 1157 | 0 | 257 | — | parse: expected expression; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 
@@ -382,6 +382,25 @@ named, not inferred.
 - `mir` ×9: unsupported assignment target
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 
+**llvm**
+
+- `parse` ×35: expected expression
+- `parse` ×13: expected declaration (fn, extern, class, enum, type, concept, or extend)
+- `parse` ×2: expected RParen, got Identifier
+- `resolve` ×22: unknown name 'char_at'
+- `resolve` ×8: unknown name 'Vector'
+- `resolve` ×7: unknown name 'new'
+- `resolve` ×5: unknown name 'Span'
+- `resolve` ×5: unknown name 'make_error'
+- `typecheck` ×29: type mismatch in '+': i64 vs i32
+- `typecheck` ×8: type mismatch: cannot assign i32 to i64
+- `typecheck` ×4: unknown type in annotation
+- `typecheck` ×3: type mismatch in '==': i64 vs i32
+- `typecheck` ×3: type mismatch in assignment: expected bool, got void
+- `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×9: unsupported assignment target
+- `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
+
 ### Parse-stage attribution
 
 Every parse-stage rejection in the first audit is one construct: generic
@@ -403,7 +422,7 @@ Sites per program against the parse column above:
 | typecheck | 135 | 284 |
 | hir | 154 | 528 |
 | mir | 170 | 1340 |
-| llvm | 208 | — |
+| llvm | 208 | 2008 |
 
 ## 4. Reading the matrix
 

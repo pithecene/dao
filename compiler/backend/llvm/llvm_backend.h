@@ -156,6 +156,13 @@ private:
 
   auto lower_block(const MirBlock& block,
                     FunctionState& state) -> bool;
+
+  // A stack slot for a temporary, in the function's entry block.  An
+  // alloca at the point of use lives until the function returns, so one
+  // inside a loop grows the frame every iteration; in the entry block it
+  // is one slot, reused.
+  auto entry_alloca(FunctionState& state, llvm::Type* type, const llvm::Twine& name)
+      -> llvm::AllocaInst*;
   auto lower_inst(const MirInst& inst,
                    FunctionState& state) -> bool;
 

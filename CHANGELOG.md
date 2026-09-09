@@ -6,6 +6,16 @@ and when, not what is guaranteed.
 
 ## Unreleased
 
+### Fixed
+
+- **A loop's temporaries take one stack slot per site, not one per
+  iteration.**  The backend allocated the slot for a string operand, a
+  string argument, a struct passed or returned through the C ABI, or an
+  enum value where the value was used, and a slot allocated inside a
+  loop lives until the function returns; a long loop overflowed the
+  stack (the bootstrap lexer, at 8 MiB, on its largest program).  Every
+  such slot is now allocated in the function's entry block and reused.
+
 ### Changed
 
 - **A user module may shadow a prelude name.**  A top-level declaration
