@@ -58,10 +58,13 @@ Laws:
    type: a `string` by its bytes; a class or enum field by field,
    unless the class declares a method `copy_out(self)` returning its
    own type, which the compiler calls instead (`Vector` and `HashMap`
-   do, since their raw pointer field owns what it points at); scalars
-   and pointer values unchanged.  A generator is not copied: the
-   compiler rejects a generator leaving a block, stored to an outer
-   binding or returned from inside it.  A pointer value itself is the
+   do, since their raw pointer field owns what it points at; a method
+   of that name with any other signature is an ordinary method);
+   scalars and pointer values unchanged.  A generator is not copied:
+   the compiler rejects a generator leaving a block -- by itself, or
+   inside a class or container that holds one, through a raw pointer
+   as `Vector` does -- stored to an outer binding or returned from
+   inside it.  A pointer value itself is the
    author's responsibility, as everywhere.
 8. A `resource memory` block may not contain `yield`: a domain cannot
    stay current across a suspension.
