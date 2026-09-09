@@ -321,6 +321,21 @@ suite<"mir_break_unwinding"> mir_break_unwinding = [] {
     expect(eq(count_of(dump, "resource_exit memory pool"), size_t{1})) << dump;
   };
 
+  "an owning value leaving a block needs the prelude's copy_out"_test = [] {
+    // Without a prelude there is nothing to copy with; the builder says
+    // so rather than letting the value dangle past the block's exit.
+    MirTestPipeline pipe("fn f(): string\n"
+                         "    let out: string = \"\"\n"
+                         "    resource memory pool =>\n"
+                         "        out = \"made inside\"\n"
+                         "    return out\n");
+    expect(!pipe.mir_result.diagnostics.empty()) << "no diagnostic: " << pipe.dump();
+    expect(!pipe.mir_result.diagnostics.empty() &&
+           pipe.mir_result.diagnostics[0].message.find("no prelude `copy_out`") !=
+               std::string::npos)
+        << (pipe.mir_result.diagnostics.empty() ? "" : pipe.mir_result.diagnostics[0].message);
+  };
+
   "break out of a loop leaves a resource block entered inside the loop"_test = [] {
     // The block is inside the loop body: the break path exits it (the
     // fall-through end of the block exits it too, on its own path).

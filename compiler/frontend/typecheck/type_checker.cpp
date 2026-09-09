@@ -3,6 +3,7 @@
 #include "frontend/module/module_graph.h"
 
 #include "frontend/typecheck/type_conversion.h"
+#include "frontend/types/type_ownership.h"
 
 namespace dao {
 
@@ -1801,7 +1802,7 @@ void TypeChecker::check_resource_block(const Stmt* stmt) {
   // is checked without the domain rules.
   const bool is_domain = rb.resource_kind == "memory";
   if (is_domain) {
-    ctx_.resource_blocks.push_back({.span = stmt->span, .name = rb.resource_name});
+    ctx_.resource_blocks.push_back({.stmt = stmt, .name = rb.resource_name});
   }
   check_body(rb.body);
   if (is_domain) {
@@ -1822,42 +1823,6 @@ auto TypeChecker::place_root_symbol(const Expr* expr) const -> const Symbol* {
   }
 }
 
-auto TypeChecker::owns_heap_memory(const Type* type) const -> bool {
-  std::unordered_set<const Type*> seen;
-  auto walk = [&](auto& self, const Type* t) -> bool {
-    if (t == nullptr || !seen.insert(t).second) {
-      return false;
-    }
-    switch (t->kind()) {
-    case TypeKind::Named:
-      return static_cast<const TypeNamed*>(t)->name() == "string";
-    case TypeKind::Generator:
-      return true;
-    case TypeKind::GenericParam:
-      return true; // may be instantiated with an owning type
-    case TypeKind::Struct: {
-      // A raw pointer field is how a class owns heap memory (Vector,
-      // HashMap): counted as owning, since the class reaches it.
-      const auto* st = static_cast<const TypeStruct*>(t);
-      return std::ranges::any_of(st->fields(), [&](const StructField& f) {
-        return f.type != nullptr && (f.type->kind() == TypeKind::Pointer || self(self, f.type));
-      });
-    }
-    case TypeKind::Enum: {
-      const auto* en = static_cast<const TypeEnum*>(t);
-      return std::ranges::any_of(en->variants(), [&](const EnumVariant& v) {
-        return std::ranges::any_of(v.payload_types, [&](const Type* p) {
-          return p != nullptr && (p->kind() == TypeKind::Pointer || self(self, p));
-        });
-      });
-    }
-    default:
-      return false; // scalars, and a pointer value itself: the author's responsibility
-    }
-  };
-  return walk(walk, type);
-}
-
 void TypeChecker::check_store_escapes_domain(const Expr* target) {
   if (ctx_.resource_blocks.empty()) {
     return;
@@ -1866,20 +1831,28 @@ void TypeChecker::check_store_escapes_domain(const Expr* target) {
   if (root == nullptr) {
     return;
   }
-  const auto& block = ctx_.resource_blocks.back();
-  const bool declared_inside = root->decl_span.offset >= block.span.offset &&
-                               root->decl_span.offset < block.span.offset + block.span.length;
-  if (declared_inside) {
-    return;
-  }
   const auto* root_type = resolve_symbol_type(root);
   if (root_type == nullptr || !owns_heap_memory(root_type)) {
     return;
   }
-  error(target->span,
-        "'" + std::string(root->name) + "' is declared outside resource block '" +
-            std::string(block.name) +
-            "' and stored to inside it: a value allocated in the block does not outlive it");
+  // The binding escapes every enclosing block it was declared outside
+  // of: each block's exit copies it one domain outward.
+  for (auto it = ctx_.resource_blocks.rbegin(); it != ctx_.resource_blocks.rend(); ++it) {
+    const Span extent = it->stmt->span;
+    const bool declared_inside = root->decl_span.offset >= extent.offset &&
+                                 root->decl_span.offset < extent.offset + extent.length;
+    if (declared_inside) {
+      break;
+    }
+    if (holds_generator(root_type)) {
+      error(target->span,
+            "'" + std::string(root->name) + "' is declared outside resource block '" +
+                std::string(it->name) +
+                "' and stored to inside it: a generator cannot be copied out of the block");
+      return;
+    }
+    typed_.add_resource_escape(it->stmt, root);
+  }
 }
 
 void TypeChecker::check_return(const Stmt* stmt) {
@@ -1900,11 +1873,12 @@ void TypeChecker::check_return(const Stmt* stmt) {
       error(ret.value->span,
             "return type '" + print_type(val_type) + "' does not match function return type '" +
                 print_type(ctx_.return_type) + "'");
-    } else if (!ctx_.resource_blocks.empty() && owns_heap_memory(val_type)) {
+    } else if (!ctx_.resource_blocks.empty() && holds_generator(val_type)) {
+      // Anything else that owns heap memory is copied out at the exits.
       error(ret.value->span,
-            "returning a value that owns heap memory from inside resource block '" +
+            "returning a generator from inside resource block '" +
                 std::string(ctx_.resource_blocks.back().name) +
-                "': a value allocated in the block does not outlive it");
+                "': a generator cannot be copied out of the block");
     }
   } else {
     // Bare return — valid for void functions and generator functions.
@@ -3008,12 +2982,12 @@ auto TypeChecker::check_try(const Expr* expr) -> const Type* {
     return nullptr;
   }
   // `?` returns from inside the block on the error path -- through the
-  // block's exit -- so it is a return of the function's result type.
-  if (!ctx_.resource_blocks.empty() && owns_heap_memory(ctx_.return_type)) {
+  // block's exit -- so it is a return of the function's result type,
+  // copied out at the exits like any other; only a generator cannot be.
+  if (!ctx_.resource_blocks.empty() && holds_generator(ctx_.return_type)) {
     error(expr->span,
           "'?' inside resource block '" + std::string(ctx_.resource_blocks.back().name) +
-              "' returns a value that owns heap memory: a value allocated in the block does "
-              "not outlive it");
+              "' would return a generator: a generator cannot be copied out of the block");
   }
 
   const auto& variants = enum_type->variants();

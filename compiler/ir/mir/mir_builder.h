@@ -60,13 +60,36 @@ private:
   // Generic templates accumulated during build().
   std::unordered_map<const Symbol*, MirFunction*> generic_templates_;
 
-  // Loop exit block stack for break statement lowering.
+  // An outer binding a resource block stores to: copied into the
+  // enclosing domain at the block's exits, when its flag says the block
+  // stored to it on the path taken.
+  struct EscapeFlag {
+    LocalId binding;
+    const Type* type;
+    LocalId flag;
+  };
+
   // Active mode/resource region stack for exit-on-return.
   struct ActiveRegion {
     MirPayload exit_payload;
     Span span;
+    std::vector<EscapeFlag> escapes; // only a resource region has any
   };
   std::vector<ActiveRegion> active_regions_;
+
+  // What a `return` carries out of the regions it leaves: the returned
+  // value (none for a bare return) and its type.
+  struct Carried {
+    MirValueId* value = nullptr;
+    const Type* type = nullptr;
+  };
+
+  // The prelude's `copy_out<T>` (types/type_ownership.h explains what
+  // is copied): the call every escaping value goes through, expanded
+  // per type by the monomorphizer.  Null when no prelude is loaded, in
+  // which case nothing is copied (single-file tests without a prelude).
+  const Symbol* copy_out_symbol_ = nullptr;
+  const Type* copy_out_type_ = nullptr;
 
   // The loops being lowered, innermost last: where `break` branches to,
   // and how many regions were active when the loop was entered.  A
@@ -107,10 +130,20 @@ private:
   void switch_to_block(MirBlock* block);
   [[nodiscard]] auto block_terminated() const -> bool;
 
-  /// Exit every active region, innermost first (a `return` leaves them all).
-  void emit_region_exits(Span span);
-  /// Exit the active regions above `depth`, innermost first.
+  /// Exit every active region, innermost first: a `return` (or `?`)
+  /// leaves them all, and what it carries is copied out of each resource
+  /// domain crossed.
+  void emit_region_exits(Span span, Carried carried);
+  /// Exit the active regions above `depth`, innermost first (a `break`
+  /// leaves the ones its loop entered).
   void emit_region_exits_from(size_t depth, Span span);
+  /// Leave one region: copy out what escapes it -- the bindings the block
+  /// stored to, or, when a function return is what leaves (`carried` is
+  /// given), the returned value -- then exit it.
+  void emit_region_exit(const ActiveRegion& region, Span span, const Carried* carried);
+  /// `copy_out<T>(value)`: a copy in the enclosing domain, or the value
+  /// itself when its type owns nothing.
+  auto emit_copy_out(MirValueId value, const Type* type, Span span) -> MirValueId;
 
   auto resolve_field_index(const Type* obj_type, std::string_view field_name)
       -> std::optional<uint32_t>;

@@ -155,6 +155,7 @@ inline constexpr std::string_view kStrEndsWith   = "__dao_str_ends_with";
 inline constexpr std::string_view kStrCompare    = "__dao_str_compare";
 inline constexpr std::string_view kStrHash       = "__dao_str_hash";
 inline constexpr std::string_view kStrFromBytes = "__dao_str_from_bytes";
+inline constexpr std::string_view kStrCopyOuter = "__dao_str_copy_outer";
 
 // All hook names, for iteration / validation.
 inline constexpr std::string_view kAllHooks[] = {
@@ -259,6 +260,7 @@ inline constexpr std::string_view kAllHooks[] = {
     kStrCompare,
     kStrHash,
     kStrFromBytes,
+    kStrCopyOuter,
 };
 
 } // namespace runtime_hooks

@@ -18,3 +18,12 @@ fn align_of<T>(): i64
 
 // Compute a typed pointer offset: ptr + index (in units of T).
 fn ptr_offset<T>(ptr: *T, index: i64): *T -> ptr
+
+// A copy of `x` that outlives the current `resource memory` block: it
+// lives in the enclosing domain.  The compiler expands each call per
+// type after monomorphization -- a scalar or pointer is itself, a
+// string is copied by the runtime, a class that owns raw memory copies
+// itself through its own `copy_out` method, and any other class or
+// enum is copied field by field -- so this body is only the identity
+// the scalar case keeps.
+fn copy_out<T>(x: T): T -> x

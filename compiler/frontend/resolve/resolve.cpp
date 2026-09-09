@@ -95,6 +95,14 @@ constexpr std::string_view kPreludeIntrinsics[] = {
     "ptr_cast",
 };
 
+// `copy_out` is the prelude's to declare for the same reason, but it is
+// the monomorphizer that replaces its calls (with a per-type copy out of
+// a resource domain), not the backend: it stays out of the list above so
+// the backend lowers the specializations that reach it -- the identity,
+// for a type that owns nothing -- as ordinary functions.  A class's own
+// `copy_out` method is not a top-level declaration and is unaffected.
+constexpr std::string_view kCopyOutIntrinsic = "copy_out";
+
 // ---------------------------------------------------------------------------
 // Resolver — two-pass name resolution over the AST
 // ---------------------------------------------------------------------------
@@ -387,7 +395,7 @@ private:
     // backend's to answer with inline IR, so a user module cannot
     // introduce one — shadowing a prelude name is allowed (§7.6), but
     // not when the name's meaning is the compiler's.
-    if (!current_->is_prelude && is_prelude_intrinsic(name)) {
+    if (!current_->is_prelude && (is_prelude_intrinsic(name) || name == kCopyOutIntrinsic)) {
       diagnostics_.push_back(Diagnostic::error(
           name_span, "duplicate top-level declaration '" + std::string(name) + "'"));
       return;

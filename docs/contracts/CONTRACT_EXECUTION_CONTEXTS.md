@@ -48,17 +48,28 @@ Laws:
    the block — by falling off its end, `break`, or `return` — reclaims
    the domain wholesale.  Domains nest; the innermost open block's
    domain is current; outside every block the process is the domain.
-7. A value allocated in a domain does not outlive it.  A heap-owning
-   value — a string, a generator, or a class or enum holding one of
-   those or a raw pointer field by value (an aggregate with a raw
-   pointer field is taken to own what it points at, as `Vector` and
-   `HashMap` do) — may not leave the block: the compiler rejects a
-   store to a binding declared outside the block (directly, or through
-   a field or index rooted at it), a `return` of such a value from
-   inside the block, and a `?` that would return one.  Copy-out — the
-   compiler copying what leaves into the enclosing domain — is Task 35
-   E1 and amends this law when it lands.  A pointer value itself is
-   the author's responsibility, as everywhere.
+7. A value allocated in a domain does not outlive it.  What leaves a
+   block is copied into the enclosing domain at the block's exit, by
+   the compiler: a binding declared outside the block that the block
+   stores to (directly, or through a field or index rooted at it) is
+   copied whole at a fall-through or `break` exit when a store to it
+   ran on the path taken; the value a `return` or `?` carries out of
+   the block is copied at that exit.  The copy follows the static
+   type: a `string` by its bytes; a class or enum field by field,
+   unless the class itself directly declares a method `copy_out(self)`,
+   `self` and nothing else and no type parameters of its own, returning
+   the class's own type spelled as the class names itself, type
+   parameters included, which the compiler calls instead (`Vector` and
+   `HashMap` do, since their raw pointer field owns what it points at;
+   a method of that name with any other signature, or supplied by an
+   `extend`, is an ordinary method; one declared only in a class's
+   `as Concept:` block cannot be called yet and is diagnosed);
+   scalars and pointer values unchanged.  A generator is not copied:
+   the compiler rejects a generator leaving a block -- by itself, or
+   inside a class or container that holds one, through a raw pointer
+   as `Vector` does -- stored to an outer binding or returned from
+   inside it.  A pointer value itself is the
+   author's responsibility, as everywhere.
 8. A `resource memory` block may not contain `yield`: a domain cannot
    stay current across a suspension.
 

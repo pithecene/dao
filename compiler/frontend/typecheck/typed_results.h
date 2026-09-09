@@ -5,6 +5,7 @@
 #include "frontend/resolve/symbol.h"
 #include "frontend/types/type.h"
 
+#include <algorithm>
 #include <unordered_map>
 
 namespace dao {
@@ -70,6 +71,22 @@ public:
     return it != method_resolutions_.end() ? it->second : nullptr;
   }
 
+  // --- Resource blocks: the outer bindings a block stores to, which
+  //     its exits copy into the enclosing domain ---
+  void add_resource_escape(const Stmt* block, const Symbol* binding) {
+    // A block stores to a handful of outer bindings; a list keeps their
+    // order, which the MIR builder's flags and copies follow.
+    auto& escapes = resource_escapes_[block];
+    if (std::ranges::find(escapes, binding) == escapes.end()) {
+      escapes.push_back(binding);
+    }
+  }
+  [[nodiscard]] auto resource_escapes(const Stmt* block) const
+      -> const std::vector<const Symbol*>* {
+    auto it = resource_escapes_.find(block);
+    return it != resource_escapes_.end() ? &it->second : nullptr;
+  }
+
   // --- Call-site explicit type arguments ---
 
   void set_call_type_args(const Expr* call_expr,
@@ -89,6 +106,7 @@ private:
   std::unordered_map<const Decl*, const Type*> decl_types_;
   std::unordered_map<const Expr*, const Decl*> method_resolutions_;
   std::unordered_map<const Expr*, std::vector<const Type*>> call_type_args_;
+  std::unordered_map<const Stmt*, std::vector<const Symbol*>> resource_escapes_;
 };
 
 } // namespace dao

@@ -164,6 +164,20 @@ suite<"domain_outer_and_strings"> domain_outer_and_strings = [] {
     expect(eq(dao_domain_bytes_held(), int64_t{0}));
   };
 
+  "copy_outer copies a string into the enclosing domain"_test = [] {
+    void* outer = __dao_mem_resource_enter();
+    void* inner = __dao_mem_resource_enter();
+    auto a = literal("in the inner ");
+    auto b = literal("block");
+    auto made_inside = __dao_str_concat(&a, &b);
+    auto escaped = __dao_str_copy_outer(&made_inside);
+    __dao_mem_resource_exit(inner);
+    expect(eq(text(escaped), std::string("in the inner block")));
+    expect(dao_domain_bytes_held() > int64_t{0});
+    __dao_mem_resource_exit(outer);
+    expect(eq(dao_domain_bytes_held(), int64_t{0}));
+  };
+
   "from_bytes of nothing is the empty string"_test = [] {
     auto empty = __dao_str_from_bytes(nullptr, 0);
     expect(eq(empty.len, int64_t{0}));

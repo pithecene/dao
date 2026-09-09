@@ -1,10 +1,13 @@
 // NOLINTBEGIN(readability-magic-numbers,readability-identifier-length)
 #include "ir/mir/mir_monomorphize.h"
 
+#include "frontend/ast/ast.h"
 #include "frontend/types/type_identity.h"
 
 #include "frontend/module/program.h"
+#include "frontend/module/source_map.h"
 #include "frontend/types/type.h"
+#include "frontend/types/type_ownership.h"
 #include "frontend/types/type_printer.h"
 
 #include <algorithm>
@@ -788,6 +791,424 @@ auto specialize_call_site(MirInst* inst,
 } // namespace
 
 // ---------------------------------------------------------------------------
+// copy_out expansion
+// ---------------------------------------------------------------------------
+//
+// The prelude's `copy_out<T>(x)` is the identity.  A call to it whose T
+// is concrete is expanded, before the call could be specialized, into
+// what copies a T out of a `resource memory` domain into the enclosing
+// one:
+//   string                        -> copy_out_string(x), the prelude's
+//   class with `copy_out(self)`   -> x.copy_out(), the class's own
+//   any other class               -> the class constructed from copy_out<F>(x.f) per field
+//   enum                          -> per variant, constructed from copy_out<P>(payload)
+//   anything owning no heap memory -> left to specialize into the identity
+// The calls an expansion introduces (a field's copy_out, a container's
+// method) are expanded in the same sweep or specialized right after it,
+// so the pass runs inside the fixpoint loop ahead of each function's
+// specialization and reports whether it changed anything.
+
+struct CopyOutHooks {
+  const Decl* copy_out_decl = nullptr; // the prelude's copy_out; its specializations share it
+  const Symbol* copy_out_template = nullptr;
+  const MirFunction* copy_out_fn = nullptr; // the template, for its (generic) function type
+  const Symbol* copy_out_string = nullptr;  // the prelude's copy_out_string
+  const MirFunction* copy_out_string_fn = nullptr;
+};
+
+auto is_prelude_symbol(const Symbol* sym) -> bool {
+  return sym != nullptr && sym->module != nullptr && sym->module->is_prelude;
+}
+
+auto find_copy_out_hooks(const MirModule& module,
+                         const std::unordered_map<const Symbol*, MirFunction*>& generic_templates)
+    -> CopyOutHooks {
+  CopyOutHooks hooks;
+  for (const auto& [sym, fn] : generic_templates) {
+    if (sym->name == "copy_out" && is_prelude_symbol(sym)) {
+      hooks.copy_out_template = sym;
+      hooks.copy_out_decl = sym->decl_as_decl();
+      hooks.copy_out_fn = fn;
+    }
+  }
+  for (const auto* fn : module.functions) {
+    if (fn->symbol != nullptr && fn->symbol->name == "copy_out_string" &&
+        is_prelude_symbol(fn->symbol)) {
+      hooks.copy_out_string = fn->symbol;
+      hooks.copy_out_string_fn = fn;
+    }
+  }
+  return hooks;
+}
+
+auto function_type_of(const MirFunction* fn, TypeContext& types) -> const Type* {
+  std::vector<const Type*> params;
+  for (const auto& local : fn->locals) {
+    if (!local.is_param) {
+      break;
+    }
+    params.push_back(local.type);
+  }
+  return types.function_type(std::move(params), fn->return_type);
+}
+
+// A class's own copier, decided from its declaration: the method named
+// `copy_out`, with no type parameters of its own, that takes `self` and
+// nothing else and returns the class's own type spelled as the class
+// names itself, type parameters included (`Wrap<T>` for `class Wrap<T>`).
+// Decided there rather than from MIR shapes: a static
+// `copy_out(value: Label): Label` has one parameter but no receiver, and
+// a phantom type parameter leaves `Tag<i32>` and `Tag<string>` with the
+// same fields.
+struct MethodRef {
+  const Symbol* symbol = nullptr;
+  const MirFunction* fn = nullptr;
+};
+
+auto names_only(const QualifiedPath& path, std::string_view name) -> bool {
+  return path.segments.size() == 1 && path.segments[0] == name;
+}
+
+auto is_copier_shaped(const FunctionDecl& fn, const ClassDecl& cls) -> bool {
+  if (fn.name != "copy_out" || !fn.type_params.empty() || fn.params.size() != 1 ||
+      fn.params[0].name != "self" || fn.params[0].type != nullptr || fn.return_type == nullptr ||
+      !fn.return_type->is<NamedType>()) {
+    return false;
+  }
+  const auto& returned = fn.return_type->as<NamedType>();
+  if (!names_only(returned.name, cls.name) || returned.type_args.size() != cls.type_params.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < returned.type_args.size(); ++i) {
+    const auto* arg = returned.type_args[i];
+    if (!arg->is<NamedType>() || !arg->as<NamedType>().type_args.empty() ||
+        !names_only(arg->as<NamedType>().name, cls.type_params[i].name)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+auto copier_among(const std::vector<Decl*>& methods, const ClassDecl& cls) -> const Decl* {
+  for (const auto* method : methods) {
+    if (is_copier_shaped(method->as<FunctionDecl>(), cls)) {
+      return method;
+    }
+  }
+  return nullptr;
+}
+
+auto find_copy_out_method(const TypeStruct* receiver,
+                          const MirModule& module,
+                          const std::unordered_map<const Symbol*, MirFunction*>& generic_templates,
+                          Span span,
+                          std::vector<Diagnostic>& diagnostics) -> MethodRef {
+  const auto* class_decl = receiver->decl_id();
+  if (class_decl == nullptr || class_decl->kind() != NodeKind::ClassDecl) {
+    return {};
+  }
+  const auto& cls = class_decl->as<ClassDecl>();
+  const auto* copier = copier_among(cls.methods, cls);
+  if (copier == nullptr) {
+    // A conformance block's methods are lowered without a symbol (not
+    // lowerable to native code yet), so a copier declared only there
+    // cannot be called; say so rather than copy field by field as if
+    // the class had declared none.
+    for (const auto& conformance : cls.conformances) {
+      if (copier_among(conformance.methods, cls) != nullptr) {
+        diagnostics.push_back(Diagnostic::error(
+            span,
+            "'" + std::string(cls.name) +
+                "' declares its copy_out inside a conformance block, which cannot be "
+                "called yet: declare it directly in the class"));
+        return {};
+      }
+    }
+    return {};
+  }
+  // The template first: a specialization already made for another
+  // receiver (`Vector.copy_out$string` when `Vector<i64>` is being
+  // copied) shares the declaration and must not answer for it; the
+  // template is specialized for this receiver by the call's own type
+  // arguments.
+  for (const auto& [sym, fn] : generic_templates) {
+    if (sym != nullptr && sym->decl_as_decl() == copier) {
+      return {sym, fn};
+    }
+  }
+  for (const auto* fn : module.functions) {
+    if (fn->symbol != nullptr && fn->symbol->decl_as_decl() == copier) {
+      return {fn->symbol, fn};
+    }
+  }
+  return {};
+}
+
+// Fresh value and block ids for instructions the expansion adds.
+struct FunctionIds {
+  uint32_t next_value = 0;
+  uint32_t next_block = 0;
+  explicit FunctionIds(const MirFunction* fn) {
+    for (const auto* blk : fn->blocks) {
+      next_block = std::max(next_block, blk->id.id + 1);
+      for (const auto* inst : blk->insts) {
+        if (inst->result.valid()) {
+          next_value = std::max(next_value, inst->result.id + 1);
+        }
+      }
+    }
+  }
+  auto value() -> MirValueId {
+    return MirValueId{next_value++};
+  }
+  auto block() -> BlockId {
+    return BlockId{next_block++};
+  }
+};
+
+auto make_inst(MirContext& ctx, MirValueId result, const Type* type, Span span, MirPayload payload)
+    -> MirInst* {
+  auto* inst = ctx.alloc<MirInst>();
+  inst->result = result;
+  inst->type = type;
+  inst->span = span;
+  inst->payload = std::move(payload);
+  return inst;
+}
+
+// `copy_out<T>(value)` as fresh instructions, or `value` itself when its
+// type owns nothing.  Appended to `out`.
+auto emit_copy_of(MirValueId value,
+                  const Type* type,
+                  Span span,
+                  const CopyOutHooks& hooks,
+                  FunctionIds& ids,
+                  MirContext& ctx,
+                  TypeContext& types,
+                  std::vector<MirInst*>& out) -> MirValueId {
+  if (type == nullptr || !owns_heap_memory(type)) {
+    return value;
+  }
+  auto callee = ids.value();
+  out.push_back(make_inst(ctx,
+                          callee,
+                          function_type_of(hooks.copy_out_fn, types),
+                          span,
+                          MirFnRef{hooks.copy_out_template}));
+  auto* args = ctx.alloc<std::vector<MirValueId>>();
+  args->push_back(value);
+  auto* type_args = ctx.alloc<std::vector<const Type*>>();
+  type_args->push_back(type);
+  auto result = ids.value();
+  out.push_back(make_inst(ctx, result, type, span, MirCall{callee, args, type_args}));
+  return result;
+}
+
+// Drop the `fn_ref` that fed a call whose payload no longer calls
+// anything, so the expansion leaves no dead instruction behind.  The
+// builder and the expansion place the `fn_ref` just before its call.
+auto erase_callee_ref(MirBlock* block, size_t call_index, const MirInst* callee_ref) -> bool {
+  for (size_t i = call_index; i > 0; --i) {
+    if (block->insts[i - 1] == callee_ref) {
+      block->insts.erase(block->insts.begin() + static_cast<std::ptrdiff_t>(i - 1));
+      return true;
+    }
+  }
+  return false;
+}
+
+// Expand every `copy_out` call in `fn` whose T is concrete and owns heap
+// memory.  Returns true if anything was rewritten.
+auto expand_copy_out_calls(MirFunction* fn,
+                           const MirModule& module,
+                           const std::unordered_map<const Symbol*, MirFunction*>& generic_templates,
+                           const CopyOutHooks& hooks,
+                           MirContext& ctx,
+                           TypeContext& types,
+                           std::vector<Diagnostic>& diagnostics) -> bool {
+  if (hooks.copy_out_decl == nullptr) {
+    return false;
+  }
+  // The fn_ref each value id was defined by, for finding a call's callee.
+  std::unordered_map<uint32_t, MirInst*> defining;
+  for (auto* blk : fn->blocks) {
+    for (auto* inst : blk->insts) {
+      if (inst->result.valid()) {
+        defining[inst->result.id] = inst;
+      }
+    }
+  }
+  FunctionIds ids(fn);
+  bool changed = false;
+
+  for (size_t bi = 0; bi < fn->blocks.size(); ++bi) {
+    auto* block = fn->blocks[bi];
+    for (size_t k = 0; k < block->insts.size(); ++k) {
+      auto* inst = block->insts[k];
+      auto* call = std::get_if<MirCall>(&inst->payload);
+      if (call == nullptr || call->args == nullptr || call->args->size() != 1) {
+        continue;
+      }
+      auto def = defining.find(call->callee.id);
+      if (def == defining.end()) {
+        continue;
+      }
+      auto* callee_ref = std::get_if<MirFnRef>(&def->second->payload);
+      if (callee_ref == nullptr || callee_ref->symbol != hooks.copy_out_template) {
+        continue;
+      }
+      const Type* type = inst->type;
+      if (type == nullptr || type_has_generic(type) || !owns_heap_memory(type)) {
+        continue;
+      }
+      // A generator has no copier (its frame layout is the generator's
+      // own); one reached here came through a container's element type,
+      // past the checker's rule, and is rejected rather than aliased.
+      if (holds_generator(type)) {
+        diagnostics.push_back(
+            Diagnostic::error(inst->span,
+                              "a generator cannot be copied out of a resource block: a '" +
+                                  print_type(type) + "' leaves one through a container"));
+        continue;
+      }
+      MirValueId value = (*call->args)[0];
+      Span span = inst->span;
+
+      if (type->kind() == TypeKind::Named) {
+        // A string: the prelude copies it into the enclosing domain.
+        if (hooks.copy_out_string == nullptr) {
+          continue; // reported once, by monomorphize()
+        }
+        def->second->payload = MirFnRef{hooks.copy_out_string};
+        def->second->type = function_type_of(hooks.copy_out_string_fn, types);
+        call->explicit_type_args = nullptr;
+        changed = true;
+        continue;
+      }
+
+      if (type->kind() == TypeKind::Struct) {
+        const auto* st = static_cast<const TypeStruct*>(type);
+        auto method = find_copy_out_method(st, module, generic_templates, span, diagnostics);
+        if (method.symbol != nullptr) {
+          // The class copies itself; the receiver is the one argument.
+          def->second->payload = MirFnRef{method.symbol};
+          def->second->type = function_type_of(method.fn, types);
+          call->explicit_type_args = nullptr;
+          changed = true;
+          continue;
+        }
+        // Field by field: each owning field through its own copy_out.
+        std::vector<MirInst*> added;
+        auto* field_values = ctx.alloc<std::vector<MirValueId>>();
+        uint32_t index = 0;
+        for (const auto& field : st->fields()) {
+          auto fv = ids.value();
+          added.push_back(
+              make_inst(ctx, fv, field.type, span, MirFieldAccess{value, field.name, index}));
+          field_values->push_back(
+              emit_copy_of(fv, field.type, span, hooks, ids, ctx, types, added));
+          ++index;
+        }
+        inst->payload = MirConstruct{st, field_values};
+        if (erase_callee_ref(block, k, def->second)) {
+          --k;
+        }
+        // Inserted ahead of the construct; the sweep resumes at the
+        // second inserted instruction (the first is a field access, never
+        // a call), so a field's own copy_out call is expanded when reached.
+        block->insts.insert(
+            block->insts.begin() + static_cast<std::ptrdiff_t>(k), added.begin(), added.end());
+        for (auto* a : added) {
+          defining[a->result.id] = a;
+        }
+        changed = true;
+        continue;
+      }
+
+      if (type->kind() == TypeKind::Enum) {
+        // Per variant: the block splits at the call; each variant's block
+        // rebuilds the value from copied payloads into a temporary, and
+        // the merge block reads it back under the call's own result id.
+        const auto* en = static_cast<const TypeEnum*>(type);
+        if (erase_callee_ref(block, k, def->second)) {
+          --k;
+        }
+        LocalId temp{static_cast<uint32_t>(fn->locals.size())};
+        fn->locals.push_back(
+            {.id = temp, .symbol = nullptr, .type = type, .span = span, .is_param = false});
+        std::vector<MirInst*> post(block->insts.begin() + static_cast<std::ptrdiff_t>(k) + 1,
+                                   block->insts.end());
+        block->insts.resize(k);
+        auto* merge = ctx.alloc<MirBlock>();
+        merge->id = ids.block();
+        auto* load_place = ctx.alloc<MirPlace>();
+        load_place->local = temp;
+        inst->payload = MirLoad{load_place};
+        merge->insts.push_back(inst);
+        merge->insts.insert(merge->insts.end(), post.begin(), post.end());
+
+        const auto* i32 = types.builtin(BuiltinKind::I32);
+        auto discr = ids.value();
+        block->insts.push_back(make_inst(ctx, discr, i32, span, MirEnumDiscriminant{value}));
+        MirBlock* test_block = block;
+        const auto& variants = en->variants();
+        std::vector<MirBlock*> variant_blocks;
+        for (uint32_t v = 0; v < variants.size(); ++v) {
+          auto* var_bb = ctx.alloc<MirBlock>();
+          var_bb->id = ids.block();
+          variant_blocks.push_back(var_bb);
+          if (v + 1 < variants.size()) {
+            auto* next_test = ctx.alloc<MirBlock>();
+            next_test->id = ids.block();
+            auto tag = ids.value();
+            test_block->insts.push_back(
+                make_inst(ctx, tag, i32, span, MirConstInt{static_cast<int64_t>(v)}));
+            auto is_v = ids.value();
+            test_block->insts.push_back(make_inst(
+                ctx, is_v, types.bool_type(), span, MirBinary{BinaryOp::EqEq, discr, tag}));
+            test_block->insts.push_back(make_inst(
+                ctx, MirValueId{}, nullptr, span, MirCondBr{is_v, var_bb->id, next_test->id}));
+            fn->blocks.push_back(next_test);
+            test_block = next_test;
+          } else {
+            test_block->insts.push_back(
+                make_inst(ctx, MirValueId{}, nullptr, span, MirBr{var_bb->id}));
+          }
+          // The variant's block: copy each payload, rebuild, store, merge.
+          auto* payloads = ctx.alloc<std::vector<MirValueId>>();
+          for (uint32_t j = 0; j < variants[v].payload_types.size(); ++j) {
+            const Type* pt = variants[v].payload_types[j];
+            auto pv = ids.value();
+            var_bb->insts.push_back(make_inst(ctx, pv, pt, span, MirEnumPayload{value, v, j}));
+            payloads->push_back(emit_copy_of(pv, pt, span, hooks, ids, ctx, types, var_bb->insts));
+          }
+          auto rebuilt = ids.value();
+          var_bb->insts.push_back(
+              make_inst(ctx, rebuilt, type, span, MirEnumConstruct{en, v, payloads}));
+          auto* store_place = ctx.alloc<MirPlace>();
+          store_place->local = temp;
+          var_bb->insts.push_back(
+              make_inst(ctx, MirValueId{}, nullptr, span, MirStore{store_place, rebuilt}));
+          var_bb->insts.push_back(make_inst(ctx, MirValueId{}, nullptr, span, MirBr{merge->id}));
+          fn->blocks.push_back(var_bb);
+        }
+        fn->blocks.push_back(merge);
+        for (auto* blk : fn->blocks) {
+          for (auto* a : blk->insts) {
+            if (a->result.valid()) {
+              defining[a->result.id] = a;
+            }
+          }
+        }
+        changed = true;
+        break; // this block ends here; the loop moves on to the next block
+      }
+    }
+  }
+  return changed;
+}
+
+// ---------------------------------------------------------------------------
 // Main pass
 // ---------------------------------------------------------------------------
 
@@ -808,6 +1229,14 @@ auto monomorphize(
 
   // Specialization cache: (generic fn, type args) → specialized fn.
   SpecializationState state;
+  const auto copy_out_hooks = find_copy_out_hooks(module, generic_templates);
+  if (copy_out_hooks.copy_out_template != nullptr && copy_out_hooks.copy_out_string == nullptr) {
+    // A string could not be copied out; say so rather than leave the
+    // identity in place and let the value dangle past its block.
+    result.diagnostics.push_back(
+        Diagnostic::error(copy_out_hooks.copy_out_fn->span,
+                          "internal: the prelude declares `copy_out` but not `copy_out_string`"));
+  }
 
   // Phase 2+3+4: iterate until no new specializations are produced.
   // Use index-based iteration because specialize_call_site() may
@@ -819,6 +1248,13 @@ auto monomorphize(
     const size_t fn_count = module.functions.size();
     for (size_t fn_idx = 0; fn_idx < fn_count; ++fn_idx) {
       auto* fn = module.functions[fn_idx];
+
+      // Copies out of a domain first, per concrete type, so that what a
+      // copy_out call becomes is what gets specialized below.
+      if (expand_copy_out_calls(
+              fn, module, generic_templates, copy_out_hooks, ctx, types, result.diagnostics)) {
+        changed = true;
+      }
 
       // Per-function indexes: value types for O(1) argument lookups,
       // and the call each callee value feeds.

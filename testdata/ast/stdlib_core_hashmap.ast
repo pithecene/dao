@@ -80,6 +80,234 @@ File
       ExprBody
         FieldExpr .count
           Identifier self
+    FunctionDecl copy_out
+      Param self
+      ReturnType: HashMap<V>
+      IfStatement
+        Condition
+          BinaryExpr ==
+            FieldExpr .cap
+              Identifier self
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 0
+        Then
+          ReturnStatement
+            CallExpr
+              Callee
+                Identifier HashMap
+              Args
+                CallExpr
+                  Callee
+                    Identifier null_ptr
+                  TypeArgs
+                    string
+                CallExpr
+                  Callee
+                    Identifier null_ptr
+                  TypeArgs
+                    V
+                CallExpr
+                  Callee
+                    Identifier null_ptr
+                  TypeArgs
+                    i32
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 0
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 0
+      LetStatement key_raw
+        CallExpr
+          Callee
+            Identifier __dao_mem_alloc_outer
+          Args
+            BinaryExpr *
+              CallExpr
+                Callee
+                  Identifier size_of
+                TypeArgs
+                  string
+              FieldExpr .cap
+                Identifier self
+            CallExpr
+              Callee
+                Identifier align_of
+              TypeArgs
+                string
+      LetStatement val_raw
+        CallExpr
+          Callee
+            Identifier __dao_mem_alloc_outer
+          Args
+            BinaryExpr *
+              CallExpr
+                Callee
+                  Identifier size_of
+                TypeArgs
+                  V
+              FieldExpr .cap
+                Identifier self
+            CallExpr
+              Callee
+                Identifier align_of
+              TypeArgs
+                V
+      LetStatement state_raw
+        CallExpr
+          Callee
+            Identifier __dao_mem_alloc_outer
+          Args
+            BinaryExpr *
+              CallExpr
+                Callee
+                  Identifier size_of
+                TypeArgs
+                  i32
+              FieldExpr .cap
+                Identifier self
+            CallExpr
+              Callee
+                Identifier align_of
+              TypeArgs
+                i32
+      ModeBlock unsafe
+        LetStatement nk
+          CallExpr
+            Callee
+              Identifier ptr_cast
+            TypeArgs
+              string
+            Args
+              Identifier key_raw
+        LetStatement nv
+          CallExpr
+            Callee
+              Identifier ptr_cast
+            TypeArgs
+              V
+            Args
+              Identifier val_raw
+        LetStatement ns
+          CallExpr
+            Callee
+              Identifier ptr_cast
+            TypeArgs
+              i32
+            Args
+              Identifier state_raw
+        LetStatement i: i64
+          IntLiteral 0
+        WhileStatement
+          Condition
+            BinaryExpr <
+              Identifier i
+              FieldExpr .cap
+                Identifier self
+          LetStatement st: i32
+            UnaryExpr *
+              CallExpr
+                Callee
+                  Identifier ptr_offset
+                Args
+                  FieldExpr .state_data
+                    Identifier self
+                  Identifier i
+          Assignment
+            Target
+              UnaryExpr *
+                CallExpr
+                  Callee
+                    Identifier ptr_offset
+                  Args
+                    Identifier ns
+                    Identifier i
+            Value
+              Identifier st
+          IfStatement
+            Condition
+              BinaryExpr ==
+                Identifier st
+                IntLiteral 1
+            Then
+              Assignment
+                Target
+                  UnaryExpr *
+                    CallExpr
+                      Callee
+                        Identifier ptr_offset
+                      Args
+                        Identifier nk
+                        Identifier i
+                Value
+                  CallExpr
+                    Callee
+                      Identifier copy_out_string
+                    Args
+                      UnaryExpr *
+                        CallExpr
+                          Callee
+                            Identifier ptr_offset
+                          Args
+                            FieldExpr .key_data
+                              Identifier self
+                            Identifier i
+              Assignment
+                Target
+                  UnaryExpr *
+                    CallExpr
+                      Callee
+                        Identifier ptr_offset
+                      Args
+                        Identifier nv
+                        Identifier i
+                Value
+                  CallExpr
+                    Callee
+                      Identifier copy_out
+                    TypeArgs
+                      V
+                    Args
+                      UnaryExpr *
+                        CallExpr
+                          Callee
+                            Identifier ptr_offset
+                          Args
+                            FieldExpr .val_data
+                              Identifier self
+                            Identifier i
+          Assignment
+            Target
+              Identifier i
+            Value
+              BinaryExpr +
+                Identifier i
+                IntLiteral 1
+        ReturnStatement
+          CallExpr
+            Callee
+              Identifier HashMap
+            Args
+              Identifier nk
+              Identifier nv
+              Identifier ns
+              FieldExpr .count
+                Identifier self
+              FieldExpr .cap
+                Identifier self
+      ExpressionStatement
+        CallExpr
+          Callee
+            Identifier panic
+          Args
+            StringLiteral "unreachable"
     FunctionDecl get
       Param self
       Param key: string

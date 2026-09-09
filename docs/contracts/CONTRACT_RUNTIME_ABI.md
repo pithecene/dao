@@ -101,6 +101,7 @@ Examples:
 | `__dao_mem_free`          | `(ptr: *void): void`                 |
 | `__dao_mem_alloc_outer`   | `(size: i64, align: i64): *void`     |
 | `__dao_str_from_bytes`    | `(bytes: *u8, len: i64): string`     |
+| `__dao_str_copy_outer`    | `(s: string): string`                |
 | `__dao_conv_i32_to_f64`  | `(x: i32): f64`                       |
 | `__dao_conv_i32_to_i64`  | `(x: i32): i64`                       |
 | `__dao_conv_f64_to_i32`  | `(x: f64): i32`                       |
@@ -286,13 +287,14 @@ Allocation semantics (Task 35):
   values that must outlive the block; which domain that is only the
   runtime's domain stack knows
 - a value allocated in a domain is invalid after the domain's exit.
-  The compiler rejects a program in which a heap-owning value (a
-  string, a generator, or a class or enum holding one or a raw
-  pointer field by value) would leave its block — stored to a binding
-  declared outside it, or returned from inside it — and rejects
-  `yield` inside a block, since a domain cannot stay current across
-  a suspension.  Task 35 E1 replaces the rejection of escaping
-  values with a copy into the enclosing domain and amends this list.
+  The compiler copies what leaves a block into the enclosing domain
+  at the exit (`CONTRACT_EXECUTION_CONTEXTS.md`, law 7): a string
+  through `__dao_str_copy_outer`, which copies its bytes into the
+  parent of the current domain, and an aggregate through its own
+  `copy_out` method or field by field, allocating through
+  `__dao_mem_alloc_outer`.  A generator may not leave its block, and
+  a block may not contain `yield`, since a domain cannot stay current
+  across a suspension.
 
 ## Ownership and lifetime rules
 

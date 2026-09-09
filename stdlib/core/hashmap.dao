@@ -37,6 +37,29 @@ class HashMap<V>:
 
   fn length(self): i64 -> self.count
 
+  // A copy of this map, arrays, keys, and values, in the enclosing
+  // domain: what `copy_out` does for a map.
+  fn copy_out(self): HashMap<V>
+    if self.cap == to_i64(0):
+      return HashMap(null_ptr<string>(), null_ptr<V>(), null_ptr<i32>(), to_i64(0), to_i64(0))
+    let key_raw = __dao_mem_alloc_outer(size_of<string>() * self.cap, align_of<string>())
+    let val_raw = __dao_mem_alloc_outer(size_of<V>() * self.cap, align_of<V>())
+    let state_raw = __dao_mem_alloc_outer(size_of<i32>() * self.cap, align_of<i32>())
+    mode unsafe =>
+      let nk = ptr_cast<string>(key_raw)
+      let nv = ptr_cast<V>(val_raw)
+      let ns = ptr_cast<i32>(state_raw)
+      let i: i64 = 0
+      while i < self.cap:
+        let st: i32 = *ptr_offset(self.state_data, i)
+        *ptr_offset(ns, i) = st
+        if st == 1:
+          *ptr_offset(nk, i) = copy_out_string(*ptr_offset(self.key_data, i))
+          *ptr_offset(nv, i) = copy_out<V>(*ptr_offset(self.val_data, i))
+        i = i + 1
+      return HashMap(nk, nv, ns, self.count, self.cap)
+    panic("unreachable")
+
   fn get(self, key: string): Option<V>
     if self.cap == to_i64(0):
       return Option::None

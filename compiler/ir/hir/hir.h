@@ -116,6 +116,9 @@ struct HirResource {
   std::string_view resource_kind;
   std::string_view resource_name;
   std::vector<HirStmt*> body;
+  // Bindings declared outside the block that it stores to: copied into
+  // the enclosing domain at the block's exits when they were stored to.
+  std::vector<const Symbol*> escapes;
 };
 
 struct HirBreak {};

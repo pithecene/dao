@@ -518,6 +518,124 @@ File
       ExprBody
         FieldExpr .len
           Identifier self
+    FunctionDecl copy_out
+      Param self
+      ReturnType: Vector<T>
+      LetStatement elem_size: i64
+        CallExpr
+          Callee
+            Identifier size_of
+          TypeArgs
+            T
+      LetStatement data_raw
+        CallExpr
+          Callee
+            Identifier __dao_mem_alloc_outer
+          Args
+            BinaryExpr *
+              Identifier elem_size
+              FieldExpr .cap
+                Identifier self
+            CallExpr
+              Callee
+                Identifier align_of
+              TypeArgs
+                T
+      LetStatement gen_raw
+        CallExpr
+          Callee
+            Identifier __dao_mem_alloc_outer
+          Args
+            CallExpr
+              Callee
+                Identifier size_of
+              TypeArgs
+                i64
+            CallExpr
+              Callee
+                Identifier align_of
+              TypeArgs
+                i64
+      ModeBlock unsafe
+        LetStatement data
+          CallExpr
+            Callee
+              Identifier ptr_cast
+            TypeArgs
+              T
+            Args
+              Identifier data_raw
+        LetStatement i: i64
+          IntLiteral 0
+        WhileStatement
+          Condition
+            BinaryExpr <
+              Identifier i
+              FieldExpr .len
+                Identifier self
+          Assignment
+            Target
+              UnaryExpr *
+                CallExpr
+                  Callee
+                    Identifier ptr_offset
+                  Args
+                    Identifier data
+                    Identifier i
+            Value
+              CallExpr
+                Callee
+                  Identifier copy_out
+                TypeArgs
+                  T
+                Args
+                  UnaryExpr *
+                    CallExpr
+                      Callee
+                        Identifier ptr_offset
+                      Args
+                        FieldExpr .data
+                          Identifier self
+                        Identifier i
+          Assignment
+            Target
+              Identifier i
+            Value
+              BinaryExpr +
+                Identifier i
+                IntLiteral 1
+        LetStatement gen
+          CallExpr
+            Callee
+              Identifier ptr_cast
+            TypeArgs
+              i64
+            Args
+              Identifier gen_raw
+        Assignment
+          Target
+            UnaryExpr *
+              Identifier gen
+          Value
+            FieldExpr .len
+              Identifier self
+        ReturnStatement
+          CallExpr
+            Callee
+              Identifier Vector
+            Args
+              Identifier data
+              FieldExpr .len
+                Identifier self
+              FieldExpr .cap
+                Identifier self
+              Identifier gen
+      ExpressionStatement
+        CallExpr
+          Callee
+            Identifier panic
+          Args
+            StringLiteral "unreachable"
     FunctionDecl iter
       Param self
       ReturnType: Generator<T>

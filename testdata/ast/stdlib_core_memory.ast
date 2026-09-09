@@ -13,3 +13,7 @@ File
   ExternFunctionDecl __dao_mem_free
     Param ptr: *void
     ReturnType: void
+  ExternFunctionDecl __dao_mem_alloc_outer
+    Param size: i64
+    Param align: i64
+    ReturnType: *void

@@ -259,6 +259,15 @@ void __dao_mem_free(void *ptr) {
   free(ptr);
 }
 
+struct dao_string __dao_str_copy_outer(const struct dao_string* s) {
+  if (s == NULL || s->len <= 0 || s->ptr == NULL) {
+    return (struct dao_string){.ptr = NULL, .len = 0};
+  }
+  char* buf = (char*)__dao_mem_alloc_outer(s->len, 1);
+  memcpy(buf, s->ptr, (size_t)s->len);
+  return (struct dao_string){.ptr = buf, .len = s->len};
+}
+
 struct dao_string __dao_str_from_bytes(const char *bytes, int64_t len) {
   if (len <= 0 || bytes == NULL) {
     return (struct dao_string){.ptr = NULL, .len = 0};

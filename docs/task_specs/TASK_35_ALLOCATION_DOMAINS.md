@@ -190,20 +190,26 @@ can read off the source.
 
 ## 6. Compiler changes
 
-- **Backend, copy-out.**  At every `MirResourceExit` the backend emits,
-  before the exit call, a copy into the enclosing domain for each
-  escaping value (§3.3).  The MIR builder already tracks active regions
-  and emits exits on every path; it gains, per region, the set of
-  outer bindings at the root of a place stored to within it, one dirty
-  flag per such binding (a local the region's entry clears and each
-  such store inside sets), and, on a `return` exit, the return value.  A fall-through or
-  `break` exit copies each binding under its flag; a `return` exit
-  copies the return value only (§3.3).  Copies are emitted through per-type copier functions the
-  backend generates on demand (`dao.copy.<mangled type>`).  The copy
+- **MIR builder, copy-out.**  At every region exit the MIR builder
+  emits, before the exit call, the copies §3.3 calls for.  It already
+  tracks active regions and emits exits on every path; per `resource`
+  region it keeps one dirty flag per outer binding stored to inside
+  it (a `bool` local the region's entry clears and each store rooted
+  at the binding sets) and copies each binding under its flag at a
+  fall-through or `break` exit; a `return` or `?` exit copies the
+  carried value only.  A copy is a call to the prelude intrinsic
+  `copy_out<T>(x: T): T` (`core::builtins`), whose declared body is
+  the identity; the monomorphizer, once types are concrete, replaces
+  each call with what the static type needs: `string` through
+  `__dao_str_copy_outer`; a class declaring a `copy_out(self)` method
+  returning its own type through that method (`Vector` and `HashMap`
+  do, rebuilding their buffer through `__dao_mem_alloc_outer`); any
+  other class field by field and enum by variant; scalars and pointer
+  values unchanged, the call removed.  The copy
   must be made *before* the exit call — its source is in the domain
   about to be reclaimed — and must land in the *enclosing* domain, so
-  copiers allocate through one new hook, `__dao_mem_alloc_outer(size,
-  align)`, which allocates in the parent of the current domain: the
+  copiers allocate through `__dao_mem_alloc_outer(size,
+  align)` and `__dao_str_copy_outer(s)`, which allocate in the parent of the current domain: the
   domain that becomes current at the exit about to happen.  Which
   domain that is only the runtime knows.  A function whose outermost
   `resource` block runs while its caller has a domain open must copy
@@ -214,10 +220,11 @@ can read off the source.
   removes.  The runtime's domain stack has the answer; the hook asks
   it.
 - **Type checker.**  Records, for each `resource` block, the outer
-  bindings assigned inside it (it already knows binding scopes); no
-  new diagnostics in this slice.
-- **HIR/MIR.**  `HirResource` gains the escaping-binding list; the MIR
-  region record carries it to the exit instruction.
+  bindings stored to inside it (it already knows binding scopes); of
+  the E0 rejections only the generator ones remain (§3.3), and
+  `yield` inside a block.
+- **HIR/MIR.**  `HirResource` carries the escaping-binding list; the
+  MIR builder's region record carries it to the exits.
 
 ## 7. Standard library
 

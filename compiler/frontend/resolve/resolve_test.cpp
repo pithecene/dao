@@ -348,7 +348,7 @@ suite<"resolve_modules"> resolve_modules = [] {
     // `size_of` and its family are prelude declarations the backend
     // answers with inline IR; shadowing a prelude name is allowed
     // (§7.6) but not when the name's meaning belongs to the compiler.
-    for (auto name : {"size_of", "align_of", "ptr_offset"}) {
+    for (auto name : {"size_of", "align_of", "ptr_offset", "copy_out"}) {
       auto entry = resolve_program(
           {{"main.dao",
             std::string("module app::main\nfn ") + name + "(): i32 -> 0\nfn main(): i32 -> 0\n"}});

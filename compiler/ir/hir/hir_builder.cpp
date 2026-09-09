@@ -266,10 +266,13 @@ auto HirBuilder::lower_stmt(const Stmt* stmt) -> HirStmt* {
   case NodeKind::ResourceBlock: {
     const auto& rb = stmt->as<ResourceBlock>();
     auto body = lower_body(rb.body);
+    std::vector<const Symbol*> escapes;
+    if (const auto* recorded = typed_.typed.resource_escapes(stmt)) {
+      escapes = *recorded;
+    }
     return ctx_.alloc<HirStmt>(
         stmt->span,
-        HirResource{rb.resource_kind, rb.resource_name,
-                    std::move(body)});
+        HirResource{rb.resource_kind, rb.resource_name, std::move(body), std::move(escapes)});
   }
 
   case NodeKind::YieldStatement: {
