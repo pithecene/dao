@@ -8,6 +8,7 @@
 #include <llvm/Support/Program.h>
 
 #include <boost/ut.hpp>
+#include <cctype>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -527,12 +528,16 @@ suite<"driver_cli"> driver_cli_suite = [] {
       expect(dumped.out.find(expected) != std::string::npos)
           << "no `" << expected << "` in the MIR: " << dumped.out;
     }
-    // The one identity specialization is for Vector<i64>'s non-owning
-    // element type; every owning type's copy was expanded.
+    // Identity specializations survive only for types owning nothing
+    // (scalars such as the i64 element of Vector<i64>, the u8 of the
+    // prelude's Builder); every owning type's copy was expanded.  Class
+    // names are capitalized and `string` is the one lowercase owner.
     for (size_t at = dumped.out.find("fn copy_out$"); at != std::string::npos;
          at = dumped.out.find("fn copy_out$", at + 1)) {
-      expect(dumped.out.compare(at, 15, "fn copy_out$i64") == 0)
-          << "an identity copy_out specialization was left behind: " << dumped.out.substr(at, 40);
+      const size_t name_at = at + std::string_view("fn copy_out$").size();
+      const auto name = dumped.out.substr(name_at, dumped.out.find('(', name_at) - name_at);
+      expect(name != "string" && !name.empty() && std::islower(static_cast<unsigned char>(name[0])))
+          << "an identity copy_out specialization was left behind for `" << name << "`";
     }
     // A method named copy_out with another signature is not the copier:
     // extra parameters, another return type, another instantiation of

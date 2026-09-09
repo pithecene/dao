@@ -533,7 +533,7 @@ See `docs/task_specs/TASK_30_BOOTSTRAP_LLVM_BACKEND.md` and
 
 ### Task 35 — Allocation Domains
 
-Status: **E3 in progress** — `docs/task_specs/TASK_35_ALLOCATION_DOMAINS.md`;
+Status: **complete** — `docs/task_specs/TASK_35_ALLOCATION_DOMAINS.md`;
 `resource memory` is an arena: the runtime keeps a domain stack of
 chunked arenas, every string-, frame-, and file-producing hook
 allocates through the memory hooks, `__dao_mem_free` is a no-op on
@@ -551,14 +551,20 @@ grows amortized and becomes a string once, through
 `__dao_str_from_bytes`, so a loop of appends is linear and its dead
 buffers are the domain's.  The bootstrap pipeline drivers open one
 block per stage call and the LLVM text serializer assembles through
-`Builder` (E3); the audit's peak column (`docs/bootstrap_closure.md`,
-6 GiB probe bound) fell from 5.5–16 GiB to 1.5–1.9 GiB for the lexer,
-parser, and graph programs and 3.1 GiB for the resolver; the typecheck,
-hir, and mir programs still exceed the bound in their typecheck stage,
-and the llvm program dies in parse as before.
-E3's acceptance bar (§10) — every program under 2 GiB — is not met
-yet: the typecheck stage's own scratch (its expression-key strings and
-forked tables) must run in domains of its own before E3 is delivered.
+`Builder` (E3).  What the audit then showed was not scratch the domains
+could reclaim but scratch the prelude's containers made on every
+write: `HashMap.set` and `Vector.set` allocated fresh storage per call,
+so a map or vector threaded through a pass copied its whole table per
+write (the typecheck stage: 2.7 GiB of map copies for the lexer
+program; the MIR stage: 6.3 GiB of node-vector copies for the
+typecheck program).  Both now write in place for the latest value
+with versioned slots (maps) and an overwrite log (vectors), so a
+stale value still reads exactly its own.  The audit's peak column
+(`docs/bootstrap_closure.md`, 6 GiB probe bound) fell from 5.5–16 GiB
+to 47–127 MiB for every program, stage times to a second or less, and
+§10's acceptance bar — every program under 2 GiB — is met.  The
+llvm stage's `Vector.get` panic and the llvm program's parse crash are
+earlier bootstrap defects, not memory.
 
 **Objective**: make `resource memory <name> =>` a real arena: every
 allocation inside comes from the domain and is reclaimed wholesale at
