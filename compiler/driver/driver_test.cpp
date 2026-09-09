@@ -477,6 +477,11 @@ suite<"driver_cli"> driver_cli_suite = [] {
                              "  text: string\n\n"
                              "  fn copy_out(value: Stat): Stat\n"
                              "    return Stat(\"wrong\")\n\n"
+                             "class Gen:\n"
+                             "  text: string\n\n"
+                             "  fn copy_out<U>(self): Gen\n"
+                             "    return Gen(\"wrong\")\n\n"
+
                              "enum class Slot:\n"
                              "  Empty\n"
                              "  Full(text: string)\n\n"
@@ -494,6 +499,8 @@ suite<"driver_cli"> driver_cli_suite = [] {
                              "  let wrap: Wrap<string> = Wrap(\"w\")\n"
                              "  let tag: Tag<string> = Tag(\"t\")\n"
                              "  let stat: Stat = Stat(\"s\")\n"
+                             "  let gen: Gen = Gen(\"g\")\n"
+
                              "  let slot: Slot = Slot::Empty\n"
                              "  resource memory pool =>\n"
                              "    box = Box(\"in\")\n"
@@ -504,6 +511,8 @@ suite<"driver_cli"> driver_cli_suite = [] {
                              "    wrap = Wrap(\"in\")\n"
                              "    tag = Tag(\"in\")\n"
                              "    stat = Stat(\"in\")\n"
+                             "    gen = Gen(\"in\")\n"
+
                              "    slot = Slot::Full(text = \"in\")\n"
                              "  return label.count\n");
     auto dumped = run_daoc(scratch, {"mir", root.string()});
@@ -527,16 +536,40 @@ suite<"driver_cli"> driver_cli_suite = [] {
     }
     // A method named copy_out with another signature is not the copier:
     // extra parameters, another return type, another instantiation of
-    // the class (even one a phantom parameter cannot tell apart), or no
-    // receiver at all.
+    // the class (even one a phantom parameter cannot tell apart), no
+    // receiver at all, or type parameters of its own.
     for (auto not_a_copier : {"fn_ref Odd.copy_out ",
                               "fn_ref Other.copy_out ",
                               "fn_ref Wrap.copy_out",
                               "fn_ref Tag.copy_out",
-                              "fn_ref Stat.copy_out"}) {
+                              "fn_ref Stat.copy_out",
+                              "fn_ref Gen.copy_out"}) {
       expect(dumped.out.find(not_a_copier) == std::string::npos)
           << "`" << not_a_copier << "` was taken for the copier: " << dumped.out;
     }
+  };
+
+  "a copier declared in a conformance block is diagnosed"_test = [] {
+    // Conformance-block methods are lowered without a symbol, so such a
+    // copy_out cannot be called; the class must declare it directly.
+    const Scratch scratch("copy-out-conformance");
+    auto root = scratch.file("main.dao",
+                             "module app::main\n\n"
+                             "concept Copier:\n"
+                             "  fn copy_out(self): Conf\n\n"
+                             "class Conf:\n"
+                             "  text: string\n\n"
+                             "  as Copier:\n"
+                             "    fn copy_out(self): Conf\n"
+                             "      return Conf(self.text)\n\n"
+                             "fn main(): i32\n"
+                             "  let conf: Conf = Conf(\"c\")\n"
+                             "  resource memory pool =>\n"
+                             "    conf = Conf(\"in\")\n"
+                             "  return 0\n");
+    auto dumped = run_daoc(scratch, {"mir", root.string()});
+    expect(dumped.exit_code != 0) << "a conformance-block copier was silently ignored";
+    expect(dumped.err_says("declares its copy_out inside a conformance block")) << dumped.err;
   };
 
   "an extension's copy_out is not the class's copier"_test = [] {
