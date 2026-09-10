@@ -123,7 +123,12 @@ files that parse clean or in a declaration that survives recovery.
    non-prelude module — its own declarations.  A prelude module's
    declarations go into the shared scope; its imports stay in its own
    module scope, so an `import` in a prelude module binds there and
-   nowhere else (§3).
+   nowhere else (§3).  An import binding is checked against the
+   module's own export table before it is declared — the collision
+   §3.3 forbids is between a binding and the module's own top-level
+   declaration, which for a prelude module live in different scopes —
+   and diagnoses `duplicate declaration` as it does today for an
+   ordinary module.
 
 The single-file `resolve` path uses the same layout with an empty
 prelude scope, so scope indices mean one thing in both paths:
@@ -264,6 +269,9 @@ under `stdlib/core/` with `is_prelude`):
 - **prelude import isolation** — an `import` in a prelude module binds
   in that module only: another module's unqualified use of the binding
   is `unknown name`.
+- **prelude import collision** — a prelude module with its own
+  `fn two` and `import core::two` diagnoses `duplicate declaration
+  'two'`; the binding never shadows the declaration.
 - **per-module exports** — after `import core::greet`, `greet::other`
   (declared in `core::other`) diagnoses `module 'greet' has no
   exported symbol 'other'`, while `other` resolves unqualified.
