@@ -124,6 +124,10 @@ Rules:
   comma-separated, multiline when inside parens
 - anonymous positional payloads are not allowed — all fields must be
   named
+- a variant is reached through its enum with `::`, in expressions and
+  in patterns: `Option::None`, `Option::Some(value = v)`,
+  `Expr::Call(callee, args):`.  `.` after a type name is field access
+  and is diagnosed; the same rule holds for `enum`
 - construction uses named fields: `Expr::Call(callee = f, args = a)`
 - match is exhaustive and uses named destructuring:
   `Expr::Call(callee, args):` or `Expr::Call as c:` for field access

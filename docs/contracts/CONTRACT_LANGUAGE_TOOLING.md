@@ -123,7 +123,7 @@ Literals and uses:
   receiver, enum-variant path head, concept reference, generic
   parameter)
 - `use.variant` — an enum variant referenced through its enum
-  (`Color::Red`, `Option.Some` in expressions and patterns)
+  (`Color::Red`, `Option::Some` in expressions and patterns)
 
 ## Frozen Initial LSP Capability Slice
 
