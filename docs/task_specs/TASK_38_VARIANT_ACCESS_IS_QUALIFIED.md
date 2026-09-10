@@ -21,6 +21,14 @@ with a diagnostic that names the `::` spelling; the bootstrap pipeline
 types and lowers `Enum::Variant` constructors and patterns; and every
 source in the repository uses `::`.
 
+The ADR's migration path binds the construction form too: a variant
+with named fields is constructed by name, `Enum::Variant(field = v)`,
+and the host already enforces that on the `::` path (positional
+arguments to an `enum class` variant are rejected).  The dot form was
+the leak through which positional construction survived — 213 sites in
+the corpus.  Those move to named construction; the bootstrap parser,
+type checker, and HIR gain named call arguments so its own sources can.
+
 ## 2. Why this task exists now
 
 The host never rejected the dot form.  Its parser reads
@@ -91,8 +99,16 @@ expression, `lower_call_expr` lowers a `QualNameE` callee to
   without reading the variant's payload count; it now compares the
   argument count with the payload count of the variant the callee
   names and diagnoses a mismatch;
-- tests in the type checker and HIR suites for a `::` constructor, a
-  wrong-arity construction, and a `::` pattern.
+- named call arguments: `parse_call_suffix` reads `name = expr` (the
+  host's lookahead: an identifier followed by `=`), `CallE` carries the
+  names beside the arguments, the enum declaration keeps each payload
+  field's name beside its type, and a construction of a variant with
+  named fields is checked by field name — every field named once, no
+  positional argument — and lowered to HIR in declaration order;
+- tests in the parser, type checker, and HIR suites for a `::`
+  constructor by name, a positional construction of a named-field
+  variant (diagnosed), an unknown or missing field name (diagnosed),
+  a wrong arity, and a `::` pattern.
 
 The `FieldE` path stays what it is — field access on a value — and
 types nothing for an enum object, as today; after the corpus moves, no
@@ -100,15 +116,20 @@ bootstrap source exercises it.
 
 ## 6. Corpus migration
 
-Mechanical, in one commit, over every tracked `.dao` file and the test
-strings inside the C++ tests: `\b([A-Z][A-Za-z0-9_]*)\.([A-Z][A-Za-z0-9_]*)\b`
-→ `\1::\2`.  The match is a capitalized identifier, a dot, and a
-capitalized identifier: a variant of an enum whose name is a type name.
-Fields and methods are lowercase by convention throughout the
-repository, so no field access matches; the rewrite is then checked by
-the host building every program (`task test`, `task bootstrap-test`)
-and by the rejection diagnostic, which would name any site the regex
-missed.  Docs and comments that show source are edited by hand:
+Scripted, in one commit, over every tracked `.dao` file and the test
+strings inside the C++ tests.  Two rewrites: the separator,
+`\b([A-Z][A-Za-z0-9_]*)\.([A-Z][A-Za-z0-9_]*)\b` → `\1::\2` (a
+capitalized identifier, a dot, and a capitalized identifier — fields
+and methods are lowercase by convention throughout the repository, so
+no field access matches); and, for each construction of a variant with
+named fields that is a call and no match pattern (a pattern line ends
+in `):`), the arguments get their field names in declaration order,
+read from the enum declarations in the same sources
+(`Option::Some(v)` → `Option::Some(value = v)`,
+`Node::CallE(c, lp, n, tlp, tn)` → `Node::CallE(callee = c, …)`).  The
+rewrite is then checked by the host building every program
+(`task test`, `task bootstrap-test`) and by the rejection diagnostics,
+which name any site either pass missed.  Docs and comments that show source are edited by hand:
 `TASK_18_ENUM_PAYLOADS.md`, the plan, the two contracts,
 `bootstrap/README.md` (`TK.Error`), the Task 36 and Task 37 specs
 (`Node.CallE`, `Node.ResourceS`), and the `Result.Err` comment in
@@ -121,16 +142,17 @@ over every tracked file close the inventory.
 Three PRs on stack #292, above Task 37:
 
 1. This spec, the three contract edits, the plan entry.
-2. Bootstrap: two-segment variant validation and the `::` tests (green
-   with the corpus still on `.`; both spellings type-check in the
-   bootstrap until the next PR).
-3. Host rejection, host tests, the corpus migration, goldens, docs,
-   the audit rerun.
+2. Bootstrap: two-segment variant validation, arity, named call
+   arguments and named construction, with their tests (green with the
+   corpus still on `.`: the dot form types nothing in the bootstrap, as
+   today, until the next PR removes it).
+3. Host rejection, host tests, the corpus migration (both rewrites),
+   goldens, docs, the audit rerun.
 
 PR 3 after PR 2 keeps every PR green: the bootstrap's own sources are
 inputs to the host, so the host's rejection and the corpus migration
-land together, and the bootstrap must already type the `::` form its
-migrated sources use.
+land together, and the bootstrap must already parse and type the named
+`::` constructions its migrated sources use.
 
 ## 8. Tests
 
@@ -138,12 +160,15 @@ migrated sources use.
   as a constructor, `Option.Some(v):` as a pattern each diagnose
   `variant access uses '::'`; the `::` spellings still type.
 - Host: existing suites unchanged in count; goldens regenerated.
-- Bootstrap: type checker — `Color::Red` types as `Color`;
-  `Color::Blue` on an enum without `Blue` diagnoses; `Shape::Circle()`
-  and `Shape::Circle(1, 2)` against `Circle(r: i64)` each diagnose the
-  arity; fieldless `::` patterns check against the scrutinee.  HIR — a
-  `::` constructor and a `::` pattern lower with `HirQualName` callees
-  and no diagnostics.
+- Bootstrap: parser — `f(a = 1, b)` reads one named and one positional
+  argument; `f(a == 1)` reads a comparison.  Type checker —
+  `Color::Red` types as `Color`; `Color::Blue` on an enum without
+  `Blue` diagnoses; `Shape::Circle(r = 3)` types as `Shape`;
+  `Shape::Circle(3)` diagnoses the positional argument;
+  `Shape::Circle(q = 3)` and `Shape::Circle()` diagnose the field;
+  fieldless `::` patterns check against the scrutinee.  HIR — a named
+  `::` constructor lowers its arguments in declaration order with a
+  `HirQualName` callee; a `::` pattern lowers with no diagnostics.
 - Corpus: `task test`, `task bootstrap-test`, the closure audit rerun —
   with the corpus on `::` the resolve column's `unknown name` histogram
   is expected to move, since the dot form's enum head was a `FieldE`
@@ -151,8 +176,10 @@ migrated sources use.
 
 ## 9. Non-goals
 
-- Named-field construction (`Enum::Variant(field = v)`) beyond what the
-  host parses today.
+- Named arguments anywhere but a variant construction: the bootstrap
+  reads them at every call, and types them only there (a function call
+  with a named argument is diagnosed).
+- The `..` rest marker in patterns.
 - Nested or or-patterns.
 - Any change to `.` as field access on values.
 
