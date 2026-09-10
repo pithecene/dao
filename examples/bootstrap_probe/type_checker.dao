@@ -74,18 +74,18 @@ fn is_whitespace(ch: i32): bool
 fn classify_keyword(source: string, offset: i64, len: i64): TK
   let word: string = substring(source, offset, len)
   if word == "let":
-    return TK.KwLet
+    return TK::KwLet
   if word == "true":
-    return TK.True
+    return TK::True
   if word == "false":
-    return TK.False
+    return TK::False
   if word == "and":
-    return TK.KwAnd
+    return TK::KwAnd
   if word == "or":
-    return TK.KwOr
+    return TK::KwOr
   if word == "not":
-    return TK.KwNot
-  return TK.Ident
+    return TK::KwNot
+  return TK::Ident
 
 fn lex(source: string): Vector<Token>
   let tokens = Vector<Token>::new()
@@ -102,7 +102,7 @@ fn lex(source: string): Vector<Token>
           end = end + 1
         else:
           break
-      tokens = tokens.push(make_token(TK.Int, pos, end - pos))
+      tokens = tokens.push(make_token(TK::Int, pos, end - pos))
       pos = end
     else if is_alpha(ch):
       let end: i64 = pos + 1
@@ -115,48 +115,48 @@ fn lex(source: string): Vector<Token>
       tokens = tokens.push(make_token(kind, pos, end - pos))
       pos = end
     else if ch == 43:
-      tokens = tokens.push(make_token(TK.Plus, pos, to_i64(1)))
+      tokens = tokens.push(make_token(TK::Plus, pos, to_i64(1)))
       pos = pos + 1
     else if ch == 45:
-      tokens = tokens.push(make_token(TK.Minus, pos, to_i64(1)))
+      tokens = tokens.push(make_token(TK::Minus, pos, to_i64(1)))
       pos = pos + 1
     else if ch == 42:
-      tokens = tokens.push(make_token(TK.Star, pos, to_i64(1)))
+      tokens = tokens.push(make_token(TK::Star, pos, to_i64(1)))
       pos = pos + 1
     else if ch == 47:
-      tokens = tokens.push(make_token(TK.Slash, pos, to_i64(1)))
+      tokens = tokens.push(make_token(TK::Slash, pos, to_i64(1)))
       pos = pos + 1
     else if ch == 60:
-      tokens = tokens.push(make_token(TK.Lt, pos, to_i64(1)))
+      tokens = tokens.push(make_token(TK::Lt, pos, to_i64(1)))
       pos = pos + 1
     else if ch == 62:
-      tokens = tokens.push(make_token(TK.Gt, pos, to_i64(1)))
+      tokens = tokens.push(make_token(TK::Gt, pos, to_i64(1)))
       pos = pos + 1
     else if ch == 61:
       // '=' or '=='
       if pos + 1 < slen:
         if char_at(source, pos + 1) == 61:
-          tokens = tokens.push(make_token(TK.EqEq, pos, to_i64(2)))
+          tokens = tokens.push(make_token(TK::EqEq, pos, to_i64(2)))
           pos = pos + 2
         else:
-          tokens = tokens.push(make_token(TK.Assign, pos, to_i64(1)))
+          tokens = tokens.push(make_token(TK::Assign, pos, to_i64(1)))
           pos = pos + 1
       else:
-        tokens = tokens.push(make_token(TK.Assign, pos, to_i64(1)))
+        tokens = tokens.push(make_token(TK::Assign, pos, to_i64(1)))
         pos = pos + 1
     else if ch == 40:
-      tokens = tokens.push(make_token(TK.LParen, pos, to_i64(1)))
+      tokens = tokens.push(make_token(TK::LParen, pos, to_i64(1)))
       pos = pos + 1
     else if ch == 41:
-      tokens = tokens.push(make_token(TK.RParen, pos, to_i64(1)))
+      tokens = tokens.push(make_token(TK::RParen, pos, to_i64(1)))
       pos = pos + 1
     else if ch == 59:
-      tokens = tokens.push(make_token(TK.Semi, pos, to_i64(1)))
+      tokens = tokens.push(make_token(TK::Semi, pos, to_i64(1)))
       pos = pos + 1
     else:
-      tokens = tokens.push(make_token(TK.Error, pos, to_i64(1)))
+      tokens = tokens.push(make_token(TK::Error, pos, to_i64(1)))
       pos = pos + 1
-  tokens = tokens.push(make_token(TK.Eof, slen, to_i64(0)))
+  tokens = tokens.push(make_token(TK::Eof, slen, to_i64(0)))
   return tokens
 
 // ---------------------------------------------------------------
@@ -197,7 +197,7 @@ class ParseState:
 
 fn peek(tokens: Vector<Token>, pos: i64): TK
   if pos >= tokens.length():
-    return TK.Eof
+    return TK::Eof
   let tok: Token = tokens.get(pos)
   return tok.kind
 
@@ -231,34 +231,34 @@ fn token_text_to_i64(source: string, tok: Token): i64
 fn parse_primary(tokens: Vector<Token>, source: string, arena: Vector<Node>, pos: i64): ExprResult
   let kind: TK = peek(tokens, pos)
 
-  if kind == TK.Int:
+  if kind == TK::Int:
     let tok: Token = tokens.get(pos)
     let val: i64 = token_text_to_i64(source, tok)
     let idx: i64 = arena.length()
-    let new_arena: Vector<Node> = arena.push(Node.IntLit(val))
+    let new_arena: Vector<Node> = arena.push(Node::IntLit(value = val))
     return ExprResult(new_arena, idx, pos + 1)
 
-  if kind == TK.True:
+  if kind == TK::True:
     let idx: i64 = arena.length()
-    let new_arena: Vector<Node> = arena.push(Node.BoolLit(to_i64(1)))
+    let new_arena: Vector<Node> = arena.push(Node::BoolLit(value = to_i64(1)))
     return ExprResult(new_arena, idx, pos + 1)
 
-  if kind == TK.False:
+  if kind == TK::False:
     let idx: i64 = arena.length()
-    let new_arena: Vector<Node> = arena.push(Node.BoolLit(to_i64(0)))
+    let new_arena: Vector<Node> = arena.push(Node::BoolLit(value = to_i64(0)))
     return ExprResult(new_arena, idx, pos + 1)
 
-  if kind == TK.Ident:
+  if kind == TK::Ident:
     let tok: Token = tokens.get(pos)
     let idx: i64 = arena.length()
-    let new_arena: Vector<Node> = arena.push(Node.VarRef(tok.offset, tok.len))
+    let new_arena: Vector<Node> = arena.push(Node::VarRef(name = tok.offset, span = tok.len))
     return ExprResult(new_arena, idx, pos + 1)
 
-  if kind == TK.LParen:
+  if kind == TK::LParen:
     let inner: ExprResult = parse_expr(tokens, source, arena, pos + 1)
     if is_expr_ok(inner) == false:
       return inner
-    if peek(tokens, inner.pos) != TK.RParen:
+    if peek(tokens, inner.pos) != TK::RParen:
       return expr_error(inner.arena, inner.pos)
     return ExprResult(inner.arena, inner.node, inner.pos + 1)
 
@@ -267,22 +267,22 @@ fn parse_primary(tokens: Vector<Token>, source: string, arena: Vector<Node>, pos
 fn parse_unary(tokens: Vector<Token>, source: string, arena: Vector<Node>, pos: i64): ExprResult
   let kind: TK = peek(tokens, pos)
 
-  if kind == TK.Minus:
+  if kind == TK::Minus:
     let operand: ExprResult = parse_unary(tokens, source, arena, pos + 1)
     if is_expr_ok(operand) == false:
       return operand
     let idx: i64 = operand.arena.length()
     let new_arena: Vector<Node> = operand.arena.push(
-      Node.Unary(TK.Minus, operand.node))
+      Node::Unary(op = TK::Minus, operand = operand.node))
     return ExprResult(new_arena, idx, operand.pos)
 
-  if kind == TK.KwNot:
+  if kind == TK::KwNot:
     let operand: ExprResult = parse_unary(tokens, source, arena, pos + 1)
     if is_expr_ok(operand) == false:
       return operand
     let idx: i64 = operand.arena.length()
     let new_arena: Vector<Node> = operand.arena.push(
-      Node.Unary(TK.KwNot, operand.node))
+      Node::Unary(op = TK::KwNot, operand = operand.node))
     return ExprResult(new_arena, idx, operand.pos)
 
   return parse_primary(tokens, source, arena, pos)
@@ -295,13 +295,13 @@ fn parse_multiplicative(tokens: Vector<Token>, source: string, arena: Vector<Nod
   let done: bool = false
   while done == false:
     let op: TK = peek(tokens, result.pos)
-    if op == TK.Star or op == TK.Slash:
+    if op == TK::Star or op == TK::Slash:
       let right: ExprResult = parse_unary(tokens, source, result.arena, result.pos + 1)
       if is_expr_ok(right) == false:
         return right
       let idx: i64 = right.arena.length()
       let new_arena: Vector<Node> = right.arena.push(
-        Node.Binary(op, result.node, right.node))
+        Node::Binary(op = op, left = result.node, right = right.node))
       result = ExprResult(new_arena, idx, right.pos)
     else:
       done = true
@@ -315,13 +315,13 @@ fn parse_additive(tokens: Vector<Token>, source: string, arena: Vector<Node>, po
   let done: bool = false
   while done == false:
     let op: TK = peek(tokens, result.pos)
-    if op == TK.Plus or op == TK.Minus:
+    if op == TK::Plus or op == TK::Minus:
       let right: ExprResult = parse_multiplicative(tokens, source, result.arena, result.pos + 1)
       if is_expr_ok(right) == false:
         return right
       let idx: i64 = right.arena.length()
       let new_arena: Vector<Node> = right.arena.push(
-        Node.Binary(op, result.node, right.node))
+        Node::Binary(op = op, left = result.node, right = right.node))
       result = ExprResult(new_arena, idx, right.pos)
     else:
       done = true
@@ -332,13 +332,13 @@ fn parse_compare(tokens: Vector<Token>, source: string, arena: Vector<Node>, pos
   if is_expr_ok(left) == false:
     return left
   let op: TK = peek(tokens, left.pos)
-  if op == TK.EqEq or op == TK.Lt or op == TK.Gt:
+  if op == TK::EqEq or op == TK::Lt or op == TK::Gt:
     let right: ExprResult = parse_additive(tokens, source, left.arena, left.pos + 1)
     if is_expr_ok(right) == false:
       return right
     let idx: i64 = right.arena.length()
     let new_arena: Vector<Node> = right.arena.push(
-      Node.Binary(op, left.node, right.node))
+      Node::Binary(op = op, left = left.node, right = right.node))
     return ExprResult(new_arena, idx, right.pos)
   return left
 
@@ -349,13 +349,13 @@ fn parse_and(tokens: Vector<Token>, source: string, arena: Vector<Node>, pos: i6
   let result: ExprResult = left
   let done: bool = false
   while done == false:
-    if peek(tokens, result.pos) == TK.KwAnd:
+    if peek(tokens, result.pos) == TK::KwAnd:
       let right: ExprResult = parse_compare(tokens, source, result.arena, result.pos + 1)
       if is_expr_ok(right) == false:
         return right
       let idx: i64 = right.arena.length()
       let new_arena: Vector<Node> = right.arena.push(
-        Node.Binary(TK.KwAnd, result.node, right.node))
+        Node::Binary(op = TK::KwAnd, left = result.node, right = right.node))
       result = ExprResult(new_arena, idx, right.pos)
     else:
       done = true
@@ -368,13 +368,13 @@ fn parse_or(tokens: Vector<Token>, source: string, arena: Vector<Node>, pos: i64
   let result: ExprResult = left
   let done: bool = false
   while done == false:
-    if peek(tokens, result.pos) == TK.KwOr:
+    if peek(tokens, result.pos) == TK::KwOr:
       let right: ExprResult = parse_and(tokens, source, result.arena, result.pos + 1)
       if is_expr_ok(right) == false:
         return right
       let idx: i64 = right.arena.length()
       let new_arena: Vector<Node> = right.arena.push(
-        Node.Binary(TK.KwOr, result.node, right.node))
+        Node::Binary(op = TK::KwOr, left = result.node, right = right.node))
       result = ExprResult(new_arena, idx, right.pos)
     else:
       done = true
@@ -390,21 +390,21 @@ fn parse_expr(tokens: Vector<Token>, source: string, arena: Vector<Node>, pos: i
 fn parse_stmt(tokens: Vector<Token>, source: string, arena: Vector<Node>, stmts: Vector<Stmt>, pos: i64): ParseState
   let kind: TK = peek(tokens, pos)
 
-  if kind == TK.KwLet:
+  if kind == TK::KwLet:
     // let IDENT = expr ;?
-    if peek(tokens, pos + 1) != TK.Ident:
+    if peek(tokens, pos + 1) != TK::Ident:
       return ParseState(arena, stmts, pos, false)
     let ident_tok: Token = tokens.get(pos + 1)
-    if peek(tokens, pos + 2) != TK.Assign:
+    if peek(tokens, pos + 2) != TK::Assign:
       return ParseState(arena, stmts, pos, false)
     let value: ExprResult = parse_expr(tokens, source, arena, pos + 3)
     if is_expr_ok(value) == false:
       return ParseState(value.arena, stmts, value.pos, false)
     let next_pos: i64 = value.pos
-    if peek(tokens, next_pos) == TK.Semi:
+    if peek(tokens, next_pos) == TK::Semi:
       next_pos = next_pos + 1
     let new_stmts: Vector<Stmt> = stmts.push(
-      Stmt.Let(ident_tok.offset, ident_tok.len, value.node))
+      Stmt::Let(name = ident_tok.offset, typ = ident_tok.len, init = value.node))
     return ParseState(value.arena, new_stmts, next_pos, true)
 
   // Expression statement.
@@ -412,9 +412,9 @@ fn parse_stmt(tokens: Vector<Token>, source: string, arena: Vector<Node>, stmts:
   if is_expr_ok(value) == false:
     return ParseState(value.arena, stmts, value.pos, false)
   let next_pos: i64 = value.pos
-  if peek(tokens, next_pos) == TK.Semi:
+  if peek(tokens, next_pos) == TK::Semi:
     next_pos = next_pos + 1
-  let new_stmts: Vector<Stmt> = stmts.push(Stmt.Expr(value.node))
+  let new_stmts: Vector<Stmt> = stmts.push(Stmt::Expr(node = value.node))
   return ParseState(value.arena, new_stmts, next_pos, true)
 
 fn parse_program(tokens: Vector<Token>, source: string): ParseState
@@ -422,7 +422,7 @@ fn parse_program(tokens: Vector<Token>, source: string): ParseState
   let stmts = Vector<Stmt>::new()
   let pos: i64 = 0
   let ok: bool = true
-  while peek(tokens, pos) != TK.Eof and ok:
+  while peek(tokens, pos) != TK::Eof and ok:
     let result: ParseState = parse_stmt(tokens, source, arena, stmts, pos)
     arena = result.arena
     stmts = result.stmts
@@ -458,61 +458,61 @@ class Symbol:
 
 fn check_binary_op(op: TK, left_ty: i32, right_ty: i32): Result<i32, string>
   // Arithmetic: + - * / require Int, produce Int.
-  if op == TK.Plus or op == TK.Minus or op == TK.Star or op == TK.Slash:
+  if op == TK::Plus or op == TK::Minus or op == TK::Star or op == TK::Slash:
     if left_ty == TY_INT() and right_ty == TY_INT():
-      return Result.Ok(TY_INT())
-    return Result.Err("arithmetic operator requires Int operands, got " + type_name(left_ty) + " and " + type_name(right_ty))
+      return Result::Ok(value = TY_INT())
+    return Result::Err(error = "arithmetic operator requires Int operands, got " + type_name(left_ty) + " and " + type_name(right_ty))
 
   // Comparison: == < > require Int, produce Bool.
-  if op == TK.EqEq or op == TK.Lt or op == TK.Gt:
+  if op == TK::EqEq or op == TK::Lt or op == TK::Gt:
     if left_ty == TY_INT() and right_ty == TY_INT():
-      return Result.Ok(TY_BOOL())
-    return Result.Err("comparison requires Int operands, got " + type_name(left_ty) + " and " + type_name(right_ty))
+      return Result::Ok(value = TY_BOOL())
+    return Result::Err(error = "comparison requires Int operands, got " + type_name(left_ty) + " and " + type_name(right_ty))
 
   // Logical: and or require Bool, produce Bool.
-  if op == TK.KwAnd or op == TK.KwOr:
+  if op == TK::KwAnd or op == TK::KwOr:
     if left_ty == TY_BOOL() and right_ty == TY_BOOL():
-      return Result.Ok(TY_BOOL())
-    return Result.Err("logical operator requires Bool operands, got " + type_name(left_ty) + " and " + type_name(right_ty))
+      return Result::Ok(value = TY_BOOL())
+    return Result::Err(error = "logical operator requires Bool operands, got " + type_name(left_ty) + " and " + type_name(right_ty))
 
-  return Result.Err("unknown binary operator")
+  return Result::Err(error = "unknown binary operator")
 
 fn check_expr(arena: Vector<Node>, idx: i64, table: HashMap<Symbol>, source: string): Result<i32, string>
   let node: Node = arena.get(idx)
   match node:
-    Node.IntLit(v):
-      return Result.Ok(TY_INT())
+    Node::IntLit(v):
+      return Result::Ok(value = TY_INT())
 
-    Node.BoolLit(v):
-      return Result.Ok(TY_BOOL())
+    Node::BoolLit(v):
+      return Result::Ok(value = TY_BOOL())
 
-    Node.VarRef(off, len):
+    Node::VarRef(off, len):
       let name: string = substring(source, off, len)
       let found: Option<Symbol> = table.get(name)
       match found:
-        Option.Some(sym):
-          return Result.Ok(sym.ty)
-        Option.None:
-          return Result.Err("undefined variable '" + name + "'")
+        Option::Some(sym):
+          return Result::Ok(value = sym.ty)
+        Option::None:
+          return Result::Err(error = "undefined variable '" + name + "'")
 
-    Node.Binary(op, left, right):
+    Node::Binary(op, left, right):
       let left_ty: i32 = check_expr(arena, left, table, source)?
       let right_ty: i32 = check_expr(arena, right, table, source)?
       return check_binary_op(op, left_ty, right_ty)
 
-    Node.Unary(op, operand):
+    Node::Unary(op, operand):
       let operand_ty: i32 = check_expr(arena, operand, table, source)?
-      if op == TK.Minus:
+      if op == TK::Minus:
         if operand_ty == TY_INT():
-          return Result.Ok(TY_INT())
-        return Result.Err("unary '-' requires Int, got " + type_name(operand_ty))
-      if op == TK.KwNot:
+          return Result::Ok(value = TY_INT())
+        return Result::Err(error = "unary '-' requires Int, got " + type_name(operand_ty))
+      if op == TK::KwNot:
         if operand_ty == TY_BOOL():
-          return Result.Ok(TY_BOOL())
-        return Result.Err("'not' requires Bool, got " + type_name(operand_ty))
-      return Result.Err("unknown unary operator")
+          return Result::Ok(value = TY_BOOL())
+        return Result::Err(error = "'not' requires Bool, got " + type_name(operand_ty))
+      return Result::Err(error = "unknown unary operator")
 
-  return Result.Err("unknown node kind")
+  return Result::Err(error = "unknown node kind")
 
 // Analyze a program: walk statements, build symbol table, typecheck.
 // Returns the type of the last statement (Ok) or the first error (Err).
@@ -523,15 +523,15 @@ fn analyze(arena: Vector<Node>, stmts: Vector<Stmt>, source: string): Result<i32
   while i < stmts.length():
     let stmt: Stmt = stmts.get(i)
     match stmt:
-      Stmt.Let(name_off, name_len, expr_idx):
+      Stmt::Let(name_off, name_len, expr_idx):
         let ty: i32 = check_expr(arena, expr_idx, table, source)?
         let name: string = substring(source, name_off, name_len)
         table = table.set(name, Symbol(name, ty))
         last_ty = ty
-      Stmt.Expr(expr_idx):
+      Stmt::Expr(expr_idx):
         last_ty = check_expr(arena, expr_idx, table, source)?
     i = i + 1
-  return Result.Ok(last_ty)
+  return Result::Ok(value = last_ty)
 
 // ---------------------------------------------------------------
 // Test harness
@@ -548,7 +548,7 @@ fn test(label: string, source: string, expected: string): bool
     return false
   let result: Result<i32, string> = analyze(parsed.arena, parsed.stmts, source)
   match result:
-    Result.Ok(ty):
+    Result::Ok(ty):
       let actual: string = type_name(ty)
       if actual == expected:
         print("PASS " + label + " : " + actual)
@@ -556,7 +556,7 @@ fn test(label: string, source: string, expected: string): bool
       else:
         print("FAIL " + label + ": expected " + expected + ", got " + actual)
         return false
-    Result.Err(msg):
+    Result::Err(msg):
       if expected == "ERROR":
         print("PASS " + label + " : " + msg)
         return true

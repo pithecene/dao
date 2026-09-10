@@ -12,8 +12,7 @@ File
         Identifier result
       Arm
         Pattern
-          FieldExpr .Some
-            Identifier Option
+          QualifiedName Option::Some
         ExpressionStatement
           CallExpr
             Callee
@@ -31,8 +30,7 @@ File
                       Identifier e
       Arm
         Pattern
-          FieldExpr .None
-            Identifier Option
+          QualifiedName Option::None
         ExpressionStatement
           CallExpr
             Callee
@@ -327,8 +325,7 @@ File
         Identifier rj
       Arm
         Pattern
-          FieldExpr .Some
-            Identifier Option
+          QualifiedName Option::Some
         ExpressionStatement
           CallExpr
             Callee
@@ -343,8 +340,7 @@ File
                     Identifier v
       Arm
         Pattern
-          FieldExpr .None
-            Identifier Option
+          QualifiedName Option::None
         ExpressionStatement
           CallExpr
             Callee
@@ -363,8 +359,7 @@ File
         Identifier ra
       Arm
         Pattern
-          FieldExpr .Some
-            Identifier Option
+          QualifiedName Option::Some
         ExpressionStatement
           CallExpr
             Callee
@@ -379,8 +374,7 @@ File
                     Identifier v
       Arm
         Pattern
-          FieldExpr .None
-            Identifier Option
+          QualifiedName Option::None
         ExpressionStatement
           CallExpr
             Callee
@@ -399,8 +393,7 @@ File
         Identifier rm
       Arm
         Pattern
-          FieldExpr .Some
-            Identifier Option
+          QualifiedName Option::Some
         ExpressionStatement
           CallExpr
             Callee
@@ -409,8 +402,7 @@ File
               StringLiteral "missing found (unexpected)"
       Arm
         Pattern
-          FieldExpr .None
-            Identifier Option
+          QualifiedName Option::None
         ExpressionStatement
           CallExpr
             Callee

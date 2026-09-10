@@ -68,7 +68,7 @@ already (the type grammar depends on it); no lexer change.
 
 ## 4. AST
 
-`Node.CallE` gains the call-site type arguments, as the host's
+`Node::CallE` gains the call-site type arguments, as the host's
 `CallExpr.type_args`:
 
 ```
@@ -133,7 +133,7 @@ One PR on the host-compiler fix that lets the `llvm` program reach its
 parse stage (the audit's first item; a loop's temporaries overflowed
 the stack), containing:
 
-1. `Node.CallE` five-field shape.
+1. `Node::CallE` five-field shape.
 2. `parse_postfix` speculation and both call shapes.
 3. Resolver / type checker / HIR arms updated (pass-through).
 4. Parser golden tests (§8) and the audit rerun (§8).

@@ -9,25 +9,25 @@ enum class Token:
 
 fn describe_token(t: Token): i32
   match t:
-    Token.Int(value):
+    Token::Int(value):
       print("Int: ")
       print(value)
       return 0
-    Token.Plus:
+    Token::Plus:
       print("Plus")
       return 0
-    Token.Minus:
+    Token::Minus:
       print("Minus")
       return 0
-    Token.Eof:
+    Token::Eof:
       print("Eof")
       return 0
   return 0
 
 fn main(): i32
-  let t1: Token = Token.Int(to_i64(42))
-  let t2: Token = Token.Plus
-  let t3: Token = Token.Int(to_i64(99))
+  let t1: Token = Token::Int(value = to_i64(42))
+  let t2: Token = Token::Plus
+  let t3: Token = Token::Int(value = to_i64(99))
 
   describe_token(t1)
   describe_token(t2)

@@ -12,35 +12,28 @@ File
       Condition
         BinaryExpr ==
           Identifier d
-          FieldExpr .North
-            Identifier Direction
+          QualifiedName Direction::North
       Then
         ReturnStatement
-          FieldExpr .South
-            Identifier Direction
+          QualifiedName Direction::South
     IfStatement
       Condition
         BinaryExpr ==
           Identifier d
-          FieldExpr .South
-            Identifier Direction
+          QualifiedName Direction::South
       Then
         ReturnStatement
-          FieldExpr .North
-            Identifier Direction
+          QualifiedName Direction::North
     IfStatement
       Condition
         BinaryExpr ==
           Identifier d
-          FieldExpr .East
-            Identifier Direction
+          QualifiedName Direction::East
       Then
         ReturnStatement
-          FieldExpr .West
-            Identifier Direction
+          QualifiedName Direction::West
     ReturnStatement
-      FieldExpr .East
-        Identifier Direction
+      QualifiedName Direction::East
   FunctionDecl direction_name
     Param d: Direction
     ReturnType: string
@@ -48,8 +41,7 @@ File
       Condition
         BinaryExpr ==
           Identifier d
-          FieldExpr .North
-            Identifier Direction
+          QualifiedName Direction::North
       Then
         ReturnStatement
           StringLiteral "North"
@@ -57,8 +49,7 @@ File
       Condition
         BinaryExpr ==
           Identifier d
-          FieldExpr .South
-            Identifier Direction
+          QualifiedName Direction::South
       Then
         ReturnStatement
           StringLiteral "South"
@@ -66,8 +57,7 @@ File
       Condition
         BinaryExpr ==
           Identifier d
-          FieldExpr .East
-            Identifier Direction
+          QualifiedName Direction::East
       Then
         ReturnStatement
           StringLiteral "East"
@@ -75,8 +65,7 @@ File
       Condition
         BinaryExpr ==
           Identifier d
-          FieldExpr .West
-            Identifier Direction
+          QualifiedName Direction::West
       Then
         ReturnStatement
           StringLiteral "West"
@@ -85,8 +74,7 @@ File
   FunctionDecl main
     ReturnType: i32
     LetStatement d: Direction
-      FieldExpr .East
-        Identifier Direction
+      QualifiedName Direction::East
     ExpressionStatement
       CallExpr
         Callee
@@ -119,8 +107,7 @@ File
       Condition
         BinaryExpr ==
           Identifier d
-          FieldExpr .East
-            Identifier Direction
+          QualifiedName Direction::East
       Then
         ExpressionStatement
           CallExpr
@@ -132,8 +119,7 @@ File
       Condition
         BinaryExpr !=
           Identifier d
-          FieldExpr .North
-            Identifier Direction
+          QualifiedName Direction::North
       Then
         ExpressionStatement
           CallExpr

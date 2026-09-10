@@ -17,10 +17,10 @@ class Diagnostic:
   message: string
 
 fn make_error(span: Span, message: string): Diagnostic
-  return Diagnostic(Severity.Error, span, message)
+  return Diagnostic(Severity::Error, span, message)
 
 fn make_warning(span: Span, message: string): Diagnostic
-  return Diagnostic(Severity.Warning, span, message)
+  return Diagnostic(Severity::Warning, span, message)
 
 fn make_note(span: Span, message: string): Diagnostic
-  return Diagnostic(Severity.Note, span, message)
+  return Diagnostic(Severity::Note, span, message)

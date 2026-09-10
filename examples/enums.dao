@@ -11,34 +11,34 @@ enum Direction:
   West
 
 fn opposite(d: Direction): Direction
-  if d == Direction.North:
-    return Direction.South
-  if d == Direction.South:
-    return Direction.North
-  if d == Direction.East:
-    return Direction.West
-  return Direction.East
+  if d == Direction::North:
+    return Direction::South
+  if d == Direction::South:
+    return Direction::North
+  if d == Direction::East:
+    return Direction::West
+  return Direction::East
 
 fn direction_name(d: Direction): string
-  if d == Direction.North:
+  if d == Direction::North:
     return "North"
-  if d == Direction.South:
+  if d == Direction::South:
     return "South"
-  if d == Direction.East:
+  if d == Direction::East:
     return "East"
-  if d == Direction.West:
+  if d == Direction::West:
     return "West"
   return "?"
 
 fn main(): i32
-  let d: Direction = Direction.East
+  let d: Direction = Direction::East
   print("direction: " + direction_name(d))
   print("opposite:  " + direction_name(opposite(d)))
 
   // Equality.
-  if d == Direction.East:
+  if d == Direction::East:
     print("heading east")
-  if d != Direction.North:
+  if d != Direction::North:
     print("not heading north")
 
   return 0

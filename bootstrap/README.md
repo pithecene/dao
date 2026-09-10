@@ -37,7 +37,7 @@ Indentation-aware lexer matching the host compiler's token surface
 The bootstrap lexer matches the C++ lexer on:
 
 - Token kind sequences for well-formed source
-- Error-token emission (TK.Error) matching `emit_error()` behavior
+- Error-token emission (TK::Error) matching `emit_error()` behavior
 - INDENT/DEDENT spans (`line_begin` position, correct lengths)
 - Comment handling (skipped as trivia, comment-only lines don't
   affect indentation)

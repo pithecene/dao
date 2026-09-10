@@ -379,22 +379,21 @@ suite<"expansion_classification"> expansion_classification = [] {
   };
 
   "for binders and match bindings are declaration sites"_test = [] {
-    auto result = classify_source_resolved(
-        "test.dao",
-        "enum class Shape:\n"
-        "    Dot\n"
-        "    Circle(radius: i32)\n"
-        "fn main(): i32\n"
-        "    let s: Shape = Shape.Dot\n"
-        "    match s:\n"
-        "        Shape.Circle(radius):\n"
-        "            return radius\n"
-        "        Shape.Dot:\n"
-        "            return 0\n"
-        "    return 1\n");
+    auto result = classify_source_resolved("test.dao",
+                                           "enum class Shape:\n"
+                                           "    Dot\n"
+                                           "    Circle(radius: i32)\n"
+                                           "fn main(): i32\n"
+                                           "    let s: Shape = Shape::Dot\n"
+                                           "    match s:\n"
+                                           "        Shape::Circle(radius):\n"
+                                           "            return radius\n"
+                                           "        Shape::Dot:\n"
+                                           "            return 0\n"
+                                           "    return 1\n");
     expect(find_token_at(result, "decl.variable.local", "radius") != nullptr);
     expect(count_tokens(result.tokens, "use.variant") == 3_ul)
-        << "Shape.Dot (expr), Shape.Circle and Shape.Dot (patterns)";
+        << "Shape::Dot (expr), Shape::Circle and Shape::Dot (patterns)";
     expect(find_token_at(result, "use.type", "Shape") != nullptr)
         << "enum head used as a value";
     expect(find_token_at(result, "use.variable.local", "radius") != nullptr)
@@ -402,17 +401,17 @@ suite<"expansion_classification"> expansion_classification = [] {
   };
 
   "operators receive their expansion categories"_test = [] {
-    auto result = classify_source_resolved(
-        "test.dao",
-        "enum class Pair:\n"
-        "    Both(a: i32, b: i32)\n"
-        "fn f(p: *i32, x: i32, pair: Pair): bool\n"
-        "    let y: i32 = x + 1 - 2 * 3 / 4 % 5\n"
-        "    let q: i32 = *p\n"
-        "    match pair:\n"
-        "        Pair.Both(a, ..):\n"
-        "            return a == x\n"
-        "    return (y == x) and (y != x) or !(y < x) or y >= x\n");
+    auto result =
+        classify_source_resolved("test.dao",
+                                 "enum class Pair:\n"
+                                 "    Both(a: i32, b: i32)\n"
+                                 "fn f(p: *i32, x: i32, pair: Pair): bool\n"
+                                 "    let y: i32 = x + 1 - 2 * 3 / 4 % 5\n"
+                                 "    let q: i32 = *p\n"
+                                 "    match pair:\n"
+                                 "        Pair::Both(a, ..):\n"
+                                 "            return a == x\n"
+                                 "    return (y == x) and (y != x) or !(y < x) or y >= x\n");
     expect(count_tokens(result.tokens, "operator.arithmetic") == 5_ul);
     expect(count_tokens(result.tokens, "operator.comparison") == 5_ul);
     expect(count_tokens(result.tokens, "operator.logical") == 4_ul) << "and, or, !, or";

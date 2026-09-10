@@ -76,7 +76,7 @@ suite<"hir_enum_variant_values"> hir_enum_variant_values = [] {
                       "  Red\n"
                       "  Green\n"
                       "fn pick(): Color\n"
-                      "  return Color.Green\n");
+                      "  return Color::Green\n");
     auto dump = p.dump();
     expect(contains(dump, "IntLiteral 1")) << dump;
     expect(!contains(dump, "EnumConstruct")) << dump;
@@ -88,9 +88,9 @@ suite<"hir_enum_variant_values"> hir_enum_variant_values = [] {
                       "  B\n"
                       "fn pick(k: K): i64\n"
                       "  match k:\n"
-                      "    K.A(v):\n"
+                      "    K::A(v):\n"
                       "      return v\n"
-                      "    K.B:\n"
+                      "    K::B:\n"
                       "      return 0\n");
     auto dump = p.dump();
     expect(contains(dump, "EnumDiscriminant")) << dump;
@@ -103,7 +103,7 @@ suite<"hir_enum_variant_values"> hir_enum_variant_values = [] {
                       "  A(v: i64)\n"
                       "  B\n"
                       "fn pick(): K\n"
-                      "  return K.B\n"
+                      "  return K::B\n"
                       "fn pick_qualified(): K\n"
                       "  return K::B\n");
     auto dump = p.dump();

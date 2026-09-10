@@ -366,12 +366,10 @@ void HirBuilder::lower_match_into(const Stmt* stmt,
   // Build the if/else chain from last arm to first.
   HirStmt* chain = nullptr;
   for (auto it = match.arms.rbegin(); it != match.arms.rend(); ++it) {
-    // The variant an arm names, from `Enum.Variant`, `Enum::Variant`, or
-    // either form applied to bindings.
+    // The variant an arm names, from `Enum::Variant` or the same applied
+    // to bindings.
     std::string_view pattern_variant_name;
-    if (it->pattern->is<FieldExpr>()) {
-      pattern_variant_name = it->pattern->as<FieldExpr>().field;
-    } else if (it->pattern->is<QualifiedName>()) {
+    if (it->pattern->is<QualifiedName>()) {
       const auto& qn = it->pattern->as<QualifiedName>();
       if (qn.segments.size() >= 2) {
         pattern_variant_name = qn.segments.back();
@@ -379,9 +377,7 @@ void HirBuilder::lower_match_into(const Stmt* stmt,
     } else if (it->pattern->is<CallExpr>()) {
       // Enum::Variant(bindings) parsed as CallExpr with QualifiedName callee
       const auto& call = it->pattern->as<CallExpr>();
-      if (call.callee->is<FieldExpr>()) {
-        pattern_variant_name = call.callee->as<FieldExpr>().field;
-      } else if (call.callee->is<QualifiedName>()) {
+      if (call.callee->is<QualifiedName>()) {
         const auto& qn = call.callee->as<QualifiedName>();
         if (qn.segments.size() >= 2) {
           pattern_variant_name = qn.segments.back();
@@ -606,14 +602,12 @@ auto HirBuilder::lower_expr(const Expr* expr) -> HirExpr* {
       }
     }
 
-    // Enum variant construction: Enum.Variant(42) or Enum::Variant(42)
+    // Enum variant construction: Enum::Variant(field = value).
     // Use the CallExpr's type (which may be instantiated for generic enums)
     // rather than the callee's type (which may be the uninstantiated generic).
     if (callee_type != nullptr && callee_type->kind() == TypeKind::Enum) {
       std::string_view variant_field;
-      if (call.callee->is<FieldExpr>()) {
-        variant_field = call.callee->as<FieldExpr>().field;
-      } else if (call.callee->is<QualifiedName>()) {
+      if (call.callee->is<QualifiedName>()) {
         const auto& qn = call.callee->as<QualifiedName>();
         if (qn.segments.size() >= 2) {
           variant_field = qn.segments.back();

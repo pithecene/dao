@@ -76,11 +76,11 @@ fn sb_line_count(buf: SourceBuffer): i64
 
 fn severity_label(sev: Severity): string
   match sev:
-    Severity.Error:
+    Severity::Error:
       return "error"
-    Severity.Warning:
+    Severity::Warning:
       return "warning"
-    Severity.Note:
+    Severity::Note:
       return "note"
   return "unknown"
 

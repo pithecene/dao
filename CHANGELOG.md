@@ -8,6 +8,15 @@ and when, not what is guaranteed.
 
 ### Fixed
 
+- **A variant is reached with `::`.**  `Enum.Variant` — a field access
+  on a type name — was accepted as variant access in expressions,
+  constructor callees, and match patterns, against the enum-class ADR,
+  and let a payload variant be constructed positionally past the ADR's
+  named-construction rule.  The type checker now rejects it with
+  `variant access uses '::': Enum::Variant`; a payload variant is
+  constructed by field name, `Enum::Variant(field = value)`.  Every
+  source in the repository is on the qualified spelling.
+
 - **A loop's temporaries take one stack slot per site, not one per
   iteration.**  The backend allocated the slot for a string operand, a
   string argument, a struct passed or returned through the C ABI, or an

@@ -13,8 +13,7 @@ File
         Identifier t
       Arm
         Pattern
-          FieldExpr .Int
-            Identifier Token
+          QualifiedName Token::Int
         ExpressionStatement
           CallExpr
             Callee
@@ -31,8 +30,7 @@ File
           IntLiteral 0
       Arm
         Pattern
-          FieldExpr .Plus
-            Identifier Token
+          QualifiedName Token::Plus
         ExpressionStatement
           CallExpr
             Callee
@@ -43,8 +41,7 @@ File
           IntLiteral 0
       Arm
         Pattern
-          FieldExpr .Minus
-            Identifier Token
+          QualifiedName Token::Minus
         ExpressionStatement
           CallExpr
             Callee
@@ -55,8 +52,7 @@ File
           IntLiteral 0
       Arm
         Pattern
-          FieldExpr .Eof
-            Identifier Token
+          QualifiedName Token::Eof
         ExpressionStatement
           CallExpr
             Callee
@@ -72,8 +68,7 @@ File
     LetStatement t1: Token
       CallExpr
         Callee
-          FieldExpr .Int
-            Identifier Token
+          QualifiedName Token::Int
         Args
           CallExpr
             Callee
@@ -81,13 +76,11 @@ File
             Args
               IntLiteral 42
     LetStatement t2: Token
-      FieldExpr .Plus
-        Identifier Token
+      QualifiedName Token::Plus
     LetStatement t3: Token
       CallExpr
         Callee
-          FieldExpr .Int
-            Identifier Token
+          QualifiedName Token::Int
         Args
           CallExpr
             Callee

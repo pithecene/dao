@@ -478,7 +478,7 @@ suite<"simple_functions"> simple_functions = [] {
                           "  kind: K\n"
                           "  name: string\n"
                           "fn make(): Inst\n"
-                          "  return Inst(K.B, \"\")\n");
+                          "  return Inst(K::B, \"\")\n");
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << ir;
     expect(contains(ir, "define")) << ir;
@@ -490,9 +490,9 @@ suite<"simple_functions"> simple_functions = [] {
                           "  B\n"
                           "fn pick(k: K): i64\n"
                           "  match k:\n"
-                          "    K.A(v):\n"
+                          "    K::A(v):\n"
                           "      return v\n"
-                          "    K.B:\n"
+                          "    K::B:\n"
                           "      return 0\n");
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << ir;
