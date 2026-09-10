@@ -650,6 +650,16 @@ suite<"typecheck_modules"> typecheck_modules = [] {
                                "fn f(c: Color): i32\n  return c.code()\n");
     expect(is_ok(method)) << (method.diagnostics.empty() ? "" : method.diagnostics[0].message);
 
+    // A variant is a value of the enum type too; its methods are reached
+    // with `.` after the `::` that reaches the variant.
+    auto on_variant = check_source("enum Color:\n  Red\n  Green\n"
+                                   "concept Named:\n  fn code(self): i32\n"
+                                   "extend Color as Named:\n  fn code(self): i32\n    return 1\n"
+                                   "fn f(): i32\n  return Color::Red.code()\n");
+    expect(is_ok(on_variant)) << (on_variant.diagnostics.empty()
+                                      ? ""
+                                      : on_variant.diagnostics[0].message);
+
     auto qualified =
         check_source("enum class Maybe:\n  Some(value: i32)\n  None\n"
                      "fn f(m: Maybe): i32\n  match m:\n    Maybe::Some(value):\n"

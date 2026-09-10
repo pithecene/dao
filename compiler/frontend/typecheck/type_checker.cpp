@@ -3029,10 +3029,11 @@ auto TypeChecker::check_field(const Expr* expr) -> const Type* {
 
   // `Enum.Variant` is field access on a type name: a variant is reached
   // through its enum with `::` (CONTRACT_SYNTAX_SURFACE.md, enum class).
-  // A value of the enum type is an instance; its methods are looked up
-  // below.
+  // A value of the enum type is an instance -- a variable, or a variant
+  // itself (`Color::Red`, which resolves to the enum's symbol since a
+  // variant has none of its own) -- and its methods are looked up below.
   const auto* obj_sym = symbol_for_use(field.object);
-  if (obj_type->kind() == TypeKind::Enum && obj_sym != nullptr &&
+  if (obj_type->kind() == TypeKind::Enum && names_a_type(field.object) && obj_sym != nullptr &&
       obj_sym->kind == SymbolKind::Type) {
     const auto* en = static_cast<const TypeEnum*>(obj_type);
     error(field.field_span,
