@@ -3347,7 +3347,11 @@ fn main(): i32
   while ci_i < ci_p.diags.length():
     ci_errors = ci_errors + 1
     ci_i = ci_i + 1
-  if ci_a_idx == ci_b_idx:
+  let ci_collides: bool = false
+  if ci_a_idx >= 0:
+    if ci_a_idx == ci_b_idx:
+      ci_collides = true
+  if ci_collides:
     if ci_errors == 0:
       print("PASS colliding_decl_indices_stay_apart")
       pass_count = pass_count + 1
@@ -3358,7 +3362,7 @@ fn main(): i32
         print("  diag: " + ci_p.diags.get(ci_j).path + ": " + ci_p.diags.get(ci_j).diag.message)
         ci_j = ci_j + 1
   else:
-    print("FAIL colliding_decl_indices_stay_apart: the fixture no longer collides (a=" + i64_to_string(ci_a_idx) + " b=" + i64_to_string(ci_b_idx) + "); retune it")
+    print("FAIL colliding_decl_indices_stay_apart: the fixture declares no colliding methods (a=" + i64_to_string(ci_a_idx) + " b=" + i64_to_string(ci_b_idx) + "); retune it")
 
   // -----------------------------------------------------------------
   // Summary
