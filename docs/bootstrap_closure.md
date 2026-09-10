@@ -10,38 +10,38 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 71025 |
-| `CallExpr` | 23494 |
-| `Callee` | 23494 |
-| `Args` | 21118 |
-| `FieldExpr` | 15828 |
-| `BinaryExpr` | 10809 |
-| `LetStatement` | 10385 |
-| `Value` | 8238 |
-| `Target` | 8238 |
-| `Assignment` | 8238 |
-| `IntLiteral` | 8007 |
-| `Condition` | 6674 |
-| `QualifiedName` | 6157 |
-| `Then` | 5416 |
-| `IfStatement` | 5416 |
-| `ReturnStatement` | 5356 |
-| `StringLiteral` | 4676 |
+| `Identifier` | 71291 |
+| `CallExpr` | 23598 |
+| `Callee` | 23598 |
+| `Args` | 21200 |
+| `FieldExpr` | 15918 |
+| `BinaryExpr` | 10907 |
+| `LetStatement` | 10427 |
+| `Value` | 8254 |
+| `Target` | 8254 |
+| `Assignment` | 8254 |
+| `IntLiteral` | 8038 |
+| `Condition` | 6702 |
+| `QualifiedName` | 6173 |
+| `Then` | 5438 |
+| `IfStatement` | 5438 |
+| `ReturnStatement` | 5372 |
+| `StringLiteral` | 4727 |
 | `Param` | 3707 |
-| `Pattern` | 2592 |
-| `Arm` | 2592 |
-| `BoolLiteral` | 2463 |
+| `Pattern` | 2608 |
+| `Arm` | 2608 |
+| `BoolLiteral` | 2475 |
 | `ReturnType` | 1578 |
 | `FunctionDecl` | 1578 |
-| `Else` | 1294 |
-| `WhileStatement` | 1258 |
+| `Else` | 1295 |
+| `WhileStatement` | 1264 |
 | `Variant` | 1166 |
 | `Field` | 1072 |
 | `UnaryExpr` | 1035 |
 | `TypeArgs` | 962 |
-| `Scrutinee` | 605 |
-| `MatchStatement` | 605 |
-| `ExpressionStatement` | 514 |
+| `Scrutinee` | 617 |
+| `MatchStatement` | 617 |
+| `ExpressionStatement` | 517 |
 | `ClassDecl` | 255 |
 | `BreakStatement` | 64 |
 | `ResourceBlock` | 39 |
@@ -234,14 +234,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 53 | 0 | 0 | 0 | 342 | 398 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 56 | 1 | 0 | 0 | 473 | 326 | 0 | 35 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 55 | 1 | 0 | 0 | 365 | 357 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 110 | 1 | 0 | 0 | 894 | 559 | 0 | 59 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 195 | 1 | 0 | 0 | 1618 | 931 | 0 | 138 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 308 | 1 | 0 | 0 | 2140 | 1156 | 0 | 178 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 321 | 1 | 0 | 0 | 2438 | 1104 | 0 | 228 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 419 | 2 | 0 | 0 | 2925 | 1138 | 0 | 296 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 58 | 1 | 0 | 0 | 342 | 398 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 63 | 0 | 0 | 0 | 473 | 326 | 0 | 35 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 61 | 0 | 0 | 0 | 365 | 357 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 118 | 0 | 0 | 0 | 894 | 559 | 0 | 59 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 203 | 1 | 0 | 0 | 1642 | 945 | 0 | 141 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 333 | 1 | 0 | 0 | 2157 | 1163 | 0 | 181 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 334 | 1 | 0 | 0 | 2455 | 1111 | 0 | 231 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 430 | 2 | 0 | 0 | 2942 | 1145 | 0 | 299 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 
