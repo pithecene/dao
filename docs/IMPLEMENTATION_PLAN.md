@@ -617,19 +617,6 @@ bootstrap program parses clean.  MIR rejects the block fail-closed
 (`CONTRACT_MIR_BOUNDARY.md` §4: a resource region must not disappear
 before backend lowering) until the domain's MIR representation lands.
 
-### Task 38 — A Variant Is Reached With `::`
-
-Status: **spec** — `docs/task_specs/TASK_38_VARIANT_ACCESS_IS_QUALIFIED.md`;
-a syntax correction sequenced on stack #292 after Task 37.
-
-**Objective**: one spelling of variant access, the one
-`ADR_ENUM_CLASS.md` grants — `Enum::Variant` — in the host, the
-bootstrap, and every source.  The host never rejected `Enum.Variant`
-(a field access on a type name), so the dot form spread to ~1,400
-sites; the host now diagnoses it, the bootstrap validates the
-qualified form on local enums, the corpus migrates mechanically, and
-the contracts that quoted the dot form are corrected.
-
 ### Task 31 — Host Multi-file Compilation
 
 Status: **complete** — D0 (program-wide source map; prelude loaded
