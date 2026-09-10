@@ -25,7 +25,7 @@ module bootstrap::typecheck
 //   - Try operator (requires generic Option/Result)
 //   - Deref / addr-of unary operators
 //   - Index expressions
-//   - Mode / resource block semantics
+//   - Mode blocks; resource-block domain semantics (bodies are checked)
 //   - Yield / Generator checking
 //   - C ABI type validation
 //
@@ -1495,6 +1495,8 @@ fn check_stmt(ts: TS, node_idx: i64): TS
       return check_if_stmt(ts, cond, then_lp, else_lp)
     Node.WhileS(cond, body_lp):
       return check_while_stmt(ts, cond, body_lp)
+    Node.ResourceS(kind_tidx, name_tidx, body_lp):
+      return check_body_stmts(ts, body_lp)
     Node.ForS(var_tidx, iter_node, body_lp):
       return check_for_stmt(ts, var_tidx, iter_node, body_lp)
     Node.ReturnS(val_node):
@@ -2870,7 +2872,7 @@ fn main(): i32
   //   - Try operator (requires generic Option/Result)
   //   - Deref / addr-of unary operators
   //   - Index expressions
-  //   - Mode / resource block semantics
+  //   - Mode blocks; resource-block domain semantics (bodies are checked)
   //   - Yield / Generator checking
   //   - C ABI type validation
   //   - Structural function type comparison

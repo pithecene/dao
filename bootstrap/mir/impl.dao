@@ -15,7 +15,8 @@ module bootstrap::mir::impl
 // Deferred to Tier B (same deferrals as the bootstrap HIR, plus):
 //   - Generators (iter init/has_next/next/destroy/yield)
 //   - Monomorphization / generic template separation
-//   - Mode/resource region enter/exit
+//   - Mode blocks; resource-block domains (HirResource is rejected with
+//     a diagnostic until the domain is represented in MIR)
 //   - Enum construction / discriminant / payload
 //   - Lambda / closures
 //   - Try operator
@@ -512,6 +513,13 @@ fn mir_lower_stmt(br: BlockR, hir_node_idx: i64): BlockR
       return mir_lower_if_stmt(br, cond, then_lp, else_lp)
     HirNode.HirWhile(cond, body_lp):
       return mir_lower_while_stmt(br, cond, body_lp)
+    HirNode.HirResource(kind, name, body_lp):
+      // Rejected until the domain has a MIR representation: a resource
+      // region must survive to backend lowering (CONTRACT_MIR_BOUNDARY.md
+      // §4), and lowering the body in place would erase it.
+      br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)),
+        "unsupported statement kind in Tier A MIR lowering: HirResource (a resource block's domain is not represented in MIR yet)")
+      return br
   // Unsupported statement kind (Tier A): HirBreak, HirFor, etc.  Emit
   // a diagnostic so downstream consumers observe the failure instead
   // of seeing valid-looking MIR with silently-dropped control flow.
@@ -884,7 +892,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 8
+  let total: i32 = 9
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -1038,6 +1046,22 @@ fn main(): i32
       print("FAIL while_stmt: no MirBr")
   else:
     print("FAIL while_stmt: no MirCondBr")
+
+  // -----------------------------------------------------------------
+  // Test 9: a resource block is rejected fail-closed — one diagnostic
+  // naming HirResource, nothing of the block lowered silently.
+  // -----------------------------------------------------------------
+  let src9: string = "fn main(): i32\n  let x: i32 = 0\n  resource memory pool =>\n    x = 1\n  return x\n"
+  let r9: MirResult = lower_to_mir(src9)
+  let rejected: bool = false
+  if r9.diags.length() == 1:
+    if index_of(r9.diags.get(0).message, "HirResource") >= 0:
+      rejected = true
+  if rejected:
+    print("PASS resource_block_rejected")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL resource_block_rejected: expected one diagnostic naming HirResource, got " + i64_to_string(r9.diags.length()))
 
   // -----------------------------------------------------------------
   // Summary

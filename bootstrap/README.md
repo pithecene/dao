@@ -84,13 +84,14 @@ slice of Dao syntax.
 
 **Tier B-Bootstrap coverage (added)**: call-site type arguments —
 `Type<Args>::member(args)` and `f<Args>(args)` read with the host's
-rule, the type arguments carried on `CallE` (Task 36)
+rule, the type arguments carried on `CallE` (Task 36); `resource <kind>
+<name> =>` blocks and their suites (Task 37)
 
 **Tier B deferrals** (explicitly not supported yet):
 
 - `concept`, `derived concept`, `extend`
 - Class methods and conformance blocks
-- `mode` / `resource` blocks
+- `mode` blocks
 - `yield`
 - Function types (`fn(T): R`)
 - Generic parameter bounds and `where` clauses
@@ -133,13 +134,14 @@ uses map over the bootstrap parser's AST.
 - Builtin type pre-population (i8–u64, f32, f64, bool, string, void)
 - Duplicate declaration diagnostics
 - `let` / `for` / lambda / param / field declarations
+- `resource` block bodies in a block scope (Task 37)
 
 **Tier B deferrals**:
 
 - Imports, overload resolution, method mangling
 - Generic type parameters and where clauses
 - Concept / extend resolution
-- Mode / resource block scoping
+- Mode block scoping
 - Match arm destructuring bindings
 
 **How to run tests**:
@@ -162,7 +164,8 @@ correctness for Tier A Dao syntax.
 - Expression typing: literals, identifiers, binary/unary ops, calls,
   field access, pipe
 - Statement checking: let, assign, if/while (bool condition), for,
-  return, break, match, expression statements
+  return, break, match, expression statements, `resource` block
+  bodies (Task 37)
 - Struct constructors and field access
 - Enum variant constructors
 - Assignability via structural type comparison
@@ -199,7 +202,8 @@ type-checked AST.
 **Tier A coverage**: literals, identifiers, binary/unary ops, calls,
 field access, pipe, qualified names, let, assign, if/else, while,
 for, return, break, match (desugared), expression statements,
-fn/extern fn/class/enum/type alias declarations
+fn/extern fn/class/enum/type alias declarations, `resource` blocks
+(`HirResource`, Task 37)
 
 **How to run tests**:
 
@@ -235,8 +239,10 @@ constants (int/float/bool/string), binary/unary ops, let/assign,
 calls (with `MirFnRef` callees), returns, field-access reads,
 if/else, while.
 
-**Tier B deferrals**: generators, monomorphization, mode/resource
-region enter/exit, enum construction/discriminant/payload, lambda
+**Tier B deferrals**: generators, monomorphization, `resource` blocks
+(rejected with the unsupported-statement diagnostic, fail-closed, until
+the domain is represented in MIR — `CONTRACT_MIR_BOUNDARY.md` §4, Task
+37 §5), `mode` blocks, enum construction/discriminant/payload, lambda
 / closures, try operator, for-over-iterable, index expressions,
 break/continue.
 

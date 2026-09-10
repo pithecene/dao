@@ -1,6 +1,6 @@
 # Task 37 — Bootstrap Pipeline: `resource` Blocks
 
-Status: implementation spec
+Status: implemented
 Phase: Tier B-Bootstrap, second construct (after Task 36)
 Scope: the bootstrap parser, resolver, type checker, and HIR carry a
 `resource <kind> <name> =>` block; MIR rejects it, fail-closed, until

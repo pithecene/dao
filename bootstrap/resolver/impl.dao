@@ -472,6 +472,9 @@ fn resolve_stmt(rs: RS, node_idx: i64): RS
     Node.WhileS(cond, body_lp):
       let r: RS = resolve_expr(rs, cond)
       return resolve_body_in_new_scope(r, body_lp)
+    Node.ResourceS(kind_tidx, name_tidx, body_lp):
+      // The domain's name binds nothing in Tier A; its body is a block.
+      return resolve_body_in_new_scope(rs, body_lp)
     Node.ForS(var_tidx, iter_node, body_lp):
       // Resolve iterable in outer scope
       let r: RS = resolve_expr(rs, iter_node)
@@ -1261,7 +1264,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 34
+  let total: i32 = 35
 
   // -----------------------------------------------------------------
   // Test 1: forward_ref — fn calls fn defined later in file; no diagnostic
@@ -1904,6 +1907,19 @@ fn main(): i32
     print("FAIL d0_program_wrapper")
 
   // -----------------------------------------------------------------
+  // Test 35: resource_block_scope — a name declared inside a resource
+  // block is unknown after it (the block is a scope).
+  // -----------------------------------------------------------------
+  let src35: string = "fn f(): i64\n  resource memory pool =>\n    let inner: i64 = 1\n  return inner\n"
+  let r35: ResolveResult = resolve(src35)
+  let r35_diags: i64 = count_diags(r35)
+  if r35_diags == 1:
+    print("PASS resource_block_scope")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL resource_block_scope: expected 1 diagnostic (unknown name after the block), got " + i64_to_string(r35_diags))
+
+  // -----------------------------------------------------------------
   // Summary
   // -----------------------------------------------------------------
 
@@ -1923,7 +1939,7 @@ fn main(): i32
   //     resolution of generic params is implemented in Tier A)
   //   - Concept / extend conformance validation (parsing and symbol
   //     registration is implemented; conformance checking is deferred)
-  //   - Mode / resource block scoping
+  //   - Mode block scoping (a resource block's body is a block scope)
   //   - Yield statement resolution
   //   - Match arm destructuring bindings (patterns resolved as
   //     expressions, but no binding introduction)
