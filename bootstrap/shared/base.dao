@@ -160,203 +160,203 @@ fn is_alnum(ch: i32): bool
 fn classify_keyword(src: string, start: i64, klen: i64): TK
   let text: string = substring(src, start, klen)
   if text == "module":
-    return TK.KwModule
+    return TK::KwModule
   if text == "import":
-    return TK.KwImport
+    return TK::KwImport
   if text == "extern":
-    return TK.KwExtern
+    return TK::KwExtern
   if text == "fn":
-    return TK.KwFn
+    return TK::KwFn
   if text == "class":
-    return TK.KwClass
+    return TK::KwClass
   if text == "enum":
-    return TK.KwEnum
+    return TK::KwEnum
   if text == "type":
-    return TK.KwType
+    return TK::KwType
   if text == "let":
-    return TK.KwLet
+    return TK::KwLet
   if text == "if":
-    return TK.KwIf
+    return TK::KwIf
   if text == "else":
-    return TK.KwElse
+    return TK::KwElse
   if text == "while":
-    return TK.KwWhile
+    return TK::KwWhile
   if text == "for":
-    return TK.KwFor
+    return TK::KwFor
   if text == "in":
-    return TK.KwIn
+    return TK::KwIn
   if text == "return":
-    return TK.KwReturn
+    return TK::KwReturn
   if text == "yield":
-    return TK.KwYield
+    return TK::KwYield
   if text == "break":
-    return TK.KwBreak
+    return TK::KwBreak
   if text == "match":
-    return TK.KwMatch
+    return TK::KwMatch
   if text == "mode":
-    return TK.KwMode
+    return TK::KwMode
   if text == "resource":
-    return TK.KwResource
+    return TK::KwResource
   if text == "true":
-    return TK.KwTrue
+    return TK::KwTrue
   if text == "false":
-    return TK.KwFalse
+    return TK::KwFalse
   if text == "and":
-    return TK.KwAnd
+    return TK::KwAnd
   if text == "or":
-    return TK.KwOr
+    return TK::KwOr
   if text == "concept":
-    return TK.KwConcept
+    return TK::KwConcept
   if text == "derived":
-    return TK.KwDerived
+    return TK::KwDerived
   if text == "as":
-    return TK.KwAs
+    return TK::KwAs
   if text == "extend":
-    return TK.KwExtend
+    return TK::KwExtend
   if text == "deny":
-    return TK.KwDeny
+    return TK::KwDeny
   if text == "self":
-    return TK.KwSelf
+    return TK::KwSelf
   if text == "where":
-    return TK.KwWhere
-  return TK.Identifier
+    return TK::KwWhere
+  return TK::Identifier
 
 // =========================================================================
 // Section 4: Token kind names// =========================================================================
 
 fn tk_name(kind: TK): string
   match kind:
-    TK.KwModule:
+    TK::KwModule:
       return "KwModule"
-    TK.KwImport:
+    TK::KwImport:
       return "KwImport"
-    TK.KwExtern:
+    TK::KwExtern:
       return "KwExtern"
-    TK.KwFn:
+    TK::KwFn:
       return "KwFn"
-    TK.KwClass:
+    TK::KwClass:
       return "KwClass"
-    TK.KwEnum:
+    TK::KwEnum:
       return "KwEnum"
-    TK.KwType:
+    TK::KwType:
       return "KwType"
-    TK.KwLet:
+    TK::KwLet:
       return "KwLet"
-    TK.KwIf:
+    TK::KwIf:
       return "KwIf"
-    TK.KwElse:
+    TK::KwElse:
       return "KwElse"
-    TK.KwWhile:
+    TK::KwWhile:
       return "KwWhile"
-    TK.KwFor:
+    TK::KwFor:
       return "KwFor"
-    TK.KwIn:
+    TK::KwIn:
       return "KwIn"
-    TK.KwReturn:
+    TK::KwReturn:
       return "KwReturn"
-    TK.KwYield:
+    TK::KwYield:
       return "KwYield"
-    TK.KwBreak:
+    TK::KwBreak:
       return "KwBreak"
-    TK.KwMatch:
+    TK::KwMatch:
       return "KwMatch"
-    TK.KwMode:
+    TK::KwMode:
       return "KwMode"
-    TK.KwResource:
+    TK::KwResource:
       return "KwResource"
-    TK.KwTrue:
+    TK::KwTrue:
       return "KwTrue"
-    TK.KwFalse:
+    TK::KwFalse:
       return "KwFalse"
-    TK.KwAnd:
+    TK::KwAnd:
       return "KwAnd"
-    TK.KwOr:
+    TK::KwOr:
       return "KwOr"
-    TK.KwConcept:
+    TK::KwConcept:
       return "KwConcept"
-    TK.KwDerived:
+    TK::KwDerived:
       return "KwDerived"
-    TK.KwAs:
+    TK::KwAs:
       return "KwAs"
-    TK.KwExtend:
+    TK::KwExtend:
       return "KwExtend"
-    TK.KwDeny:
+    TK::KwDeny:
       return "KwDeny"
-    TK.KwSelf:
+    TK::KwSelf:
       return "KwSelf"
-    TK.KwWhere:
+    TK::KwWhere:
       return "KwWhere"
-    TK.Colon:
+    TK::Colon:
       return "Colon"
-    TK.ColonColon:
+    TK::ColonColon:
       return "ColonColon"
-    TK.Arrow:
+    TK::Arrow:
       return "Arrow"
-    TK.FatArrow:
+    TK::FatArrow:
       return "FatArrow"
-    TK.Eq:
+    TK::Eq:
       return "Eq"
-    TK.EqEq:
+    TK::EqEq:
       return "EqEq"
-    TK.BangEq:
+    TK::BangEq:
       return "BangEq"
-    TK.Lt:
+    TK::Lt:
       return "Lt"
-    TK.LtEq:
+    TK::LtEq:
       return "LtEq"
-    TK.Gt:
+    TK::Gt:
       return "Gt"
-    TK.GtEq:
+    TK::GtEq:
       return "GtEq"
-    TK.Plus:
+    TK::Plus:
       return "Plus"
-    TK.Minus:
+    TK::Minus:
       return "Minus"
-    TK.Star:
+    TK::Star:
       return "Star"
-    TK.Slash:
+    TK::Slash:
       return "Slash"
-    TK.Percent:
+    TK::Percent:
       return "Percent"
-    TK.Amp:
+    TK::Amp:
       return "Amp"
-    TK.Bang:
+    TK::Bang:
       return "Bang"
-    TK.Dot:
+    TK::Dot:
       return "Dot"
-    TK.Comma:
+    TK::Comma:
       return "Comma"
-    TK.Pipe:
+    TK::Pipe:
       return "Pipe"
-    TK.PipeGt:
+    TK::PipeGt:
       return "PipeGt"
-    TK.Question:
+    TK::Question:
       return "Question"
-    TK.LParen:
+    TK::LParen:
       return "LParen"
-    TK.RParen:
+    TK::RParen:
       return "RParen"
-    TK.LBracket:
+    TK::LBracket:
       return "LBracket"
-    TK.RBracket:
+    TK::RBracket:
       return "RBracket"
-    TK.IntLiteral:
+    TK::IntLiteral:
       return "IntLiteral"
-    TK.FloatLiteral:
+    TK::FloatLiteral:
       return "FloatLiteral"
-    TK.StringLiteral:
+    TK::StringLiteral:
       return "StringLiteral"
-    TK.Identifier:
+    TK::Identifier:
       return "Identifier"
-    TK.Newline:
+    TK::Newline:
       return "Newline"
-    TK.Indent:
+    TK::Indent:
       return "Indent"
-    TK.Dedent:
+    TK::Dedent:
       return "Dedent"
-    TK.Eof:
+    TK::Eof:
       return "Eof"
-    TK.Error:
+    TK::Error:
       return "Error"
   return "Unknown"
 
@@ -411,7 +411,7 @@ fn lex(src: string): LexResult
         else:
           if lc == 9:
             diags = diags.push(make_error(Span(pos, one), "tabs are not allowed in Dao source"))
-            tokens = tokens.push(Token(TK.Error, pos, one))
+            tokens = tokens.push(Token(TK::Error, pos, one))
             spaces = spaces + 1
             pos = pos + 1
           else:
@@ -449,17 +449,17 @@ fn lex(src: string): LexResult
           let current_indent: i64 = indent_stack.get(indent_stack.length() - 1)
           if spaces > current_indent:
             indent_stack = indent_stack.push(spaces)
-            tokens = tokens.push(Token(TK.Indent, line_begin, spaces))
+            tokens = tokens.push(Token(TK::Indent, line_begin, spaces))
           else:
             if spaces < current_indent:
               while indent_stack.length() > 1:
                 if indent_stack.get(indent_stack.length() - 1) <= spaces:
                   break
                 indent_stack = vec_pop(indent_stack)
-                tokens = tokens.push(Token(TK.Dedent, line_begin, zero))
+                tokens = tokens.push(Token(TK::Dedent, line_begin, zero))
               if indent_stack.get(indent_stack.length() - 1) != spaces:
                 diags = diags.push(make_error(Span(line_begin, spaces), "inconsistent indentation"))
-                tokens = tokens.push(Token(TK.Error, line_begin, spaces))
+                tokens = tokens.push(Token(TK::Error, line_begin, spaces))
         at_line_start = false
 
     // --- Non-indent token processing ---
@@ -475,7 +475,7 @@ fn lex(src: string): LexResult
       else:
         if ch == 10:
           if paren_depth == 0:
-            tokens = emit1(tokens, TK.Newline, pos)
+            tokens = emit1(tokens, TK::Newline, pos)
           pos = pos + 1
           at_line_start = true
           handled = true
@@ -486,7 +486,7 @@ fn lex(src: string): LexResult
               if char_at(src, pos) == 10:
                 pos = pos + 1
             if paren_depth == 0:
-              tokens = emit1(tokens, TK.Newline, pos - 1)
+              tokens = emit1(tokens, TK::Newline, pos - 1)
             at_line_start = true
             handled = true
 
@@ -531,9 +531,9 @@ fn lex(src: string): LexResult
           if str_done == false:
             diags = diags.push(make_error(Span(str_start, pos - str_start), "unterminated string literal"))
           if str_terminated:
-            tokens = tokens.push(Token(TK.StringLiteral, str_start, pos - str_start))
+            tokens = tokens.push(Token(TK::StringLiteral, str_start, pos - str_start))
           else:
-            tokens = tokens.push(Token(TK.Error, str_start, pos - str_start))
+            tokens = tokens.push(Token(TK::Error, str_start, pos - str_start))
           handled = true
 
       // Numbers.
@@ -556,9 +556,9 @@ fn lex(src: string): LexResult
                       break
                     pos = pos + 1
           if is_float:
-            tokens = tokens.push(Token(TK.FloatLiteral, num_start, pos - num_start))
+            tokens = tokens.push(Token(TK::FloatLiteral, num_start, pos - num_start))
           else:
-            tokens = tokens.push(Token(TK.IntLiteral, num_start, pos - num_start))
+            tokens = tokens.push(Token(TK::IntLiteral, num_start, pos - num_start))
           handled = true
 
       // Identifiers and keywords.
@@ -578,11 +578,11 @@ fn lex(src: string): LexResult
         if ch == 58:
           if pos + 1 < src_len:
             if char_at(src, pos + 1) == 58:
-              tokens = emit2(tokens, TK.ColonColon, pos)
+              tokens = emit2(tokens, TK::ColonColon, pos)
               pos = pos + 2
               handled = true
           if handled == false:
-            tokens = emit1(tokens, TK.Colon, pos)
+            tokens = emit1(tokens, TK::Colon, pos)
             pos = pos + 1
             handled = true
 
@@ -592,16 +592,16 @@ fn lex(src: string): LexResult
           if pos + 1 < src_len:
             let nx: i32 = char_at(src, pos + 1)
             if nx == 61:
-              tokens = emit2(tokens, TK.EqEq, pos)
+              tokens = emit2(tokens, TK::EqEq, pos)
               pos = pos + 2
               handled = true
             else:
               if nx == 62:
-                tokens = emit2(tokens, TK.FatArrow, pos)
+                tokens = emit2(tokens, TK::FatArrow, pos)
                 pos = pos + 2
                 handled = true
           if handled == false:
-            tokens = emit1(tokens, TK.Eq, pos)
+            tokens = emit1(tokens, TK::Eq, pos)
             pos = pos + 1
             handled = true
 
@@ -610,11 +610,11 @@ fn lex(src: string): LexResult
         if ch == 33:
           if pos + 1 < src_len:
             if char_at(src, pos + 1) == 61:
-              tokens = emit2(tokens, TK.BangEq, pos)
+              tokens = emit2(tokens, TK::BangEq, pos)
               pos = pos + 2
               handled = true
           if handled == false:
-            tokens = emit1(tokens, TK.Bang, pos)
+            tokens = emit1(tokens, TK::Bang, pos)
             pos = pos + 1
             handled = true
 
@@ -623,11 +623,11 @@ fn lex(src: string): LexResult
         if ch == 60:
           if pos + 1 < src_len:
             if char_at(src, pos + 1) == 61:
-              tokens = emit2(tokens, TK.LtEq, pos)
+              tokens = emit2(tokens, TK::LtEq, pos)
               pos = pos + 2
               handled = true
           if handled == false:
-            tokens = emit1(tokens, TK.Lt, pos)
+            tokens = emit1(tokens, TK::Lt, pos)
             pos = pos + 1
             handled = true
 
@@ -636,11 +636,11 @@ fn lex(src: string): LexResult
         if ch == 62:
           if pos + 1 < src_len:
             if char_at(src, pos + 1) == 61:
-              tokens = emit2(tokens, TK.GtEq, pos)
+              tokens = emit2(tokens, TK::GtEq, pos)
               pos = pos + 2
               handled = true
           if handled == false:
-            tokens = emit1(tokens, TK.Gt, pos)
+            tokens = emit1(tokens, TK::Gt, pos)
             pos = pos + 1
             handled = true
 
@@ -649,11 +649,11 @@ fn lex(src: string): LexResult
         if ch == 45:
           if pos + 1 < src_len:
             if char_at(src, pos + 1) == 62:
-              tokens = emit2(tokens, TK.Arrow, pos)
+              tokens = emit2(tokens, TK::Arrow, pos)
               pos = pos + 2
               handled = true
           if handled == false:
-            tokens = emit1(tokens, TK.Minus, pos)
+            tokens = emit1(tokens, TK::Minus, pos)
             pos = pos + 1
             handled = true
 
@@ -662,79 +662,79 @@ fn lex(src: string): LexResult
         if ch == 124:
           if pos + 1 < src_len:
             if char_at(src, pos + 1) == 62:
-              tokens = emit2(tokens, TK.PipeGt, pos)
+              tokens = emit2(tokens, TK::PipeGt, pos)
               pos = pos + 2
               handled = true
           if handled == false:
-            tokens = emit1(tokens, TK.Pipe, pos)
+            tokens = emit1(tokens, TK::Pipe, pos)
             pos = pos + 1
             handled = true
 
       // Single-character tokens and delimiters.
       if handled == false:
         if ch == 43:
-          tokens = emit1(tokens, TK.Plus, pos)
+          tokens = emit1(tokens, TK::Plus, pos)
           pos = pos + 1
           handled = true
         else:
           if ch == 42:
-            tokens = emit1(tokens, TK.Star, pos)
+            tokens = emit1(tokens, TK::Star, pos)
             pos = pos + 1
             handled = true
           else:
             if ch == 47:
-              tokens = emit1(tokens, TK.Slash, pos)
+              tokens = emit1(tokens, TK::Slash, pos)
               pos = pos + 1
               handled = true
             else:
               if ch == 37:
-                tokens = emit1(tokens, TK.Percent, pos)
+                tokens = emit1(tokens, TK::Percent, pos)
                 pos = pos + 1
                 handled = true
               else:
                 if ch == 38:
-                  tokens = emit1(tokens, TK.Amp, pos)
+                  tokens = emit1(tokens, TK::Amp, pos)
                   pos = pos + 1
                   handled = true
                 else:
                   if ch == 46:
-                    tokens = emit1(tokens, TK.Dot, pos)
+                    tokens = emit1(tokens, TK::Dot, pos)
                     pos = pos + 1
                     handled = true
                   else:
                     if ch == 44:
-                      tokens = emit1(tokens, TK.Comma, pos)
+                      tokens = emit1(tokens, TK::Comma, pos)
                       pos = pos + 1
                       handled = true
                     else:
                       if ch == 63:
-                        tokens = emit1(tokens, TK.Question, pos)
+                        tokens = emit1(tokens, TK::Question, pos)
                         pos = pos + 1
                         handled = true
 
       // Delimiters (track paren depth).
       if handled == false:
         if ch == 40:
-          tokens = emit1(tokens, TK.LParen, pos)
+          tokens = emit1(tokens, TK::LParen, pos)
           paren_depth = paren_depth + 1
           pos = pos + 1
           handled = true
         else:
           if ch == 41:
-            tokens = emit1(tokens, TK.RParen, pos)
+            tokens = emit1(tokens, TK::RParen, pos)
             if paren_depth > 0:
               paren_depth = paren_depth - 1
             pos = pos + 1
             handled = true
           else:
             if ch == 91:
-              tokens = emit1(tokens, TK.LBracket, pos)
+              tokens = emit1(tokens, TK::LBracket, pos)
               paren_depth = paren_depth + 1
               pos = pos + 1
               handled = true
             else:
               if ch == 93:
-                tokens = emit1(tokens, TK.RBracket, pos)
+                tokens = emit1(tokens, TK::RBracket, pos)
                 if paren_depth > 0:
                   paren_depth = paren_depth - 1
                 pos = pos + 1
@@ -743,16 +743,16 @@ fn lex(src: string): LexResult
       // Unknown character.
       if handled == false:
         diags = diags.push(make_error(Span(pos, one), "unexpected character"))
-        tokens = emit1(tokens, TK.Error, pos)
+        tokens = emit1(tokens, TK::Error, pos)
         pos = pos + 1
 
   // --- Emit remaining DEDENTs ---
   while indent_stack.length() > 1:
     indent_stack = vec_pop(indent_stack)
-    tokens = tokens.push(Token(TK.Dedent, pos, zero))
+    tokens = tokens.push(Token(TK::Dedent, pos, zero))
 
   // --- Emit EOF ---
-  tokens = tokens.push(Token(TK.Eof, pos, zero))
+  tokens = tokens.push(Token(TK::Eof, pos, zero))
 
   return LexResult(tokens, diags)
 
@@ -777,7 +777,7 @@ enum class Node:
   QualNameE(seg_lp: i64, seg_count: i64)
   BinaryE(op: i64, left: i64, right: i64)
   UnaryE(op: i64, operand: i64)
-  CallE(callee: i64, args_lp: i64, arg_count: i64, targs_lp: i64, targ_count: i64)
+  CallE(callee: i64, args_lp: i64, arg_count: i64, targs_lp: i64, names_lp: i64)
   IndexE(obj: i64, idx: i64)
   FieldE(obj: i64, field: i64)
   PipeE(left: i64, right: i64)
@@ -868,7 +868,7 @@ fn ps_advance(pc: PC, ps: PS): PS
   if ps.pos >= pc.toks.length():
     return ps
   let tok: Token = pc.toks.get(ps.pos)
-  if tk_name(tok.kind) == tk_name(TK.Eof):
+  if tk_name(tok.kind) == tk_name(TK::Eof):
     return ps
   return ps_set_pos(ps, ps.pos + 1)
 
@@ -886,17 +886,17 @@ fn idx_push(ps: PS, val: i64): PS
 
 fn peek_kind(pc: PC, ps: PS): TK
   if ps.pos >= pc.toks.length():
-    return TK.Eof
+    return TK::Eof
   let tok: Token = pc.toks.get(ps.pos)
   return tok.kind
 
 fn peek_tok(pc: PC, ps: PS): Token
   if ps.pos >= pc.toks.length():
-    return Token(TK.Eof, to_i64(0), to_i64(0))
+    return Token(TK::Eof, to_i64(0), to_i64(0))
   return pc.toks.get(ps.pos)
 
 fn at_end(pc: PC, ps: PS): bool
-  return tk_name(peek_kind(pc, ps)) == tk_name(TK.Eof)
+  return tk_name(peek_kind(pc, ps)) == tk_name(TK::Eof)
 
 fn tok_span(pc: PC, ps: PS): Span
   let tok: Token = peek_tok(pc, ps)
@@ -917,7 +917,7 @@ fn skip_newlines(pc: PC, ps: PS): PS
   let cur: PS = ps
   let done: bool = false
   while done == false:
-    if tk_name(peek_kind(pc, cur)) == tk_name(TK.Newline):
+    if tk_name(peek_kind(pc, cur)) == tk_name(TK::Newline):
       cur = ps_advance(pc, cur)
     else:
       done = true
@@ -982,22 +982,22 @@ fn sync_to_decl(pc: PC, ps: PS): PS
       done = true
     else:
       let k: TK = peek_kind(pc, cur)
-      if tk_name(k) == tk_name(TK.KwFn):
+      if tk_name(k) == tk_name(TK::KwFn):
         done = true
       else:
-        if tk_name(k) == tk_name(TK.KwClass):
+        if tk_name(k) == tk_name(TK::KwClass):
           done = true
         else:
-          if tk_name(k) == tk_name(TK.KwEnum):
+          if tk_name(k) == tk_name(TK::KwEnum):
             done = true
           else:
-            if tk_name(k) == tk_name(TK.KwExtern):
+            if tk_name(k) == tk_name(TK::KwExtern):
               done = true
             else:
-              if tk_name(k) == tk_name(TK.KwType):
+              if tk_name(k) == tk_name(TK::KwType):
                 done = true
               else:
-                if tk_name(k) == tk_name(TK.Dedent):
+                if tk_name(k) == tk_name(TK::Dedent):
                   done = true
                 else:
                   cur = ps_advance(pc, cur)
@@ -1011,10 +1011,10 @@ fn sync_to_stmt(pc: PC, ps: PS): PS
       done = true
     else:
       let k: TK = peek_kind(pc, cur)
-      if tk_name(k) == tk_name(TK.Newline):
+      if tk_name(k) == tk_name(TK::Newline):
         done = true
       else:
-        if tk_name(k) == tk_name(TK.Dedent):
+        if tk_name(k) == tk_name(TK::Dedent):
           done = true
         else:
           cur = ps_advance(pc, cur)
@@ -1026,45 +1026,45 @@ fn sync_to_stmt(pc: PC, ps: PS): PS
 
 fn parse_type(pc: PC, ps: PS): PR
   // Pointer type: *T
-  if tk_name(peek_kind(pc, ps)) == tk_name(TK.Star):
+  if tk_name(peek_kind(pc, ps)) == tk_name(TK::Star):
     let ps2: PS = ps_advance(pc, ps)
     let inner: PR = parse_type(pc, ps2)
     if inner.node < 0:
       return inner
-    return ps_add_node(inner.ps, Node.PointerT(inner.node))
+    return ps_add_node(inner.ps, Node::PointerT(inner = inner.node))
   // Named or generic type
   return parse_named_type(pc, ps)
 
 fn parse_named_type(pc: PC, ps: PS): PR
-  if tk_name(peek_kind(pc, ps)) != tk_name(TK.Identifier):
+  if tk_name(peek_kind(pc, ps)) != tk_name(TK::Identifier):
     let sp: Span = tok_span(pc, ps)
     let ps2: PS = ps_add_diag(ps, sp, "expected type name")
     let ps3: PS = ps_advance(pc, ps2)
-    return ps_add_node(ps3, Node.ErrorT(ps.pos))
+    return ps_add_node(ps3, Node::ErrorT(tok = ps.pos))
 
   let name_tidx: i64 = ps.pos
   let ps2: PS = ps_advance(pc, ps)
 
   // Check for qualified type: Name::Name (module::Type)
-  if tk_name(peek_kind(pc, ps2)) == tk_name(TK.ColonColon):
+  if tk_name(peek_kind(pc, ps2)) == tk_name(TK::ColonColon):
     // Build a QualNameE node to represent the qualified type path.
     let seg_toks: Vector<i64> = Vector<i64>::new()
     seg_toks = seg_toks.push(name_tidx)
     let cur: PS = ps2
     let qual_done: bool = false
     while qual_done == false:
-      if tk_name(peek_kind(pc, cur)) == tk_name(TK.ColonColon):
+      if tk_name(peek_kind(pc, cur)) == tk_name(TK::ColonColon):
         cur = ps_advance(pc, cur)
         let tidx: i64 = cur.pos
-        cur = expect(pc, cur, TK.Identifier)
+        cur = expect(pc, cur, TK::Identifier)
         seg_toks = seg_toks.push(tidx)
       else:
         qual_done = true
     let seg_fl: FlushResult = flush_list(cur, seg_toks)
-    return ps_add_node(seg_fl.ps, Node.QualNameE(seg_fl.list_pos, seg_toks.length()))
+    return ps_add_node(seg_fl.ps, Node::QualNameE(seg_lp = seg_fl.list_pos, seg_count = seg_toks.length()))
 
   // Check for generic: Name<...>
-  if tk_name(peek_kind(pc, ps2)) == tk_name(TK.Lt):
+  if tk_name(peek_kind(pc, ps2)) == tk_name(TK::Lt):
     let ps3: PS = ps_advance(pc, ps2)
     // Parse type arguments — collect then flush for contiguity
     let collected: Vector<i64> = Vector<i64>::new()
@@ -1074,7 +1074,7 @@ fn parse_named_type(pc: PC, ps: PS): PR
       let cur: PS = first_arg.ps
       let done: bool = false
       while done == false:
-        if tk_name(peek_kind(pc, cur)) == tk_name(TK.Comma):
+        if tk_name(peek_kind(pc, cur)) == tk_name(TK::Comma):
           cur = ps_advance(pc, cur)
           let arg: PR = parse_type(pc, cur)
           if arg.node >= 0:
@@ -1086,15 +1086,15 @@ fn parse_named_type(pc: PC, ps: PS): PR
         else:
           done = true
       let fl: FlushResult = flush_list(cur, collected)
-      let ps7: PS = expect(pc, fl.ps, TK.Gt)
-      return ps_add_node(ps7, Node.GenericT(name_tidx, fl.list_pos, collected.length()))
+      let ps7: PS = expect(pc, fl.ps, TK::Gt)
+      return ps_add_node(ps7, Node::GenericT(name = name_tidx, args_lp = fl.list_pos, arg_count = collected.length()))
     else:
       // Error parsing first type arg
-      let ps5: PS = expect(pc, first_arg.ps, TK.Gt)
-      return ps_add_node(ps5, Node.ErrorT(name_tidx))
+      let ps5: PS = expect(pc, first_arg.ps, TK::Gt)
+      return ps_add_node(ps5, Node::ErrorT(tok = name_tidx))
 
   // Simple named type
-  return ps_add_node(ps2, Node.NamedT(name_tidx))
+  return ps_add_node(ps2, Node::NamedT(tok = name_tidx))
 
 // =========================================================================
 // Section 11: Expression parsing — precedence tower
@@ -1105,74 +1105,74 @@ fn parse_primary(pc: PC, ps: PS): PR
   let k: TK = peek_kind(pc, ps)
 
   // Integer literal
-  if tk_name(k) == tk_name(TK.IntLiteral):
+  if tk_name(k) == tk_name(TK::IntLiteral):
     let tidx: i64 = ps.pos
-    return ps_add_node(ps_advance(pc, ps), Node.IntLitE(tidx))
+    return ps_add_node(ps_advance(pc, ps), Node::IntLitE(tok = tidx))
 
   // Float literal
-  if tk_name(k) == tk_name(TK.FloatLiteral):
+  if tk_name(k) == tk_name(TK::FloatLiteral):
     let tidx: i64 = ps.pos
-    return ps_add_node(ps_advance(pc, ps), Node.FloatLitE(tidx))
+    return ps_add_node(ps_advance(pc, ps), Node::FloatLitE(tok = tidx))
 
   // String literal
-  if tk_name(k) == tk_name(TK.StringLiteral):
+  if tk_name(k) == tk_name(TK::StringLiteral):
     let tidx: i64 = ps.pos
-    return ps_add_node(ps_advance(pc, ps), Node.StringLitE(tidx))
+    return ps_add_node(ps_advance(pc, ps), Node::StringLitE(tok = tidx))
 
   // Bool literal true
-  if tk_name(k) == tk_name(TK.KwTrue):
+  if tk_name(k) == tk_name(TK::KwTrue):
     let tidx: i64 = ps.pos
-    return ps_add_node(ps_advance(pc, ps), Node.BoolLitE(tidx))
+    return ps_add_node(ps_advance(pc, ps), Node::BoolLitE(tok = tidx))
 
   // Bool literal false
-  if tk_name(k) == tk_name(TK.KwFalse):
+  if tk_name(k) == tk_name(TK::KwFalse):
     let tidx: i64 = ps.pos
-    return ps_add_node(ps_advance(pc, ps), Node.BoolLitE(tidx))
+    return ps_add_node(ps_advance(pc, ps), Node::BoolLitE(tok = tidx))
 
   // Parenthesized expression
-  if tk_name(k) == tk_name(TK.LParen):
+  if tk_name(k) == tk_name(TK::LParen):
     let ps2: PS = ps_advance(pc, ps)
     let inner: PR = parse_expr(pc, ps2)
     if inner.node < 0:
       return inner
-    let ps3: PS = expect(pc, inner.ps, TK.RParen)
+    let ps3: PS = expect(pc, inner.ps, TK::RParen)
     return PR(ps3, inner.node)
 
   // List literal: [elem, ...]
-  if tk_name(k) == tk_name(TK.LBracket):
+  if tk_name(k) == tk_name(TK::LBracket):
     return parse_list_literal(pc, ps)
 
   // Lambda: |params| -> body
-  if tk_name(k) == tk_name(TK.Pipe):
+  if tk_name(k) == tk_name(TK::Pipe):
     return parse_lambda(pc, ps)
 
   // Identifier or qualified name
-  if tk_name(k) == tk_name(TK.Identifier):
+  if tk_name(k) == tk_name(TK::Identifier):
     return parse_ident_or_qual(pc, ps)
 
   // self keyword as expression (inside method bodies)
-  if tk_name(k) == tk_name(TK.KwSelf):
+  if tk_name(k) == tk_name(TK::KwSelf):
     let self_tidx: i64 = ps.pos
-    return ps_add_node(ps_advance(pc, ps), Node.IdentE(self_tidx))
+    return ps_add_node(ps_advance(pc, ps), Node::IdentE(tok = self_tidx))
 
   // Error
   let sp: Span = tok_span(pc, ps)
   let ps2: PS = ps_add_diag(ps, sp, "expected expression")
-  return ps_add_node(ps_advance(pc, ps2), Node.ErrorE(ps.pos))
+  return ps_add_node(ps_advance(pc, ps2), Node::ErrorE(tok = ps.pos))
 
 fn parse_list_literal(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
   let collected: Vector<i64> = Vector<i64>::new()
   let cur: PS = ps2
 
-  if tk_name(peek_kind(pc, cur)) != tk_name(TK.RBracket):
+  if tk_name(peek_kind(pc, cur)) != tk_name(TK::RBracket):
     let first: PR = parse_expr(pc, cur)
     if first.node >= 0:
       collected = collected.push(first.node)
       cur = first.ps
       let done: bool = false
       while done == false:
-        if tk_name(peek_kind(pc, cur)) == tk_name(TK.Comma):
+        if tk_name(peek_kind(pc, cur)) == tk_name(TK::Comma):
           cur = ps_advance(pc, cur)
           let elem: PR = parse_expr(pc, cur)
           if elem.node >= 0:
@@ -1187,44 +1187,44 @@ fn parse_list_literal(pc: PC, ps: PS): PR
       cur = first.ps
 
   let fl: FlushResult = flush_list(cur, collected)
-  cur = expect(pc, fl.ps, TK.RBracket)
-  return ps_add_node(cur, Node.ListLitE(fl.list_pos, collected.length()))
+  cur = expect(pc, fl.ps, TK::RBracket)
+  return ps_add_node(cur, Node::ListLitE(elems_lp = fl.list_pos, elem_count = collected.length()))
 
 fn parse_lambda(pc: PC, ps: PS): PR
-  let ps2: PS = expect(pc, ps, TK.Pipe)
+  let ps2: PS = expect(pc, ps, TK::Pipe)
   let param_toks: Vector<i64> = Vector<i64>::new()
   let cur: PS = ps2
 
-  if tk_name(peek_kind(pc, cur)) != tk_name(TK.Pipe):
+  if tk_name(peek_kind(pc, cur)) != tk_name(TK::Pipe):
     // First param
     let tidx: i64 = cur.pos
-    cur = expect(pc, cur, TK.Identifier)
+    cur = expect(pc, cur, TK::Identifier)
     param_toks = param_toks.push(tidx)
     let done: bool = false
     while done == false:
-      if tk_name(peek_kind(pc, cur)) == tk_name(TK.Comma):
+      if tk_name(peek_kind(pc, cur)) == tk_name(TK::Comma):
         cur = ps_advance(pc, cur)
         let tidx2: i64 = cur.pos
-        cur = expect(pc, cur, TK.Identifier)
+        cur = expect(pc, cur, TK::Identifier)
         param_toks = param_toks.push(tidx2)
       else:
         done = true
 
   let param_fl: FlushResult = flush_list(cur, param_toks)
-  cur = expect(pc, param_fl.ps, TK.Pipe)
-  cur = expect(pc, cur, TK.Arrow)
+  cur = expect(pc, param_fl.ps, TK::Pipe)
+  cur = expect(pc, cur, TK::Arrow)
   let body: PR = parse_expr(pc, cur)
   if body.node < 0:
     return body
-  return ps_add_node(body.ps, Node.LambdaE(param_fl.list_pos, param_toks.length(), body.node))
+  return ps_add_node(body.ps, Node::LambdaE(params_lp = param_fl.list_pos, param_count = param_toks.length(), body = body.node))
 
 fn parse_ident_or_qual(pc: PC, ps: PS): PR
   let first_tidx: i64 = ps.pos
   let ps2: PS = ps_advance(pc, ps)
 
   // Check for :: (qualified name)
-  if tk_name(peek_kind(pc, ps2)) != tk_name(TK.ColonColon):
-    return ps_add_node(ps2, Node.IdentE(first_tidx))
+  if tk_name(peek_kind(pc, ps2)) != tk_name(TK::ColonColon):
+    return ps_add_node(ps2, Node::IdentE(tok = first_tidx))
 
   // Qualified name: ident::ident (::ident)*
   let seg_toks: Vector<i64> = Vector<i64>::new()
@@ -1232,16 +1232,16 @@ fn parse_ident_or_qual(pc: PC, ps: PS): PR
   let cur: PS = ps2
   let done: bool = false
   while done == false:
-    if tk_name(peek_kind(pc, cur)) == tk_name(TK.ColonColon):
+    if tk_name(peek_kind(pc, cur)) == tk_name(TK::ColonColon):
       cur = ps_advance(pc, cur)
       let tidx: i64 = cur.pos
-      cur = expect(pc, cur, TK.Identifier)
+      cur = expect(pc, cur, TK::Identifier)
       seg_toks = seg_toks.push(tidx)
     else:
       done = true
 
   let seg_fl: FlushResult = flush_list(cur, seg_toks)
-  return ps_add_node(seg_fl.ps, Node.QualNameE(seg_fl.list_pos, seg_toks.length()))
+  return ps_add_node(seg_fl.ps, Node::QualNameE(seg_lp = seg_fl.list_pos, seg_count = seg_toks.length()))
 
 // Type arguments read speculatively after a callee name: the state past
 // `>` and the flushed list when accepted, else `ok` false and the state
@@ -1266,7 +1266,7 @@ fn try_call_type_args(pc: PC, ps: PS): TypeArgsResult
   cur = first.ps
   let more: bool = true
   while more:
-    if tk_name(peek_kind(pc, cur)) == tk_name(TK.Comma):
+    if tk_name(peek_kind(pc, cur)) == tk_name(TK::Comma):
       cur = ps_advance(pc, cur)
       let arg: PR = parse_type(pc, cur)
       collected = collected.push(arg.node)
@@ -1275,11 +1275,11 @@ fn try_call_type_args(pc: PC, ps: PS): TypeArgsResult
       more = false
   if cur.diags.length() != ps.diags.length():
     return none
-  if tk_name(peek_kind(pc, cur)) != tk_name(TK.Gt):
+  if tk_name(peek_kind(pc, cur)) != tk_name(TK::Gt):
     return none
   cur = ps_advance(pc, cur)
   let next: TK = peek_kind(pc, cur)
-  if tk_name(next) != tk_name(TK.LParen) and tk_name(next) != tk_name(TK.ColonColon):
+  if tk_name(next) != tk_name(TK::LParen) and tk_name(next) != tk_name(TK::ColonColon):
     return none
   let fl: FlushResult = flush_list(cur, collected)
   return TypeArgsResult(fl.ps, fl.list_pos, collected.length(), true)
@@ -1288,9 +1288,9 @@ fn try_call_type_args(pc: PC, ps: PS): TypeArgsResult
 // or a qualified name.
 fn names_callee(ps: PS, node: i64): bool
   match ps.nodes.get(node):
-    Node.IdentE(t):
+    Node::IdentE(t):
       return true
-    Node.QualNameE(lp, n):
+    Node::QualNameE(lp, n):
       return true
   return false
 
@@ -1298,42 +1298,61 @@ fn names_callee(ps: PS, node: i64): bool
 fn extend_qual_name(ps: PS, node: i64, member_tidx: i64): PR
   let seg_toks: Vector<i64> = Vector<i64>::new()
   match ps.nodes.get(node):
-    Node.IdentE(t):
+    Node::IdentE(t):
       seg_toks = seg_toks.push(t)
-    Node.QualNameE(lp, n):
+    Node::QualNameE(lp, n):
       seg_toks = read_list(ps.idx, lp)
   seg_toks = seg_toks.push(member_tidx)
   let fl: FlushResult = flush_list(ps, seg_toks)
-  return ps_add_node(fl.ps, Node.QualNameE(fl.list_pos, seg_toks.length()))
+  return ps_add_node(fl.ps, Node::QualNameE(seg_lp = fl.list_pos, seg_count = seg_toks.length()))
+
+// One call argument at `ps`: `name = expr` when an identifier is followed
+// by `=` (`==` is a comparison), else an expression.  The name's token
+// index rides in `names`, -1 for a positional argument.
+class CallArg:
+  ps: PS
+  node: i64
+  name_tidx: i64
+
+fn parse_call_arg(pc: PC, ps: PS): CallArg
+  if tk_name(peek_kind(pc, ps)) == tk_name(TK::Identifier):
+    let after: PS = ps_advance(pc, ps)
+    if tk_name(peek_kind(pc, after)) == tk_name(TK::Eq):
+      let value: PR = parse_expr(pc, ps_advance(pc, after))
+      return CallArg(value.ps, value.node, ps.pos)
+  let expr: PR = parse_expr(pc, ps)
+  return CallArg(expr.ps, expr.node, to_i64(-1))
 
 // The call `(args)` on `callee` at `ps`, carrying the type arguments the
-// callee was read with (`targs_lp` -1 and `targ_count` 0 for none).
-fn parse_call_suffix(pc: PC, ps: PS, callee: i64, targs_lp: i64, targ_count: i64): PR
-  let inner: PS = expect(pc, ps, TK.LParen)
+// callee was read with (`targs_lp` -1 for none).  The argument names
+// are a list beside the arguments, one entry each.
+fn parse_call_suffix(pc: PC, ps: PS, callee: i64, targs_lp: i64): PR
+  let inner: PS = expect(pc, ps, TK::LParen)
   let call_args: Vector<i64> = Vector<i64>::new()
-  if tk_name(peek_kind(pc, inner)) != tk_name(TK.RParen):
-    let arg: PR = parse_expr(pc, inner)
+  let arg_names: Vector<i64> = Vector<i64>::new()
+  if tk_name(peek_kind(pc, inner)) != tk_name(TK::RParen):
+    let arg: CallArg = parse_call_arg(pc, inner)
+    inner = arg.ps
     if arg.node >= 0:
       call_args = call_args.push(arg.node)
-      inner = arg.ps
+      arg_names = arg_names.push(arg.name_tidx)
       let arg_done: bool = false
       while arg_done == false:
-        if tk_name(peek_kind(pc, inner)) == tk_name(TK.Comma):
+        if tk_name(peek_kind(pc, inner)) == tk_name(TK::Comma):
           inner = ps_advance(pc, inner)
-          let arg2: PR = parse_expr(pc, inner)
+          let arg2: CallArg = parse_call_arg(pc, inner)
+          inner = arg2.ps
           if arg2.node >= 0:
             call_args = call_args.push(arg2.node)
-            inner = arg2.ps
+            arg_names = arg_names.push(arg2.name_tidx)
           else:
-            inner = arg2.ps
             arg_done = true
         else:
           arg_done = true
-    else:
-      inner = arg.ps
   let call_fl: FlushResult = flush_list(inner, call_args)
-  inner = expect(pc, call_fl.ps, TK.RParen)
-  return ps_add_node(inner, Node.CallE(callee, call_fl.list_pos, call_args.length(), targs_lp, targ_count))
+  let names_fl: FlushResult = flush_list(call_fl.ps, arg_names)
+  inner = expect(pc, names_fl.ps, TK::RParen)
+  return ps_add_node(inner, Node::CallE(callee = callee, args_lp = call_fl.list_pos, arg_count = call_args.length(), targs_lp = targs_lp, names_lp = names_fl.list_pos))
 
 // Postfix expressions: call (with call-site type arguments), field, index, try
 fn parse_postfix(pc: PC, ps: PS): PR
@@ -1348,56 +1367,56 @@ fn parse_postfix(pc: PC, ps: PS): PR
 
     // Type arguments on a name: name<T, ..>(args) or name<T, ..>::member(args)
     let targs: TypeArgsResult = TypeArgsResult(cur_ps, to_i64(-1), to_i64(0), false)
-    if tk_name(k) == tk_name(TK.Lt):
+    if tk_name(k) == tk_name(TK::Lt):
       if names_callee(cur_ps, cur_node):
         targs = try_call_type_args(pc, cur_ps)
     if targs.ok:
       let after: PS = targs.ps
-      if tk_name(peek_kind(pc, after)) == tk_name(TK.ColonColon):
+      if tk_name(peek_kind(pc, after)) == tk_name(TK::ColonColon):
         let ps_m: PS = ps_advance(pc, after)
         let member_tidx: i64 = ps_m.pos
-        ps_m = expect(pc, ps_m, TK.Identifier)
+        ps_m = expect(pc, ps_m, TK::Identifier)
         let qual_r: PR = extend_qual_name(ps_m, cur_node, member_tidx)
         after = qual_r.ps
         cur_node = qual_r.node
-      let typed_call: PR = parse_call_suffix(pc, after, cur_node, targs.list_pos, targs.count)
+      let typed_call: PR = parse_call_suffix(pc, after, cur_node, targs.list_pos)
       cur_ps = typed_call.ps
       cur_node = typed_call.node
 
     // Call: expr(args)
     else:
-      if tk_name(k) == tk_name(TK.LParen):
-        let call_r: PR = parse_call_suffix(pc, cur_ps, cur_node, to_i64(-1), to_i64(0))
+      if tk_name(k) == tk_name(TK::LParen):
+        let call_r: PR = parse_call_suffix(pc, cur_ps, cur_node, to_i64(-1))
         cur_ps = call_r.ps
         cur_node = call_r.node
 
       // Field access: expr.field
       else:
-        if tk_name(k) == tk_name(TK.Dot):
+        if tk_name(k) == tk_name(TK::Dot):
           let ps2: PS = ps_advance(pc, cur_ps)
           let field_tidx: i64 = ps2.pos
-          let ps3: PS = expect(pc, ps2, TK.Identifier)
-          let fld_r: PR = ps_add_node(ps3, Node.FieldE(cur_node, field_tidx))
+          let ps3: PS = expect(pc, ps2, TK::Identifier)
+          let fld_r: PR = ps_add_node(ps3, Node::FieldE(obj = cur_node, field = field_tidx))
           cur_ps = fld_r.ps
           cur_node = fld_r.node
 
         // Index: expr[index]
         else:
-          if tk_name(k) == tk_name(TK.LBracket):
+          if tk_name(k) == tk_name(TK::LBracket):
             let ps2: PS = ps_advance(pc, cur_ps)
             let idx_expr: PR = parse_expr(pc, ps2)
             if idx_expr.node < 0:
               return idx_expr
-            let ps3: PS = expect(pc, idx_expr.ps, TK.RBracket)
-            let idx_r: PR = ps_add_node(ps3, Node.IndexE(cur_node, idx_expr.node))
+            let ps3: PS = expect(pc, idx_expr.ps, TK::RBracket)
+            let idx_r: PR = ps_add_node(ps3, Node::IndexE(obj = cur_node, idx = idx_expr.node))
             cur_ps = idx_r.ps
             cur_node = idx_r.node
 
           // Try: expr?
           else:
-            if tk_name(k) == tk_name(TK.Question):
+            if tk_name(k) == tk_name(TK::Question):
               let ps2: PS = ps_advance(pc, cur_ps)
-              let try_r: PR = ps_add_node(ps2, Node.TryE(cur_node))
+              let try_r: PR = ps_add_node(ps2, Node::TryE(operand = cur_node))
               cur_ps = try_r.ps
               cur_node = try_r.node
 
@@ -1409,12 +1428,12 @@ fn parse_postfix(pc: PC, ps: PS): PR
 // Unary: -expr, !expr, *expr, &expr
 fn parse_unary(pc: PC, ps: PS): PR
   let k: TK = peek_kind(pc, ps)
-  if tk_name(k) == tk_name(TK.Minus) or tk_name(k) == tk_name(TK.Bang) or tk_name(k) == tk_name(TK.Star) or tk_name(k) == tk_name(TK.Amp):
+  if tk_name(k) == tk_name(TK::Minus) or tk_name(k) == tk_name(TK::Bang) or tk_name(k) == tk_name(TK::Star) or tk_name(k) == tk_name(TK::Amp):
     let op_tidx: i64 = ps.pos
     let operand: PR = parse_unary(pc, ps_advance(pc, ps))
     if operand.node < 0:
       return operand
-    return ps_add_node(operand.ps, Node.UnaryE(op_tidx, operand.node))
+    return ps_add_node(operand.ps, Node::UnaryE(op = op_tidx, operand = operand.node))
   return parse_postfix(pc, ps)
 
 // Multiplicative: expr * expr, expr / expr, expr % expr
@@ -1427,12 +1446,12 @@ fn parse_multiplicative(pc: PC, ps: PS): PR
   let done: bool = false
   while done == false:
     let k: TK = peek_kind(pc, cur_ps)
-    if tk_name(k) == tk_name(TK.Star) or tk_name(k) == tk_name(TK.Slash) or tk_name(k) == tk_name(TK.Percent):
+    if tk_name(k) == tk_name(TK::Star) or tk_name(k) == tk_name(TK::Slash) or tk_name(k) == tk_name(TK::Percent):
       let op_tidx: i64 = cur_ps.pos
       let right: PR = parse_unary(pc, ps_advance(pc, cur_ps))
       if right.node < 0:
         return right
-      let bin_r: PR = ps_add_node(right.ps, Node.BinaryE(op_tidx, cur_node, right.node))
+      let bin_r: PR = ps_add_node(right.ps, Node::BinaryE(op = op_tidx, left = cur_node, right = right.node))
       cur_ps = bin_r.ps
       cur_node = bin_r.node
     else:
@@ -1449,12 +1468,12 @@ fn parse_additive(pc: PC, ps: PS): PR
   let done: bool = false
   while done == false:
     let k: TK = peek_kind(pc, cur_ps)
-    if tk_name(k) == tk_name(TK.Plus) or tk_name(k) == tk_name(TK.Minus):
+    if tk_name(k) == tk_name(TK::Plus) or tk_name(k) == tk_name(TK::Minus):
       let op_tidx: i64 = cur_ps.pos
       let right: PR = parse_multiplicative(pc, ps_advance(pc, cur_ps))
       if right.node < 0:
         return right
-      let bin_r: PR = ps_add_node(right.ps, Node.BinaryE(op_tidx, cur_node, right.node))
+      let bin_r: PR = ps_add_node(right.ps, Node::BinaryE(op = op_tidx, left = cur_node, right = right.node))
       cur_ps = bin_r.ps
       cur_node = bin_r.node
     else:
@@ -1471,12 +1490,12 @@ fn parse_relational(pc: PC, ps: PS): PR
   let done: bool = false
   while done == false:
     let k: TK = peek_kind(pc, cur_ps)
-    if tk_name(k) == tk_name(TK.Lt) or tk_name(k) == tk_name(TK.LtEq) or tk_name(k) == tk_name(TK.Gt) or tk_name(k) == tk_name(TK.GtEq):
+    if tk_name(k) == tk_name(TK::Lt) or tk_name(k) == tk_name(TK::LtEq) or tk_name(k) == tk_name(TK::Gt) or tk_name(k) == tk_name(TK::GtEq):
       let op_tidx: i64 = cur_ps.pos
       let right: PR = parse_additive(pc, ps_advance(pc, cur_ps))
       if right.node < 0:
         return right
-      let bin_r: PR = ps_add_node(right.ps, Node.BinaryE(op_tidx, cur_node, right.node))
+      let bin_r: PR = ps_add_node(right.ps, Node::BinaryE(op = op_tidx, left = cur_node, right = right.node))
       cur_ps = bin_r.ps
       cur_node = bin_r.node
     else:
@@ -1493,12 +1512,12 @@ fn parse_equality(pc: PC, ps: PS): PR
   let done: bool = false
   while done == false:
     let k: TK = peek_kind(pc, cur_ps)
-    if tk_name(k) == tk_name(TK.EqEq) or tk_name(k) == tk_name(TK.BangEq):
+    if tk_name(k) == tk_name(TK::EqEq) or tk_name(k) == tk_name(TK::BangEq):
       let op_tidx: i64 = cur_ps.pos
       let right: PR = parse_relational(pc, ps_advance(pc, cur_ps))
       if right.node < 0:
         return right
-      let bin_r: PR = ps_add_node(right.ps, Node.BinaryE(op_tidx, cur_node, right.node))
+      let bin_r: PR = ps_add_node(right.ps, Node::BinaryE(op = op_tidx, left = cur_node, right = right.node))
       cur_ps = bin_r.ps
       cur_node = bin_r.node
     else:
@@ -1514,12 +1533,12 @@ fn parse_logical_and(pc: PC, ps: PS): PR
   let cur_node: i64 = left.node
   let done: bool = false
   while done == false:
-    if tk_name(peek_kind(pc, cur_ps)) == tk_name(TK.KwAnd):
+    if tk_name(peek_kind(pc, cur_ps)) == tk_name(TK::KwAnd):
       let op_tidx: i64 = cur_ps.pos
       let right: PR = parse_equality(pc, ps_advance(pc, cur_ps))
       if right.node < 0:
         return right
-      let bin_r: PR = ps_add_node(right.ps, Node.BinaryE(op_tidx, cur_node, right.node))
+      let bin_r: PR = ps_add_node(right.ps, Node::BinaryE(op = op_tidx, left = cur_node, right = right.node))
       cur_ps = bin_r.ps
       cur_node = bin_r.node
     else:
@@ -1535,12 +1554,12 @@ fn parse_logical_or(pc: PC, ps: PS): PR
   let cur_node: i64 = left.node
   let done: bool = false
   while done == false:
-    if tk_name(peek_kind(pc, cur_ps)) == tk_name(TK.KwOr):
+    if tk_name(peek_kind(pc, cur_ps)) == tk_name(TK::KwOr):
       let op_tidx: i64 = cur_ps.pos
       let right: PR = parse_logical_and(pc, ps_advance(pc, cur_ps))
       if right.node < 0:
         return right
-      let bin_r: PR = ps_add_node(right.ps, Node.BinaryE(op_tidx, cur_node, right.node))
+      let bin_r: PR = ps_add_node(right.ps, Node::BinaryE(op = op_tidx, left = cur_node, right = right.node))
       cur_ps = bin_r.ps
       cur_node = bin_r.node
     else:
@@ -1556,11 +1575,11 @@ fn parse_pipe(pc: PC, ps: PS): PR
   let cur_node: i64 = left.node
   let done: bool = false
   while done == false:
-    if tk_name(peek_kind(pc, cur_ps)) == tk_name(TK.PipeGt):
+    if tk_name(peek_kind(pc, cur_ps)) == tk_name(TK::PipeGt):
       let right: PR = parse_logical_or(pc, ps_advance(pc, cur_ps))
       if right.node < 0:
         return right
-      let pipe_r: PR = ps_add_node(right.ps, Node.PipeE(cur_node, right.node))
+      let pipe_r: PR = ps_add_node(right.ps, Node::PipeE(left = cur_node, right = right.node))
       cur_ps = pipe_r.ps
       cur_node = pipe_r.node
     else:
@@ -1578,15 +1597,15 @@ fn parse_expr(pc: PC, ps: PS): PR
 // Parse a suite (body block): NEWLINE INDENT stmts DEDENT
 // Returns PR where .node = list_pos (position of count in idx)
 fn parse_suite(pc: PC, ps: PS): PR
-  let ps2: PS = expect(pc, ps, TK.Newline)
-  let ps3: PS = expect(pc, ps2, TK.Indent)
+  let ps2: PS = expect(pc, ps, TK::Newline)
+  let ps3: PS = expect(pc, ps2, TK::Indent)
   let collected: Vector<i64> = Vector<i64>::new()
   let cur: PS = ps3
   let done: bool = false
   while done == false:
     cur = skip_newlines(pc, cur)
     let k: TK = peek_kind(pc, cur)
-    if tk_name(k) == tk_name(TK.Dedent) or at_end(pc, cur):
+    if tk_name(k) == tk_name(TK::Dedent) or at_end(pc, cur):
       done = true
     else:
       let stmt: PR = parse_statement(pc, cur)
@@ -1596,35 +1615,35 @@ fn parse_suite(pc: PC, ps: PS): PR
       else:
         // Error recovery: skip to next statement boundary
         cur = sync_to_stmt(pc, stmt.ps)
-        let err_r: PR = ps_add_node(cur, Node.ErrorS(cur.pos))
+        let err_r: PR = ps_add_node(cur, Node::ErrorS(tok = cur.pos))
         collected = collected.push(err_r.node)
         cur = err_r.ps
 
   let fl: FlushResult = flush_list(cur, collected)
-  cur = expect(pc, fl.ps, TK.Dedent)
+  cur = expect(pc, fl.ps, TK::Dedent)
   return PR(cur, fl.list_pos)
 
 fn parse_statement(pc: PC, ps: PS): PR
   let k: TK = peek_kind(pc, ps)
 
-  if tk_name(k) == tk_name(TK.KwLet):
+  if tk_name(k) == tk_name(TK::KwLet):
     return parse_let_stmt(pc, ps)
-  if tk_name(k) == tk_name(TK.KwIf):
+  if tk_name(k) == tk_name(TK::KwIf):
     return parse_if_stmt(pc, ps)
-  if tk_name(k) == tk_name(TK.KwWhile):
+  if tk_name(k) == tk_name(TK::KwWhile):
     return parse_while_stmt(pc, ps)
-  if tk_name(k) == tk_name(TK.KwFor):
+  if tk_name(k) == tk_name(TK::KwFor):
     return parse_for_stmt(pc, ps)
-  if tk_name(k) == tk_name(TK.KwReturn):
+  if tk_name(k) == tk_name(TK::KwReturn):
     return parse_return_stmt(pc, ps)
-  if tk_name(k) == tk_name(TK.KwBreak):
+  if tk_name(k) == tk_name(TK::KwBreak):
     let tidx: i64 = ps.pos
     let ps2: PS = ps_advance(pc, ps)
-    let ps3: PS = match_tok(pc, ps2, TK.Newline)
-    return ps_add_node(ps3, Node.BreakS(tidx))
-  if tk_name(k) == tk_name(TK.KwMatch):
+    let ps3: PS = match_tok(pc, ps2, TK::Newline)
+    return ps_add_node(ps3, Node::BreakS(tok = tidx))
+  if tk_name(k) == tk_name(TK::KwMatch):
     return parse_match_stmt(pc, ps)
-  if tk_name(k) == tk_name(TK.KwResource):
+  if tk_name(k) == tk_name(TK::KwResource):
     return parse_resource_stmt(pc, ps)
 
   // Expression or assignment
@@ -1633,28 +1652,28 @@ fn parse_statement(pc: PC, ps: PS): PR
     return expr
 
   // Check for assignment: expr = value
-  if tk_name(peek_kind(pc, expr.ps)) == tk_name(TK.Eq):
+  if tk_name(peek_kind(pc, expr.ps)) == tk_name(TK::Eq):
     let ps2: PS = ps_advance(pc, expr.ps)
     let val: PR = parse_expr(pc, ps2)
     if val.node < 0:
       return val
-    let ps3: PS = match_tok(pc, val.ps, TK.Newline)
-    return ps_add_node(ps3, Node.AssignS(expr.node, val.node))
+    let ps3: PS = match_tok(pc, val.ps, TK::Newline)
+    return ps_add_node(ps3, Node::AssignS(target = expr.node, value = val.node))
 
   // Expression statement
-  let ps2: PS = match_tok(pc, expr.ps, TK.Newline)
-  return ps_add_node(ps2, Node.ExprStmtS(expr.node))
+  let ps2: PS = match_tok(pc, expr.ps, TK::Newline)
+  return ps_add_node(ps2, Node::ExprStmtS(expr = expr.node))
 
 fn parse_let_stmt(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
   let name_tidx: i64 = ps2.pos
-  let ps3: PS = expect(pc, ps2, TK.Identifier)
+  let ps3: PS = expect(pc, ps2, TK::Identifier)
 
   let type_node: i64 = to_i64(-1)
   let init_node: i64 = to_i64(-1)
 
   // Check for : Type
-  if tk_name(peek_kind(pc, ps3)) == tk_name(TK.Colon):
+  if tk_name(peek_kind(pc, ps3)) == tk_name(TK::Colon):
     let ps4: PS = ps_advance(pc, ps3)
     let ty: PR = parse_type(pc, ps4)
     if ty.node >= 0:
@@ -1663,7 +1682,7 @@ fn parse_let_stmt(pc: PC, ps: PS): PR
     else:
       ps3 = ty.ps
     // Check for = init after type
-    if tk_name(peek_kind(pc, ps3)) == tk_name(TK.Eq):
+    if tk_name(peek_kind(pc, ps3)) == tk_name(TK::Eq):
       let ps5: PS = ps_advance(pc, ps3)
       let init: PR = parse_expr(pc, ps5)
       if init.node >= 0:
@@ -1672,7 +1691,7 @@ fn parse_let_stmt(pc: PC, ps: PS): PR
       else:
         ps3 = init.ps
   else:
-    if tk_name(peek_kind(pc, ps3)) == tk_name(TK.Eq):
+    if tk_name(peek_kind(pc, ps3)) == tk_name(TK::Eq):
       let ps4: PS = ps_advance(pc, ps3)
       let init: PR = parse_expr(pc, ps4)
       if init.node >= 0:
@@ -1684,24 +1703,24 @@ fn parse_let_stmt(pc: PC, ps: PS): PR
       let sp: Span = tok_span(pc, ps3)
       ps3 = ps_add_diag(ps3, sp, "expected ':' or '=' after let binding name")
 
-  let ps4: PS = match_tok(pc, ps3, TK.Newline)
-  return ps_add_node(ps4, Node.LetS(name_tidx, type_node, init_node))
+  let ps4: PS = match_tok(pc, ps3, TK::Newline)
+  return ps_add_node(ps4, Node::LetS(name = name_tidx, typ = type_node, init = init_node))
 
 fn parse_if_stmt(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
   let cond: PR = parse_expr(pc, ps2)
   if cond.node < 0:
     let psr: PS = sync_to_stmt(pc, cond.ps)
-    return ps_add_node(psr, Node.ErrorS(ps.pos))
-  let ps3: PS = expect(pc, cond.ps, TK.Colon)
+    return ps_add_node(psr, Node::ErrorS(tok = ps.pos))
+  let ps3: PS = expect(pc, cond.ps, TK::Colon)
   let then_suite: PR = parse_suite(pc, ps3)
   let then_list_pos: i64 = then_suite.node
   let cur: PS = then_suite.ps
 
   let else_list_pos: i64 = to_i64(-1)
-  if tk_name(peek_kind(pc, cur)) == tk_name(TK.KwElse):
+  if tk_name(peek_kind(pc, cur)) == tk_name(TK::KwElse):
     cur = ps_advance(pc, cur)
-    if tk_name(peek_kind(pc, cur)) == tk_name(TK.KwIf):
+    if tk_name(peek_kind(pc, cur)) == tk_name(TK::KwIf):
       // else if — parse as a single-element body containing an if stmt
       let nested_if: PR = parse_if_stmt(pc, cur)
       if nested_if.node >= 0:
@@ -1713,22 +1732,22 @@ fn parse_if_stmt(pc: PC, ps: PS): PR
       else:
         cur = nested_if.ps
     else:
-      let ps4: PS = expect(pc, cur, TK.Colon)
+      let ps4: PS = expect(pc, cur, TK::Colon)
       let else_suite: PR = parse_suite(pc, ps4)
       else_list_pos = else_suite.node
       cur = else_suite.ps
 
-  return ps_add_node(cur, Node.IfS(cond.node, then_list_pos, else_list_pos))
+  return ps_add_node(cur, Node::IfS(cond = cond.node, then_lp = then_list_pos, else_lp = else_list_pos))
 
 fn parse_while_stmt(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
   let cond: PR = parse_expr(pc, ps2)
   if cond.node < 0:
     let psr: PS = sync_to_stmt(pc, cond.ps)
-    return ps_add_node(psr, Node.ErrorS(ps.pos))
-  let ps3: PS = expect(pc, cond.ps, TK.Colon)
+    return ps_add_node(psr, Node::ErrorS(tok = ps.pos))
+  let ps3: PS = expect(pc, cond.ps, TK::Colon)
   let body: PR = parse_suite(pc, ps3)
-  return ps_add_node(body.ps, Node.WhileS(cond.node, body.node))
+  return ps_add_node(body.ps, Node::WhileS(cond = cond.node, body_lp = body.node))
 
 // `resource <kind> <name> =>` and its suite: the block's kind and name
 // are kept as token indexes; the domain they name has no MIR
@@ -1736,47 +1755,47 @@ fn parse_while_stmt(pc: PC, ps: PS): PR
 fn parse_resource_stmt(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
   let kind_tidx: i64 = ps2.pos
-  let ps3: PS = expect(pc, ps2, TK.Identifier)
+  let ps3: PS = expect(pc, ps2, TK::Identifier)
   let name_tidx: i64 = ps3.pos
-  let ps4: PS = expect(pc, ps3, TK.Identifier)
-  let ps5: PS = expect(pc, ps4, TK.FatArrow)
+  let ps4: PS = expect(pc, ps3, TK::Identifier)
+  let ps5: PS = expect(pc, ps4, TK::FatArrow)
   let body: PR = parse_suite(pc, ps5)
-  return ps_add_node(body.ps, Node.ResourceS(kind_tidx, name_tidx, body.node))
+  return ps_add_node(body.ps, Node::ResourceS(kind = kind_tidx, name = name_tidx, body_lp = body.node))
 
 fn parse_for_stmt(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
   let var_tidx: i64 = ps2.pos
-  let ps3: PS = expect(pc, ps2, TK.Identifier)
-  let ps4: PS = expect(pc, ps3, TK.KwIn)
+  let ps3: PS = expect(pc, ps2, TK::Identifier)
+  let ps4: PS = expect(pc, ps3, TK::KwIn)
   let iter: PR = parse_expr(pc, ps4)
   if iter.node < 0:
     let psr: PS = sync_to_stmt(pc, iter.ps)
-    return ps_add_node(psr, Node.ErrorS(ps.pos))
-  let ps5: PS = expect(pc, iter.ps, TK.Colon)
+    return ps_add_node(psr, Node::ErrorS(tok = ps.pos))
+  let ps5: PS = expect(pc, iter.ps, TK::Colon)
   let body: PR = parse_suite(pc, ps5)
-  return ps_add_node(body.ps, Node.ForS(var_tidx, iter.node, body.node))
+  return ps_add_node(body.ps, Node::ForS(var_tok = var_tidx, iter = iter.node, body_lp = body.node))
 
 fn parse_return_stmt(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
   let k: TK = peek_kind(pc, ps2)
-  if tk_name(k) == tk_name(TK.Newline) or tk_name(k) == tk_name(TK.Dedent) or at_end(pc, ps2):
-    let ps3: PS = match_tok(pc, ps2, TK.Newline)
-    return ps_add_node(ps3, Node.ReturnS(to_i64(-1)))
+  if tk_name(k) == tk_name(TK::Newline) or tk_name(k) == tk_name(TK::Dedent) or at_end(pc, ps2):
+    let ps3: PS = match_tok(pc, ps2, TK::Newline)
+    return ps_add_node(ps3, Node::ReturnS(value = to_i64(-1)))
   let val: PR = parse_expr(pc, ps2)
   if val.node < 0:
     return val
-  let ps3: PS = match_tok(pc, val.ps, TK.Newline)
-  return ps_add_node(ps3, Node.ReturnS(val.node))
+  let ps3: PS = match_tok(pc, val.ps, TK::Newline)
+  return ps_add_node(ps3, Node::ReturnS(value = val.node))
 
 fn parse_match_stmt(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
   let scrut: PR = parse_expr(pc, ps2)
   if scrut.node < 0:
     let psr: PS = sync_to_stmt(pc, scrut.ps)
-    return ps_add_node(psr, Node.ErrorS(ps.pos))
-  let ps3: PS = expect(pc, scrut.ps, TK.Colon)
-  let ps4: PS = expect(pc, ps3, TK.Newline)
-  let ps5: PS = expect(pc, ps4, TK.Indent)
+    return ps_add_node(psr, Node::ErrorS(tok = ps.pos))
+  let ps3: PS = expect(pc, scrut.ps, TK::Colon)
+  let ps4: PS = expect(pc, ps3, TK::Newline)
+  let ps5: PS = expect(pc, ps4, TK::Indent)
 
   // Arms: collect [pattern, body_list_pos] pairs, then flush
   let arm_pairs: Vector<i64> = Vector<i64>::new()
@@ -1786,7 +1805,7 @@ fn parse_match_stmt(pc: PC, ps: PS): PR
   while done == false:
     cur = skip_newlines(pc, cur)
     let k: TK = peek_kind(pc, cur)
-    if tk_name(k) == tk_name(TK.Dedent) or at_end(pc, cur):
+    if tk_name(k) == tk_name(TK::Dedent) or at_end(pc, cur):
       done = true
     else:
       // Parse pattern (as expression)
@@ -1794,7 +1813,7 @@ fn parse_match_stmt(pc: PC, ps: PS): PR
       if pat.node < 0:
         cur = sync_to_stmt(pc, pat.ps)
       else:
-        cur = expect(pc, pat.ps, TK.Colon)
+        cur = expect(pc, pat.ps, TK::Colon)
         let arm_body: PR = parse_suite(pc, cur)
         arm_pairs = arm_pairs.push(pat.node)
         arm_pairs = arm_pairs.push(arm_body.node)
@@ -1802,8 +1821,8 @@ fn parse_match_stmt(pc: PC, ps: PS): PR
         arm_count = arm_count + 1
 
   let arms_fl: FlushResult = flush_pairs(cur, arm_pairs, arm_count)
-  cur = expect(pc, arms_fl.ps, TK.Dedent)
-  return ps_add_node(cur, Node.MatchS(scrut.node, arms_fl.list_pos))
+  cur = expect(pc, arms_fl.ps, TK::Dedent)
+  return ps_add_node(cur, Node::MatchS(scrutinee = scrut.node, arms_lp = arms_fl.list_pos))
 
 // =========================================================================
 // Section 13: Declaration parsing
@@ -1812,78 +1831,78 @@ fn parse_match_stmt(pc: PC, ps: PS): PR
 fn parse_declaration(pc: PC, ps: PS): PR
   let k: TK = peek_kind(pc, ps)
 
-  if tk_name(k) == tk_name(TK.KwExtern):
+  if tk_name(k) == tk_name(TK::KwExtern):
     return parse_extern_fn(pc, ps)
-  if tk_name(k) == tk_name(TK.KwFn):
+  if tk_name(k) == tk_name(TK::KwFn):
     return parse_fn_decl(pc, ps)
-  if tk_name(k) == tk_name(TK.KwClass):
+  if tk_name(k) == tk_name(TK::KwClass):
     return parse_class_decl(pc, ps)
-  if tk_name(k) == tk_name(TK.KwEnum):
+  if tk_name(k) == tk_name(TK::KwEnum):
     return parse_enum_decl(pc, ps)
-  if tk_name(k) == tk_name(TK.KwType):
+  if tk_name(k) == tk_name(TK::KwType):
     return parse_type_alias(pc, ps)
-  if tk_name(k) == tk_name(TK.KwConcept):
+  if tk_name(k) == tk_name(TK::KwConcept):
     return parse_concept_decl(pc, ps)
-  if tk_name(k) == tk_name(TK.KwExtend):
+  if tk_name(k) == tk_name(TK::KwExtend):
     return parse_extend_decl(pc, ps)
 
   let sp: Span = tok_span(pc, ps)
   let ps2: PS = ps_add_diag(ps, sp, "expected declaration (fn, extern, class, enum, type, concept, or extend)")
-  return ps_add_node(ps_advance(pc, ps2), Node.ErrorD(ps.pos))
+  return ps_add_node(ps_advance(pc, ps2), Node::ErrorD(tok = ps.pos))
 
 // Parse optional type parameters: <T, U, V> — returns PR where .node = list_pos
 // Returns -1 if no type params are present.
 fn parse_type_params(pc: PC, ps: PS): PR
-  if tk_name(peek_kind(pc, ps)) != tk_name(TK.Lt):
+  if tk_name(peek_kind(pc, ps)) != tk_name(TK::Lt):
     return PR(ps, to_i64(-1))
   let ps2: PS = ps_advance(pc, ps)
   let collected: Vector<i64> = Vector<i64>::new()
   // Parse first type param (must be an identifier)
-  if tk_name(peek_kind(pc, ps2)) == tk_name(TK.Identifier):
+  if tk_name(peek_kind(pc, ps2)) == tk_name(TK::Identifier):
     let tidx: i64 = ps2.pos
     let ps3: PS = ps_advance(pc, ps2)
-    let gp: PR = ps_add_node(ps3, Node.GenericParamT(tidx))
+    let gp: PR = ps_add_node(ps3, Node::GenericParamT(tok = tidx))
     collected = collected.push(gp.node)
     let cur: PS = gp.ps
     let done: bool = false
     while done == false:
-      if tk_name(peek_kind(pc, cur)) == tk_name(TK.Comma):
+      if tk_name(peek_kind(pc, cur)) == tk_name(TK::Comma):
         cur = ps_advance(pc, cur)
         let tidx2: i64 = cur.pos
-        cur = expect(pc, cur, TK.Identifier)
-        let gp2: PR = ps_add_node(cur, Node.GenericParamT(tidx2))
+        cur = expect(pc, cur, TK::Identifier)
+        let gp2: PR = ps_add_node(cur, Node::GenericParamT(tok = tidx2))
         collected = collected.push(gp2.node)
         cur = gp2.ps
       else:
         done = true
     let fl: FlushResult = flush_list(cur, collected)
-    let ps_end: PS = expect(pc, fl.ps, TK.Gt)
+    let ps_end: PS = expect(pc, fl.ps, TK::Gt)
     return PR(ps_end, fl.list_pos)
   else:
     let sp: Span = tok_span(pc, ps2)
     let pse: PS = ps_add_diag(ps2, sp, "expected type parameter name")
-    let pse2: PS = expect(pc, pse, TK.Gt)
+    let pse2: PS = expect(pc, pse, TK::Gt)
     return PR(pse2, to_i64(-1))
 
 // Parse (name: Type, name: Type, ...) — returns PR where .node = list_pos
 // Pushes pairs [name_tok, type_node, ...], then count
 fn parse_params_list(pc: PC, ps: PS): PR
-  let ps2: PS = expect(pc, ps, TK.LParen)
+  let ps2: PS = expect(pc, ps, TK::LParen)
   let param_pairs: Vector<i64> = Vector<i64>::new()
   let count: i64 = 0
   let cur: PS = ps2
 
-  if tk_name(peek_kind(pc, cur)) != tk_name(TK.RParen):
+  if tk_name(peek_kind(pc, cur)) != tk_name(TK::RParen):
     // Parse first param — accept KwSelf as a parameter name (self param)
     let name_tidx: i64 = cur.pos
-    if tk_name(peek_kind(pc, cur)) == tk_name(TK.KwSelf):
+    if tk_name(peek_kind(pc, cur)) == tk_name(TK::KwSelf):
       cur = ps_advance(pc, cur)
       param_pairs = param_pairs.push(name_tidx)
       param_pairs = param_pairs.push(to_i64(-1))
       count = count + 1
     else:
-      cur = expect(pc, cur, TK.Identifier)
-      cur = expect(pc, cur, TK.Colon)
+      cur = expect(pc, cur, TK::Identifier)
+      cur = expect(pc, cur, TK::Colon)
       let ty: PR = parse_type(pc, cur)
       cur = ty.ps
       param_pairs = param_pairs.push(name_tidx)
@@ -1895,11 +1914,11 @@ fn parse_params_list(pc: PC, ps: PS): PR
 
     let done: bool = false
     while done == false:
-      if tk_name(peek_kind(pc, cur)) == tk_name(TK.Comma):
+      if tk_name(peek_kind(pc, cur)) == tk_name(TK::Comma):
         cur = ps_advance(pc, cur)
         let name_tidx2: i64 = cur.pos
         // self is only valid as the first parameter — reject here
-        if tk_name(peek_kind(pc, cur)) == tk_name(TK.KwSelf):
+        if tk_name(peek_kind(pc, cur)) == tk_name(TK::KwSelf):
           let sp: Span = tok_span(pc, cur)
           cur = ps_add_diag(cur, sp, "self must be the first parameter")
           cur = ps_advance(pc, cur)
@@ -1907,8 +1926,8 @@ fn parse_params_list(pc: PC, ps: PS): PR
           param_pairs = param_pairs.push(to_i64(-1))
           count = count + 1
         else:
-          cur = expect(pc, cur, TK.Identifier)
-          cur = expect(pc, cur, TK.Colon)
+          cur = expect(pc, cur, TK::Identifier)
+          cur = expect(pc, cur, TK::Colon)
           let ty2: PR = parse_type(pc, cur)
           cur = ty2.ps
           param_pairs = param_pairs.push(name_tidx2)
@@ -1921,13 +1940,13 @@ fn parse_params_list(pc: PC, ps: PS): PR
         done = true
 
   let fl: FlushResult = flush_pairs(cur, param_pairs, count)
-  cur = expect(pc, fl.ps, TK.RParen)
+  cur = expect(pc, fl.ps, TK::RParen)
   return PR(cur, fl.list_pos)
 
 fn parse_fn_decl(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
   let name_tidx: i64 = ps2.pos
-  let ps3: PS = expect(pc, ps2, TK.Identifier)
+  let ps3: PS = expect(pc, ps2, TK::Identifier)
 
   // Parse optional type parameters
   let tparams: PR = parse_type_params(pc, ps3)
@@ -1939,7 +1958,7 @@ fn parse_fn_decl(pc: PC, ps: PS): PR
 
   // Optional return type
   let ret_type: i64 = to_i64(-1)
-  if tk_name(peek_kind(pc, cur)) == tk_name(TK.Colon):
+  if tk_name(peek_kind(pc, cur)) == tk_name(TK::Colon):
     cur = ps_advance(pc, cur)
     let ty: PR = parse_type(pc, cur)
     if ty.node >= 0:
@@ -1947,17 +1966,17 @@ fn parse_fn_decl(pc: PC, ps: PS): PR
     cur = ty.ps
 
   // Expression-bodied: -> expr NEWLINE
-  if tk_name(peek_kind(pc, cur)) == tk_name(TK.Arrow):
+  if tk_name(peek_kind(pc, cur)) == tk_name(TK::Arrow):
     cur = ps_advance(pc, cur)
     let body_expr: PR = parse_expr(pc, cur)
     if body_expr.node < 0:
       return body_expr
-    let psfn: PS = match_tok(pc, body_expr.ps, TK.Newline)
-    return ps_add_node(psfn, Node.ExprFnD(name_tidx, tparams_lp, params_lp, ret_type, body_expr.node))
+    let psfn: PS = match_tok(pc, body_expr.ps, TK::Newline)
+    return ps_add_node(psfn, Node::ExprFnD(name = name_tidx, tparams = tparams_lp, params = params_lp, ret = ret_type, body = body_expr.node))
 
   // Block-bodied: NEWLINE INDENT stmts DEDENT
-  let ps4: PS = expect(pc, cur, TK.Newline)
-  if tk_name(peek_kind(pc, ps4)) == tk_name(TK.Indent):
+  let ps4: PS = expect(pc, cur, TK::Newline)
+  if tk_name(peek_kind(pc, ps4)) == tk_name(TK::Indent):
     let ps5: PS = ps_advance(pc, ps4)
     // Parse statement list inline — collect then flush
     let body_items: Vector<i64> = Vector<i64>::new()
@@ -1966,7 +1985,7 @@ fn parse_fn_decl(pc: PC, ps: PS): PR
     while bdone == false:
       bcur = skip_newlines(pc, bcur)
       let bk: TK = peek_kind(pc, bcur)
-      if tk_name(bk) == tk_name(TK.Dedent) or at_end(pc, bcur):
+      if tk_name(bk) == tk_name(TK::Dedent) or at_end(pc, bcur):
         bdone = true
       else:
         let stmt: PR = parse_statement(pc, bcur)
@@ -1975,27 +1994,27 @@ fn parse_fn_decl(pc: PC, ps: PS): PR
           bcur = stmt.ps
         else:
           bcur = sync_to_stmt(pc, stmt.ps)
-          let err_r: PR = ps_add_node(bcur, Node.ErrorS(bcur.pos))
+          let err_r: PR = ps_add_node(bcur, Node::ErrorS(tok = bcur.pos))
           body_items = body_items.push(err_r.node)
           bcur = err_r.ps
     let body_fl: FlushResult = flush_list(bcur, body_items)
-    bcur = expect(pc, body_fl.ps, TK.Dedent)
-    return ps_add_node(bcur, Node.FnDeclD(name_tidx, tparams_lp, params_lp, ret_type, body_fl.list_pos))
+    bcur = expect(pc, body_fl.ps, TK::Dedent)
+    return ps_add_node(bcur, Node::FnDeclD(name = name_tidx, tparams = tparams_lp, params = params_lp, ret = ret_type, body = body_fl.list_pos))
   else:
     // No body — error
     let sp: Span = tok_span(pc, ps4)
     let pse: PS = ps_add_diag(ps4, sp, "expected function body (indented block or -> expression)")
-    return ps_add_node(pse, Node.ErrorD(name_tidx))
+    return ps_add_node(pse, Node::ErrorD(tok = name_tidx))
 
 fn parse_extern_fn(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
-  if tk_name(peek_kind(pc, ps2)) != tk_name(TK.KwFn):
+  if tk_name(peek_kind(pc, ps2)) != tk_name(TK::KwFn):
     let sp: Span = tok_span(pc, ps2)
     let pse: PS = ps_add_diag(ps2, sp, "expected 'fn' after 'extern'")
-    return ps_add_node(pse, Node.ErrorD(ps.pos))
+    return ps_add_node(pse, Node::ErrorD(tok = ps.pos))
   let ps3: PS = ps_advance(pc, ps2)
   let name_tidx: i64 = ps3.pos
-  let ps4: PS = expect(pc, ps3, TK.Identifier)
+  let ps4: PS = expect(pc, ps3, TK::Identifier)
 
   // Parse optional type parameters
   let tparams: PR = parse_type_params(pc, ps4)
@@ -2007,7 +2026,7 @@ fn parse_extern_fn(pc: PC, ps: PS): PR
 
   // Return type is required for extern fn (CONTRACT_SYNTAX_SURFACE.md §extern).
   let ret_type: i64 = to_i64(-1)
-  if tk_name(peek_kind(pc, cur)) == tk_name(TK.Colon):
+  if tk_name(peek_kind(pc, cur)) == tk_name(TK::Colon):
     cur = ps_advance(pc, cur)
     let ty: PR = parse_type(pc, cur)
     if ty.node >= 0:
@@ -2017,21 +2036,21 @@ fn parse_extern_fn(pc: PC, ps: PS): PR
     let sp: Span = tok_span(pc, cur)
     cur = ps_add_diag(cur, sp, "extern fn requires a return type annotation")
 
-  cur = match_tok(pc, cur, TK.Newline)
-  return ps_add_node(cur, Node.ExternFnD(name_tidx, tparams_lp, params_lp, ret_type))
+  cur = match_tok(pc, cur, TK::Newline)
+  return ps_add_node(cur, Node::ExternFnD(name = name_tidx, tparams = tparams_lp, params = params_lp, ret = ret_type))
 
 fn parse_class_decl(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
   let name_tidx: i64 = ps2.pos
-  let ps3: PS = expect(pc, ps2, TK.Identifier)
+  let ps3: PS = expect(pc, ps2, TK::Identifier)
 
   // Parse optional type parameters
   let tparams: PR = parse_type_params(pc, ps3)
   let tparams_lp: i64 = tparams.node
 
-  let ps4: PS = expect(pc, tparams.ps, TK.Colon)
-  let ps5: PS = expect(pc, ps4, TK.Newline)
-  let ps6: PS = expect(pc, ps5, TK.Indent)
+  let ps4: PS = expect(pc, tparams.ps, TK::Colon)
+  let ps5: PS = expect(pc, ps4, TK::Newline)
+  let ps6: PS = expect(pc, ps5, TK::Indent)
 
   // Parse fields: collect [name_tok, type_node] pairs, then flush.
   let field_pairs: Vector<i64> = Vector<i64>::new()
@@ -2041,15 +2060,15 @@ fn parse_class_decl(pc: PC, ps: PS): PR
   while done == false:
     cur = skip_newlines(pc, cur)
     let k: TK = peek_kind(pc, cur)
-    if tk_name(k) == tk_name(TK.Dedent) or at_end(pc, cur):
+    if tk_name(k) == tk_name(TK::Dedent) or at_end(pc, cur):
       done = true
     else:
-      if tk_name(k) == tk_name(TK.KwFn):
+      if tk_name(k) == tk_name(TK::KwFn):
         done = true
       else:
         let fname_tidx: i64 = cur.pos
-        cur = expect(pc, cur, TK.Identifier)
-        cur = expect(pc, cur, TK.Colon)
+        cur = expect(pc, cur, TK::Identifier)
+        cur = expect(pc, cur, TK::Colon)
         let fty: PR = parse_type(pc, cur)
         cur = fty.ps
         field_pairs = field_pairs.push(fname_tidx)
@@ -2058,7 +2077,7 @@ fn parse_class_decl(pc: PC, ps: PS): PR
         else:
           field_pairs = field_pairs.push(to_i64(-1))
         field_count = field_count + 1
-        cur = match_tok(pc, cur, TK.Newline)
+        cur = match_tok(pc, cur, TK::Newline)
 
   // Diagnose empty class body (contract: must have at least one field).
   if field_count == 0:
@@ -2074,7 +2093,7 @@ fn parse_class_decl(pc: PC, ps: PS): PR
   while mdone == false:
     cur = skip_newlines(pc, cur)
     let mk: TK = peek_kind(pc, cur)
-    if tk_name(mk) == tk_name(TK.KwFn):
+    if tk_name(mk) == tk_name(TK::KwFn):
       let meth: PR = parse_fn_decl(pc, cur)
       if meth.node >= 0:
         method_items = method_items.push(meth.node)
@@ -2088,27 +2107,27 @@ fn parse_class_decl(pc: PC, ps: PS): PR
     cur = mfl.ps
     methods_lp = mfl.list_pos
 
-  cur = expect(pc, cur, TK.Dedent)
-  return ps_add_node(cur, Node.ClassDeclD(name_tidx, tparams_lp, fields_fl.list_pos, methods_lp))
+  cur = expect(pc, cur, TK::Dedent)
+  return ps_add_node(cur, Node::ClassDeclD(name = name_tidx, tparams = tparams_lp, fields = fields_fl.list_pos, methods = methods_lp))
 
 fn parse_enum_decl(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
   // Track whether this is 'enum class' (named-field variants) or
   // plain 'enum' (fieldless only, per CONTRACT_SYNTAX_SURFACE.md).
   let is_enum_class: bool = false
-  if tk_name(peek_kind(pc, ps2)) == tk_name(TK.KwClass):
+  if tk_name(peek_kind(pc, ps2)) == tk_name(TK::KwClass):
     ps2 = ps_advance(pc, ps2)
     is_enum_class = true
   let name_tidx: i64 = ps2.pos
-  let ps3: PS = expect(pc, ps2, TK.Identifier)
+  let ps3: PS = expect(pc, ps2, TK::Identifier)
 
   // Parse optional type parameters
   let tparams: PR = parse_type_params(pc, ps3)
   let tparams_lp: i64 = tparams.node
 
-  let ps4: PS = expect(pc, tparams.ps, TK.Colon)
-  let ps5: PS = expect(pc, ps4, TK.Newline)
-  let ps6: PS = expect(pc, ps5, TK.Indent)
+  let ps4: PS = expect(pc, tparams.ps, TK::Colon)
+  let ps5: PS = expect(pc, ps4, TK::Newline)
+  let ps6: PS = expect(pc, ps5, TK::Indent)
 
   // Variants: push [name_tok, payload_list_pos] pairs, then count
   // Each variant has a name_tok and a payload_list_pos.
@@ -2120,43 +2139,49 @@ fn parse_enum_decl(pc: PC, ps: PS): PR
   while done == false:
     cur = skip_newlines(pc, cur)
     let k: TK = peek_kind(pc, cur)
-    if tk_name(k) == tk_name(TK.Dedent) or at_end(pc, cur):
+    if tk_name(k) == tk_name(TK::Dedent) or at_end(pc, cur):
       done = true
     else:
       let vname_tidx: i64 = cur.pos
-      cur = expect(pc, cur, TK.Identifier)
+      cur = expect(pc, cur, TK::Identifier)
 
       // Parse optional payload.
       // Plain enum: payloads are illegal (CONTRACT_SYNTAX_SURFACE §Enum).
       // Enum class: fields must be named (CONTRACT_SYNTAX_SURFACE §Enum Class).
       let payload_types: Vector<i64> = Vector<i64>::new()
-      if tk_name(peek_kind(pc, cur)) == tk_name(TK.LParen):
+      if tk_name(peek_kind(pc, cur)) == tk_name(TK::LParen):
         if is_enum_class == false:
           // Plain enum with payload — diagnose per contract.
           let sp: Span = tok_span(pc, cur)
           cur = ps_add_diag(cur, sp, "enum variants cannot carry payloads; use 'enum class' for structured variants")
         cur = ps_advance(pc, cur)
-        if tk_name(peek_kind(pc, cur)) != tk_name(TK.RParen):
+        if tk_name(peek_kind(pc, cur)) != tk_name(TK::RParen):
+          let field_tidx: i64 = to_i64(-1)
           if is_enum_class:
-            // Enum class: require name: Type syntax.
-            cur = expect(pc, cur, TK.Identifier)
-            cur = expect(pc, cur, TK.Colon)
+            // Enum class: a field is `name: Type`; the name is kept
+            // beside the type, for construction by name.
+            field_tidx = cur.pos
+            cur = expect(pc, cur, TK::Identifier)
+            cur = expect(pc, cur, TK::Colon)
           let pty: PR = parse_type(pc, cur)
           if pty.node >= 0:
+            payload_types = payload_types.push(field_tidx)
             payload_types = payload_types.push(pty.node)
             cur = pty.ps
           else:
             cur = pty.ps
           let pdone: bool = false
           while pdone == false:
-            if tk_name(peek_kind(pc, cur)) == tk_name(TK.Comma):
+            if tk_name(peek_kind(pc, cur)) == tk_name(TK::Comma):
               cur = ps_advance(pc, cur)
+              let field2_tidx: i64 = to_i64(-1)
               if is_enum_class:
-                // Enum class: require name: Type syntax.
-                cur = expect(pc, cur, TK.Identifier)
-                cur = expect(pc, cur, TK.Colon)
+                field2_tidx = cur.pos
+                cur = expect(pc, cur, TK::Identifier)
+                cur = expect(pc, cur, TK::Colon)
               let pty2: PR = parse_type(pc, cur)
               if pty2.node >= 0:
+                payload_types = payload_types.push(field2_tidx)
                 payload_types = payload_types.push(pty2.node)
                 cur = pty2.ps
               else:
@@ -2164,7 +2189,7 @@ fn parse_enum_decl(pc: PC, ps: PS): PR
                 pdone = true
             else:
               pdone = true
-        cur = expect(pc, cur, TK.RParen)
+        cur = expect(pc, cur, TK::RParen)
 
       // Flush payload list
       let payload_fl: FlushResult = flush_list(cur, payload_types)
@@ -2174,36 +2199,36 @@ fn parse_enum_decl(pc: PC, ps: PS): PR
       variant_pairs = variant_pairs.push(vname_tidx)
       variant_pairs = variant_pairs.push(payload_fl.list_pos)
       variant_count = variant_count + 1
-      cur = match_tok(pc, cur, TK.Newline)
+      cur = match_tok(pc, cur, TK::Newline)
 
   // Flush variant pairs
   let variants_fl: FlushResult = flush_pairs(cur, variant_pairs, variant_count)
-  cur = expect(pc, variants_fl.ps, TK.Dedent)
-  return ps_add_node(cur, Node.EnumDeclD(name_tidx, tparams_lp, variants_fl.list_pos))
+  cur = expect(pc, variants_fl.ps, TK::Dedent)
+  return ps_add_node(cur, Node::EnumDeclD(name = name_tidx, tparams = tparams_lp, variants = variants_fl.list_pos))
 
 fn parse_type_alias(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
   let name_tidx: i64 = ps2.pos
-  let ps3: PS = expect(pc, ps2, TK.Identifier)
-  let ps4: PS = expect(pc, ps3, TK.Eq)
+  let ps3: PS = expect(pc, ps2, TK::Identifier)
+  let ps4: PS = expect(pc, ps3, TK::Eq)
   let ty: PR = parse_type(pc, ps4)
   if ty.node < 0:
     return ty
-  let cur: PS = match_tok(pc, ty.ps, TK.Newline)
-  return ps_add_node(cur, Node.TypeAliasD(name_tidx, ty.node))
+  let cur: PS = match_tok(pc, ty.ps, TK::Newline)
+  return ps_add_node(cur, Node::TypeAliasD(name = name_tidx, typ = ty.node))
 
 fn parse_concept_decl(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
   let name_tidx: i64 = ps2.pos
-  let ps3: PS = expect(pc, ps2, TK.Identifier)
+  let ps3: PS = expect(pc, ps2, TK::Identifier)
 
   // Parse optional type parameters
   let tparams: PR = parse_type_params(pc, ps3)
   let tparams_lp: i64 = tparams.node
 
-  let ps4: PS = expect(pc, tparams.ps, TK.Colon)
-  let ps5: PS = expect(pc, ps4, TK.Newline)
-  let ps6: PS = expect(pc, ps5, TK.Indent)
+  let ps4: PS = expect(pc, tparams.ps, TK::Colon)
+  let ps5: PS = expect(pc, ps4, TK::Newline)
+  let ps6: PS = expect(pc, ps5, TK::Indent)
 
   // Parse method signatures (fn without body)
   let method_items: Vector<i64> = Vector<i64>::new()
@@ -2212,60 +2237,60 @@ fn parse_concept_decl(pc: PC, ps: PS): PR
   while done == false:
     cur = skip_newlines(pc, cur)
     let k: TK = peek_kind(pc, cur)
-    if tk_name(k) == tk_name(TK.Dedent) or at_end(pc, cur):
+    if tk_name(k) == tk_name(TK::Dedent) or at_end(pc, cur):
       done = true
     else:
-      if tk_name(k) == tk_name(TK.KwFn):
+      if tk_name(k) == tk_name(TK::KwFn):
         // Parse signature only: fn name(params): RetType NEWLINE (no body)
         let ps_fn: PS = ps_advance(pc, cur)
         let sig_name_tidx: i64 = ps_fn.pos
-        let ps_fn2: PS = expect(pc, ps_fn, TK.Identifier)
+        let ps_fn2: PS = expect(pc, ps_fn, TK::Identifier)
         let sig_tparams: PR = parse_type_params(pc, ps_fn2)
         let sig_params: PR = parse_params_list(pc, sig_tparams.ps)
         let sig_cur: PS = sig_params.ps
         let sig_ret_type: i64 = to_i64(-1)
-        if tk_name(peek_kind(pc, sig_cur)) == tk_name(TK.Colon):
+        if tk_name(peek_kind(pc, sig_cur)) == tk_name(TK::Colon):
           sig_cur = ps_advance(pc, sig_cur)
           let sig_ty: PR = parse_type(pc, sig_cur)
           if sig_ty.node >= 0:
             sig_ret_type = sig_ty.node
           sig_cur = sig_ty.ps
         // Check for default implementation: -> expr or NEWLINE INDENT body
-        if tk_name(peek_kind(pc, sig_cur)) == tk_name(TK.Arrow):
+        if tk_name(peek_kind(pc, sig_cur)) == tk_name(TK::Arrow):
           // Expression-bodied default: fn name(params): T -> expr
           sig_cur = ps_advance(pc, sig_cur)
           let body_expr: PR = parse_expr(pc, sig_cur)
           if body_expr.node < 0:
             cur = body_expr.ps
           else:
-            sig_cur = match_tok(pc, body_expr.ps, TK.Newline)
-            let sig_r: PR = ps_add_node(sig_cur, Node.ExprFnD(sig_name_tidx, sig_tparams.node, sig_params.node, sig_ret_type, body_expr.node))
+            sig_cur = match_tok(pc, body_expr.ps, TK::Newline)
+            let sig_r: PR = ps_add_node(sig_cur, Node::ExprFnD(name = sig_name_tidx, tparams = sig_tparams.node, params = sig_params.node, ret = sig_ret_type, body = body_expr.node))
             method_items = method_items.push(sig_r.node)
             cur = sig_r.ps
         else:
-          if tk_name(peek_kind(pc, sig_cur)) == tk_name(TK.Newline):
+          if tk_name(peek_kind(pc, sig_cur)) == tk_name(TK::Newline):
             // Check for block body (NEWLINE followed by INDENT)
             let next_pos: i64 = sig_cur.pos + 1
             let has_indent: bool = false
             if next_pos < pc.toks.length():
               let next_tok: Token = pc.toks.get(next_pos)
-              if tk_name(next_tok.kind) == tk_name(TK.Indent):
+              if tk_name(next_tok.kind) == tk_name(TK::Indent):
                 has_indent = true
             if has_indent:
               // Block-bodied default: parse as full fn decl
               let body_suite: PR = parse_suite(pc, sig_cur)
-              let sig_r: PR = ps_add_node(body_suite.ps, Node.FnDeclD(sig_name_tidx, sig_tparams.node, sig_params.node, sig_ret_type, body_suite.node))
+              let sig_r: PR = ps_add_node(body_suite.ps, Node::FnDeclD(name = sig_name_tidx, tparams = sig_tparams.node, params = sig_params.node, ret = sig_ret_type, body = body_suite.node))
               method_items = method_items.push(sig_r.node)
               cur = sig_r.ps
             else:
               // Signature only (no body)
-              sig_cur = match_tok(pc, sig_cur, TK.Newline)
-              let sig_r: PR = ps_add_node(sig_cur, Node.ExternFnD(sig_name_tidx, sig_tparams.node, sig_params.node, sig_ret_type))
+              sig_cur = match_tok(pc, sig_cur, TK::Newline)
+              let sig_r: PR = ps_add_node(sig_cur, Node::ExternFnD(name = sig_name_tidx, tparams = sig_tparams.node, params = sig_params.node, ret = sig_ret_type))
               method_items = method_items.push(sig_r.node)
               cur = sig_r.ps
           else:
             // Signature only (no newline — error recovery)
-            let sig_r: PR = ps_add_node(sig_cur, Node.ExternFnD(sig_name_tidx, sig_tparams.node, sig_params.node, sig_ret_type))
+            let sig_r: PR = ps_add_node(sig_cur, Node::ExternFnD(name = sig_name_tidx, tparams = sig_tparams.node, params = sig_params.node, ret = sig_ret_type))
             method_items = method_items.push(sig_r.node)
             cur = sig_r.ps
       else:
@@ -2280,8 +2305,8 @@ fn parse_concept_decl(pc: PC, ps: PS): PR
     cur = mfl.ps
     methods_lp = mfl.list_pos
 
-  cur = expect(pc, cur, TK.Dedent)
-  return ps_add_node(cur, Node.ConceptDeclD(name_tidx, tparams_lp, methods_lp))
+  cur = expect(pc, cur, TK::Dedent)
+  return ps_add_node(cur, Node::ConceptDeclD(name = name_tidx, tparams = tparams_lp, methods = methods_lp))
 
 fn parse_extend_decl(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
@@ -2292,15 +2317,15 @@ fn parse_extend_decl(pc: PC, ps: PS): PR
   let cur: PS = target_ty.ps
 
   // Consume 'as'
-  cur = expect(pc, cur, TK.KwAs)
+  cur = expect(pc, cur, TK::KwAs)
 
   // Parse concept name (identifier token)
   let concept_name_tidx: i64 = cur.pos
-  cur = expect(pc, cur, TK.Identifier)
+  cur = expect(pc, cur, TK::Identifier)
 
-  cur = expect(pc, cur, TK.Colon)
-  cur = expect(pc, cur, TK.Newline)
-  cur = expect(pc, cur, TK.Indent)
+  cur = expect(pc, cur, TK::Colon)
+  cur = expect(pc, cur, TK::Newline)
+  cur = expect(pc, cur, TK::Indent)
 
   // Parse method definitions (full fn with body)
   let method_items: Vector<i64> = Vector<i64>::new()
@@ -2308,10 +2333,10 @@ fn parse_extend_decl(pc: PC, ps: PS): PR
   while done == false:
     cur = skip_newlines(pc, cur)
     let k: TK = peek_kind(pc, cur)
-    if tk_name(k) == tk_name(TK.Dedent) or at_end(pc, cur):
+    if tk_name(k) == tk_name(TK::Dedent) or at_end(pc, cur):
       done = true
     else:
-      if tk_name(k) == tk_name(TK.KwFn):
+      if tk_name(k) == tk_name(TK::KwFn):
         let meth: PR = parse_fn_decl(pc, cur)
         if meth.node >= 0:
           method_items = method_items.push(meth.node)
@@ -2327,8 +2352,8 @@ fn parse_extend_decl(pc: PC, ps: PS): PR
     cur = mfl.ps
     methods_lp = mfl.list_pos
 
-  cur = expect(pc, cur, TK.Dedent)
-  return ps_add_node(cur, Node.ExtendDeclD(target_type_node, concept_name_tidx, methods_lp))
+  cur = expect(pc, cur, TK::Dedent)
+  return ps_add_node(cur, Node::ExtendDeclD(target = target_type_node, concept_name = concept_name_tidx, methods = methods_lp))
 
 // =========================================================================
 // Section 14: File-level parsing
@@ -2350,15 +2375,15 @@ class ModulePathResult:
 
 fn parse_module_path(pc: PC, ps: PS): ModulePathResult
   let first_tidx: i64 = ps.pos
-  let cur: PS = expect(pc, ps, TK.Identifier)
+  let cur: PS = expect(pc, ps, TK::Identifier)
   let seg_toks: Vector<i64> = Vector<i64>::new()
   seg_toks = seg_toks.push(first_tidx)
   let done: bool = false
   while done == false:
-    if tk_name(peek_kind(pc, cur)) == tk_name(TK.ColonColon):
+    if tk_name(peek_kind(pc, cur)) == tk_name(TK::ColonColon):
       cur = ps_advance(pc, cur)
       let tidx: i64 = cur.pos
-      cur = expect(pc, cur, TK.Identifier)
+      cur = expect(pc, cur, TK::Identifier)
       seg_toks = seg_toks.push(tidx)
     else:
       done = true
@@ -2369,22 +2394,22 @@ fn parse_module_decl(pc: PC, ps: PS): PR
   // consume 'module' keyword
   let cur: PS = ps_advance(pc, ps)
   let path: ModulePathResult = parse_module_path(pc, cur)
-  cur = expect(pc, path.ps, TK.Newline)
-  return ps_add_node(cur, Node.ModuleDeclN(path.list_pos, path.seg_count))
+  cur = expect(pc, path.ps, TK::Newline)
+  return ps_add_node(cur, Node::ModuleDeclN(path_lp = path.list_pos, seg_count = path.seg_count))
 
 fn parse_import_decl(pc: PC, ps: PS): PR
   // consume 'import' keyword
   let cur: PS = ps_advance(pc, ps)
   let path: ModulePathResult = parse_module_path(pc, cur)
-  cur = expect(pc, path.ps, TK.Newline)
-  return ps_add_node(cur, Node.ImportDeclN(path.list_pos, path.seg_count))
+  cur = expect(pc, path.ps, TK::Newline)
+  return ps_add_node(cur, Node::ImportDeclN(path_lp = path.list_pos, seg_count = path.seg_count))
 
 fn parse_file(pc: PC, ps: PS): PR
   let cur: PS = skip_newlines(pc, ps)
 
   // Optional module declaration
   let mod_node: i64 = to_i64(-1)
-  if tk_name(peek_kind(pc, cur)) == tk_name(TK.KwModule):
+  if tk_name(peek_kind(pc, cur)) == tk_name(TK::KwModule):
     let md: PR = parse_module_decl(pc, cur)
     mod_node = md.node
     cur = md.ps
@@ -2395,7 +2420,7 @@ fn parse_file(pc: PC, ps: PS): PR
   let imp_done: bool = false
   while imp_done == false:
     cur = skip_newlines(pc, cur)
-    if tk_name(peek_kind(pc, cur)) == tk_name(TK.KwImport):
+    if tk_name(peek_kind(pc, cur)) == tk_name(TK::KwImport):
       let imp: PR = parse_import_decl(pc, cur)
       import_items = import_items.push(imp.node)
       cur = imp.ps
@@ -2413,7 +2438,7 @@ fn parse_file(pc: PC, ps: PS): PR
       done = true
     else:
       // Diagnose misplaced module/import after declarations
-      if tk_name(peek_kind(pc, cur)) == tk_name(TK.KwModule):
+      if tk_name(peek_kind(pc, cur)) == tk_name(TK::KwModule):
         let sp: Span = tok_span(pc, cur)
         cur = ps_add_diag(cur, sp, "module declaration must appear before top-level declarations")
         cur = ps_advance(pc, cur)
@@ -2423,12 +2448,12 @@ fn parse_file(pc: PC, ps: PS): PR
           if at_end(pc, cur):
             sync_done = true
           else:
-            if tk_name(peek_kind(pc, cur)) == tk_name(TK.Newline):
+            if tk_name(peek_kind(pc, cur)) == tk_name(TK::Newline):
               sync_done = true
             else:
               cur = ps_advance(pc, cur)
       else:
-        if tk_name(peek_kind(pc, cur)) == tk_name(TK.KwImport):
+        if tk_name(peek_kind(pc, cur)) == tk_name(TK::KwImport):
           let sp: Span = tok_span(pc, cur)
           cur = ps_add_diag(cur, sp, "import declaration must appear before top-level declarations")
           cur = ps_advance(pc, cur)
@@ -2437,7 +2462,7 @@ fn parse_file(pc: PC, ps: PS): PR
             if at_end(pc, cur):
               sync_done = true
             else:
-              if tk_name(peek_kind(pc, cur)) == tk_name(TK.Newline):
+              if tk_name(peek_kind(pc, cur)) == tk_name(TK::Newline):
                 sync_done = true
               else:
                 cur = ps_advance(pc, cur)
@@ -2448,13 +2473,13 @@ fn parse_file(pc: PC, ps: PS): PR
             cur = decl.ps
           else:
             cur = sync_to_decl(pc, decl.ps)
-            let err_r: PR = ps_add_node(cur, Node.ErrorD(cur.pos))
+            let err_r: PR = ps_add_node(cur, Node::ErrorD(tok = cur.pos))
             decl_items = decl_items.push(err_r.node)
             cur = err_r.ps
     cur = skip_newlines(pc, cur)
 
   let decls_fl: FlushResult = flush_list(cur, decl_items)
-  return ps_add_node(decls_fl.ps, Node.FileN(mod_node, imports_fl.list_pos, decls_fl.list_pos))
+  return ps_add_node(decls_fl.ps, Node::FileN(module_decl = mod_node, imports_lp = imports_fl.list_pos, decls_lp = decls_fl.list_pos))
 
 // =========================================================================
 // Section 15: Public API
@@ -2473,93 +2498,93 @@ fn parse(src: string): ParseOutput
 
 fn node_kind_name(n: Node): string
   match n:
-    Node.IntLitE(t):
+    Node::IntLitE(t):
       return "IntLitE"
-    Node.FloatLitE(t):
+    Node::FloatLitE(t):
       return "FloatLitE"
-    Node.StringLitE(t):
+    Node::StringLitE(t):
       return "StringLitE"
-    Node.BoolLitE(t):
+    Node::BoolLitE(t):
       return "BoolLitE"
-    Node.IdentE(t):
+    Node::IdentE(t):
       return "IdentE"
-    Node.QualNameE(a, b):
+    Node::QualNameE(a, b):
       return "QualNameE"
-    Node.BinaryE(a, b, c):
+    Node::BinaryE(a, b, c):
       return "BinaryE"
-    Node.UnaryE(a, b):
+    Node::UnaryE(a, b):
       return "UnaryE"
-    Node.CallE(a, b, c, d, e):
+    Node::CallE(a, b, c, d, e):
       return "CallE"
-    Node.IndexE(a, b):
+    Node::IndexE(a, b):
       return "IndexE"
-    Node.FieldE(a, b):
+    Node::FieldE(a, b):
       return "FieldE"
-    Node.PipeE(a, b):
+    Node::PipeE(a, b):
       return "PipeE"
-    Node.TryE(a):
+    Node::TryE(a):
       return "TryE"
-    Node.LambdaE(a, b, c):
+    Node::LambdaE(a, b, c):
       return "LambdaE"
-    Node.ListLitE(a, b):
+    Node::ListLitE(a, b):
       return "ListLitE"
-    Node.ErrorE(t):
+    Node::ErrorE(t):
       return "ErrorE"
-    Node.NamedT(t):
+    Node::NamedT(t):
       return "NamedT"
-    Node.GenericT(a, b, c):
+    Node::GenericT(a, b, c):
       return "GenericT"
-    Node.PointerT(a):
+    Node::PointerT(a):
       return "PointerT"
-    Node.GenericParamT(t):
+    Node::GenericParamT(t):
       return "GenericParamT"
-    Node.ErrorT(t):
+    Node::ErrorT(t):
       return "ErrorT"
-    Node.LetS(a, b, c):
+    Node::LetS(a, b, c):
       return "LetS"
-    Node.AssignS(a, b):
+    Node::AssignS(a, b):
       return "AssignS"
-    Node.IfS(a, b, c):
+    Node::IfS(a, b, c):
       return "IfS"
-    Node.WhileS(a, b):
+    Node::WhileS(a, b):
       return "WhileS"
-    Node.ResourceS(a, b, c):
+    Node::ResourceS(a, b, c):
       return "ResourceS"
-    Node.ForS(a, b, c):
+    Node::ForS(a, b, c):
       return "ForS"
-    Node.ReturnS(a):
+    Node::ReturnS(a):
       return "ReturnS"
-    Node.BreakS(a):
+    Node::BreakS(a):
       return "BreakS"
-    Node.MatchS(a, b):
+    Node::MatchS(a, b):
       return "MatchS"
-    Node.ExprStmtS(a):
+    Node::ExprStmtS(a):
       return "ExprStmtS"
-    Node.ErrorS(a):
+    Node::ErrorS(a):
       return "ErrorS"
-    Node.FnDeclD(a, b, c, d, e):
+    Node::FnDeclD(a, b, c, d, e):
       return "FnDeclD"
-    Node.ExternFnD(a, b, c, d):
+    Node::ExternFnD(a, b, c, d):
       return "ExternFnD"
-    Node.ExprFnD(a, b, c, d, e):
+    Node::ExprFnD(a, b, c, d, e):
       return "ExprFnD"
-    Node.ClassDeclD(a, b, c, d):
+    Node::ClassDeclD(a, b, c, d):
       return "ClassDeclD"
-    Node.EnumDeclD(a, b, c):
+    Node::EnumDeclD(a, b, c):
       return "EnumDeclD"
-    Node.TypeAliasD(a, b):
+    Node::TypeAliasD(a, b):
       return "TypeAliasD"
-    Node.ConceptDeclD(a, b, c):
+    Node::ConceptDeclD(a, b, c):
       return "ConceptDeclD"
-    Node.ExtendDeclD(a, b, c):
+    Node::ExtendDeclD(a, b, c):
       return "ExtendDeclD"
-    Node.ErrorD(a):
+    Node::ErrorD(a):
       return "ErrorD"
-    Node.ModuleDeclN(a, b):
+    Node::ModuleDeclN(a, b):
       return "ModuleDeclN"
-    Node.ImportDeclN(a, b):
+    Node::ImportDeclN(a, b):
       return "ImportDeclN"
-    Node.FileN(a, b, c):
+    Node::FileN(a, b, c):
       return "FileN"
   return "Unknown"
 
@@ -2572,7 +2597,7 @@ fn node_kind_name(n: Node): string
 fn extract_module_name(po: ParseOutput, mod_node_idx: i64): string
   let node: Node = po.nodes.get(mod_node_idx)
   match node:
-    Node.ModuleDeclN(path_lp, seg_count):
+    Node::ModuleDeclN(path_lp, seg_count):
       let result: string = ""
       let i: i64 = 0
       while i < seg_count:
@@ -2589,7 +2614,7 @@ fn extract_module_name(po: ParseOutput, mod_node_idx: i64): string
 fn extract_import_name(po: ParseOutput, imp_node_idx: i64): string
   let node: Node = po.nodes.get(imp_node_idx)
   match node:
-    Node.ImportDeclN(path_lp, seg_count):
+    Node::ImportDeclN(path_lp, seg_count):
       let result: Builder = Builder::new()
       let i: i64 = 0
       while i < seg_count:
@@ -2723,9 +2748,9 @@ fn tc_get_expr_type(td: TypeCheckData, module_id: i64, node_idx: i64): i64
   let key: string = expr_id_key(module_id, node_idx)
   let found: Option<i64> = td.expr_types.get(key)
   match found:
-    Option.Some(ty):
+    Option::Some(ty):
       return ty
-    Option.None:
+    Option::None:
       return to_i64(-1)
 
 fn tc_set_expr_type(td: TypeCheckData, module_id: i64, node_idx: i64, ty: i64): TypeCheckData
@@ -2831,7 +2856,7 @@ fn build_program(inputs: Vector<SourceInput>): ProgramGraph
     let mod_name: string = ""
     let root_node: Node = po.nodes.get(po.root)
     match root_node:
-      Node.FileN(mod_decl, imports_lp, decls_lp):
+      Node::FileN(mod_decl, imports_lp, decls_lp):
         if mod_decl >= 0:
           mod_name = extract_module_name(po, mod_decl)
     if mod_name == "":
@@ -2860,7 +2885,7 @@ fn build_program(inputs: Vector<SourceInput>): ProgramGraph
     if sf.module_id >= 0:
       let root_n: Node = sf.parse_output.nodes.get(sf.parse_output.root)
       match root_n:
-        Node.FileN(mod_decl, imports_lp, decls_lp):
+        Node::FileN(mod_decl, imports_lp, decls_lp):
           let imps: Vector<i64> = pg_read_list(sf.parse_output.idx, imports_lp)
           let ii: i64 = 0
           while ii < imps.length():

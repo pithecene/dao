@@ -78,7 +78,7 @@ fn expect_eof_last(label: string, result: LexResult): bool
     print("FAIL " + label + ": empty token stream")
     return false
   let last: Token = result.tokens.get(result.tokens.length() - 1)
-  if tk_name(last.kind) == tk_name(TK.Eof):
+  if tk_name(last.kind) == tk_name(TK::Eof):
     print("PASS " + label)
     return true
   print("FAIL " + label + ": last token is " + tk_name(last.kind) + ", expected Eof")
@@ -112,17 +112,17 @@ fn main(): i32
 
   let src1: string = "let x = 42\n"
   let r1: LexResult = lex(src1)
-  if expect_token_text("let_kw", r1, 0, TK.KwLet, "let", src1):
+  if expect_token_text("let_kw", r1, 0, TK::KwLet, "let", src1):
     pass_count = pass_count + 1
-  if expect_token_text("ident_x", r1, 1, TK.Identifier, "x", src1):
+  if expect_token_text("ident_x", r1, 1, TK::Identifier, "x", src1):
     pass_count = pass_count + 1
-  if expect_token("eq_op", r1, 2, TK.Eq, src1):
+  if expect_token("eq_op", r1, 2, TK::Eq, src1):
     pass_count = pass_count + 1
-  if expect_token_text("int_42", r1, 3, TK.IntLiteral, "42", src1):
+  if expect_token_text("int_42", r1, 3, TK::IntLiteral, "42", src1):
     pass_count = pass_count + 1
-  if expect_token("newline", r1, 4, TK.Newline, src1):
+  if expect_token("newline", r1, 4, TK::Newline, src1):
     pass_count = pass_count + 1
-  if expect_token("eof", r1, 5, TK.Eof, src1):
+  if expect_token("eof", r1, 5, TK::Eof, src1):
     pass_count = pass_count + 1
   if expect_no_errors("basic_no_err", r1):
     pass_count = pass_count + 1
@@ -133,15 +133,15 @@ fn main(): i32
 
   let src_kw: string = "fn class enum if else while for in return match\n"
   let rkw: LexResult = lex(src_kw)
-  if expect_token("kw_fn", rkw, 0, TK.KwFn, src_kw):
+  if expect_token("kw_fn", rkw, 0, TK::KwFn, src_kw):
     pass_count = pass_count + 1
-  if expect_token("kw_class", rkw, 1, TK.KwClass, src_kw):
+  if expect_token("kw_class", rkw, 1, TK::KwClass, src_kw):
     pass_count = pass_count + 1
-  if expect_token("kw_enum", rkw, 2, TK.KwEnum, src_kw):
+  if expect_token("kw_enum", rkw, 2, TK::KwEnum, src_kw):
     pass_count = pass_count + 1
-  if expect_token("kw_if", rkw, 3, TK.KwIf, src_kw):
+  if expect_token("kw_if", rkw, 3, TK::KwIf, src_kw):
     pass_count = pass_count + 1
-  if expect_token("kw_match", rkw, 9, TK.KwMatch, src_kw):
+  if expect_token("kw_match", rkw, 9, TK::KwMatch, src_kw):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------
@@ -150,21 +150,21 @@ fn main(): i32
 
   let src2: string = "== != <= >= -> => :: |>\n"
   let r2: LexResult = lex(src2)
-  if expect_token("op_eqeq", r2, 0, TK.EqEq, src2):
+  if expect_token("op_eqeq", r2, 0, TK::EqEq, src2):
     pass_count = pass_count + 1
-  if expect_token("op_bangeq", r2, 1, TK.BangEq, src2):
+  if expect_token("op_bangeq", r2, 1, TK::BangEq, src2):
     pass_count = pass_count + 1
-  if expect_token("op_lteq", r2, 2, TK.LtEq, src2):
+  if expect_token("op_lteq", r2, 2, TK::LtEq, src2):
     pass_count = pass_count + 1
-  if expect_token("op_gteq", r2, 3, TK.GtEq, src2):
+  if expect_token("op_gteq", r2, 3, TK::GtEq, src2):
     pass_count = pass_count + 1
-  if expect_token("op_arrow", r2, 4, TK.Arrow, src2):
+  if expect_token("op_arrow", r2, 4, TK::Arrow, src2):
     pass_count = pass_count + 1
-  if expect_token("op_fatarrow", r2, 5, TK.FatArrow, src2):
+  if expect_token("op_fatarrow", r2, 5, TK::FatArrow, src2):
     pass_count = pass_count + 1
-  if expect_token("op_coloncolon", r2, 6, TK.ColonColon, src2):
+  if expect_token("op_coloncolon", r2, 6, TK::ColonColon, src2):
     pass_count = pass_count + 1
-  if expect_token("op_pipegt", r2, 7, TK.PipeGt, src2):
+  if expect_token("op_pipegt", r2, 7, TK::PipeGt, src2):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------
@@ -173,31 +173,31 @@ fn main(): i32
 
   let src_ops: string = "+ - * / % & . , | ! < > ?\n"
   let r_ops: LexResult = lex(src_ops)
-  if expect_token("op_plus", r_ops, 0, TK.Plus, src_ops):
+  if expect_token("op_plus", r_ops, 0, TK::Plus, src_ops):
     pass_count = pass_count + 1
-  if expect_token("op_minus", r_ops, 1, TK.Minus, src_ops):
+  if expect_token("op_minus", r_ops, 1, TK::Minus, src_ops):
     pass_count = pass_count + 1
-  if expect_token("op_star", r_ops, 2, TK.Star, src_ops):
+  if expect_token("op_star", r_ops, 2, TK::Star, src_ops):
     pass_count = pass_count + 1
-  if expect_token("op_slash", r_ops, 3, TK.Slash, src_ops):
+  if expect_token("op_slash", r_ops, 3, TK::Slash, src_ops):
     pass_count = pass_count + 1
-  if expect_token("op_percent", r_ops, 4, TK.Percent, src_ops):
+  if expect_token("op_percent", r_ops, 4, TK::Percent, src_ops):
     pass_count = pass_count + 1
-  if expect_token("op_amp", r_ops, 5, TK.Amp, src_ops):
+  if expect_token("op_amp", r_ops, 5, TK::Amp, src_ops):
     pass_count = pass_count + 1
-  if expect_token("op_dot", r_ops, 6, TK.Dot, src_ops):
+  if expect_token("op_dot", r_ops, 6, TK::Dot, src_ops):
     pass_count = pass_count + 1
-  if expect_token("op_comma", r_ops, 7, TK.Comma, src_ops):
+  if expect_token("op_comma", r_ops, 7, TK::Comma, src_ops):
     pass_count = pass_count + 1
-  if expect_token("op_pipe", r_ops, 8, TK.Pipe, src_ops):
+  if expect_token("op_pipe", r_ops, 8, TK::Pipe, src_ops):
     pass_count = pass_count + 1
-  if expect_token("op_bang", r_ops, 9, TK.Bang, src_ops):
+  if expect_token("op_bang", r_ops, 9, TK::Bang, src_ops):
     pass_count = pass_count + 1
-  if expect_token("op_lt", r_ops, 10, TK.Lt, src_ops):
+  if expect_token("op_lt", r_ops, 10, TK::Lt, src_ops):
     pass_count = pass_count + 1
-  if expect_token("op_gt", r_ops, 11, TK.Gt, src_ops):
+  if expect_token("op_gt", r_ops, 11, TK::Gt, src_ops):
     pass_count = pass_count + 1
-  if expect_token("op_question", r_ops, 12, TK.Question, src_ops):
+  if expect_token("op_question", r_ops, 12, TK::Question, src_ops):
     pass_count = pass_count + 1
   if expect_no_errors("ops_no_err", r_ops):
     pass_count = pass_count + 1
@@ -208,7 +208,7 @@ fn main(): i32
 
   let src3: string = "\"hello world\"\n"
   let r3: LexResult = lex(src3)
-  if expect_token("str_lit", r3, 0, TK.StringLiteral, src3):
+  if expect_token("str_lit", r3, 0, TK::StringLiteral, src3):
     pass_count = pass_count + 1
   if expect_no_errors("str_no_err", r3):
     pass_count = pass_count + 1
@@ -219,7 +219,7 @@ fn main(): i32
 
   let src_esc: string = "\"hello\\nworld\\t\\\"end\"\n"
   let r_esc: LexResult = lex(src_esc)
-  if expect_token("str_esc", r_esc, 0, TK.StringLiteral, src_esc):
+  if expect_token("str_esc", r_esc, 0, TK::StringLiteral, src_esc):
     pass_count = pass_count + 1
   if expect_no_errors("str_esc_no_err", r_esc):
     pass_count = pass_count + 1
@@ -230,7 +230,7 @@ fn main(): i32
 
   let src4: string = "3.14\n"
   let r4: LexResult = lex(src4)
-  if expect_token_text("float_lit", r4, 0, TK.FloatLiteral, "3.14", src4):
+  if expect_token_text("float_lit", r4, 0, TK::FloatLiteral, "3.14", src4):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------
@@ -240,15 +240,15 @@ fn main(): i32
   let src5: string = "fn foo():\n  let x = 1\n  let y = 2\nlet z = 3\n"
   let r5: LexResult = lex(src5)
   // Tokens: fn foo ( ) : NL INDENT let x = 1 NL let y = 2 NL DEDENT let z = 3 NL EOF
-  if expect_token("indent_fn", r5, 0, TK.KwFn, src5):
+  if expect_token("indent_fn", r5, 0, TK::KwFn, src5):
     pass_count = pass_count + 1
-  if expect_token("indent_tok", r5, 6, TK.Indent, src5):
+  if expect_token("indent_tok", r5, 6, TK::Indent, src5):
     pass_count = pass_count + 1
   // INDENT span: line_begin=10, length=2.
   if expect_token_span("indent_span", r5, 6, 10, 2):
     pass_count = pass_count + 1
   // DEDENT at index 17: line_begin=34, length=0.
-  if expect_token("dedent_tok", r5, 17, TK.Dedent, src5):
+  if expect_token("dedent_tok", r5, 17, TK::Dedent, src5):
     pass_count = pass_count + 1
   if expect_token_span("dedent_span", r5, 17, 34, 0):
     pass_count = pass_count + 1
@@ -263,16 +263,16 @@ fn main(): i32
   let r_ml: LexResult = lex(src_ml)
   // Tokens: if(0) x(1) :(2) NL(3) INDENT(4) if(5) y(6) :(7) NL(8)
   //         INDENT(9) z(10) NL(11) DEDENT(12) DEDENT(13) EOF(14)
-  if expect_token("ml_if", r_ml, 0, TK.KwIf, src_ml):
+  if expect_token("ml_if", r_ml, 0, TK::KwIf, src_ml):
     pass_count = pass_count + 1
-  if expect_token("ml_indent1", r_ml, 4, TK.Indent, src_ml):
+  if expect_token("ml_indent1", r_ml, 4, TK::Indent, src_ml):
     pass_count = pass_count + 1
-  if expect_token("ml_indent2", r_ml, 9, TK.Indent, src_ml):
+  if expect_token("ml_indent2", r_ml, 9, TK::Indent, src_ml):
     pass_count = pass_count + 1
   // Two DEDENTs emitted at EOF
-  if expect_token("ml_dedent1", r_ml, 12, TK.Dedent, src_ml):
+  if expect_token("ml_dedent1", r_ml, 12, TK::Dedent, src_ml):
     pass_count = pass_count + 1
-  if expect_token("ml_dedent2", r_ml, 13, TK.Dedent, src_ml):
+  if expect_token("ml_dedent2", r_ml, 13, TK::Dedent, src_ml):
     pass_count = pass_count + 1
   if expect_no_errors("ml_no_err", r_ml):
     pass_count = pass_count + 1
@@ -285,19 +285,19 @@ fn main(): i32
   let r6: LexResult = lex(src6)
   // Inside parens, newlines and indentation are suppressed.
   // Tokens: foo ( 1 , 2 ) NL EOF
-  if expect_token("paren_foo", r6, 0, TK.Identifier, src6):
+  if expect_token("paren_foo", r6, 0, TK::Identifier, src6):
     pass_count = pass_count + 1
-  if expect_token("paren_lparen", r6, 1, TK.LParen, src6):
+  if expect_token("paren_lparen", r6, 1, TK::LParen, src6):
     pass_count = pass_count + 1
-  if expect_token("paren_1", r6, 2, TK.IntLiteral, src6):
+  if expect_token("paren_1", r6, 2, TK::IntLiteral, src6):
     pass_count = pass_count + 1
-  if expect_token("paren_comma", r6, 3, TK.Comma, src6):
+  if expect_token("paren_comma", r6, 3, TK::Comma, src6):
     pass_count = pass_count + 1
-  if expect_token("paren_2", r6, 4, TK.IntLiteral, src6):
+  if expect_token("paren_2", r6, 4, TK::IntLiteral, src6):
     pass_count = pass_count + 1
-  if expect_token("paren_rparen", r6, 5, TK.RParen, src6):
+  if expect_token("paren_rparen", r6, 5, TK::RParen, src6):
     pass_count = pass_count + 1
-  if expect_token("paren_nl", r6, 6, TK.Newline, src6):
+  if expect_token("paren_nl", r6, 6, TK::Newline, src6):
     pass_count = pass_count + 1
   if expect_no_errors("paren_no_err", r6):
     pass_count = pass_count + 1
@@ -309,15 +309,15 @@ fn main(): i32
   let src_nb: string = "f(a[0], b)\n"
   let r_nb: LexResult = lex(src_nb)
   // f ( a [ 0 ] , b ) NL EOF
-  if expect_token("nb_f", r_nb, 0, TK.Identifier, src_nb):
+  if expect_token("nb_f", r_nb, 0, TK::Identifier, src_nb):
     pass_count = pass_count + 1
-  if expect_token("nb_lp", r_nb, 1, TK.LParen, src_nb):
+  if expect_token("nb_lp", r_nb, 1, TK::LParen, src_nb):
     pass_count = pass_count + 1
-  if expect_token("nb_lb", r_nb, 3, TK.LBracket, src_nb):
+  if expect_token("nb_lb", r_nb, 3, TK::LBracket, src_nb):
     pass_count = pass_count + 1
-  if expect_token("nb_rb", r_nb, 5, TK.RBracket, src_nb):
+  if expect_token("nb_rb", r_nb, 5, TK::RBracket, src_nb):
     pass_count = pass_count + 1
-  if expect_token("nb_rp", r_nb, 8, TK.RParen, src_nb):
+  if expect_token("nb_rp", r_nb, 8, TK::RParen, src_nb):
     pass_count = pass_count + 1
   if expect_no_errors("nb_no_err", r_nb):
     pass_count = pass_count + 1
@@ -329,11 +329,11 @@ fn main(): i32
   let src7: string = "x // comment\ny\n"
   let r7: LexResult = lex(src7)
   // comment is skipped: x NL y NL EOF
-  if expect_token_text("comment_x", r7, 0, TK.Identifier, "x", src7):
+  if expect_token_text("comment_x", r7, 0, TK::Identifier, "x", src7):
     pass_count = pass_count + 1
-  if expect_token("comment_nl", r7, 1, TK.Newline, src7):
+  if expect_token("comment_nl", r7, 1, TK::Newline, src7):
     pass_count = pass_count + 1
-  if expect_token_text("comment_y", r7, 2, TK.Identifier, "y", src7):
+  if expect_token_text("comment_y", r7, 2, TK::Identifier, "y", src7):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------
@@ -344,9 +344,9 @@ fn main(): i32
   let r_co: LexResult = lex(src_co)
   // Comment line is blank — does not affect indentation.
   // Tokens: if x : NL INDENT y NL DEDENT EOF
-  if expect_token("co_indent", r_co, 4, TK.Indent, src_co):
+  if expect_token("co_indent", r_co, 4, TK::Indent, src_co):
     pass_count = pass_count + 1
-  if expect_token_text("co_y", r_co, 5, TK.Identifier, "y", src_co):
+  if expect_token_text("co_y", r_co, 5, TK::Identifier, "y", src_co):
     pass_count = pass_count + 1
   if expect_no_errors("co_no_err", r_co):
     pass_count = pass_count + 1
@@ -357,8 +357,8 @@ fn main(): i32
 
   let src8: string = "\tx\n"
   let r8: LexResult = lex(src8)
-  // Tab emits TK.Error token (matching C++ emit_error behavior).
-  if expect_token("tab_err_tok", r8, 0, TK.Error, src8):
+  // Tab emits TK::Error token (matching C++ emit_error behavior).
+  if expect_token("tab_err_tok", r8, 0, TK::Error, src8):
     pass_count = pass_count + 1
   if expect_error_count("tab_err", r8, 1):
     pass_count = pass_count + 1
@@ -369,9 +369,9 @@ fn main(): i32
 
   let src9: string = "x?\n"
   let r9: LexResult = lex(src9)
-  if expect_token("try_ident", r9, 0, TK.Identifier, src9):
+  if expect_token("try_ident", r9, 0, TK::Identifier, src9):
     pass_count = pass_count + 1
-  if expect_token("try_question", r9, 1, TK.Question, src9):
+  if expect_token("try_question", r9, 1, TK::Question, src9):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------
@@ -380,13 +380,13 @@ fn main(): i32
 
   let src10: string = "a[0]\n"
   let r10: LexResult = lex(src10)
-  if expect_token("bracket_a", r10, 0, TK.Identifier, src10):
+  if expect_token("bracket_a", r10, 0, TK::Identifier, src10):
     pass_count = pass_count + 1
-  if expect_token("bracket_l", r10, 1, TK.LBracket, src10):
+  if expect_token("bracket_l", r10, 1, TK::LBracket, src10):
     pass_count = pass_count + 1
-  if expect_token("bracket_0", r10, 2, TK.IntLiteral, src10):
+  if expect_token("bracket_0", r10, 2, TK::IntLiteral, src10):
     pass_count = pass_count + 1
-  if expect_token("bracket_r", r10, 3, TK.RBracket, src10):
+  if expect_token("bracket_r", r10, 3, TK::RBracket, src10):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------
@@ -395,7 +395,7 @@ fn main(): i32
 
   let src11: string = "\"hello"
   let r11: LexResult = lex(src11)
-  if expect_token("unterm_eof_tok", r11, 0, TK.Error, src11):
+  if expect_token("unterm_eof_tok", r11, 0, TK::Error, src11):
     pass_count = pass_count + 1
   if expect_error_count("unterm_eof_err", r11, 1):
     pass_count = pass_count + 1
@@ -406,7 +406,7 @@ fn main(): i32
 
   let src_unl: string = "\"hello\nx\n"
   let r_unl: LexResult = lex(src_unl)
-  if expect_token("unterm_nl_tok", r_unl, 0, TK.Error, src_unl):
+  if expect_token("unterm_nl_tok", r_unl, 0, TK::Error, src_unl):
     pass_count = pass_count + 1
   if expect_error_count("unterm_nl_err", r_unl, 1):
     pass_count = pass_count + 1
@@ -417,11 +417,11 @@ fn main(): i32
 
   let src_uc: string = "x @ y\n"
   let r_uc: LexResult = lex(src_uc)
-  if expect_token("uc_x", r_uc, 0, TK.Identifier, src_uc):
+  if expect_token("uc_x", r_uc, 0, TK::Identifier, src_uc):
     pass_count = pass_count + 1
-  if expect_token("uc_err", r_uc, 1, TK.Error, src_uc):
+  if expect_token("uc_err", r_uc, 1, TK::Error, src_uc):
     pass_count = pass_count + 1
-  if expect_token("uc_y", r_uc, 2, TK.Identifier, src_uc):
+  if expect_token("uc_y", r_uc, 2, TK::Identifier, src_uc):
     pass_count = pass_count + 1
   if expect_error_count("uc_err_count", r_uc, 1):
     pass_count = pass_count + 1
@@ -432,7 +432,7 @@ fn main(): i32
 
   let src_empty: string = ""
   let re: LexResult = lex(src_empty)
-  if expect_token("empty_eof", re, 0, TK.Eof, src_empty):
+  if expect_token("empty_eof", re, 0, TK::Eof, src_empty):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------
@@ -442,19 +442,19 @@ fn main(): i32
   let src_dao: string = "enum Color:\n  Red\n  Green\n  Blue\n\nclass Point:\n  x: f64\n  y: f64\n\nfn distance(a: Point, b: Point): f64\n  let dx: f64 = b.x - a.x\n  let dy: f64 = b.y - a.y\n  return sqrt(dx * dx + dy * dy)\n\nfn main(): i32\n  let p: Point = Point(1.0, 2.0)\n  let q: Point = Point(4.0, 6.0)\n  print(distance(p, q))\n  return 0\n"
   let r_dao: LexResult = lex(src_dao)
   // Smoke: correct keywords, no errors, ends with Eof.
-  if expect_has_kind("dao_has_enum", r_dao, TK.KwEnum):
+  if expect_has_kind("dao_has_enum", r_dao, TK::KwEnum):
     pass_count = pass_count + 1
-  if expect_has_kind("dao_has_class", r_dao, TK.KwClass):
+  if expect_has_kind("dao_has_class", r_dao, TK::KwClass):
     pass_count = pass_count + 1
-  if expect_has_kind("dao_has_fn", r_dao, TK.KwFn):
+  if expect_has_kind("dao_has_fn", r_dao, TK::KwFn):
     pass_count = pass_count + 1
-  if expect_has_kind("dao_has_return", r_dao, TK.KwReturn):
+  if expect_has_kind("dao_has_return", r_dao, TK::KwReturn):
     pass_count = pass_count + 1
-  if expect_has_kind("dao_has_float", r_dao, TK.FloatLiteral):
+  if expect_has_kind("dao_has_float", r_dao, TK::FloatLiteral):
     pass_count = pass_count + 1
-  if expect_has_kind("dao_has_indent", r_dao, TK.Indent):
+  if expect_has_kind("dao_has_indent", r_dao, TK::Indent):
     pass_count = pass_count + 1
-  if expect_has_kind("dao_has_dedent", r_dao, TK.Dedent):
+  if expect_has_kind("dao_has_dedent", r_dao, TK::Dedent):
     pass_count = pass_count + 1
   if expect_eof_last("dao_eof_last", r_dao):
     pass_count = pass_count + 1
@@ -480,15 +480,15 @@ fn main(): i32
       pass_count = pass_count + 1
     if expect_eof_last("self_lex_eof", r_self):
       pass_count = pass_count + 1
-    if expect_has_kind("self_lex_has_fn", r_self, TK.KwFn):
+    if expect_has_kind("self_lex_has_fn", r_self, TK::KwFn):
       pass_count = pass_count + 1
-    if expect_has_kind("self_lex_has_enum", r_self, TK.KwEnum):
+    if expect_has_kind("self_lex_has_enum", r_self, TK::KwEnum):
       pass_count = pass_count + 1
-    if expect_has_kind("self_lex_has_match", r_self, TK.KwMatch):
+    if expect_has_kind("self_lex_has_match", r_self, TK::KwMatch):
       pass_count = pass_count + 1
-    if expect_has_kind("self_lex_has_class", r_self, TK.KwClass):
+    if expect_has_kind("self_lex_has_class", r_self, TK::KwClass):
       pass_count = pass_count + 1
-    if expect_has_kind("self_lex_has_string", r_self, TK.StringLiteral):
+    if expect_has_kind("self_lex_has_string", r_self, TK::StringLiteral):
       pass_count = pass_count + 1
     if expect_no_errors("self_lex_no_err", r_self):
       pass_count = pass_count + 1

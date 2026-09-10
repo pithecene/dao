@@ -167,27 +167,27 @@ fn hir_flush_pairs(hs: HS, items: Vector<i64>, pair_count: i64): HirFlush
 // Extract type_idx from an already-lowered HIR expression node.
 fn hir_expr_type(node: HirNode): i64
   match node:
-    HirNode.HirIntLit(t, ti):
+    HirNode::HirIntLit(t, ti):
       return ti
-    HirNode.HirFloatLit(t, ti):
+    HirNode::HirFloatLit(t, ti):
       return ti
-    HirNode.HirStringLit(t, ti):
+    HirNode::HirStringLit(t, ti):
       return ti
-    HirNode.HirBoolLit(t, ti):
+    HirNode::HirBoolLit(t, ti):
       return ti
-    HirNode.HirIdent(s, ti, t):
+    HirNode::HirIdent(s, ti, t):
       return ti
-    HirNode.HirBinary(o, l, r, ti):
+    HirNode::HirBinary(o, l, r, ti):
       return ti
-    HirNode.HirUnary(o, op, ti):
+    HirNode::HirUnary(o, op, ti):
       return ti
-    HirNode.HirCall(c, a, n, ti):
+    HirNode::HirCall(c, a, n, ti):
       return ti
-    HirNode.HirFieldAccess(o, f, ti):
+    HirNode::HirFieldAccess(o, f, ti):
       return ti
-    HirNode.HirPipe(l, r, ti):
+    HirNode::HirPipe(l, r, ti):
       return ti
-    HirNode.HirQualName(t, n, ti):
+    HirNode::HirQualName(t, n, ti):
       return ti
   return to_i64(-1)
 
@@ -195,18 +195,18 @@ fn hir_get_expr_type(hs: HS, ast_node_idx: i64): i64
   let key: string = expr_id_key(hs.module_id, ast_node_idx)
   let found: Option<i64> = hs.expr_types.get(key)
   match found:
-    Option.Some(ti):
+    Option::Some(ti):
       return ti
-    Option.None:
+    Option::None:
       return to_i64(-1)
 
 fn hir_lookup_use(hs: HS, tok_idx: i64): i64
   let key: string = uses_key(hs.file_id, tok_idx)
   let result: Option<i64> = hs.uses_map.get(key)
   match result:
-    Option.Some(sym_idx):
+    Option::Some(sym_idx):
       return sym_idx
-    Option.None:
+    Option::None:
       return to_i64(-1)
 
 fn hir_sym_type(hs: HS, sym_idx: i64): i64
@@ -251,38 +251,38 @@ fn hir_find_method_sym(hs: HS, mangled: string): i64
 
 fn lower_expr(hs: HS, node_idx: i64): HirR
   if node_idx < 0:
-    return hs_add_node(hs, HirNode.HirErrorExpr(to_i64(0)))
+    return hs_add_node(hs, HirNode::HirErrorExpr(tok = to_i64(0)))
   let node: Node = hs.nodes.get(node_idx)
   let ti: i64 = hir_get_expr_type(hs, node_idx)
   match node:
-    Node.IntLitE(tidx):
+    Node::IntLitE(tidx):
       let int_ti: i64 = ti
       if int_ti < 0:
         int_ti = 2  // default i32
-      return hs_add_node(hs, HirNode.HirIntLit(tidx, int_ti))
-    Node.FloatLitE(tidx):
+      return hs_add_node(hs, HirNode::HirIntLit(tok = tidx, typ = int_ti))
+    Node::FloatLitE(tidx):
       let float_ti: i64 = ti
       if float_ti < 0:
         float_ti = 9  // default f64
-      return hs_add_node(hs, HirNode.HirFloatLit(tidx, float_ti))
-    Node.StringLitE(tidx):
+      return hs_add_node(hs, HirNode::HirFloatLit(tok = tidx, typ = float_ti))
+    Node::StringLitE(tidx):
       let str_ti: i64 = ti
       if str_ti < 0:
         str_ti = 12  // default string
-      return hs_add_node(hs, HirNode.HirStringLit(tidx, str_ti))
-    Node.BoolLitE(tidx):
+      return hs_add_node(hs, HirNode::HirStringLit(tok = tidx, typ = str_ti))
+    Node::BoolLitE(tidx):
       let bool_ti: i64 = ti
       if bool_ti < 0:
         bool_ti = 10  // default bool
-      return hs_add_node(hs, HirNode.HirBoolLit(tidx, bool_ti))
-    Node.IdentE(tidx):
+      return hs_add_node(hs, HirNode::HirBoolLit(tok = tidx, typ = bool_ti))
+    Node::IdentE(tidx):
       let sym_idx: i64 = hir_lookup_use(hs, tidx)
       let ident_ti: i64 = ti
       if ident_ti < 0:
         if sym_idx >= 0:
           ident_ti = hir_sym_type(hs, sym_idx)
-      return hs_add_node(hs, HirNode.HirIdent(sym_idx, ident_ti, tidx))
-    Node.BinaryE(op_tidx, left, right):
+      return hs_add_node(hs, HirNode::HirIdent(sym = sym_idx, typ = ident_ti, tok = tidx))
+    Node::BinaryE(op_tidx, left, right):
       let lr: HirR = lower_expr(hs, left)
       let rr: HirR = lower_expr(lr.hs, right)
       // Fallback: if typechecker didn't record type (value-corruption),
@@ -291,21 +291,21 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
       if bin_ti < 0:
         let tok: Token = rr.hs.toks.get(op_tidx)
         let is_cmp: bool = false
-        if tk_name(tok.kind) == tk_name(TK.EqEq):
+        if tk_name(tok.kind) == tk_name(TK::EqEq):
           is_cmp = true
-        if tk_name(tok.kind) == tk_name(TK.BangEq):
+        if tk_name(tok.kind) == tk_name(TK::BangEq):
           is_cmp = true
-        if tk_name(tok.kind) == tk_name(TK.Lt):
+        if tk_name(tok.kind) == tk_name(TK::Lt):
           is_cmp = true
-        if tk_name(tok.kind) == tk_name(TK.LtEq):
+        if tk_name(tok.kind) == tk_name(TK::LtEq):
           is_cmp = true
-        if tk_name(tok.kind) == tk_name(TK.Gt):
+        if tk_name(tok.kind) == tk_name(TK::Gt):
           is_cmp = true
-        if tk_name(tok.kind) == tk_name(TK.GtEq):
+        if tk_name(tok.kind) == tk_name(TK::GtEq):
           is_cmp = true
-        if tk_name(tok.kind) == tk_name(TK.KwAnd):
+        if tk_name(tok.kind) == tk_name(TK::KwAnd):
           is_cmp = true
-        if tk_name(tok.kind) == tk_name(TK.KwOr):
+        if tk_name(tok.kind) == tk_name(TK::KwOr):
           is_cmp = true
         if is_cmp:
           bin_ti = 10  // bool
@@ -313,42 +313,64 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
           // Arithmetic: extract type from left HIR child node
           let left_hir: HirNode = rr.hs.hir_nodes.get(lr.hir)
           bin_ti = hir_expr_type(left_hir)
-      return hs_add_node(rr.hs, HirNode.HirBinary(op_tidx, lr.hir, rr.hir, bin_ti))
-    Node.UnaryE(op_tidx, operand):
+      return hs_add_node(rr.hs, HirNode::HirBinary(op = op_tidx, left = lr.hir, right = rr.hir, typ = bin_ti))
+    Node::UnaryE(op_tidx, operand):
       let or2: HirR = lower_expr(hs, operand)
-      return hs_add_node(or2.hs, HirNode.HirUnary(op_tidx, or2.hir, ti))
-    Node.CallE(callee, args_lp, arg_count, targs_lp, targ_count):
-      return lower_call_expr(hs, node_idx, callee, args_lp, arg_count, ti)
-    Node.FieldE(obj, field_tidx):
+      return hs_add_node(or2.hs, HirNode::HirUnary(op = op_tidx, operand = or2.hir, typ = ti))
+    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp):
+      return lower_call_expr(hs, node_idx, callee, args_lp, names_lp, ti)
+    Node::FieldE(obj, field_tidx):
       let obj_r: HirR = lower_expr(hs, obj)
-      return hs_add_node(obj_r.hs, HirNode.HirFieldAccess(obj_r.hir, field_tidx, ti))
-    Node.PipeE(left, right):
+      return hs_add_node(obj_r.hs, HirNode::HirFieldAccess(obj = obj_r.hir, field = field_tidx, typ = ti))
+    Node::PipeE(left, right):
       let lr: HirR = lower_expr(hs, left)
       let rr: HirR = lower_expr(lr.hs, right)
-      return hs_add_node(rr.hs, HirNode.HirPipe(lr.hir, rr.hir, ti))
-    Node.QualNameE(seg_lp, seg_count):
+      return hs_add_node(rr.hs, HirNode::HirPipe(left = lr.hir, right = rr.hir, typ = ti))
+    Node::QualNameE(seg_lp, seg_count):
       // Preserve all segment token indices in HIR idx.
       let segs: Vector<i64> = read_list(hs.idx_data, seg_lp)
       let seg_fl: HirFlush = hir_flush_list(hs, segs)
-      return hs_add_node(seg_fl.hs, HirNode.HirQualName(seg_fl.list_pos, segs.length(), ti))
-    Node.TryE(operand):
+      return hs_add_node(seg_fl.hs, HirNode::HirQualName(segs_lp = seg_fl.list_pos, seg_count = segs.length(), typ = ti))
+    Node::TryE(operand):
       // Tier B deferral — lower operand, emit error
       let cur: HS = hs_add_diag(hs, Span(to_i64(0), to_i64(1)), "try operator not supported in Tier A HIR")
-      return hs_add_node(cur, HirNode.HirErrorExpr(to_i64(0)))
-    Node.LambdaE(params_lp, param_count, body):
+      return hs_add_node(cur, HirNode::HirErrorExpr(tok = to_i64(0)))
+    Node::LambdaE(params_lp, param_count, body):
       let cur: HS = hs_add_diag(hs, Span(to_i64(0), to_i64(1)), "lambda not supported in Tier A HIR")
-      return hs_add_node(cur, HirNode.HirErrorExpr(to_i64(0)))
-    Node.ListLitE(elems_lp, elem_count):
+      return hs_add_node(cur, HirNode::HirErrorExpr(tok = to_i64(0)))
+    Node::ListLitE(elems_lp, elem_count):
       let cur: HS = hs_add_diag(hs, Span(to_i64(0), to_i64(1)), "list literal not supported in Tier A HIR")
-      return hs_add_node(cur, HirNode.HirErrorExpr(to_i64(0)))
-    Node.IndexE(obj, idx_expr):
+      return hs_add_node(cur, HirNode::HirErrorExpr(tok = to_i64(0)))
+    Node::IndexE(obj, idx_expr):
       let cur: HS = hs_add_diag(hs, Span(to_i64(0), to_i64(1)), "index expression not supported in Tier A HIR")
-      return hs_add_node(cur, HirNode.HirErrorExpr(to_i64(0)))
-    Node.ErrorE(t):
-      return hs_add_node(hs, HirNode.HirErrorExpr(to_i64(0)))
-  return hs_add_node(hs, HirNode.HirErrorExpr(to_i64(0)))
+      return hs_add_node(cur, HirNode::HirErrorExpr(tok = to_i64(0)))
+    Node::ErrorE(t):
+      return hs_add_node(hs, HirNode::HirErrorExpr(tok = to_i64(0)))
+  return hs_add_node(hs, HirNode::HirErrorExpr(tok = to_i64(0)))
 
-fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, arg_count: i64, ti: i64): HirR
+// `hir_args` in the declaration order of the variant's parameters when
+// the arguments were given by name: the type checker recorded each named
+// argument's parameter index under `<expr key>:param`.  Unchanged when
+// the arguments are positional.
+fn variant_args_in_param_order(hs: HS, args: Vector<i64>, hir_args: Vector<i64>): Vector<i64>
+  let ordered: Vector<i64> = hir_args
+  let placed: i64 = 0
+  let ai: i64 = 0
+  while ai < args.length():
+    let slot: Option<i64> = hs.expr_types.get(expr_id_key(hs.module_id, args.get(ai)) + ":param")
+    match slot:
+      Option::Some(param_index):
+        if param_index >= 0 and param_index < ordered.length():
+          ordered = ordered.set(param_index, hir_args.get(ai))
+          placed = placed + 1
+      Option::None:
+        placed = placed
+    ai = ai + 1
+  if placed == hir_args.length():
+    return ordered
+  return hir_args
+
+fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i64, ti: i64): HirR
   // ---------------------------------------------------------------
   // Method call desugaring: obj.method(args) → Method(obj, args)
   // ---------------------------------------------------------------
@@ -367,7 +389,7 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, arg_count: 
   // type is the field's type, not a function type.
   let callee_node: Node = hs.nodes.get(callee)
   match callee_node:
-    Node.FieldE(mobj, mfield_tidx):
+    Node::FieldE(mobj, mfield_tidx):
       // Check if the type checker resolved the FieldE as a function
       // type.  If not (e.g. it's a concrete field), suppress the
       // desugaring so we don't rewrite a field access as a method call.
@@ -376,7 +398,7 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, arg_count: 
       if callee_ti >= 0:
         let callee_type: DaoType = hs.types.get(callee_ti)
         match callee_type.kind:
-          TypeKind.TFunction:
+          TypeKind::TFunction:
             is_method_callee = true
       let obj_ti: i64 = hir_get_expr_type(hs, mobj)
       // Use sentinel values to avoid deep nesting: if any guard fails,
@@ -387,7 +409,7 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, arg_count: 
       if method_obj_ti >= 0:
         let obj_type: DaoType = hs.types.get(method_obj_ti)
         match obj_type.kind:
-          TypeKind.TStruct:
+          TypeKind::TStruct:
             let field_name: string = substring(hs.src, hs.toks.get(mfield_tidx).offset, hs.toks.get(mfield_tidx).len)
             let mangled: string = obj_type.name + "." + field_name
             let msym: i64 = hir_find_method_sym(hs, mangled)
@@ -408,16 +430,16 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, arg_count: 
                 ai = ai + 1
               let fl: HirFlush = hir_flush_list(cur, hir_args)
               let meth_ti: i64 = hir_sym_type(fl.hs, msym)
-              let callee_hir: HirR = hs_add_node(fl.hs, HirNode.HirIdent(msym, meth_ti, mfield_tidx))
+              let callee_hir: HirR = hs_add_node(fl.hs, HirNode::HirIdent(sym = msym, typ = meth_ti, tok = mfield_tidx))
               // Derive call result type from the method's return type.
               let call_ti: i64 = ti
               if call_ti < 0:
                 if meth_ti >= 0:
                   let mt: DaoType = callee_hir.hs.types.get(meth_ti)
                   match mt.kind:
-                    TypeKind.TFunction:
+                    TypeKind::TFunction:
                       call_ti = mt.ret_type
-              return hs_add_node(callee_hir.hs, HirNode.HirCall(callee_hir.hir, fl.list_pos, hir_args.length(), call_ti))
+              return hs_add_node(callee_hir.hs, HirNode::HirCall(callee = callee_hir.hir, args_lp = fl.list_pos, arg_count = hir_args.length(), typ = call_ti))
 
   // ---------------------------------------------------------------
   // Normal call path (non-method)
@@ -432,6 +454,9 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, arg_count: 
     cur = ar.hs
     hir_args = hir_args.push(ar.hir)
     ai = ai + 1
+  // A variant constructed by parameter name: HirCall takes the payload
+  // in declaration order.
+  hir_args = variant_args_in_param_order(cur, args, hir_args)
   let fl: HirFlush = hir_flush_list(cur, hir_args)
   // Fallback: if typechecker didn't record type (value-corruption),
   // infer from callee — if it's a function, use return type;
@@ -442,20 +467,20 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, arg_count: 
     if callee_ti >= 0:
       let ct: DaoType = fl.hs.types.get(callee_ti)
       match ct.kind:
-        TypeKind.TFunction:
+        TypeKind::TFunction:
           call_ti = ct.ret_type
     // Check if callee is an IdentE resolving to a Type symbol (struct constructor)
     if call_ti < 0:
       let cn: Node = fl.hs.nodes.get(callee)
       match cn:
-        Node.IdentE(ctidx):
+        Node::IdentE(ctidx):
           let csym: i64 = hir_lookup_use(fl.hs, ctidx)
           if csym >= 0:
             let sym: Symbol = fl.hs.symbols.get(csym)
             match sym.kind:
-              SymbolKind.Type:
+              SymbolKind::Type:
                 call_ti = hir_sym_type(fl.hs, csym)
-  return hs_add_node(fl.hs, HirNode.HirCall(callee_r.hir, fl.list_pos, args.length(), call_ti))
+  return hs_add_node(fl.hs, HirNode::HirCall(callee = callee_r.hir, args_lp = fl.list_pos, arg_count = args.length(), typ = call_ti))
 
 // =========================================================================
 // Section 55: Statement lowering
@@ -463,36 +488,36 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, arg_count: 
 
 fn lower_stmt(hs: HS, node_idx: i64): HirR
   if node_idx < 0:
-    return hs_add_node(hs, HirNode.HirErrorStmt(to_i64(0)))
+    return hs_add_node(hs, HirNode::HirErrorStmt(tok = to_i64(0)))
   let node: Node = hs.nodes.get(node_idx)
   match node:
-    Node.LetS(name_tidx, type_node, init_node):
+    Node::LetS(name_tidx, type_node, init_node):
       return lower_let_stmt(hs, node_idx, name_tidx, type_node, init_node)
-    Node.AssignS(target, value):
+    Node::AssignS(target, value):
       let tr: HirR = lower_expr(hs, target)
       let vr: HirR = lower_expr(tr.hs, value)
-      return hs_add_node(vr.hs, HirNode.HirAssign(tr.hir, vr.hir))
-    Node.IfS(cond, then_lp, else_lp):
+      return hs_add_node(vr.hs, HirNode::HirAssign(target = tr.hir, value = vr.hir))
+    Node::IfS(cond, then_lp, else_lp):
       return lower_if_stmt(hs, cond, then_lp, else_lp)
-    Node.WhileS(cond, body_lp):
+    Node::WhileS(cond, body_lp):
       return lower_while_stmt(hs, cond, body_lp)
-    Node.ResourceS(kind_tidx, name_tidx, body_lp):
+    Node::ResourceS(kind_tidx, name_tidx, body_lp):
       let body_fl: HirFlush = lower_body_stmts(hs, body_lp)
-      return hs_add_node(body_fl.hs, HirNode.HirResource(kind_tidx, name_tidx, body_fl.list_pos))
-    Node.ForS(var_tidx, iter_node, body_lp):
+      return hs_add_node(body_fl.hs, HirNode::HirResource(kind = kind_tidx, name = name_tidx, body_lp = body_fl.list_pos))
+    Node::ForS(var_tidx, iter_node, body_lp):
       return lower_for_stmt(hs, var_tidx, iter_node, body_lp)
-    Node.ReturnS(val_node):
+    Node::ReturnS(val_node):
       return lower_return_stmt(hs, val_node)
-    Node.BreakS(tidx):
-      return hs_add_node(hs, HirNode.HirBreak(to_i64(0)))
-    Node.MatchS(scrut_node, arms_lp):
+    Node::BreakS(tidx):
+      return hs_add_node(hs, HirNode::HirBreak(tok = to_i64(0)))
+    Node::MatchS(scrut_node, arms_lp):
       return lower_match_stmt(hs, scrut_node, arms_lp)
-    Node.ExprStmtS(expr_node):
+    Node::ExprStmtS(expr_node):
       let er: HirR = lower_expr(hs, expr_node)
-      return hs_add_node(er.hs, HirNode.HirExprStmt(er.hir))
-    Node.ErrorS(t):
-      return hs_add_node(hs, HirNode.HirErrorStmt(to_i64(0)))
-  return hs_add_node(hs, HirNode.HirErrorStmt(to_i64(0)))
+      return hs_add_node(er.hs, HirNode::HirExprStmt(expr = er.hir))
+    Node::ErrorS(t):
+      return hs_add_node(hs, HirNode::HirErrorStmt(tok = to_i64(0)))
+  return hs_add_node(hs, HirNode::HirErrorStmt(tok = to_i64(0)))
 
 fn lower_let_stmt(hs: HS, node_idx: i64, name_tidx: i64, type_node: i64, init_node: i64): HirR
   // Find the Local symbol for this let binding by matching the
@@ -514,7 +539,7 @@ fn lower_let_stmt(hs: HS, node_idx: i64, name_tidx: i64, type_node: i64, init_no
     let ir: HirR = lower_expr(cur, init_node)
     cur = ir.hs
     init_hir = ir.hir
-  return hs_add_node(cur, HirNode.HirLet(let_sym, let_ti, init_hir))
+  return hs_add_node(cur, HirNode::HirLet(sym = let_sym, typ = let_ti, init = init_hir))
 
 fn lower_if_stmt(hs: HS, cond: i64, then_lp: i64, else_lp: i64): HirR
   let cr: HirR = lower_expr(hs, cond)
@@ -526,23 +551,23 @@ fn lower_if_stmt(hs: HS, cond: i64, then_lp: i64, else_lp: i64): HirR
     let else_fl: HirFlush = lower_body_stmts(cur, else_lp)
     cur = else_fl.hs
     else_list_pos = else_fl.list_pos
-  return hs_add_node(cur, HirNode.HirIf(cr.hir, then_fl.list_pos, else_list_pos))
+  return hs_add_node(cur, HirNode::HirIf(cond = cr.hir, then_lp = then_fl.list_pos, else_lp = else_list_pos))
 
 fn lower_while_stmt(hs: HS, cond: i64, body_lp: i64): HirR
   let cr: HirR = lower_expr(hs, cond)
   let body_fl: HirFlush = lower_body_stmts(cr.hs, body_lp)
-  return hs_add_node(body_fl.hs, HirNode.HirWhile(cr.hir, body_fl.list_pos))
+  return hs_add_node(body_fl.hs, HirNode::HirWhile(cond = cr.hir, body_lp = body_fl.list_pos))
 
 fn lower_for_stmt(hs: HS, var_tidx: i64, iter_node: i64, body_lp: i64): HirR
   let ir: HirR = lower_expr(hs, iter_node)
   let body_fl: HirFlush = lower_body_stmts(ir.hs, body_lp)
-  return hs_add_node(body_fl.hs, HirNode.HirFor(var_tidx, ir.hir, body_fl.list_pos))
+  return hs_add_node(body_fl.hs, HirNode::HirFor(var_name = var_tidx, iter = ir.hir, body_lp = body_fl.list_pos))
 
 fn lower_return_stmt(hs: HS, val_node: i64): HirR
   if val_node < 0:
-    return hs_add_node(hs, HirNode.HirReturn(to_i64(-1)))
+    return hs_add_node(hs, HirNode::HirReturn(value = to_i64(-1)))
   let vr: HirR = lower_expr(hs, val_node)
-  return hs_add_node(vr.hs, HirNode.HirReturn(vr.hir))
+  return hs_add_node(vr.hs, HirNode::HirReturn(value = vr.hir))
 
 fn lower_match_stmt(hs: HS, scrut_node: i64, arms_lp: i64): HirR
   // Desugar match into chained if/else-if:
@@ -558,7 +583,7 @@ fn lower_match_stmt(hs: HS, scrut_node: i64, arms_lp: i64): HirR
   let scrut_sym_idx: i64 = cur.symbols.length()
   // We can't add to hs.symbols (it's from the resolver, immutable in HS).
   // Instead, use the HirLet node index itself as the synthetic sym reference.
-  let scrut_let_r: HirR = hs_add_node(cur, HirNode.HirLet(to_i64(-1), scrut_ti, scrut_r.hir))
+  let scrut_let_r: HirR = hs_add_node(cur, HirNode::HirLet(sym = to_i64(-1), typ = scrut_ti, init = scrut_r.hir))
   cur = scrut_let_r.hs
   // The scrut_let_r.hir node index serves as the synthetic binding ID.
   let scrut_binding: i64 = scrut_let_r.hir
@@ -580,9 +605,9 @@ fn lower_match_stmt(hs: HS, scrut_node: i64, arms_lp: i64): HirR
     // Create condition: scrut == pattern
     // Use scrut_binding (the HirLet node index) as sym_idx so downstream
     // passes can identify which binding this references.
-    let scrut_ref_r: HirR = hs_add_node(cur, HirNode.HirIdent(scrut_binding, scrut_ti, to_i64(-1)))
+    let scrut_ref_r: HirR = hs_add_node(cur, HirNode::HirIdent(sym = scrut_binding, typ = scrut_ti, tok = to_i64(-1)))
     cur = scrut_ref_r.hs
-    let cond_r: HirR = hs_add_node(cur, HirNode.HirBinary(to_i64(-1), scrut_ref_r.hir, pat_r.hir, to_i64(10)))
+    let cond_r: HirR = hs_add_node(cur, HirNode::HirBinary(op = to_i64(-1), left = scrut_ref_r.hir, right = pat_r.hir, typ = to_i64(10)))
     cur = cond_r.hs
     arm_conds = arm_conds.push(cond_r.hir)
     arm_bodies = arm_bodies.push(body_fl.list_pos)
@@ -603,7 +628,7 @@ fn lower_match_stmt(hs: HS, scrut_node: i64, arms_lp: i64): HirR
       let else_fl: HirFlush = hir_flush_list(cur, else_items)
       cur = else_fl.hs
       else_lp = else_fl.list_pos
-    let if_r: HirR = hs_add_node(cur, HirNode.HirIf(arm_conds.get(ai), arm_bodies.get(ai), else_lp))
+    let if_r: HirR = hs_add_node(cur, HirNode::HirIf(cond = arm_conds.get(ai), then_lp = arm_bodies.get(ai), else_lp = else_lp))
     cur = if_r.hs
     chain_hir = if_r.hir
     ai = ai - 1
@@ -614,8 +639,8 @@ fn lower_match_stmt(hs: HS, scrut_node: i64, arms_lp: i64): HirR
   if chain_hir >= 0:
     block_items = block_items.push(chain_hir)
   let block_fl: HirFlush = hir_flush_list(cur, block_items)
-  let true_r: HirR = hs_add_node(block_fl.hs, HirNode.HirBoolLit(to_i64(-1), to_i64(10)))
-  return hs_add_node(true_r.hs, HirNode.HirIf(true_r.hir, block_fl.list_pos, to_i64(-1)))
+  let true_r: HirR = hs_add_node(block_fl.hs, HirNode::HirBoolLit(tok = to_i64(-1), typ = to_i64(10)))
+  return hs_add_node(true_r.hs, HirNode::HirIf(cond = true_r.hir, then_lp = block_fl.list_pos, else_lp = to_i64(-1)))
 
 fn lower_body_stmts(hs: HS, list_pos: i64): HirFlush
   if list_pos < 0:
@@ -650,7 +675,7 @@ fn lower_type_params(hs: HS, ast_tparams_lp: i64): HirFlush
     if tp_node_idx >= 0:
       let tp_node: Node = hs.nodes.get(tp_node_idx)
       match tp_node:
-        Node.GenericParamT(tidx):
+        Node::GenericParamT(tidx):
           tok_indices = tok_indices.push(tidx)
     i = i + 1
   if tok_indices.length() == 0:
@@ -684,7 +709,7 @@ fn lower_fn_decl_with_owner(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i
     pi = pi + 2
   let param_fl: HirFlush = hir_flush_pairs(tp_fl.hs, param_items, param_count)
   let body_fl: HirFlush = lower_body_stmts(param_fl.hs, body_lp)
-  return hs_add_node(body_fl.hs, HirNode.HirFunction(fn_sym, tp_fl.list_pos, param_fl.list_pos, ret_ti, body_fl.list_pos, to_i64(0), class_owner_tidx))
+  return hs_add_node(body_fl.hs, HirNode::HirFunction(sym = fn_sym, tparams = tp_fl.list_pos, params = param_fl.list_pos, ret = ret_ti, body = body_fl.list_pos, is_extern = to_i64(0), class_owner = class_owner_tidx))
 
 fn lower_fn_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, params_lp: i64, ret_type_node: i64, body_lp: i64): HirR
   return lower_fn_decl_with_owner(hs, decl_idx, name_tidx, tparams_lp, params_lp, ret_type_node, body_lp, to_i64(-1))
@@ -721,12 +746,12 @@ fn lower_expr_fn_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, pa
   // Lower body expression
   let body_r: HirR = lower_expr(param_fl.hs, body_expr)
   // Wrap in HirReturn
-  let ret_r: HirR = hs_add_node(body_r.hs, HirNode.HirReturn(body_r.hir))
+  let ret_r: HirR = hs_add_node(body_r.hs, HirNode::HirReturn(value = body_r.hir))
   // Flush single-statement body
   let body_stmts: Vector<i64> = Vector<i64>::new()
   body_stmts = body_stmts.push(ret_r.hir)
   let body_fl: HirFlush = hir_flush_list(ret_r.hs, body_stmts)
-  return hs_add_node(body_fl.hs, HirNode.HirFunction(fn_sym, tp_fl.list_pos, param_fl.list_pos, ret_ti, body_fl.list_pos, to_i64(0), to_i64(-1)))
+  return hs_add_node(body_fl.hs, HirNode::HirFunction(sym = fn_sym, tparams = tp_fl.list_pos, params = param_fl.list_pos, ret = ret_ti, body = body_fl.list_pos, is_extern = to_i64(0), class_owner = to_i64(-1)))
 
 fn lower_extern_fn_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, params_lp: i64, ret_type_node: i64): HirR
   let tp_fl: HirFlush = lower_type_params(hs, tparams_lp)
@@ -757,7 +782,7 @@ fn lower_extern_fn_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, 
   let param_fl: HirFlush = hir_flush_pairs(tp_fl.hs, param_items, param_count)
   // No body — use empty list
   let empty_body_fl: HirFlush = hir_flush_list(param_fl.hs, Vector<i64>::new())
-  return hs_add_node(empty_body_fl.hs, HirNode.HirFunction(fn_sym, tp_fl.list_pos, param_fl.list_pos, ret_ti, empty_body_fl.list_pos, to_i64(1), to_i64(-1)))
+  return hs_add_node(empty_body_fl.hs, HirNode::HirFunction(sym = fn_sym, tparams = tp_fl.list_pos, params = param_fl.list_pos, ret = ret_ti, body = empty_body_fl.list_pos, is_extern = to_i64(1), class_owner = to_i64(-1)))
 
 fn lower_class_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, fields_lp: i64, methods_lp: i64): HirR
   let tp_fl: HirFlush = lower_type_params(hs, tparams_lp)
@@ -778,7 +803,7 @@ fn lower_class_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, fiel
     field_count = field_count + 1
     fi = fi + 2
   let fl: HirFlush = hir_flush_pairs(tp_fl.hs, field_items, field_count)
-  return hs_add_node(fl.hs, HirNode.HirStruct(name_tidx, tp_fl.list_pos, fl.list_pos))
+  return hs_add_node(fl.hs, HirNode::HirStruct(name = name_tidx, tparams = tp_fl.list_pos, fields = fl.list_pos))
 
 // Resolve an AST type node to a type index. Handles NamedT, GenericT, PointerT.
 fn resolve_type_to_idx(hs: HS, type_node_idx: i64): i64
@@ -790,7 +815,7 @@ fn resolve_type_to_idx(hs: HS, type_node_idx: i64): i64
     return ti
   let tn: Node = hs.nodes.get(type_node_idx)
   match tn:
-    Node.NamedT(ttidx):
+    Node::NamedT(ttidx):
       let tsym: i64 = hir_lookup_use(hs, ttidx)
       if tsym >= 0:
         return hir_sym_type(hs, tsym)
@@ -820,7 +845,7 @@ fn resolve_type_to_idx(hs: HS, type_node_idx: i64): i64
         return 10
       if tname == "string":
         return 12
-    Node.PointerT(inner):
+    Node::PointerT(inner):
       // Resolve inner, return pointer type if available
       let inner_ti: i64 = resolve_type_to_idx(hs, inner)
       // Search for existing pointer type in types table
@@ -828,11 +853,11 @@ fn resolve_type_to_idx(hs: HS, type_node_idx: i64): i64
       while pti < hs.types.length():
         let pt: DaoType = hs.types.get(pti)
         match pt.kind:
-          TypeKind.TPointer:
+          TypeKind::TPointer:
             if pt.pointee == inner_ti:
               return pti
         pti = pti + 1
-    Node.GenericT(name_tidx, args_lp, arg_count):
+    Node::GenericT(name_tidx, args_lp, arg_count):
       // Try resolving the base name
       let tsym: i64 = hir_lookup_use(hs, name_tidx)
       if tsym >= 0:
@@ -849,14 +874,15 @@ fn lower_enum_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, varia
   while vi < pairs.length():
     let v_tidx: i64 = pairs.get(vi)
     let ast_payload_lp: i64 = pairs.get(vi + 1)
-    let payload_types: Vector<i64> = read_list(cur.idx_data, ast_payload_lp)
+    // The payload list is (field name token, type node) pairs; HIR keeps
+    // the types in declaration order.
+    let payload_fields: Vector<i64> = read_list(cur.idx_data, ast_payload_lp)
     let hir_payload: Vector<i64> = Vector<i64>::new()
-    let pi: i64 = 0
-    while pi < payload_types.length():
-      let type_node_idx: i64 = payload_types.get(pi)
-      let pti: i64 = resolve_type_to_idx(cur, type_node_idx)
+    let pi: i64 = 1
+    while pi < payload_fields.length():
+      let pti: i64 = resolve_type_to_idx(cur, payload_fields.get(pi))
       hir_payload = hir_payload.push(pti)
-      pi = pi + 1
+      pi = pi + 2
     // Flush payload types into HIR idx
     let payload_fl: HirFlush = hir_flush_list(cur, hir_payload)
     cur = payload_fl.hs
@@ -865,7 +891,7 @@ fn lower_enum_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, varia
     var_count = var_count + 1
     vi = vi + 2
   let fl: HirFlush = hir_flush_pairs(cur, var_items, var_count)
-  return hs_add_node(fl.hs, HirNode.HirEnum(name_tidx, tp_fl.list_pos, fl.list_pos))
+  return hs_add_node(fl.hs, HirNode::HirEnum(name = name_tidx, tparams = tp_fl.list_pos, variants = fl.list_pos))
 
 fn lower_type_alias_decl(hs: HS, decl_idx: i64, name_tidx: i64, target_type_node: i64): HirR
   // Find the type index for the alias
@@ -873,32 +899,32 @@ fn lower_type_alias_decl(hs: HS, decl_idx: i64, name_tidx: i64, target_type_node
   let ti: i64 = to_i64(-1)
   if sym_idx >= 0:
     ti = hir_sym_type(hs, sym_idx)
-  return hs_add_node(hs, HirNode.HirTypeAlias(name_tidx, ti))
+  return hs_add_node(hs, HirNode::HirTypeAlias(name = name_tidx, typ = ti))
 
 fn lower_decl(hs: HS, decl_idx: i64): HirR
   let node: Node = hs.nodes.get(decl_idx)
   match node:
-    Node.FnDeclD(name_tidx, tparams_lp, params_lp, ret_type_node, body_lp):
+    Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_type_node, body_lp):
       return lower_fn_decl(hs, decl_idx, name_tidx, tparams_lp, params_lp, ret_type_node, body_lp)
-    Node.ExprFnD(name_tidx, tparams_lp, params_lp, ret_type_node, body_expr):
+    Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_type_node, body_expr):
       return lower_expr_fn_decl(hs, decl_idx, name_tidx, tparams_lp, params_lp, ret_type_node, body_expr)
-    Node.ExternFnD(name_tidx, tparams_lp, params_lp, ret_type_node):
+    Node::ExternFnD(name_tidx, tparams_lp, params_lp, ret_type_node):
       return lower_extern_fn_decl(hs, decl_idx, name_tidx, tparams_lp, params_lp, ret_type_node)
-    Node.ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
+    Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
       return lower_class_decl(hs, decl_idx, name_tidx, tparams_lp, fields_lp, methods_lp)
-    Node.EnumDeclD(name_tidx, tparams_lp, variants_lp):
+    Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
       return lower_enum_decl(hs, decl_idx, name_tidx, tparams_lp, variants_lp)
-    Node.TypeAliasD(name_tidx, target_type):
+    Node::TypeAliasD(name_tidx, target_type):
       return lower_type_alias_decl(hs, decl_idx, name_tidx, target_type)
-    Node.ConceptDeclD(name_tidx, tparams_lp, methods_lp):
+    Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp):
       // Concepts produce no runtime code — emit a no-op
-      return hs_add_node(hs, HirNode.HirErrorStmt(to_i64(0)))
-    Node.ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
+      return hs_add_node(hs, HirNode::HirErrorStmt(tok = to_i64(0)))
+    Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
       // Extend methods are emitted in lower_file; return a no-op here
-      return hs_add_node(hs, HirNode.HirErrorStmt(to_i64(0)))
-    Node.ErrorD(t):
-      return hs_add_node(hs, HirNode.HirErrorStmt(to_i64(0)))
-  return hs_add_node(hs, HirNode.HirErrorStmt(to_i64(0)))
+      return hs_add_node(hs, HirNode::HirErrorStmt(tok = to_i64(0)))
+    Node::ErrorD(t):
+      return hs_add_node(hs, HirNode::HirErrorStmt(tok = to_i64(0)))
+  return hs_add_node(hs, HirNode::HirErrorStmt(tok = to_i64(0)))
 
 // =========================================================================
 // Section 57: Symbol lookup helpers for HIR
@@ -943,7 +969,7 @@ fn hir_find_field_sym(hs: HS, decl_idx: i64, field_name: string): i64
 fn lower_file(hs: HS, file_node_idx: i64): HirR
   let node: Node = hs.nodes.get(file_node_idx)
   match node:
-    Node.FileN(module_decl, imports_lp, decls_lp):
+    Node::FileN(module_decl, imports_lp, decls_lp):
       let decls: Vector<i64> = read_list(hs.idx_data, decls_lp)
       let cur: HS = hs
       let hir_decls: Vector<i64> = Vector<i64>::new()
@@ -956,7 +982,7 @@ fn lower_file(hs: HS, file_node_idx: i64): HirR
         // class_owner set to the class name token for mangled identity.
         let decl_node: Node = hs.nodes.get(decls.get(i))
         match decl_node:
-          Node.ClassDeclD(cn_tidx, cn_tp, cn_fl, cn_ml):
+          Node::ClassDeclD(cn_tidx, cn_tp, cn_fl, cn_ml):
             if cn_ml >= 0:
               let methods: Vector<i64> = read_list(cur.idx_data, cn_ml)
               let mi: i64 = 0
@@ -964,19 +990,19 @@ fn lower_file(hs: HS, file_node_idx: i64): HirR
                 let meth_idx: i64 = methods.get(mi)
                 let meth_node: Node = cur.nodes.get(meth_idx)
                 match meth_node:
-                  Node.FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
+                  Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
                     let mr: HirR = lower_fn_decl_with_owner(cur, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp, cn_tidx)
                     cur = mr.hs
                     hir_decls = hir_decls.push(mr.hir)
                 mi = mi + 1
-          Node.ExtendDeclD(ext_target, ext_cname, ext_ml):
+          Node::ExtendDeclD(ext_target, ext_cname, ext_ml):
             if ext_ml >= 0:
               // Get target type name token for owner
               let ext_owner_tidx: i64 = to_i64(-1)
               if ext_target >= 0:
                 let tnode: Node = cur.nodes.get(ext_target)
                 match tnode:
-                  Node.NamedT(t_tidx):
+                  Node::NamedT(t_tidx):
                     ext_owner_tidx = t_tidx
               let ext_methods: Vector<i64> = read_list(cur.idx_data, ext_ml)
               let emi: i64 = 0
@@ -984,15 +1010,15 @@ fn lower_file(hs: HS, file_node_idx: i64): HirR
                 let emeth_idx: i64 = ext_methods.get(emi)
                 let emeth_node: Node = cur.nodes.get(emeth_idx)
                 match emeth_node:
-                  Node.FnDeclD(em_name_tidx, em_tparams_lp, em_params_lp, em_ret_type, em_body_lp):
+                  Node::FnDeclD(em_name_tidx, em_tparams_lp, em_params_lp, em_ret_type, em_body_lp):
                     let emr: HirR = lower_fn_decl_with_owner(cur, emeth_idx, em_name_tidx, em_tparams_lp, em_params_lp, em_ret_type, em_body_lp, ext_owner_tidx)
                     cur = emr.hs
                     hir_decls = hir_decls.push(emr.hir)
                 emi = emi + 1
         i = i + 1
       let fl: HirFlush = hir_flush_list(cur, hir_decls)
-      return hs_add_node(fl.hs, HirNode.HirFile(fl.list_pos))
-  return hs_add_node(hs, HirNode.HirErrorStmt(to_i64(0)))
+      return hs_add_node(fl.hs, HirNode::HirFile(decls_lp = fl.list_pos))
+  return hs_add_node(hs, HirNode::HirErrorStmt(tok = to_i64(0)))
 
 // =========================================================================
 // Section 58a: Program-level HIR lowering (Task 27 D6/D7)
@@ -1039,23 +1065,23 @@ fn program_run_hir(p: Program): Program
     let file_node: HirNode = hir_nodes.get(file_r.hir)
     let module_decls_lp: i64 = to_i64(-1)
     match file_node:
-      HirNode.HirFile(dlp):
+      HirNode::HirFile(dlp):
         module_decls_lp = dlp
     // Extract module name token from the ModuleDeclN node.
     let mod_name_tok: i64 = to_i64(-1)
     let root_node: Node = po.nodes.get(po.root)
     match root_node:
-      Node.FileN(mod_decl, imp_lp, dec_lp):
+      Node::FileN(mod_decl, imp_lp, dec_lp):
         if mod_decl >= 0:
           let md_node: Node = po.nodes.get(mod_decl)
           match md_node:
-            Node.ModuleDeclN(path_lp, seg_count):
+            Node::ModuleDeclN(path_lp, seg_count):
               if seg_count > 0:
                 // First segment token of the module path.
                 mod_name_tok = po.idx.get(path_lp - seg_count)
     // Emit HirModule wrapping the file's decls.
     let mod_idx: i64 = hir_nodes.length()
-    hir_nodes = hir_nodes.push(HirNode.HirModule(mod_name_tok, module_decls_lp, mid))
+    hir_nodes = hir_nodes.push(HirNode::HirModule(name_tok = mod_name_tok, decl_list_lp = module_decls_lp, module_id = mid))
     module_indices = module_indices.push(mod_idx)
     // Merge diagnostics.
     let di: i64 = 0
@@ -1070,7 +1096,7 @@ fn program_run_hir(p: Program): Program
   hir_nodes = mod_fl.hs.hir_nodes
   hir_idx = mod_fl.hs.hir_idx
   let prog_idx: i64 = hir_nodes.length()
-  hir_nodes = hir_nodes.push(HirNode.HirProgram(mod_fl.list_pos))
+  hir_nodes = hir_nodes.push(HirNode::HirProgram(module_list_lp = mod_fl.list_pos))
 
   let hd: HirData = HirData(true, prog_idx, hir_nodes.length(), p.graph.topo_order.length())
   return Program(p.graph, p.resolve, p.typecheck, hd, all_diags)
@@ -1118,63 +1144,63 @@ fn lower_to_hir(src: string): HirResult
 
 fn hir_node_kind(node: HirNode): string
   match node:
-    HirNode.HirProgram(a):
+    HirNode::HirProgram(a):
       return "HirProgram"
-    HirNode.HirModule(a, b, c):
+    HirNode::HirModule(a, b, c):
       return "HirModule"
-    HirNode.HirFile(a):
+    HirNode::HirFile(a):
       return "HirFile"
-    HirNode.HirFunction(a, b, c, d, e, f, g):
+    HirNode::HirFunction(a, b, c, d, e, f, g):
       return "HirFunction"
-    HirNode.HirStruct(a, b, c):
+    HirNode::HirStruct(a, b, c):
       return "HirStruct"
-    HirNode.HirEnum(a, b, c):
+    HirNode::HirEnum(a, b, c):
       return "HirEnum"
-    HirNode.HirTypeAlias(a, b):
+    HirNode::HirTypeAlias(a, b):
       return "HirTypeAlias"
-    HirNode.HirLet(a, b, c):
+    HirNode::HirLet(a, b, c):
       return "HirLet"
-    HirNode.HirAssign(a, b):
+    HirNode::HirAssign(a, b):
       return "HirAssign"
-    HirNode.HirIf(a, b, c):
+    HirNode::HirIf(a, b, c):
       return "HirIf"
-    HirNode.HirWhile(a, b):
+    HirNode::HirWhile(a, b):
       return "HirWhile"
-    HirNode.HirResource(a, b, c):
+    HirNode::HirResource(a, b, c):
       return "HirResource"
-    HirNode.HirFor(a, b, c):
+    HirNode::HirFor(a, b, c):
       return "HirFor"
-    HirNode.HirReturn(a):
+    HirNode::HirReturn(a):
       return "HirReturn"
-    HirNode.HirBreak(a):
+    HirNode::HirBreak(a):
       return "HirBreak"
-    HirNode.HirExprStmt(a):
+    HirNode::HirExprStmt(a):
       return "HirExprStmt"
-    HirNode.HirErrorStmt(a):
+    HirNode::HirErrorStmt(a):
       return "HirErrorStmt"
-    HirNode.HirIntLit(a, b):
+    HirNode::HirIntLit(a, b):
       return "HirIntLit"
-    HirNode.HirFloatLit(a, b):
+    HirNode::HirFloatLit(a, b):
       return "HirFloatLit"
-    HirNode.HirStringLit(a, b):
+    HirNode::HirStringLit(a, b):
       return "HirStringLit"
-    HirNode.HirBoolLit(a, b):
+    HirNode::HirBoolLit(a, b):
       return "HirBoolLit"
-    HirNode.HirIdent(a, b, c):
+    HirNode::HirIdent(a, b, c):
       return "HirIdent"
-    HirNode.HirBinary(a, b, c, d):
+    HirNode::HirBinary(a, b, c, d):
       return "HirBinary"
-    HirNode.HirUnary(a, b, c):
+    HirNode::HirUnary(a, b, c):
       return "HirUnary"
-    HirNode.HirCall(a, b, c, d):
+    HirNode::HirCall(a, b, c, d):
       return "HirCall"
-    HirNode.HirFieldAccess(a, b, c):
+    HirNode::HirFieldAccess(a, b, c):
       return "HirFieldAccess"
-    HirNode.HirPipe(a, b, c):
+    HirNode::HirPipe(a, b, c):
       return "HirPipe"
-    HirNode.HirQualName(a, b, c):
+    HirNode::HirQualName(a, b, c):
       return "HirQualName"
-    HirNode.HirErrorExpr(a):
+    HirNode::HirErrorExpr(a):
       return "HirErrorExpr"
   return "Unknown"
 
@@ -1202,7 +1228,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
   let kind: string = hir_node_kind(node)
   let line: string = pad + kind
   match node:
-    HirNode.HirProgram(module_list_lp):
+    HirNode::HirProgram(module_list_lp):
       line = line + "\n"
       let mods: Vector<i64> = read_list(hr.hir_idx, module_list_lp)
       let mi: i64 = 0
@@ -1210,7 +1236,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
         line = line + hir_dump_node(hr, mods.get(mi), indent + 1)
         mi = mi + 1
       return line
-    HirNode.HirModule(name_tok, decl_list_lp, mod_id):
+    HirNode::HirModule(name_tok, decl_list_lp, mod_id):
       line = line + " (module_id=" + i64_to_string(mod_id) + ")\n"
       let decls: Vector<i64> = read_list(hr.hir_idx, decl_list_lp)
       let di: i64 = 0
@@ -1218,7 +1244,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
         line = line + hir_dump_node(hr, decls.get(di), indent + 1)
         di = di + 1
       return line
-    HirNode.HirFile(decls_lp):
+    HirNode::HirFile(decls_lp):
       line = line + "\n"
       let decls: Vector<i64> = read_list(hr.hir_idx, decls_lp)
       let di: i64 = 0
@@ -1226,7 +1252,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
         line = line + hir_dump_node(hr, decls.get(di), indent + 1)
         di = di + 1
       return line
-    HirNode.HirFunction(fn_sym, tparams_lp, params_lp, ret_ti, body_lp, is_extern, class_owner):
+    HirNode::HirFunction(fn_sym, tparams_lp, params_lp, ret_ti, body_lp, is_extern, class_owner):
       if class_owner >= 0:
         let co_tok: Token = hr.toks.get(class_owner)
         line = line + " [" + substring(hr.src, co_tok.offset, co_tok.len) + ".]"
@@ -1253,22 +1279,22 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
         line = line + hir_dump_node(hr, body.get(bi), indent + 1)
         bi = bi + 1
       return line
-    HirNode.HirStruct(name_tidx, tparams_lp, fields_lp):
+    HirNode::HirStruct(name_tidx, tparams_lp, fields_lp):
       if tparams_lp >= 0:
         let tps: Vector<i64> = read_list(hr.hir_idx, tparams_lp)
         line = line + "<" + i64_to_string(tps.length()) + " params>"
       line = line + "\n"
       return line
-    HirNode.HirEnum(name_tidx, tparams_lp, variants_lp):
+    HirNode::HirEnum(name_tidx, tparams_lp, variants_lp):
       if tparams_lp >= 0:
         let tps: Vector<i64> = read_list(hr.hir_idx, tparams_lp)
         line = line + "<" + i64_to_string(tps.length()) + " params>"
       line = line + "\n"
       return line
-    HirNode.HirTypeAlias(name_tidx, ti2):
+    HirNode::HirTypeAlias(name_tidx, ti2):
       line = line + " -> " + hir_type_label(hr, ti2) + "\n"
       return line
-    HirNode.HirLet(name_tidx, ti2, init_hir):
+    HirNode::HirLet(name_tidx, ti2, init_hir):
       line = line + " : " + hir_type_label(hr, ti2)
       if init_hir >= 0:
         line = line + " =\n"
@@ -1276,12 +1302,12 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
       else:
         line = line + "\n"
       return line
-    HirNode.HirAssign(target, value):
+    HirNode::HirAssign(target, value):
       line = line + "\n"
       line = line + hir_dump_node(hr, target, indent + 1)
       line = line + hir_dump_node(hr, value, indent + 1)
       return line
-    HirNode.HirIf(cond, then_lp, else_lp):
+    HirNode::HirIf(cond, then_lp, else_lp):
       line = line + "\n"
       line = line + hir_dump_node(hr, cond, indent + 1)
       let then_stmts: Vector<i64> = read_list(hr.hir_idx, then_lp)
@@ -1296,7 +1322,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
           line = line + hir_dump_node(hr, else_stmts.get(ei), indent + 1)
           ei = ei + 1
       return line
-    HirNode.HirWhile(cond, body_lp):
+    HirNode::HirWhile(cond, body_lp):
       line = line + "\n"
       line = line + hir_dump_node(hr, cond, indent + 1)
       let body: Vector<i64> = read_list(hr.hir_idx, body_lp)
@@ -1305,7 +1331,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
         line = line + hir_dump_node(hr, body.get(bi), indent + 1)
         bi = bi + 1
       return line
-    HirNode.HirResource(kind_tidx, name_tidx, body_lp):
+    HirNode::HirResource(kind_tidx, name_tidx, body_lp):
       let kind_tok: Token = hr.toks.get(kind_tidx)
       let name_tok: Token = hr.toks.get(name_tidx)
       line = line + " " + substring(hr.src, kind_tok.offset, kind_tok.len) + " " + substring(hr.src, name_tok.offset, name_tok.len) + "\n"
@@ -1315,7 +1341,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
         line = line + hir_dump_node(hr, rbody.get(ri), indent + 1)
         ri = ri + 1
       return line
-    HirNode.HirFor(var_tidx, iter, body_lp):
+    HirNode::HirFor(var_tidx, iter, body_lp):
       line = line + "\n"
       line = line + hir_dump_node(hr, iter, indent + 1)
       let body: Vector<i64> = read_list(hr.hir_idx, body_lp)
@@ -1324,48 +1350,48 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
         line = line + hir_dump_node(hr, body.get(bi), indent + 1)
         bi = bi + 1
       return line
-    HirNode.HirReturn(val):
+    HirNode::HirReturn(val):
       if val >= 0:
         line = line + "\n"
         line = line + hir_dump_node(hr, val, indent + 1)
         return line
       line = line + "\n"
       return line
-    HirNode.HirBreak(d):
+    HirNode::HirBreak(d):
       line = line + "\n"
       return line
-    HirNode.HirExprStmt(expr):
+    HirNode::HirExprStmt(expr):
       line = line + "\n"
       line = line + hir_dump_node(hr, expr, indent + 1)
       return line
-    HirNode.HirErrorStmt(d):
+    HirNode::HirErrorStmt(d):
       line = line + "\n"
       return line
-    HirNode.HirIntLit(tidx, ti2):
+    HirNode::HirIntLit(tidx, ti2):
       line = line + " : " + hir_type_label(hr, ti2) + "\n"
       return line
-    HirNode.HirFloatLit(tidx, ti2):
+    HirNode::HirFloatLit(tidx, ti2):
       line = line + " : " + hir_type_label(hr, ti2) + "\n"
       return line
-    HirNode.HirStringLit(tidx, ti2):
+    HirNode::HirStringLit(tidx, ti2):
       line = line + " : " + hir_type_label(hr, ti2) + "\n"
       return line
-    HirNode.HirBoolLit(tidx, ti2):
+    HirNode::HirBoolLit(tidx, ti2):
       line = line + " : " + hir_type_label(hr, ti2) + "\n"
       return line
-    HirNode.HirIdent(sym_idx, ti2, tidx):
+    HirNode::HirIdent(sym_idx, ti2, tidx):
       line = line + " : " + hir_type_label(hr, ti2) + "\n"
       return line
-    HirNode.HirBinary(op_tidx, left, right, ti2):
+    HirNode::HirBinary(op_tidx, left, right, ti2):
       line = line + " : " + hir_type_label(hr, ti2) + "\n"
       line = line + hir_dump_node(hr, left, indent + 1)
       line = line + hir_dump_node(hr, right, indent + 1)
       return line
-    HirNode.HirUnary(op_tidx, operand, ti2):
+    HirNode::HirUnary(op_tidx, operand, ti2):
       line = line + " : " + hir_type_label(hr, ti2) + "\n"
       line = line + hir_dump_node(hr, operand, indent + 1)
       return line
-    HirNode.HirCall(callee, args_lp, arg_count, ti2):
+    HirNode::HirCall(callee, args_lp, arg_count, ti2):
       line = line + " : " + hir_type_label(hr, ti2) + "\n"
       line = line + hir_dump_node(hr, callee, indent + 1)
       let args: Vector<i64> = read_list(hr.hir_idx, args_lp)
@@ -1374,19 +1400,19 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
         line = line + hir_dump_node(hr, args.get(ai), indent + 1)
         ai = ai + 1
       return line
-    HirNode.HirFieldAccess(obj, ftidx, ti2):
+    HirNode::HirFieldAccess(obj, ftidx, ti2):
       line = line + " : " + hir_type_label(hr, ti2) + "\n"
       line = line + hir_dump_node(hr, obj, indent + 1)
       return line
-    HirNode.HirPipe(left, right, ti2):
+    HirNode::HirPipe(left, right, ti2):
       line = line + " : " + hir_type_label(hr, ti2) + "\n"
       line = line + hir_dump_node(hr, left, indent + 1)
       line = line + hir_dump_node(hr, right, indent + 1)
       return line
-    HirNode.HirQualName(first_tok, seg_count, ti2):
+    HirNode::HirQualName(first_tok, seg_count, ti2):
       line = line + " : " + hir_type_label(hr, ti2) + "\n"
       return line
-    HirNode.HirErrorExpr(d):
+    HirNode::HirErrorExpr(d):
       line = line + "\n"
       return line
   return pad + "???\n"
@@ -1417,7 +1443,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 23
+  let total: i32 = 25
 
   // Test 1: simple_fn
   let src1: string = "fn add(a: i32, b: i32): i32\n  return a + b\n"
@@ -1498,7 +1524,7 @@ fn main(): i32
       if hir_node_kind(n5) == "HirBinary":
         found_bin = true
         match n5:
-          HirNode.HirBinary(op, l, r6, ti):
+          HirNode::HirBinary(op, l, r6, ti):
             if ti >= 0:
               bin_has_type = true
       i5 = i5 + 1
@@ -1561,7 +1587,7 @@ fn main(): i32
       if hir_node_kind(n8) == "HirCall":
         found_call8 = true
         match n8:
-          HirNode.HirCall(callee, args_lp, ac, ti):
+          HirNode::HirCall(callee, args_lp, ac, ti):
             if ti >= 0:
               call_has_type8 = true
       i8 = i8 + 1
@@ -1647,7 +1673,7 @@ fn main(): i32
     while i12 < hir_count_nodes(r12):
       let n12: HirNode = r12.hir_nodes.get(i12)
       match n12:
-        HirNode.HirFunction(nt, tp, plp, rti, blp, is_ext, co):
+        HirNode::HirFunction(nt, tp, plp, rti, blp, is_ext, co):
           if is_ext > 0:
             found_extern = true
       i12 = i12 + 1
@@ -1700,7 +1726,7 @@ fn main(): i32
     while i14g < hir_count_nodes(r14g):
       let n14g: HirNode = r14g.hir_nodes.get(i14g)
       match n14g:
-        HirNode.HirFunction(nm, tp_lp, pl, rt, bl, ie, co2):
+        HirNode::HirFunction(nm, tp_lp, pl, rt, bl, ie, co2):
           found_fn14 = true
           if tp_lp >= 0:
             let tps: Vector<i64> = read_list(r14g.hir_idx, tp_lp)
@@ -1728,7 +1754,7 @@ fn main(): i32
     while i15e < hir_count_nodes(r15e):
       let n15e: HirNode = r15e.hir_nodes.get(i15e)
       match n15e:
-        HirNode.HirFunction(nm, tp_lp, pl, rt, bl, ie, co):
+        HirNode::HirFunction(nm, tp_lp, pl, rt, bl, ie, co):
           fn_count_15e = fn_count_15e + 1
       i15e = i15e + 1
     if fn_count_15e >= 1:
@@ -1849,15 +1875,15 @@ fn main(): i32
   while i20 < hir_count_nodes(r20):
     let n20: HirNode = r20.hir_nodes.get(i20)
     match n20:
-      HirNode.HirCall(callee20, a20, n20c, t20):
+      HirNode::HirCall(callee20, a20, n20c, t20):
         let callee_node20: HirNode = r20.hir_nodes.get(callee20)
         match callee_node20:
-          HirNode.HirIdent(sym20, ti20, tok20):
+          HirNode::HirIdent(sym20, ti20, tok20):
             // Desugared method call: callee is a symbol ref.
             // Check arg_count > 0 (self was prepended).
             if n20c > 0:
               found_ident_callee = true
-          HirNode.HirFieldAccess(o20, f20, ft20):
+          HirNode::HirFieldAccess(o20, f20, ft20):
             // Undesugared dot-call — this should NOT happen for
             // method calls after desugaring.  (Field accesses
             // inside the method body like self.x are fine — they
@@ -1951,6 +1977,50 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL resource_block_lowers: expected a HirResource node and no diagnostics")
+
+  // -----------------------------------------------------------------
+  // Test 24: qualified_variant_lowers — a `Enum::Variant` constructor
+  // and a `Enum::Variant` match pattern lower with no diagnostics; the
+  // constructor's callee is a HirQualName.
+  // -----------------------------------------------------------------
+  let src24: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn area(s: Shape): i64\n  match s:\n    Shape::Circle(r):\n      return r\n    Shape::Dot:\n      return 0\n  return 0\n\nfn main(): i32\n  let c: Shape = Shape::Circle(r = 3)\n  return 0\n"
+  let r24: HirResult = lower_to_hir(src24)
+  let has_qual: bool = false
+  let qi: i64 = 0
+  while qi < hir_count_nodes(r24):
+    if hir_get_kind_at(r24, qi) == "HirQualName":
+      has_qual = true
+    qi = qi + 1
+  if r24.root >= 0 and has_qual and hir_count_diags(r24) == 0:
+    print("PASS qualified_variant_lowers")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL qualified_variant_lowers: expected HirQualName nodes and no diagnostics, got " + i64_to_string(hir_count_diags(r24)))
+
+  // -----------------------------------------------------------------
+  // Test 25: named_construction_in_field_order — arguments given out of
+  // declaration order reach HirCall in declaration order.
+  // -----------------------------------------------------------------
+  let src25: string = "enum class Pair:\n  Both(a: i64, b: i64)\n\nfn main(): i32\n  let p: Pair = Pair::Both(b = 2, a = 1)\n  return 0\n"
+  let r25: HirResult = lower_to_hir(src25)
+  let order_ok: bool = false
+  let oi: i64 = 0
+  while oi < hir_count_nodes(r25):
+    match r25.hir_nodes.get(oi):
+      HirNode::HirCall(callee, args_lp, arg_count, ti):
+        if arg_count == 2:
+          let first_arg: i64 = r25.hir_idx.get(args_lp - 2)
+          match r25.hir_nodes.get(first_arg):
+            HirNode::HirIntLit(tok, lit_ti):
+              let lit_tok: Token = r25.toks.get(tok)
+              if substring(r25.src, lit_tok.offset, lit_tok.len) == "1":
+                order_ok = true
+    oi = oi + 1
+  if r25.root >= 0 and order_ok and hir_count_diags(r25) == 0:
+    print("PASS named_construction_in_field_order")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL named_construction_in_field_order: expected the first lowered argument to be the literal 1, no diagnostics (" + i64_to_string(hir_count_diags(r25)) + ")")
 
   // -----------------------------------------------------------------
   // Summary
