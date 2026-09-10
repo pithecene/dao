@@ -1731,18 +1731,49 @@ fn check_break_stmt(ts: TS, tidx: i64): TS
     return ts_add_diag(ts, sp, "break outside of loop")
   return ts
 
-// A match pattern: `Enum::Variant` or `Enum::Variant(bindings)`, or a
-// constant.  A pattern with bindings is checked by its callee alone --
-// the bindings are names it introduces, no arguments -- and takes the
-// callee's type.
+// A match pattern: `Enum::Variant`, `Enum::Variant(bindings)`, or a
+// constant.  A pattern with bindings is checked by its callee -- the
+// bindings are names it introduces, no arguments -- and against the
+// variant's shape in the registry: a variant without parameters is
+// written bare, and a variant with parameters binds one name per
+// parameter.  The pattern takes the callee's type.
 fn check_pattern(ts: TS, pat_node: i64): TS
   match ts.tc.nodes.get(pat_node):
     Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp):
       let r: TS = check_expr(ts, callee)
       let callee_ti: i64 = get_expr_type(r, callee)
-      if callee_ti >= 0:
-        return ts_set_expr_type(r, pat_node, callee_ti)
-      return r
+      if callee_ti < 0:
+        return r
+      let variant_name: string = ""
+      match r.tc.nodes.get(callee):
+        Node::QualNameE(seg_lp, seg_count):
+          let segs: Vector<i64> = read_list(r.tc.idx_data, seg_lp)
+          if segs.length() >= 2:
+            variant_name = ts_tok_name(r, segs.get(segs.length() - 1))
+      if variant_name != "":
+        let registered: Option<i64> = r.variant_set.get(i64_to_string(callee_ti) + ":" + variant_name)
+        match registered:
+          Option::Some(param_count):
+            let sp: Span = ts_node_span(r, callee)
+            if param_count == to_i64(0):
+              return ts_add_diag(r, sp, "variant '" + variant_name + "' has no parameters; the pattern is written without parentheses")
+            let bindings: Vector<i64> = read_list(r.tc.idx_data, args_lp)
+            if bindings.length() != param_count:
+              return ts_add_diag(r, sp, "variant '" + variant_name + "' takes " + i64_to_string(param_count) + " parameter(s); the pattern binds " + i64_to_string(bindings.length()))
+            let bi: i64 = 0
+            while bi < bindings.length():
+              let bound: Node = r.tc.nodes.get(bindings.get(bi))
+              let is_name: bool = false
+              match bound:
+                Node::IdentE(t2):
+                  is_name = true
+              if is_name == false:
+                let bsp: Span = ts_node_span(r, bindings.get(bi))
+                return ts_add_diag(r, bsp, "a pattern binds a name per parameter of '" + variant_name + "': " + variant_name + "(a, b)")
+              bi = bi + 1
+          Option::None:
+            return r
+      return ts_set_expr_type(r, pat_node, callee_ti)
   return check_expr(ts, pat_node)
 
 fn check_match_stmt(ts: TS, scrut_node: i64, arms_lp: i64): TS
@@ -2150,7 +2181,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 48
+  let total: i32 = 49
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -3031,6 +3062,28 @@ fn main(): i32
     while di47 < r47.diags.length():
       print("  diag: " + r47.diags.get(di47).message)
       di47 = di47 + 1
+
+  // Test 49: pattern shapes: a parameterless variant with parentheses, a
+  // literal where a binding goes, and the wrong number of bindings are
+  // each diagnosed.
+  let src49: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn pick(s: Shape): i32\n  match s:\n    Shape::Dot():\n      return 1\n    Shape::Circle(1):\n      return 2\n    Shape::Circle(a, b):\n      return 3\n  return 0\n"
+  let r49: TypeCheckResult = typecheck(src49)
+  let shape_diags: i64 = 0
+  let dk49: i64 = 0
+  while dk49 < r49.diags.length():
+    let m49: string = r49.diags.get(dk49).message
+    if index_of(m49, "written without parentheses") >= 0 or index_of(m49, "binds a name per parameter") >= 0 or index_of(m49, "the pattern binds") >= 0:
+      shape_diags = shape_diags + 1
+    dk49 = dk49 + 1
+  if shape_diags == 3:
+    print("PASS pattern_shapes_diagnosed")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL pattern_shapes_diagnosed: expected 3 shape diagnostics, got " + i64_to_string(shape_diags))
+    let dj49: i64 = 0
+    while dj49 < r49.diags.length():
+      print("  diag: " + r49.diags.get(dj49).message)
+      dj49 = dj49 + 1
 
   // Test 48: a named argument's value must have the field's type.
   let src48: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn main(): i32\n  let a: Shape = Shape::Circle(r = true)\n  return 0\n"
