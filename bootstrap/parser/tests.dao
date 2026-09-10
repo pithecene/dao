@@ -464,7 +464,7 @@ fn main(): i32
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------
-  // Call-site type arguments (Task 36)
+  // Call-site type arguments
   // -----------------------------------------------------------------
 
   // Test 41: Static call on a generic type: CallE, callee QualNameE of
