@@ -16,7 +16,10 @@ Today `Vector<i64>::new()` is read as the comparison `Vector < i64 > …`
 and stops at `::` with "expected expression".  After this task the
 bootstrap parser reads it as the host does — a call whose callee is the
 qualified name `Vector::new` and whose call-site type arguments are
-`[i64]` — and the audit's parse column is zero for every program.
+`[i64]` — and the audit's parse column is zero for every program whose
+sources hold no `resource` block.  The blocks Task 35 E3 placed in the
+pipeline drivers are the parse column's other construct and the next
+task's; this task's gate is the five programs without them.
 
 ## 2. Why this task exists now
 
@@ -179,4 +182,5 @@ source) passes.
 
 The bootstrap parser reads `Type<Args>::member(args)` and `f<Args>(args)`
 as the host does — a call carrying type arguments — so the closure
-audit's parse column reaches zero.
+audit's parse column reaches zero for every program without a
+`resource` block.
