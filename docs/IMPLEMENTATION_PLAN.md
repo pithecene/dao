@@ -772,11 +772,34 @@ methods slice.
 
 **Objective**: close the bootstrap compiler's gaps against
 `CONTRACT_MODULE_SYSTEM.md` §12: `b::T::m` qualified static methods
-(§6, once bootstrap methods exist), the prelude (§7), entry-module
-selection (§8), and program-level output determinism (§9).  The
-conformance table in `CONTRACT_MODULE_SYSTEM.md` §12 and its mirror in
-`bootstrap/README.md` are the status of record and move only with the
-bootstrap work that closes each row.
+(§6, once bootstrap methods exist), entry-module selection (§8), and
+program-level output determinism (§9).  The prelude (§7) is Task 38:
+the closure audit sequenced it first, and there is one prelude
+mechanism.  The conformance table in `CONTRACT_MODULE_SYSTEM.md` §12
+and its mirror in `bootstrap/README.md` are the status of record and
+move only with the bootstrap work that closes each row.
+
+### Task 38 — Bootstrap Prelude Resolution
+
+Status: **spec** — `docs/task_specs/TASK_38_BOOTSTRAP_PRELUDE_RESOLUTION.md`;
+the prelude row of `CONTRACT_MODULE_SYSTEM.md` §12, promoted from Task
+33 by the closure audit.
+
+**Objective**: after Tasks 36–37 every compiler program's first
+blocking diagnostic is `unknown name` for a prelude declaration
+(`char_at`, `Vector`, `Span`, `make_error`, `to_i64`): the bootstrap
+resolves its program without the prelude group the host gives every
+program.  Task 38 gives the bootstrap the contract's environment —
+builtins scope, a shared prelude scope filled from the real
+`stdlib/core` and `stdlib/io` modules, per-module scopes under it;
+shadowing, builtin protection, reserved names, identity of qualified
+and unqualified paths — and loads the prelude into the audit's probe.
+Measured at this head, 7 of the 21 prelude files are rejected by the
+bootstrap parser at constructs on its deferral list (`derived
+concept`, `mode` blocks, generic bounds, `yield`); the audit reports
+them per file rather than the task closing them, and the rerun audit
+names the next task.
+
 
 ### Task 14 — Numeric Type Expansion
 
