@@ -15,8 +15,7 @@ File
             Identifier key
       Arm
         Pattern
-          FieldExpr .Some
-            Identifier Option
+          QualifiedName Option::Some
         ExpressionStatement
           CallExpr
             Callee
@@ -36,8 +35,7 @@ File
                       Identifier v
       Arm
         Pattern
-          FieldExpr .None
-            Identifier Option
+          QualifiedName Option::None
         ExpressionStatement
           CallExpr
             Callee

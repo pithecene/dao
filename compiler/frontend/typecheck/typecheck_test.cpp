@@ -622,6 +622,35 @@ suite<"typecheck_modules"> typecheck_modules = [] {
     expect(clean(checked)) << all_messages(checked);
   };
 
+  "a variant is reached with ::, never with . on the enum's name"_test = [] {
+    // `Enum.Variant` is field access on a type name; the enum-class ADR
+    // grants `Enum::Variant` only, in expressions and in patterns.
+    auto expr = check_source("enum Color:\n  Red\n  Green\n"
+                             "fn f(): Color\n  return Color.Red\n");
+    expect(has_error_containing(expr, "variant access uses '::': Color::Red"))
+        << (expr.diagnostics.empty() ? "" : expr.diagnostics[0].message);
+
+    auto ctor = check_source("enum class Token:\n  Int(value: i64)\n  End\n"
+                             "fn f(): Token\n  return Token.Int(value = 1)\n");
+    expect(has_error_containing(ctor, "variant access uses '::': Token::Int"))
+        << (ctor.diagnostics.empty() ? "" : ctor.diagnostics[0].message);
+
+    auto pattern =
+        check_source("enum class Maybe:\n  Some(value: i64)\n  None\n"
+                     "fn f(m: Maybe): i64\n  match m:\n    Maybe.Some(value):\n"
+                     "      return value\n    Maybe.None:\n      return 0\n  return 0\n");
+    expect(has_error_containing(pattern, "variant access uses '::': Maybe::Some"))
+        << (pattern.diagnostics.empty() ? "" : pattern.diagnostics[0].message);
+
+    auto qualified =
+        check_source("enum class Maybe:\n  Some(value: i32)\n  None\n"
+                     "fn f(m: Maybe): i32\n  match m:\n    Maybe::Some(value):\n"
+                     "      return value\n    Maybe::None:\n      return 0\n  return 0\n"
+                     "fn g(): Maybe\n  return Maybe::Some(value = 1)\n");
+    expect(is_ok(qualified)) << (qualified.diagnostics.empty() ? ""
+                                                               : qualified.diagnostics[0].message);
+  };
+
   "qualified_enum_construction_and_match"_test = [] {
     auto checked = check_program({
         {"main.dao",

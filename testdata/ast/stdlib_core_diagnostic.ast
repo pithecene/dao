@@ -17,8 +17,7 @@ File
         Callee
           Identifier Diagnostic
         Args
-          FieldExpr .Error
-            Identifier Severity
+          QualifiedName Severity::Error
           Identifier span
           Identifier message
   FunctionDecl make_warning
@@ -30,8 +29,7 @@ File
         Callee
           Identifier Diagnostic
         Args
-          FieldExpr .Warning
-            Identifier Severity
+          QualifiedName Severity::Warning
           Identifier span
           Identifier message
   FunctionDecl make_note
@@ -43,7 +41,6 @@ File
         Callee
           Identifier Diagnostic
         Args
-          FieldExpr .Note
-            Identifier Severity
+          QualifiedName Severity::Note
           Identifier span
           Identifier message

@@ -13,26 +13,22 @@ File
         Identifier s
       Arm
         Pattern
-          FieldExpr .Spring
-            Identifier Season
+          QualifiedName Season::Spring
         ReturnStatement
           StringLiteral "Spring"
       Arm
         Pattern
-          FieldExpr .Summer
-            Identifier Season
+          QualifiedName Season::Summer
         ReturnStatement
           StringLiteral "Summer"
       Arm
         Pattern
-          FieldExpr .Autumn
-            Identifier Season
+          QualifiedName Season::Autumn
         ReturnStatement
           StringLiteral "Autumn"
       Arm
         Pattern
-          FieldExpr .Winter
-            Identifier Season
+          QualifiedName Season::Winter
         ReturnStatement
           StringLiteral "Winter"
     ReturnStatement
@@ -45,14 +41,12 @@ File
         Identifier s
       Arm
         Pattern
-          FieldExpr .Summer
-            Identifier Season
+          QualifiedName Season::Summer
         ReturnStatement
           BoolLiteral true
       Arm
         Pattern
-          FieldExpr .Spring
-            Identifier Season
+          QualifiedName Season::Spring
         ReturnStatement
           BoolLiteral true
     ReturnStatement
@@ -109,8 +103,7 @@ File
             Callee
               Identifier season_name
             Args
-              FieldExpr .Spring
-                Identifier Season
+              QualifiedName Season::Spring
     ExpressionStatement
       CallExpr
         Callee
@@ -120,16 +113,14 @@ File
             Callee
               Identifier season_name
             Args
-              FieldExpr .Winter
-                Identifier Season
+              QualifiedName Season::Winter
     IfStatement
       Condition
         CallExpr
           Callee
             Identifier is_warm
           Args
-            FieldExpr .Summer
-              Identifier Season
+            QualifiedName Season::Summer
       Then
         ExpressionStatement
           CallExpr
@@ -144,8 +135,7 @@ File
             Callee
               Identifier is_warm
             Args
-              FieldExpr .Winter
-                Identifier Season
+              QualifiedName Season::Winter
           BoolLiteral false
       Then
         ExpressionStatement

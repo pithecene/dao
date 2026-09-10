@@ -42,8 +42,8 @@ position — the host's `parse_resource_block`: keyword, two identifiers,
 ## 4. AST, HIR
 
 ```
-Node.ResourceS(kind: i64, name: i64, body_lp: i64)      // token indexes and the suite
-HirNode.HirResource(kind: i64, name: i64, body_lp: i64)
+Node::ResourceS(kind: i64, name: i64, body_lp: i64)      // token indexes and the suite
+HirNode::HirResource(kind: i64, name: i64, body_lp: i64)
 ```
 
 The block keeps its identity through HIR, as it does in the host, so a
@@ -76,7 +76,7 @@ later slice can lower the domain without re-deriving it.
 
 One PR on Task 36's implementation:
 
-1. `Node.ResourceS`, `parse_resource_stmt`, `node_kind_name`.
+1. `Node::ResourceS`, `parse_resource_stmt`, `node_kind_name`.
 2. Resolver, type checker, HIR, MIR arms.
 3. Tests (§7); `bootstrap/README.md`, every stage's inventory: the
    parser's Tier B-Bootstrap coverage list gains `resource` blocks,

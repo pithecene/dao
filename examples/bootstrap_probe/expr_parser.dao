@@ -65,31 +65,31 @@ fn lex(source: string): Vector<Token>
           end = end + 1
         else:
           break
-      tokens = tokens.push(make_token(TK.Int, pos, end - pos))
+      tokens = tokens.push(make_token(TK::Int, pos, end - pos))
       pos = end
     else if ch == 43:
-      tokens = tokens.push(make_token(TK.Plus, pos, to_i64(1)))
+      tokens = tokens.push(make_token(TK::Plus, pos, to_i64(1)))
       pos = pos + 1
     else if ch == 45:
-      tokens = tokens.push(make_token(TK.Minus, pos, to_i64(1)))
+      tokens = tokens.push(make_token(TK::Minus, pos, to_i64(1)))
       pos = pos + 1
     else if ch == 42:
-      tokens = tokens.push(make_token(TK.Star, pos, to_i64(1)))
+      tokens = tokens.push(make_token(TK::Star, pos, to_i64(1)))
       pos = pos + 1
     else if ch == 47:
-      tokens = tokens.push(make_token(TK.Slash, pos, to_i64(1)))
+      tokens = tokens.push(make_token(TK::Slash, pos, to_i64(1)))
       pos = pos + 1
     else if ch == 40:
-      tokens = tokens.push(make_token(TK.LParen, pos, to_i64(1)))
+      tokens = tokens.push(make_token(TK::LParen, pos, to_i64(1)))
       pos = pos + 1
     else if ch == 41:
-      tokens = tokens.push(make_token(TK.RParen, pos, to_i64(1)))
+      tokens = tokens.push(make_token(TK::RParen, pos, to_i64(1)))
       pos = pos + 1
     else:
-      tokens = tokens.push(make_token(TK.Error, pos, to_i64(1)))
+      tokens = tokens.push(make_token(TK::Error, pos, to_i64(1)))
       pos = pos + 1
   // Append EOF sentinel.
-  tokens = tokens.push(make_token(TK.Eof, slen, to_i64(0)))
+  tokens = tokens.push(make_token(TK::Eof, slen, to_i64(0)))
   return tokens
 
 // ---------------------------------------------------------------
@@ -123,7 +123,7 @@ fn is_parse_ok(r: ParseResult): bool
 
 fn peek(tokens: Vector<Token>, pos: i64): TK
   if pos >= tokens.length():
-    return TK.Eof
+    return TK::Eof
   let tok: Token = tokens.get(pos)
   return tok.kind
 
@@ -151,19 +151,19 @@ fn parse_primary(tokens: Vector<Token>, source: string, arena: Vector<Expr>, pos
   let kind: TK = peek(tokens, pos)
 
   // Integer literal.
-  if kind == TK.Int:
+  if kind == TK::Int:
     let tok: Token = tokens.get(pos)
     let val: i64 = token_text_to_i64(source, tok)
     let idx: i64 = arena.length()
-    let new_arena: Vector<Expr> = arena.push(Expr.IntLit(val))
+    let new_arena: Vector<Expr> = arena.push(Expr::IntLit(value = val))
     return ParseResult(new_arena, idx, pos + 1)
 
   // Parenthesized expression.
-  if kind == TK.LParen:
+  if kind == TK::LParen:
     let inner: ParseResult = parse_expr(tokens, source, arena, pos + 1)
     if is_parse_ok(inner) == false:
       return inner
-    if peek(tokens, inner.pos) != TK.RParen:
+    if peek(tokens, inner.pos) != TK::RParen:
       print("error: expected ')'")
       return parse_error(inner.arena, inner.pos)
     return ParseResult(inner.arena, inner.node, inner.pos + 1)
@@ -172,13 +172,13 @@ fn parse_primary(tokens: Vector<Token>, source: string, arena: Vector<Expr>, pos
   return parse_error(arena, pos)
 
 fn parse_unary(tokens: Vector<Token>, source: string, arena: Vector<Expr>, pos: i64): ParseResult
-  if peek(tokens, pos) == TK.Minus:
+  if peek(tokens, pos) == TK::Minus:
     let operand: ParseResult = parse_unary(tokens, source, arena, pos + 1)
     if is_parse_ok(operand) == false:
       return operand
     let idx: i64 = operand.arena.length()
     let new_arena: Vector<Expr> = operand.arena.push(
-      Expr.Unary(TK.Minus, operand.node))
+      Expr::Unary(op = TK::Minus, operand = operand.node))
     return ParseResult(new_arena, idx, operand.pos)
 
   return parse_primary(tokens, source, arena, pos)
@@ -191,13 +191,13 @@ fn parse_multiplicative(tokens: Vector<Token>, source: string, arena: Vector<Exp
   let done: bool = false
   while done == false:
     let op: TK = peek(tokens, result.pos)
-    if op == TK.Star or op == TK.Slash:
+    if op == TK::Star or op == TK::Slash:
       let right: ParseResult = parse_unary(tokens, source, result.arena, result.pos + 1)
       if is_parse_ok(right) == false:
         return right
       let idx: i64 = right.arena.length()
       let new_arena: Vector<Expr> = right.arena.push(
-        Expr.Binary(op, result.node, right.node))
+        Expr::Binary(op = op, left = result.node, right = right.node))
       result = ParseResult(new_arena, idx, right.pos)
     else:
       done = true
@@ -211,13 +211,13 @@ fn parse_additive(tokens: Vector<Token>, source: string, arena: Vector<Expr>, po
   let done: bool = false
   while done == false:
     let op: TK = peek(tokens, result.pos)
-    if op == TK.Plus or op == TK.Minus:
+    if op == TK::Plus or op == TK::Minus:
       let right: ParseResult = parse_multiplicative(tokens, source, result.arena, result.pos + 1)
       if is_parse_ok(right) == false:
         return right
       let idx: i64 = right.arena.length()
       let new_arena: Vector<Expr> = right.arena.push(
-        Expr.Binary(op, result.node, right.node))
+        Expr::Binary(op = op, left = result.node, right = right.node))
       result = ParseResult(new_arena, idx, right.pos)
     else:
       done = true
@@ -230,7 +230,7 @@ fn parse(tokens: Vector<Token>, source: string): ParseResult
   let arena = Vector<Expr>::new()
   let result: ParseResult = parse_expr(tokens, source, arena, to_i64(0))
   if is_parse_ok(result):
-    if peek(tokens, result.pos) != TK.Eof:
+    if peek(tokens, result.pos) != TK::Eof:
       print("error: unexpected token after expression")
       return parse_error(result.arena, result.pos)
   return result
@@ -242,22 +242,22 @@ fn parse(tokens: Vector<Token>, source: string): ParseResult
 fn eval_node(arena: Vector<Expr>, idx: i64): i64
   let node: Expr = arena.get(idx)
   match node:
-    Expr.IntLit(value):
+    Expr::IntLit(value):
       return value
-    Expr.Unary(op, operand_idx):
+    Expr::Unary(op, operand_idx):
       let operand: i64 = eval_node(arena, operand_idx)
       return to_i64(0) - operand
-    Expr.Binary(op, left_idx, right_idx):
+    Expr::Binary(op, left_idx, right_idx):
       let lval: i64 = eval_node(arena, left_idx)
       let rval: i64 = eval_node(arena, right_idx)
       match op:
-        TK.Plus:
+        TK::Plus:
           return lval + rval
-        TK.Minus:
+        TK::Minus:
           return lval - rval
-        TK.Star:
+        TK::Star:
           return lval * rval
-        TK.Slash:
+        TK::Slash:
           if rval != to_i64(0):
             return lval / rval
           print("error: division by zero")
@@ -271,13 +271,13 @@ fn eval_node(arena: Vector<Expr>, idx: i64): i64
 
 fn op_name(op: TK): string
   match op:
-    TK.Plus:
+    TK::Plus:
       return "+"
-    TK.Minus:
+    TK::Minus:
       return "-"
-    TK.Star:
+    TK::Star:
       return "*"
-    TK.Slash:
+    TK::Slash:
       return "/"
   return "?"
 
@@ -289,12 +289,12 @@ fn print_node(arena: Vector<Expr>, idx: i64, depth: i32): i32
     indent = indent + "  "
     d = d + 1
   match node:
-    Expr.IntLit(value):
+    Expr::IntLit(value):
       print(indent + "INT " + i64_to_string(value))
-    Expr.Unary(op, operand_idx):
+    Expr::Unary(op, operand_idx):
       print(indent + "NEG")
       let unused: i32 = print_node(arena, operand_idx, depth + 1)
-    Expr.Binary(op, left_idx, right_idx):
+    Expr::Binary(op, left_idx, right_idx):
       print(indent + "BIN " + op_name(op))
       let unused1: i32 = print_node(arena, left_idx, depth + 1)
       let unused2: i32 = print_node(arena, right_idx, depth + 1)

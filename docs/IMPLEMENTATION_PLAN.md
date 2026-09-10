@@ -596,7 +596,7 @@ the corpus is this one construct (268 static calls on `Vector<T>` /
 compiler sources); the resolver's and type checker's histograms are
 dominated by its shadow.
 
-Delivery: `Node.CallE` gains the type-argument list (the host's
+Delivery: `Node::CallE` gains the type-argument list (the host's
 `CallExpr.type_args`); `parse_postfix` speculates on `<` after a name
 with the host's rule (types, then `>`, then `(` or `::`, else a
 comparison); downstream stages pass the type arguments through —
@@ -810,7 +810,7 @@ Status: **complete**
   `saturating_sub`, `saturating_mul` (+ `_i64` variants)
 - ✓ explicit checked operations for all signed types (i8–i64):
   `checked_add`, `checked_sub`, `checked_mul` — return
-  `Option.None` on overflow, `Option.Some(result)` otherwise;
+  `Option::None` on overflow, `Option::Some(value = result)` otherwise;
   pure Dao implementations (no runtime hooks), enabled by
   `Option<T>` prelude promotion
 

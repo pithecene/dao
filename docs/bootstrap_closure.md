@@ -234,14 +234,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 53 | 0 | 0 | 0 | 342 | 398 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 56 | 1 | 0 | 0 | 473 | 326 | 0 | 35 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 55 | 1 | 0 | 0 | 365 | 357 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 110 | 1 | 0 | 0 | 894 | 559 | 0 | 59 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 195 | 1 | 0 | 0 | 1618 | 931 | 0 | 138 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 308 | 1 | 0 | 0 | 2140 | 1156 | 0 | 178 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 321 | 1 | 0 | 0 | 2438 | 1104 | 0 | 228 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 419 | 2 | 0 | 0 | 2925 | 1138 | 0 | 296 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 59 | 0 | 0 | 0 | 342 | 398 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 61 | 0 | 0 | 0 | 473 | 326 | 0 | 35 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 63 | 0 | 0 | 0 | 365 | 357 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 132 | 1 | 0 | 0 | 894 | 559 | 0 | 59 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 245 | 1 | 0 | 0 | 1618 | 931 | 0 | 138 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 363 | 1 | 0 | 0 | 2140 | 1156 | 0 | 178 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 365 | 1 | 0 | 0 | 2438 | 1104 | 0 | 228 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 437 | 1 | 0 | 0 | 2925 | 1138 | 0 | 296 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 

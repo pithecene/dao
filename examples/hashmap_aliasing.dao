@@ -6,9 +6,9 @@ module examples::hashmap_aliasing
 
 fn show(label: string, m: HashMap<i64>, key: string): void
   match m.get(key):
-    Option.Some(v):
+    Option::Some(v):
       print(label + " " + key + " = " + v.to_string())
-    Option.None:
+    Option::None:
       print(label + " has no " + key)
 
 fn main(): i32

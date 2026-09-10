@@ -1,5 +1,11 @@
 # Task 18 — Enum Payloads and Match Destructuring
 
+
+> Superseded in part by `docs/contracts/ADR_ENUM_CLASS.md`: payload
+> variants are `enum class` with named fields, constructed by field name
+> (`Enum::Variant(field = value)`), and a variant is reached with `::`.
+> The examples below keep this task's positional payloads as its record.
+
 ## Objective
 
 Add payload-bearing enum variants and match-arm destructuring so that
@@ -52,9 +58,9 @@ Rules:
 ### Variant construction
 
 ```dao
-let t: Token = Token.Int(42)
-let e: Expr = Expr.Lit(7)
-let plus: Token = Token.Plus
+let t: Token = Token::Int(42)
+let e: Expr = Expr::Lit(7)
+let plus: Token = Token::Plus
 ```
 
 Rules:
@@ -69,15 +75,15 @@ Rules:
 
 ```dao
 match token:
-  Token.Int(value):
+  Token::Int(value):
     print(value)
-  Token.Ident(name):
+  Token::Ident(name):
     print(name)
-  Token.Plus:
+  Token::Plus:
     print("+")
-  Token.Minus:
+  Token::Minus:
     print("-")
-  Token.Eof:
+  Token::Eof:
     print("eof")
 ```
 
@@ -146,7 +152,7 @@ preserved for diagnostics and semantic tokens.
 
 ### 4. Resolver — variant constructor and binding scopes
 
-- Variant construction (`Token.Int(42)`) resolves through the
+- Variant construction (`Token::Int(42)`) resolves through the
   existing FieldExpr → CallExpr path. The resolver does not need
   major changes; the type checker handles arity/type validation.
 - Match arm bindings must be introduced as local symbols scoped to
@@ -286,7 +292,7 @@ Payload-free enums continue to lower to bare `i32`.
   this task. The type checker must reject equality comparison on
   any enum type that has at least one payload-bearing variant.
 - Rationale: discriminant-only comparison would make
-  `Token.Int(1) == Token.Int(2)` evaluate `true`, which is
+  `Token::Int(1) == Token::Int(2)` evaluate `true`, which is
   unsound. Full structural equality (compare discriminant, then
   compare payload fields if equal) requires recursive field
   comparison and Equatable dispatch per CONTRACT_TYPE_SYSTEM_
@@ -297,7 +303,7 @@ Payload-free enums continue to lower to bare `i32`.
 
 **Printing:**
 - First cut: printing a payload-bearing enum can show the variant
-  name and payload values, e.g. `Token.Int(42)`. Implementation
+  name and payload values, e.g. `Token::Int(42)`. Implementation
   via a generated or runtime-assisted print hook.
 - Alternatively, defer pretty-printing of payload enums and only
   require that payload-free enum printing continues to work.
@@ -364,14 +370,14 @@ demonstrating the feature.
 ## What this task does NOT include
 
 - Named payload fields (first cut is positional only)
-- Nested patterns (`Expr.Binary(TK.Plus, _, _)`)
+- Nested patterns (`Expr::Binary(TK::Plus, _, _)`)
 - Wildcard / catch-all arms (`_:`)
-- Guard clauses (`Expr.Binary(op, l, r) if op == TK.Plus:`)
+- Guard clauses (`Expr::Binary(op, l, r) if op == TK::Plus:`)
 - Exhaustiveness checking
 - Generic payload enums (`enum Option<T>: Some(T) | None`)
 - Payload-bearing enum equality (`==`/`!=` is a type error until structural equality lands)
 - `match` as an expression (returns a value)
-- Irrefutable let-destructuring (`let Token.Int(v) = tok`)
+- Irrefutable let-destructuring (`let Token::Int(v) = tok`)
 
 ## What is deliberately deferred
 
@@ -388,8 +394,8 @@ demonstrating the feature.
 ## Exit criteria
 
 1. Enum variants with positional payload types parse and type-check
-2. Variant constructors (`Token.Int(42)`) compile end-to-end
-3. Match arms with destructuring bindings (`Token.Int(v):`) compile
+2. Variant constructors (`Token::Int(42)`) compile end-to-end
+3. Match arms with destructuring bindings (`Token::Int(v):`) compile
    and bind correctly
 4. Mixed enums (payload-free + payload-bearing variants) work
 5. LLVM lowering produces correct discriminated-union layout

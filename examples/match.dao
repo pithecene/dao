@@ -12,21 +12,21 @@ enum Season:
 
 fn season_name(s: Season): string
   match s:
-    Season.Spring:
+    Season::Spring:
       return "Spring"
-    Season.Summer:
+    Season::Summer:
       return "Summer"
-    Season.Autumn:
+    Season::Autumn:
       return "Autumn"
-    Season.Winter:
+    Season::Winter:
       return "Winter"
   return "?"
 
 fn is_warm(s: Season): bool
   match s:
-    Season.Summer:
+    Season::Summer:
       return true
-    Season.Spring:
+    Season::Spring:
       return true
   return false
 
@@ -44,12 +44,12 @@ fn classify(x: i32): string
 
 fn main(): i32
   // Match over enum.
-  print(season_name(Season.Spring))
-  print(season_name(Season.Winter))
+  print(season_name(Season::Spring))
+  print(season_name(Season::Winter))
 
-  if is_warm(Season.Summer):
+  if is_warm(Season::Summer):
     print("summer is warm")
-  if is_warm(Season.Winter) == false:
+  if is_warm(Season::Winter) == false:
     print("winter is not warm")
 
   // Else-if chains.

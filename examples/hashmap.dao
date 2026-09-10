@@ -7,9 +7,9 @@ class Entry:
 
 fn show_entry(label: string, result: Option<Entry>): i32
   match result:
-    Option.Some(e):
+    Option::Some(e):
       print(label + " = " + i32_to_string(e.value))
-    Option.None:
+    Option::None:
       print(label + " not found")
   return 0
 
@@ -48,24 +48,24 @@ fn main(): i32
 
   let rj: Option<i32> = big.get("j")
   match rj:
-    Option.Some(v):
+    Option::Some(v):
       print("j = " + i32_to_string(v))
-    Option.None:
+    Option::None:
       print("j not found")
 
   let ra: Option<i32> = big.get("a")
   match ra:
-    Option.Some(v):
+    Option::Some(v):
       print("a = " + i32_to_string(v))
-    Option.None:
+    Option::None:
       print("a not found")
 
   // Missing key returns None.
   let rm: Option<i32> = big.get("missing")
   match rm:
-    Option.Some(v):
+    Option::Some(v):
       print("missing found (unexpected)")
-    Option.None:
+    Option::None:
       print("missing = None (correct)")
 
   return 0

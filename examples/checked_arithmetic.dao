@@ -2,21 +2,21 @@ module checked_arithmetic
 // checked_arithmetic.dao — checked overflow operations returning Option<T>.
 //
 // Demonstrates checked_add, checked_sub, checked_mul for i32 and i64.
-// Each returns Option.Some(result) on success, Option.None on overflow.
+// Each returns Option::Some(value = result) on success, Option::None on overflow.
 
 fn show_i32(label: string, result: Option<i32>): i32
   match result:
-    Option.Some(value):
+    Option::Some(value):
       print(label + " = Some(" + i32_to_string(value) + ")")
-    Option.None:
+    Option::None:
       print(label + " = None (overflow)")
   return 0
 
 fn show_i64(label: string, result: Option<i64>): i32
   match result:
-    Option.Some(value):
+    Option::Some(value):
       print(label + " = Some(" + i64_to_string(value) + ")")
-    Option.None:
+    Option::None:
       print(label + " = None (overflow)")
   return 0
 

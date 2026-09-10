@@ -198,11 +198,6 @@ public:
   // paint `Type::method` and `Enum::Variant` per segment.
   using QualifiedSpans = std::unordered_map<uint32_t, std::vector<Span>>;
 
-  // Field-access sites whose object is a bare identifier, keyed by the
-  // field's offset and mapping to the object's offset.  When the
-  // object resolves to a type, the field is an enum variant.
-  using FieldObjects = std::unordered_map<uint32_t, uint32_t>;
-
   auto classifications() const -> const SpanMap& {
     return map_;
   }
@@ -217,9 +212,6 @@ public:
   };
   auto named_labels() const -> const std::vector<NamedLabel>& {
     return named_labels_;
-  }
-  auto field_objects() const -> const FieldObjects& {
-    return field_objects_;
   }
 
   void visit_file(const FileNode& file) {
@@ -237,7 +229,6 @@ public:
 private:
   SpanMap map_;
   QualifiedSpans qualified_;
-  FieldObjects field_objects_;
   std::vector<NamedLabel> named_labels_;
 
   void classify(Span span, std::string_view kind) {
@@ -570,17 +561,11 @@ private:
 
   // --- Patterns ---
 
-  // A match pattern is a constant, a bare variant name, `Enum.Variant`,
-  // or `Enum::Variant`.  The variant name is a use.variant; the enum
-  // head is left to the resolver (a type use).
+  // A match pattern is a constant, a bare variant name, or
+  // `Enum::Variant`.  The variant name is a use.variant; the enum head
+  // is left to the resolver (a type use).
   void visit_pattern(const Expr& pattern) {
     switch (pattern.kind()) {
-    case NodeKind::FieldExpr: {
-      const auto& field = pattern.as<FieldExpr>();
-      visit_expr(*field.object);
-      classify(field.field_span, "use.variant");
-      break;
-    }
     case NodeKind::QualifiedName: {
       auto spans = record_qualified(pattern);
       if (!spans.empty()) {
@@ -674,9 +659,6 @@ private:
       const auto& field = expr.as<FieldExpr>();
       visit_expr(*field.object);
       classify(field.field_span, "use.field");
-      if (field.object->kind() == NodeKind::Identifier) {
-        field_objects_[field.field_span.offset] = field.object->span.offset;
-      }
       break;
     }
     case NodeKind::PipeExpr: {
@@ -840,14 +822,12 @@ auto classify_tokens(const std::vector<Token>& tokens,
   // Step 1: Collect structural classifications from AST.
   AstClassifier::SpanMap ast_map;
   AstClassifier::QualifiedSpans qualified;
-  AstClassifier::FieldObjects field_objects;
   std::vector<AstClassifier::NamedLabel> named_labels;
   if (file != nullptr) {
     AstClassifier classifier;
     classifier.visit_file(*file);
     ast_map = classifier.classifications();
     qualified = classifier.qualified_expressions();
-    field_objects = classifier.field_objects();
     named_labels = classifier.named_labels();
   }
 
@@ -932,17 +912,7 @@ auto classify_tokens(const std::vector<Token>& tokens,
     // positions, fields, patterns.  A type name in a type position stays
     // `type.*` even though the resolver also records it as a use.
     if (auto it = ast_map.find(tok.span.offset); it != ast_map.end()) {
-      auto kind = it->second;
-      // `Enum.Variant`: a field access whose object is a type.
-      if (kind == "use.field") {
-        if (auto obj = field_objects.find(tok.span.offset); obj != field_objects.end()) {
-          const auto* object_sym = resolved_symbol(obj->second);
-          if (object_sym != nullptr && object_sym->kind == SymbolKind::Type) {
-            kind = "use.variant";
-          }
-        }
-      }
-      emit(tok, kind);
+      emit(tok, it->second);
       continue;
     }
 

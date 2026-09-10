@@ -639,7 +639,7 @@ auto MirBuilder::lower_expr_value(const HirExpr& expr) -> MirValueId {
           auto err_payload = emit_value(
               enum_type->variants()[1].payload_types[0], expr.span,
               MirEnumPayload{operand_val, 1, 0});
-          // Construct Result.Err(err_payload) with the function's return type.
+          // Construct Result::Err(err_payload) with the function's return type.
           const auto* ret_enum_type = static_cast<const TypeEnum*>(
               current_fn_->return_type);
           auto* err_args = ctx_.alloc<std::vector<MirValueId>>();
@@ -650,7 +650,7 @@ auto MirBuilder::lower_expr_value(const HirExpr& expr) -> MirValueId {
           emit_region_exits(expr.span, {.value = &err_result, .type = current_fn_->return_type});
           emit_terminator(expr.span, MirReturn{err_result, true});
         } else {
-          // Option: construct Option.None (variant 1, no payload).
+          // Option: construct Option::None (variant 1, no payload).
           const auto* ret_enum_type = static_cast<const TypeEnum*>(
               current_fn_->return_type);
           auto* empty_args = ctx_.alloc<std::vector<MirValueId>>();

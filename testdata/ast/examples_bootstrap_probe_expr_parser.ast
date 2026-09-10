@@ -154,8 +154,7 @@ File
                         Callee
                           Identifier make_token
                         Args
-                          FieldExpr .Int
-                            Identifier TK
+                          QualifiedName TK::Int
                           Identifier pos
                           BinaryExpr -
                             Identifier end
@@ -185,8 +184,7 @@ File
                             Callee
                               Identifier make_token
                             Args
-                              FieldExpr .Plus
-                                Identifier TK
+                              QualifiedName TK::Plus
                               Identifier pos
                               CallExpr
                                 Callee
@@ -220,8 +218,7 @@ File
                                 Callee
                                   Identifier make_token
                                 Args
-                                  FieldExpr .Minus
-                                    Identifier TK
+                                  QualifiedName TK::Minus
                                   Identifier pos
                                   CallExpr
                                     Callee
@@ -255,8 +252,7 @@ File
                                     Callee
                                       Identifier make_token
                                     Args
-                                      FieldExpr .Star
-                                        Identifier TK
+                                      QualifiedName TK::Star
                                       Identifier pos
                                       CallExpr
                                         Callee
@@ -290,8 +286,7 @@ File
                                         Callee
                                           Identifier make_token
                                         Args
-                                          FieldExpr .Slash
-                                            Identifier TK
+                                          QualifiedName TK::Slash
                                           Identifier pos
                                           CallExpr
                                             Callee
@@ -325,8 +320,7 @@ File
                                             Callee
                                               Identifier make_token
                                             Args
-                                              FieldExpr .LParen
-                                                Identifier TK
+                                              QualifiedName TK::LParen
                                               Identifier pos
                                               CallExpr
                                                 Callee
@@ -360,8 +354,7 @@ File
                                                 Callee
                                                   Identifier make_token
                                                 Args
-                                                  FieldExpr .RParen
-                                                    Identifier TK
+                                                  QualifiedName TK::RParen
                                                   Identifier pos
                                                   CallExpr
                                                     Callee
@@ -389,8 +382,7 @@ File
                                                 Callee
                                                   Identifier make_token
                                                 Args
-                                                  FieldExpr .Error
-                                                    Identifier TK
+                                                  QualifiedName TK::Error
                                                   Identifier pos
                                                   CallExpr
                                                     Callee
@@ -417,8 +409,7 @@ File
               Callee
                 Identifier make_token
               Args
-                FieldExpr .Eof
-                  Identifier TK
+                QualifiedName TK::Eof
                 Identifier slen
                 CallExpr
                   Callee
@@ -478,8 +469,7 @@ File
                 Identifier tokens
       Then
         ReturnStatement
-          FieldExpr .Eof
-            Identifier TK
+          QualifiedName TK::Eof
     LetStatement tok: Token
       CallExpr
         Callee
@@ -559,8 +549,7 @@ File
       Condition
         BinaryExpr ==
           Identifier kind
-          FieldExpr .Int
-            Identifier TK
+          QualifiedName TK::Int
       Then
         LetStatement tok: Token
           CallExpr
@@ -589,8 +578,7 @@ File
             Args
               CallExpr
                 Callee
-                  FieldExpr .IntLit
-                    Identifier Expr
+                  QualifiedName Expr::IntLit
                 Args
                   Identifier val
         ReturnStatement
@@ -607,8 +595,7 @@ File
       Condition
         BinaryExpr ==
           Identifier kind
-          FieldExpr .LParen
-            Identifier TK
+          QualifiedName TK::LParen
       Then
         LetStatement inner: ParseResult
           CallExpr
@@ -643,8 +630,7 @@ File
                   Identifier tokens
                   FieldExpr .pos
                     Identifier inner
-              FieldExpr .RParen
-                Identifier TK
+              QualifiedName TK::RParen
           Then
             ExpressionStatement
               CallExpr
@@ -702,8 +688,7 @@ File
             Args
               Identifier tokens
               Identifier pos
-          FieldExpr .Minus
-            Identifier TK
+          QualifiedName TK::Minus
       Then
         LetStatement operand: ParseResult
           CallExpr
@@ -743,11 +728,9 @@ File
             Args
               CallExpr
                 Callee
-                  FieldExpr .Unary
-                    Identifier Expr
+                  QualifiedName Expr::Unary
                 Args
-                  FieldExpr .Minus
-                    Identifier TK
+                  QualifiedName TK::Minus
                   FieldExpr .node
                     Identifier operand
         ReturnStatement
@@ -817,12 +800,10 @@ File
           BinaryExpr or
             BinaryExpr ==
               Identifier op
-              FieldExpr .Star
-                Identifier TK
+              QualifiedName TK::Star
             BinaryExpr ==
               Identifier op
-              FieldExpr .Slash
-                Identifier TK
+              QualifiedName TK::Slash
         Then
           LetStatement right: ParseResult
             CallExpr
@@ -864,8 +845,7 @@ File
               Args
                 CallExpr
                   Callee
-                    FieldExpr .Binary
-                      Identifier Expr
+                    QualifiedName Expr::Binary
                   Args
                     Identifier op
                     FieldExpr .node
@@ -941,12 +921,10 @@ File
           BinaryExpr or
             BinaryExpr ==
               Identifier op
-              FieldExpr .Plus
-                Identifier TK
+              QualifiedName TK::Plus
             BinaryExpr ==
               Identifier op
-              FieldExpr .Minus
-                Identifier TK
+              QualifiedName TK::Minus
         Then
           LetStatement right: ParseResult
             CallExpr
@@ -988,8 +966,7 @@ File
               Args
                 CallExpr
                   Callee
-                    FieldExpr .Binary
-                      Identifier Expr
+                    QualifiedName Expr::Binary
                   Args
                     Identifier op
                     FieldExpr .node
@@ -1072,8 +1049,7 @@ File
                   Identifier tokens
                   FieldExpr .pos
                     Identifier result
-              FieldExpr .Eof
-                Identifier TK
+              QualifiedName TK::Eof
           Then
             ExpressionStatement
               CallExpr
@@ -1108,14 +1084,12 @@ File
         Identifier node
       Arm
         Pattern
-          FieldExpr .IntLit
-            Identifier Expr
+          QualifiedName Expr::IntLit
         ReturnStatement
           Identifier value
       Arm
         Pattern
-          FieldExpr .Unary
-            Identifier Expr
+          QualifiedName Expr::Unary
         LetStatement operand: i64
           CallExpr
             Callee
@@ -1133,8 +1107,7 @@ File
             Identifier operand
       Arm
         Pattern
-          FieldExpr .Binary
-            Identifier Expr
+          QualifiedName Expr::Binary
         LetStatement lval: i64
           CallExpr
             Callee
@@ -1154,32 +1127,28 @@ File
             Identifier op
           Arm
             Pattern
-              FieldExpr .Plus
-                Identifier TK
+              QualifiedName TK::Plus
             ReturnStatement
               BinaryExpr +
                 Identifier lval
                 Identifier rval
           Arm
             Pattern
-              FieldExpr .Minus
-                Identifier TK
+              QualifiedName TK::Minus
             ReturnStatement
               BinaryExpr -
                 Identifier lval
                 Identifier rval
           Arm
             Pattern
-              FieldExpr .Star
-                Identifier TK
+              QualifiedName TK::Star
             ReturnStatement
               BinaryExpr *
                 Identifier lval
                 Identifier rval
           Arm
             Pattern
-              FieldExpr .Slash
-                Identifier TK
+              QualifiedName TK::Slash
             IfStatement
               Condition
                 BinaryExpr !=
@@ -1226,26 +1195,22 @@ File
         Identifier op
       Arm
         Pattern
-          FieldExpr .Plus
-            Identifier TK
+          QualifiedName TK::Plus
         ReturnStatement
           StringLiteral "+"
       Arm
         Pattern
-          FieldExpr .Minus
-            Identifier TK
+          QualifiedName TK::Minus
         ReturnStatement
           StringLiteral "-"
       Arm
         Pattern
-          FieldExpr .Star
-            Identifier TK
+          QualifiedName TK::Star
         ReturnStatement
           StringLiteral "*"
       Arm
         Pattern
-          FieldExpr .Slash
-            Identifier TK
+          QualifiedName TK::Slash
         ReturnStatement
           StringLiteral "/"
     ReturnStatement
@@ -1290,8 +1255,7 @@ File
         Identifier node
       Arm
         Pattern
-          FieldExpr .IntLit
-            Identifier Expr
+          QualifiedName Expr::IntLit
         ExpressionStatement
           CallExpr
             Callee
@@ -1308,8 +1272,7 @@ File
                     Identifier value
       Arm
         Pattern
-          FieldExpr .Unary
-            Identifier Expr
+          QualifiedName Expr::Unary
         ExpressionStatement
           CallExpr
             Callee
@@ -1330,8 +1293,7 @@ File
                 IntLiteral 1
       Arm
         Pattern
-          FieldExpr .Binary
-            Identifier Expr
+          QualifiedName Expr::Binary
         ExpressionStatement
           CallExpr
             Callee
