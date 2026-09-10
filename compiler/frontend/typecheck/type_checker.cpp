@@ -3029,7 +3029,11 @@ auto TypeChecker::check_field(const Expr* expr) -> const Type* {
 
   // `Enum.Variant` is field access on a type name: a variant is reached
   // through its enum with `::` (CONTRACT_SYNTAX_SURFACE.md, enum class).
-  if (obj_type->kind() == TypeKind::Enum && names_a_type(field.object)) {
+  // A value of the enum type is an instance; its methods are looked up
+  // below.
+  const auto* obj_sym = symbol_for_use(field.object);
+  if (obj_type->kind() == TypeKind::Enum && obj_sym != nullptr &&
+      obj_sym->kind == SymbolKind::Type) {
     const auto* en = static_cast<const TypeEnum*>(obj_type);
     error(field.field_span,
           "variant access uses '::': " + std::string(en->name()) + "::" + std::string(field.field));
