@@ -624,7 +624,7 @@ fn main(): i32
   //   - yield statements
   //   - function types (fn(T): R as a type)
   //   - generic parameter bounds / where clauses
-  //   - static method calls requiring <T> disambiguation
+  //   - call-site type arguments on a field access (`obj.method<T>(..)`)
   //   - import declarations
   //   - pipe continuation across newlines with INDENT/DEDENT
   //   - self-parse of this file (deferred due to bootstrap runtime
