@@ -240,7 +240,7 @@ fn hir_find_method_sym(hs: HS, mangled: string, type_decl_node: i64): i64
   while i < hs.symbols.length():
     let sym: Symbol = hs.symbols.get(i)
     if sym.name == mangled:
-      if symbol_kind_name(sym.kind) == "Function":
+      if is_method_symbol(sym):
         return i
     i = i + 1
   return to_i64(-1)

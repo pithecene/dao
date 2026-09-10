@@ -6,6 +6,7 @@ module bootstrap::resolver
 enum SymbolKind:
   Builtin
   Function
+  Method
   Type
   Local
   Param
@@ -256,6 +257,8 @@ fn symbol_kind_name(kind: SymbolKind): string
       return "Builtin"
     SymbolKind::Function:
       return "Function"
+    SymbolKind::Method:
+      return "Method"
     SymbolKind::Type:
       return "Type"
     SymbolKind::Local:
@@ -883,7 +886,9 @@ fn collect_top_level(rs: RS, file_node_idx: i64): RS
                   Node::FnDeclD(m_name_tidx, m_tp, m_plp, m_rt, m_blp):
                     let mname: string = tok_name(r, m_name_tidx)
                     let mangled: string = name + "." + mname
-                    let msr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, mangled, meth_idx, r.current_scope, r.owner_module_id))
+                    // A class's own method: declared with the type, so
+                    // the type's identity, not its name, dispatches it.
+                    let msr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Method, mangled, meth_idx, r.current_scope, r.owner_module_id))
                     r = declare_top_level(msr.rs, mangled, msr.sym_idx, m_name_tidx)
                 mi = mi + 1
           Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):

@@ -810,13 +810,21 @@ fn sym_visible_in_module(sym: Symbol, module_id: i64): bool
 // declaration when it has one — a module that shadows a prelude type
 // shadows its methods too (§7.4), whatever the symbols' order — else
 // a visible prelude or builtin one; -1 when none is visible.
+// A mangled name (`Box.m`) is borne by a class's own method
+// (`SymbolKind::Method`) and by one an `extend` block introduces
+// (`Function`, like the free function it is).
+fn is_method_symbol(sym: Symbol): bool
+  if symbol_kind_name(sym.kind) == "Method":
+    return true
+  return symbol_kind_name(sym.kind) == "Function"
+
 fn find_visible_method_sym(symbols: Vector<Symbol>, mangled: string, module_id: i64): i64
   let outer: i64 = to_i64(-1)
   let i: i64 = 0
   while i < symbols.length():
     let sym: Symbol = symbols.get(i)
     if sym.name == mangled:
-      if symbol_kind_name(sym.kind) == "Function":
+      if is_method_symbol(sym):
         if sym.owner_module_id == module_id:
           return i
         if sym_visible_in_module(sym, module_id):
@@ -824,12 +832,13 @@ fn find_visible_method_sym(symbols: Vector<Symbol>, mangled: string, module_id: 
     i = i + 1
   return outer
 
-fn find_method_sym_owned_by(symbols: Vector<Symbol>, mangled: string, owner: i64): i64
+// A class's own method, declared with the type in `owner`'s module.
+fn find_inherent_method_sym(symbols: Vector<Symbol>, mangled: string, owner: i64): i64
   let i: i64 = 0
   while i < symbols.length():
     let sym: Symbol = symbols.get(i)
     if sym.name == mangled:
-      if symbol_kind_name(sym.kind) == "Function":
+      if symbol_kind_name(sym.kind) == "Method":
         if sym.owner_module_id == owner:
           return i
     i = i + 1
@@ -849,19 +858,21 @@ fn type_owner_module(symbols: Vector<Symbol>, type_decl_node: i64): i64
     i = i + 1
   return to_i64(-1)
 
-// The method a receiver of this type answers to.  A type's own methods
-// are declared with it, so the receiver's type — not its name — picks
-// them: `box::Box(1).m()` reaches `core::box`'s method even where this
-// module declares its own `Box` (§7.4 shadows the name, not the value's
-// type).  A method the receiver's module does not declare comes from an
-// `extend`, which the orphan rule lets any module write for a foreign
-// type: this module's, else a visible prelude one.  Both the type
-// checker and the HIR builder dispatch through here, so they cannot
-// disagree about which symbol a call means.
+// The method a receiver of this type answers to, in precedence order:
+// the type's own method, then an `extend` this module wrote, then a
+// visible prelude one.  A type's own methods are declared with it, so
+// the receiver's type — not its name — picks them: a value of
+// `core::box`'s `Box` answers with that module's method even where
+// this module declares its own `Box` (§7.4 shadows the name, not the
+// value's type).  An `extend` is not the type's own: the orphan rule
+// lets any module write one for a foreign type, and this module's wins
+// over the prelude's (§5, §7.2).  Both the type checker and the HIR
+// builder dispatch through here, so they cannot disagree about which
+// symbol a call means.
 fn find_method_sym_for_receiver(symbols: Vector<Symbol>, mangled: string, module_id: i64, type_decl_node: i64): i64
   let type_owner: i64 = type_owner_module(symbols, type_decl_node)
   if type_owner >= 0:
-    let inherent: i64 = find_method_sym_owned_by(symbols, mangled, type_owner)
+    let inherent: i64 = find_inherent_method_sym(symbols, mangled, type_owner)
     if inherent >= 0:
       return inherent
   return find_visible_method_sym(symbols, mangled, module_id)
@@ -968,7 +979,7 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
               let sym: Symbol = r.tc.symbols.get(si)
               if si == chosen:
                 if sym.name == mangled:
-                  if symbol_kind_name(sym.kind) == "Function":
+                  if is_method_symbol(sym):
                     found_method = true
                   // Check full signature match: param count, each param type, return type.
                   let impl_ti: i64 = vec_i64_get(r.sym_types, si)
@@ -2234,7 +2245,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 53
+  let total: i32 = 54
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -3150,8 +3161,8 @@ fn main(): i32
   // Test 49: a symbol declared into the prelude scope is visible from
   // any module (CONTRACT_MODULE_SYSTEM.md §7.2); one declared in an
   // ordinary module is visible from that module only.
-  let prelude_sym: Symbol = Symbol(SymbolKind::Function, "i32.show", to_i64(0), prelude_scope_idx(), to_i64(7))
-  let module_sym: Symbol = Symbol(SymbolKind::Function, "i32.show", to_i64(0), prelude_scope_idx() + to_i64(1), to_i64(0))
+  let prelude_sym: Symbol = Symbol(SymbolKind::Method, "i32.show", to_i64(0), prelude_scope_idx(), to_i64(7))
+  let module_sym: Symbol = Symbol(SymbolKind::Method, "i32.show", to_i64(0), prelude_scope_idx() + to_i64(1), to_i64(0))
   let vis_ok: bool = false
   if sym_visible_in_module(prelude_sym, to_i64(1)):
     if sym_visible_in_module(module_sym, to_i64(0)):
@@ -3235,6 +3246,32 @@ fn main(): i32
     while qb_j < qb_p.diags.length():
       print("  diag: " + qb_p.diags.get(qb_j).path + ": " + qb_p.diags.get(qb_j).diag.message)
       qb_j = qb_j + 1
+
+  // Test 53: an `extend` is not the type's own method: where the
+  // prelude extends `Box` with `pick(): bool` and this module extends
+  // it with `pick(): i32`, this module's wins (§5, §7.2) — the
+  // receiver's owner picks only a method declared with the type.
+  let xb_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  xb_inputs = xb_inputs.push(SourceInput("stdlib/core/box.dao", "module core::box\nconcept PickB:\n  fn pick(self): bool\n\nclass Box:\n  n: i32\n\nfn make_box(): Box\n  return Box(1)\n\nextend Box as PickB:\n  fn pick(self): bool\n    return true\n", true))
+  xb_inputs = xb_inputs.push(SourceInput("main.dao", "module app::main\nconcept PickI:\n  fn pick(self): i32\n\nextend Box as PickI:\n  fn pick(self): i32\n    return 7\n\nfn f(): i32\n  return make_box().pick()\n", false))
+  let xb_p: Program = program_from_graph(build_program(xb_inputs))
+  xb_p = program_run_resolve(xb_p)
+  xb_p = program_run_typecheck(xb_p)
+  let xb_errors: i64 = 0
+  let xb_i: i64 = 0
+  while xb_i < xb_p.diags.length():
+    if xb_p.diags.get(xb_i).path == "main.dao":
+      xb_errors = xb_errors + 1
+    xb_i = xb_i + 1
+  if xb_errors == 0:
+    print("PASS module_extend_wins_over_prelude_extend")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL module_extend_wins_over_prelude_extend: " + i64_to_string(xb_errors) + " diagnostics in main.dao")
+    let xb_j: i64 = 0
+    while xb_j < xb_p.diags.length():
+      print("  diag: " + xb_p.diags.get(xb_j).path + ": " + xb_p.diags.get(xb_j).diag.message)
+      xb_j = xb_j + 1
 
   // -----------------------------------------------------------------
   // Summary

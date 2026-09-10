@@ -10,38 +10,38 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 72618 |
-| `CallExpr` | 24139 |
-| `Callee` | 24139 |
-| `Args` | 21663 |
-| `FieldExpr` | 16161 |
-| `BinaryExpr` | 11160 |
-| `LetStatement` | 10585 |
-| `Value` | 8341 |
-| `Target` | 8341 |
-| `Assignment` | 8341 |
-| `IntLiteral` | 8164 |
-| `Condition` | 6837 |
-| `QualifiedName` | 6247 |
-| `Then` | 5565 |
-| `IfStatement` | 5565 |
-| `ReturnStatement` | 5549 |
-| `StringLiteral` | 4962 |
-| `Param` | 3831 |
-| `BoolLiteral` | 2683 |
-| `Pattern` | 2669 |
-| `Arm` | 2669 |
-| `ReturnType` | 1646 |
-| `FunctionDecl` | 1646 |
-| `Else` | 1313 |
-| `WhileStatement` | 1272 |
-| `Variant` | 1176 |
+| `Identifier` | 72674 |
+| `CallExpr` | 24165 |
+| `Callee` | 24165 |
+| `Args` | 21686 |
+| `FieldExpr` | 16174 |
+| `BinaryExpr` | 11170 |
+| `LetStatement` | 10590 |
+| `Value` | 8349 |
+| `Target` | 8349 |
+| `Assignment` | 8349 |
+| `IntLiteral` | 8172 |
+| `Condition` | 6845 |
+| `QualifiedName` | 6252 |
+| `Then` | 5571 |
+| `IfStatement` | 5571 |
+| `ReturnStatement` | 5562 |
+| `StringLiteral` | 4974 |
+| `Param` | 3835 |
+| `BoolLiteral` | 2689 |
+| `Pattern` | 2674 |
+| `Arm` | 2674 |
+| `ReturnType` | 1650 |
+| `FunctionDecl` | 1650 |
+| `Else` | 1314 |
+| `WhileStatement` | 1274 |
+| `Variant` | 1181 |
 | `Field` | 1090 |
 | `UnaryExpr` | 1041 |
-| `TypeArgs` | 997 |
+| `TypeArgs` | 998 |
 | `Scrutinee` | 643 |
 | `MatchStatement` | 643 |
-| `ExpressionStatement` | 552 |
+| `ExpressionStatement` | 555 |
 | `ClassDecl` | 256 |
 | `BreakStatement` | 64 |
 | `ResourceBlock` | 42 |
@@ -234,14 +234,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 54 | 1 | 0 | 0 | 154 | 1005 | 0 | 18 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 56 | 0 | 0 | 0 | 269 | 845 | 0 | 35 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 55 | 0 | 0 | 0 | 163 | 885 | 0 | 18 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 116 | 1 | 0 | 0 | 605 | 1170 | 0 | 67 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 210 | 1 | 0 | 0 | 1014 | 1577 | 0 | 148 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 329 | 2 | 0 | 0 | 1479 | 1801 | 0 | 188 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 330 | 2 | 0 | 0 | 1626 | 1765 | 0 | 238 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 444 | 2 | 0 | 0 | 1856 | 1866 | 0 | 309 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 58 | 1 | 0 | 0 | 154 | 1005 | 0 | 18 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 63 | 0 | 0 | 0 | 269 | 845 | 0 | 35 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 62 | 0 | 0 | 0 | 163 | 885 | 0 | 18 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 127 | 0 | 0 | 0 | 605 | 1170 | 0 | 67 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 230 | 1 | 0 | 0 | 1017 | 1586 | 0 | 148 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 335 | 1 | 0 | 0 | 1479 | 1801 | 0 | 188 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 344 | 2 | 0 | 0 | 1626 | 1765 | 0 | 238 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 455 | 1 | 0 | 0 | 1856 | 1866 | 0 | 309 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 
@@ -433,7 +433,7 @@ next.  Sites per program against the parse column above:
 | parser | 62 | 0 | 0 |
 | graph | 68 | 0 | 0 |
 | resolver | 114 | 0 | 0 |
-| typecheck | 146 | 0 | 0 |
+| typecheck | 147 | 0 | 0 |
 | hir | 161 | 4 | 0 |
 | mir | 177 | 10 | 0 |
 | llvm | 215 | 28 | 0 |
