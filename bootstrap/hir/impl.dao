@@ -222,9 +222,10 @@ fn hir_sym_type(hs: HS, sym_idx: i64): i64
 
 // Find a mangled method symbol (e.g. "Foo.bar") by scanning the
 // symbol table, respecting module visibility.  Only builtin symbols
-// (owner_module_id < 0) or symbols owned by the current module are
-// visible — matching the typecheck-side module scoping for extend
-// methods (Task 26 §6.5).  Without this filter, HIR would desugar
+// (owner_module_id < 0), prelude declarations, or symbols owned by
+// the current module are visible — matching the typecheck-side module
+// scoping for extend methods (Task 26 §6.5; CONTRACT_MODULE_SYSTEM.md
+// §7.2 for the prelude).  Without this filter, HIR would desugar
 // a dot-call to the wrong module's symbol when two modules define
 // the same mangled extend method name.
 //
@@ -1113,7 +1114,7 @@ fn lower_to_hir(src: string): HirResult
   // provide complete file text still work.
   let wrapped: string = wrap_test_module(src)
   let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs = inputs.push(SourceInput("test.dao", wrapped))
+  inputs = inputs.push(SourceInput("test.dao", wrapped, false))
   let pg: ProgramGraph = program_graph_empty()
   resource memory graph =>
     pg = build_program(inputs)
@@ -1783,8 +1784,8 @@ fn main(): i32
 
   // Test 17: program_run_hir produces HirProgram root with HirModules.
   let d7_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  d7_inputs = d7_inputs.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n"))
-  d7_inputs = d7_inputs.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n"))
+  d7_inputs = d7_inputs.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
+  d7_inputs = d7_inputs.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
   let d7_pg: ProgramGraph = build_program(d7_inputs)
   let d7_p: Program = program_from_graph(d7_pg)
   d7_p = program_run_resolve(d7_p)
@@ -1807,7 +1808,7 @@ fn main(): i32
   // Build an HirResult from the program's accumulated hir_nodes/hir_idx
   // and verify the dump contains the expected node kinds.
   let d7_inputs2: Vector<SourceInput> = Vector<SourceInput>::new()
-  d7_inputs2 = d7_inputs2.push(SourceInput("a.dao", "module mod_a\nfn fa(): i32 -> 1\n"))
+  d7_inputs2 = d7_inputs2.push(SourceInput("a.dao", "module mod_a\nfn fa(): i32 -> 1\n", false))
   let d7_pg2: ProgramGraph = build_program(d7_inputs2)
   let d7_p2: Program = program_from_graph(d7_pg2)
   d7_p2 = program_run_resolve(d7_p2)
@@ -1835,9 +1836,9 @@ fn main(): i32
   let hir_smoke_ok: bool = false
   if file_exists(hir_smoke_base + "core_fmt.dao"):
     let hs_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-    hs_inputs = hs_inputs.push(SourceInput("core_fmt.dao", read_file(hir_smoke_base + "core_fmt.dao")))
-    hs_inputs = hs_inputs.push(SourceInput("app_math.dao", read_file(hir_smoke_base + "app_math.dao")))
-    hs_inputs = hs_inputs.push(SourceInput("app_main.dao", read_file(hir_smoke_base + "app_main.dao")))
+    hs_inputs = hs_inputs.push(SourceInput("core_fmt.dao", read_file(hir_smoke_base + "core_fmt.dao"), false))
+    hs_inputs = hs_inputs.push(SourceInput("app_math.dao", read_file(hir_smoke_base + "app_math.dao"), false))
+    hs_inputs = hs_inputs.push(SourceInput("app_main.dao", read_file(hir_smoke_base + "app_main.dao"), false))
     let hs_pg: ProgramGraph = build_program(hs_inputs)
     let hs_p: Program = program_from_graph(hs_pg)
     hs_p = program_run_resolve(hs_p)
@@ -1914,8 +1915,8 @@ fn main(): i32
   // returning a distinct integer.  Both modules must lower cleanly
   // without cross-module symbol contamination.
   let iso_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  iso_inputs = iso_inputs.push(SourceInput("a.dao", "module iso::a\nclass Point:\n  x: i32\n\n  fn kind(self): i32\n    return 1\n\nfn use_a(): i32\n  let p: Point = Point(0)\n  return p.kind()\n"))
-  iso_inputs = iso_inputs.push(SourceInput("b.dao", "module iso::b\nclass Point:\n  y: i32\n\n  fn kind(self): i32\n    return 2\n\nfn use_b(): i32\n  let q: Point = Point(0)\n  return q.kind()\n"))
+  iso_inputs = iso_inputs.push(SourceInput("a.dao", "module iso::a\nclass Point:\n  x: i32\n\n  fn kind(self): i32\n    return 1\n\nfn use_a(): i32\n  let p: Point = Point(0)\n  return p.kind()\n", false))
+  iso_inputs = iso_inputs.push(SourceInput("b.dao", "module iso::b\nclass Point:\n  y: i32\n\n  fn kind(self): i32\n    return 2\n\nfn use_b(): i32\n  let q: Point = Point(0)\n  return q.kind()\n", false))
   let iso_pg: ProgramGraph = build_program(iso_inputs)
   let iso_p: Program = program_from_graph(iso_pg)
   iso_p = program_run_resolve(iso_p)

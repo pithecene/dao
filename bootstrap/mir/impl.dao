@@ -717,7 +717,7 @@ fn lower_to_mir(src: string): MirResult
   // composite-keyed uses_map as the HIR pass does.
   let wrapped: string = wrap_test_module(src)
   let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs = inputs.push(SourceInput("test.dao", wrapped))
+  inputs = inputs.push(SourceInput("test.dao", wrapped, false))
   let pg: ProgramGraph = program_graph_empty()
   resource memory graph =>
     pg = build_program(inputs)

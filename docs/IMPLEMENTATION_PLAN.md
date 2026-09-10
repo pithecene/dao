@@ -561,8 +561,9 @@ typecheck program).  Both now write in place for the latest value
 with versioned slots (maps) and an overwrite log (vectors), so a
 stale value still reads exactly its own.  The audit's peak column
 (`docs/bootstrap_closure.md`, 6 GiB probe bound) fell from 5.5–16 GiB
-to 51–418 MiB for every program (the larger figures once the parser
-reads the corpus's static calls, Task 36), stage times to two seconds
+to 53–442 MiB for every program (the larger figures once the parser
+reads the corpus's static calls, Task 36, and the prelude is in the
+program, Task 38), stage times to two seconds
 or less, and §10's acceptance bar — every program under 2 GiB — is
 met.  The
 llvm stage's `Vector.get` panic is an earlier bootstrap defect, not
@@ -781,9 +782,21 @@ move only with the bootstrap work that closes each row.
 
 ### Task 38 — Bootstrap Prelude Resolution
 
-Status: **spec** — `docs/task_specs/TASK_38_BOOTSTRAP_PRELUDE_RESOLUTION.md`;
+Status: **complete** — `docs/task_specs/TASK_38_BOOTSTRAP_PRELUDE_RESOLUTION.md`;
 the prelude row of `CONTRACT_MODULE_SYSTEM.md` §12, promoted from Task
 33 by the closure audit.
+
+**Result** (`docs/bootstrap_closure.md` on the landing head): the five
+prelude names resolve; the resolve column fell (llvm: 2954 → 1856) and
+its histogram is now match-arm destructuring bindings (`unknown name
+'a'`, `'t'`, `'b'`), which the resolver resolves as expressions
+without introducing bindings.  The typecheck column's first
+diagnostics with the prelude present name a cross-module enum
+identity fault (`'KwType' is not a variant of enum 'Severity'`: a
+variant check keyed by declaration node index without file
+provenance).  The prelude section lists the seven partially parsed
+files and each file's typecheck count.  The next task is chosen from
+that audit, not written here.
 
 **Objective**: after Tasks 36–37 every compiler program's first
 blocking diagnostic is `unknown name` for a prelude declaration

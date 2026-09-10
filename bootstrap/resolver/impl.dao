@@ -22,6 +22,8 @@ class Symbol:
   owner_module_id: i64  // -1 for builtins; >= 0 = module_id from ProgramGraph
 
 enum ScopeKind:
+  BuiltinScope
+  PreludeScope
   FileScope
   FunctionScope
   BlockScope
@@ -103,19 +105,87 @@ fn rs_add_diag(rs: RS, span: Span, msg: string): RS
 // Section 19: Scope operations
 // =========================================================================
 
+// Every resolve, single-file or program, opens the same two outermost
+// scopes before any module's own (CONTRACT_MODULE_SYSTEM.md §7): scope
+// 0 holds the compiler builtins, scope 1 the prelude's declarations,
+// and each module's file scope is a child of scope 1.  A symbol whose
+// scope_id is the prelude scope is a prelude declaration whichever
+// module owns it; the later passes admit such symbols into every
+// module's method set (§7.2).
+fn builtins_scope_idx(): i64 -> to_i64(0)
+fn prelude_scope_idx(): i64 -> to_i64(1)
+
+// Open the builtins and prelude scopes; the prelude scope is current.
+fn rs_open_root_scopes(rs: RS): RS
+  let br: ScopeR = rs_push_scope(rs, ScopeKind::BuiltinScope)
+  let r: RS = populate_builtins(br.rs)
+  let pr: ScopeR = rs_push_scope(r, ScopeKind::PreludeScope)
+  return pr.rs
+
 fn rs_update_scope(rs: RS, scope_idx: i64, new_scope: Scope): RS
   rs.scopes = rs.scopes.set(scope_idx, new_scope)
   return rs
 
+// The prelude and module scopes: where top-level declarations land.
+fn is_top_level_scope(kind: ScopeKind): bool
+  match kind:
+    ScopeKind::PreludeScope:
+      return true
+    ScopeKind::FileScope:
+      return true
+  return false
+
+fn is_module_scope(kind: ScopeKind): bool
+  match kind:
+    ScopeKind::FileScope:
+      return true
+  return false
+
+fn builtin_declared(rs: RS, name: string): bool
+  let scope: Scope = rs.scopes.get(builtins_scope_idx())
+  match scope.decls.get(name):
+    Option::Some(sym_idx):
+      return true
+    Option::None:
+      return false
+  return false
+
+// The intrinsic family: prelude declarations whose bodies the compiler
+// replaces (CONTRACT_MODULE_SYSTEM.md §7.8).  A method is declared
+// under its mangled name (`Box.copy_out`), which is never one of these.
+fn is_prelude_intrinsic(name: string): bool
+  if name == "size_of":
+    return true
+  if name == "align_of":
+    return true
+  if name == "ptr_offset":
+    return true
+  if name == "copy_out":
+    return true
+  return false
+
+fn decl_span(rs: RS, decl_tidx: i64): Span
+  if decl_tidx >= 0:
+    return tok_name_span(rs, decl_tidx)
+  return Span(to_i64(0), to_i64(1))
+
 fn scope_declare(rs: RS, name: string, sym_idx: i64, decl_tidx: i64): RS
   let scope: Scope = rs.scopes.get(rs.current_scope)
+  // Scope nesting alone does not enforce §7.6–§7.8: a top-level
+  // declaration may not carry a builtin's name, and the reserved
+  // names are the prelude's to declare.  The diagnostics are the
+  // host's.
+  if is_top_level_scope(scope.kind):
+    if builtin_declared(rs, name):
+      return rs_add_diag(rs, decl_span(rs, decl_tidx), "duplicate top-level declaration '" + name + "'")
+    if is_module_scope(scope.kind):
+      if is_prelude_intrinsic(name):
+        return rs_add_diag(rs, decl_span(rs, decl_tidx), "duplicate top-level declaration '" + name + "'")
+      if starts_with(name, "__dao_"):
+        return rs_add_diag(rs, decl_span(rs, decl_tidx), "'" + name + "': the '__dao_' prefix is reserved for compiler/runtime use")
   match scope.decls.get(name):
     Option::Some(eidx):
-      let sp: Span = Span(to_i64(0), to_i64(1))
-      if decl_tidx >= 0:
-        let tok: Token = rs.rc.toks.get(decl_tidx)
-        sp = Span(tok.offset, tok.len)
-      return rs_add_diag(rs, sp, "duplicate declaration '" + name + "'")
+      return rs_add_diag(rs, decl_span(rs, decl_tidx), "duplicate declaration '" + name + "'")
     Option::None:
       scope.decls = scope.decls.set(name, sym_idx)
       return rs_update_scope(rs, rs.current_scope, scope)
@@ -197,6 +267,10 @@ fn symbol_kind_name(kind: SymbolKind): string
 
 fn scope_kind_name(kind: ScopeKind): string
   match kind:
+    ScopeKind::BuiltinScope:
+      return "BuiltinScope"
+    ScopeKind::PreludeScope:
+      return "PreludeScope"
     ScopeKind::FileScope:
       return "FileScope"
     ScopeKind::FunctionScope:
@@ -876,12 +950,11 @@ fn resolve(src: string): ResolveResult
   let rc: RC = RC(po.nodes, po.idx, po.toks, src, ExportTables(Vector<ExportTable>::new()))
   let rs: RS = RS(rc, Vector<Symbol>::new(), Vector<Scope>::new(), Vector<i64>::new(), po.diags, to_i64(-1), to_i64(0))
 
-  // Create file scope
+  // Builtins, an empty prelude, then the file's own scope: the same
+  // layout as a program's, so scope indices mean one thing.
+  rs = rs_open_root_scopes(rs)
   let file_sr: ScopeR = rs_push_scope(rs, ScopeKind::FileScope)
   rs = file_sr.rs
-
-  // Populate builtins
-  rs = populate_builtins(rs)
 
   // Pass 1: Collect top-level declarations
   rs = collect_top_level(rs, file_node_idx)
@@ -993,6 +1066,13 @@ fn resolve_program(pg: ProgramGraph): ProgramResolveResult
     all_diags = all_diags.push(pg.diags.get(gdi))
     gdi = gdi + 1
 
+  // The builtins and prelude scopes are opened once per program; every
+  // module's scope hangs from the prelude scope (§7 scope order).
+  let root_rc: RC = RC(Vector<Node>::new(), Vector<i64>::new(), Vector<Token>::new(), "", ExportTables(export_tables))
+  let root_rs: RS = rs_open_root_scopes(RS(root_rc, all_symbols, all_scopes, rs_uses, Vector<Diagnostic>::new(), to_i64(-1), to_i64(-1)))
+  all_symbols = root_rs.symbols
+  all_scopes = root_rs.scopes
+
   // Pass 1: Collect declarations and build export tables in topo order.
   // Track per-module file scope index for Pass 2.
   let module_scope_idx: Vector<i64> = Vector<i64>::new()
@@ -1013,18 +1093,23 @@ fn resolve_program(pg: ProgramGraph): ProgramResolveResult
 
     // Create resolver state for this module.
     let rc: RC = RC(po.nodes, po.idx, po.toks, sf.source_text, ExportTables(export_tables))
-    let rs: RS = RS(rc, all_symbols, all_scopes, rs_uses, Vector<Diagnostic>::new(), to_i64(-1), mid)
+    let rs: RS = RS(rc, all_symbols, all_scopes, rs_uses, Vector<Diagnostic>::new(), prelude_scope_idx(), mid)
 
-    // Create file scope.
+    // The module's own scope, under the prelude.  A prelude module's
+    // declarations go into the shared prelude scope (§7.3); its import
+    // bindings, like any module's, stay in its own scope (§3).
     let fsr: ScopeR = rs_push_scope(rs, ScopeKind::FileScope)
     rs = fsr.rs
     module_scope_idx = module_scope_idx.set(mid, fsr.scope_idx)
+    if me.is_prelude:
+      rs.current_scope = prelude_scope_idx()
 
-    // Populate builtins.
-    rs = populate_builtins(rs)
-
-    // Collect top-level declarations.
+    // Collect top-level declarations; the export table is the
+    // module's own declarations, looked up where they were declared.
     rs = collect_top_level(rs, po.root)
+    let exports: HashMap<i64> = build_export_table(rs, po.root)
+    export_tables = export_tables.set(mid, ExportTable(exports))
+    rs.current_scope = fsr.scope_idx
 
     // Register import bindings as Module symbols.
     let root_node: Node = po.nodes.get(po.root)
@@ -1043,14 +1128,19 @@ fn resolve_program(pg: ProgramGraph): ProgramResolveResult
                 if seg_count > 0:
                   let last_tidx: i64 = po.idx.get(path_lp - 1)
                   let local_name: string = substring(po.src, po.toks.get(last_tidx).offset, po.toks.get(last_tidx).len)
-                  // decl_node stores target module_id for Module symbols.
-                  let msr: SymR = rs_add_symbol(rs, Symbol(SymbolKind::Module, local_name, target_mid, rs.current_scope, rs.owner_module_id))
-                  rs = scope_declare(msr.rs, local_name, msr.sym_idx, last_tidx)
+                  // A binding may not collide with the module's own
+                  // top-level declaration (§3.3), which for a prelude
+                  // module lives in the prelude scope, not this one:
+                  // the export table is the check for every module.
+                  let own: Option<i64> = exports.get(local_name)
+                  match own:
+                    Option::Some(own_sym):
+                      rs = rs_add_diag(rs, tok_name_span(rs, last_tidx), "duplicate declaration '" + local_name + "'")
+                    Option::None:
+                      // decl_node stores target module_id for Module symbols.
+                      let msr: SymR = rs_add_symbol(rs, Symbol(SymbolKind::Module, local_name, target_mid, rs.current_scope, rs.owner_module_id))
+                      rs = scope_declare(msr.rs, local_name, msr.sym_idx, last_tidx)
           ii = ii + 1
-
-    // Build export table for this module.
-    let exports: HashMap<i64> = build_export_table(rs, po.root)
-    export_tables = export_tables.set(mid, ExportTable(exports))
 
     // Save accumulated state.
     all_symbols = rs.symbols
@@ -1257,6 +1347,51 @@ fn count_uses(result: ResolveResult): i64
   // Uses are stored as flat pairs, so count is length / 2
   return result.uses.length() / 2
 
+fn program_error_count(rr: ProgramResolveResult): i64
+  let n: i64 = 0
+  let i: i64 = 0
+  while i < rr.diags.length():
+    if rr.diags.get(i).diag.severity == Severity::Error:
+      n = n + 1
+    i = i + 1
+  return n
+
+fn program_has_message(rr: ProgramResolveResult, message: string): bool
+  let i: i64 = 0
+  while i < rr.diags.length():
+    if rr.diags.get(i).diag.message == message:
+      return true
+    i = i + 1
+  return false
+
+// The symbol the program resolved for the first token spelled `name`
+// in file `path` that has a use (a declaration's own name token has
+// none), or -1.
+fn program_use_of(pg: ProgramGraph, rr: ProgramResolveResult, path: string, name: string): i64
+  let fi: i64 = 0
+  while fi < pg.files.length():
+    let sf: SourceFile = pg.files.get(fi)
+    if sf.path == path:
+      let toks: Vector<Token> = sf.parse_output.toks
+      let ti: i64 = 0
+      while ti < toks.length():
+        let tok: Token = toks.get(ti)
+        if substring(sf.source_text, tok.offset, tok.len) == name:
+          let found: Option<i64> = rr.uses.get(uses_key(sf.file_id, ti))
+          match found:
+            Option::Some(sym_idx):
+              return sym_idx
+            Option::None:
+              ti = ti + 1
+        else:
+          ti = ti + 1
+      return to_i64(-1)
+    fi = fi + 1
+  return to_i64(-1)
+
+fn resolve_inputs(inputs: Vector<SourceInput>): ProgramResolveResult
+  return resolve_program(build_program(inputs))
+
 // =========================================================================
 // Section 32: Golden resolve tests
 // =========================================================================
@@ -1266,7 +1401,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 35
+  let total: i32 = 46
 
   // -----------------------------------------------------------------
   // Test 1: forward_ref — fn calls fn defined later in file; no diagnostic
@@ -1581,8 +1716,8 @@ fn main(): i32
 
   // Test 21: import binds final segment as Module symbol
   let cf_inputs1: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs1 = cf_inputs1.push(SourceInput("fmt.dao", "module core::fmt\nfn print_line(s: string): void\n  print(s)\n"))
-  cf_inputs1 = cf_inputs1.push(SourceInput("main.dao", "module app::main\nimport core::fmt\nfn f(): i32 -> 0\n"))
+  cf_inputs1 = cf_inputs1.push(SourceInput("fmt.dao", "module core::fmt\nfn print_line(s: string): void\n  print(s)\n", false))
+  cf_inputs1 = cf_inputs1.push(SourceInput("main.dao", "module app::main\nimport core::fmt\nfn f(): i32 -> 0\n", false))
   let cf_pg1: ProgramGraph = build_program(cf_inputs1)
   let cf_r1: ProgramResolveResult = resolve_program(cf_pg1)
   let found_mod_sym: bool = false
@@ -1601,8 +1736,8 @@ fn main(): i32
 
   // Test 22: qualified function call into imported module resolves
   let cf_inputs2: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs2 = cf_inputs2.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n"))
-  cf_inputs2 = cf_inputs2.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n"))
+  cf_inputs2 = cf_inputs2.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
+  cf_inputs2 = cf_inputs2.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
   let cf_pg2: ProgramGraph = build_program(cf_inputs2)
   let cf_r2: ProgramResolveResult = resolve_program(cf_pg2)
   // Should have no diagnostics related to resolution
@@ -1621,8 +1756,8 @@ fn main(): i32
 
   // Test 23: missing imported module symbol diagnoses correctly
   let cf_inputs3: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs3 = cf_inputs3.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n"))
-  cf_inputs3 = cf_inputs3.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::sub(1, 2)\n"))
+  cf_inputs3 = cf_inputs3.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
+  cf_inputs3 = cf_inputs3.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::sub(1, 2)\n", false))
   let cf_pg3: ProgramGraph = build_program(cf_inputs3)
   let cf_r3: ProgramResolveResult = resolve_program(cf_pg3)
   let found_no_export: bool = false
@@ -1640,9 +1775,9 @@ fn main(): i32
 
   // Test 24: duplicate import final segment diagnoses
   let cf_inputs4: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs4 = cf_inputs4.push(SourceInput("a_fmt.dao", "module a::fmt\nfn f(): i32 -> 0\n"))
-  cf_inputs4 = cf_inputs4.push(SourceInput("b_fmt.dao", "module b::fmt\nfn g(): i32 -> 0\n"))
-  cf_inputs4 = cf_inputs4.push(SourceInput("main.dao", "module app::main\nimport a::fmt\nimport b::fmt\nfn h(): i32 -> 0\n"))
+  cf_inputs4 = cf_inputs4.push(SourceInput("a_fmt.dao", "module a::fmt\nfn f(): i32 -> 0\n", false))
+  cf_inputs4 = cf_inputs4.push(SourceInput("b_fmt.dao", "module b::fmt\nfn g(): i32 -> 0\n", false))
+  cf_inputs4 = cf_inputs4.push(SourceInput("main.dao", "module app::main\nimport a::fmt\nimport b::fmt\nfn h(): i32 -> 0\n", false))
   let cf_pg4: ProgramGraph = build_program(cf_inputs4)
   let cf_r4: ProgramResolveResult = resolve_program(cf_pg4)
   let found_dup_import: bool = false
@@ -1660,8 +1795,8 @@ fn main(): i32
 
   // Test 25: unqualified imported declaration remains unresolved
   let cf_inputs5: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs5 = cf_inputs5.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n"))
-  cf_inputs5 = cf_inputs5.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return add(1, 2)\n"))
+  cf_inputs5 = cf_inputs5.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
+  cf_inputs5 = cf_inputs5.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return add(1, 2)\n", false))
   let cf_pg5: ProgramGraph = build_program(cf_inputs5)
   let cf_r5: ProgramResolveResult = resolve_program(cf_pg5)
   let found_unknown_add: bool = false
@@ -1679,7 +1814,7 @@ fn main(): i32
 
   // Test 26: same-module unqualified access still works
   let cf_inputs6: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs6 = cf_inputs6.push(SourceInput("math.dao", "module app::math\nfn helper(): i32 -> 42\n\nfn add(a: i32, b: i32): i32\n  return helper()\n"))
+  cf_inputs6 = cf_inputs6.push(SourceInput("math.dao", "module app::math\nfn helper(): i32 -> 42\n\nfn add(a: i32, b: i32): i32\n  return helper()\n", false))
   let cf_pg6: ProgramGraph = build_program(cf_inputs6)
   let cf_r6: ProgramResolveResult = resolve_program(cf_pg6)
   let cf_r6_errs: i64 = 0
@@ -1697,8 +1832,8 @@ fn main(): i32
 
   // Test 27: imported enum variant resolves via full qualified path
   let cf_inputs7: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs7 = cf_inputs7.push(SourceInput("colors.dao", "module app::colors\nenum Color:\n  Red\n  Blue\n"))
-  cf_inputs7 = cf_inputs7.push(SourceInput("main.dao", "module app::main\nimport app::colors\nfn f(): i32\n  let c: i32 = colors::Color::Red\n  return 0\n"))
+  cf_inputs7 = cf_inputs7.push(SourceInput("colors.dao", "module app::colors\nenum Color:\n  Red\n  Blue\n", false))
+  cf_inputs7 = cf_inputs7.push(SourceInput("main.dao", "module app::main\nimport app::colors\nfn f(): i32\n  let c: i32 = colors::Color::Red\n  return 0\n", false))
   let cf_pg7: ProgramGraph = build_program(cf_inputs7)
   let cf_r7: ProgramResolveResult = resolve_program(cf_pg7)
   // colors::Color::Red should resolve — 'colors' as Module, 'Color' through
@@ -1724,13 +1859,13 @@ fn main(): i32
   // Test 29: topo-order-independent result stability
   // Resolve with different input orders; same diagnostic count.
   let cf_inputs9a: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs9a = cf_inputs9a.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n"))
-  cf_inputs9a = cf_inputs9a.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n"))
+  cf_inputs9a = cf_inputs9a.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
+  cf_inputs9a = cf_inputs9a.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
   let cf_pg9a: ProgramGraph = build_program(cf_inputs9a)
   let cf_r9a: ProgramResolveResult = resolve_program(cf_pg9a)
   let cf_inputs9b: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs9b = cf_inputs9b.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n"))
-  cf_inputs9b = cf_inputs9b.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n"))
+  cf_inputs9b = cf_inputs9b.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
+  cf_inputs9b = cf_inputs9b.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
   let cf_pg9b: ProgramGraph = build_program(cf_inputs9b)
   let cf_r9b: ProgramResolveResult = resolve_program(cf_pg9b)
   if cf_r9a.diags.length() == cf_r9b.diags.length():
@@ -1741,9 +1876,9 @@ fn main(): i32
 
   // Test 30: three-module chain resolves end-to-end
   let cf_inputs10: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs10 = cf_inputs10.push(SourceInput("base.dao", "module lib::base\nfn zero(): i32 -> 0\n"))
-  cf_inputs10 = cf_inputs10.push(SourceInput("mid.dao", "module lib::mid\nimport lib::base\nfn get_zero(): i32\n  return base::zero()\n"))
-  cf_inputs10 = cf_inputs10.push(SourceInput("top.dao", "module app::top\nimport lib::mid\nfn f(): i32\n  return mid::get_zero()\n"))
+  cf_inputs10 = cf_inputs10.push(SourceInput("base.dao", "module lib::base\nfn zero(): i32 -> 0\n", false))
+  cf_inputs10 = cf_inputs10.push(SourceInput("mid.dao", "module lib::mid\nimport lib::base\nfn get_zero(): i32\n  return base::zero()\n", false))
+  cf_inputs10 = cf_inputs10.push(SourceInput("top.dao", "module app::top\nimport lib::mid\nfn f(): i32\n  return mid::get_zero()\n", false))
   let cf_pg10: ProgramGraph = build_program(cf_inputs10)
   let cf_r10: ProgramResolveResult = resolve_program(cf_pg10)
   let cf_r10_errs: i64 = 0
@@ -1761,8 +1896,8 @@ fn main(): i32
 
   // Test 31: imported type in annotation position (qualified type)
   let cf_inputs11: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs11 = cf_inputs11.push(SourceInput("types.dao", "module app::types\nclass Point:\n  x: i32\n  y: i32\n"))
-  cf_inputs11 = cf_inputs11.push(SourceInput("main.dao", "module app::main\nimport app::types\nfn f(): i32\n  let p: types::Point = types::Point(1, 2)\n  return p.x\n"))
+  cf_inputs11 = cf_inputs11.push(SourceInput("types.dao", "module app::types\nclass Point:\n  x: i32\n  y: i32\n", false))
+  cf_inputs11 = cf_inputs11.push(SourceInput("main.dao", "module app::main\nimport app::types\nfn f(): i32\n  let p: types::Point = types::Point(1, 2)\n  return p.x\n", false))
   let cf_pg11: ProgramGraph = build_program(cf_inputs11)
   let cf_r11: ProgramResolveResult = resolve_program(cf_pg11)
   let cf_r11_errs: i64 = 0
@@ -1780,8 +1915,8 @@ fn main(): i32
 
   // Test 32: transitive re-export is blocked (i32 from module A not exported)
   let cf_inputs12: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs12 = cf_inputs12.push(SourceInput("a.dao", "module app::a\nfn f(): i32 -> 0\n"))
-  cf_inputs12 = cf_inputs12.push(SourceInput("b.dao", "module app::b\nimport app::a\nfn g(): i32\n  return a::i32\n"))
+  cf_inputs12 = cf_inputs12.push(SourceInput("a.dao", "module app::a\nfn f(): i32 -> 0\n", false))
+  cf_inputs12 = cf_inputs12.push(SourceInput("b.dao", "module app::b\nimport app::a\nfn g(): i32\n  return a::i32\n", false))
   let cf_pg12: ProgramGraph = build_program(cf_inputs12)
   let cf_r12: ProgramResolveResult = resolve_program(cf_pg12)
   let found_no_i32: bool = false
@@ -1841,8 +1976,8 @@ fn main(): i32
   // typecheck/HIR access path routes through the helpers correctly
   // before those passes are built on top.
   let p_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  p_inputs = p_inputs.push(SourceInput("fmt.dao", "module core::fmt\nfn print_line(s: string): void\n  print(s)\n"))
-  p_inputs = p_inputs.push(SourceInput("main.dao", "module app::main\nimport core::fmt\nfn f(): i32\n  return 0\n"))
+  p_inputs = p_inputs.push(SourceInput("fmt.dao", "module core::fmt\nfn print_line(s: string): void\n  print(s)\n", false))
+  p_inputs = p_inputs.push(SourceInput("main.dao", "module app::main\nimport core::fmt\nfn f(): i32\n  return 0\n", false))
   let p_pg: ProgramGraph = build_program(p_inputs)
   let p0_val: Program = program_from_graph(p_pg)
   let p1_val: Program = program_run_resolve(p0_val)
@@ -1922,6 +2057,208 @@ fn main(): i32
     print("FAIL resource_block_scope: expected 1 diagnostic (unknown name after the block), got " + i64_to_string(r35_diags))
 
   // -----------------------------------------------------------------
+  // Prelude resolution (CONTRACT_MODULE_SYSTEM.md §7): synthetic
+  // prelude modules under stdlib/core/, loaded with `is_prelude`.
+  // -----------------------------------------------------------------
+  let greet_prelude: SourceInput = SourceInput("stdlib/core/greet.dao", "module core::greet\nfn greeting(): i32 -> 1\n", true)
+
+  // Test 36: prelude_visibility — a prelude declaration is visible
+  // unqualified in a module that imports nothing.
+  let pv_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  pv_inputs = pv_inputs.push(greet_prelude)
+  pv_inputs = pv_inputs.push(SourceInput("main.dao", "module app::main\nfn f(): i32\n  return greeting()\n", false))
+  let pv_r: ProgramResolveResult = resolve_inputs(pv_inputs)
+  if program_error_count(pv_r) == 0:
+    print("PASS prelude_visibility")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL prelude_visibility: " + i64_to_string(program_error_count(pv_r)) + " errors")
+
+  // Test 37: prelude_shadowing — the module's own `greeting` wins
+  // silently; the use resolves to the module's symbol.
+  let ps_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  ps_inputs = ps_inputs.push(greet_prelude)
+  ps_inputs = ps_inputs.push(SourceInput("main.dao", "module app::main\nfn greeting(): i32 -> 2\nfn f(): i32\n  return greeting()\n", false))
+  let ps_pg: ProgramGraph = build_program(ps_inputs)
+  let ps_r: ProgramResolveResult = resolve_program(ps_pg)
+  let ps_sym: i64 = program_use_of(ps_pg, ps_r, "main.dao", "greeting")
+  let ps_ok: bool = false
+  if program_error_count(ps_r) == 0:
+    if ps_sym >= 0:
+      let ps_main_mid: i64 = find_module_by_name(ps_pg.modules, "app::main")
+      if ps_r.symbols.get(ps_sym).owner_module_id == ps_main_mid:
+        ps_ok = true
+  if ps_ok:
+    print("PASS prelude_shadowing")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL prelude_shadowing: errors=" + i64_to_string(program_error_count(ps_r)) + " sym=" + i64_to_string(ps_sym))
+
+  // Test 38: builtin_protection — a builtin's name cannot be declared
+  // at top level by a module or by a prelude module (§7.6); locals
+  // are not top-level declarations.
+  let bp_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  bp_inputs = bp_inputs.push(SourceInput("stdlib/core/bad.dao", "module core::bad\nfn bool(): i32 -> 0\n", true))
+  bp_inputs = bp_inputs.push(SourceInput("main.dao", "module app::main\nclass string:\n  n: i32\nfn f(): i32\n  let i32: i32 = 1\n  return i32\n", false))
+  let bp_r: ProgramResolveResult = resolve_inputs(bp_inputs)
+  let bp_ok: bool = false
+  if program_error_count(bp_r) == 2:
+    if program_has_message(bp_r, "duplicate top-level declaration 'bool'"):
+      if program_has_message(bp_r, "duplicate top-level declaration 'string'"):
+        bp_ok = true
+  if bp_ok:
+    print("PASS builtin_protection")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL builtin_protection: " + i64_to_string(program_error_count(bp_r)) + " errors")
+
+  // Test 39: prelude_identity — `greeting()` and `greet::greeting()`
+  // after `import core::greet` resolve to one symbol, owned by the
+  // prelude module.
+  let pi_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  pi_inputs = pi_inputs.push(greet_prelude)
+  pi_inputs = pi_inputs.push(SourceInput("main.dao", "module app::main\nimport core::greet\nfn f(): i32\n  return greeting() + greet::greeting()\n", false))
+  let pi_pg: ProgramGraph = build_program(pi_inputs)
+  let pi_r: ProgramResolveResult = resolve_program(pi_pg)
+  let pi_bare: i64 = program_use_of(pi_pg, pi_r, "main.dao", "greeting")
+  let pi_greet_mid: i64 = find_module_by_name(pi_pg.modules, "core::greet")
+  let pi_qualified: i64 = to_i64(-1)
+  match pi_r.module_exports.tables.get(pi_greet_mid).entries.get("greeting"):
+    Option::Some(s):
+      pi_qualified = s
+    Option::None:
+      pi_qualified = to_i64(-1)
+  let pi_ok: bool = false
+  if program_error_count(pi_r) == 0:
+    if pi_bare >= 0:
+      if pi_bare == pi_qualified:
+        if pi_r.symbols.get(pi_bare).owner_module_id == pi_greet_mid:
+          pi_ok = true
+  if pi_ok:
+    print("PASS prelude_identity")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL prelude_identity: errors=" + i64_to_string(program_error_count(pi_r)) + " bare=" + i64_to_string(pi_bare) + " qualified=" + i64_to_string(pi_qualified))
+
+  // Test 40: prelude_one_namespace — one prelude module uses another's
+  // declaration unqualified, importing nothing (§7.3).
+  let pn_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  pn_inputs = pn_inputs.push(greet_prelude)
+  pn_inputs = pn_inputs.push(SourceInput("stdlib/core/twice.dao", "module core::twice\nfn twice(): i32\n  return greeting() + greeting()\n", true))
+  let pn_r: ProgramResolveResult = resolve_inputs(pn_inputs)
+  if program_error_count(pn_r) == 0:
+    print("PASS prelude_one_namespace")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL prelude_one_namespace: " + i64_to_string(program_error_count(pn_r)) + " errors")
+
+  // Test 41: prelude_module_isolation — with the prelude loaded, an
+  // ordinary module's declaration stays unknown in another module
+  // (§3), and an import in a prelude module binds there only.
+  let pm_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  pm_inputs = pm_inputs.push(greet_prelude)
+  pm_inputs = pm_inputs.push(SourceInput("stdlib/core/uses_lib.dao", "module core::uses_lib\nimport app::lib\nfn via(): i32\n  return lib::helper()\n", true))
+  pm_inputs = pm_inputs.push(SourceInput("lib.dao", "module app::lib\nfn helper(): i32 -> 3\n", false))
+  pm_inputs = pm_inputs.push(SourceInput("main.dao", "module app::main\nfn f(): i32\n  return helper() + lib::helper()\n", false))
+  let pm_r: ProgramResolveResult = resolve_inputs(pm_inputs)
+  let pm_ok: bool = false
+  if program_error_count(pm_r) == 2:
+    if program_has_message(pm_r, "unknown name 'helper'"):
+      if program_has_message(pm_r, "unknown name 'lib'"):
+        pm_ok = true
+  if pm_ok:
+    print("PASS prelude_module_isolation")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL prelude_module_isolation: " + i64_to_string(program_error_count(pm_r)) + " errors")
+
+  // Test 42: prelude_order_independence — the inputs in the other
+  // order resolve the same use to the same symbol.
+  let po_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  po_inputs = po_inputs.push(SourceInput("main.dao", "module app::main\nfn f(): i32\n  return greeting()\n", false))
+  po_inputs = po_inputs.push(greet_prelude)
+  let po_pg: ProgramGraph = build_program(po_inputs)
+  let po_r: ProgramResolveResult = resolve_program(po_pg)
+  let po_sym: i64 = program_use_of(po_pg, po_r, "main.dao", "greeting")
+  let pv_pg: ProgramGraph = build_program(pv_inputs)
+  let pv_sym: i64 = program_use_of(pv_pg, pv_r, "main.dao", "greeting")
+  let po_ok: bool = false
+  if program_error_count(po_r) == 0:
+    if po_sym >= 0:
+      if po_sym == pv_sym:
+        if po_r.symbols.get(po_sym).name == "greeting":
+          po_ok = true
+  if po_ok:
+    print("PASS prelude_order_independence")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL prelude_order_independence: sym=" + i64_to_string(po_sym) + " vs " + i64_to_string(pv_sym))
+
+  // Test 43: prelude_absence — a name declared nowhere still diagnoses.
+  let pa_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  pa_inputs = pa_inputs.push(greet_prelude)
+  pa_inputs = pa_inputs.push(SourceInput("main.dao", "module app::main\nfn f(): i32\n  return farewell()\n", false))
+  let pa_r: ProgramResolveResult = resolve_inputs(pa_inputs)
+  if program_has_message(pa_r, "unknown name 'farewell'"):
+    print("PASS prelude_absence")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL prelude_absence: expected unknown name 'farewell'")
+
+  // Test 44: reserved_names — `__dao_` names and the intrinsic family
+  // are the prelude's to declare at top level (§7.7–§7.8); a class's
+  // own `copy_out` method is not such a declaration.
+  let rn_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  rn_inputs = rn_inputs.push(SourceInput("stdlib/core/hooks.dao", "module core::hooks\nextern fn __dao_x(): i32\nfn size_of(): i32 -> 8\n", true))
+  rn_inputs = rn_inputs.push(SourceInput("main.dao", "module app::main\nfn __dao_y(): i32 -> 0\nfn ptr_offset(): i32 -> 0\nclass Box:\n  n: i32\n  fn copy_out(self): i32 -> self.n\n", false))
+  let rn_r: ProgramResolveResult = resolve_inputs(rn_inputs)
+  let rn_ok: bool = false
+  if program_error_count(rn_r) == 2:
+    if program_has_message(rn_r, "'__dao_y': the '__dao_' prefix is reserved for compiler/runtime use"):
+      if program_has_message(rn_r, "duplicate top-level declaration 'ptr_offset'"):
+        rn_ok = true
+  if rn_ok:
+    print("PASS reserved_names")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL reserved_names: " + i64_to_string(program_error_count(rn_r)) + " errors")
+
+  // Test 45: prelude_import_collision — a prelude module's import
+  // binding may not collide with its own top-level declaration
+  // (§3.3), although the two live in different scopes.
+  let pc_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  pc_inputs = pc_inputs.push(SourceInput("stdlib/core/two.dao", "module core::two\nfn pair(): i32 -> 2\n", true))
+  pc_inputs = pc_inputs.push(SourceInput("stdlib/core/user.dao", "module core::user\nimport core::two\nfn two(): i32 -> 0\n", true))
+  let pc_r: ProgramResolveResult = resolve_inputs(pc_inputs)
+  let pc_ok: bool = false
+  if program_error_count(pc_r) == 1:
+    if program_has_message(pc_r, "duplicate declaration 'two'"):
+      pc_ok = true
+  if pc_ok:
+    print("PASS prelude_import_collision")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL prelude_import_collision: " + i64_to_string(program_error_count(pc_r)) + " errors")
+
+  // Test 46: prelude_exports_per_module — a qualified path reaches only
+  // the owning module's declarations (§7.5): `greet::twice` is not an
+  // export of core::greet although `twice` is visible unqualified.
+  let pe_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  pe_inputs = pe_inputs.push(greet_prelude)
+  pe_inputs = pe_inputs.push(SourceInput("stdlib/core/twice.dao", "module core::twice\nfn twice(): i32 -> 2\n", true))
+  pe_inputs = pe_inputs.push(SourceInput("main.dao", "module app::main\nimport core::greet\nfn f(): i32\n  return twice() + greet::twice()\n", false))
+  let pe_r: ProgramResolveResult = resolve_inputs(pe_inputs)
+  let pe_ok: bool = false
+  if program_error_count(pe_r) == 1:
+    if program_has_message(pe_r, "module 'greet' has no exported symbol 'twice'"):
+      pe_ok = true
+  if pe_ok:
+    print("PASS prelude_exports_per_module")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL prelude_exports_per_module: " + i64_to_string(program_error_count(pe_r)) + " errors")
+
+  // -----------------------------------------------------------------
   // Summary
   // -----------------------------------------------------------------
 
@@ -1945,7 +2282,6 @@ fn main(): i32
   //   - Yield statement resolution
   //   - Match arm destructuring bindings (patterns resolved as
   //     expressions, but no binding introduction)
-  //   - Reserved __dao_ prefix enforcement
   //   - Cross-file / module resolution
 
   return 0

@@ -2651,6 +2651,7 @@ class ModuleEntry:
   module_id: i64
   file_id: i64
   name: string            // canonical "a::b::c" display form
+  is_prelude: bool        // a prelude module (CONTRACT_MODULE_SYSTEM.md §7)
 
 class FileDiagnostic:
   file_id: i64            // -1 for graph-level diagnostics
@@ -2671,6 +2672,7 @@ class ProgramGraph:
 class SourceInput:
   path: string
   source_text: string
+  is_prelude: bool        // explicit membership in the prelude group; never inferred from the path
 
 // --- Task 27: Type universe (shared across passes) ---
 //
@@ -2872,7 +2874,7 @@ fn build_program(inputs: Vector<SourceInput>): ProgramGraph
         files = files.push(SourceFile(fi, inp.path, inp.source_text, po, to_i64(-1)))
       else:
         let mid: i64 = modules.length()
-        modules = modules.push(ModuleEntry(mid, fi, mod_name))
+        modules = modules.push(ModuleEntry(mid, fi, mod_name, inp.is_prelude))
         files = files.push(SourceFile(fi, inp.path, inp.source_text, po, mid))
     fi = fi + 1
 

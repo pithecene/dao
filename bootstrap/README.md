@@ -133,6 +133,13 @@ uses map over the bootstrap parser's AST.
 - `QualNameE` first-segment resolution
 - Type name resolution (no diagnostic on unresolved)
 - Builtin type pre-population (i8–u64, f32, f64, bool, string, void)
+- Program scope order builtins → prelude → module (Task 38): the
+  prelude group (`stdlib/core`, `stdlib/io`, loaded as declarations
+  with `is_prelude`) is one shared scope every module's scope hangs
+  from; a module's own declaration shadows a prelude declaration;
+  qualified and unqualified paths reach one symbol; builtin names
+  cannot be redeclared at top level; `__dao_` names and the intrinsic
+  family are the prelude's to declare
 - Duplicate declaration diagnostics
 - `let` / `for` / lambda / param / field declarations
 - `resource` block bodies in a block scope (Task 37)
@@ -332,7 +339,7 @@ same change as the bootstrap work that closes a row.
 | §4 exports, same-module access | conforms (Task 26) |
 | §5 `extend` scoping | conforms (Task 26 §6.5) — module granularity, not imported |
 | §6 qualified forms | `b::f`, `b::T`, `b::E::V` conform (Task 27 D4); `b::C` in conformance positions and `b::T::m` are rejected until the bootstrap has concepts and methods — Task 33 |
-| §7 prelude | not implemented — the resolver declares compiler builtins only and loads no stdlib — Task 38 |
+| §7 prelude | partial (Task 38) — scope order, shadowing, identity, reserved names, and prelude method visibility conform; seven prelude files load partially (the parser lacks `derived concept`, `mode` blocks, generic bounds, `yield`); the `hir`/`mir`/`llvm` probe columns are not yet measured with the prelude |
 | §8 entry module | not implemented — no driver or entry concept; MIR flattens every function of every module — Task 33 |
 | §9 determinism | graph construction conforms (Task 25 §8; graph tests 7–8); program-level output determinism is unverified — Task 33 |
 

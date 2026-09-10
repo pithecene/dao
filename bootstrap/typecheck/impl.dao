@@ -802,10 +802,15 @@ fn tc_register_concepts(ts: TS, decls: Vector<i64>): TS
     i = i + 1
   return r
 
-// D2: Returns true if a symbol is visible from the current module.
-// Visible = builtin (owner_module_id == -1) OR same module.
+// A symbol is visible from a module when it is a builtin
+// (owner_module_id == -1), a prelude declaration (declared into the
+// prelude scope, whichever prelude module owns it — its `extend`
+// methods join every module's method set, CONTRACT_MODULE_SYSTEM.md
+// §7.2), or the module's own.
 fn sym_visible_in_module(sym: Symbol, module_id: i64): bool
   if sym.owner_module_id < 0:
+    return true
+  if sym.scope_id == prelude_scope_idx():
     return true
   return sym.owner_module_id == module_id
 
@@ -2161,7 +2166,7 @@ fn typecheck(src: string): TypeCheckResult
   // program_run_typecheck instead.
   let wrapped: string = wrap_test_module(src)
   let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs = inputs.push(SourceInput("test.dao", wrapped))
+  inputs = inputs.push(SourceInput("test.dao", wrapped, false))
   let pg: ProgramGraph = build_program(inputs)
   let p: Program = program_from_graph(pg)
   p = program_run_resolve(p)
@@ -2205,7 +2210,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 49
+  let total: i32 = 50
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -2519,7 +2524,7 @@ fn main(): i32
 
   // Test d1a_1: program_init_typecheck seeds canonical builtins.
   let p_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  p_inputs = p_inputs.push(SourceInput("a.dao", "module a\nfn f(): i32 -> 0\n"))
+  p_inputs = p_inputs.push(SourceInput("a.dao", "module a\nfn f(): i32 -> 0\n", false))
   let p_pg: ProgramGraph = build_program(p_inputs)
   let p_val: Program = program_from_graph(p_pg)
   let p_r: Program = program_run_resolve(p_val)
@@ -2597,7 +2602,7 @@ fn main(): i32
   // when a required method is missing.
   let d3_src: string = "concept Showable:\n  fn show(self): string\n\nclass Msg:\n  text: string\n\nextend Msg as Showable:\n  fn display(self): string -> self.text\n"
   let d3_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  d3_inputs = d3_inputs.push(SourceInput("d3.dao", "module d3\n" + d3_src))
+  d3_inputs = d3_inputs.push(SourceInput("d3.dao", "module d3\n" + d3_src, false))
   let d3_pg: ProgramGraph = build_program(d3_inputs)
   let d3_p: Program = program_from_graph(d3_pg)
   d3_p = program_run_resolve(d3_p)
@@ -2686,8 +2691,8 @@ fn main(): i32
   // the Program pipeline (build_program → resolve → typecheck).
   // Two modules: math exports `add`, main imports and calls `math::add(1,2)`.
   let d4_inputs1: Vector<SourceInput> = Vector<SourceInput>::new()
-  d4_inputs1 = d4_inputs1.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n"))
-  d4_inputs1 = d4_inputs1.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n"))
+  d4_inputs1 = d4_inputs1.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
+  d4_inputs1 = d4_inputs1.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
   let d4_pg1: ProgramGraph = build_program(d4_inputs1)
   let d4_p1: Program = program_from_graph(d4_pg1)
   d4_p1 = program_run_resolve(d4_p1)
@@ -2727,8 +2732,8 @@ fn main(): i32
 
   // Test d4_2: missing export produces a clear diagnostic.
   let d4_inputs2: Vector<SourceInput> = Vector<SourceInput>::new()
-  d4_inputs2 = d4_inputs2.push(SourceInput("a.dao", "module lib::a\nfn secret(): i32 -> 42\n"))
-  d4_inputs2 = d4_inputs2.push(SourceInput("b.dao", "module app::b\nimport lib::a\nfn f(): i32\n  return a::nonexistent()\n"))
+  d4_inputs2 = d4_inputs2.push(SourceInput("a.dao", "module lib::a\nfn secret(): i32 -> 42\n", false))
+  d4_inputs2 = d4_inputs2.push(SourceInput("b.dao", "module app::b\nimport lib::a\nfn f(): i32\n  return a::nonexistent()\n", false))
   let d4_pg2: ProgramGraph = build_program(d4_inputs2)
   let d4_p2: Program = program_from_graph(d4_pg2)
   d4_p2 = program_run_resolve(d4_p2)
@@ -2764,8 +2769,8 @@ fn main(): i32
 
   // Test d4_3: mod::Enum::NotAVariant produces a variant-not-found diagnostic.
   let d4_inputs3: Vector<SourceInput> = Vector<SourceInput>::new()
-  d4_inputs3 = d4_inputs3.push(SourceInput("c.dao", "module lib::colors\nenum Color:\n  Red\n  Blue\n"))
-  d4_inputs3 = d4_inputs3.push(SourceInput("d.dao", "module app::d\nimport lib::colors\nfn f(): i32\n  let x: i32 = colors::Color::NotAColor\n  return 0\n"))
+  d4_inputs3 = d4_inputs3.push(SourceInput("c.dao", "module lib::colors\nenum Color:\n  Red\n  Blue\n", false))
+  d4_inputs3 = d4_inputs3.push(SourceInput("d.dao", "module app::d\nimport lib::colors\nfn f(): i32\n  let x: i32 = colors::Color::NotAColor\n  return 0\n", false))
   let d4_pg3: ProgramGraph = build_program(d4_inputs3)
   let d4_p3: Program = program_from_graph(d4_pg3)
   d4_p3 = program_run_resolve(d4_p3)
@@ -2809,8 +2814,8 @@ fn main(): i32
   // function type is registered in pass1 before main's body is
   // checked in pass2.
   let d5_inputs1: Vector<SourceInput> = Vector<SourceInput>::new()
-  d5_inputs1 = d5_inputs1.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n"))
-  d5_inputs1 = d5_inputs1.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n"))
+  d5_inputs1 = d5_inputs1.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
+  d5_inputs1 = d5_inputs1.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
   let d5_pg1: ProgramGraph = build_program(d5_inputs1)
   let d5_p1: Program = program_from_graph(d5_pg1)
   d5_p1 = program_run_resolve(d5_p1)
@@ -2837,8 +2842,8 @@ fn main(): i32
   // Both modules reference i32 — the type index should be the same
   // canonical builtin (index 2) in the program type table.
   let d5_inputs2: Vector<SourceInput> = Vector<SourceInput>::new()
-  d5_inputs2 = d5_inputs2.push(SourceInput("a.dao", "module mod_a\nfn fa(): i32 -> 1\n"))
-  d5_inputs2 = d5_inputs2.push(SourceInput("b.dao", "module mod_b\nfn fb(): i32 -> 2\n"))
+  d5_inputs2 = d5_inputs2.push(SourceInput("a.dao", "module mod_a\nfn fa(): i32 -> 1\n", false))
+  d5_inputs2 = d5_inputs2.push(SourceInput("b.dao", "module mod_b\nfn fb(): i32 -> 2\n", false))
   let d5_pg2: ProgramGraph = build_program(d5_inputs2)
   let d5_p2: Program = program_from_graph(d5_pg2)
   d5_p2 = program_run_resolve(d5_p2)
@@ -2863,7 +2868,7 @@ fn main(): i32
   // program_run_typecheck. Verify tc_get_expr_type returns a valid
   // type for an expression node in a typechecked module.
   let d5_inputs3: Vector<SourceInput> = Vector<SourceInput>::new()
-  d5_inputs3 = d5_inputs3.push(SourceInput("e.dao", "module expr_test\nfn f(): i32 -> 1 + 2\n"))
+  d5_inputs3 = d5_inputs3.push(SourceInput("e.dao", "module expr_test\nfn f(): i32 -> 1 + 2\n", false))
   let d5_pg3: ProgramGraph = build_program(d5_inputs3)
   let d5_p3: Program = program_from_graph(d5_pg3)
   d5_p3 = program_run_resolve(d5_p3)
@@ -2893,9 +2898,9 @@ fn main(): i32
   let smoke_ok: bool = false
   if file_exists(smoke_base + "core_fmt.dao"):
     let smoke_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-    smoke_inputs = smoke_inputs.push(SourceInput("core_fmt.dao", read_file(smoke_base + "core_fmt.dao")))
-    smoke_inputs = smoke_inputs.push(SourceInput("app_math.dao", read_file(smoke_base + "app_math.dao")))
-    smoke_inputs = smoke_inputs.push(SourceInput("app_main.dao", read_file(smoke_base + "app_main.dao")))
+    smoke_inputs = smoke_inputs.push(SourceInput("core_fmt.dao", read_file(smoke_base + "core_fmt.dao"), false))
+    smoke_inputs = smoke_inputs.push(SourceInput("app_math.dao", read_file(smoke_base + "app_math.dao"), false))
+    smoke_inputs = smoke_inputs.push(SourceInput("app_main.dao", read_file(smoke_base + "app_main.dao"), false))
     let smoke_pg: ProgramGraph = build_program(smoke_inputs)
     let smoke_p: Program = program_from_graph(smoke_pg)
     smoke_p = program_run_resolve(smoke_p)
@@ -2925,8 +2930,8 @@ fn main(): i32
   let enum_ok: bool = false
   if file_exists(enum_base + "colors.dao"):
     let enum_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-    enum_inputs = enum_inputs.push(SourceInput("colors.dao", read_file(enum_base + "colors.dao")))
-    enum_inputs = enum_inputs.push(SourceInput("user.dao", read_file(enum_base + "user.dao")))
+    enum_inputs = enum_inputs.push(SourceInput("colors.dao", read_file(enum_base + "colors.dao"), false))
+    enum_inputs = enum_inputs.push(SourceInput("user.dao", read_file(enum_base + "user.dao"), false))
     let enum_pg: ProgramGraph = build_program(enum_inputs)
     let enum_p: Program = program_from_graph(enum_pg)
     enum_p = program_run_resolve(enum_p)
@@ -2960,8 +2965,8 @@ fn main(): i32
   let ext_ok: bool = false
   if file_exists(ext_base + "provider.dao"):
     let ext_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-    ext_inputs = ext_inputs.push(SourceInput("provider.dao", read_file(ext_base + "provider.dao")))
-    ext_inputs = ext_inputs.push(SourceInput("consumer.dao", read_file(ext_base + "consumer.dao")))
+    ext_inputs = ext_inputs.push(SourceInput("provider.dao", read_file(ext_base + "provider.dao"), false))
+    ext_inputs = ext_inputs.push(SourceInput("consumer.dao", read_file(ext_base + "consumer.dao"), false))
     let ext_pg: ProgramGraph = build_program(ext_inputs)
     let ext_p: Program = program_from_graph(ext_pg)
     ext_p = program_run_resolve(ext_p)
@@ -2990,10 +2995,10 @@ fn main(): i32
   //   2. Concept in one module, extend in another (cross-module).
   //   3. Multiple builtins extended in one module.
   let cb_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  cb_inputs = cb_inputs.push(SourceInput("a.dao", "module case_a\n\nconcept Showable:\n  fn show(self): string\n\nextend i32 as Showable:\n  fn show(self): string\n    return \"i32\"\n"))
-  cb_inputs = cb_inputs.push(SourceInput("c.dao", "module case_b::concepts\nconcept Printable:\n  fn to_string(self): string\n"))
-  cb_inputs = cb_inputs.push(SourceInput("p.dao", "module case_b::impl\nimport case_b::concepts\n\nextend i64 as Printable:\n  fn to_string(self): string\n    return \"i64\"\n"))
-  cb_inputs = cb_inputs.push(SourceInput("m.dao", "module case_c\n\nconcept Named:\n  fn name(self): string\n\nextend i32 as Named:\n  fn name(self): string\n    return \"i32\"\n\nextend bool as Named:\n  fn name(self): string\n    return \"bool\"\n\nextend string as Named:\n  fn name(self): string\n    return \"string\"\n"))
+  cb_inputs = cb_inputs.push(SourceInput("a.dao", "module case_a\n\nconcept Showable:\n  fn show(self): string\n\nextend i32 as Showable:\n  fn show(self): string\n    return \"i32\"\n", false))
+  cb_inputs = cb_inputs.push(SourceInput("c.dao", "module case_b::concepts\nconcept Printable:\n  fn to_string(self): string\n", false))
+  cb_inputs = cb_inputs.push(SourceInput("p.dao", "module case_b::impl\nimport case_b::concepts\n\nextend i64 as Printable:\n  fn to_string(self): string\n    return \"i64\"\n", false))
+  cb_inputs = cb_inputs.push(SourceInput("m.dao", "module case_c\n\nconcept Named:\n  fn name(self): string\n\nextend i32 as Named:\n  fn name(self): string\n    return \"i32\"\n\nextend bool as Named:\n  fn name(self): string\n    return \"bool\"\n\nextend string as Named:\n  fn name(self): string\n    return \"string\"\n", false))
   let cb_pg: ProgramGraph = build_program(cb_inputs)
   let cb_p: Program = program_from_graph(cb_pg)
   cb_p = program_run_resolve(cb_p)
@@ -3117,6 +3122,22 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL qualified_variant_field_type: expected 1 diagnostic, got " + i64_to_string(tc_count_diags(r48)))
+
+  // Test 49: a symbol declared into the prelude scope is visible from
+  // any module (CONTRACT_MODULE_SYSTEM.md §7.2); one declared in an
+  // ordinary module is visible from that module only.
+  let prelude_sym: Symbol = Symbol(SymbolKind::Function, "i32.show", to_i64(0), prelude_scope_idx(), to_i64(0))
+  let module_sym: Symbol = Symbol(SymbolKind::Function, "i32.show", to_i64(0), prelude_scope_idx() + to_i64(1), to_i64(0))
+  let vis_ok: bool = false
+  if sym_visible_in_module(prelude_sym, to_i64(1)):
+    if sym_visible_in_module(module_sym, to_i64(0)):
+      if sym_visible_in_module(module_sym, to_i64(1)) == false:
+        vis_ok = true
+  if vis_ok:
+    print("PASS prelude_method_visibility")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL prelude_method_visibility")
 
   // -----------------------------------------------------------------
   // Summary

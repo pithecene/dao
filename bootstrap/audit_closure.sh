@@ -37,10 +37,16 @@ PROGRAMS="lexer parser graph resolver typecheck hir mir llvm"
 
 bash bootstrap/assemble.sh > /dev/null || { echo "audit: assemble failed"; exit 1; }
 mkdir -p "$OUT" "$AUDIT_OUT"
-# The probe marker must not outlive this run: left behind, every later
-# bootstrap/llvm/llvm.gen run would probe instead of testing.  Nor may a
-# half-merged matrix: the next run would append to it.
-trap 'rm -f "$OUT/.closure_probe" "$AUDIT_OUT/closure.merged"' EXIT
+# The prelude the program pipeline runs with: every module under
+# stdlib/core/ and stdlib/io/ in path order (CONTRACT_MODULE_SYSTEM.md
+# §7.1; the host's prelude_files).  The probe reads the list -- it has
+# no directory listing -- so membership is this script's explicit input.
+PRELUDE_LIST="$OUT/.closure_prelude"
+ls stdlib/core/*.dao stdlib/io/*.dao | LC_ALL=C sort > "$PRELUDE_LIST"
+# The probe marker and prelude list must not outlive this run: left
+# behind, every later bootstrap/llvm/llvm.gen run would probe instead of
+# testing.  Nor may a half-merged matrix: the next run would append to it.
+trap 'rm -f "$OUT/.closure_probe" "$PRELUDE_LIST" "$AUDIT_OUT/closure.merged"' EXIT
 
 # 1. Construct inventory: the labels the host AST printer prints, counted
 #    over every program.  Only the printer's own vocabulary counts, so a
@@ -96,6 +102,18 @@ STAGES="parse typecheck hir mir llvm"
 if [ "$REPORT_ONLY" -eq 0 ]; then
 "$DAOC" build bootstrap/llvm/llvm.gen.dao > /dev/null || { echo "audit: building llvm.gen failed"; exit 1; }
 rm -f "$OUT/closure.txt" "$AUDIT_OUT/closure.merged"
+# The prelude alone, once: each file's parse and resolve counts, then
+# its typecheck count, for the document's prelude section.  A probe
+# that dies leaves the lines it wrote before dying, and why it died.
+printf 'prelude\tprelude' > "$OUT/.closure_probe"
+( ulimit -v "$LIMIT_KB"; timeout "$LIMIT_S" ./bootstrap/llvm/llvm.gen ) > "$AUDIT_OUT/probe-prelude.log" 2>&1
+prelude_status=$?
+rm -f "$OUT/closure.txt" "$AUDIT_OUT/probe-prelude.died"
+if [ "$prelude_status" -eq 124 ]; then
+  echo "exceeded ${LIMIT_S}s" > "$AUDIT_OUT/probe-prelude.died"
+elif [ "$prelude_status" -ne 0 ]; then
+  echo "process died (status $prelude_status; memory bound $((LIMIT_KB / 1048576)) GiB) $(grep -m1 -oE 'dao panic: .*' "$AUDIT_OUT/probe-prelude.log")" > "$AUDIT_OUT/probe-prelude.died"
+fi
 for p in $PROGRAMS; do
   : > "$AUDIT_OUT/probe-$p.log"
   record="$p"
@@ -244,6 +262,31 @@ resource_block_sites() {
       echo
     fi
   done
+  echo "### The prelude through the bootstrap"
+  echo
+  echo "The \`resolve\` and \`typecheck\` columns above are measured with the"
+  echo "prelude in the program -- every module under \`stdlib/core/\` and"
+  echo "\`stdlib/io/\` (CONTRACT_MODULE_SYSTEM.md §7), loaded as declarations,"
+  echo "whatever the bootstrap parser keeps of each file.  The \`hir\`, \`mir\`,"
+  echo "and \`llvm\` columns run the single-source adapters without it (the"
+  echo "bootstrap has no program-level MIR or LLVM driver) and do not choose"
+  echo "the frontier until the program pipeline reaches them."
+  echo
+  echo "Per prelude file, the prelude group alone through the pipeline:"
+  echo "diagnostics per stage, and the first."
+  echo
+  echo "| File | parse | resolve | typecheck | First diagnostic |"
+  echo "|---|---|---|---|---|"
+  awk -F'\t' '
+    /^probe: prelude file\t/ { path = $2; split($3, a, "="); split($4, b, "="); parse[path] = a[2]; resolve[path] = b[2]; first[path] = substr($5, 7); order[++n] = path }
+    /^probe: prelude typecheck\t/ { tc[$2] = $3; if (first[$2] == "") first[$2] = $4 }
+    END { for (i = 1; i <= n; i++) { p = order[i]; f = first[p]; gsub(/\|/, "\\|", f); printf "| `%s` | %s | %s | %s | %s |\n", p, parse[p], resolve[p], (p in tc ? tc[p] : "—"), (f == "" ? "—" : f) } }
+  ' "$AUDIT_OUT/probe-prelude.log"
+  if [ -f "$AUDIT_OUT/probe-prelude.died" ]; then
+    echo
+    echo "The prelude probe died: $(cat "$AUDIT_OUT/probe-prelude.died").  A stage it never reached reads as —."
+  fi
+  echo
   echo "### Parse-stage attribution"
   echo
   echo "Every parse-stage rejection in the first audit was one construct: generic"
@@ -273,6 +316,8 @@ resource_block_sites() {
   echo "- A stage with zero diagnostics on every program is closed for the corpus."
   echo "- The first blocking diagnostic names the construct to implement next for"
   echo "  that stage; rerun the audit after each slice."
+  echo "- The \`hir\`, \`mir\`, \`llvm\` columns are measured without the prelude"
+  echo "  (see the prelude section) and are not frontier evidence yet."
 } > "$DOC"
 
 echo "audit: wrote $DOC"
