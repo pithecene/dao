@@ -1304,6 +1304,16 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
         line = line + hir_dump_node(hr, body.get(bi), indent + 1)
         bi = bi + 1
       return line
+    HirNode.HirResource(kind_tidx, name_tidx, body_lp):
+      let kind_tok: Token = hr.toks.get(kind_tidx)
+      let name_tok: Token = hr.toks.get(name_tidx)
+      line = line + " " + substring(hr.src, kind_tok.offset, kind_tok.len) + " " + substring(hr.src, name_tok.offset, name_tok.len) + "\n"
+      let rbody: Vector<i64> = read_list(hr.hir_idx, body_lp)
+      let ri: i64 = 0
+      while ri < rbody.length():
+        line = line + hir_dump_node(hr, rbody.get(ri), indent + 1)
+        ri = ri + 1
+      return line
     HirNode.HirFor(var_tidx, iter, body_lp):
       line = line + "\n"
       line = line + hir_dump_node(hr, iter, indent + 1)

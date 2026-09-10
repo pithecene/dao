@@ -75,8 +75,7 @@ slice of Dao syntax.
 - Declarations: `fn` (block + expression-bodied), `extern fn`, `class`
   (fields only), `enum` (with payloads), `type` alias
 - Statements: `let`, assignment, `if`/`else`/`else if`, `while`,
-  `for...in`, `return`, `break`, `match`, `resource <kind> <name> =>`
-  blocks, expression statements
+  `for...in`, `return`, `break`, `match`, expression statements
 - Expressions: full precedence tower (pipe through primary), call,
   field access, index, try (`?`), lambda, list literals, qualified
   names
@@ -85,7 +84,8 @@ slice of Dao syntax.
 
 **Tier B-Bootstrap coverage (added)**: call-site type arguments —
 `Type<Args>::member(args)` and `f<Args>(args)` read with the host's
-rule, the type arguments carried on `CallE` (Task 36)
+rule, the type arguments carried on `CallE` (Task 36); `resource <kind>
+<name> =>` blocks and their suites (Task 37)
 
 **Tier B deferrals** (explicitly not supported yet):
 
@@ -134,13 +134,14 @@ uses map over the bootstrap parser's AST.
 - Builtin type pre-population (i8–u64, f32, f64, bool, string, void)
 - Duplicate declaration diagnostics
 - `let` / `for` / lambda / param / field declarations
+- `resource` block bodies in a block scope (Task 37)
 
 **Tier B deferrals**:
 
 - Imports, overload resolution, method mangling
 - Generic type parameters and where clauses
 - Concept / extend resolution
-- Mode / resource block scoping
+- Mode block scoping
 - Match arm destructuring bindings
 
 **How to run tests**:
@@ -200,7 +201,8 @@ type-checked AST.
 **Tier A coverage**: literals, identifiers, binary/unary ops, calls,
 field access, pipe, qualified names, let, assign, if/else, while,
 for, return, break, match (desugared), expression statements,
-fn/extern fn/class/enum/type alias declarations
+fn/extern fn/class/enum/type alias declarations, `resource` blocks
+(`HirResource`, Task 37)
 
 **How to run tests**:
 
@@ -236,9 +238,10 @@ constants (int/float/bool/string), binary/unary ops, let/assign,
 calls (with `MirFnRef` callees), returns, field-access reads,
 if/else, while.
 
-**Tier B deferrals**: generators, monomorphization, the domain of a
-`resource` block (its body lowers in place: no arena, no copy-out at
-exit — Task 37 §5), `mode` blocks, enum construction/discriminant/payload, lambda
+**Tier B deferrals**: generators, monomorphization, `resource` blocks
+(rejected with the unsupported-statement diagnostic, fail-closed, until
+the domain is represented in MIR — `CONTRACT_MIR_BOUNDARY.md` §4, Task
+37 §5), `mode` blocks, enum construction/discriminant/payload, lambda
 / closures, try operator, for-over-iterable, index expressions,
 break/continue.
 
