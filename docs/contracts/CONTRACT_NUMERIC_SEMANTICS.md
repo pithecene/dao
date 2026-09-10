@@ -118,7 +118,7 @@ Explicit overflow operations:
   min/max representable value — **implemented** for all signed types
   (i8–i64)
 - `checked_add`, `checked_sub`, `checked_mul` — return
-  `Option::None` on overflow, `Option::Some(result)` otherwise —
+  `Option::None` on overflow, `Option::Some(value = result)` otherwise —
   **implemented** for all signed types (i8–i64); pure Dao
   implementations using widening (i8/i16/i32) or wrapping +
   overflow detection (i64)
