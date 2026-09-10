@@ -159,7 +159,7 @@ fn ts_node_span(ts: TS, node_idx: i64): Span
       return ts_tok_span(ts, op_tidx)
     Node.UnaryE(op_tidx, operand):
       return ts_tok_span(ts, op_tidx)
-    Node.CallE(callee, args_lp, arg_count, targs_lp, targ_count):
+    Node.CallE(callee, args_lp, arg_count, targs_lp, names_lp):
       return ts_node_span(ts, callee)
     Node.FieldE(obj, field_tidx):
       return ts_tok_span(ts, field_tidx)
@@ -517,14 +517,18 @@ fn tc_register_enums(ts: TS, decls: Vector<i64>): TS
           let v_tidx: i64 = pairs.get(vi)
           let payload_lp: i64 = pairs.get(vi + 1)
           r = ts_push_type_info(r, v_tidx)
-          let payload_types: Vector<i64> = read_list(r.tc.idx_data, payload_lp)
-          r = ts_push_type_info(r, payload_types.length())
+          // The payload list is (field name token, type node) pairs; the
+          // enum's type_info keeps, per variant: name, field count, then
+          // (field name token, type index) per field.
+          let payload_fields: Vector<i64> = read_list(r.tc.idx_data, payload_lp)
+          r = ts_push_type_info(r, payload_fields.length() / 2)
           let pi: i64 = 0
-          while pi < payload_types.length():
-            let pt_r: TypeR = resolve_ast_type(r, payload_types.get(pi))
+          while pi < payload_fields.length():
+            let pt_r: TypeR = resolve_ast_type(r, payload_fields.get(pi + 1))
             r = pt_r.ts
+            r = ts_push_type_info(r, payload_fields.get(pi))
             r = ts_push_type_info(r, pt_r.type_idx)
-            pi = pi + 1
+            pi = pi + 2
           variant_count = variant_count + 1
           vi = vi + 2
         let tr: TypeR = ts_add_type(r, DaoType(TypeKind.TEnum, to_i64(-1), name, decl_idx, info_start, variant_count, to_i64(-1), to_i64(-1)))
@@ -544,7 +548,7 @@ fn tc_register_enums(ts: TS, decls: Vector<i64>): TS
           let vkey: string = i64_to_string(tr.type_idx) + ":" + vname
           r.variant_set = r.variant_set.set(vkey, to_i64(1))
           let payload_count: i64 = r.type_info.get(v_offset + 1)
-          v_offset = v_offset + 2 + payload_count
+          v_offset = v_offset + 2 + payload_count * 2
           vr = vr + 1
     i = i + 1
   return r
@@ -1012,8 +1016,8 @@ fn check_expr(ts: TS, node_idx: i64): TS
       return check_binary_expr(ts, node_idx, op_tidx, left, right)
     Node.UnaryE(op_tidx, operand):
       return check_unary_expr(ts, node_idx, op_tidx, operand)
-    Node.CallE(callee, args_lp, arg_count, targs_lp, targ_count):
-      return check_call_expr(ts, node_idx, callee, args_lp, arg_count)
+    Node.CallE(callee, args_lp, arg_count, targs_lp, names_lp):
+      return check_call_expr(ts, node_idx, callee, args_lp, names_lp)
     Node.FieldE(obj, field_tidx):
       return check_field_expr(ts, node_idx, obj, field_tidx)
     Node.PipeE(left, right):
@@ -1347,7 +1351,7 @@ fn check_unary_expr(ts: TS, node_idx: i64, op_tidx: i64, operand: i64): TS
     return ts_set_expr_type(r, node_idx, to_i64(-1))
   return ts_set_expr_type(r, node_idx, ot)
 
-fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, arg_count: i64): TS
+fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i64): TS
   let r: TS = check_expr(ts, callee)
   let args: Vector<i64> = read_list(r.tc.idx_data, args_lp)
   let ai: i64 = 0
@@ -1429,9 +1433,10 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, arg_count: 
       return ts_set_expr_type(r, node_idx, callee_ti)
     TypeKind.TEnum:
       // A variant construction: the callee's last segment names the
-      // variant, whose payload count the arguments must match.  The
-      // variants sit in type_info from info_lp: name, payload count,
-      // then that many payload types, per variant.
+      // variant.  Its fields sit in type_info from info_lp -- per
+      // variant: name, field count, then (field name token, type index)
+      // per field -- and a variant with fields is constructed by field
+      // name, every field once (CONTRACT_SYNTAX_SURFACE.md, enum class).
       let variant_name: string = ""
       let callee_node3: Node = r.tc.nodes.get(callee)
       match callee_node3:
@@ -1440,20 +1445,65 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, arg_count: 
           if vsegs.length() >= 2:
             variant_name = ts_tok_name(r, vsegs.get(vsegs.length() - 1))
       if variant_name != "":
+        let names: Vector<i64> = read_list(r.tc.idx_data, names_lp)
         let v_offset: i64 = callee_type.info_lp
         let vi: i64 = 0
         while vi < callee_type.info_count:
           let vname: string = ts_tok_name(r, r.type_info.get(v_offset))
-          let payload_count: i64 = r.type_info.get(v_offset + 1)
+          let field_count: i64 = r.type_info.get(v_offset + 1)
           if vname == variant_name:
-            if args.length() != payload_count:
-              let sp: Span = ts_node_span(r, callee)
-              r = ts_add_diag(r, sp, "variant '" + variant_name + "' expects " + i64_to_string(payload_count) + " field(s), got " + i64_to_string(args.length()))
-              return r
-          v_offset = v_offset + 2 + payload_count
+            return check_variant_construction(r, node_idx, callee, callee_ti, variant_name, v_offset + 2, field_count, args, names)
+          v_offset = v_offset + 2 + field_count * 2
           vi = vi + 1
       return ts_set_expr_type(r, node_idx, callee_ti)
   return r
+
+// The arguments of `Variant(...)` against its fields at `fields_lp` in
+// type_info (field name token, type index, per field).  A fieldless
+// variant takes no arguments; one with fields takes each field by name,
+// once, and its value must have the field's type.
+fn check_variant_construction(ts: TS, node_idx: i64, callee: i64, enum_ti: i64, variant_name: string, fields_lp: i64, field_count: i64, args: Vector<i64>, names: Vector<i64>): TS
+  let r: TS = ts
+  let sp: Span = ts_node_span(r, callee)
+  if field_count == to_i64(0):
+    if args.length() != to_i64(0):
+      return ts_add_diag(r, sp, "variant '" + variant_name + "' has no fields; construct it without arguments")
+    return ts_set_expr_type(r, node_idx, enum_ti)
+  let ai: i64 = 0
+  while ai < args.length():
+    let name_tidx: i64 = names.get(ai)
+    if name_tidx < 0:
+      let asp: Span = ts_node_span(r, args.get(ai))
+      return ts_add_diag(r, asp, "variant '" + variant_name + "' is constructed by field name: " + variant_name + "(field = value)")
+    let arg_name: string = ts_tok_name(r, name_tidx)
+    let fi: i64 = 0
+    let found: bool = false
+    while fi < field_count:
+      if ts_tok_name(r, r.type_info.get(fields_lp + fi * 2)) == arg_name:
+        found = true
+        let field_ti: i64 = r.type_info.get(fields_lp + fi * 2 + 1)
+        let arg_ti: i64 = get_expr_type(r, args.get(ai))
+        if arg_ti >= 0:
+          if field_ti >= 0:
+            if types_equal(r, arg_ti, field_ti) == false:
+              let vsp: Span = ts_node_span(r, args.get(ai))
+              r = ts_add_diag(r, vsp, "field '" + arg_name + "' of variant '" + variant_name + "' has type " + type_name(r, field_ti) + ", got " + type_name(r, arg_ti))
+      fi = fi + 1
+    if found == false:
+      let nsp: Span = ts_tok_span(r, name_tidx)
+      return ts_add_diag(r, nsp, "variant '" + variant_name + "' has no field '" + arg_name + "'")
+    // A field named twice.
+    let aj: i64 = 0
+    while aj < ai:
+      if names.get(aj) >= 0:
+        if ts_tok_name(r, names.get(aj)) == arg_name:
+          let dsp: Span = ts_tok_span(r, name_tidx)
+          return ts_add_diag(r, dsp, "field '" + arg_name + "' of variant '" + variant_name + "' is given twice")
+      aj = aj + 1
+    ai = ai + 1
+  if args.length() != field_count:
+    return ts_add_diag(r, sp, "variant '" + variant_name + "' expects " + i64_to_string(field_count) + " field(s), got " + i64_to_string(args.length()))
+  return ts_set_expr_type(r, node_idx, enum_ti)
 
 fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
   let r: TS = check_expr(ts, obj)
@@ -2075,7 +2125,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 47
+  let total: i32 = 48
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -2901,7 +2951,7 @@ fn main(): i32
 
   // Test 44: a two-segment variant access types as the enum and a
   // construction of a payload variant types as the enum.
-  let src44: string = "enum class Shape:\n  Circle(r: i64)\n  Dot\n\nfn main(): i32\n  let d: Shape = Shape::Dot\n  let c: Shape = Shape::Circle(3)\n  return 0\n"
+  let src44: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn main(): i32\n  let d: Shape = Shape::Dot\n  let c: Shape = Shape::Circle(r = 3)\n  return 0\n"
   let r44: TypeCheckResult = typecheck(src44)
   if tc_count_diags(r44) == 0:
     print("PASS qualified_variant_types")
@@ -2934,19 +2984,30 @@ fn main(): i32
       print("  diag: " + r46.diags.get(di46).message)
       di46 = di46 + 1
 
-  // Test 47: a qualified variant construction with the wrong arity is
-  // diagnosed, once per site.
-  let src47: string = "enum class Shape:\n  Circle(r: i64)\n  Dot\n\nfn main(): i32\n  let a: Shape = Shape::Circle()\n  let b: Shape = Shape::Circle(1, 2)\n  return 0\n"
+  // Test 47: constructions that miss the variant's shape are diagnosed,
+  // once per site: no arguments for a field, a positional argument, a
+  // name that is no field, a field given twice, a fieldless variant
+  // with an argument.
+  let src47: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn main(): i32\n  let a: Shape = Shape::Circle()\n  let b: Shape = Shape::Circle(3)\n  let c: Shape = Shape::Circle(q = 3)\n  let d: Shape = Shape::Circle(r = 3, r = 4)\n  let e: Shape = Shape::Dot(1)\n  return 0\n"
   let r47: TypeCheckResult = typecheck(src47)
-  if tc_count_diags(r47) == 2:
-    print("PASS qualified_variant_arity")
+  if tc_count_diags(r47) == 5:
+    print("PASS qualified_variant_shape")
     pass_count = pass_count + 1
   else:
-    print("FAIL qualified_variant_arity: expected 2 diagnostics, got " + i64_to_string(tc_count_diags(r47)))
+    print("FAIL qualified_variant_shape: expected 5 diagnostics, got " + i64_to_string(tc_count_diags(r47)))
     let di47: i64 = 0
     while di47 < r47.diags.length():
       print("  diag: " + r47.diags.get(di47).message)
       di47 = di47 + 1
+
+  // Test 48: a named argument's value must have the field's type.
+  let src48: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn main(): i32\n  let a: Shape = Shape::Circle(r = true)\n  return 0\n"
+  let r48: TypeCheckResult = typecheck(src48)
+  if tc_count_diags(r48) == 1:
+    print("PASS qualified_variant_field_type")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL qualified_variant_field_type: expected 1 diagnostic, got " + i64_to_string(tc_count_diags(r48)))
 
   // -----------------------------------------------------------------
   // Summary

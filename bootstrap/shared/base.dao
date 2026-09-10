@@ -777,7 +777,7 @@ enum class Node:
   QualNameE(seg_lp: i64, seg_count: i64)
   BinaryE(op: i64, left: i64, right: i64)
   UnaryE(op: i64, operand: i64)
-  CallE(callee: i64, args_lp: i64, arg_count: i64, targs_lp: i64, targ_count: i64)
+  CallE(callee: i64, args_lp: i64, arg_count: i64, targs_lp: i64, names_lp: i64)
   IndexE(obj: i64, idx: i64)
   FieldE(obj: i64, field: i64)
   PipeE(left: i64, right: i64)
@@ -1306,34 +1306,53 @@ fn extend_qual_name(ps: PS, node: i64, member_tidx: i64): PR
   let fl: FlushResult = flush_list(ps, seg_toks)
   return ps_add_node(fl.ps, Node.QualNameE(fl.list_pos, seg_toks.length()))
 
+// One call argument at `ps`: `name = expr` when an identifier is followed
+// by `=` (`==` is a comparison), else an expression.  The name's token
+// index rides in `names`, -1 for a positional argument.
+class CallArg:
+  ps: PS
+  node: i64
+  name_tidx: i64
+
+fn parse_call_arg(pc: PC, ps: PS): CallArg
+  if tk_name(peek_kind(pc, ps)) == tk_name(TK.Identifier):
+    let after: PS = ps_advance(pc, ps)
+    if tk_name(peek_kind(pc, after)) == tk_name(TK.Eq):
+      let value: PR = parse_expr(pc, ps_advance(pc, after))
+      return CallArg(value.ps, value.node, ps.pos)
+  let expr: PR = parse_expr(pc, ps)
+  return CallArg(expr.ps, expr.node, to_i64(-1))
+
 // The call `(args)` on `callee` at `ps`, carrying the type arguments the
-// callee was read with (`targs_lp` -1 and `targ_count` 0 for none).
-fn parse_call_suffix(pc: PC, ps: PS, callee: i64, targs_lp: i64, targ_count: i64): PR
+// callee was read with (`targs_lp` -1 for none).  The argument names
+// are a list beside the arguments, one entry each.
+fn parse_call_suffix(pc: PC, ps: PS, callee: i64, targs_lp: i64): PR
   let inner: PS = expect(pc, ps, TK.LParen)
   let call_args: Vector<i64> = Vector<i64>::new()
+  let arg_names: Vector<i64> = Vector<i64>::new()
   if tk_name(peek_kind(pc, inner)) != tk_name(TK.RParen):
-    let arg: PR = parse_expr(pc, inner)
+    let arg: CallArg = parse_call_arg(pc, inner)
+    inner = arg.ps
     if arg.node >= 0:
       call_args = call_args.push(arg.node)
-      inner = arg.ps
+      arg_names = arg_names.push(arg.name_tidx)
       let arg_done: bool = false
       while arg_done == false:
         if tk_name(peek_kind(pc, inner)) == tk_name(TK.Comma):
           inner = ps_advance(pc, inner)
-          let arg2: PR = parse_expr(pc, inner)
+          let arg2: CallArg = parse_call_arg(pc, inner)
+          inner = arg2.ps
           if arg2.node >= 0:
             call_args = call_args.push(arg2.node)
-            inner = arg2.ps
+            arg_names = arg_names.push(arg2.name_tidx)
           else:
-            inner = arg2.ps
             arg_done = true
         else:
           arg_done = true
-    else:
-      inner = arg.ps
   let call_fl: FlushResult = flush_list(inner, call_args)
-  inner = expect(pc, call_fl.ps, TK.RParen)
-  return ps_add_node(inner, Node.CallE(callee, call_fl.list_pos, call_args.length(), targs_lp, targ_count))
+  let names_fl: FlushResult = flush_list(call_fl.ps, arg_names)
+  inner = expect(pc, names_fl.ps, TK.RParen)
+  return ps_add_node(inner, Node.CallE(callee, call_fl.list_pos, call_args.length(), targs_lp, names_fl.list_pos))
 
 // Postfix expressions: call (with call-site type arguments), field, index, try
 fn parse_postfix(pc: PC, ps: PS): PR
@@ -1360,14 +1379,14 @@ fn parse_postfix(pc: PC, ps: PS): PR
         let qual_r: PR = extend_qual_name(ps_m, cur_node, member_tidx)
         after = qual_r.ps
         cur_node = qual_r.node
-      let typed_call: PR = parse_call_suffix(pc, after, cur_node, targs.list_pos, targs.count)
+      let typed_call: PR = parse_call_suffix(pc, after, cur_node, targs.list_pos)
       cur_ps = typed_call.ps
       cur_node = typed_call.node
 
     // Call: expr(args)
     else:
       if tk_name(k) == tk_name(TK.LParen):
-        let call_r: PR = parse_call_suffix(pc, cur_ps, cur_node, to_i64(-1), to_i64(0))
+        let call_r: PR = parse_call_suffix(pc, cur_ps, cur_node, to_i64(-1))
         cur_ps = call_r.ps
         cur_node = call_r.node
 
@@ -2137,12 +2156,16 @@ fn parse_enum_decl(pc: PC, ps: PS): PR
           cur = ps_add_diag(cur, sp, "enum variants cannot carry payloads; use 'enum class' for structured variants")
         cur = ps_advance(pc, cur)
         if tk_name(peek_kind(pc, cur)) != tk_name(TK.RParen):
+          let field_tidx: i64 = to_i64(-1)
           if is_enum_class:
-            // Enum class: require name: Type syntax.
+            // Enum class: a field is `name: Type`; the name is kept
+            // beside the type, for construction by name.
+            field_tidx = cur.pos
             cur = expect(pc, cur, TK.Identifier)
             cur = expect(pc, cur, TK.Colon)
           let pty: PR = parse_type(pc, cur)
           if pty.node >= 0:
+            payload_types = payload_types.push(field_tidx)
             payload_types = payload_types.push(pty.node)
             cur = pty.ps
           else:
@@ -2151,12 +2174,14 @@ fn parse_enum_decl(pc: PC, ps: PS): PR
           while pdone == false:
             if tk_name(peek_kind(pc, cur)) == tk_name(TK.Comma):
               cur = ps_advance(pc, cur)
+              let field2_tidx: i64 = to_i64(-1)
               if is_enum_class:
-                // Enum class: require name: Type syntax.
+                field2_tidx = cur.pos
                 cur = expect(pc, cur, TK.Identifier)
                 cur = expect(pc, cur, TK.Colon)
               let pty2: PR = parse_type(pc, cur)
               if pty2.node >= 0:
+                payload_types = payload_types.push(field2_tidx)
                 payload_types = payload_types.push(pty2.node)
                 cur = pty2.ps
               else:

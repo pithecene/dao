@@ -10,38 +10,38 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 75963 |
-| `CallExpr` | 23091 |
-| `Callee` | 23091 |
-| `FieldExpr` | 21622 |
-| `Args` | 20737 |
-| `BinaryExpr` | 10525 |
-| `LetStatement` | 10238 |
-| `Value` | 8146 |
-| `Target` | 8146 |
-| `Assignment` | 8146 |
-| `IntLiteral` | 7873 |
-| `Condition` | 6596 |
-| `Then` | 5351 |
-| `IfStatement` | 5351 |
-| `ReturnStatement` | 5294 |
-| `StringLiteral` | 4565 |
-| `Param` | 3654 |
-| `Pattern` | 2553 |
-| `Arm` | 2553 |
-| `BoolLiteral` | 2450 |
-| `ReturnType` | 1559 |
-| `FunctionDecl` | 1559 |
-| `Else` | 1298 |
-| `WhileStatement` | 1245 |
+| `Identifier` | 77158 |
+| `CallExpr` | 23502 |
+| `Callee` | 23502 |
+| `FieldExpr` | 21934 |
+| `Args` | 21111 |
+| `BinaryExpr` | 10837 |
+| `LetStatement` | 10395 |
+| `Value` | 8230 |
+| `Target` | 8230 |
+| `Assignment` | 8230 |
+| `IntLiteral` | 8054 |
+| `Condition` | 6715 |
+| `Then` | 5448 |
+| `IfStatement` | 5448 |
+| `ReturnStatement` | 5359 |
+| `StringLiteral` | 4647 |
+| `Param` | 3710 |
+| `Pattern` | 2564 |
+| `Arm` | 2564 |
+| `BoolLiteral` | 2472 |
+| `ReturnType` | 1574 |
+| `FunctionDecl` | 1574 |
+| `Else` | 1294 |
+| `WhileStatement` | 1267 |
 | `Variant` | 1166 |
-| `Field` | 1048 |
-| `UnaryExpr` | 999 |
-| `TypeArgs` | 954 |
-| `Scrutinee` | 581 |
-| `MatchStatement` | 581 |
-| `ExpressionStatement` | 506 |
-| `ClassDecl` | 247 |
+| `Field` | 1072 |
+| `UnaryExpr` | 1023 |
+| `TypeArgs` | 965 |
+| `Scrutinee` | 592 |
+| `MatchStatement` | 592 |
+| `ExpressionStatement` | 514 |
+| `ClassDecl` | 255 |
 | `BreakStatement` | 64 |
 | `ResourceBlock` | 39 |
 | `EnumDecl` | 27 |
@@ -234,14 +234,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 62 | 1 | 0 | 0 | 339 | 397 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 62 | 1 | 0 | 0 | 444 | 323 | 0 | 32 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 57 | 0 | 0 | 0 | 362 | 356 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 113 | 0 | 0 | 0 | 891 | 558 | 0 | 59 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 212 | 1 | 0 | 0 | 1588 | 907 | 0 | 131 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 321 | 1 | 0 | 0 | 2095 | 1125 | 0 | 168 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 331 | 2 | 0 | 0 | 2406 | 1077 | 0 | 220 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 423 | 1 | 0 | 0 | 2893 | 1111 | 0 | 288 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 52 | 1 | 0 | 0 | 342 | 398 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 55 | 1 | 0 | 0 | 473 | 326 | 0 | 35 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 55 | 0 | 0 | 0 | 365 | 357 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 111 | 1 | 0 | 0 | 894 | 559 | 0 | 59 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 213 | 1 | 0 | 0 | 1596 | 930 | 0 | 131 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 320 | 1 | 0 | 0 | 2117 | 1167 | 0 | 172 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 332 | 2 | 0 | 0 | 2415 | 1115 | 0 | 222 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 434 | 2 | 0 | 0 | 2902 | 1149 | 0 | 290 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 
@@ -277,7 +277,7 @@ named, not inferred.
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
 - `typecheck` ×1: type mismatch in '-': i64 vs i32
-- `mir` ×23: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×26: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `mir` ×1: unsupported assignment target
 
@@ -392,14 +392,14 @@ next.  Sites per program against the parse column above:
 
 | Program | `Type<Args>::` sites | `resource` blocks | parse diagnostics |
 |---|---|---|---|
-| lexer | 56 | 0 | 0 |
-| parser | 61 | 0 | 0 |
-| graph | 67 | 0 | 0 |
-| resolver | 98 | 0 | 0 |
-| typecheck | 137 | 0 | 0 |
-| hir | 156 | 4 | 0 |
-| mir | 172 | 10 | 0 |
-| llvm | 210 | 25 | 0 |
+| lexer | 57 | 0 | 0 |
+| parser | 62 | 0 | 0 |
+| graph | 68 | 0 | 0 |
+| resolver | 99 | 0 | 0 |
+| typecheck | 138 | 0 | 0 |
+| hir | 158 | 4 | 0 |
+| mir | 174 | 10 | 0 |
+| llvm | 212 | 25 | 0 |
 
 ## 4. Reading the matrix
 

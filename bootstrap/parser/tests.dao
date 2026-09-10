@@ -91,7 +91,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 70
+  let total: i32 = 75
 
   // -----------------------------------------------------------------
   // Expression tests
@@ -157,7 +157,7 @@ fn main(): i32
     let outer: Node = r10a.ps.nodes.get(r10a.node)
     let ok_nested: bool = false
     match outer:
-      Node.CallE(callee, list_pos, arg_count, targs_lp, targ_count):
+      Node.CallE(callee, list_pos, arg_count, targs_lp, names_lp):
         // Read count from idx list at list_pos
         let cnt: i64 = r10a.ps.idx.get(list_pos)
         if cnt == 2:
@@ -475,8 +475,8 @@ fn main(): i32
   if r41.node >= 0:
     let shape_ok: bool = false
     match r41.ps.nodes.get(r41.node):
-      Node.CallE(callee, args_lp, arg_count, targs_lp, targ_count):
-        if targ_count == 1 and r41.ps.idx.get(targs_lp) == 1 and arg_count == 0:
+      Node.CallE(callee, args_lp, arg_count, targs_lp, names_lp):
+        if targs_lp >= 0 and r41.ps.idx.get(targs_lp) == 1 and arg_count == 0:
           match r41.ps.nodes.get(callee):
             Node.QualNameE(seg_lp, seg_count):
               if seg_count == 2:
@@ -496,8 +496,8 @@ fn main(): i32
   if r42.node >= 0:
     let nested_ok: bool = false
     match r42.ps.nodes.get(r42.node):
-      Node.CallE(callee, args_lp, arg_count, targs_lp, targ_count):
-        if targ_count == 1:
+      Node.CallE(callee, args_lp, arg_count, targs_lp, names_lp):
+        if targs_lp >= 0 and r42.ps.idx.get(targs_lp) == 1:
           // The list's one item sits just before its count.
           let targ: i64 = r42.ps.idx.get(targs_lp - 1)
           match r42.ps.nodes.get(targ):
@@ -518,8 +518,8 @@ fn main(): i32
   if r43.node >= 0:
     let plain_ok: bool = false
     match r43.ps.nodes.get(r43.node):
-      Node.CallE(callee, args_lp, arg_count, targs_lp, targ_count):
-        if targ_count == 1 and arg_count == 1:
+      Node.CallE(callee, args_lp, arg_count, targs_lp, names_lp):
+        if targs_lp >= 0 and r43.ps.idx.get(targs_lp) == 1 and arg_count == 1:
           match r43.ps.nodes.get(callee):
             Node.IdentE(t):
               plain_ok = true
@@ -548,8 +548,8 @@ fn main(): i32
   if r46.node >= 0:
     let cmp_arg_ok: bool = false
     match r46.ps.nodes.get(r46.node):
-      Node.CallE(callee, args_lp, arg_count, targs_lp, targ_count):
-        if arg_count == 1 and targ_count == 0:
+      Node.CallE(callee, args_lp, arg_count, targs_lp, names_lp):
+        if arg_count == 1 and targs_lp < 0:
           let arg0: i64 = r46.ps.idx.get(args_lp - 1)
           match r46.ps.nodes.get(arg0):
             Node.BinaryE(op, l, r):
@@ -567,7 +567,7 @@ fn main(): i32
   if r47.node >= 0:
     let chain_ok: bool = false
     match r47.ps.nodes.get(r47.node):
-      Node.CallE(callee, args_lp, arg_count, targs_lp, targ_count):
+      Node.CallE(callee, args_lp, arg_count, targs_lp, names_lp):
         match r47.ps.nodes.get(callee):
           Node.FieldE(obj, field):
             chain_ok = true
@@ -608,6 +608,48 @@ fn main(): i32
   else:
     print("FAIL resource_block_two_stmts: expected a ResourceS with a two-statement body")
 
+
+  // -----------------------------------------------------------------
+  // Named call arguments
+  // -----------------------------------------------------------------
+
+  // Test 50: `f(a = 1, b)` — one named argument, one positional; the
+  // names list holds the name's token for the first and -1 for the second.
+  let r50: PR = parse_expr_str("f(a = 1, b)")
+  if expect_node_kind("named_arg_call", r50, r50.node, "CallE"):
+    pass_count = pass_count + 1
+  if r50.node >= 0:
+    let names_ok: bool = false
+    match r50.ps.nodes.get(r50.node):
+      Node.CallE(callee, args_lp, arg_count, targs_lp, names_lp):
+        if arg_count == 2 and r50.ps.idx.get(names_lp) == 2:
+          if r50.ps.idx.get(names_lp - 2) >= 0 and r50.ps.idx.get(names_lp - 1) < 0:
+            names_ok = true
+    if names_ok:
+      print("PASS named_arg_names")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL named_arg_names: expected a named first argument and a positional second")
+  if expect_no_parse_errors("named_arg_no_err", r50):
+    pass_count = pass_count + 1
+
+  // Test 51: `f(a == 1)` is a comparison argument, unnamed.
+  let r51: PR = parse_expr_str("f(a == 1)")
+  if expect_node_kind("eq_arg_call", r51, r51.node, "CallE"):
+    pass_count = pass_count + 1
+  if r51.node >= 0:
+    let cmp_ok: bool = false
+    match r51.ps.nodes.get(r51.node):
+      Node.CallE(callee, args_lp, arg_count, targs_lp, names_lp):
+        if arg_count == 1 and r51.ps.idx.get(names_lp - 1) < 0:
+          match r51.ps.nodes.get(r51.ps.idx.get(args_lp - 1)):
+            Node.BinaryE(op, l, rr):
+              cmp_ok = true
+    if cmp_ok:
+      print("PASS eq_arg_is_comparison")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL eq_arg_is_comparison: expected one positional BinaryE argument")
 
   print("")
   print("--- results ---")

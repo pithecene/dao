@@ -317,8 +317,8 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
     Node.UnaryE(op_tidx, operand):
       let or2: HirR = lower_expr(hs, operand)
       return hs_add_node(or2.hs, HirNode.HirUnary(op_tidx, or2.hir, ti))
-    Node.CallE(callee, args_lp, arg_count, targs_lp, targ_count):
-      return lower_call_expr(hs, node_idx, callee, args_lp, arg_count, ti)
+    Node.CallE(callee, args_lp, arg_count, targs_lp, names_lp):
+      return lower_call_expr(hs, node_idx, callee, args_lp, names_lp, ti)
     Node.FieldE(obj, field_tidx):
       let obj_r: HirR = lower_expr(hs, obj)
       return hs_add_node(obj_r.hs, HirNode.HirFieldAccess(obj_r.hir, field_tidx, ti))
@@ -348,7 +348,54 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
       return hs_add_node(hs, HirNode.HirErrorExpr(to_i64(0)))
   return hs_add_node(hs, HirNode.HirErrorExpr(to_i64(0)))
 
-fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, arg_count: i64, ti: i64): HirR
+// `hir_args` reordered by the fields of the variant `callee` names, when
+// the arguments were given by name; unchanged otherwise.  The variant's
+// fields are in the enum's type_info: per variant, name, field count,
+// then (field name token, type index) per field.
+fn variant_args_in_field_order(hs: HS, callee: i64, names_lp: i64, hir_args: Vector<i64>): Vector<i64>
+  if names_lp < 0:
+    return hir_args
+  let names: Vector<i64> = read_list(hs.idx_data, names_lp)
+  if names.length() == 0:
+    return hir_args
+  if names.get(0) < 0:
+    return hir_args
+  let callee_ti: i64 = hir_get_expr_type(hs, callee)
+  if callee_ti < 0:
+    return hir_args
+  let enum_type: DaoType = hs.types.get(callee_ti)
+  match enum_type.kind:
+    TypeKind.TEnum:
+      let variant_name: string = ""
+      match hs.nodes.get(callee):
+        Node.QualNameE(seg_lp, seg_count):
+          let segs: Vector<i64> = read_list(hs.idx_data, seg_lp)
+          if segs.length() >= 2:
+            variant_name = hs_tok_name(hs, segs.get(segs.length() - 1))
+      let v_offset: i64 = enum_type.info_lp
+      let vi: i64 = 0
+      while vi < enum_type.info_count:
+        let field_count: i64 = hs.type_info.get(v_offset + 1)
+        if hs_tok_name(hs, hs.type_info.get(v_offset)) == variant_name:
+          let ordered: Vector<i64> = Vector<i64>::new()
+          let fi: i64 = 0
+          while fi < field_count:
+            let field_name: string = hs_tok_name(hs, hs.type_info.get(v_offset + 2 + fi * 2))
+            let ai: i64 = 0
+            while ai < names.length():
+              if names.get(ai) >= 0:
+                if hs_tok_name(hs, names.get(ai)) == field_name:
+                  ordered = ordered.push(hir_args.get(ai))
+              ai = ai + 1
+            fi = fi + 1
+          if ordered.length() == hir_args.length():
+            return ordered
+          return hir_args
+        v_offset = v_offset + 2 + field_count * 2
+        vi = vi + 1
+  return hir_args
+
+fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i64, ti: i64): HirR
   // ---------------------------------------------------------------
   // Method call desugaring: obj.method(args) → Method(obj, args)
   // ---------------------------------------------------------------
@@ -432,6 +479,10 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, arg_count: 
     cur = ar.hs
     hir_args = hir_args.push(ar.hir)
     ai = ai + 1
+  // A variant constructed by field name: HirCall takes the payload in
+  // declaration order, so the lowered arguments are ordered by the
+  // variant's fields (the type checker has matched every name).
+  hir_args = variant_args_in_field_order(cur, callee, names_lp, hir_args)
   let fl: HirFlush = hir_flush_list(cur, hir_args)
   // Fallback: if typechecker didn't record type (value-corruption),
   // infer from callee — if it's a function, use return type;
@@ -849,14 +900,15 @@ fn lower_enum_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, varia
   while vi < pairs.length():
     let v_tidx: i64 = pairs.get(vi)
     let ast_payload_lp: i64 = pairs.get(vi + 1)
-    let payload_types: Vector<i64> = read_list(cur.idx_data, ast_payload_lp)
+    // The payload list is (field name token, type node) pairs; HIR keeps
+    // the types in declaration order.
+    let payload_fields: Vector<i64> = read_list(cur.idx_data, ast_payload_lp)
     let hir_payload: Vector<i64> = Vector<i64>::new()
-    let pi: i64 = 0
-    while pi < payload_types.length():
-      let type_node_idx: i64 = payload_types.get(pi)
-      let pti: i64 = resolve_type_to_idx(cur, type_node_idx)
+    let pi: i64 = 1
+    while pi < payload_fields.length():
+      let pti: i64 = resolve_type_to_idx(cur, payload_fields.get(pi))
       hir_payload = hir_payload.push(pti)
-      pi = pi + 1
+      pi = pi + 2
     // Flush payload types into HIR idx
     let payload_fl: HirFlush = hir_flush_list(cur, hir_payload)
     cur = payload_fl.hs
@@ -1417,7 +1469,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 24
+  let total: i32 = 25
 
   // Test 1: simple_fn
   let src1: string = "fn add(a: i32, b: i32): i32\n  return a + b\n"
@@ -1957,7 +2009,7 @@ fn main(): i32
   // and a `Enum::Variant` match pattern lower with no diagnostics; the
   // constructor's callee is a HirQualName.
   // -----------------------------------------------------------------
-  let src24: string = "enum class Shape:\n  Circle(r: i64)\n  Dot\n\nfn area(s: Shape): i64\n  match s:\n    Shape::Circle(r):\n      return r\n    Shape::Dot:\n      return 0\n  return 0\n\nfn main(): i32\n  let c: Shape = Shape::Circle(3)\n  return 0\n"
+  let src24: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn area(s: Shape): i64\n  match s:\n    Shape::Circle(r):\n      return r\n    Shape::Dot:\n      return 0\n  return 0\n\nfn main(): i32\n  let c: Shape = Shape::Circle(r = 3)\n  return 0\n"
   let r24: HirResult = lower_to_hir(src24)
   let has_qual: bool = false
   let qi: i64 = 0
@@ -1970,6 +2022,31 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL qualified_variant_lowers: expected HirQualName nodes and no diagnostics, got " + i64_to_string(hir_count_diags(r24)))
+
+  // -----------------------------------------------------------------
+  // Test 25: named_construction_in_field_order — arguments given out of
+  // declaration order reach HirCall in declaration order.
+  // -----------------------------------------------------------------
+  let src25: string = "enum class Pair:\n  Both(a: i64, b: i64)\n\nfn main(): i32\n  let p: Pair = Pair::Both(b = 2, a = 1)\n  return 0\n"
+  let r25: HirResult = lower_to_hir(src25)
+  let order_ok: bool = false
+  let oi: i64 = 0
+  while oi < hir_count_nodes(r25):
+    match r25.hir_nodes.get(oi):
+      HirNode.HirCall(callee, args_lp, arg_count, ti):
+        if arg_count == 2:
+          let first_arg: i64 = r25.hir_idx.get(args_lp - 2)
+          match r25.hir_nodes.get(first_arg):
+            HirNode.HirIntLit(tok, lit_ti):
+              let lit_tok: Token = r25.toks.get(tok)
+              if substring(r25.src, lit_tok.offset, lit_tok.len) == "1":
+                order_ok = true
+    oi = oi + 1
+  if r25.root >= 0 and order_ok and hir_count_diags(r25) == 0:
+    print("PASS named_construction_in_field_order")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL named_construction_in_field_order: expected the first lowered argument to be the literal 1, no diagnostics (" + i64_to_string(hir_count_diags(r25)) + ")")
 
   // -----------------------------------------------------------------
   // Summary

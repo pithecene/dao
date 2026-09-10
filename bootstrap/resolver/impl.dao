@@ -362,7 +362,7 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
       return resolve_expr(r, right)
     Node.UnaryE(op_tidx, operand):
       return resolve_expr(rs, operand)
-    Node.CallE(callee, args_lp, arg_count, targs_lp, targ_count):
+    Node.CallE(callee, args_lp, arg_count, targs_lp, names_lp):
       let r: RS = resolve_expr(rs, callee)
       let args: Vector<i64> = read_list(r.rc.idx_data, args_lp)
       let i: i64 = 0
@@ -370,8 +370,10 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
         r = resolve_expr(r, args.get(i))
         i = i + 1
       // Call-site type arguments are type nodes; binding them to the
-      // callee's type parameters is the type checker's, later.
-      if targ_count > 0:
+      // callee's type parameters is the type checker's, later.  An
+      // argument's name is a field of the variant being constructed,
+      // the type checker's too.
+      if targs_lp >= 0:
         let targs: Vector<i64> = read_list(r.rc.idx_data, targs_lp)
         let ti: i64 = 0
         while ti < targs.length():
@@ -675,12 +677,12 @@ fn resolve_enum_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, var
   while i < pairs.length():
     let v_tidx: i64 = pairs.get(i)
     let payload_lp: i64 = pairs.get(i + 1)
-    // Resolve each payload type
-    let payload_types: Vector<i64> = read_list(r.rc.idx_data, payload_lp)
-    let j: i64 = 0
-    while j < payload_types.length():
-      r = resolve_type_node(r, payload_types.get(j))
-      j = j + 1
+    // Resolve each payload field's type (the list is name, type pairs)
+    let payload_fields: Vector<i64> = read_list(r.rc.idx_data, payload_lp)
+    let j: i64 = 1
+    while j < payload_fields.length():
+      r = resolve_type_node(r, payload_fields.get(j))
+      j = j + 2
     i = i + 2
   if has_tparams:
     r = rs_pop_scope(r)

@@ -85,7 +85,8 @@ slice of Dao syntax.
 **Tier B-Bootstrap coverage (added)**: call-site type arguments —
 `Type<Args>::member(args)` and `f<Args>(args)` read with the host's
 rule, the type arguments carried on `CallE` (Task 36); `resource <kind>
-<name> =>` blocks and their suites (Task 37)
+<name> =>` blocks and their suites (Task 37); named call arguments
+(`f(name = expr)`), the names carried on `CallE` beside the arguments
 
 **Tier B deferrals** (explicitly not supported yet):
 
