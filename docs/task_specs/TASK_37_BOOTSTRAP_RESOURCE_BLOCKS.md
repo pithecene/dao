@@ -81,9 +81,11 @@ One PR on Task 36's implementation:
 3. Tests (§7); `bootstrap/README.md`, every stage's inventory: the
    parser's Tier B-Bootstrap coverage list gains `resource` blocks,
    the resolver's deferrals lose "resource block scoping" and its scope
-   gains the block, the HIR coverage list gains `HirResource`, and the
-   MIR deferrals name the block as rejected fail-closed;
-   `docs/IMPLEMENTATION_PLAN.md` Task 37 entry; the audit rerun.
+   gains the block, the type checker's scope gains the block's body
+   (and its deferrals lose the block), the HIR coverage list gains
+   `HirResource`, and the MIR deferrals name the block as rejected
+   fail-closed; `docs/IMPLEMENTATION_PLAN.md` Task 37 entry; the audit
+   rerun.
 
 ## 7. Tests
 
