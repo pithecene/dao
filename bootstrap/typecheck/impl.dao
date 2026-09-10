@@ -432,13 +432,41 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
 // =========================================================================
 
 // Find a symbol index by decl_node and kind name
+// The callable symbol a declaration introduces: a free function's is
+// a `Function`, a class's own method's a `Method`.  A declaration
+// index is file-local, so the owning module is half the identity: two
+// modules' declarations share an index freely.  A negative module id
+// is the single-file adapters', where no other module exists.
+fn find_callable_sym(symbols: Vector<Symbol>, decl_idx: i64, module_id: i64): i64
+  let si: i64 = 0
+  while si < symbols.length():
+    let sym: Symbol = symbols.get(si)
+    if sym.decl_node == decl_idx:
+      if is_method_symbol(sym):
+        if module_id < 0:
+          return si
+        if sym.owner_module_id == module_id:
+          return si
+    si = si + 1
+  return to_i64(-1)
+
+fn find_callable_sym_by_decl(ts: TS, decl_idx: i64): i64
+  return find_callable_sym(ts.tc.symbols, decl_idx, ts.tc.module_id)
+
+// The symbol of the given kind declared at `decl_idx` in this module.
+// A declaration index is file-local, so the module is half the
+// identity here too: without it, two modules' declarations at one
+// index take each other's symbols.
 fn find_sym_by_decl(ts: TS, decl_idx: i64, kind_name: string): i64
   let si: i64 = 0
   while si < ts.tc.symbols.length():
     let sym: Symbol = ts.tc.symbols.get(si)
     if sym.decl_node == decl_idx:
       if symbol_kind_name(sym.kind) == kind_name:
-        return si
+        if ts.tc.module_id < 0:
+          return si
+        if sym.owner_module_id == ts.tc.module_id:
+          return si
     si = si + 1
   return to_i64(-1)
 
@@ -667,7 +695,7 @@ fn tc_register_functions(ts: TS, decls: Vector<i64>): TS
     if is_fn:
       let tr: TypeR = tc_register_fn_sig_core(r, decl_idx, fn_name_tidx, fn_params_lp, fn_ret_type)
       r = tr.ts
-      let fn_sym: i64 = find_sym_by_decl(r, decl_idx, "Function")
+      let fn_sym: i64 = find_callable_sym_by_decl(r, decl_idx)
       fn_syms = fn_syms.push(fn_sym)
       fn_type_idxs = fn_type_idxs.push(tr.type_idx)
     i = i + 1
@@ -704,15 +732,7 @@ fn tc_register_methods(ts: TS, decls: Vector<i64>): TS
                 // Find the mangled symbol and set its type
                 let mname: string = ts_tok_name(r, m_name_tidx)
                 let mangled: string = class_name + "." + mname
-                let msym: i64 = to_i64(-1)
-                let si: i64 = 0
-                while si < r.tc.symbols.length():
-                  let sym: Symbol = r.tc.symbols.get(si)
-                  if sym_visible_in_module(sym, r.tc.module_id):
-                    if sym.name == mangled:
-                      if symbol_kind_name(sym.kind) == "Function":
-                        msym = si
-                  si = si + 1
+                let msym: i64 = find_visible_method_sym(r.tc.symbols, mangled, r.tc.module_id)
                 if msym >= 0:
                   r = ts_set_sym_type(r, msym, tr.type_idx)
                 // Set self param type to the enclosing struct type
@@ -802,12 +822,88 @@ fn tc_register_concepts(ts: TS, decls: Vector<i64>): TS
     i = i + 1
   return r
 
-// D2: Returns true if a symbol is visible from the current module.
-// Visible = builtin (owner_module_id == -1) OR same module.
+// A symbol is visible from a module when it is a builtin
+// (owner_module_id == -1), a prelude declaration (declared into the
+// prelude scope, whichever prelude module owns it — its `extend`
+// methods join every module's method set, CONTRACT_MODULE_SYSTEM.md
+// §7.2), or the module's own.
 fn sym_visible_in_module(sym: Symbol, module_id: i64): bool
   if sym.owner_module_id < 0:
     return true
+  if sym.scope_id == prelude_scope_idx():
+    return true
   return sym.owner_module_id == module_id
+
+// The method symbol `mangled` names from `module_id`: the module's own
+// declaration when it has one — a module that shadows a prelude type
+// shadows its methods too (§7.4), whatever the symbols' order — else
+// a visible prelude or builtin one; -1 when none is visible.
+// A mangled name (`Box.m`) is borne by a class's own method
+// (`SymbolKind::Method`) and by one an `extend` block introduces
+// (`Function`, like the free function it is).
+fn is_method_symbol(sym: Symbol): bool
+  if symbol_kind_name(sym.kind) == "Method":
+    return true
+  return symbol_kind_name(sym.kind) == "Function"
+
+fn find_visible_method_sym(symbols: Vector<Symbol>, mangled: string, module_id: i64): i64
+  let outer: i64 = to_i64(-1)
+  let i: i64 = 0
+  while i < symbols.length():
+    let sym: Symbol = symbols.get(i)
+    if sym.name == mangled:
+      if is_method_symbol(sym):
+        if sym.owner_module_id == module_id:
+          return i
+        if sym_visible_in_module(sym, module_id):
+          outer = i
+    i = i + 1
+  return outer
+
+// A class's own method, declared with the type in `owner`'s module.
+fn find_inherent_method_sym(symbols: Vector<Symbol>, mangled: string, owner: i64): i64
+  let i: i64 = 0
+  while i < symbols.length():
+    let sym: Symbol = symbols.get(i)
+    if sym.name == mangled:
+      if symbol_kind_name(sym.kind) == "Method":
+        if sym.owner_module_id == owner:
+          return i
+    i = i + 1
+  return to_i64(-1)
+
+// The module that declares the type whose declaration is `type_decl_node`,
+// or -1 for a builtin or unresolved type.
+fn type_owner_module(symbols: Vector<Symbol>, type_decl_node: i64): i64
+  if type_decl_node < 0:
+    return to_i64(-1)
+  let i: i64 = 0
+  while i < symbols.length():
+    let sym: Symbol = symbols.get(i)
+    if sym.decl_node == type_decl_node:
+      if symbol_kind_name(sym.kind) == "Type":
+        return sym.owner_module_id
+    i = i + 1
+  return to_i64(-1)
+
+// The method a receiver of this type answers to, in precedence order:
+// the type's own method, then an `extend` this module wrote, then a
+// visible prelude one.  A type's own methods are declared with it, so
+// the receiver's type — not its name — picks them: a value of
+// `core::box`'s `Box` answers with that module's method even where
+// this module declares its own `Box` (§7.4 shadows the name, not the
+// value's type).  An `extend` is not the type's own: the orphan rule
+// lets any module write one for a foreign type, and this module's wins
+// over the prelude's (§5, §7.2).  Both the type checker and the HIR
+// builder dispatch through here, so they cannot disagree about which
+// symbol a call means.
+fn find_method_sym_for_receiver(symbols: Vector<Symbol>, mangled: string, module_id: i64, type_decl_node: i64): i64
+  let type_owner: i64 = type_owner_module(symbols, type_decl_node)
+  if type_owner >= 0:
+    let inherent: i64 = find_inherent_method_sym(symbols, mangled, type_owner)
+    if inherent >= 0:
+      return inherent
+  return find_visible_method_sym(symbols, mangled, module_id)
 
 fn tc_register_extend_methods(ts: TS, decls: Vector<i64>): TS
   let r: TS = ts
@@ -847,15 +943,7 @@ fn tc_register_extend_methods(ts: TS, decls: Vector<i64>): TS
                 // Find the mangled symbol and set its type
                 let mname: string = ts_tok_name(r, m_name_tidx)
                 let mangled: string = target_name + "." + mname
-                let msym: i64 = to_i64(-1)
-                let si: i64 = 0
-                while si < r.tc.symbols.length():
-                  let sym: Symbol = r.tc.symbols.get(si)
-                  if sym_visible_in_module(sym, r.tc.module_id):
-                    if sym.name == mangled:
-                      if symbol_kind_name(sym.kind) == "Function":
-                        msym = si
-                  si = si + 1
+                let msym: i64 = find_visible_method_sym(r.tc.symbols, mangled, r.tc.module_id)
                 if msym >= 0:
                   r = ts_set_sym_type(r, msym, tr.type_idx)
                 // Set self param type to the target type
@@ -913,12 +1001,13 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
             // Look for mangled symbol TargetName.methodName
             let mangled: string = target_name + "." + req_name
             let found_method: bool = false
+            let chosen: i64 = find_visible_method_sym(r.tc.symbols, mangled, r.tc.module_id)
             let si: i64 = 0
             while si < r.tc.symbols.length():
               let sym: Symbol = r.tc.symbols.get(si)
-              if sym_visible_in_module(sym, r.tc.module_id):
+              if si == chosen:
                 if sym.name == mangled:
-                  if symbol_kind_name(sym.kind) == "Function":
+                  if is_method_symbol(sym):
                     found_method = true
                   // Check full signature match: param count, each param type, return type.
                   let impl_ti: i64 = vec_i64_get(r.sym_types, si)
@@ -1536,14 +1625,7 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
         fi = fi + 1
       // Try method lookup: look for mangled symbol "StructName.fieldName"
       let mangled_name: string = obj_type.name + "." + field_name
-      let msym: i64 = to_i64(-1)
-      let si: i64 = 0
-      while si < r.tc.symbols.length():
-        let sym: Symbol = r.tc.symbols.get(si)
-        if sym.name == mangled_name:
-          if symbol_kind_name(sym.kind) == "Function":
-            msym = si
-        si = si + 1
+      let msym: i64 = find_method_sym_for_receiver(r.tc.symbols, mangled_name, r.tc.module_id, obj_type.decl_node)
       if msym >= 0:
         let meth_ti: i64 = vec_i64_get(r.sym_types, msym)
         if meth_ti >= 0:
@@ -1838,7 +1920,7 @@ fn check_body_stmts(ts: TS, list_pos: i64): TS
 fn tc_check_fn_body(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, ret_type_node: i64, body_lp: i64): TS
   let r: TS = ts
   let fn_ti: i64 = to_i64(-1)
-  let sym_idx: i64 = find_sym_by_decl(r, decl_idx, "Function")
+  let sym_idx: i64 = find_callable_sym_by_decl(r, decl_idx)
   if sym_idx >= 0:
     fn_ti = vec_i64_get(r.sym_types, sym_idx)
   let old_return_type: i64 = r.return_type
@@ -1866,7 +1948,7 @@ fn tc_check_fn_body(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, ret_t
 fn tc_check_expr_fn_body(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, ret_type_node: i64, body_expr: i64): TS
   let r: TS = ts
   let fn_ti: i64 = to_i64(-1)
-  let sym_idx: i64 = find_sym_by_decl(r, decl_idx, "Function")
+  let sym_idx: i64 = find_callable_sym_by_decl(r, decl_idx)
   if sym_idx >= 0:
     fn_ti = vec_i64_get(r.sym_types, sym_idx)
   let old_return_type: i64 = r.return_type
@@ -1907,14 +1989,7 @@ fn tc_check_method_body(ts: TS, class_decl_idx: i64, meth_idx: i64, m_name_tidx:
       class_name = ts_tok_name(r, cn_tidx)
   let mname: string = ts_tok_name(r, m_name_tidx)
   let mangled: string = class_name + "." + mname
-  let msym: i64 = to_i64(-1)
-  let si: i64 = 0
-  while si < r.tc.symbols.length():
-    let sym: Symbol = r.tc.symbols.get(si)
-    if sym.name == mangled:
-      if symbol_kind_name(sym.kind) == "Function":
-        msym = si
-    si = si + 1
+  let msym: i64 = find_visible_method_sym(r.tc.symbols, mangled, r.tc.module_id)
   if msym >= 0:
     fn_ti = vec_i64_get(r.sym_types, msym)
   let old_return_type: i64 = r.return_type
@@ -1958,14 +2033,7 @@ fn tc_check_extend_method_body(ts: TS, extend_decl_idx: i64, meth_idx: i64, m_na
   let mname: string = ts_tok_name(r, m_name_tidx)
   let mangled: string = target_name + "." + mname
   let fn_ti: i64 = to_i64(-1)
-  let msym: i64 = to_i64(-1)
-  let si: i64 = 0
-  while si < r.tc.symbols.length():
-    let sym: Symbol = r.tc.symbols.get(si)
-    if sym.name == mangled:
-      if symbol_kind_name(sym.kind) == "Function":
-        msym = si
-    si = si + 1
+  let msym: i64 = find_visible_method_sym(r.tc.symbols, mangled, r.tc.module_id)
   if msym >= 0:
     fn_ti = vec_i64_get(r.sym_types, msym)
   let old_return_type: i64 = r.return_type
@@ -2161,7 +2229,7 @@ fn typecheck(src: string): TypeCheckResult
   // program_run_typecheck instead.
   let wrapped: string = wrap_test_module(src)
   let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs = inputs.push(SourceInput("test.dao", wrapped))
+  inputs = inputs.push(SourceInput("test.dao", wrapped, false))
   let pg: ProgramGraph = build_program(inputs)
   let p: Program = program_from_graph(pg)
   p = program_run_resolve(p)
@@ -2200,12 +2268,32 @@ fn tc_count_types(result: TypeCheckResult): i64
 // Section 48: Golden type checker tests
 // =========================================================================
 
+// The node index of the first method a file's first class declares:
+// a program-level test checks that two modules' declarations at one
+// index stay apart.
+fn first_method_decl_index(po: ParseOutput): i64
+  let root: Node = po.nodes.get(po.root)
+  match root:
+    Node::FileN(md, ilp, dlp):
+      let decls: Vector<i64> = read_list(po.idx, dlp)
+      let i: i64 = 0
+      while i < decls.length():
+        let decl: Node = po.nodes.get(decls.get(i))
+        match decl:
+          Node::ClassDeclD(nt, tp, flp, mlp):
+            if mlp >= 0:
+              let meths: Vector<i64> = read_list(po.idx, mlp)
+              if meths.length() > 0:
+                return meths.get(to_i64(0))
+        i = i + 1
+  return to_i64(-1)
+
 fn main(): i32
   print("=== bootstrap/typecheck: Task 23 — Bootstrap Type Checker ===")
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 49
+  let total: i32 = 55
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -2519,7 +2607,7 @@ fn main(): i32
 
   // Test d1a_1: program_init_typecheck seeds canonical builtins.
   let p_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  p_inputs = p_inputs.push(SourceInput("a.dao", "module a\nfn f(): i32 -> 0\n"))
+  p_inputs = p_inputs.push(SourceInput("a.dao", "module a\nfn f(): i32 -> 0\n", false))
   let p_pg: ProgramGraph = build_program(p_inputs)
   let p_val: Program = program_from_graph(p_pg)
   let p_r: Program = program_run_resolve(p_val)
@@ -2597,7 +2685,7 @@ fn main(): i32
   // when a required method is missing.
   let d3_src: string = "concept Showable:\n  fn show(self): string\n\nclass Msg:\n  text: string\n\nextend Msg as Showable:\n  fn display(self): string -> self.text\n"
   let d3_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  d3_inputs = d3_inputs.push(SourceInput("d3.dao", "module d3\n" + d3_src))
+  d3_inputs = d3_inputs.push(SourceInput("d3.dao", "module d3\n" + d3_src, false))
   let d3_pg: ProgramGraph = build_program(d3_inputs)
   let d3_p: Program = program_from_graph(d3_pg)
   d3_p = program_run_resolve(d3_p)
@@ -2686,8 +2774,8 @@ fn main(): i32
   // the Program pipeline (build_program → resolve → typecheck).
   // Two modules: math exports `add`, main imports and calls `math::add(1,2)`.
   let d4_inputs1: Vector<SourceInput> = Vector<SourceInput>::new()
-  d4_inputs1 = d4_inputs1.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n"))
-  d4_inputs1 = d4_inputs1.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n"))
+  d4_inputs1 = d4_inputs1.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
+  d4_inputs1 = d4_inputs1.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
   let d4_pg1: ProgramGraph = build_program(d4_inputs1)
   let d4_p1: Program = program_from_graph(d4_pg1)
   d4_p1 = program_run_resolve(d4_p1)
@@ -2727,8 +2815,8 @@ fn main(): i32
 
   // Test d4_2: missing export produces a clear diagnostic.
   let d4_inputs2: Vector<SourceInput> = Vector<SourceInput>::new()
-  d4_inputs2 = d4_inputs2.push(SourceInput("a.dao", "module lib::a\nfn secret(): i32 -> 42\n"))
-  d4_inputs2 = d4_inputs2.push(SourceInput("b.dao", "module app::b\nimport lib::a\nfn f(): i32\n  return a::nonexistent()\n"))
+  d4_inputs2 = d4_inputs2.push(SourceInput("a.dao", "module lib::a\nfn secret(): i32 -> 42\n", false))
+  d4_inputs2 = d4_inputs2.push(SourceInput("b.dao", "module app::b\nimport lib::a\nfn f(): i32\n  return a::nonexistent()\n", false))
   let d4_pg2: ProgramGraph = build_program(d4_inputs2)
   let d4_p2: Program = program_from_graph(d4_pg2)
   d4_p2 = program_run_resolve(d4_p2)
@@ -2764,8 +2852,8 @@ fn main(): i32
 
   // Test d4_3: mod::Enum::NotAVariant produces a variant-not-found diagnostic.
   let d4_inputs3: Vector<SourceInput> = Vector<SourceInput>::new()
-  d4_inputs3 = d4_inputs3.push(SourceInput("c.dao", "module lib::colors\nenum Color:\n  Red\n  Blue\n"))
-  d4_inputs3 = d4_inputs3.push(SourceInput("d.dao", "module app::d\nimport lib::colors\nfn f(): i32\n  let x: i32 = colors::Color::NotAColor\n  return 0\n"))
+  d4_inputs3 = d4_inputs3.push(SourceInput("c.dao", "module lib::colors\nenum Color:\n  Red\n  Blue\n", false))
+  d4_inputs3 = d4_inputs3.push(SourceInput("d.dao", "module app::d\nimport lib::colors\nfn f(): i32\n  let x: i32 = colors::Color::NotAColor\n  return 0\n", false))
   let d4_pg3: ProgramGraph = build_program(d4_inputs3)
   let d4_p3: Program = program_from_graph(d4_pg3)
   d4_p3 = program_run_resolve(d4_p3)
@@ -2809,8 +2897,8 @@ fn main(): i32
   // function type is registered in pass1 before main's body is
   // checked in pass2.
   let d5_inputs1: Vector<SourceInput> = Vector<SourceInput>::new()
-  d5_inputs1 = d5_inputs1.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n"))
-  d5_inputs1 = d5_inputs1.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n"))
+  d5_inputs1 = d5_inputs1.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
+  d5_inputs1 = d5_inputs1.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
   let d5_pg1: ProgramGraph = build_program(d5_inputs1)
   let d5_p1: Program = program_from_graph(d5_pg1)
   d5_p1 = program_run_resolve(d5_p1)
@@ -2837,8 +2925,8 @@ fn main(): i32
   // Both modules reference i32 — the type index should be the same
   // canonical builtin (index 2) in the program type table.
   let d5_inputs2: Vector<SourceInput> = Vector<SourceInput>::new()
-  d5_inputs2 = d5_inputs2.push(SourceInput("a.dao", "module mod_a\nfn fa(): i32 -> 1\n"))
-  d5_inputs2 = d5_inputs2.push(SourceInput("b.dao", "module mod_b\nfn fb(): i32 -> 2\n"))
+  d5_inputs2 = d5_inputs2.push(SourceInput("a.dao", "module mod_a\nfn fa(): i32 -> 1\n", false))
+  d5_inputs2 = d5_inputs2.push(SourceInput("b.dao", "module mod_b\nfn fb(): i32 -> 2\n", false))
   let d5_pg2: ProgramGraph = build_program(d5_inputs2)
   let d5_p2: Program = program_from_graph(d5_pg2)
   d5_p2 = program_run_resolve(d5_p2)
@@ -2863,7 +2951,7 @@ fn main(): i32
   // program_run_typecheck. Verify tc_get_expr_type returns a valid
   // type for an expression node in a typechecked module.
   let d5_inputs3: Vector<SourceInput> = Vector<SourceInput>::new()
-  d5_inputs3 = d5_inputs3.push(SourceInput("e.dao", "module expr_test\nfn f(): i32 -> 1 + 2\n"))
+  d5_inputs3 = d5_inputs3.push(SourceInput("e.dao", "module expr_test\nfn f(): i32 -> 1 + 2\n", false))
   let d5_pg3: ProgramGraph = build_program(d5_inputs3)
   let d5_p3: Program = program_from_graph(d5_pg3)
   d5_p3 = program_run_resolve(d5_p3)
@@ -2893,9 +2981,9 @@ fn main(): i32
   let smoke_ok: bool = false
   if file_exists(smoke_base + "core_fmt.dao"):
     let smoke_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-    smoke_inputs = smoke_inputs.push(SourceInput("core_fmt.dao", read_file(smoke_base + "core_fmt.dao")))
-    smoke_inputs = smoke_inputs.push(SourceInput("app_math.dao", read_file(smoke_base + "app_math.dao")))
-    smoke_inputs = smoke_inputs.push(SourceInput("app_main.dao", read_file(smoke_base + "app_main.dao")))
+    smoke_inputs = smoke_inputs.push(SourceInput("core_fmt.dao", read_file(smoke_base + "core_fmt.dao"), false))
+    smoke_inputs = smoke_inputs.push(SourceInput("app_math.dao", read_file(smoke_base + "app_math.dao"), false))
+    smoke_inputs = smoke_inputs.push(SourceInput("app_main.dao", read_file(smoke_base + "app_main.dao"), false))
     let smoke_pg: ProgramGraph = build_program(smoke_inputs)
     let smoke_p: Program = program_from_graph(smoke_pg)
     smoke_p = program_run_resolve(smoke_p)
@@ -2925,8 +3013,8 @@ fn main(): i32
   let enum_ok: bool = false
   if file_exists(enum_base + "colors.dao"):
     let enum_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-    enum_inputs = enum_inputs.push(SourceInput("colors.dao", read_file(enum_base + "colors.dao")))
-    enum_inputs = enum_inputs.push(SourceInput("user.dao", read_file(enum_base + "user.dao")))
+    enum_inputs = enum_inputs.push(SourceInput("colors.dao", read_file(enum_base + "colors.dao"), false))
+    enum_inputs = enum_inputs.push(SourceInput("user.dao", read_file(enum_base + "user.dao"), false))
     let enum_pg: ProgramGraph = build_program(enum_inputs)
     let enum_p: Program = program_from_graph(enum_pg)
     enum_p = program_run_resolve(enum_p)
@@ -2960,8 +3048,8 @@ fn main(): i32
   let ext_ok: bool = false
   if file_exists(ext_base + "provider.dao"):
     let ext_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-    ext_inputs = ext_inputs.push(SourceInput("provider.dao", read_file(ext_base + "provider.dao")))
-    ext_inputs = ext_inputs.push(SourceInput("consumer.dao", read_file(ext_base + "consumer.dao")))
+    ext_inputs = ext_inputs.push(SourceInput("provider.dao", read_file(ext_base + "provider.dao"), false))
+    ext_inputs = ext_inputs.push(SourceInput("consumer.dao", read_file(ext_base + "consumer.dao"), false))
     let ext_pg: ProgramGraph = build_program(ext_inputs)
     let ext_p: Program = program_from_graph(ext_pg)
     ext_p = program_run_resolve(ext_p)
@@ -2990,10 +3078,10 @@ fn main(): i32
   //   2. Concept in one module, extend in another (cross-module).
   //   3. Multiple builtins extended in one module.
   let cb_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  cb_inputs = cb_inputs.push(SourceInput("a.dao", "module case_a\n\nconcept Showable:\n  fn show(self): string\n\nextend i32 as Showable:\n  fn show(self): string\n    return \"i32\"\n"))
-  cb_inputs = cb_inputs.push(SourceInput("c.dao", "module case_b::concepts\nconcept Printable:\n  fn to_string(self): string\n"))
-  cb_inputs = cb_inputs.push(SourceInput("p.dao", "module case_b::impl\nimport case_b::concepts\n\nextend i64 as Printable:\n  fn to_string(self): string\n    return \"i64\"\n"))
-  cb_inputs = cb_inputs.push(SourceInput("m.dao", "module case_c\n\nconcept Named:\n  fn name(self): string\n\nextend i32 as Named:\n  fn name(self): string\n    return \"i32\"\n\nextend bool as Named:\n  fn name(self): string\n    return \"bool\"\n\nextend string as Named:\n  fn name(self): string\n    return \"string\"\n"))
+  cb_inputs = cb_inputs.push(SourceInput("a.dao", "module case_a\n\nconcept Showable:\n  fn show(self): string\n\nextend i32 as Showable:\n  fn show(self): string\n    return \"i32\"\n", false))
+  cb_inputs = cb_inputs.push(SourceInput("c.dao", "module case_b::concepts\nconcept Printable:\n  fn to_string(self): string\n", false))
+  cb_inputs = cb_inputs.push(SourceInput("p.dao", "module case_b::impl\nimport case_b::concepts\n\nextend i64 as Printable:\n  fn to_string(self): string\n    return \"i64\"\n", false))
+  cb_inputs = cb_inputs.push(SourceInput("m.dao", "module case_c\n\nconcept Named:\n  fn name(self): string\n\nextend i32 as Named:\n  fn name(self): string\n    return \"i32\"\n\nextend bool as Named:\n  fn name(self): string\n    return \"bool\"\n\nextend string as Named:\n  fn name(self): string\n    return \"string\"\n", false))
   let cb_pg: ProgramGraph = build_program(cb_inputs)
   let cb_p: Program = program_from_graph(cb_pg)
   cb_p = program_run_resolve(cb_p)
@@ -3117,6 +3205,164 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL qualified_variant_field_type: expected 1 diagnostic, got " + i64_to_string(tc_count_diags(r48)))
+
+  // Test 49: a symbol declared into the prelude scope is visible from
+  // any module (CONTRACT_MODULE_SYSTEM.md §7.2); one declared in an
+  // ordinary module is visible from that module only.
+  let prelude_sym: Symbol = Symbol(SymbolKind::Method, "i32.show", to_i64(0), prelude_scope_idx(), to_i64(7))
+  let module_sym: Symbol = Symbol(SymbolKind::Method, "i32.show", to_i64(0), prelude_scope_idx() + to_i64(1), to_i64(0))
+  let vis_ok: bool = false
+  if sym_visible_in_module(prelude_sym, to_i64(1)):
+    if sym_visible_in_module(module_sym, to_i64(0)):
+      if sym_visible_in_module(module_sym, to_i64(1)) == false:
+        vis_ok = true
+  if vis_ok:
+    print("PASS prelude_method_visibility")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL prelude_method_visibility")
+
+  // Test 50: a module's own method shadows a prelude method of the
+  // same mangled name whichever comes first in the symbol table.
+  let shadow_syms_a: Vector<Symbol> = Vector<Symbol>::new()
+  shadow_syms_a = shadow_syms_a.push(prelude_sym).push(module_sym)
+  let shadow_syms_b: Vector<Symbol> = Vector<Symbol>::new()
+  shadow_syms_b = shadow_syms_b.push(module_sym).push(prelude_sym)
+  let shadow_ok: bool = false
+  if find_visible_method_sym(shadow_syms_a, "i32.show", to_i64(0)) == to_i64(1):
+    if find_visible_method_sym(shadow_syms_b, "i32.show", to_i64(0)) == to_i64(0):
+      if find_visible_method_sym(shadow_syms_a, "i32.show", to_i64(1)) == to_i64(0):
+        if find_visible_method_sym(shadow_syms_a, "i32.hash", to_i64(0)) == to_i64(-1):
+          shadow_ok = true
+  if shadow_ok:
+    print("PASS module_method_shadows_prelude")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL module_method_shadows_prelude")
+
+  // Test 51: end to end — a module's `class Box` with `fn m(): i32`
+  // shadows the prelude's `class Box` with `fn m(): bool`; the dot call
+  // types as the module's method, whichever module resolves first.
+  // `pad` keeps the two class declarations at different node indices:
+  // the type checker still identifies a declaration by node index
+  // without file provenance (the closure audit's typecheck frontier),
+  // which is not what this test measures.
+  let sb_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  sb_inputs = sb_inputs.push(SourceInput("stdlib/core/box.dao", "module core::box\nclass Box:\n  n: i32\n  fn m(self): bool\n    return true\n", true))
+  sb_inputs = sb_inputs.push(SourceInput("main.dao", "module app::main\nfn pad(): i32 -> 0\nclass Box:\n  n: i32\n  fn m(self): i32\n    return self.n\nfn f(): i32\n  let b: Box = Box(1)\n  return b.m()\n", false))
+  let sb_p: Program = program_from_graph(build_program(sb_inputs))
+  sb_p = program_run_resolve(sb_p)
+  sb_p = program_run_typecheck(sb_p)
+  let sb_errors: i64 = 0
+  let sb_i: i64 = 0
+  while sb_i < sb_p.diags.length():
+    let sb_fd: FileDiagnostic = sb_p.diags.get(sb_i)
+    if sb_fd.path == "main.dao":
+      sb_errors = sb_errors + 1
+    sb_i = sb_i + 1
+  if sb_errors == 0:
+    print("PASS shadowed_class_method_types_as_module")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL shadowed_class_method_types_as_module: " + i64_to_string(sb_errors) + " diagnostics in main.dao")
+    let sb_j: i64 = 0
+    while sb_j < sb_p.diags.length():
+      print("  diag: " + sb_p.diags.get(sb_j).path + ": " + sb_p.diags.get(sb_j).diag.message)
+      sb_j = sb_j + 1
+
+  // Test 52: the receiver's type, not its name, picks the method: a
+  // value of the prelude's `Box` answers with the prelude's `m` (bool)
+  // even where this module declares its own `Box` whose `m` is i32.
+  let qb_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  qb_inputs = qb_inputs.push(SourceInput("stdlib/core/box.dao", "module core::box\nclass Box:\n  n: i32\n  fn m(self): bool\n    return true\n\nfn make_box(): Box\n  return Box(1)\n", true))
+  qb_inputs = qb_inputs.push(SourceInput("main.dao", "module app::main\nfn pad(): i32 -> 0\nclass Box:\n  n: i32\n  fn m(self): i32\n    return self.n\nfn f(): bool\n  return make_box().m()\nfn g(): i32\n  return Box(2).m()\n", false))
+  let qb_p: Program = program_from_graph(build_program(qb_inputs))
+  qb_p = program_run_resolve(qb_p)
+  qb_p = program_run_typecheck(qb_p)
+  let qb_errors: i64 = 0
+  let qb_i: i64 = 0
+  while qb_i < qb_p.diags.length():
+    if qb_p.diags.get(qb_i).path == "main.dao":
+      qb_errors = qb_errors + 1
+    qb_i = qb_i + 1
+  if qb_errors == 0:
+    print("PASS qualified_receiver_picks_its_own_method")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL qualified_receiver_picks_its_own_method: " + i64_to_string(qb_errors) + " diagnostics in main.dao")
+    let qb_j: i64 = 0
+    while qb_j < qb_p.diags.length():
+      print("  diag: " + qb_p.diags.get(qb_j).path + ": " + qb_p.diags.get(qb_j).diag.message)
+      qb_j = qb_j + 1
+
+  // Test 53: an `extend` is not the type's own method: where the
+  // prelude extends `Box` with `pick(): bool` and this module extends
+  // it with `pick(): i32`, this module's wins (§5, §7.2) — the
+  // receiver's owner picks only a method declared with the type.
+  let xb_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  xb_inputs = xb_inputs.push(SourceInput("stdlib/core/box.dao", "module core::box\nconcept PickB:\n  fn pick(self): bool\n\nclass Box:\n  n: i32\n\nfn make_box(): Box\n  return Box(1)\n\nextend Box as PickB:\n  fn pick(self): bool\n    return true\n", true))
+  xb_inputs = xb_inputs.push(SourceInput("main.dao", "module app::main\nconcept PickI:\n  fn pick(self): i32\n\nextend Box as PickI:\n  fn pick(self): i32\n    return 7\n\nfn f(): i32\n  return make_box().pick()\n", false))
+  let xb_p: Program = program_from_graph(build_program(xb_inputs))
+  xb_p = program_run_resolve(xb_p)
+  xb_p = program_run_typecheck(xb_p)
+  let xb_errors: i64 = 0
+  let xb_i: i64 = 0
+  while xb_i < xb_p.diags.length():
+    if xb_p.diags.get(xb_i).path == "main.dao":
+      xb_errors = xb_errors + 1
+    xb_i = xb_i + 1
+  if xb_errors == 0:
+    print("PASS module_extend_wins_over_prelude_extend")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL module_extend_wins_over_prelude_extend: " + i64_to_string(xb_errors) + " diagnostics in main.dao")
+    let xb_j: i64 = 0
+    while xb_j < xb_p.diags.length():
+      print("  diag: " + xb_p.diags.get(xb_j).path + ": " + xb_p.diags.get(xb_j).diag.message)
+      xb_j = xb_j + 1
+
+  // Test 54: a declaration index is file-local — two modules'
+  // declarations share one freely (these two classes have the same
+  // shape, so both methods sit at the same index), and each must keep
+  // its own signature rather than the other's.
+  let ci_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  ci_inputs = ci_inputs.push(SourceInput("a.dao", "module app::a\nclass Box:\n  n: i32\n  fn pick(self): i32\n    return self.n\n", false))
+  ci_inputs = ci_inputs.push(SourceInput("b.dao", "module app::b\nclass Cup:\n  n: bool\n  fn pick(self): bool\n    return self.n\n", false))
+  let ci_pg: ProgramGraph = build_program(ci_inputs)
+  let ci_p: Program = program_from_graph(ci_pg)
+  ci_p = program_run_resolve(ci_p)
+  ci_p = program_run_typecheck(ci_p)
+  let ci_a_idx: i64 = to_i64(-1)
+  let ci_b_idx: i64 = to_i64(-1)
+  let ci_fi: i64 = 0
+  while ci_fi < ci_pg.files.length():
+    let ci_sf: SourceFile = ci_pg.files.get(ci_fi)
+    if ci_sf.path == "a.dao":
+      ci_a_idx = first_method_decl_index(ci_sf.parse_output)
+    if ci_sf.path == "b.dao":
+      ci_b_idx = first_method_decl_index(ci_sf.parse_output)
+    ci_fi = ci_fi + 1
+  let ci_errors: i64 = 0
+  let ci_i: i64 = 0
+  while ci_i < ci_p.diags.length():
+    ci_errors = ci_errors + 1
+    ci_i = ci_i + 1
+  let ci_collides: bool = false
+  if ci_a_idx >= 0:
+    if ci_a_idx == ci_b_idx:
+      ci_collides = true
+  if ci_collides:
+    if ci_errors == 0:
+      print("PASS colliding_decl_indices_stay_apart")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL colliding_decl_indices_stay_apart: " + i64_to_string(ci_errors) + " diagnostics")
+      let ci_j: i64 = 0
+      while ci_j < ci_p.diags.length():
+        print("  diag: " + ci_p.diags.get(ci_j).path + ": " + ci_p.diags.get(ci_j).diag.message)
+        ci_j = ci_j + 1
+  else:
+    print("FAIL colliding_decl_indices_stay_apart: the fixture declares no colliding methods (a=" + i64_to_string(ci_a_idx) + " b=" + i64_to_string(ci_b_idx) + "); retune it")
 
   // -----------------------------------------------------------------
   // Summary

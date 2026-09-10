@@ -18,8 +18,8 @@ fn main(): i32
   // Test 1: Two files with one import build correctly
   // -----------------------------------------------------------------
   let inputs1: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs1 = inputs1.push(SourceInput("a.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n"))
-  inputs1 = inputs1.push(SourceInput("b.dao", "module app::main\nimport app::math\nfn f(): i32 -> 0\n"))
+  inputs1 = inputs1.push(SourceInput("a.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
+  inputs1 = inputs1.push(SourceInput("b.dao", "module app::main\nimport app::math\nfn f(): i32 -> 0\n", false))
   let pg1: ProgramGraph = build_program(inputs1)
   if pg1.modules.length() == 2:
     if pg1.diags.length() == 0:
@@ -34,9 +34,9 @@ fn main(): i32
   // Test 2: Three-module chain topo-sorts correctly
   // -----------------------------------------------------------------
   let inputs2: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs2 = inputs2.push(SourceInput("c.dao", "module app::main\nimport app::mid\nfn f(): i32 -> 0\n"))
-  inputs2 = inputs2.push(SourceInput("b.dao", "module app::mid\nimport app::base\nfn g(): i32 -> 0\n"))
-  inputs2 = inputs2.push(SourceInput("a.dao", "module app::base\nfn h(): i32 -> 0\n"))
+  inputs2 = inputs2.push(SourceInput("c.dao", "module app::main\nimport app::mid\nfn f(): i32 -> 0\n", false))
+  inputs2 = inputs2.push(SourceInput("b.dao", "module app::mid\nimport app::base\nfn g(): i32 -> 0\n", false))
+  inputs2 = inputs2.push(SourceInput("a.dao", "module app::base\nfn h(): i32 -> 0\n", false))
   let pg2: ProgramGraph = build_program(inputs2)
   if pg2.diags.length() == 0:
     if pg2.topo_order.length() == 3:
@@ -56,7 +56,7 @@ fn main(): i32
   // Test 3: Missing imported module reports error
   // -----------------------------------------------------------------
   let inputs3: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs3 = inputs3.push(SourceInput("a.dao", "module app::main\nimport core::fmt\nfn f(): i32 -> 0\n"))
+  inputs3 = inputs3.push(SourceInput("a.dao", "module app::main\nimport core::fmt\nfn f(): i32 -> 0\n", false))
   let pg3: ProgramGraph = build_program(inputs3)
   let found_missing: bool = false
   let di3: i64 = 0
@@ -75,8 +75,8 @@ fn main(): i32
   // Test 4: Duplicate module across files reports error
   // -----------------------------------------------------------------
   let inputs4: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs4 = inputs4.push(SourceInput("a.dao", "module app::math\nfn f(): i32 -> 0\n"))
-  inputs4 = inputs4.push(SourceInput("b.dao", "module app::math\nfn g(): i32 -> 0\n"))
+  inputs4 = inputs4.push(SourceInput("a.dao", "module app::math\nfn f(): i32 -> 0\n", false))
+  inputs4 = inputs4.push(SourceInput("b.dao", "module app::math\nfn g(): i32 -> 0\n", false))
   let pg4: ProgramGraph = build_program(inputs4)
   let found_dup: bool = false
   let di4: i64 = 0
@@ -95,7 +95,7 @@ fn main(): i32
   // Test 5: Self-import cycle reports error
   // -----------------------------------------------------------------
   let inputs5: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs5 = inputs5.push(SourceInput("a.dao", "module app::main\nimport app::main\nfn f(): i32 -> 0\n"))
+  inputs5 = inputs5.push(SourceInput("a.dao", "module app::main\nimport app::main\nfn f(): i32 -> 0\n", false))
   let pg5: ProgramGraph = build_program(inputs5)
   let found_self: bool = false
   let di5: i64 = 0
@@ -114,8 +114,8 @@ fn main(): i32
   // Test 6: Two-node cycle reports error
   // -----------------------------------------------------------------
   let inputs6: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs6 = inputs6.push(SourceInput("a.dao", "module app::a\nimport app::b\nfn f(): i32 -> 0\n"))
-  inputs6 = inputs6.push(SourceInput("b.dao", "module app::b\nimport app::a\nfn g(): i32 -> 0\n"))
+  inputs6 = inputs6.push(SourceInput("a.dao", "module app::a\nimport app::b\nfn f(): i32 -> 0\n", false))
+  inputs6 = inputs6.push(SourceInput("b.dao", "module app::b\nimport app::a\nfn g(): i32 -> 0\n", false))
   let pg6: ProgramGraph = build_program(inputs6)
   let found_cycle: bool = false
   let di6: i64 = 0
@@ -161,12 +161,12 @@ fn main(): i32
   // Test 8: File ordering is deterministic independent of input order
   // -----------------------------------------------------------------
   let inputs8a: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs8a = inputs8a.push(SourceInput("z.dao", "module app::z\nfn f(): i32 -> 0\n"))
-  inputs8a = inputs8a.push(SourceInput("a.dao", "module app::a\nfn g(): i32 -> 0\n"))
+  inputs8a = inputs8a.push(SourceInput("z.dao", "module app::z\nfn f(): i32 -> 0\n", false))
+  inputs8a = inputs8a.push(SourceInput("a.dao", "module app::a\nfn g(): i32 -> 0\n", false))
   let pg8a: ProgramGraph = build_program(inputs8a)
   let inputs8b: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs8b = inputs8b.push(SourceInput("a.dao", "module app::a\nfn g(): i32 -> 0\n"))
-  inputs8b = inputs8b.push(SourceInput("z.dao", "module app::z\nfn f(): i32 -> 0\n"))
+  inputs8b = inputs8b.push(SourceInput("a.dao", "module app::a\nfn g(): i32 -> 0\n", false))
+  inputs8b = inputs8b.push(SourceInput("z.dao", "module app::z\nfn f(): i32 -> 0\n", false))
   let pg8b: ProgramGraph = build_program(inputs8b)
   let f8a: SourceFile = pg8a.files.get(to_i64(0))
   let f8b: SourceFile = pg8b.files.get(to_i64(0))
@@ -183,7 +183,7 @@ fn main(): i32
   // Test 9: No-module file produces diagnostic
   // -----------------------------------------------------------------
   let inputs9: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs9 = inputs9.push(SourceInput("bare.dao", "fn f(): i32 -> 0\n"))
+  inputs9 = inputs9.push(SourceInput("bare.dao", "fn f(): i32 -> 0\n", false))
   let pg9: ProgramGraph = build_program(inputs9)
   let found_no_mod: bool = false
   let di9: i64 = 0
@@ -202,8 +202,8 @@ fn main(): i32
   // Test 10: Two-file smoke fixture — graph constructed correctly
   // -----------------------------------------------------------------
   let inputs10: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs10 = inputs10.push(SourceInput("fmt.dao", "module core::fmt\nfn print_line(s: string): void\n  print(s)\n"))
-  inputs10 = inputs10.push(SourceInput("main.dao", "module app::main\nimport core::fmt\nfn main(): void\n  fmt::print_line(\"hello\")\n"))
+  inputs10 = inputs10.push(SourceInput("fmt.dao", "module core::fmt\nfn print_line(s: string): void\n  print(s)\n", false))
+  inputs10 = inputs10.push(SourceInput("main.dao", "module app::main\nimport core::fmt\nfn main(): void\n  fmt::print_line(\"hello\")\n", false))
   let pg10: ProgramGraph = build_program(inputs10)
   if pg10.diags.length() == 0:
     if pg10.modules.length() == 2:
@@ -227,9 +227,9 @@ fn main(): i32
   // c imports a, a imports b, b imports a.  Only a and b form a cycle;
   // c is an acyclic dependent and must not appear in the cycle trace.
   let inputs11: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs11 = inputs11.push(SourceInput("a.dao", "module app::a\nimport app::b\nfn f(): i32 -> 0\n"))
-  inputs11 = inputs11.push(SourceInput("b.dao", "module app::b\nimport app::a\nfn g(): i32 -> 0\n"))
-  inputs11 = inputs11.push(SourceInput("c.dao", "module app::c\nimport app::a\nfn h(): i32 -> 0\n"))
+  inputs11 = inputs11.push(SourceInput("a.dao", "module app::a\nimport app::b\nfn f(): i32 -> 0\n", false))
+  inputs11 = inputs11.push(SourceInput("b.dao", "module app::b\nimport app::a\nfn g(): i32 -> 0\n", false))
+  inputs11 = inputs11.push(SourceInput("c.dao", "module app::c\nimport app::a\nfn h(): i32 -> 0\n", false))
   let pg11: ProgramGraph = build_program(inputs11)
   let cycle_msg_11: string = ""
   let di11a: i64 = 0

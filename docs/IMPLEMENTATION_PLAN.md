@@ -561,9 +561,11 @@ typecheck program).  Both now write in place for the latest value
 with versioned slots (maps) and an overwrite log (vectors), so a
 stale value still reads exactly its own.  The audit's peak column
 (`docs/bootstrap_closure.md`, 6 GiB probe bound) fell from 5.5–16 GiB
-to 51–418 MiB for every program (the larger figures once the parser
-reads the corpus's static calls, Task 36), stage times to two seconds
-or less, and §10's acceptance bar — every program under 2 GiB — is
+to well under 500 MiB for every program (the audit on this head
+reports 59 MiB for the lexer program and 455 for `llvm`, the larger
+figures following the parser reading the corpus's static calls, Task
+36, and the prelude entering the program, Task 38), stage times to
+two seconds or less, and §10's acceptance bar — every program under 2 GiB — is
 met.  The
 llvm stage's `Vector.get` panic is an earlier bootstrap defect, not
 memory.  (The llvm program's parse-stage crash was the host backend
@@ -781,9 +783,23 @@ move only with the bootstrap work that closes each row.
 
 ### Task 38 — Bootstrap Prelude Resolution
 
-Status: **spec** — `docs/task_specs/TASK_38_BOOTSTRAP_PRELUDE_RESOLUTION.md`;
+Status: **complete** — `docs/task_specs/TASK_38_BOOTSTRAP_PRELUDE_RESOLUTION.md`;
 the prelude row of `CONTRACT_MODULE_SYSTEM.md` §12, promoted from Task
 33 by the closure audit.
+
+**Result** (`docs/bootstrap_closure.md` on the landing head): the five
+prelude names resolve; the resolve column fell (llvm: 2954 → 1860) and
+its histogram is now match-arm destructuring bindings (`unknown name
+'a'`, `'t'`, `'b'`), which the resolver resolves as expressions
+without introducing bindings.  The typecheck column fell with it
+(lexer: 1005 → 455, llvm: 1870 → 1382) once declaration lookups took
+the module as half a declaration's identity — an index is file-local,
+so two modules' declarations at one index had been taking each other's
+symbols — and its histogram is now integer width (`type mismatch in
+'+': i64 vs i32`, `cannot assign i32 to i64`), the bootstrap's own
+`i32`/`i64` mixing rather than a compiler fault.  The prelude section
+lists the seven partially parsed files and each file's typecheck
+count.  The next task is chosen from that audit, not written here.
 
 **Objective**: after Tasks 36–37 every compiler program's first
 blocking diagnostic is `unknown name` for a prelude declaration

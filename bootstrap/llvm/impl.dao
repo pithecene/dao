@@ -1647,7 +1647,7 @@ fn lower_mir_to_llvm_text(input: MirBackendInput): LlvmTextResult
 fn lower_to_mir_backend_input(src: string): MirBackendInput
   let wrapped: string = wrap_test_module(src)
   let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs = inputs.push(SourceInput("test.dao", wrapped))
+  inputs = inputs.push(SourceInput("test.dao", wrapped, false))
   let pg: ProgramGraph = program_graph_empty()
   resource memory graph =>
     pg = build_program(inputs)
@@ -1767,15 +1767,63 @@ fn closure_report_diags_from(name: string, stage: string, diags: Vector<Diagnost
     eprint("probe: " + name + " diag " + stage + ": " + diags.get(i).message)
     i = i + to_i64(1)
 
-// The same, for the diagnostics the program pipeline attaches to files,
-// from index `from` (a later pass appends to an earlier pass's list).
-fn closure_report_file_diags(name: string, stage: string, diags: Vector<FileDiagnostic>, from: i64, limit: i64): void
+// One file's share of the diagnostics the program pipeline attaches
+// from index `from` on (a later pass appends to an earlier pass's
+// list): with the prelude in the program the list carries every
+// file's, and a column is one file's.
+class DiagTally:
+  count: i64
+  first: string
+
+fn closure_tally_by_path(diags: Vector<FileDiagnostic>, from: i64, path: string): DiagTally
+  let n: i64 = 0
+  let first: string = ""
   let i: i64 = from
   while i < diags.length():
-    if i - from >= limit:
-      return
-    eprint("probe: " + name + " diag " + stage + ": " + diags.get(i).diag.message)
+    let fd: FileDiagnostic = diags.get(i)
+    if fd.path == path:
+      if n == to_i64(0):
+        first = fd.diag.message
+      n = n + to_i64(1)
     i = i + to_i64(1)
+  return DiagTally(n, first)
+
+// The same as closure_report_diags_from, for one file's diagnostics
+// among those the program pipeline attaches.
+fn closure_report_file_diags(name: string, stage: string, diags: Vector<FileDiagnostic>, from: i64, limit: i64, path: string): void
+  let reported: i64 = 0
+  let i: i64 = from
+  while i < diags.length():
+    if reported >= limit:
+      return
+    let fd: FileDiagnostic = diags.get(i)
+    if fd.path == path:
+      eprint("probe: " + name + " diag " + stage + ": " + fd.diag.message)
+      reported = reported + to_i64(1)
+    i = i + to_i64(1)
+
+// The prelude the audit gives the program pipeline: the file list it
+// writes beside the marker, one path per line in path order.  The
+// probe has no directory listing, so membership is explicit input
+// (CONTRACT_MODULE_SYSTEM.md §7.1); no list, no prelude.
+fn closure_prelude_inputs(): Vector<SourceInput>
+  let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  if file_exists("bootstrap/llvm/out/.closure_prelude") == false:
+    return inputs
+  let listing: string = read_file("bootstrap/llvm/out/.closure_prelude")
+  let start: i64 = 0
+  while start < length(listing):
+    let rest: string = substring(listing, start, length(listing) - start)
+    let nl: i64 = index_of(rest, "\n")
+    let line: string = rest
+    if nl >= to_i64(0):
+      line = substring(rest, to_i64(0), nl)
+      start = start + nl + to_i64(1)
+    else:
+      start = length(listing)
+    if length(line) > to_i64(0):
+      inputs = inputs.push(SourceInput(line, read_file(line), true))
+  return inputs
 
 // One stage per process, from source: the bootstrap frees nothing, so
 // a stage's cost can only be measured alone.  `parse` reports the
@@ -1804,8 +1852,10 @@ fn closure_probe_stage(name: string, path: string, stage: string): string
     closure_report_diags_from(name, "parse", parsed.diags, lex_n, to_i64(50))
     cols = cols + closure_stage_column(name, "parse", parsed.diags, lex_n)
   if stage == "typecheck":
-    let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-    inputs = inputs.push(SourceInput(path, wrap_test_module(src)))
+    // The program pipeline, with the prelude: the columns count the
+    // compiler program's own diagnostics, by path.
+    let inputs: Vector<SourceInput> = closure_prelude_inputs()
+    inputs = inputs.push(SourceInput(path, wrap_test_module(src), false))
     let pg: ProgramGraph = program_graph_empty()
     resource memory graph =>
       pg = build_program(inputs)
@@ -1814,13 +1864,13 @@ fn closure_probe_stage(name: string, path: string, stage: string): string
     resource memory resolve =>
       p = program_run_resolve(p)
     let carried_into_resolve: i64 = pg.diags.length()
-    closure_report_file_diags(name, "resolve", p.resolve.diags, carried_into_resolve, to_i64(50))
-    cols = cols + closure_stage_file_column(name, "resolve", p.resolve.diags, carried_into_resolve)
+    closure_report_file_diags(name, "resolve", p.resolve.diags, carried_into_resolve, to_i64(50), path)
+    cols = cols + closure_stage_file_column(name, "resolve", p.resolve.diags, carried_into_resolve, path)
     resource memory typecheck =>
       p = program_run_typecheck(p)
     let carried_into_typecheck: i64 = p.resolve.diags.length()
-    closure_report_file_diags(name, "typecheck", p.diags, carried_into_typecheck, to_i64(50))
-    cols = cols + closure_stage_file_column(name, "typecheck", p.diags, carried_into_typecheck)
+    closure_report_file_diags(name, "typecheck", p.diags, carried_into_typecheck, to_i64(50), path)
+    cols = cols + closure_stage_file_column(name, "typecheck", p.diags, carried_into_typecheck, path)
   if stage == "hir":
     let hir: HirResult = hir_result_empty()
     resource memory hir =>
@@ -1850,14 +1900,53 @@ fn closure_stage_column(name: string, stage: string, diags: Vector<Diagnostic>, 
     eprint("probe: " + name + " first " + stage + ": " + diags.get(from).message)
   return "\t" + stage + "=" + i64_to_string(n)
 
-fn closure_stage_file_column(name: string, stage: string, diags: Vector<FileDiagnostic>, from: i64): string
-  let n: i64 = diags.length() - from
-  eprint("probe: " + name + " " + stage + "=" + i64_to_string(n))
-  if n > to_i64(0):
-    eprint("probe: " + name + " first " + stage + ": " + diags.get(from).diag.message)
-  return "\t" + stage + "=" + i64_to_string(n)
+fn closure_stage_file_column(name: string, stage: string, diags: Vector<FileDiagnostic>, from: i64, path: string): string
+  let tally: DiagTally = closure_tally_by_path(diags, from, path)
+  eprint("probe: " + name + " " + stage + "=" + i64_to_string(tally.count))
+  if tally.count > to_i64(0):
+    eprint("probe: " + name + " first " + stage + ": " + tally.first)
+  return "\t" + stage + "=" + i64_to_string(tally.count)
 
-// The marker holds "<program>\t<stage>".
+// The prelude group alone through the program pipeline, for the
+// audit's prelude section.  One line per file after resolve --
+// "probe: prelude file<TAB><path><TAB>parse=N<TAB>resolve=M<TAB>first=<message>"
+// -- and one per file after typecheck --
+// "probe: prelude typecheck<TAB><path><TAB><K><TAB><message>" -- so a
+// type checker that dies over a prelude body leaves the parse and
+// resolve columns behind.
+fn closure_probe_prelude(): string
+  let inputs: Vector<SourceInput> = closure_prelude_inputs()
+  eprint("probe: prelude files=" + i64_to_string(inputs.length()))
+  let pg: ProgramGraph = program_graph_empty()
+  resource memory graph =>
+    pg = build_program(inputs)
+  let p: Program = program_from_graph(pg)
+  resource memory resolve =>
+    p = program_run_resolve(p)
+  let carried_into_resolve: i64 = pg.diags.length()
+  let i: i64 = 0
+  while i < inputs.length():
+    let path: string = inputs.get(i).path
+    let parsed: DiagTally = closure_tally_by_path(pg.diags, to_i64(0), path)
+    let resolved: DiagTally = closure_tally_by_path(p.resolve.diags, carried_into_resolve, path)
+    let first: string = parsed.first
+    if parsed.count == to_i64(0):
+      first = resolved.first
+    eprint("probe: prelude file\t" + path + "\tparse=" + i64_to_string(parsed.count) + "\tresolve=" + i64_to_string(resolved.count) + "\tfirst=" + first)
+    i = i + to_i64(1)
+  resource memory typecheck =>
+    p = program_run_typecheck(p)
+  let carried_into_typecheck: i64 = p.resolve.diags.length()
+  i = to_i64(0)
+  while i < inputs.length():
+    let path: string = inputs.get(i).path
+    let typed: DiagTally = closure_tally_by_path(p.diags, carried_into_typecheck, path)
+    eprint("probe: prelude typecheck\t" + path + "\t" + i64_to_string(typed.count) + "\t" + typed.first)
+    i = i + to_i64(1)
+  return "prelude\tfiles=" + i64_to_string(inputs.length()) + "\n"
+
+// The marker holds "<program>\t<stage>"; the program "prelude" is the
+// prelude group alone.
 fn closure_probe(marker: string): void
   let tab: i64 = index_of(marker, "\t")
   if tab < to_i64(0):
@@ -1865,7 +1954,11 @@ fn closure_probe(marker: string): void
     return
   let which: string = substring(marker, to_i64(0), tab)
   let stage: string = substring(marker, tab + to_i64(1), length(marker) - tab - to_i64(1))
-  let line: string = closure_probe_stage(which, "bootstrap/" + which + "/" + which + ".gen.dao", stage)
+  let line: string = ""
+  if which == "prelude":
+    line = closure_probe_prelude()
+  else:
+    line = closure_probe_stage(which, "bootstrap/" + which + "/" + which + ".gen.dao", stage)
   let previous: string = ""
   if file_exists("bootstrap/llvm/out/closure.txt"):
     previous = read_file("bootstrap/llvm/out/closure.txt")
@@ -1882,7 +1975,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 19
+  let total: i32 = 20
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -2186,6 +2279,35 @@ fn main(): i32
     while di < r15.diags.length():
       print("  diag: " + r15.diags.get(di).message)
       di = di + to_i64(1)
+
+  // -----------------------------------------------------------------
+  // Test 15b: class_method_define — a class's own method reaches LLVM
+  // as a named define with its declared return type, and a dot call
+  // reaches it.  A method's symbol is a `Method`, not a `Function`;
+  // a declaration lowering that looked only for `Function` gave the
+  // method a void return and an anonymous define.
+  // -----------------------------------------------------------------
+  let src15b: string = "class Box:\n  n: i32\n  fn pick(self): i32\n    return self.n\n\nfn main(): i32\n  let b: Box = Box(7)\n  return b.pick()\n"
+  let r15b: LlvmTextResult = lower_source_to_llvm_text(src15b)
+  write_failures = write_failures + emit_ir("class_method_define", r15b, 7)
+  if r15b.ok:
+    let a15b: bool = check_contains(r15b, "define i32 @Box.pick(", "class_method_define")
+    let b15b: bool = check_contains(r15b, "call i32 @Box.pick(", "class_method_define")
+    let c15b: bool = true
+    if contains_substring(r15b.text, "<unsupported>"):
+      c15b = false
+      print("FAIL class_method_define: emitted IR contains <unsupported> marker")
+    if a15b:
+      if b15b:
+        if c15b:
+          print("PASS class_method_define")
+          pass_count = pass_count + 1
+  else:
+    print("FAIL class_method_define: ok=false")
+    let d15b: i64 = to_i64(0)
+    while d15b < r15b.diags.length():
+      print("  diag: " + r15b.diags.get(d15b).message)
+      d15b = d15b + to_i64(1)
 
   // -----------------------------------------------------------------
   // Test 16: nested_struct_registration — a struct containing another
