@@ -43,8 +43,10 @@ There is one prelude mechanism, this one.
    qualified too; both paths reach the same declaration.
 5. Builtins and predeclared names can be neither shadowed nor
    redeclared by any module, prelude included.
-6. Only prelude modules may declare `__dao_`-prefixed names and the
-   intrinsic family `size_of`, `align_of`, `ptr_offset`, `copy_out`.
+6. Only prelude modules may declare, at top level, `__dao_`-prefixed
+   names and the intrinsic family `size_of`, `align_of`, `ptr_offset`,
+   `copy_out`.  A class's own `copy_out` method is not such a
+   declaration (§7.8).
 
 Scope order, outermost to innermost:
 
@@ -115,22 +117,41 @@ files that parse clean or in a declaration that survives recovery.
 1. a **builtins scope** — `populate_builtins` runs once, into scope 0;
 2. a **prelude scope**, child of the builtins scope — every prelude
    module's top-level declarations are collected into it, in topo
-   order; the module's `scope` and its export table both denote this
-   scope's contents for that module (§7.5: a qualified path reaches
-   the same declaration as the unqualified name);
-3. per non-prelude module, a **module scope**, child of the prelude
-   scope, holding the module's own declarations and import bindings.
+   order;
+3. per module, prelude or not, a **module scope**, child of the
+   prelude scope, holding the module's import bindings and — for a
+   non-prelude module — its own declarations.  A prelude module's
+   declarations go into the shared scope; its imports stay in its own
+   module scope, so an `import` in a prelude module binds there and
+   nowhere else (§3).
+
+The single-file `resolve` path uses the same layout with an empty
+prelude scope, so scope indices mean one thing in both paths:
+scope 0 is the builtins, scope 1 the prelude.
+
+Export tables stay per module: each is built from the module's own
+declarations, looked up in the scope they were declared into.  Through
+`import core::vector`, `vector::Vector` reaches the prelude-scope
+symbol and `vector::make_error` is rejected as today ("module 'vector'
+has no exported symbol 'make_error'"), although `make_error` is visible
+unqualified (§7.5: a qualified path reaches the same declaration as
+the unqualified name, and no other).
 
 `scope_lookup` walks parents as it does now, so innermost-first
 lookup gives §7.4 shadowing for free.  What the chain alone does not
-give:
+give, checked at top-level declaration with the host's diagnostics:
 
 - **rule 6** — declaring into the prelude scope or a module scope a
-  name that the builtins scope holds is an error ("'i32' is a compiler
-  builtin and cannot be redeclared"), checked at declaration;
-- **rule 7 and 8** — a non-prelude module declaring a `__dao_`-prefixed
-  name, or `size_of` / `align_of` / `ptr_offset` / `copy_out`, is an
-  error; a prelude module may.
+  name that the builtins scope holds is an error ("duplicate
+  top-level declaration 'i32'");
+- **rule 7** — a non-prelude module declaring a `__dao_`-prefixed name
+  is an error ("'__dao_y': the '__dao_' prefix is reserved for
+  compiler/runtime use"); a prelude module may;
+- **rule 8** — a non-prelude module declaring `size_of` / `align_of` /
+  `ptr_offset` / `copy_out` at top level is an error ("duplicate
+  top-level declaration 'size_of'"); a prelude module may.  Methods
+  are declared under their mangled name (`Box.copy_out`), so a class's
+  own `copy_out` is untouched.
 
 Unqualified lookup of an ordinary (non-prelude) module's declaration
 from another module stays unresolved, as today (§3: only import
@@ -145,18 +166,41 @@ today from their own declarations, so `vector::Vector` through an
 import binding and the bare `Vector` name identify the same
 `sym_idx`.
 
+Method-set visibility follows (§7.2): `sym_visible_in_module`, which
+the type checker's and HIR's method lookups filter by, admits builtins,
+the current module's symbols, and symbols declared into the prelude
+scope — so a prelude `extend` method participates in every module's
+method set, as the host's does.  Typing the prelude's bodies stays out
+of scope (§6); only the visibility of what the prelude declares is.
+
 ### 5.4 The probe
 
-`closure_probe_stage` builds the program from the prelude group plus
-the compiler program: `stdlib/core/*.dao` and `stdlib/io/*.dao`, each
-a `SourceInput` with `is_prelude` set, then the compiler program.  The
-`parse` probe stage keeps measuring the compiler program alone (that
-column is the compiler sources' closure); the audit gains a **prelude
-section**: per prelude file, its parse diagnostic count and first
-rejected construct, so the table in §4 is regenerated, never
-hand-kept.  Resolve, typecheck, and later stages report the compiler
-program's diagnostics with the prelude present; prelude files'
-own later-stage diagnostics are reported under their own paths.
+The audit writes the prelude file list (`stdlib/core/*.dao` and
+`stdlib/io/*.dao`, path order — the host's `prelude_files`) beside the
+probe marker; the probe has no directory listing and membership is
+explicit input.  The `typecheck` probe stage — the one that runs the
+program pipeline, resolve then typecheck — builds its `Program` from
+that list, each file a `SourceInput` with `is_prelude` set, plus the
+compiler program, and its `resolve` and `typecheck` columns count the
+compiler program's own diagnostics (by path) with the prelude present.
+The `parse` stage keeps measuring the compiler program alone (that
+column is the compiler sources' closure).
+
+The `hir`, `mir`, and `llvm` stages run the single-source adapters
+(`lower_to_hir(src)`, `lower_to_mir(src)`,
+`lower_source_to_llvm_text(src)`) as today, without the prelude: the
+bootstrap has no program-level MIR or LLVM driver.  Those three columns
+measure a program the Stage-2 compiler will not compile and are
+excluded from frontier selection until the program pipeline reaches
+them; the audit's narrative says so, and the next task chosen from
+the audit comes from the resolve and typecheck columns and the prelude
+section.
+
+The audit gains a **prelude section** from one dedicated probe run over
+the prelude group alone: per prelude file, its parse, resolve, and
+typecheck diagnostic counts and first diagnostic, so the table in §4
+is regenerated, never hand-kept, and the prelude's own later-stage
+diagnostics are reported under their own paths.
 
 ### 5.5 Determinism
 
@@ -186,8 +230,11 @@ Two PRs:
 2. The implementation: §5.1–§5.4, the tests of §8, the audit script's
    prelude section, `bootstrap/README.md` resolver inventory (prelude
    scope in Tier A scope; reserved prefix and intrinsic family
-   enforced), the §12 row updated to "conforms (Task 38)" with any
-   caveat the parser evidence imposes, and the audit rerun on the head.
+   enforced), the §12 row updated to "partial (Task 38)" — scope
+   order, shadowing, identity, reserved names, and method visibility
+   conform; the seven files of §4 load partially; the `hir`, `mir`,
+   `llvm` columns are not yet measured with the prelude — and the
+   audit rerun on the head.
 
 ## 8. Tests
 
@@ -212,6 +259,16 @@ under `stdlib/core/` with `is_prelude`):
   `unknown name`.
 - **reserved names** — `fn __dao_x()` and `fn size_of()` in an ordinary
   module diagnose; in a prelude module they declare.
+- **`copy_out` method** — `class Box` with its own `fn copy_out` in an
+  ordinary module declares; no diagnostic.
+- **prelude import isolation** — an `import` in a prelude module binds
+  in that module only: another module's unqualified use of the binding
+  is `unknown name`.
+- **per-module exports** — after `import core::greet`, `greet::other`
+  (declared in `core::other`) diagnoses `module 'greet' has no
+  exported symbol 'other'`, while `other` resolves unqualified.
+- **method visibility** — a symbol declared into the prelude scope
+  passes `sym_visible_in_module` from any module (typecheck suite).
 
 Corpus, through the audit with the real prelude loaded:
 
@@ -235,9 +292,11 @@ Corpus, through the audit with the real prelude loaded:
 5. `bash bootstrap/audit_closure.sh` is rerun and
    `docs/bootstrap_closure.md` committed from the head, with the
    prelude section.
-6. The audit — the resolve histogram with the prelude present, and the
-   prelude section — states the next frontier.  The plan's next task is
-   written from that, after this task lands.
+6. The audit — the resolve and typecheck histograms with the prelude
+   present, and the prelude section — states the next frontier; the
+   `hir`, `mir`, `llvm` columns, measured without the prelude, do not
+   choose it, and the audit's narrative says so.  The plan's next task
+   is written from that, after this task lands.
 
 ## 10. One-sentence summary
 
