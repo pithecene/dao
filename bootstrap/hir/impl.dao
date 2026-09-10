@@ -315,7 +315,7 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
     Node.UnaryE(op_tidx, operand):
       let or2: HirR = lower_expr(hs, operand)
       return hs_add_node(or2.hs, HirNode.HirUnary(op_tidx, or2.hir, ti))
-    Node.CallE(callee, args_lp, arg_count):
+    Node.CallE(callee, args_lp, arg_count, targs_lp, targ_count):
       return lower_call_expr(hs, node_idx, callee, args_lp, arg_count, ti)
     Node.FieldE(obj, field_tidx):
       let obj_r: HirR = lower_expr(hs, obj)

@@ -777,7 +777,7 @@ enum class Node:
   QualNameE(seg_lp: i64, seg_count: i64)
   BinaryE(op: i64, left: i64, right: i64)
   UnaryE(op: i64, operand: i64)
-  CallE(callee: i64, args_lp: i64, arg_count: i64)
+  CallE(callee: i64, args_lp: i64, arg_count: i64, targs_lp: i64, targ_count: i64)
   IndexE(obj: i64, idx: i64)
   FieldE(obj: i64, field: i64)
   PipeE(left: i64, right: i64)
@@ -939,6 +939,17 @@ fn flush_list(ps: PS, items: Vector<i64>): FlushResult
   let lp: i64 = cur.idx.length()
   cur = idx_push(cur, items.length())
   return FlushResult(cur, lp)
+
+// The items of the list `flush_list` wrote at `lp`: its count sits at
+// `lp`, the items just before it.
+fn read_list(idx_data: Vector<i64>, lp: i64): Vector<i64>
+  let count: i64 = idx_data.get(lp)
+  let result: Vector<i64> = Vector<i64>::new()
+  let i: i64 = 0
+  while i < count:
+    result = result.push(idx_data.get(lp - count + i))
+    i = i + 1
+  return result
 
 // flush_pairs: push collected pairs contiguously to idx, then push count.
 // items contains [a0, b0, a1, b1, ...] — count is number of pairs.
@@ -1231,7 +1242,99 @@ fn parse_ident_or_qual(pc: PC, ps: PS): PR
   let seg_fl: FlushResult = flush_list(cur, seg_toks)
   return ps_add_node(seg_fl.ps, Node.QualNameE(seg_fl.list_pos, seg_toks.length()))
 
-// Postfix expressions: call, field, index, try
+// Type arguments read speculatively after a callee name: the state past
+// `>` and the flushed list when accepted, else `ok` false and the state
+// the caller had (a parser state is a value, so the attempt's nodes and
+// diagnostics are dropped with it).
+class TypeArgsResult:
+  ps: PS
+  list_pos: i64
+  count: i64
+  ok: bool
+
+// `<Type, ..>` at `ps` is call-site type arguments only when `>` follows
+// the types and `(` or `::` follows the `>` -- the host parser's rule;
+// otherwise `<` is a comparison.  A type that fails to parse fails the
+// attempt too, so `x < 3 > (y)` stays a comparison.
+fn try_call_type_args(pc: PC, ps: PS): TypeArgsResult
+  let none: TypeArgsResult = TypeArgsResult(ps, to_i64(-1), to_i64(0), false)
+  let cur: PS = ps_advance(pc, ps)
+  let collected: Vector<i64> = Vector<i64>::new()
+  let first: PR = parse_type(pc, cur)
+  collected = collected.push(first.node)
+  cur = first.ps
+  let more: bool = true
+  while more:
+    if tk_name(peek_kind(pc, cur)) == tk_name(TK.Comma):
+      cur = ps_advance(pc, cur)
+      let arg: PR = parse_type(pc, cur)
+      collected = collected.push(arg.node)
+      cur = arg.ps
+    else:
+      more = false
+  if cur.diags.length() != ps.diags.length():
+    return none
+  if tk_name(peek_kind(pc, cur)) != tk_name(TK.Gt):
+    return none
+  cur = ps_advance(pc, cur)
+  let next: TK = peek_kind(pc, cur)
+  if tk_name(next) != tk_name(TK.LParen) and tk_name(next) != tk_name(TK.ColonColon):
+    return none
+  let fl: FlushResult = flush_list(cur, collected)
+  return TypeArgsResult(fl.ps, fl.list_pos, collected.length(), true)
+
+// Whether `node` is a name that type arguments may follow: an identifier
+// or a qualified name.
+fn names_callee(ps: PS, node: i64): bool
+  match ps.nodes.get(node):
+    Node.IdentE(t):
+      return true
+    Node.QualNameE(lp, n):
+      return true
+  return false
+
+// The qualified name `node::member`: the name's segments plus one.
+fn extend_qual_name(ps: PS, node: i64, member_tidx: i64): PR
+  let seg_toks: Vector<i64> = Vector<i64>::new()
+  match ps.nodes.get(node):
+    Node.IdentE(t):
+      seg_toks = seg_toks.push(t)
+    Node.QualNameE(lp, n):
+      seg_toks = read_list(ps.idx, lp)
+  seg_toks = seg_toks.push(member_tidx)
+  let fl: FlushResult = flush_list(ps, seg_toks)
+  return ps_add_node(fl.ps, Node.QualNameE(fl.list_pos, seg_toks.length()))
+
+// The call `(args)` on `callee` at `ps`, carrying the type arguments the
+// callee was read with (`targs_lp` -1 and `targ_count` 0 for none).
+fn parse_call_suffix(pc: PC, ps: PS, callee: i64, targs_lp: i64, targ_count: i64): PR
+  let inner: PS = expect(pc, ps, TK.LParen)
+  let call_args: Vector<i64> = Vector<i64>::new()
+  if tk_name(peek_kind(pc, inner)) != tk_name(TK.RParen):
+    let arg: PR = parse_expr(pc, inner)
+    if arg.node >= 0:
+      call_args = call_args.push(arg.node)
+      inner = arg.ps
+      let arg_done: bool = false
+      while arg_done == false:
+        if tk_name(peek_kind(pc, inner)) == tk_name(TK.Comma):
+          inner = ps_advance(pc, inner)
+          let arg2: PR = parse_expr(pc, inner)
+          if arg2.node >= 0:
+            call_args = call_args.push(arg2.node)
+            inner = arg2.ps
+          else:
+            inner = arg2.ps
+            arg_done = true
+        else:
+          arg_done = true
+    else:
+      inner = arg.ps
+  let call_fl: FlushResult = flush_list(inner, call_args)
+  inner = expect(pc, call_fl.ps, TK.RParen)
+  return ps_add_node(inner, Node.CallE(callee, call_fl.list_pos, call_args.length(), targs_lp, targ_count))
+
+// Postfix expressions: call (with call-site type arguments), field, index, try
 fn parse_postfix(pc: PC, ps: PS): PR
   let prim: PR = parse_primary(pc, ps)
   if prim.node < 0:
@@ -1242,69 +1345,63 @@ fn parse_postfix(pc: PC, ps: PS): PR
   while done == false:
     let k: TK = peek_kind(pc, cur_ps)
 
+    // Type arguments on a name: name<T, ..>(args) or name<T, ..>::member(args)
+    let targs: TypeArgsResult = TypeArgsResult(cur_ps, to_i64(-1), to_i64(0), false)
+    if tk_name(k) == tk_name(TK.Lt):
+      if names_callee(cur_ps, cur_node):
+        targs = try_call_type_args(pc, cur_ps)
+    if targs.ok:
+      let after: PS = targs.ps
+      if tk_name(peek_kind(pc, after)) == tk_name(TK.ColonColon):
+        let ps_m: PS = ps_advance(pc, after)
+        let member_tidx: i64 = ps_m.pos
+        ps_m = expect(pc, ps_m, TK.Identifier)
+        let qual_r: PR = extend_qual_name(ps_m, cur_node, member_tidx)
+        after = qual_r.ps
+        cur_node = qual_r.node
+      let typed_call: PR = parse_call_suffix(pc, after, cur_node, targs.list_pos, targs.count)
+      cur_ps = typed_call.ps
+      cur_node = typed_call.node
+
     // Call: expr(args)
-    if tk_name(k) == tk_name(TK.LParen):
-      let ps2: PS = ps_advance(pc, cur_ps)
-      let call_args: Vector<i64> = Vector<i64>::new()
-      let inner: PS = ps2
-      if tk_name(peek_kind(pc, inner)) != tk_name(TK.RParen):
-        let arg: PR = parse_expr(pc, inner)
-        if arg.node >= 0:
-          call_args = call_args.push(arg.node)
-          inner = arg.ps
-          let arg_done: bool = false
-          while arg_done == false:
-            if tk_name(peek_kind(pc, inner)) == tk_name(TK.Comma):
-              inner = ps_advance(pc, inner)
-              let arg2: PR = parse_expr(pc, inner)
-              if arg2.node >= 0:
-                call_args = call_args.push(arg2.node)
-                inner = arg2.ps
-              else:
-                inner = arg2.ps
-                arg_done = true
-            else:
-              arg_done = true
-        else:
-          inner = arg.ps
-      let call_fl: FlushResult = flush_list(inner, call_args)
-      inner = expect(pc, call_fl.ps, TK.RParen)
-      let call_r: PR = ps_add_node(inner, Node.CallE(cur_node, call_fl.list_pos, call_args.length()))
-      cur_ps = call_r.ps
-      cur_node = call_r.node
-
-    // Field access: expr.field
     else:
-      if tk_name(k) == tk_name(TK.Dot):
-        let ps2: PS = ps_advance(pc, cur_ps)
-        let field_tidx: i64 = ps2.pos
-        let ps3: PS = expect(pc, ps2, TK.Identifier)
-        let fld_r: PR = ps_add_node(ps3, Node.FieldE(cur_node, field_tidx))
-        cur_ps = fld_r.ps
-        cur_node = fld_r.node
+      if tk_name(k) == tk_name(TK.LParen):
+        let call_r: PR = parse_call_suffix(pc, cur_ps, cur_node, to_i64(-1), to_i64(0))
+        cur_ps = call_r.ps
+        cur_node = call_r.node
 
-      // Index: expr[index]
+      // Field access: expr.field
       else:
-        if tk_name(k) == tk_name(TK.LBracket):
+        if tk_name(k) == tk_name(TK.Dot):
           let ps2: PS = ps_advance(pc, cur_ps)
-          let idx_expr: PR = parse_expr(pc, ps2)
-          if idx_expr.node < 0:
-            return idx_expr
-          let ps3: PS = expect(pc, idx_expr.ps, TK.RBracket)
-          let idx_r: PR = ps_add_node(ps3, Node.IndexE(cur_node, idx_expr.node))
-          cur_ps = idx_r.ps
-          cur_node = idx_r.node
+          let field_tidx: i64 = ps2.pos
+          let ps3: PS = expect(pc, ps2, TK.Identifier)
+          let fld_r: PR = ps_add_node(ps3, Node.FieldE(cur_node, field_tidx))
+          cur_ps = fld_r.ps
+          cur_node = fld_r.node
 
-        // Try: expr?
+        // Index: expr[index]
         else:
-          if tk_name(k) == tk_name(TK.Question):
+          if tk_name(k) == tk_name(TK.LBracket):
             let ps2: PS = ps_advance(pc, cur_ps)
-            let try_r: PR = ps_add_node(ps2, Node.TryE(cur_node))
-            cur_ps = try_r.ps
-            cur_node = try_r.node
+            let idx_expr: PR = parse_expr(pc, ps2)
+            if idx_expr.node < 0:
+              return idx_expr
+            let ps3: PS = expect(pc, idx_expr.ps, TK.RBracket)
+            let idx_r: PR = ps_add_node(ps3, Node.IndexE(cur_node, idx_expr.node))
+            cur_ps = idx_r.ps
+            cur_node = idx_r.node
 
+          // Try: expr?
           else:
-            done = true
+            if tk_name(k) == tk_name(TK.Question):
+              let ps2: PS = ps_advance(pc, cur_ps)
+              let try_r: PR = ps_add_node(ps2, Node.TryE(cur_node))
+              cur_ps = try_r.ps
+              cur_node = try_r.node
+
+            else:
+              done = true
 
   return PR(cur_ps, cur_node)
 
@@ -2376,7 +2473,7 @@ fn node_kind_name(n: Node): string
       return "BinaryE"
     Node.UnaryE(a, b):
       return "UnaryE"
-    Node.CallE(a, b, c):
+    Node.CallE(a, b, c, d, e):
       return "CallE"
     Node.IndexE(a, b):
       return "IndexE"

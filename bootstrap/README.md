@@ -82,6 +82,10 @@ slice of Dao syntax.
 - Types: named, generic instantiation (`Vector<Token>`), pointer
   (`*T`)
 
+**Tier B-Bootstrap coverage (added)**: call-site type arguments —
+`Type<Args>::member(args)` and `f<Args>(args)` read with the host's
+rule, the type arguments carried on `CallE` (Task 36)
+
 **Tier B deferrals** (explicitly not supported yet):
 
 - `concept`, `derived concept`, `extend`

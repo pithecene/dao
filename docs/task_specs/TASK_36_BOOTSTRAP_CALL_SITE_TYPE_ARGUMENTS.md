@@ -1,6 +1,6 @@
 # Task 36 — Bootstrap Parser: Call-Site Type Arguments
 
-Status: implementation spec
+Status: implemented
 Phase: Tier B-Bootstrap, first construct (after Task 35's capacity work)
 Scope: the bootstrap parser accepts generic arguments on a callee in
 expression position — `Type<Args>::method(args)` and `f<Args>(args)` —
@@ -118,10 +118,11 @@ one helper used by both paths, so a third copy is never written.
 ## 6. Downstream stages (in scope: pass-through only)
 
 Every `match` over `Node` is closed, so the resolver, type checker, and
-HIR lowering each update their `CallE` arm to the five-field shape.  In
-this task they ignore the type arguments; the resolver resolves the
-callee and arguments as today, so `Vector<i64>::new()` resolves its
-`Vector` prefix and records the use.  Binding the type arguments —
+HIR lowering each update their `CallE` arm to the five-field shape.  The
+resolver resolves the type arguments as type nodes (as it does a
+generic type's arguments) beside the callee and arguments, so
+`Vector<i64>::new()` resolves its `Vector` prefix and records the use;
+the type checker and HIR lowering ignore them in this task.  Binding the type arguments —
 instantiating `new` for `Vector<i64>` in the bootstrap type checker —
 is the next Tier B-Bootstrap slice, sequenced by the audit's typecheck
 histogram once the parse column is zero.
