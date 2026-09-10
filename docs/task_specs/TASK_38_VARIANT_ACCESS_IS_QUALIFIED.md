@@ -86,8 +86,13 @@ expression, `lower_call_expr` lowers a `QualNameE` callee to
 - variant validation for a two-segment `Enum::Variant` on a local enum
   (the three-segment `mod::Enum::Variant` path already checks
   `variant_set`), with the diagnostic the three-segment path emits;
-- tests in the type checker and HIR suites for a `::` constructor and a
-  `::` pattern.
+- arity validation for a qualified variant construction: the
+  `TEnum` arm of `check_call_expr` typed every enum call as the enum
+  without reading the variant's payload count; it now compares the
+  argument count with the payload count of the variant the callee
+  names and diagnoses a mismatch;
+- tests in the type checker and HIR suites for a `::` constructor, a
+  wrong-arity construction, and a `::` pattern.
 
 The `FieldE` path stays what it is — field access on a value — and
 types nothing for an enum object, as today; after the corpus moves, no
@@ -103,9 +108,13 @@ Fields and methods are lowercase by convention throughout the
 repository, so no field access matches; the rewrite is then checked by
 the host building every program (`task test`, `task bootstrap-test`)
 and by the rejection diagnostic, which would name any site the regex
-missed.  Docs that show source (`TASK_18_ENUM_PAYLOADS.md`, the plan,
-the two contracts) are edited by hand; `docs/bootstrap_closure.md` is
-regenerated.
+missed.  Docs and comments that show source are edited by hand:
+`TASK_18_ENUM_PAYLOADS.md`, the plan, the two contracts,
+`bootstrap/README.md` (`TK.Error`), the Task 36 and Task 37 specs
+(`Node.CallE`, `Node.ResourceS`), and the `Result.Err` comment in
+`compiler/ir/mir/mir_builder.cpp`; `docs/bootstrap_closure.md` is
+regenerated.  The rejection diagnostic and a final grep for the regex
+over every tracked file close the inventory.
 
 ## 7. Delivery
 
@@ -130,9 +139,11 @@ migrated sources use.
   `variant access uses '::'`; the `::` spellings still type.
 - Host: existing suites unchanged in count; goldens regenerated.
 - Bootstrap: type checker — `Color::Red` types as `Color`;
-  `Color::Blue` on an enum without `Blue` diagnoses; a `::` constructor
-  with the wrong arity diagnoses as today.  HIR — a `::` pattern lowers
-  the same nodes as before.
+  `Color::Blue` on an enum without `Blue` diagnoses; `Shape::Circle()`
+  and `Shape::Circle(1, 2)` against `Circle(r: i64)` each diagnose the
+  arity; fieldless `::` patterns check against the scrutinee.  HIR — a
+  `::` constructor and a `::` pattern lower with `HirQualName` callees
+  and no diagnostics.
 - Corpus: `task test`, `task bootstrap-test`, the closure audit rerun —
   with the corpus on `::` the resolve column's `unknown name` histogram
   is expected to move, since the dot form's enum head was a `FieldE`
