@@ -10,37 +10,37 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 71291 |
-| `CallExpr` | 23598 |
-| `Callee` | 23598 |
-| `Args` | 21200 |
-| `FieldExpr` | 15918 |
-| `BinaryExpr` | 10907 |
-| `LetStatement` | 10427 |
-| `Value` | 8254 |
-| `Target` | 8254 |
-| `Assignment` | 8254 |
-| `IntLiteral` | 8038 |
-| `Condition` | 6702 |
-| `QualifiedName` | 6173 |
-| `Then` | 5438 |
-| `IfStatement` | 5438 |
-| `ReturnStatement` | 5372 |
-| `StringLiteral` | 4727 |
+| `Identifier` | 71493 |
+| `CallExpr` | 23675 |
+| `Callee` | 23675 |
+| `Args` | 21265 |
+| `FieldExpr` | 15966 |
+| `BinaryExpr` | 10969 |
+| `LetStatement` | 10463 |
+| `Value` | 8258 |
+| `Target` | 8258 |
+| `Assignment` | 8258 |
+| `IntLiteral` | 8067 |
+| `Condition` | 6722 |
+| `QualifiedName` | 6185 |
+| `Then` | 5454 |
+| `IfStatement` | 5454 |
+| `ReturnStatement` | 5388 |
+| `StringLiteral` | 4752 |
 | `Param` | 3707 |
-| `Pattern` | 2608 |
-| `Arm` | 2608 |
+| `Pattern` | 2620 |
+| `Arm` | 2620 |
 | `BoolLiteral` | 2475 |
 | `ReturnType` | 1578 |
 | `FunctionDecl` | 1578 |
 | `Else` | 1295 |
-| `WhileStatement` | 1264 |
+| `WhileStatement` | 1268 |
 | `Variant` | 1166 |
 | `Field` | 1072 |
 | `UnaryExpr` | 1035 |
 | `TypeArgs` | 962 |
-| `Scrutinee` | 617 |
-| `MatchStatement` | 617 |
+| `Scrutinee` | 621 |
+| `MatchStatement` | 621 |
 | `ExpressionStatement` | 517 |
 | `ClassDecl` | 255 |
 | `BreakStatement` | 64 |
@@ -234,14 +234,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 59 | 0 | 0 | 0 | 342 | 398 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 57 | 1 | 0 | 0 | 342 | 398 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
 | parser | 64 | 1 | 0 | 0 | 473 | 326 | 0 | 35 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 61 | 1 | 0 | 0 | 365 | 357 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 133 | 1 | 0 | 0 | 894 | 559 | 0 | 59 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 254 | 0 | 0 | 0 | 1642 | 945 | 0 | 141 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 401 | 1 | 0 | 0 | 2157 | 1163 | 0 | 181 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 429 | 1 | 0 | 0 | 2455 | 1111 | 0 | 231 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 502 | 2 | 0 | 0 | 2942 | 1145 | 0 | 299 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 62 | 0 | 0 | 0 | 365 | 357 | 0 | 18 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 132 | 0 | 0 | 0 | 894 | 559 | 0 | 59 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 260 | 1 | 0 | 0 | 1655 | 953 | 0 | 142 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 379 | 2 | 0 | 0 | 2169 | 1171 | 0 | 182 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 367 | 1 | 0 | 0 | 2467 | 1119 | 0 | 232 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 473 | 1 | 0 | 0 | 2954 | 1153 | 0 | 300 | — | resolve: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 
