@@ -234,15 +234,14 @@ fn hir_sym_type(hs: HS, sym_idx: i64): i64
 // cross-module ambiguity is possible, so the visibility filter is
 // skipped.
 fn hir_find_method_sym(hs: HS, mangled: string): i64
+  if hs.module_id >= 0:
+    return find_visible_method_sym(hs.symbols, mangled, hs.module_id)
   let i: i64 = 0
   while i < hs.symbols.length():
     let sym: Symbol = hs.symbols.get(i)
     if sym.name == mangled:
       if symbol_kind_name(sym.kind) == "Function":
-        if hs.module_id < 0:
-          return i
-        if sym_visible_in_module(sym, hs.module_id):
-          return i
+        return i
     i = i + 1
   return to_i64(-1)
 

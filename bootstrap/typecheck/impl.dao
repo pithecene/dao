@@ -704,15 +704,7 @@ fn tc_register_methods(ts: TS, decls: Vector<i64>): TS
                 // Find the mangled symbol and set its type
                 let mname: string = ts_tok_name(r, m_name_tidx)
                 let mangled: string = class_name + "." + mname
-                let msym: i64 = to_i64(-1)
-                let si: i64 = 0
-                while si < r.tc.symbols.length():
-                  let sym: Symbol = r.tc.symbols.get(si)
-                  if sym_visible_in_module(sym, r.tc.module_id):
-                    if sym.name == mangled:
-                      if symbol_kind_name(sym.kind) == "Function":
-                        msym = si
-                  si = si + 1
+                let msym: i64 = find_visible_method_sym(r.tc.symbols, mangled, r.tc.module_id)
                 if msym >= 0:
                   r = ts_set_sym_type(r, msym, tr.type_idx)
                 // Set self param type to the enclosing struct type
@@ -814,6 +806,24 @@ fn sym_visible_in_module(sym: Symbol, module_id: i64): bool
     return true
   return sym.owner_module_id == module_id
 
+// The method symbol `mangled` names from `module_id`: the module's own
+// declaration when it has one — a module that shadows a prelude type
+// shadows its methods too (§7.4), whatever the symbols' order — else
+// a visible prelude or builtin one; -1 when none is visible.
+fn find_visible_method_sym(symbols: Vector<Symbol>, mangled: string, module_id: i64): i64
+  let outer: i64 = to_i64(-1)
+  let i: i64 = 0
+  while i < symbols.length():
+    let sym: Symbol = symbols.get(i)
+    if sym.name == mangled:
+      if symbol_kind_name(sym.kind) == "Function":
+        if sym.owner_module_id == module_id:
+          return i
+        if sym_visible_in_module(sym, module_id):
+          outer = i
+    i = i + 1
+  return outer
+
 fn tc_register_extend_methods(ts: TS, decls: Vector<i64>): TS
   let r: TS = ts
   let i: i64 = 0
@@ -852,15 +862,7 @@ fn tc_register_extend_methods(ts: TS, decls: Vector<i64>): TS
                 // Find the mangled symbol and set its type
                 let mname: string = ts_tok_name(r, m_name_tidx)
                 let mangled: string = target_name + "." + mname
-                let msym: i64 = to_i64(-1)
-                let si: i64 = 0
-                while si < r.tc.symbols.length():
-                  let sym: Symbol = r.tc.symbols.get(si)
-                  if sym_visible_in_module(sym, r.tc.module_id):
-                    if sym.name == mangled:
-                      if symbol_kind_name(sym.kind) == "Function":
-                        msym = si
-                  si = si + 1
+                let msym: i64 = find_visible_method_sym(r.tc.symbols, mangled, r.tc.module_id)
                 if msym >= 0:
                   r = ts_set_sym_type(r, msym, tr.type_idx)
                 // Set self param type to the target type
@@ -918,10 +920,11 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
             // Look for mangled symbol TargetName.methodName
             let mangled: string = target_name + "." + req_name
             let found_method: bool = false
+            let chosen: i64 = find_visible_method_sym(r.tc.symbols, mangled, r.tc.module_id)
             let si: i64 = 0
             while si < r.tc.symbols.length():
               let sym: Symbol = r.tc.symbols.get(si)
-              if sym_visible_in_module(sym, r.tc.module_id):
+              if si == chosen:
                 if sym.name == mangled:
                   if symbol_kind_name(sym.kind) == "Function":
                     found_method = true
@@ -1541,14 +1544,7 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
         fi = fi + 1
       // Try method lookup: look for mangled symbol "StructName.fieldName"
       let mangled_name: string = obj_type.name + "." + field_name
-      let msym: i64 = to_i64(-1)
-      let si: i64 = 0
-      while si < r.tc.symbols.length():
-        let sym: Symbol = r.tc.symbols.get(si)
-        if sym.name == mangled_name:
-          if symbol_kind_name(sym.kind) == "Function":
-            msym = si
-        si = si + 1
+      let msym: i64 = find_visible_method_sym(r.tc.symbols, mangled_name, r.tc.module_id)
       if msym >= 0:
         let meth_ti: i64 = vec_i64_get(r.sym_types, msym)
         if meth_ti >= 0:
@@ -1912,14 +1908,7 @@ fn tc_check_method_body(ts: TS, class_decl_idx: i64, meth_idx: i64, m_name_tidx:
       class_name = ts_tok_name(r, cn_tidx)
   let mname: string = ts_tok_name(r, m_name_tidx)
   let mangled: string = class_name + "." + mname
-  let msym: i64 = to_i64(-1)
-  let si: i64 = 0
-  while si < r.tc.symbols.length():
-    let sym: Symbol = r.tc.symbols.get(si)
-    if sym.name == mangled:
-      if symbol_kind_name(sym.kind) == "Function":
-        msym = si
-    si = si + 1
+  let msym: i64 = find_visible_method_sym(r.tc.symbols, mangled, r.tc.module_id)
   if msym >= 0:
     fn_ti = vec_i64_get(r.sym_types, msym)
   let old_return_type: i64 = r.return_type
@@ -1963,14 +1952,7 @@ fn tc_check_extend_method_body(ts: TS, extend_decl_idx: i64, meth_idx: i64, m_na
   let mname: string = ts_tok_name(r, m_name_tidx)
   let mangled: string = target_name + "." + mname
   let fn_ti: i64 = to_i64(-1)
-  let msym: i64 = to_i64(-1)
-  let si: i64 = 0
-  while si < r.tc.symbols.length():
-    let sym: Symbol = r.tc.symbols.get(si)
-    if sym.name == mangled:
-      if symbol_kind_name(sym.kind) == "Function":
-        msym = si
-    si = si + 1
+  let msym: i64 = find_visible_method_sym(r.tc.symbols, mangled, r.tc.module_id)
   if msym >= 0:
     fn_ti = vec_i64_get(r.sym_types, msym)
   let old_return_type: i64 = r.return_type
@@ -2210,7 +2192,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 50
+  let total: i32 = 52
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -3126,7 +3108,7 @@ fn main(): i32
   // Test 49: a symbol declared into the prelude scope is visible from
   // any module (CONTRACT_MODULE_SYSTEM.md §7.2); one declared in an
   // ordinary module is visible from that module only.
-  let prelude_sym: Symbol = Symbol(SymbolKind::Function, "i32.show", to_i64(0), prelude_scope_idx(), to_i64(0))
+  let prelude_sym: Symbol = Symbol(SymbolKind::Function, "i32.show", to_i64(0), prelude_scope_idx(), to_i64(7))
   let module_sym: Symbol = Symbol(SymbolKind::Function, "i32.show", to_i64(0), prelude_scope_idx() + to_i64(1), to_i64(0))
   let vis_ok: bool = false
   if sym_visible_in_module(prelude_sym, to_i64(1)):
@@ -3138,6 +3120,54 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL prelude_method_visibility")
+
+  // Test 50: a module's own method shadows a prelude method of the
+  // same mangled name whichever comes first in the symbol table.
+  let shadow_syms_a: Vector<Symbol> = Vector<Symbol>::new()
+  shadow_syms_a = shadow_syms_a.push(prelude_sym).push(module_sym)
+  let shadow_syms_b: Vector<Symbol> = Vector<Symbol>::new()
+  shadow_syms_b = shadow_syms_b.push(module_sym).push(prelude_sym)
+  let shadow_ok: bool = false
+  if find_visible_method_sym(shadow_syms_a, "i32.show", to_i64(0)) == to_i64(1):
+    if find_visible_method_sym(shadow_syms_b, "i32.show", to_i64(0)) == to_i64(0):
+      if find_visible_method_sym(shadow_syms_a, "i32.show", to_i64(1)) == to_i64(0):
+        if find_visible_method_sym(shadow_syms_a, "i32.hash", to_i64(0)) == to_i64(-1):
+          shadow_ok = true
+  if shadow_ok:
+    print("PASS module_method_shadows_prelude")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL module_method_shadows_prelude")
+
+  // Test 51: end to end — a module's `class Box` with `fn m(): i32`
+  // shadows the prelude's `class Box` with `fn m(): bool`; the dot call
+  // types as the module's method, whichever module resolves first.
+  // `pad` keeps the two class declarations at different node indices:
+  // the type checker still identifies a declaration by node index
+  // without file provenance (the closure audit's typecheck frontier),
+  // which is not what this test measures.
+  let sb_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  sb_inputs = sb_inputs.push(SourceInput("stdlib/core/box.dao", "module core::box\nclass Box:\n  n: i32\n  fn m(self): bool\n    return true\n", true))
+  sb_inputs = sb_inputs.push(SourceInput("main.dao", "module app::main\nfn pad(): i32 -> 0\nclass Box:\n  n: i32\n  fn m(self): i32\n    return self.n\nfn f(): i32\n  let b: Box = Box(1)\n  return b.m()\n", false))
+  let sb_p: Program = program_from_graph(build_program(sb_inputs))
+  sb_p = program_run_resolve(sb_p)
+  sb_p = program_run_typecheck(sb_p)
+  let sb_errors: i64 = 0
+  let sb_i: i64 = 0
+  while sb_i < sb_p.diags.length():
+    let sb_fd: FileDiagnostic = sb_p.diags.get(sb_i)
+    if sb_fd.path == "main.dao":
+      sb_errors = sb_errors + 1
+    sb_i = sb_i + 1
+  if sb_errors == 0:
+    print("PASS shadowed_class_method_types_as_module")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL shadowed_class_method_types_as_module: " + i64_to_string(sb_errors) + " diagnostics in main.dao")
+    let sb_j: i64 = 0
+    while sb_j < sb_p.diags.length():
+      print("  diag: " + sb_p.diags.get(sb_j).path + ": " + sb_p.diags.get(sb_j).diag.message)
+      sb_j = sb_j + 1
 
   // -----------------------------------------------------------------
   // Summary

@@ -10,38 +10,38 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 72401 |
-| `CallExpr` | 24071 |
-| `Callee` | 24071 |
-| `Args` | 21595 |
-| `FieldExpr` | 16127 |
-| `BinaryExpr` | 11137 |
-| `LetStatement` | 10566 |
-| `Value` | 8344 |
-| `Target` | 8344 |
-| `Assignment` | 8344 |
-| `IntLiteral` | 8147 |
-| `Condition` | 6835 |
+| `Identifier` | 72400 |
+| `CallExpr` | 24073 |
+| `Callee` | 24073 |
+| `Args` | 21608 |
+| `FieldExpr` | 16098 |
+| `BinaryExpr` | 11099 |
+| `LetStatement` | 10556 |
+| `Value` | 8325 |
+| `Target` | 8325 |
+| `Assignment` | 8325 |
+| `IntLiteral` | 8116 |
+| `Condition` | 6793 |
 | `QualifiedName` | 6247 |
-| `Then` | 5559 |
-| `IfStatement` | 5559 |
-| `ReturnStatement` | 5508 |
-| `StringLiteral` | 4942 |
-| `Param` | 3760 |
-| `BoolLiteral` | 2676 |
+| `Then` | 5531 |
+| `IfStatement` | 5531 |
+| `ReturnStatement` | 5521 |
+| `StringLiteral` | 4944 |
+| `Param` | 3792 |
+| `BoolLiteral` | 2681 |
 | `Pattern` | 2669 |
 | `Arm` | 2669 |
-| `ReturnType` | 1625 |
-| `FunctionDecl` | 1625 |
-| `Else` | 1310 |
-| `WhileStatement` | 1276 |
+| `ReturnType` | 1634 |
+| `FunctionDecl` | 1634 |
+| `Else` | 1312 |
+| `WhileStatement` | 1262 |
 | `Variant` | 1176 |
 | `Field` | 1090 |
-| `UnaryExpr` | 1044 |
-| `TypeArgs` | 993 |
+| `UnaryExpr` | 1029 |
+| `TypeArgs` | 996 |
 | `Scrutinee` | 643 |
 | `MatchStatement` | 643 |
-| `ExpressionStatement` | 544 |
+| `ExpressionStatement` | 549 |
 | `ClassDecl` | 256 |
 | `BreakStatement` | 64 |
 | `ResourceBlock` | 42 |
@@ -234,14 +234,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 53 | 1 | 0 | 0 | 154 | 1005 | 0 | 18 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 55 | 0 | 0 | 0 | 269 | 845 | 0 | 35 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 55 | 0 | 0 | 0 | 163 | 885 | 0 | 18 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 53 | 0 | 0 | 0 | 154 | 1005 | 0 | 18 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 55 | 1 | 0 | 0 | 269 | 845 | 0 | 35 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 55 | 1 | 0 | 0 | 163 | 885 | 0 | 18 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
 | resolver | 114 | 1 | 0 | 0 | 605 | 1170 | 0 | 67 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 204 | 1 | 0 | 0 | 1006 | 1556 | 0 | 148 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 317 | 1 | 0 | 0 | 1479 | 1802 | 0 | 188 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 326 | 2 | 0 | 0 | 1626 | 1766 | 0 | 238 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 442 | 2 | 0 | 0 | 1856 | 1867 | 0 | 309 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 203 | 2 | 0 | 0 | 1011 | 1561 | 0 | 148 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 312 | 2 | 0 | 0 | 1479 | 1794 | 0 | 188 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 321 | 2 | 0 | 0 | 1626 | 1758 | 0 | 238 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 436 | 2 | 0 | 0 | 1856 | 1859 | 0 | 309 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 
@@ -433,7 +433,7 @@ next.  Sites per program against the parse column above:
 | parser | 62 | 0 | 0 |
 | graph | 68 | 0 | 0 |
 | resolver | 114 | 0 | 0 |
-| typecheck | 142 | 0 | 0 |
+| typecheck | 145 | 0 | 0 |
 | hir | 161 | 4 | 0 |
 | mir | 177 | 10 | 0 |
 | llvm | 215 | 28 | 0 |

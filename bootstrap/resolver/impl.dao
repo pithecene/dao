@@ -169,20 +169,27 @@ fn decl_span(rs: RS, decl_tidx: i64): Span
     return tok_name_span(rs, decl_tidx)
   return Span(to_i64(0), to_i64(1))
 
+// A module's top-level declaration, as against an import binding: the
+// reserved names are the prelude's to declare (§7.7–§7.8), and a
+// binding named after one is not a declaration.  The diagnostics are
+// the host's.
+fn declare_top_level(rs: RS, name: string, sym_idx: i64, decl_tidx: i64): RS
+  let scope: Scope = rs.scopes.get(rs.current_scope)
+  if is_module_scope(scope.kind):
+    if is_prelude_intrinsic(name):
+      return rs_add_diag(rs, decl_span(rs, decl_tidx), "duplicate top-level declaration '" + name + "'")
+    if starts_with(name, "__dao_"):
+      return rs_add_diag(rs, decl_span(rs, decl_tidx), "'" + name + "': the '__dao_' prefix is reserved for compiler/runtime use")
+  return scope_declare(rs, name, sym_idx, decl_tidx)
+
 fn scope_declare(rs: RS, name: string, sym_idx: i64, decl_tidx: i64): RS
   let scope: Scope = rs.scopes.get(rs.current_scope)
-  // Scope nesting alone does not enforce §7.6–§7.8: a top-level
-  // declaration may not carry a builtin's name, and the reserved
-  // names are the prelude's to declare.  The diagnostics are the
-  // host's.
+  // Scope nesting alone does not enforce §7.6: nothing declared or
+  // bound at top level may carry a builtin's name.  The diagnostic is
+  // the host's.
   if is_top_level_scope(scope.kind):
     if builtin_declared(rs, name):
       return rs_add_diag(rs, decl_span(rs, decl_tidx), "duplicate top-level declaration '" + name + "'")
-    if is_module_scope(scope.kind):
-      if is_prelude_intrinsic(name):
-        return rs_add_diag(rs, decl_span(rs, decl_tidx), "duplicate top-level declaration '" + name + "'")
-      if starts_with(name, "__dao_"):
-        return rs_add_diag(rs, decl_span(rs, decl_tidx), "'" + name + "': the '__dao_' prefix is reserved for compiler/runtime use")
   match scope.decls.get(name):
     Option::Some(eidx):
       return rs_add_diag(rs, decl_span(rs, decl_tidx), "duplicate declaration '" + name + "'")
@@ -852,19 +859,19 @@ fn collect_top_level(rs: RS, file_node_idx: i64): RS
           Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_type, body_lp):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, name, decl_idx, r.current_scope, r.owner_module_id))
-            r = scope_declare(sr.rs, name, sr.sym_idx, name_tidx)
+            r = declare_top_level(sr.rs, name, sr.sym_idx, name_tidx)
           Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_type, body_expr):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, name, decl_idx, r.current_scope, r.owner_module_id))
-            r = scope_declare(sr.rs, name, sr.sym_idx, name_tidx)
+            r = declare_top_level(sr.rs, name, sr.sym_idx, name_tidx)
           Node::ExternFnD(name_tidx, tparams_lp, params_lp, ret_type):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, name, decl_idx, r.current_scope, r.owner_module_id))
-            r = scope_declare(sr.rs, name, sr.sym_idx, name_tidx)
+            r = declare_top_level(sr.rs, name, sr.sym_idx, name_tidx)
           Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Type, name, decl_idx, r.current_scope, r.owner_module_id))
-            r = scope_declare(sr.rs, name, sr.sym_idx, name_tidx)
+            r = declare_top_level(sr.rs, name, sr.sym_idx, name_tidx)
             // Register mangled method symbols in file scope
             if methods_lp >= 0:
               let meths: Vector<i64> = read_list(r.rc.idx_data, methods_lp)
@@ -877,20 +884,20 @@ fn collect_top_level(rs: RS, file_node_idx: i64): RS
                     let mname: string = tok_name(r, m_name_tidx)
                     let mangled: string = name + "." + mname
                     let msr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, mangled, meth_idx, r.current_scope, r.owner_module_id))
-                    r = scope_declare(msr.rs, mangled, msr.sym_idx, m_name_tidx)
+                    r = declare_top_level(msr.rs, mangled, msr.sym_idx, m_name_tidx)
                 mi = mi + 1
           Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Type, name, decl_idx, r.current_scope, r.owner_module_id))
-            r = scope_declare(sr.rs, name, sr.sym_idx, name_tidx)
+            r = declare_top_level(sr.rs, name, sr.sym_idx, name_tidx)
           Node::TypeAliasD(name_tidx, target_type):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Type, name, decl_idx, r.current_scope, r.owner_module_id))
-            r = scope_declare(sr.rs, name, sr.sym_idx, name_tidx)
+            r = declare_top_level(sr.rs, name, sr.sym_idx, name_tidx)
           Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Type, name, decl_idx, r.current_scope, r.owner_module_id))
-            r = scope_declare(sr.rs, name, sr.sym_idx, name_tidx)
+            r = declare_top_level(sr.rs, name, sr.sym_idx, name_tidx)
           Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
             // Register mangled method symbols: TargetTypeName.methodName
             if methods_lp >= 0:
@@ -912,7 +919,7 @@ fn collect_top_level(rs: RS, file_node_idx: i64): RS
                     let mname: string = tok_name(r, m_name_tidx)
                     let mangled: string = target_name + "." + mname
                     let msr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, mangled, meth_idx, r.current_scope, r.owner_module_id))
-                    r = scope_declare(msr.rs, mangled, msr.sym_idx, m_name_tidx)
+                    r = declare_top_level(msr.rs, mangled, msr.sym_idx, m_name_tidx)
                 mi = mi + 1
           Node::ErrorD(t):
             r = r
@@ -2207,10 +2214,12 @@ fn main(): i32
 
   // Test 44: reserved_names — `__dao_` names and the intrinsic family
   // are the prelude's to declare at top level (§7.7–§7.8); a class's
-  // own `copy_out` method is not such a declaration.
+  // own `copy_out` method is not such a declaration, nor is an import
+  // binding spelled like one (§3).
   let rn_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
   rn_inputs = rn_inputs.push(SourceInput("stdlib/core/hooks.dao", "module core::hooks\nextern fn __dao_x(): i32\nfn size_of(): i32 -> 8\n", true))
-  rn_inputs = rn_inputs.push(SourceInput("main.dao", "module app::main\nfn __dao_y(): i32 -> 0\nfn ptr_offset(): i32 -> 0\nclass Box:\n  n: i32\n  fn copy_out(self): i32 -> self.n\n", false))
+  rn_inputs = rn_inputs.push(SourceInput("copy_out.dao", "module lib::copy_out\nfn f(): i32 -> 0\n", false))
+  rn_inputs = rn_inputs.push(SourceInput("main.dao", "module app::main\nimport lib::copy_out\nfn __dao_y(): i32 -> 0\nfn ptr_offset(): i32 -> 0\nclass Box:\n  n: i32\n  fn copy_out(self): i32 -> self.n\nfn g(): i32 -> copy_out::f()\n", false))
   let rn_r: ProgramResolveResult = resolve_inputs(rn_inputs)
   let rn_ok: bool = false
   if program_error_count(rn_r) == 2:
