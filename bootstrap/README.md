@@ -164,7 +164,8 @@ correctness for Tier A Dao syntax.
 - Expression typing: literals, identifiers, binary/unary ops, calls,
   field access, pipe
 - Statement checking: let, assign, if/while (bool condition), for,
-  return, break, match, expression statements
+  return, break, match, expression statements, `resource` block
+  bodies (Task 37)
 - Struct constructors and field access
 - Enum variant constructors
 - Assignability via structural type comparison
