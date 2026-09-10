@@ -1757,6 +1757,13 @@ fn check_pattern(ts: TS, pat_node: i64): TS
             let sp: Span = ts_node_span(r, callee)
             if param_count == to_i64(0):
               return ts_add_diag(r, sp, "variant '" + variant_name + "' has no parameters; the pattern is written without parentheses")
+            let names: Vector<i64> = read_list(r.tc.idx_data, names_lp)
+            let ni: i64 = 0
+            while ni < names.length():
+              if names.get(ni) >= 0:
+                let nsp: Span = ts_tok_span(r, names.get(ni))
+                return ts_add_diag(r, nsp, "a pattern binds by position: " + variant_name + "(a, b), never by name")
+              ni = ni + 1
             let bindings: Vector<i64> = read_list(r.tc.idx_data, args_lp)
             if bindings.length() != param_count:
               return ts_add_diag(r, sp, "variant '" + variant_name + "' takes " + i64_to_string(param_count) + " parameter(s); the pattern binds " + i64_to_string(bindings.length()))
@@ -1774,6 +1781,23 @@ fn check_pattern(ts: TS, pat_node: i64): TS
           Option::None:
             return r
       return ts_set_expr_type(r, pat_node, callee_ti)
+    Node::QualNameE(seg_lp, seg_count):
+      // A bare variant pattern: only a variant without parameters.
+      let r: TS = check_expr(ts, pat_node)
+      let pat_ti: i64 = get_expr_type(r, pat_node)
+      if pat_ti >= 0:
+        let segs: Vector<i64> = read_list(r.tc.idx_data, seg_lp)
+        if segs.length() >= 2:
+          let bare_name: string = ts_tok_name(r, segs.get(segs.length() - 1))
+          let bare: Option<i64> = r.variant_set.get(i64_to_string(pat_ti) + ":" + bare_name)
+          match bare:
+            Option::Some(param_count):
+              if param_count > to_i64(0):
+                let bsp: Span = ts_node_span(r, pat_node)
+                return ts_add_diag(r, bsp, "variant '" + bare_name + "' takes " + i64_to_string(param_count) + " parameter(s); the pattern binds none")
+            Option::None:
+              return r
+      return r
   return check_expr(ts, pat_node)
 
 fn check_match_stmt(ts: TS, scrut_node: i64, arms_lp: i64): TS
@@ -3064,22 +3088,22 @@ fn main(): i32
       di47 = di47 + 1
 
   // Test 49: pattern shapes: a parameterless variant with parentheses, a
-  // literal where a binding goes, and the wrong number of bindings are
-  // each diagnosed.
-  let src49: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn pick(s: Shape): i32\n  match s:\n    Shape::Dot():\n      return 1\n    Shape::Circle(1):\n      return 2\n    Shape::Circle(a, b):\n      return 3\n  return 0\n"
+  // literal where a binding goes, the wrong number of bindings, a
+  // payload variant bare, and a binding by name are each diagnosed.
+  let src49: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn pick(s: Shape): i32\n  match s:\n    Shape::Dot():\n      return 1\n    Shape::Circle(1):\n      return 2\n    Shape::Circle(a, b):\n      return 3\n    Shape::Circle:\n      return 4\n    Shape::Circle(r = x):\n      return 5\n  return 0\n"
   let r49: TypeCheckResult = typecheck(src49)
   let shape_diags: i64 = 0
   let dk49: i64 = 0
   while dk49 < r49.diags.length():
     let m49: string = r49.diags.get(dk49).message
-    if index_of(m49, "written without parentheses") >= 0 or index_of(m49, "binds a name per parameter") >= 0 or index_of(m49, "the pattern binds") >= 0:
+    if index_of(m49, "written without parentheses") >= 0 or index_of(m49, "binds a name per parameter") >= 0 or index_of(m49, "the pattern binds") >= 0 or index_of(m49, "binds by position") >= 0:
       shape_diags = shape_diags + 1
     dk49 = dk49 + 1
-  if shape_diags == 3:
+  if shape_diags == 5:
     print("PASS pattern_shapes_diagnosed")
     pass_count = pass_count + 1
   else:
-    print("FAIL pattern_shapes_diagnosed: expected 3 shape diagnostics, got " + i64_to_string(shape_diags))
+    print("FAIL pattern_shapes_diagnosed: expected 5 shape diagnostics, got " + i64_to_string(shape_diags))
     let dj49: i64 = 0
     while dj49 < r49.diags.length():
       print("  diag: " + r49.diags.get(dj49).message)
