@@ -603,6 +603,20 @@ comparison); downstream stages pass the type arguments through —
 binding them in the bootstrap type checker is the next slice, sequenced
 by the typecheck histogram once the parse column is zero.
 
+### Task 37 — Bootstrap Pipeline: `resource` Blocks
+
+Status: **spec** — `docs/task_specs/TASK_37_BOOTSTRAP_RESOURCE_BLOCKS.md`;
+the second Tier B-Bootstrap construct, the one left in the audit's
+parse column after Task 36.
+
+**Objective**: the bootstrap parser, resolver, type checker, and HIR
+carry the `resource memory <name> =>` blocks Task 35 E3 placed in the
+pipeline drivers and the probe (4, 10, and 25 blocks in the hir, mir,
+and llvm programs; 231, 1029, and 1623 parse diagnostics), so every
+bootstrap program parses clean.  MIR rejects the block fail-closed
+(`CONTRACT_MIR_BOUNDARY.md` §4: a resource region must not disappear
+before backend lowering) until the domain's MIR representation lands.
+
 ### Task 31 — Host Multi-file Compilation
 
 Status: **complete** — D0 (program-wide source map; prelude loaded
