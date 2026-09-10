@@ -685,7 +685,7 @@ fn lower_type_params(hs: HS, ast_tparams_lp: i64): HirFlush
 fn lower_fn_decl_with_owner(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, params_lp: i64, ret_type_node: i64, body_lp: i64, class_owner_tidx: i64): HirR
   let tp_fl: HirFlush = lower_type_params(hs, tparams_lp)
   let ret_ti: i64 = to_i64(11)
-  let fn_sym: i64 = hir_find_sym_by_decl(tp_fl.hs, decl_idx, "Function")
+  let fn_sym: i64 = hir_find_callable_sym_by_decl(tp_fl.hs, decl_idx)
   if fn_sym >= 0:
     let fn_ti: i64 = hir_sym_type(tp_fl.hs, fn_sym)
     if fn_ti >= 0:
@@ -719,7 +719,7 @@ fn lower_expr_fn_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, pa
   let tp_fl: HirFlush = lower_type_params(hs, tparams_lp)
   // Desugar expr body into block with single return
   let ret_ti: i64 = to_i64(11)
-  let fn_sym: i64 = hir_find_sym_by_decl(tp_fl.hs, decl_idx, "Function")
+  let fn_sym: i64 = hir_find_callable_sym_by_decl(tp_fl.hs, decl_idx)
   if fn_sym >= 0:
     let fn_ti: i64 = hir_sym_type(tp_fl.hs, fn_sym)
     if fn_ti >= 0:
@@ -756,7 +756,7 @@ fn lower_expr_fn_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, pa
 fn lower_extern_fn_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, params_lp: i64, ret_type_node: i64): HirR
   let tp_fl: HirFlush = lower_type_params(hs, tparams_lp)
   let ret_ti: i64 = to_i64(11)
-  let fn_sym: i64 = hir_find_sym_by_decl(tp_fl.hs, decl_idx, "Function")
+  let fn_sym: i64 = hir_find_callable_sym_by_decl(tp_fl.hs, decl_idx)
   if fn_sym >= 0:
     let fn_ti: i64 = hir_sym_type(tp_fl.hs, fn_sym)
     if fn_ti >= 0:
@@ -929,6 +929,20 @@ fn lower_decl(hs: HS, decl_idx: i64): HirR
 // =========================================================================
 // Section 57: Symbol lookup helpers for HIR
 // =========================================================================
+
+// The callable symbol a declaration introduces: a free function's is
+// a `Function`, a class's own method's a `Method`.  A declaration
+// whose symbol is not found lowers with a `void` return, so the
+// lookup must know both kinds.
+fn hir_find_callable_sym_by_decl(hs: HS, decl_idx: i64): i64
+  let si: i64 = 0
+  while si < hs.symbols.length():
+    let sym: Symbol = hs.symbols.get(si)
+    if sym.decl_node == decl_idx:
+      if is_method_symbol(sym):
+        return si
+    si = si + 1
+  return to_i64(-1)
 
 fn hir_find_sym_by_decl(hs: HS, decl_idx: i64, kind_name: string): i64
   let si: i64 = 0

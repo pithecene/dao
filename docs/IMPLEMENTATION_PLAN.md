@@ -562,7 +562,7 @@ with versioned slots (maps) and an overwrite log (vectors), so a
 stale value still reads exactly its own.  The audit's peak column
 (`docs/bootstrap_closure.md`, 6 GiB probe bound) fell from 5.5–16 GiB
 to well under 500 MiB for every program (the audit on this head
-reports 58 MiB for the lexer program and 455 for `llvm`, the larger
+reports 59 MiB for the lexer program and 455 for `llvm`, the larger
 figures following the parser reading the corpus's static calls, Task
 36, and the prelude entering the program, Task 38), stage times to
 two seconds or less, and §10's acceptance bar — every program under 2 GiB — is
@@ -788,7 +788,7 @@ the prelude row of `CONTRACT_MODULE_SYSTEM.md` §12, promoted from Task
 33 by the closure audit.
 
 **Result** (`docs/bootstrap_closure.md` on the landing head): the five
-prelude names resolve; the resolve column fell (llvm: 2954 → 1856) and
+prelude names resolve; the resolve column fell (llvm: 2954 → 1860) and
 its histogram is now match-arm destructuring bindings (`unknown name
 'a'`, `'t'`, `'b'`), which the resolver resolves as expressions
 without introducing bindings.  The typecheck column's first

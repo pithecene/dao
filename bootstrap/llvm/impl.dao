@@ -1975,7 +1975,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 19
+  let total: i32 = 20
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -2279,6 +2279,35 @@ fn main(): i32
     while di < r15.diags.length():
       print("  diag: " + r15.diags.get(di).message)
       di = di + to_i64(1)
+
+  // -----------------------------------------------------------------
+  // Test 15b: class_method_define — a class's own method reaches LLVM
+  // as a named define with its declared return type, and a dot call
+  // reaches it.  A method's symbol is a `Method`, not a `Function`;
+  // a declaration lowering that looked only for `Function` gave the
+  // method a void return and an anonymous define.
+  // -----------------------------------------------------------------
+  let src15b: string = "class Box:\n  n: i32\n  fn pick(self): i32\n    return self.n\n\nfn main(): i32\n  let b: Box = Box(7)\n  return b.pick()\n"
+  let r15b: LlvmTextResult = lower_source_to_llvm_text(src15b)
+  write_failures = write_failures + emit_ir("class_method_define", r15b, 7)
+  if r15b.ok:
+    let a15b: bool = check_contains(r15b, "define i32 @Box.pick(", "class_method_define")
+    let b15b: bool = check_contains(r15b, "call i32 @Box.pick(", "class_method_define")
+    let c15b: bool = true
+    if contains_substring(r15b.text, "<unsupported>"):
+      c15b = false
+      print("FAIL class_method_define: emitted IR contains <unsupported> marker")
+    if a15b:
+      if b15b:
+        if c15b:
+          print("PASS class_method_define")
+          pass_count = pass_count + 1
+  else:
+    print("FAIL class_method_define: ok=false")
+    let d15b: i64 = to_i64(0)
+    while d15b < r15b.diags.length():
+      print("  diag: " + r15b.diags.get(d15b).message)
+      d15b = d15b + to_i64(1)
 
   // -----------------------------------------------------------------
   // Test 16: nested_struct_registration — a struct containing another

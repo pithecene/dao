@@ -432,6 +432,18 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
 // =========================================================================
 
 // Find a symbol index by decl_node and kind name
+// The callable symbol a declaration introduces: a free function's is
+// a `Function`, a class's own method's a `Method`.
+fn find_callable_sym_by_decl(ts: TS, decl_idx: i64): i64
+  let si: i64 = 0
+  while si < ts.tc.symbols.length():
+    let sym: Symbol = ts.tc.symbols.get(si)
+    if sym.decl_node == decl_idx:
+      if is_method_symbol(sym):
+        return si
+    si = si + 1
+  return to_i64(-1)
+
 fn find_sym_by_decl(ts: TS, decl_idx: i64, kind_name: string): i64
   let si: i64 = 0
   while si < ts.tc.symbols.length():
@@ -667,7 +679,7 @@ fn tc_register_functions(ts: TS, decls: Vector<i64>): TS
     if is_fn:
       let tr: TypeR = tc_register_fn_sig_core(r, decl_idx, fn_name_tidx, fn_params_lp, fn_ret_type)
       r = tr.ts
-      let fn_sym: i64 = find_sym_by_decl(r, decl_idx, "Function")
+      let fn_sym: i64 = find_callable_sym_by_decl(r, decl_idx)
       fn_syms = fn_syms.push(fn_sym)
       fn_type_idxs = fn_type_idxs.push(tr.type_idx)
     i = i + 1
@@ -1892,7 +1904,7 @@ fn check_body_stmts(ts: TS, list_pos: i64): TS
 fn tc_check_fn_body(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, ret_type_node: i64, body_lp: i64): TS
   let r: TS = ts
   let fn_ti: i64 = to_i64(-1)
-  let sym_idx: i64 = find_sym_by_decl(r, decl_idx, "Function")
+  let sym_idx: i64 = find_callable_sym_by_decl(r, decl_idx)
   if sym_idx >= 0:
     fn_ti = vec_i64_get(r.sym_types, sym_idx)
   let old_return_type: i64 = r.return_type
@@ -1920,7 +1932,7 @@ fn tc_check_fn_body(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, ret_t
 fn tc_check_expr_fn_body(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, ret_type_node: i64, body_expr: i64): TS
   let r: TS = ts
   let fn_ti: i64 = to_i64(-1)
-  let sym_idx: i64 = find_sym_by_decl(r, decl_idx, "Function")
+  let sym_idx: i64 = find_callable_sym_by_decl(r, decl_idx)
   if sym_idx >= 0:
     fn_ti = vec_i64_get(r.sym_types, sym_idx)
   let old_return_type: i64 = r.return_type
