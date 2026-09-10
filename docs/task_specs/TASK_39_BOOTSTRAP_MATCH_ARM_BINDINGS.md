@@ -21,7 +21,7 @@ bind:
 
 ```dao
 match node:
-  Node::CallE(callee, args_lp, targs_lp, names_lp):
+  Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp):
     return lower_call(callee, args_lp)
 ```
 
@@ -115,13 +115,18 @@ describes:
 
 - input: the AST arrays and a pattern node;
 - output: the **constructor** node (the pattern itself when it binds
-  nothing) and the **binder** nodes, in written order, with a verdict
-  that says whether every binder is a plain identifier.
+  nothing), the **binder** nodes in written order, whether the pattern
+  is parenthesized at all, the first binder that is not a plain name
+  (or none), and the first binder written as a named argument (or
+  none) — the two malformed shapes `check_pattern` diagnoses, each
+  with the node or token its diagnostic points at.
 
 The resolver declares from it; `check_pattern` reads its shape from it
-instead of open-coding the walk, keeping its own diagnostics and
-their wording.  A pattern shape is then described once, so the passes
-cannot drift into different pattern grammars.
+instead of walking the call itself, keeping its diagnostics and their
+wording — including `E::V(field = x)`, whose binder is a plain name
+and whose fault is only visible in the call's argument names.  A
+pattern's shape is then described once, so the passes cannot drift
+into different pattern grammars.
 
 ### 5.2 The resolver
 

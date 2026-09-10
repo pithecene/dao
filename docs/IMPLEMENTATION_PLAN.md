@@ -824,7 +824,7 @@ chosen by the closure audit rerun on Task 38's head.
 **Objective**: with the prelude in the program, the compiler corpus's
 resolve column is one family — `unknown name 'a'`, `'t'`, `'b'`,
 `'c'`, `'lp'` — and those are the names match arms bind
-(`Node::CallE(callee, args_lp, targs_lp, names_lp):`).  The bootstrap
+(`Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp):`).  The bootstrap
 resolver resolves an arm's pattern as an expression, so every binder
 is an unresolved use and so is every mention of it in the arm's body;
 the host declares each binding as a local of the arm's scope
