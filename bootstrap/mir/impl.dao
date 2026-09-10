@@ -15,7 +15,8 @@ module bootstrap::mir::impl
 // Deferred to Tier B (same deferrals as the bootstrap HIR, plus):
 //   - Generators (iter init/has_next/next/destroy/yield)
 //   - Monomorphization / generic template separation
-//   - Mode/resource region enter/exit
+//   - Mode blocks; resource-block domains (HirResource is rejected with
+//     a diagnostic until the domain is represented in MIR)
 //   - Enum construction / discriminant / payload
 //   - Lambda / closures
 //   - Try operator

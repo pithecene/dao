@@ -620,7 +620,7 @@ fn main(): i32
   // The following syntax is explicitly deferred to Tier B:
   //   - derived concept declarations
   //   - conformance blocks (as / deny)
-  //   - mode / resource blocks
+  //   - mode blocks
   //   - yield statements
   //   - function types (fn(T): R as a type)
   //   - generic parameter bounds / where clauses

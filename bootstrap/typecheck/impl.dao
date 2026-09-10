@@ -25,7 +25,7 @@ module bootstrap::typecheck
 //   - Try operator (requires generic Option/Result)
 //   - Deref / addr-of unary operators
 //   - Index expressions
-//   - Mode / resource block semantics
+//   - Mode blocks; resource-block domain semantics (bodies are checked)
 //   - Yield / Generator checking
 //   - C ABI type validation
 //
@@ -2872,7 +2872,7 @@ fn main(): i32
   //   - Try operator (requires generic Option/Result)
   //   - Deref / addr-of unary operators
   //   - Index expressions
-  //   - Mode / resource block semantics
+  //   - Mode blocks; resource-block domain semantics (bodies are checked)
   //   - Yield / Generator checking
   //   - C ABI type validation
   //   - Structural function type comparison

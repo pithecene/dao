@@ -1939,7 +1939,7 @@ fn main(): i32
   //     resolution of generic params is implemented in Tier A)
   //   - Concept / extend conformance validation (parsing and symbol
   //     registration is implemented; conformance checking is deferred)
-  //   - Mode / resource block scoping
+  //   - Mode block scoping (a resource block's body is a block scope)
   //   - Yield statement resolution
   //   - Match arm destructuring bindings (patterns resolved as
   //     expressions, but no binding introduction)

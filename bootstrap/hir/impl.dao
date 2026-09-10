@@ -25,7 +25,8 @@ module bootstrap::hir
 //   - Index expressions
 //   - Generics / monomorphization
 //   - Methods / extend
-//   - Mode / resource blocks
+//   - Mode blocks (a resource block lowers to HirResource; its domain
+//     has no HIR representation beyond the block)
 //   - Yield / generators
 
 enum class HirNode:
