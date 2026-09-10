@@ -1839,27 +1839,15 @@ fn check_pattern(ts: TS, pat_node: i64): TS
             let sp: Span = ts_node_span(r, callee)
             if param_count == to_i64(0):
               return ts_add_diag(r, sp, "variant '" + variant_name + "' has no parameters; the pattern is written without parentheses")
-            let names: Vector<i64> = read_list(r.tc.idx_data, names_lp)
-            let ni: i64 = 0
-            while ni < names.length():
-              if names.get(ni) >= 0:
-                let nsp: Span = ts_tok_span(r, names.get(ni))
-                return ts_add_diag(r, nsp, "a pattern binds by position: " + variant_name + "(a, b), never by name")
-              ni = ni + 1
-            let bindings: Vector<i64> = read_list(r.tc.idx_data, args_lp)
-            if bindings.length() != param_count:
-              return ts_add_diag(r, sp, "variant '" + variant_name + "' takes " + i64_to_string(param_count) + " parameter(s); the pattern binds " + i64_to_string(bindings.length()))
-            let bi: i64 = 0
-            while bi < bindings.length():
-              let bound: Node = r.tc.nodes.get(bindings.get(bi))
-              let is_name: bool = false
-              match bound:
-                Node::IdentE(t2):
-                  is_name = true
-              if is_name == false:
-                let bsp: Span = ts_node_span(r, bindings.get(bi))
-                return ts_add_diag(r, bsp, "a pattern binds a name per parameter of '" + variant_name + "': " + variant_name + "(a, b)")
-              bi = bi + 1
+            let shape: PatternShape = pattern_shape(r.tc.nodes, r.tc.idx_data, pat_node)
+            if shape.first_named_tok >= 0:
+              let nsp: Span = ts_tok_span(r, shape.first_named_tok)
+              return ts_add_diag(r, nsp, "a pattern binds by position: " + variant_name + "(a, b), never by name")
+            if shape.binders.length() != param_count:
+              return ts_add_diag(r, sp, "variant '" + variant_name + "' takes " + i64_to_string(param_count) + " parameter(s); the pattern binds " + i64_to_string(shape.binders.length()))
+            if shape.first_non_ident >= 0:
+              let bsp: Span = ts_node_span(r, shape.first_non_ident)
+              return ts_add_diag(r, bsp, "a pattern binds a name per parameter of '" + variant_name + "': " + variant_name + "(a, b)")
           Option::None:
             return r
       return ts_set_expr_type(r, pat_node, callee_ti)

@@ -10,39 +10,39 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 72909 |
-| `CallExpr` | 24237 |
-| `Callee` | 24237 |
-| `Args` | 21747 |
-| `FieldExpr` | 16280 |
-| `BinaryExpr` | 11234 |
-| `LetStatement` | 10619 |
-| `Value` | 8369 |
-| `Target` | 8369 |
-| `Assignment` | 8369 |
-| `IntLiteral` | 8217 |
-| `Condition` | 6895 |
-| `QualifiedName` | 6254 |
-| `Then` | 5612 |
-| `IfStatement` | 5612 |
-| `ReturnStatement` | 5590 |
-| `StringLiteral` | 4978 |
-| `Param` | 3862 |
-| `BoolLiteral` | 2693 |
-| `Pattern` | 2676 |
-| `Arm` | 2676 |
-| `ReturnType` | 1662 |
-| `FunctionDecl` | 1662 |
-| `Else` | 1317 |
-| `WhileStatement` | 1283 |
+| `Identifier` | 73562 |
+| `CallExpr` | 24506 |
+| `Callee` | 24506 |
+| `Args` | 21983 |
+| `FieldExpr` | 16441 |
+| `BinaryExpr` | 11356 |
+| `LetStatement` | 10706 |
+| `Value` | 8430 |
+| `Target` | 8430 |
+| `Assignment` | 8430 |
+| `IntLiteral` | 8365 |
+| `Condition` | 6971 |
+| `QualifiedName` | 6281 |
+| `Then` | 5672 |
+| `IfStatement` | 5672 |
+| `ReturnStatement` | 5620 |
+| `StringLiteral` | 5021 |
+| `Param` | 3903 |
+| `BoolLiteral` | 2737 |
+| `Pattern` | 2693 |
+| `Arm` | 2693 |
+| `ReturnType` | 1676 |
+| `FunctionDecl` | 1676 |
+| `Else` | 1326 |
+| `WhileStatement` | 1299 |
 | `Variant` | 1181 |
-| `Field` | 1090 |
-| `UnaryExpr` | 1048 |
-| `TypeArgs` | 999 |
-| `Scrutinee` | 645 |
-| `MatchStatement` | 645 |
-| `ExpressionStatement` | 563 |
-| `ClassDecl` | 256 |
+| `Field` | 1130 |
+| `UnaryExpr` | 1104 |
+| `TypeArgs` | 1016 |
+| `Scrutinee` | 662 |
+| `MatchStatement` | 662 |
+| `ExpressionStatement` | 582 |
+| `ClassDecl` | 264 |
 | `BreakStatement` | 64 |
 | `ResourceBlock` | 42 |
 | `EnumDecl` | 27 |
@@ -234,14 +234,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 58 | 0 | 0 | 0 | 154 | 455 | 0 | 18 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 67 | 1 | 0 | 0 | 269 | 385 | 0 | 35 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 61 | 1 | 0 | 0 | 163 | 425 | 0 | 18 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 134 | 1 | 0 | 0 | 605 | 712 | 0 | 67 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 245 | 1 | 0 | 0 | 1031 | 1151 | 0 | 150 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 337 | 1 | 0 | 0 | 1479 | 1340 | 0 | 188 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 348 | 1 | 0 | 0 | 1626 | 1305 | 0 | 238 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 453 | 2 | 0 | 0 | 1860 | 1382 | 0 | 309 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 57 | 0 | 0 | 0 | 29 | 466 | 0 | 20 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 57 | 0 | 0 | 0 | 52 | 396 | 0 | 37 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 58 | 0 | 0 | 0 | 38 | 436 | 0 | 20 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 124 | 0 | 0 | 0 | 127 | 747 | 0 | 70 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 221 | 1 | 0 | 0 | 133 | 1161 | 0 | 152 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 325 | 2 | 0 | 0 | 80 | 1348 | 0 | 190 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 331 | 2 | 0 | 0 | 35 | 1313 | 0 | 240 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 453 | 2 | 0 | 0 | 68 | 1390 | 0 | 311 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 
@@ -251,59 +251,43 @@ named, not inferred.
 
 **lexer**
 
-- `resolve` ×14: unknown name 'a'
-- `resolve` ×12: unknown name 't'
-- `resolve` ×12: unknown name 'b'
-- `resolve` ×5: unknown name 'c'
-- `resolve` ×3: unknown name 'lp'
+- `resolve` ×29: unknown name 'print'
 - `typecheck` ×28: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `mir` ×9: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×11: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `mir` ×1: unsupported assignment target
 
 **parser**
 
-- `resolve` ×14: unknown name 'a'
-- `resolve` ×12: unknown name 't'
-- `resolve` ×12: unknown name 'b'
-- `resolve` ×5: unknown name 'c'
-- `resolve` ×3: unknown name 'lp'
+- `resolve` ×50: unknown name 'print'
 - `typecheck` ×28: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `mir` ×26: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×28: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `mir` ×1: unsupported assignment target
 
 **graph**
 
-- `resolve` ×14: unknown name 'a'
-- `resolve` ×12: unknown name 't'
-- `resolve` ×12: unknown name 'b'
-- `resolve` ×5: unknown name 'c'
-- `resolve` ×3: unknown name 'lp'
+- `resolve` ×38: unknown name 'print'
 - `typecheck` ×28: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `mir` ×9: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×11: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `mir` ×1: unsupported assignment target
 
 **resolver**
 
-- `resolve` ×14: unknown name 'a'
-- `resolve` ×12: unknown name 't'
-- `resolve` ×12: unknown name 'b'
-- `resolve` ×5: unknown name 'c'
-- `resolve` ×3: unknown name 'lp'
+- `resolve` ×50: unknown name 'print'
 - `typecheck` ×28: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
@@ -315,11 +299,7 @@ named, not inferred.
 
 **typecheck**
 
-- `resolve` ×14: unknown name 'a'
-- `resolve` ×12: unknown name 't'
-- `resolve` ×12: unknown name 'b'
-- `resolve` ×5: unknown name 'c'
-- `resolve` ×3: unknown name 'lp'
+- `resolve` ×50: unknown name 'print'
 - `typecheck` ×28: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
@@ -331,11 +311,7 @@ named, not inferred.
 
 **hir**
 
-- `resolve` ×14: unknown name 'a'
-- `resolve` ×12: unknown name 't'
-- `resolve` ×12: unknown name 'b'
-- `resolve` ×5: unknown name 'c'
-- `resolve` ×3: unknown name 'lp'
+- `resolve` ×50: unknown name 'print'
 - `typecheck` ×28: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
@@ -347,11 +323,7 @@ named, not inferred.
 
 **mir**
 
-- `resolve` ×14: unknown name 'a'
-- `resolve` ×12: unknown name 't'
-- `resolve` ×12: unknown name 'b'
-- `resolve` ×5: unknown name 'c'
-- `resolve` ×3: unknown name 'lp'
+- `resolve` ×35: unknown name 'print'
 - `typecheck` ×28: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
@@ -363,11 +335,7 @@ named, not inferred.
 
 **llvm**
 
-- `resolve` ×14: unknown name 'a'
-- `resolve` ×12: unknown name 't'
-- `resolve` ×12: unknown name 'b'
-- `resolve` ×5: unknown name 'c'
-- `resolve` ×3: unknown name 'lp'
+- `resolve` ×50: unknown name 'print'
 - `typecheck` ×28: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
@@ -429,14 +397,14 @@ next.  Sites per program against the parse column above:
 
 | Program | `Type<Args>::` sites | `resource` blocks | parse diagnostics |
 |---|---|---|---|
-| lexer | 57 | 0 | 0 |
-| parser | 62 | 0 | 0 |
-| graph | 68 | 0 | 0 |
-| resolver | 114 | 0 | 0 |
-| typecheck | 148 | 0 | 0 |
-| hir | 161 | 4 | 0 |
-| mir | 177 | 10 | 0 |
-| llvm | 215 | 28 | 0 |
+| lexer | 59 | 0 | 0 |
+| parser | 64 | 0 | 0 |
+| graph | 70 | 0 | 0 |
+| resolver | 117 | 0 | 0 |
+| typecheck | 150 | 0 | 0 |
+| hir | 163 | 4 | 0 |
+| mir | 179 | 10 | 0 |
+| llvm | 217 | 28 | 0 |
 
 ## 4. Reading the matrix
 
