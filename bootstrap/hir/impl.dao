@@ -233,9 +233,9 @@ fn hir_sym_type(hs: HS, sym_idx: i64): i64
 // `typecheck(src)` / `lower_to_hir(src)` adapters.  In that mode no
 // cross-module ambiguity is possible, so the visibility filter is
 // skipped.
-fn hir_find_method_sym(hs: HS, mangled: string): i64
+fn hir_find_method_sym(hs: HS, mangled: string, type_decl_node: i64): i64
   if hs.module_id >= 0:
-    return find_visible_method_sym(hs.symbols, mangled, hs.module_id)
+    return find_method_sym_for_receiver(hs.symbols, mangled, hs.module_id, type_decl_node)
   let i: i64 = 0
   while i < hs.symbols.length():
     let sym: Symbol = hs.symbols.get(i)
@@ -412,7 +412,7 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
           TypeKind::TStruct:
             let field_name: string = substring(hs.src, hs.toks.get(mfield_tidx).offset, hs.toks.get(mfield_tidx).len)
             let mangled: string = obj_type.name + "." + field_name
-            let msym: i64 = hir_find_method_sym(hs, mangled)
+            let msym: i64 = hir_find_method_sym(hs, mangled, obj_type.decl_node)
             if msym >= 0:
               // Found the method symbol.  Desugar:
               //   CallE(FieldE(obj, method), [a1, a2])

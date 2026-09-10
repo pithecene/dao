@@ -561,7 +561,7 @@ typecheck program).  Both now write in place for the latest value
 with versioned slots (maps) and an overwrite log (vectors), so a
 stale value still reads exactly its own.  The audit's peak column
 (`docs/bootstrap_closure.md`, 6 GiB probe bound) fell from 5.5–16 GiB
-to 53–442 MiB for every program (the larger figures once the parser
+to 54–444 MiB for every program (the larger figures once the parser
 reads the corpus's static calls, Task 36, and the prelude is in the
 program, Task 38), stage times to two seconds
 or less, and §10's acceptance bar — every program under 2 GiB — is

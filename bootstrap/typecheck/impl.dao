@@ -824,6 +824,48 @@ fn find_visible_method_sym(symbols: Vector<Symbol>, mangled: string, module_id: 
     i = i + 1
   return outer
 
+fn find_method_sym_owned_by(symbols: Vector<Symbol>, mangled: string, owner: i64): i64
+  let i: i64 = 0
+  while i < symbols.length():
+    let sym: Symbol = symbols.get(i)
+    if sym.name == mangled:
+      if symbol_kind_name(sym.kind) == "Function":
+        if sym.owner_module_id == owner:
+          return i
+    i = i + 1
+  return to_i64(-1)
+
+// The module that declares the type whose declaration is `type_decl_node`,
+// or -1 for a builtin or unresolved type.
+fn type_owner_module(symbols: Vector<Symbol>, type_decl_node: i64): i64
+  if type_decl_node < 0:
+    return to_i64(-1)
+  let i: i64 = 0
+  while i < symbols.length():
+    let sym: Symbol = symbols.get(i)
+    if sym.decl_node == type_decl_node:
+      if symbol_kind_name(sym.kind) == "Type":
+        return sym.owner_module_id
+    i = i + 1
+  return to_i64(-1)
+
+// The method a receiver of this type answers to.  A type's own methods
+// are declared with it, so the receiver's type — not its name — picks
+// them: `box::Box(1).m()` reaches `core::box`'s method even where this
+// module declares its own `Box` (§7.4 shadows the name, not the value's
+// type).  A method the receiver's module does not declare comes from an
+// `extend`, which the orphan rule lets any module write for a foreign
+// type: this module's, else a visible prelude one.  Both the type
+// checker and the HIR builder dispatch through here, so they cannot
+// disagree about which symbol a call means.
+fn find_method_sym_for_receiver(symbols: Vector<Symbol>, mangled: string, module_id: i64, type_decl_node: i64): i64
+  let type_owner: i64 = type_owner_module(symbols, type_decl_node)
+  if type_owner >= 0:
+    let inherent: i64 = find_method_sym_owned_by(symbols, mangled, type_owner)
+    if inherent >= 0:
+      return inherent
+  return find_visible_method_sym(symbols, mangled, module_id)
+
 fn tc_register_extend_methods(ts: TS, decls: Vector<i64>): TS
   let r: TS = ts
   let i: i64 = 0
@@ -1544,7 +1586,7 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
         fi = fi + 1
       // Try method lookup: look for mangled symbol "StructName.fieldName"
       let mangled_name: string = obj_type.name + "." + field_name
-      let msym: i64 = find_visible_method_sym(r.tc.symbols, mangled_name, r.tc.module_id)
+      let msym: i64 = find_method_sym_for_receiver(r.tc.symbols, mangled_name, r.tc.module_id, obj_type.decl_node)
       if msym >= 0:
         let meth_ti: i64 = vec_i64_get(r.sym_types, msym)
         if meth_ti >= 0:
@@ -2192,7 +2234,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 52
+  let total: i32 = 53
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -3168,6 +3210,31 @@ fn main(): i32
     while sb_j < sb_p.diags.length():
       print("  diag: " + sb_p.diags.get(sb_j).path + ": " + sb_p.diags.get(sb_j).diag.message)
       sb_j = sb_j + 1
+
+  // Test 52: the receiver's type, not its name, picks the method: a
+  // value of the prelude's `Box` answers with the prelude's `m` (bool)
+  // even where this module declares its own `Box` whose `m` is i32.
+  let qb_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  qb_inputs = qb_inputs.push(SourceInput("stdlib/core/box.dao", "module core::box\nclass Box:\n  n: i32\n  fn m(self): bool\n    return true\n\nfn make_box(): Box\n  return Box(1)\n", true))
+  qb_inputs = qb_inputs.push(SourceInput("main.dao", "module app::main\nfn pad(): i32 -> 0\nclass Box:\n  n: i32\n  fn m(self): i32\n    return self.n\nfn f(): bool\n  return make_box().m()\nfn g(): i32\n  return Box(2).m()\n", false))
+  let qb_p: Program = program_from_graph(build_program(qb_inputs))
+  qb_p = program_run_resolve(qb_p)
+  qb_p = program_run_typecheck(qb_p)
+  let qb_errors: i64 = 0
+  let qb_i: i64 = 0
+  while qb_i < qb_p.diags.length():
+    if qb_p.diags.get(qb_i).path == "main.dao":
+      qb_errors = qb_errors + 1
+    qb_i = qb_i + 1
+  if qb_errors == 0:
+    print("PASS qualified_receiver_picks_its_own_method")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL qualified_receiver_picks_its_own_method: " + i64_to_string(qb_errors) + " diagnostics in main.dao")
+    let qb_j: i64 = 0
+    while qb_j < qb_p.diags.length():
+      print("  diag: " + qb_p.diags.get(qb_j).path + ": " + qb_p.diags.get(qb_j).diag.message)
+      qb_j = qb_j + 1
 
   // -----------------------------------------------------------------
   // Summary
