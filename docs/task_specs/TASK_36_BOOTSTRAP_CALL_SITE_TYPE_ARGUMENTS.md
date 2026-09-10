@@ -155,9 +155,16 @@ Parser goldens in `bootstrap/parser/tests.dao`:
   leaves the comparison reading).
 - `Vector<i64>::new().push(1)` → `FieldE`/`CallE` chain on the result.
 
-Corpus: the closure audit rerun on the head shows `parse = 0` for all
-eight programs — the acceptance test — and the resolver histogram no
-longer lists `unknown name 'Vector'` / `'new'`.
+Corpus: the closure audit rerun on the head shows `parse = 0` for the
+five programs whose sources hold no `resource` block (lexer, parser,
+graph, resolver, typecheck) — the acceptance test — and every
+remaining parse diagnostic in the other three is the `resource memory`
+block Task 35 E3 put into the HIR test driver and the probe (39 sites;
+the bootstrap parser's next construct, deferred in `bootstrap/README.md`).
+The resolver histogram still names `Vector`: the type checker binds
+nothing yet, so a static call's `Vector` prefix is now reached and
+left unresolved as a class in expression position — the next slice's
+first item.
 
 Self-parse: `task bootstrap-test` (the parser's self-parse of real Dao
 source) passes.
