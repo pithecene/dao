@@ -694,6 +694,33 @@ suite<"driver_cli"> driver_cli_suite = [] {
     expect(built.exit_code == 0) << built.err;
     expect(exit_status(scratch.output_for(app)) == 6);
   };
+
+  "a loop's temporaries reuse one stack slot per site"_test = [] {
+    // Three million iterations of string temporaries: allocated per
+    // iteration they would take well over the 8 MiB default stack.
+    const Scratch scratch("loop-temporaries");
+    auto app = scratch.file("main.dao",
+                            "module app::main\n\n"
+                            "fn label(s: string): i32\n"
+                            "  if s == \"x\":\n"
+                            "    return 1\n"
+                            "  return 0\n\n"
+                            "fn spin(n: i32, s: string, t: string): i32\n"
+                            "  let i: i32 = 0\n"
+                            "  let acc: i32 = 0\n"
+                            "  while i < n:\n"
+                            "    if s == t:\n"
+                            "      acc = acc + 1\n"
+                            "    acc = acc + label(s)\n"
+                            "    i = i + 1\n"
+                            "  return acc\n\n"
+                            "fn main(): i32\n"
+                            "  return spin(3000000, \"a\", \"b\")\n");
+    auto built =
+        run_daoc(scratch, {"build", app.string(), "--stdlib-root", scratch.stdlib.string()});
+    expect(built.exit_code == 0) << built.err;
+    expect(exit_status(scratch.output_for(app)) == 0);
+  };
 };
 
 auto main(int argc, const char** argv) -> int {

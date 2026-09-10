@@ -1683,6 +1683,58 @@ suite<"generators"> generators = [] {
   };
 };
 
+// ---------------------------------------------------------------------------
+// Stack temporaries
+// ---------------------------------------------------------------------------
+
+/// The alloca lines of `fn_define` (a `define` line prefix) that sit past
+/// its entry block, joined for the failure message.
+auto allocas_outside_entry(const std::string& ir, std::string_view fn_define) -> std::string {
+  auto start = ir.find(fn_define);
+  if (start == std::string::npos) {
+    return "function absent: " + std::string(fn_define);
+  }
+  std::string offending;
+  size_t labels = 0;
+  std::istringstream body(ir.substr(start));
+  std::string line;
+  while (std::getline(body, line) && line != "}") {
+    if ((!line.empty() && line.back() == ':') || line.find(":       ") != std::string::npos) {
+      ++labels;
+    } else if (labels > 1 && line.find(" alloca ") != std::string::npos) {
+      offending += line + "\n";
+    }
+  }
+  return offending;
+}
+
+suite<"stack_temporaries"> stack_temporaries = [] {
+  "every temporary's stack slot is in the entry block"_test = [] {
+    // A temporary allocated where it is used lives until the function
+    // returns, so one inside a loop grows the frame every iteration --
+    // the bootstrap lexer overflowed 8 MiB lexing its largest program.
+    // A string operand and a string argument each take a slot.
+    LlvmTestPipeline pipe("fn label(s: string): i64\n"
+                          "  if s == \"x\":\n"
+                          "    return 1\n"
+                          "  return 0\n"
+                          "fn spin(n: i64, s: string, t: string): i64\n"
+                          "  let i: i64 = 0\n"
+                          "  let acc: i64 = 0\n"
+                          "  while i < n:\n"
+                          "    if s == t:\n"
+                          "      acc = acc + 1\n"
+                          "    acc = acc + label(s)\n"
+                          "    i = i + 1\n"
+                          "  return acc\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << ir;
+    expect(contains(ir, "br i1")) << ir;
+    auto outside = allocas_outside_entry(ir, "define i64 @\"test::spin\"");
+    expect(outside.empty()) << "allocas past the entry block:\n" << outside << ir;
+  };
+};
+
 // NOLINTEND(readability-magic-numbers)
 
 auto main() -> int {} // NOLINT(readability-named-parameter)
