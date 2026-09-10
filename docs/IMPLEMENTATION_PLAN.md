@@ -580,6 +580,27 @@ alone), and the cause is strings that are never freed.  Delivery: E0 runtime are
 rejected, E1 copy-out, E2 `core::text::Builder`, E3 bootstrap adoption
 measured by the audit's peak-memory column.
 
+### Task 36 — Bootstrap Parser: Call-Site Type Arguments
+
+Status: **spec** — `docs/task_specs/TASK_36_BOOTSTRAP_CALL_SITE_TYPE_ARGUMENTS.md`;
+the first Tier B-Bootstrap construct, sequenced by the closure audit.
+
+**Objective**: the bootstrap parser reads `Type<Args>::member(args)` and
+`f<Args>(args)` as the host does — a call carrying type arguments — so
+the audit's parse column reaches zero.  Every parse-stage rejection in
+the corpus is this one construct (268 static calls on `Vector<T>` /
+`HashMap<V>` in the compiler sources; the explicit-argument shape has
+48 sites in the prelude the corpus instantiates and none in the
+compiler sources); the resolver's and type checker's histograms are
+dominated by its shadow.
+
+Delivery: `Node.CallE` gains the type-argument list (the host's
+`CallExpr.type_args`); `parse_postfix` speculates on `<` after a name
+with the host's rule (types, then `>`, then `(` or `::`, else a
+comparison); downstream stages pass the type arguments through —
+binding them in the bootstrap type checker is the next slice, sequenced
+by the typecheck histogram once the parse column is zero.
+
 ### Task 31 — Host Multi-file Compilation
 
 Status: **complete** — D0 (program-wide source map; prelude loaded
