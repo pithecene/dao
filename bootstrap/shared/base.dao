@@ -1731,8 +1731,8 @@ fn parse_while_stmt(pc: PC, ps: PS): PR
   return ps_add_node(body.ps, Node.WhileS(cond.node, body.node))
 
 // `resource <kind> <name> =>` and its suite: the block's kind and name
-// are kept as token indexes; the domain they name is the host's to
-// lower (Task 37).
+// are kept as token indexes; the domain they name has no MIR
+// representation in the bootstrap yet, so MIR rejects the block.
 fn parse_resource_stmt(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
   let kind_tidx: i64 = ps2.pos

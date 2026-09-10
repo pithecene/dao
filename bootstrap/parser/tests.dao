@@ -585,7 +585,7 @@ fn main(): i32
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------
-  // Resource blocks (Task 37)
+  // Resource blocks
   // -----------------------------------------------------------------
 
   // Test 49: `resource memory pool =>` and its suite parse to ResourceS
