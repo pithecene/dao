@@ -1417,7 +1417,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 23
+  let total: i32 = 24
 
   // Test 1: simple_fn
   let src1: string = "fn add(a: i32, b: i32): i32\n  return a + b\n"
@@ -1951,6 +1951,25 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL resource_block_lowers: expected a HirResource node and no diagnostics")
+
+  // -----------------------------------------------------------------
+  // Test 24: qualified_variant_lowers — a `Enum::Variant` constructor
+  // and a `Enum::Variant` match pattern lower with no diagnostics; the
+  // constructor's callee is a HirQualName.
+  // -----------------------------------------------------------------
+  let src24: string = "enum class Shape:\n  Circle(r: i64)\n  Dot\n\nfn area(s: Shape): i64\n  match s:\n    Shape::Circle(r):\n      return r\n    Shape::Dot:\n      return 0\n  return 0\n\nfn main(): i32\n  let c: Shape = Shape::Circle(3)\n  return 0\n"
+  let r24: HirResult = lower_to_hir(src24)
+  let has_qual: bool = false
+  let qi: i64 = 0
+  while qi < hir_count_nodes(r24):
+    if hir_get_kind_at(r24, qi) == "HirQualName":
+      has_qual = true
+    qi = qi + 1
+  if r24.root >= 0 and has_qual and hir_count_diags(r24) == 0:
+    print("PASS qualified_variant_lowers")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL qualified_variant_lowers: expected HirQualName nodes and no diagnostics, got " + i64_to_string(hir_count_diags(r24)))
 
   // -----------------------------------------------------------------
   // Summary

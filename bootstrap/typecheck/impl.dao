@@ -1124,11 +1124,27 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
     if exp_ti >= 0:
       return ts_set_expr_type(ts, node_idx, exp_ti)
     return ts
-  // Non-module first segment: existing behavior — use sym_types directly.
+  // Non-module first segment: the name's own type.  A two-segment name
+  // whose head is an enum is a variant access, `Enum::Variant`; the
+  // variant must exist, as for `mod::Enum::Variant` above.
   let ti: i64 = vec_i64_get(ts.sym_types, sym_idx)
-  if ti >= 0:
-    return ts_set_expr_type(ts, node_idx, ti)
-  return ts
+  if ti < 0:
+    return ts
+  if segs.length() == 2:
+    let head_type: DaoType = ts.types.get(ti)
+    match head_type.kind:
+      TypeKind.TEnum:
+        let variant_tidx: i64 = segs.get(1)
+        let variant_name: string = ts_tok_name(ts, variant_tidx)
+        let vkey: string = i64_to_string(ti) + ":" + variant_name
+        let known: Option<i64> = ts.variant_set.get(vkey)
+        match known:
+          Option.Some(v):
+            return ts_set_expr_type(ts, node_idx, ti)
+          Option.None:
+            let vsp: Span = ts_tok_span(ts, variant_tidx)
+            return ts_add_diag(ts, vsp, "'" + variant_name + "' is not a variant of enum '" + head_type.name + "'")
+  return ts_set_expr_type(ts, node_idx, ti)
 
 fn get_expr_type(ts: TS, node_idx: i64): i64
   let key: string = expr_id_key(ts.tc.module_id, node_idx)
@@ -1412,6 +1428,30 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, arg_count: 
         ci = ci + 1
       return ts_set_expr_type(r, node_idx, callee_ti)
     TypeKind.TEnum:
+      // A variant construction: the callee's last segment names the
+      // variant, whose payload count the arguments must match.  The
+      // variants sit in type_info from info_lp: name, payload count,
+      // then that many payload types, per variant.
+      let variant_name: string = ""
+      let callee_node3: Node = r.tc.nodes.get(callee)
+      match callee_node3:
+        Node.QualNameE(vseg_lp, vseg_count):
+          let vsegs: Vector<i64> = read_list(r.tc.idx_data, vseg_lp)
+          if vsegs.length() >= 2:
+            variant_name = ts_tok_name(r, vsegs.get(vsegs.length() - 1))
+      if variant_name != "":
+        let v_offset: i64 = callee_type.info_lp
+        let vi: i64 = 0
+        while vi < callee_type.info_count:
+          let vname: string = ts_tok_name(r, r.type_info.get(v_offset))
+          let payload_count: i64 = r.type_info.get(v_offset + 1)
+          if vname == variant_name:
+            if args.length() != payload_count:
+              let sp: Span = ts_node_span(r, callee)
+              r = ts_add_diag(r, sp, "variant '" + variant_name + "' expects " + i64_to_string(payload_count) + " field(s), got " + i64_to_string(args.length()))
+              return r
+          v_offset = v_offset + 2 + payload_count
+          vi = vi + 1
       return ts_set_expr_type(r, node_idx, callee_ti)
   return r
 
@@ -2035,7 +2075,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 43
+  let total: i32 = 47
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -2854,6 +2894,59 @@ fn main(): i32
         pass_count = pass_count + 1
       else:
         print("FAIL concept_sat_builtin_program: " + i64_to_string(cb_typecheck_diags) + " unexpected typecheck diagnostic(s)")
+
+  // -----------------------------------------------------------------
+  // Qualified variant access: Enum::Variant on a local enum
+  // -----------------------------------------------------------------
+
+  // Test 44: a two-segment variant access types as the enum and a
+  // construction of a payload variant types as the enum.
+  let src44: string = "enum class Shape:\n  Circle(r: i64)\n  Dot\n\nfn main(): i32\n  let d: Shape = Shape::Dot\n  let c: Shape = Shape::Circle(3)\n  return 0\n"
+  let r44: TypeCheckResult = typecheck(src44)
+  if tc_count_diags(r44) == 0:
+    print("PASS qualified_variant_types")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL qualified_variant_types: expected 0 diagnostics, got " + i64_to_string(tc_count_diags(r44)))
+
+  // Test 45: a name that is no variant of the enum is diagnosed.
+  let src45: string = "enum Color:\n  Red\n  Green\n\nfn main(): i32\n  let c: Color = Color::Blue\n  return 0\n"
+  let r45: TypeCheckResult = typecheck(src45)
+  if tc_count_diags(r45) == 1:
+    print("PASS qualified_variant_unknown")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL qualified_variant_unknown: expected 1 diagnostic, got " + i64_to_string(tc_count_diags(r45)))
+
+  // Test 46: qualified variants as match patterns check against the
+  // scrutinee's type.  (Pattern bindings and literal widening are the
+  // resolver's and the checker's own deferrals, so the arms bind
+  // nothing and return i32.)
+  let src46: string = "enum Color:\n  Red\n  Green\n\nfn pick(c: Color): i32\n  match c:\n    Color::Red:\n      return 1\n    Color::Green:\n      return 2\n  return 0\n"
+  let r46: TypeCheckResult = typecheck(src46)
+  if tc_count_diags(r46) == 0:
+    print("PASS qualified_variant_pattern")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL qualified_variant_pattern: expected 0 diagnostics, got " + i64_to_string(tc_count_diags(r46)))
+    let di46: i64 = 0
+    while di46 < r46.diags.length():
+      print("  diag: " + r46.diags.get(di46).message)
+      di46 = di46 + 1
+
+  // Test 47: a qualified variant construction with the wrong arity is
+  // diagnosed, once per site.
+  let src47: string = "enum class Shape:\n  Circle(r: i64)\n  Dot\n\nfn main(): i32\n  let a: Shape = Shape::Circle()\n  let b: Shape = Shape::Circle(1, 2)\n  return 0\n"
+  let r47: TypeCheckResult = typecheck(src47)
+  if tc_count_diags(r47) == 2:
+    print("PASS qualified_variant_arity")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL qualified_variant_arity: expected 2 diagnostics, got " + i64_to_string(tc_count_diags(r47)))
+    let di47: i64 = 0
+    while di47 < r47.diags.length():
+      print("  diag: " + r47.diags.get(di47).message)
+      di47 = di47 + 1
 
   // -----------------------------------------------------------------
   // Summary
