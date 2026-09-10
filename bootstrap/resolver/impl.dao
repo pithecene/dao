@@ -542,6 +542,14 @@ fn resolve_body_in_new_scope(rs: RS, list_pos: i64): RS
 fn resolve_match_arm(rs: RS, pat_node: i64, body_lp: i64): RS
   let shape: PatternShape = pattern_shape(rs.rc.nodes, rs.rc.idx_data, pat_node)
   let r: RS = resolve_expr(rs, shape.ctor)
+  // A pattern may carry call-site type arguments (`E<T>::V(x):`); they
+  // are type nodes of the enclosing scope, as they are in a call.
+  if shape.targs_lp >= 0:
+    let targs: Vector<i64> = read_list(r.rc.idx_data, shape.targs_lp)
+    let ti: i64 = 0
+    while ti < targs.length():
+      r = resolve_type_node(r, targs.get(ti))
+      ti = ti + 1
   let sr: ScopeR = rs_push_scope(r, ScopeKind::BlockScope)
   r = sr.rs
   let bi: i64 = 0
@@ -1442,7 +1450,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 55
+  let total: i32 = 57
 
   // -----------------------------------------------------------------
   // Test 1: forward_ref — fn calls fn defined later in file; no diagnostic
@@ -2395,7 +2403,36 @@ fn main(): i32
   else:
     print("FAIL match_duplicate_binder: expected 1 diagnostic, got " + i64_to_string(count_diags(r54)))
 
-  // Test 55: a cross-module pattern — the qualified constructor
+  // Test 55: a call-shaped pattern whose callee is not a variant is an
+  // expression, not a destructuring: `Box(x):` uses `x` (the host's
+  // rule; only a `::` variant takes a value apart).
+  let src55: string = "class Box:\n  n: i32\n\nfn f(b: Box): i32\n  match b:\n    Box(x):\n      return 1\n  return 0\n"
+  let r55: ResolveResult = resolve(src55)
+  if count_diags(r55) == 1:
+    print("PASS match_call_pattern_is_not_destructuring")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL match_call_pattern_is_not_destructuring: expected 1 diagnostic (unknown name 'x'), got " + i64_to_string(count_diags(r55)))
+
+  // Test 56: a pattern's call-site type arguments resolve as types of
+  // the enclosing scope, as a call's do — the use is recorded.
+  let src56: string = "class Cell:\n  n: i32\n\nenum class E:\n  One(v: i32)\n\nfn f(e: E): i32\n  match e:\n    E<Cell>::One(a):\n      return a\n  return 0\n"
+  let r56: ResolveResult = resolve(src56)
+  let targ_used: bool = false
+  let u56: i64 = 0
+  while u56 < r56.uses.length():
+    let sym56: i64 = r56.uses.get(u56 + 1)
+    if sym56 >= 0:
+      if r56.symbols.get(sym56).name == "Cell":
+        targ_used = true
+    u56 = u56 + 2
+  if targ_used:
+    print("PASS match_pattern_type_arguments")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL match_pattern_type_arguments: the type argument's use was not recorded")
+
+  // Test 57: a cross-module pattern — the qualified constructor
   // resolves through the import binding, the binders are arm-local.
   let ma_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
   ma_inputs = ma_inputs.push(SourceInput("shapes.dao", "module app::shapes\nenum class E:\n  Both(x: i32, y: i32)\n  None\n", false))

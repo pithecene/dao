@@ -10,38 +10,38 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 73562 |
-| `CallExpr` | 24506 |
-| `Callee` | 24506 |
-| `Args` | 21983 |
-| `FieldExpr` | 16441 |
-| `BinaryExpr` | 11356 |
-| `LetStatement` | 10706 |
-| `Value` | 8430 |
-| `Target` | 8430 |
-| `Assignment` | 8430 |
-| `IntLiteral` | 8365 |
-| `Condition` | 6971 |
-| `QualifiedName` | 6281 |
-| `Then` | 5672 |
-| `IfStatement` | 5672 |
-| `ReturnStatement` | 5620 |
-| `StringLiteral` | 5021 |
+| `Identifier` | 73759 |
+| `CallExpr` | 24602 |
+| `Callee` | 24602 |
+| `Args` | 22065 |
+| `FieldExpr` | 16486 |
+| `BinaryExpr` | 11388 |
+| `LetStatement` | 10731 |
+| `Value` | 8452 |
+| `Target` | 8452 |
+| `Assignment` | 8452 |
+| `IntLiteral` | 8427 |
+| `Condition` | 6994 |
+| `QualifiedName` | 6289 |
+| `Then` | 5689 |
+| `IfStatement` | 5689 |
+| `ReturnStatement` | 5628 |
+| `StringLiteral` | 5028 |
 | `Param` | 3903 |
-| `BoolLiteral` | 2737 |
-| `Pattern` | 2693 |
-| `Arm` | 2693 |
+| `BoolLiteral` | 2771 |
+| `Pattern` | 2701 |
+| `Arm` | 2701 |
 | `ReturnType` | 1676 |
 | `FunctionDecl` | 1676 |
-| `Else` | 1326 |
-| `WhileStatement` | 1299 |
+| `Else` | 1328 |
+| `WhileStatement` | 1305 |
 | `Variant` | 1181 |
-| `Field` | 1130 |
-| `UnaryExpr` | 1104 |
-| `TypeArgs` | 1016 |
-| `Scrutinee` | 662 |
-| `MatchStatement` | 662 |
-| `ExpressionStatement` | 582 |
+| `UnaryExpr` | 1144 |
+| `Field` | 1138 |
+| `TypeArgs` | 1024 |
+| `Scrutinee` | 670 |
+| `MatchStatement` | 670 |
+| `ExpressionStatement` | 586 |
 | `ClassDecl` | 264 |
 | `BreakStatement` | 64 |
 | `ResourceBlock` | 42 |
@@ -234,14 +234,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 57 | 0 | 0 | 0 | 29 | 466 | 0 | 20 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 57 | 0 | 0 | 0 | 52 | 396 | 0 | 37 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 58 | 0 | 0 | 0 | 38 | 436 | 0 | 20 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 124 | 0 | 0 | 0 | 127 | 747 | 0 | 70 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 221 | 1 | 0 | 0 | 133 | 1161 | 0 | 152 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 325 | 2 | 0 | 0 | 80 | 1348 | 0 | 190 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 331 | 2 | 0 | 0 | 35 | 1313 | 0 | 240 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 453 | 2 | 0 | 0 | 68 | 1390 | 0 | 311 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 55 | 0 | 0 | 0 | 29 | 467 | 0 | 21 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 57 | 0 | 0 | 0 | 52 | 397 | 0 | 38 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 58 | 1 | 0 | 0 | 38 | 437 | 0 | 21 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 126 | 1 | 0 | 0 | 131 | 757 | 0 | 71 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 222 | 1 | 0 | 0 | 133 | 1166 | 0 | 153 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 330 | 2 | 0 | 0 | 80 | 1353 | 0 | 191 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 336 | 2 | 0 | 0 | 35 | 1318 | 0 | 241 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 451 | 2 | 0 | 0 | 68 | 1395 | 0 | 312 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 
@@ -257,7 +257,7 @@ named, not inferred.
 - `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `mir` ×11: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×12: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `mir` ×1: unsupported assignment target
 
@@ -269,7 +269,7 @@ named, not inferred.
 - `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `mir` ×28: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×29: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `mir` ×1: unsupported assignment target
 
@@ -281,7 +281,7 @@ named, not inferred.
 - `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `mir` ×11: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×12: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `mir` ×1: unsupported assignment target
 
@@ -397,14 +397,14 @@ next.  Sites per program against the parse column above:
 
 | Program | `Type<Args>::` sites | `resource` blocks | parse diagnostics |
 |---|---|---|---|
-| lexer | 59 | 0 | 0 |
-| parser | 64 | 0 | 0 |
-| graph | 70 | 0 | 0 |
-| resolver | 117 | 0 | 0 |
-| typecheck | 150 | 0 | 0 |
-| hir | 163 | 4 | 0 |
-| mir | 179 | 10 | 0 |
-| llvm | 217 | 28 | 0 |
+| lexer | 60 | 0 | 0 |
+| parser | 65 | 0 | 0 |
+| graph | 71 | 0 | 0 |
+| resolver | 120 | 0 | 0 |
+| typecheck | 152 | 0 | 0 |
+| hir | 165 | 4 | 0 |
+| mir | 181 | 10 | 0 |
+| llvm | 219 | 28 | 0 |
 
 ## 4. Reading the matrix
 

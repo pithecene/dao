@@ -968,12 +968,23 @@ class PatternShape:
   binds: bool            // the pattern is parenthesized, so it binds
   first_non_ident: i64   // the first binding that is not a plain name, or -1
   first_named_tok: i64   // the name token of the first binding written `x = ...`, or -1
+  targs_lp: i64          // the pattern's call-site type arguments, or -1
 
 fn pattern_shape(nodes: Vector<Node>, idx_data: Vector<i64>, pat_node: i64): PatternShape
   if pat_node < 0:
-    return PatternShape(to_i64(-1), Vector<i64>::new(), false, to_i64(-1), to_i64(-1))
+    return PatternShape(to_i64(-1), Vector<i64>::new(), false, to_i64(-1), to_i64(-1), to_i64(-1))
   match nodes.get(pat_node):
     Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp):
+      // Only a variant reached with `::` destructures: a variant is
+      // the one thing a pattern takes apart (CONTRACT_SYNTAX_SURFACE.md),
+      // so `Box(x):` is a call expression whose `x` is a use, as the
+      // host has it, and not a class taken apart by position.
+      let qualified: bool = false
+      match nodes.get(callee):
+        Node::QualNameE(seg_lp, seg_count):
+          qualified = true
+      if qualified == false:
+        return PatternShape(pat_node, Vector<i64>::new(), false, to_i64(-1), to_i64(-1), to_i64(-1))
       let binders: Vector<i64> = read_list(idx_data, args_lp)
       let first_non_ident: i64 = to_i64(-1)
       let i: i64 = 0
@@ -996,8 +1007,8 @@ fn pattern_shape(nodes: Vector<Node>, idx_data: Vector<i64>, pat_node: i64): Pat
           if first_named_tok < 0:
             first_named_tok = names.get(ni)
         ni = ni + 1
-      return PatternShape(callee, binders, true, first_non_ident, first_named_tok)
-  return PatternShape(pat_node, Vector<i64>::new(), false, to_i64(-1), to_i64(-1))
+      return PatternShape(callee, binders, true, first_non_ident, first_named_tok, targs_lp)
+  return PatternShape(pat_node, Vector<i64>::new(), false, to_i64(-1), to_i64(-1), to_i64(-1))
 
 // flush_pairs: push collected pairs contiguously to idx, then push count.
 // items contains [a0, b0, a1, b1, ...] — count is number of pairs.
