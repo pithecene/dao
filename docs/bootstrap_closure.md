@@ -10,38 +10,38 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 72789 |
-| `CallExpr` | 24206 |
-| `Callee` | 24206 |
-| `Args` | 21719 |
-| `FieldExpr` | 16224 |
-| `BinaryExpr` | 11196 |
-| `LetStatement` | 10610 |
-| `Value` | 8360 |
-| `Target` | 8360 |
-| `Assignment` | 8360 |
-| `IntLiteral` | 8197 |
-| `Condition` | 6872 |
-| `QualifiedName` | 6252 |
-| `Then` | 5590 |
-| `IfStatement` | 5590 |
-| `ReturnStatement` | 5576 |
-| `StringLiteral` | 4964 |
-| `Param` | 3849 |
-| `BoolLiteral` | 2691 |
-| `Pattern` | 2674 |
-| `Arm` | 2674 |
-| `ReturnType` | 1657 |
-| `FunctionDecl` | 1657 |
-| `Else` | 1315 |
-| `WhileStatement` | 1282 |
+| `Identifier` | 72909 |
+| `CallExpr` | 24237 |
+| `Callee` | 24237 |
+| `Args` | 21747 |
+| `FieldExpr` | 16280 |
+| `BinaryExpr` | 11234 |
+| `LetStatement` | 10619 |
+| `Value` | 8369 |
+| `Target` | 8369 |
+| `Assignment` | 8369 |
+| `IntLiteral` | 8217 |
+| `Condition` | 6895 |
+| `QualifiedName` | 6254 |
+| `Then` | 5612 |
+| `IfStatement` | 5612 |
+| `ReturnStatement` | 5590 |
+| `StringLiteral` | 4978 |
+| `Param` | 3862 |
+| `BoolLiteral` | 2693 |
+| `Pattern` | 2676 |
+| `Arm` | 2676 |
+| `ReturnType` | 1662 |
+| `FunctionDecl` | 1662 |
+| `Else` | 1317 |
+| `WhileStatement` | 1283 |
 | `Variant` | 1181 |
 | `Field` | 1090 |
 | `UnaryExpr` | 1048 |
-| `TypeArgs` | 998 |
-| `Scrutinee` | 643 |
-| `MatchStatement` | 643 |
-| `ExpressionStatement` | 559 |
+| `TypeArgs` | 999 |
+| `Scrutinee` | 645 |
+| `MatchStatement` | 645 |
+| `ExpressionStatement` | 563 |
 | `ClassDecl` | 256 |
 | `BreakStatement` | 64 |
 | `ResourceBlock` | 42 |
@@ -234,14 +234,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 59 | 0 | 0 | 0 | 154 | 1005 | 0 | 18 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 61 | 0 | 0 | 0 | 269 | 845 | 0 | 35 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 64 | 1 | 0 | 0 | 163 | 885 | 0 | 18 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 140 | 1 | 0 | 0 | 605 | 1170 | 0 | 67 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 236 | 1 | 0 | 0 | 1017 | 1588 | 0 | 148 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 336 | 2 | 0 | 0 | 1479 | 1805 | 0 | 188 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 346 | 1 | 0 | 0 | 1626 | 1769 | 0 | 238 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 455 | 2 | 0 | 0 | 1860 | 1870 | 0 | 309 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 58 | 0 | 0 | 0 | 154 | 455 | 0 | 18 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 67 | 1 | 0 | 0 | 269 | 385 | 0 | 35 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 61 | 1 | 0 | 0 | 163 | 425 | 0 | 18 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 134 | 1 | 0 | 0 | 605 | 712 | 0 | 67 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 245 | 1 | 0 | 0 | 1031 | 1151 | 0 | 150 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 337 | 1 | 0 | 0 | 1479 | 1340 | 0 | 188 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 348 | 1 | 0 | 0 | 1626 | 1305 | 0 | 238 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 453 | 2 | 0 | 0 | 1860 | 1382 | 0 | 309 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 
@@ -256,11 +256,11 @@ named, not inferred.
 - `resolve` ×12: unknown name 'b'
 - `resolve` ×5: unknown name 'c'
 - `resolve` ×3: unknown name 'lp'
-- `typecheck` ×4: return type mismatch: expected i16, got bool
-- `typecheck` ×2: 'KwType' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwModule' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwLet' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwImport' is not a variant of enum 'Severity'
+- `typecheck` ×28: type mismatch in '+': i64 vs i32
+- `typecheck` ×8: type mismatch: cannot assign i32 to i64
+- `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
+- `typecheck` ×4: unknown type in annotation
+- `typecheck` ×3: type mismatch in '==': i64 vs i32
 - `mir` ×9: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `mir` ×1: unsupported assignment target
@@ -272,11 +272,11 @@ named, not inferred.
 - `resolve` ×12: unknown name 'b'
 - `resolve` ×5: unknown name 'c'
 - `resolve` ×3: unknown name 'lp'
-- `typecheck` ×4: return type mismatch: expected i16, got bool
-- `typecheck` ×2: 'KwType' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwModule' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwLet' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwImport' is not a variant of enum 'Severity'
+- `typecheck` ×28: type mismatch in '+': i64 vs i32
+- `typecheck` ×8: type mismatch: cannot assign i32 to i64
+- `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
+- `typecheck` ×4: unknown type in annotation
+- `typecheck` ×3: type mismatch in '==': i64 vs i32
 - `mir` ×26: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `mir` ×1: unsupported assignment target
@@ -288,11 +288,11 @@ named, not inferred.
 - `resolve` ×12: unknown name 'b'
 - `resolve` ×5: unknown name 'c'
 - `resolve` ×3: unknown name 'lp'
-- `typecheck` ×4: return type mismatch: expected i16, got bool
-- `typecheck` ×2: 'KwType' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwModule' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwLet' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwImport' is not a variant of enum 'Severity'
+- `typecheck` ×28: type mismatch in '+': i64 vs i32
+- `typecheck` ×8: type mismatch: cannot assign i32 to i64
+- `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
+- `typecheck` ×4: unknown type in annotation
+- `typecheck` ×3: type mismatch in '==': i64 vs i32
 - `mir` ×9: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `mir` ×1: unsupported assignment target
@@ -304,11 +304,11 @@ named, not inferred.
 - `resolve` ×12: unknown name 'b'
 - `resolve` ×5: unknown name 'c'
 - `resolve` ×3: unknown name 'lp'
-- `typecheck` ×4: return type mismatch: expected i16, got bool
-- `typecheck` ×2: 'KwType' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwModule' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwLet' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwImport' is not a variant of enum 'Severity'
+- `typecheck` ×28: type mismatch in '+': i64 vs i32
+- `typecheck` ×8: type mismatch: cannot assign i32 to i64
+- `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
+- `typecheck` ×4: unknown type in annotation
+- `typecheck` ×3: type mismatch in '==': i64 vs i32
 - `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×9: unsupported assignment target
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
@@ -320,11 +320,11 @@ named, not inferred.
 - `resolve` ×12: unknown name 'b'
 - `resolve` ×5: unknown name 'c'
 - `resolve` ×3: unknown name 'lp'
-- `typecheck` ×4: return type mismatch: expected i16, got bool
-- `typecheck` ×2: 'KwType' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwModule' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwLet' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwImport' is not a variant of enum 'Severity'
+- `typecheck` ×28: type mismatch in '+': i64 vs i32
+- `typecheck` ×8: type mismatch: cannot assign i32 to i64
+- `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
+- `typecheck` ×4: unknown type in annotation
+- `typecheck` ×3: type mismatch in '==': i64 vs i32
 - `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×9: unsupported assignment target
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
@@ -336,11 +336,11 @@ named, not inferred.
 - `resolve` ×12: unknown name 'b'
 - `resolve` ×5: unknown name 'c'
 - `resolve` ×3: unknown name 'lp'
-- `typecheck` ×4: return type mismatch: expected i16, got bool
-- `typecheck` ×2: 'KwType' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwModule' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwLet' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwImport' is not a variant of enum 'Severity'
+- `typecheck` ×28: type mismatch in '+': i64 vs i32
+- `typecheck` ×8: type mismatch: cannot assign i32 to i64
+- `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
+- `typecheck` ×4: unknown type in annotation
+- `typecheck` ×3: type mismatch in '==': i64 vs i32
 - `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×9: unsupported assignment target
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
@@ -352,11 +352,11 @@ named, not inferred.
 - `resolve` ×12: unknown name 'b'
 - `resolve` ×5: unknown name 'c'
 - `resolve` ×3: unknown name 'lp'
-- `typecheck` ×4: return type mismatch: expected i16, got bool
-- `typecheck` ×2: 'KwType' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwModule' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwLet' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwImport' is not a variant of enum 'Severity'
+- `typecheck` ×28: type mismatch in '+': i64 vs i32
+- `typecheck` ×8: type mismatch: cannot assign i32 to i64
+- `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
+- `typecheck` ×4: unknown type in annotation
+- `typecheck` ×3: type mismatch in '==': i64 vs i32
 - `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×9: unsupported assignment target
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
@@ -368,11 +368,11 @@ named, not inferred.
 - `resolve` ×12: unknown name 'b'
 - `resolve` ×5: unknown name 'c'
 - `resolve` ×3: unknown name 'lp'
-- `typecheck` ×4: return type mismatch: expected i16, got bool
-- `typecheck` ×2: 'KwType' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwModule' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwLet' is not a variant of enum 'Severity'
-- `typecheck` ×2: 'KwImport' is not a variant of enum 'Severity'
+- `typecheck` ×28: type mismatch in '+': i64 vs i32
+- `typecheck` ×8: type mismatch: cannot assign i32 to i64
+- `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
+- `typecheck` ×4: unknown type in annotation
+- `typecheck` ×3: type mismatch in '==': i64 vs i32
 - `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×9: unsupported assignment target
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
@@ -392,26 +392,26 @@ diagnostics per stage, and the first.
 
 | File | parse | resolve | typecheck | First diagnostic |
 |---|---|---|---|---|
-| `stdlib/core/builtins.dao` | 0 | 0 | 6 | type mismatch: cannot assign i32 to i64 |
+| `stdlib/core/builtins.dao` | 0 | 0 | 2 | type mismatch: cannot assign i32 to i64 |
 | `stdlib/core/comparable.dao` | 1 | 0 | 0 | expected declaration (fn, extern, class, enum, type, concept, or extend) |
-| `stdlib/core/convert.dao` | 0 | 0 | 30 | argument type mismatch: expected string, got i32 |
-| `stdlib/core/diagnostic.dao` | 0 | 0 | 3 | return type mismatch: expected string, got Result |
+| `stdlib/core/convert.dao` | 0 | 0 | 0 | — |
+| `stdlib/core/diagnostic.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/equatable.dao` | 1 | 0 | 12 | expected declaration (fn, extern, class, enum, type, concept, or extend) |
-| `stdlib/core/hashmap.dao` | 122 | 23 | 78 | expected expression |
+| `stdlib/core/hashmap.dao` | 122 | 23 | 47 | expected expression |
 | `stdlib/core/math.dao` | 118 | 0 | 0 | expected Gt, got Colon |
 | `stdlib/core/memory.dao` | 0 | 0 | 0 | — |
-| `stdlib/core/numeric.dao` | 0 | 0 | 14 | extend method 'less_than' param 1 has type i8, concept requires <unresolved> |
+| `stdlib/core/numeric.dao` | 0 | 0 | 10 | extend method 'less_than' param 1 has type i8, concept requires <unresolved> |
 | `stdlib/core/option.dao` | 0 | 0 | 0 | — |
-| `stdlib/core/overflow.dao` | 0 | 0 | 37 | arity mismatch: expected 2 arguments, got 1 |
+| `stdlib/core/overflow.dao` | 0 | 0 | 46 | return type mismatch: expected void, got Option |
 | `stdlib/core/panic.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/printable.dao` | 24 | 0 | 12 | expected declaration (fn, extern, class, enum, type, concept, or extend) |
 | `stdlib/core/range.dao` | 4 | 2 | 0 | expected expression |
 | `stdlib/core/result.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/span.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/string.dao` | 0 | 0 | 0 | — |
-| `stdlib/core/text.dao` | 0 | 0 | 7 | constructor arity mismatch: expected 7 fields, got 0 |
+| `stdlib/core/text.dao` | 0 | 0 | 5 | constructor arity mismatch: expected 7 fields, got 0 |
 | `stdlib/core/to_string.dao` | 0 | 0 | 0 | — |
-| `stdlib/core/vector.dao` | 91 | 35 | 91 | expected expression |
+| `stdlib/core/vector.dao` | 91 | 35 | 71 | expected expression |
 | `stdlib/io/file.dao` | 0 | 0 | 0 | — |
 
 ### Parse-stage attribution
@@ -433,7 +433,7 @@ next.  Sites per program against the parse column above:
 | parser | 62 | 0 | 0 |
 | graph | 68 | 0 | 0 |
 | resolver | 114 | 0 | 0 |
-| typecheck | 147 | 0 | 0 |
+| typecheck | 148 | 0 | 0 |
 | hir | 161 | 4 | 0 |
 | mir | 177 | 10 | 0 |
 | llvm | 215 | 28 | 0 |

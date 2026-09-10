@@ -791,13 +791,15 @@ the prelude row of `CONTRACT_MODULE_SYSTEM.md` §12, promoted from Task
 prelude names resolve; the resolve column fell (llvm: 2954 → 1860) and
 its histogram is now match-arm destructuring bindings (`unknown name
 'a'`, `'t'`, `'b'`), which the resolver resolves as expressions
-without introducing bindings.  The typecheck column's first
-diagnostics with the prelude present name a cross-module enum
-identity fault (`'KwType' is not a variant of enum 'Severity'`: a
-variant check keyed by declaration node index without file
-provenance).  The prelude section lists the seven partially parsed
-files and each file's typecheck count.  The next task is chosen from
-that audit, not written here.
+without introducing bindings.  The typecheck column fell with it
+(lexer: 1005 → 455, llvm: 1870 → 1382) once declaration lookups took
+the module as half a declaration's identity — an index is file-local,
+so two modules' declarations at one index had been taking each other's
+symbols — and its histogram is now integer width (`type mismatch in
+'+': i64 vs i32`, `cannot assign i32 to i64`), the bootstrap's own
+`i32`/`i64` mixing rather than a compiler fault.  The prelude section
+lists the seven partially parsed files and each file's typecheck
+count.  The next task is chosen from that audit, not written here.
 
 **Objective**: after Tasks 36–37 every compiler program's first
 blocking diagnostic is `unknown name` for a prelude declaration

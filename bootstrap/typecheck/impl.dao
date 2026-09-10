@@ -433,24 +433,40 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
 
 // Find a symbol index by decl_node and kind name
 // The callable symbol a declaration introduces: a free function's is
-// a `Function`, a class's own method's a `Method`.
-fn find_callable_sym_by_decl(ts: TS, decl_idx: i64): i64
+// a `Function`, a class's own method's a `Method`.  A declaration
+// index is file-local, so the owning module is half the identity: two
+// modules' declarations share an index freely.  A negative module id
+// is the single-file adapters', where no other module exists.
+fn find_callable_sym(symbols: Vector<Symbol>, decl_idx: i64, module_id: i64): i64
   let si: i64 = 0
-  while si < ts.tc.symbols.length():
-    let sym: Symbol = ts.tc.symbols.get(si)
+  while si < symbols.length():
+    let sym: Symbol = symbols.get(si)
     if sym.decl_node == decl_idx:
       if is_method_symbol(sym):
-        return si
+        if module_id < 0:
+          return si
+        if sym.owner_module_id == module_id:
+          return si
     si = si + 1
   return to_i64(-1)
 
+fn find_callable_sym_by_decl(ts: TS, decl_idx: i64): i64
+  return find_callable_sym(ts.tc.symbols, decl_idx, ts.tc.module_id)
+
+// The symbol of the given kind declared at `decl_idx` in this module.
+// A declaration index is file-local, so the module is half the
+// identity here too: without it, two modules' declarations at one
+// index take each other's symbols.
 fn find_sym_by_decl(ts: TS, decl_idx: i64, kind_name: string): i64
   let si: i64 = 0
   while si < ts.tc.symbols.length():
     let sym: Symbol = ts.tc.symbols.get(si)
     if sym.decl_node == decl_idx:
       if symbol_kind_name(sym.kind) == kind_name:
-        return si
+        if ts.tc.module_id < 0:
+          return si
+        if sym.owner_module_id == ts.tc.module_id:
+          return si
     si = si + 1
   return to_i64(-1)
 
@@ -2252,12 +2268,32 @@ fn tc_count_types(result: TypeCheckResult): i64
 // Section 48: Golden type checker tests
 // =========================================================================
 
+// The node index of the first method a file's first class declares:
+// a program-level test checks that two modules' declarations at one
+// index stay apart.
+fn first_method_decl_index(po: ParseOutput): i64
+  let root: Node = po.nodes.get(po.root)
+  match root:
+    Node::FileN(md, ilp, dlp):
+      let decls: Vector<i64> = read_list(po.idx, dlp)
+      let i: i64 = 0
+      while i < decls.length():
+        let decl: Node = po.nodes.get(decls.get(i))
+        match decl:
+          Node::ClassDeclD(nt, tp, flp, mlp):
+            if mlp >= 0:
+              let meths: Vector<i64> = read_list(po.idx, mlp)
+              if meths.length() > 0:
+                return meths.get(to_i64(0))
+        i = i + 1
+  return to_i64(-1)
+
 fn main(): i32
   print("=== bootstrap/typecheck: Task 23 — Bootstrap Type Checker ===")
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 54
+  let total: i32 = 55
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -3284,6 +3320,45 @@ fn main(): i32
     while xb_j < xb_p.diags.length():
       print("  diag: " + xb_p.diags.get(xb_j).path + ": " + xb_p.diags.get(xb_j).diag.message)
       xb_j = xb_j + 1
+
+  // Test 54: a declaration index is file-local — two modules'
+  // declarations share one freely (these two classes have the same
+  // shape, so both methods sit at the same index), and each must keep
+  // its own signature rather than the other's.
+  let ci_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  ci_inputs = ci_inputs.push(SourceInput("a.dao", "module app::a\nclass Box:\n  n: i32\n  fn pick(self): i32\n    return self.n\n", false))
+  ci_inputs = ci_inputs.push(SourceInput("b.dao", "module app::b\nclass Cup:\n  n: bool\n  fn pick(self): bool\n    return self.n\n", false))
+  let ci_pg: ProgramGraph = build_program(ci_inputs)
+  let ci_p: Program = program_from_graph(ci_pg)
+  ci_p = program_run_resolve(ci_p)
+  ci_p = program_run_typecheck(ci_p)
+  let ci_a_idx: i64 = to_i64(-1)
+  let ci_b_idx: i64 = to_i64(-1)
+  let ci_fi: i64 = 0
+  while ci_fi < ci_pg.files.length():
+    let ci_sf: SourceFile = ci_pg.files.get(ci_fi)
+    if ci_sf.path == "a.dao":
+      ci_a_idx = first_method_decl_index(ci_sf.parse_output)
+    if ci_sf.path == "b.dao":
+      ci_b_idx = first_method_decl_index(ci_sf.parse_output)
+    ci_fi = ci_fi + 1
+  let ci_errors: i64 = 0
+  let ci_i: i64 = 0
+  while ci_i < ci_p.diags.length():
+    ci_errors = ci_errors + 1
+    ci_i = ci_i + 1
+  if ci_a_idx == ci_b_idx:
+    if ci_errors == 0:
+      print("PASS colliding_decl_indices_stay_apart")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL colliding_decl_indices_stay_apart: " + i64_to_string(ci_errors) + " diagnostics")
+      let ci_j: i64 = 0
+      while ci_j < ci_p.diags.length():
+        print("  diag: " + ci_p.diags.get(ci_j).path + ": " + ci_p.diags.get(ci_j).diag.message)
+        ci_j = ci_j + 1
+  else:
+    print("FAIL colliding_decl_indices_stay_apart: the fixture no longer collides (a=" + i64_to_string(ci_a_idx) + " b=" + i64_to_string(ci_b_idx) + "); retune it")
 
   // -----------------------------------------------------------------
   // Summary

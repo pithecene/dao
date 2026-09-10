@@ -930,27 +930,26 @@ fn lower_decl(hs: HS, decl_idx: i64): HirR
 // Section 57: Symbol lookup helpers for HIR
 // =========================================================================
 
-// The callable symbol a declaration introduces: a free function's is
-// a `Function`, a class's own method's a `Method`.  A declaration
-// whose symbol is not found lowers with a `void` return, so the
-// lookup must know both kinds.
+// The callable symbol a declaration introduces (see
+// `find_callable_sym`).  A declaration whose symbol is not found
+// lowers with a `void` return, so the lookup must know both kinds —
+// and both halves of the identity, since declaration indices are
+// file-local.
 fn hir_find_callable_sym_by_decl(hs: HS, decl_idx: i64): i64
-  let si: i64 = 0
-  while si < hs.symbols.length():
-    let sym: Symbol = hs.symbols.get(si)
-    if sym.decl_node == decl_idx:
-      if is_method_symbol(sym):
-        return si
-    si = si + 1
-  return to_i64(-1)
+  return find_callable_sym(hs.symbols, decl_idx, hs.module_id)
 
+// The symbol of the given kind declared at `decl_idx` in this module
+// (see `find_sym_by_decl`).
 fn hir_find_sym_by_decl(hs: HS, decl_idx: i64, kind_name: string): i64
   let si: i64 = 0
   while si < hs.symbols.length():
     let sym: Symbol = hs.symbols.get(si)
     if sym.decl_node == decl_idx:
       if symbol_kind_name(sym.kind) == kind_name:
-        return si
+        if hs.module_id < 0:
+          return si
+        if sym.owner_module_id == hs.module_id:
+          return si
     si = si + 1
   return to_i64(-1)
 
