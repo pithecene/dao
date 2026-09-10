@@ -110,13 +110,13 @@ fn rs_update_scope(rs: RS, scope_idx: i64, new_scope: Scope): RS
 fn scope_declare(rs: RS, name: string, sym_idx: i64, decl_tidx: i64): RS
   let scope: Scope = rs.scopes.get(rs.current_scope)
   match scope.decls.get(name):
-    Option.Some(eidx):
+    Option::Some(eidx):
       let sp: Span = Span(to_i64(0), to_i64(1))
       if decl_tidx >= 0:
         let tok: Token = rs.rc.toks.get(decl_tidx)
         sp = Span(tok.offset, tok.len)
       return rs_add_diag(rs, sp, "duplicate declaration '" + name + "'")
-    Option.None:
+    Option::None:
       scope.decls = scope.decls.set(name, sym_idx)
       return rs_update_scope(rs, rs.current_scope, scope)
   return rs
@@ -127,9 +127,9 @@ fn scope_lookup(rs: RS, name: string): i64
     let scope: Scope = rs.scopes.get(sid)
     let found: Option<i64> = scope.decls.get(name)
     match found:
-      Option.Some(sym_idx):
+      Option::Some(sym_idx):
         return sym_idx
-      Option.None:
+      Option::None:
         sid = scope.parent
   return to_i64(-1)
 
@@ -137,9 +137,9 @@ fn scope_lookup_local(rs: RS, name: string): i64
   let scope: Scope = rs.scopes.get(rs.current_scope)
   let found: Option<i64> = scope.decls.get(name)
   match found:
-    Option.Some(sym_idx):
+    Option::Some(sym_idx):
       return sym_idx
-    Option.None:
+    Option::None:
       return to_i64(-1)
   return to_i64(-1)
 
@@ -175,35 +175,35 @@ fn tok_name_span(rs: RS, tidx: i64): Span
 
 fn symbol_kind_name(kind: SymbolKind): string
   match kind:
-    SymbolKind.Builtin:
+    SymbolKind::Builtin:
       return "Builtin"
-    SymbolKind.Function:
+    SymbolKind::Function:
       return "Function"
-    SymbolKind.Type:
+    SymbolKind::Type:
       return "Type"
-    SymbolKind.Local:
+    SymbolKind::Local:
       return "Local"
-    SymbolKind.Param:
+    SymbolKind::Param:
       return "Param"
-    SymbolKind.Field:
+    SymbolKind::Field:
       return "Field"
-    SymbolKind.LambdaParam:
+    SymbolKind::LambdaParam:
       return "LambdaParam"
-    SymbolKind.GenericParam:
+    SymbolKind::GenericParam:
       return "GenericParam"
-    SymbolKind.Module:
+    SymbolKind::Module:
       return "Module"
   return "Unknown"
 
 fn scope_kind_name(kind: ScopeKind): string
   match kind:
-    ScopeKind.FileScope:
+    ScopeKind::FileScope:
       return "FileScope"
-    ScopeKind.FunctionScope:
+    ScopeKind::FunctionScope:
       return "FunctionScope"
-    ScopeKind.BlockScope:
+    ScopeKind::BlockScope:
       return "BlockScope"
-    ScopeKind.StructScope:
+    ScopeKind::StructScope:
       return "StructScope"
   return "Unknown"
 
@@ -212,7 +212,7 @@ fn scope_kind_name(kind: ScopeKind): string
 // =========================================================================
 
 fn declare_builtin(rs: RS, name: string): RS
-  let sr: SymR = rs_add_symbol(rs, Symbol(SymbolKind.Builtin, name, to_i64(-1), rs.current_scope, to_i64(-1)))
+  let sr: SymR = rs_add_symbol(rs, Symbol(SymbolKind::Builtin, name, to_i64(-1), rs.current_scope, to_i64(-1)))
   return scope_declare(sr.rs, name, sr.sym_idx, to_i64(-1))
 
 fn populate_builtins(rs: RS): RS
@@ -242,11 +242,11 @@ fn is_type_symbol(rs: RS, sym_idx: i64): bool
     return false
   let sym: Symbol = rs.symbols.get(sym_idx)
   match sym.kind:
-    SymbolKind.Builtin:
+    SymbolKind::Builtin:
       return true
-    SymbolKind.Type:
+    SymbolKind::Type:
       return true
-    SymbolKind.GenericParam:
+    SymbolKind::GenericParam:
       return true
   return false
 
@@ -255,7 +255,7 @@ fn resolve_type_node(rs: RS, node_idx: i64): RS
     return rs
   let node: Node = rs.rc.nodes.get(node_idx)
   match node:
-    Node.NamedT(tidx):
+    Node::NamedT(tidx):
       let name: string = tok_name(rs, tidx)
       let sym: i64 = scope_lookup(rs, name)
       if sym >= 0:
@@ -264,7 +264,7 @@ fn resolve_type_node(rs: RS, node_idx: i64): RS
         // Found a non-type symbol — don't record the use, leave unresolved
       // No diagnostic on unresolved type — matches host resolver
       return rs
-    Node.GenericT(name_tidx, args_lp, arg_count):
+    Node::GenericT(name_tidx, args_lp, arg_count):
       let name: string = tok_name(rs, name_tidx)
       let sym: i64 = scope_lookup(rs, name)
       let r: RS = rs
@@ -277,12 +277,12 @@ fn resolve_type_node(rs: RS, node_idx: i64): RS
         r = resolve_type_node(r, args.get(i))
         i = i + 1
       return r
-    Node.PointerT(inner):
+    Node::PointerT(inner):
       return resolve_type_node(rs, inner)
-    Node.QualNameE(seg_lp, seg_count):
+    Node::QualNameE(seg_lp, seg_count):
       // Qualified type name (e.g. types::Point) — resolve same as expression.
       return resolve_expr(rs, node_idx)
-    Node.ErrorT(t):
+    Node::ErrorT(t):
       return rs
   return rs
 
@@ -295,7 +295,7 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
     return rs
   let node: Node = rs.rc.nodes.get(node_idx)
   match node:
-    Node.IdentE(tidx):
+    Node::IdentE(tidx):
       let name: string = tok_name(rs, tidx)
       let sym: i64 = scope_lookup(rs, name)
       if sym >= 0:
@@ -303,7 +303,7 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
       // Unknown name — emit diagnostic
       let sp: Span = tok_name_span(rs, tidx)
       return rs_add_diag(rs, sp, "unknown name '" + name + "'")
-    Node.QualNameE(seg_lp, seg_count):
+    Node::QualNameE(seg_lp, seg_count):
       let segs: Vector<i64> = read_list(rs.rc.idx_data, seg_lp)
       if segs.length() > 0:
         let first_tidx: i64 = segs.get(0)
@@ -322,17 +322,17 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
               let seg_tidx: i64 = segs.get(seg_i)
               let seg_name: string = tok_name(r, seg_tidx)
               // Module symbol: look up in export table.
-              if symbol_kind_name(cur_sym.kind) == symbol_kind_name(SymbolKind.Module):
+              if symbol_kind_name(cur_sym.kind) == symbol_kind_name(SymbolKind::Module):
                 let target_mid: i64 = cur_sym.decl_node
                 if target_mid >= 0:
                   if target_mid < r.rc.exports.tables.length():
                     let export_tbl: ExportTable = r.rc.exports.tables.get(target_mid)
                     let found: Option<i64> = export_tbl.entries.get(seg_name)
                     match found:
-                      Option.Some(exp_sym):
+                      Option::Some(exp_sym):
                         r = rs_add_use(r, seg_tidx, exp_sym)
                         cur_sym = r.symbols.get(exp_sym)
-                      Option.None:
+                      Option::None:
                         let prev_name: string = cur_sym.name
                         let sp2: Span = tok_name_span(r, seg_tidx)
                         r = rs_add_diag(r, sp2, "module '" + prev_name + "' has no exported symbol '" + seg_name + "'")
@@ -344,7 +344,7 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
               else:
                 // Type/enum symbol: record the use (for enum variant access
                 // like Color::Red — variant resolution is deferred to typecheck).
-                if symbol_kind_name(cur_sym.kind) == symbol_kind_name(SymbolKind.Type):
+                if symbol_kind_name(cur_sym.kind) == symbol_kind_name(SymbolKind::Type):
                   // Remaining segments after a Type are enum variants or
                   // static members — record the use of the type and stop.
                   // Variant resolution happens in typecheck, not the resolver.
@@ -357,12 +357,12 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
         let sp: Span = tok_name_span(rs, first_tidx)
         return rs_add_diag(rs, sp, "unknown name '" + name + "'")
       return rs
-    Node.BinaryE(op_tidx, left, right):
+    Node::BinaryE(op_tidx, left, right):
       let r: RS = resolve_expr(rs, left)
       return resolve_expr(r, right)
-    Node.UnaryE(op_tidx, operand):
+    Node::UnaryE(op_tidx, operand):
       return resolve_expr(rs, operand)
-    Node.CallE(callee, args_lp, arg_count, targs_lp, names_lp):
+    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp):
       let r: RS = resolve_expr(rs, callee)
       let args: Vector<i64> = read_list(r.rc.idx_data, args_lp)
       let i: i64 = 0
@@ -380,20 +380,20 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
           r = resolve_type_node(r, targs.get(ti))
           ti = ti + 1
       return r
-    Node.IndexE(obj, idx_expr):
+    Node::IndexE(obj, idx_expr):
       let r: RS = resolve_expr(rs, obj)
       return resolve_expr(r, idx_expr)
-    Node.FieldE(obj, field_tidx):
+    Node::FieldE(obj, field_tidx):
       // Resolve the object expression; field name needs type info (Tier B)
       return resolve_expr(rs, obj)
-    Node.PipeE(left, right):
+    Node::PipeE(left, right):
       let r: RS = resolve_expr(rs, left)
       return resolve_expr(r, right)
-    Node.TryE(operand):
+    Node::TryE(operand):
       return resolve_expr(rs, operand)
-    Node.LambdaE(params_lp, param_count, body):
+    Node::LambdaE(params_lp, param_count, body):
       // Create a block scope for the lambda
-      let sr: ScopeR = rs_push_scope(rs, ScopeKind.BlockScope)
+      let sr: ScopeR = rs_push_scope(rs, ScopeKind::BlockScope)
       let r: RS = sr.rs
       // Declare lambda parameters
       let param_toks: Vector<i64> = read_list(r.rc.idx_data, params_lp)
@@ -401,13 +401,13 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
       while i < param_toks.length():
         let ptidx: i64 = param_toks.get(i)
         let pname: string = tok_name(r, ptidx)
-        let sym_r: SymR = rs_add_symbol(r, Symbol(SymbolKind.LambdaParam, pname, node_idx, r.current_scope, r.owner_module_id))
+        let sym_r: SymR = rs_add_symbol(r, Symbol(SymbolKind::LambdaParam, pname, node_idx, r.current_scope, r.owner_module_id))
         r = scope_declare(sym_r.rs, pname, sym_r.sym_idx, ptidx)
         i = i + 1
       // Resolve body expression
       r = resolve_expr(r, body)
       return rs_pop_scope(r)
-    Node.ListLitE(elems_lp, elem_count):
+    Node::ListLitE(elems_lp, elem_count):
       let elems: Vector<i64> = read_list(rs.rc.idx_data, elems_lp)
       let r: RS = rs
       let i: i64 = 0
@@ -415,15 +415,15 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
         r = resolve_expr(r, elems.get(i))
         i = i + 1
       return r
-    Node.IntLitE(t):
+    Node::IntLitE(t):
       return rs
-    Node.FloatLitE(t):
+    Node::FloatLitE(t):
       return rs
-    Node.StringLitE(t):
+    Node::StringLitE(t):
       return rs
-    Node.BoolLitE(t):
+    Node::BoolLitE(t):
       return rs
-    Node.ErrorE(t):
+    Node::ErrorE(t):
       return rs
   return rs
 
@@ -445,7 +445,7 @@ fn resolve_body_stmts(rs: RS, list_pos: i64): RS
 fn resolve_body_in_new_scope(rs: RS, list_pos: i64): RS
   if list_pos < 0:
     return rs
-  let sr: ScopeR = rs_push_scope(rs, ScopeKind.BlockScope)
+  let sr: ScopeR = rs_push_scope(rs, ScopeKind::BlockScope)
   let r: RS = resolve_body_stmts(sr.rs, list_pos)
   return rs_pop_scope(r)
 
@@ -454,47 +454,47 @@ fn resolve_stmt(rs: RS, node_idx: i64): RS
     return rs
   let node: Node = rs.rc.nodes.get(node_idx)
   match node:
-    Node.LetS(name_tidx, type_node, init_node):
+    Node::LetS(name_tidx, type_node, init_node):
       // Resolve type and init BEFORE declaring (prevents self-reference)
       let r: RS = resolve_type_node(rs, type_node)
       r = resolve_expr(r, init_node)
       // Declare local
       let name: string = tok_name(r, name_tidx)
-      let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind.Local, name, node_idx, r.current_scope, r.owner_module_id))
+      let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Local, name, node_idx, r.current_scope, r.owner_module_id))
       return scope_declare(sr.rs, name, sr.sym_idx, name_tidx)
-    Node.AssignS(target, value):
+    Node::AssignS(target, value):
       let r: RS = resolve_expr(rs, target)
       return resolve_expr(r, value)
-    Node.IfS(cond, then_lp, else_lp):
+    Node::IfS(cond, then_lp, else_lp):
       let r: RS = resolve_expr(rs, cond)
       r = resolve_body_in_new_scope(r, then_lp)
       if else_lp >= 0:
         r = resolve_body_in_new_scope(r, else_lp)
       return r
-    Node.WhileS(cond, body_lp):
+    Node::WhileS(cond, body_lp):
       let r: RS = resolve_expr(rs, cond)
       return resolve_body_in_new_scope(r, body_lp)
-    Node.ResourceS(kind_tidx, name_tidx, body_lp):
+    Node::ResourceS(kind_tidx, name_tidx, body_lp):
       // The domain's name binds nothing in Tier A; its body is a block.
       return resolve_body_in_new_scope(rs, body_lp)
-    Node.ForS(var_tidx, iter_node, body_lp):
+    Node::ForS(var_tidx, iter_node, body_lp):
       // Resolve iterable in outer scope
       let r: RS = resolve_expr(rs, iter_node)
       // Create block scope for loop body; declare loop variable
-      let sr: ScopeR = rs_push_scope(r, ScopeKind.BlockScope)
+      let sr: ScopeR = rs_push_scope(r, ScopeKind::BlockScope)
       r = sr.rs
       let var_name: string = tok_name(r, var_tidx)
-      let sym_r: SymR = rs_add_symbol(r, Symbol(SymbolKind.Local, var_name, node_idx, r.current_scope, r.owner_module_id))
+      let sym_r: SymR = rs_add_symbol(r, Symbol(SymbolKind::Local, var_name, node_idx, r.current_scope, r.owner_module_id))
       r = scope_declare(sym_r.rs, var_name, sym_r.sym_idx, var_tidx)
       r = resolve_body_stmts(r, body_lp)
       return rs_pop_scope(r)
-    Node.ReturnS(val_node):
+    Node::ReturnS(val_node):
       if val_node >= 0:
         return resolve_expr(rs, val_node)
       return rs
-    Node.BreakS(tidx):
+    Node::BreakS(tidx):
       return rs
-    Node.MatchS(scrut_node, arms_lp):
+    Node::MatchS(scrut_node, arms_lp):
       let r: RS = resolve_expr(rs, scrut_node)
       // Arms are pairs: [pattern_node, body_list_pos]
       let arms: Vector<i64> = read_pairs(r.rc.idx_data, arms_lp)
@@ -508,9 +508,9 @@ fn resolve_stmt(rs: RS, node_idx: i64): RS
         r = resolve_body_in_new_scope(r, body_lp2)
         i = i + 2
       return r
-    Node.ExprStmtS(expr_node):
+    Node::ExprStmtS(expr_node):
       return resolve_expr(rs, expr_node)
-    Node.ErrorS(t):
+    Node::ErrorS(t):
       return rs
   return rs
 
@@ -528,16 +528,16 @@ fn resolve_type_params(rs: RS, tparams_lp: i64, node_idx: i64): RS
     let tp_node_idx: i64 = tparams.get(i)
     let tp_node: Node = r.rc.nodes.get(tp_node_idx)
     match tp_node:
-      Node.GenericParamT(tidx):
+      Node::GenericParamT(tidx):
         let tname: string = tok_name(r, tidx)
-        let sym_r: SymR = rs_add_symbol(r, Symbol(SymbolKind.GenericParam, tname, node_idx, r.current_scope, r.owner_module_id))
+        let sym_r: SymR = rs_add_symbol(r, Symbol(SymbolKind::GenericParam, tname, node_idx, r.current_scope, r.owner_module_id))
         r = scope_declare(sym_r.rs, tname, sym_r.sym_idx, tidx)
     i = i + 1
   return r
 
 fn resolve_fn_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, params_lp: i64, ret_type: i64, body_lp: i64): RS
   // Create function scope
-  let sr: ScopeR = rs_push_scope(rs, ScopeKind.FunctionScope)
+  let sr: ScopeR = rs_push_scope(rs, ScopeKind::FunctionScope)
   let r: RS = sr.rs
 
   // Declare generic type parameters
@@ -550,7 +550,7 @@ fn resolve_fn_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, param
     let p_tidx: i64 = pairs.get(i)
     let p_type: i64 = pairs.get(i + 1)
     let pname: string = tok_name(r, p_tidx)
-    let sym_r: SymR = rs_add_symbol(r, Symbol(SymbolKind.Param, pname, node_idx, r.current_scope, r.owner_module_id))
+    let sym_r: SymR = rs_add_symbol(r, Symbol(SymbolKind::Param, pname, node_idx, r.current_scope, r.owner_module_id))
     r = scope_declare(sym_r.rs, pname, sym_r.sym_idx, p_tidx)
     // Resolve parameter type
     r = resolve_type_node(r, p_type)
@@ -560,7 +560,7 @@ fn resolve_fn_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, param
   r = resolve_type_node(r, ret_type)
 
   // Create block scope for body (so let bindings can shadow params)
-  let bsr: ScopeR = rs_push_scope(r, ScopeKind.BlockScope)
+  let bsr: ScopeR = rs_push_scope(r, ScopeKind::BlockScope)
   r = resolve_body_stmts(bsr.rs, body_lp)
   r = rs_pop_scope(r)
 
@@ -569,7 +569,7 @@ fn resolve_fn_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, param
 
 fn resolve_expr_fn_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, params_lp: i64, ret_type: i64, body_expr: i64): RS
   // Create function scope
-  let sr: ScopeR = rs_push_scope(rs, ScopeKind.FunctionScope)
+  let sr: ScopeR = rs_push_scope(rs, ScopeKind::FunctionScope)
   let r: RS = sr.rs
 
   // Declare generic type parameters
@@ -582,7 +582,7 @@ fn resolve_expr_fn_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, 
     let p_tidx: i64 = pairs.get(i)
     let p_type: i64 = pairs.get(i + 1)
     let pname: string = tok_name(r, p_tidx)
-    let sym_r: SymR = rs_add_symbol(r, Symbol(SymbolKind.Param, pname, node_idx, r.current_scope, r.owner_module_id))
+    let sym_r: SymR = rs_add_symbol(r, Symbol(SymbolKind::Param, pname, node_idx, r.current_scope, r.owner_module_id))
     r = scope_declare(sym_r.rs, pname, sym_r.sym_idx, p_tidx)
     r = resolve_type_node(r, p_type)
     i = i + 2
@@ -591,7 +591,7 @@ fn resolve_expr_fn_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, 
   r = resolve_type_node(r, ret_type)
 
   // Resolve body expression in a block scope
-  let bsr: ScopeR = rs_push_scope(r, ScopeKind.BlockScope)
+  let bsr: ScopeR = rs_push_scope(r, ScopeKind::BlockScope)
   r = resolve_expr(bsr.rs, body_expr)
   r = rs_pop_scope(r)
 
@@ -600,7 +600,7 @@ fn resolve_expr_fn_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, 
 
 fn resolve_extern_fn_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, params_lp: i64, ret_type: i64): RS
   // Create function scope
-  let sr: ScopeR = rs_push_scope(rs, ScopeKind.FunctionScope)
+  let sr: ScopeR = rs_push_scope(rs, ScopeKind::FunctionScope)
   let r: RS = sr.rs
 
   // Declare generic type parameters
@@ -613,7 +613,7 @@ fn resolve_extern_fn_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64
     let p_tidx: i64 = pairs.get(i)
     let p_type: i64 = pairs.get(i + 1)
     let pname: string = tok_name(r, p_tidx)
-    let sym_r: SymR = rs_add_symbol(r, Symbol(SymbolKind.Param, pname, node_idx, r.current_scope, r.owner_module_id))
+    let sym_r: SymR = rs_add_symbol(r, Symbol(SymbolKind::Param, pname, node_idx, r.current_scope, r.owner_module_id))
     r = scope_declare(sym_r.rs, pname, sym_r.sym_idx, p_tidx)
     r = resolve_type_node(r, p_type)
     i = i + 2
@@ -626,7 +626,7 @@ fn resolve_extern_fn_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64
 
 fn resolve_class_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, fields_lp: i64, methods_lp: i64): RS
   // Create struct scope
-  let sr: ScopeR = rs_push_scope(rs, ScopeKind.StructScope)
+  let sr: ScopeR = rs_push_scope(rs, ScopeKind::StructScope)
   let r: RS = sr.rs
 
   // Declare generic type parameters
@@ -639,7 +639,7 @@ fn resolve_class_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, fi
     let f_tidx: i64 = pairs.get(i)
     let f_type: i64 = pairs.get(i + 1)
     let fname: string = tok_name(r, f_tidx)
-    let sym_r: SymR = rs_add_symbol(r, Symbol(SymbolKind.Field, fname, node_idx, r.current_scope, r.owner_module_id))
+    let sym_r: SymR = rs_add_symbol(r, Symbol(SymbolKind::Field, fname, node_idx, r.current_scope, r.owner_module_id))
     r = scope_declare(sym_r.rs, fname, sym_r.sym_idx, f_tidx)
     // Resolve field type
     r = resolve_type_node(r, f_type)
@@ -654,7 +654,7 @@ fn resolve_class_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, fi
       let meth_idx: i64 = methods.get(mi)
       let meth_node: Node = r.rc.nodes.get(meth_idx)
       match meth_node:
-        Node.FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
+        Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
           r = resolve_fn_decl(r, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp)
       mi = mi + 1
 
@@ -667,7 +667,7 @@ fn resolve_enum_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, var
   let r0: RS = rs
   let has_tparams: bool = false
   if tparams_lp >= 0:
-    let sr: ScopeR = rs_push_scope(r0, ScopeKind.BlockScope)
+    let sr: ScopeR = rs_push_scope(r0, ScopeKind::BlockScope)
     r0 = resolve_type_params(sr.rs, tparams_lp, node_idx)
     has_tparams = true
   // Resolve payload types for each variant
@@ -693,7 +693,7 @@ fn resolve_type_alias_decl(rs: RS, node_idx: i64, name_tidx: i64, target_type: i
 
 fn resolve_concept_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, methods_lp: i64): RS
   // Create scope for type params
-  let sr: ScopeR = rs_push_scope(rs, ScopeKind.BlockScope)
+  let sr: ScopeR = rs_push_scope(rs, ScopeKind::BlockScope)
   let r: RS = sr.rs
   r = resolve_type_params(r, tparams_lp, node_idx)
   // Resolve method types — signature-only (ExternFnD) or with default body
@@ -704,11 +704,11 @@ fn resolve_concept_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, 
       let meth_idx: i64 = methods.get(mi)
       let meth_node: Node = r.rc.nodes.get(meth_idx)
       match meth_node:
-        Node.ExternFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type):
+        Node::ExternFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type):
           r = resolve_extern_fn_decl(r, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type)
-        Node.FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
+        Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
           r = resolve_fn_decl(r, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp)
-        Node.ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
+        Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
           r = resolve_fn_decl(r, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, to_i64(-1))
       mi = mi + 1
   return rs_pop_scope(r)
@@ -730,7 +730,7 @@ fn resolve_extend_decl(rs: RS, node_idx: i64, target_type_node: i64, concept_nam
       let meth_idx: i64 = methods.get(mi)
       let meth_node: Node = r.rc.nodes.get(meth_idx)
       match meth_node:
-        Node.FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
+        Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
           r = resolve_fn_decl(r, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp)
       mi = mi + 1
   return r
@@ -740,23 +740,23 @@ fn resolve_decl(rs: RS, node_idx: i64): RS
     return rs
   let node: Node = rs.rc.nodes.get(node_idx)
   match node:
-    Node.FnDeclD(name_tidx, tparams_lp, params_lp, ret_type, body_lp):
+    Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_type, body_lp):
       return resolve_fn_decl(rs, node_idx, name_tidx, tparams_lp, params_lp, ret_type, body_lp)
-    Node.ExprFnD(name_tidx, tparams_lp, params_lp, ret_type, body_expr):
+    Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_type, body_expr):
       return resolve_expr_fn_decl(rs, node_idx, name_tidx, tparams_lp, params_lp, ret_type, body_expr)
-    Node.ExternFnD(name_tidx, tparams_lp, params_lp, ret_type):
+    Node::ExternFnD(name_tidx, tparams_lp, params_lp, ret_type):
       return resolve_extern_fn_decl(rs, node_idx, name_tidx, tparams_lp, params_lp, ret_type)
-    Node.ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
+    Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
       return resolve_class_decl(rs, node_idx, name_tidx, tparams_lp, fields_lp, methods_lp)
-    Node.EnumDeclD(name_tidx, tparams_lp, variants_lp):
+    Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
       return resolve_enum_decl(rs, node_idx, name_tidx, tparams_lp, variants_lp)
-    Node.TypeAliasD(name_tidx, target_type):
+    Node::TypeAliasD(name_tidx, target_type):
       return resolve_type_alias_decl(rs, node_idx, name_tidx, target_type)
-    Node.ConceptDeclD(name_tidx, tparams_lp, methods_lp):
+    Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp):
       return resolve_concept_decl(rs, node_idx, name_tidx, tparams_lp, methods_lp)
-    Node.ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
+    Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
       return resolve_extend_decl(rs, node_idx, target_type_node, concept_name_tidx, methods_lp)
-    Node.ErrorD(t):
+    Node::ErrorD(t):
       return rs
   return rs
 
@@ -767,7 +767,7 @@ fn resolve_decl(rs: RS, node_idx: i64): RS
 fn collect_top_level(rs: RS, file_node_idx: i64): RS
   let file_node: Node = rs.rc.nodes.get(file_node_idx)
   match file_node:
-    Node.FileN(module_decl, imports_lp, decls_lp):
+    Node::FileN(module_decl, imports_lp, decls_lp):
       let decls: Vector<i64> = read_list(rs.rc.idx_data, decls_lp)
       let r: RS = rs
       let i: i64 = 0
@@ -775,21 +775,21 @@ fn collect_top_level(rs: RS, file_node_idx: i64): RS
         let decl_idx: i64 = decls.get(i)
         let decl_node: Node = r.rc.nodes.get(decl_idx)
         match decl_node:
-          Node.FnDeclD(name_tidx, tparams_lp, params_lp, ret_type, body_lp):
+          Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_type, body_lp):
             let name: string = tok_name(r, name_tidx)
-            let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind.Function, name, decl_idx, r.current_scope, r.owner_module_id))
+            let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, name, decl_idx, r.current_scope, r.owner_module_id))
             r = scope_declare(sr.rs, name, sr.sym_idx, name_tidx)
-          Node.ExprFnD(name_tidx, tparams_lp, params_lp, ret_type, body_expr):
+          Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_type, body_expr):
             let name: string = tok_name(r, name_tidx)
-            let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind.Function, name, decl_idx, r.current_scope, r.owner_module_id))
+            let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, name, decl_idx, r.current_scope, r.owner_module_id))
             r = scope_declare(sr.rs, name, sr.sym_idx, name_tidx)
-          Node.ExternFnD(name_tidx, tparams_lp, params_lp, ret_type):
+          Node::ExternFnD(name_tidx, tparams_lp, params_lp, ret_type):
             let name: string = tok_name(r, name_tidx)
-            let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind.Function, name, decl_idx, r.current_scope, r.owner_module_id))
+            let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, name, decl_idx, r.current_scope, r.owner_module_id))
             r = scope_declare(sr.rs, name, sr.sym_idx, name_tidx)
-          Node.ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
+          Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
             let name: string = tok_name(r, name_tidx)
-            let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind.Type, name, decl_idx, r.current_scope, r.owner_module_id))
+            let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Type, name, decl_idx, r.current_scope, r.owner_module_id))
             r = scope_declare(sr.rs, name, sr.sym_idx, name_tidx)
             // Register mangled method symbols in file scope
             if methods_lp >= 0:
@@ -799,34 +799,34 @@ fn collect_top_level(rs: RS, file_node_idx: i64): RS
                 let meth_idx: i64 = meths.get(mi)
                 let meth_node: Node = r.rc.nodes.get(meth_idx)
                 match meth_node:
-                  Node.FnDeclD(m_name_tidx, m_tp, m_plp, m_rt, m_blp):
+                  Node::FnDeclD(m_name_tidx, m_tp, m_plp, m_rt, m_blp):
                     let mname: string = tok_name(r, m_name_tidx)
                     let mangled: string = name + "." + mname
-                    let msr: SymR = rs_add_symbol(r, Symbol(SymbolKind.Function, mangled, meth_idx, r.current_scope, r.owner_module_id))
+                    let msr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, mangled, meth_idx, r.current_scope, r.owner_module_id))
                     r = scope_declare(msr.rs, mangled, msr.sym_idx, m_name_tidx)
                 mi = mi + 1
-          Node.EnumDeclD(name_tidx, tparams_lp, variants_lp):
+          Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
             let name: string = tok_name(r, name_tidx)
-            let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind.Type, name, decl_idx, r.current_scope, r.owner_module_id))
+            let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Type, name, decl_idx, r.current_scope, r.owner_module_id))
             r = scope_declare(sr.rs, name, sr.sym_idx, name_tidx)
-          Node.TypeAliasD(name_tidx, target_type):
+          Node::TypeAliasD(name_tidx, target_type):
             let name: string = tok_name(r, name_tidx)
-            let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind.Type, name, decl_idx, r.current_scope, r.owner_module_id))
+            let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Type, name, decl_idx, r.current_scope, r.owner_module_id))
             r = scope_declare(sr.rs, name, sr.sym_idx, name_tidx)
-          Node.ConceptDeclD(name_tidx, tparams_lp, methods_lp):
+          Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp):
             let name: string = tok_name(r, name_tidx)
-            let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind.Type, name, decl_idx, r.current_scope, r.owner_module_id))
+            let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Type, name, decl_idx, r.current_scope, r.owner_module_id))
             r = scope_declare(sr.rs, name, sr.sym_idx, name_tidx)
-          Node.ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
+          Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
             // Register mangled method symbols: TargetTypeName.methodName
             if methods_lp >= 0:
               let target_name: string = ""
               if target_type_node >= 0:
                 let tnode: Node = r.rc.nodes.get(target_type_node)
                 match tnode:
-                  Node.NamedT(t_tidx):
+                  Node::NamedT(t_tidx):
                     target_name = tok_name(r, t_tidx)
-                  Node.GenericT(t_name_tidx, t_args_lp, t_arg_count):
+                  Node::GenericT(t_name_tidx, t_args_lp, t_arg_count):
                     target_name = tok_name(r, t_name_tidx)
               let meths: Vector<i64> = read_list(r.rc.idx_data, methods_lp)
               let mi: i64 = 0
@@ -834,13 +834,13 @@ fn collect_top_level(rs: RS, file_node_idx: i64): RS
                 let meth_idx: i64 = meths.get(mi)
                 let meth_node: Node = r.rc.nodes.get(meth_idx)
                 match meth_node:
-                  Node.FnDeclD(m_name_tidx, m_tp, m_plp, m_rt, m_blp):
+                  Node::FnDeclD(m_name_tidx, m_tp, m_plp, m_rt, m_blp):
                     let mname: string = tok_name(r, m_name_tidx)
                     let mangled: string = target_name + "." + mname
-                    let msr: SymR = rs_add_symbol(r, Symbol(SymbolKind.Function, mangled, meth_idx, r.current_scope, r.owner_module_id))
+                    let msr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, mangled, meth_idx, r.current_scope, r.owner_module_id))
                     r = scope_declare(msr.rs, mangled, msr.sym_idx, m_name_tidx)
                 mi = mi + 1
-          Node.ErrorD(t):
+          Node::ErrorD(t):
             r = r
         i = i + 1
       return r
@@ -853,7 +853,7 @@ fn collect_top_level(rs: RS, file_node_idx: i64): RS
 fn resolve_bodies(rs: RS, file_node_idx: i64): RS
   let file_node: Node = rs.rc.nodes.get(file_node_idx)
   match file_node:
-    Node.FileN(module_decl, imports_lp, decls_lp):
+    Node::FileN(module_decl, imports_lp, decls_lp):
       let decls: Vector<i64> = read_list(rs.rc.idx_data, decls_lp)
       let r: RS = rs
       let i: i64 = 0
@@ -877,7 +877,7 @@ fn resolve(src: string): ResolveResult
   let rs: RS = RS(rc, Vector<Symbol>::new(), Vector<Scope>::new(), Vector<i64>::new(), po.diags, to_i64(-1), to_i64(0))
 
   // Create file scope
-  let file_sr: ScopeR = rs_push_scope(rs, ScopeKind.FileScope)
+  let file_sr: ScopeR = rs_push_scope(rs, ScopeKind::FileScope)
   rs = file_sr.rs
 
   // Populate builtins
@@ -919,7 +919,7 @@ fn build_export_table(rs: RS, file_node_idx: i64): HashMap<i64>
   let exports: HashMap<i64> = HashMap<i64>::new()
   let file_node: Node = rs.rc.nodes.get(file_node_idx)
   match file_node:
-    Node.FileN(module_decl, imports_lp, decls_lp):
+    Node::FileN(module_decl, imports_lp, decls_lp):
       let decls: Vector<i64> = read_list(rs.rc.idx_data, decls_lp)
       let i: i64 = 0
       while i < decls.length():
@@ -928,26 +928,26 @@ fn build_export_table(rs: RS, file_node_idx: i64): HashMap<i64>
         // Extract the name token from each declaration kind.
         let name_tidx: i64 = to_i64(-1)
         match decl_node:
-          Node.FnDeclD(nt, tp, plp, rt, blp):
+          Node::FnDeclD(nt, tp, plp, rt, blp):
             name_tidx = nt
-          Node.ExprFnD(nt, tp, plp, rt, be):
+          Node::ExprFnD(nt, tp, plp, rt, be):
             name_tidx = nt
-          Node.ExternFnD(nt, tp, plp, rt):
+          Node::ExternFnD(nt, tp, plp, rt):
             name_tidx = nt
-          Node.ClassDeclD(nt, tp, flp, mlp):
+          Node::ClassDeclD(nt, tp, flp, mlp):
             name_tidx = nt
-          Node.EnumDeclD(nt, tp, vlp):
+          Node::EnumDeclD(nt, tp, vlp):
             name_tidx = nt
-          Node.TypeAliasD(nt, tt):
+          Node::TypeAliasD(nt, tt):
             name_tidx = nt
-          Node.ConceptDeclD(nt, tp, mlp):
+          Node::ConceptDeclD(nt, tp, mlp):
             name_tidx = nt
         if name_tidx >= 0:
           let name: string = tok_name(rs, name_tidx)
           let scope: Scope = rs.scopes.get(rs.current_scope)
           let found: Option<i64> = scope.decls.get(name)
           match found:
-            Option.Some(sym_idx):
+            Option::Some(sym_idx):
               exports = exports.set(name, sym_idx)
         i = i + 1
   return exports
@@ -1016,7 +1016,7 @@ fn resolve_program(pg: ProgramGraph): ProgramResolveResult
     let rs: RS = RS(rc, all_symbols, all_scopes, rs_uses, Vector<Diagnostic>::new(), to_i64(-1), mid)
 
     // Create file scope.
-    let fsr: ScopeR = rs_push_scope(rs, ScopeKind.FileScope)
+    let fsr: ScopeR = rs_push_scope(rs, ScopeKind::FileScope)
     rs = fsr.rs
     module_scope_idx = module_scope_idx.set(mid, fsr.scope_idx)
 
@@ -1029,7 +1029,7 @@ fn resolve_program(pg: ProgramGraph): ProgramResolveResult
     // Register import bindings as Module symbols.
     let root_node: Node = po.nodes.get(po.root)
     match root_node:
-      Node.FileN(mod_decl, imports_lp, decls_lp):
+      Node::FileN(mod_decl, imports_lp, decls_lp):
         let imps: Vector<i64> = pg_read_list(po.idx, imports_lp)
         let ii: i64 = 0
         while ii < imps.length():
@@ -1039,12 +1039,12 @@ fn resolve_program(pg: ProgramGraph): ProgramResolveResult
             // Bind the last segment of the import path as a Module symbol.
             let imp_node: Node = po.nodes.get(imps.get(ii))
             match imp_node:
-              Node.ImportDeclN(path_lp, seg_count):
+              Node::ImportDeclN(path_lp, seg_count):
                 if seg_count > 0:
                   let last_tidx: i64 = po.idx.get(path_lp - 1)
                   let local_name: string = substring(po.src, po.toks.get(last_tidx).offset, po.toks.get(last_tidx).len)
                   // decl_node stores target module_id for Module symbols.
-                  let msr: SymR = rs_add_symbol(rs, Symbol(SymbolKind.Module, local_name, target_mid, rs.current_scope, rs.owner_module_id))
+                  let msr: SymR = rs_add_symbol(rs, Symbol(SymbolKind::Module, local_name, target_mid, rs.current_scope, rs.owner_module_id))
                   rs = scope_declare(msr.rs, local_name, msr.sym_idx, last_tidx)
           ii = ii + 1
 
@@ -1105,14 +1105,14 @@ fn resolve_program(pg: ProgramGraph): ProgramResolveResult
     // extend_binding_key(file_id, decl_idx).
     let root_node_p2: Node = po.nodes.get(po.root)
     match root_node_p2:
-      Node.FileN(md2, imp_lp2, dec_lp2):
+      Node::FileN(md2, imp_lp2, dec_lp2):
         let ext_decls: Vector<i64> = pg_read_list(po.idx, dec_lp2)
         let edi: i64 = 0
         while edi < ext_decls.length():
           let ext_idx: i64 = ext_decls.get(edi)
           let ext_node: Node = po.nodes.get(ext_idx)
           match ext_node:
-            Node.ExtendDeclD(ttn2, concept_name_tidx, ml2):
+            Node::ExtendDeclD(ttn2, concept_name_tidx, ml2):
               if concept_name_tidx >= 0:
                 let ubi: i64 = uses_before
                 while ubi < rs_uses.length():
@@ -1205,9 +1205,9 @@ fn program_exported_symbol(p: Program, mid: i64, name: string): i64
   let table: ExportTable = tables.tables.get(mid)
   let found: Option<i64> = table.entries.get(name)
   match found:
-    Option.Some(sym_idx):
+    Option::Some(sym_idx):
       return sym_idx
-    Option.None:
+    Option::None:
       return to_i64(-1)
 
 // Resolve a use site to its target symbol index.  The resolver emits
@@ -1219,9 +1219,9 @@ fn program_resolved_use(p: Program, file_id: i64, tok_idx: i64): i64
   let key: string = uses_key(file_id, tok_idx)
   let found: Option<i64> = p.resolve.uses.get(key)
   match found:
-    Option.Some(sym_idx):
+    Option::Some(sym_idx):
       return sym_idx
-    Option.None:
+    Option::None:
       return to_i64(-1)
 
 // Look up the concept sym_idx bound to an `extend T as C:` block.
@@ -1230,9 +1230,9 @@ fn program_extend_concept_sym(p: Program, file_id: i64, extend_decl_idx: i64): i
   let key: string = extend_binding_key(file_id, extend_decl_idx)
   let found: Option<i64> = p.resolve.extend_concept_bindings.get(key)
   match found:
-    Option.Some(sym_idx):
+    Option::Some(sym_idx):
       return sym_idx
-    Option.None:
+    Option::None:
       return to_i64(-1)
 
 // BEGIN_RESOLVER_TESTS
@@ -1365,7 +1365,7 @@ fn main(): i32
   // -----------------------------------------------------------------
   let src8: string = "class Point:\n  x: i64\n  y: i64\n"
   let r8: ResolveResult = resolve(src8)
-  let r8_fields: i64 = count_symbols_of_kind(r8, SymbolKind.Field)
+  let r8_fields: i64 = count_symbols_of_kind(r8, SymbolKind::Field)
   if r8_fields == 2:
     print("PASS class_fields")
     pass_count = pass_count + 1
@@ -1377,7 +1377,7 @@ fn main(): i32
   // -----------------------------------------------------------------
   let src9: string = "enum Color:\n  Red\n  Green\n  Blue\n"
   let r9: ResolveResult = resolve(src9)
-  let r9_types: i64 = count_symbols_of_kind(r9, SymbolKind.Type)
+  let r9_types: i64 = count_symbols_of_kind(r9, SymbolKind::Type)
   if r9_types >= 1:
     print("PASS enum_decl")
     pass_count = pass_count + 1
@@ -1389,7 +1389,7 @@ fn main(): i32
   // -----------------------------------------------------------------
   let src10: string = "type NodeId = i64\n"
   let r10: ResolveResult = resolve(src10)
-  let r10_types: i64 = count_symbols_of_kind(r10, SymbolKind.Type)
+  let r10_types: i64 = count_symbols_of_kind(r10, SymbolKind::Type)
   if r10_types >= 1:
     print("PASS type_alias")
     pass_count = pass_count + 1
@@ -1397,7 +1397,7 @@ fn main(): i32
     print("FAIL type_alias: expected >= 1 Type symbol, got " + i64_to_string(r10_types))
 
   // -----------------------------------------------------------------
-  // Test 11: qual_name — TK.KwFn; first segment resolves
+  // Test 11: qual_name — TK::KwFn; first segment resolves
   // -----------------------------------------------------------------
   let src11: string = "enum TK:\n  KwFn\n\nfn main(): i32\n  let x = TK::KwFn\n  return 0\n"
   let r11: ResolveResult = resolve(src11)
@@ -1444,7 +1444,7 @@ fn main(): i32
   // -----------------------------------------------------------------
   let src14: string = "extern fn printf(fmt: string): i32\n"
   let r14: ResolveResult = resolve(src14)
-  let r14_fns: i64 = count_symbols_of_kind(r14, SymbolKind.Function)
+  let r14_fns: i64 = count_symbols_of_kind(r14, SymbolKind::Function)
   if r14_fns >= 1:
     print("PASS extern_fn")
     pass_count = pass_count + 1
@@ -1463,7 +1463,7 @@ fn main(): i32
   while u15 < rr15.uses.length():
     let sym15: Symbol = rr15.symbols.get(rr15.uses.get(u15 + 1))
     match sym15.kind:
-      SymbolKind.Local:
+      SymbolKind::Local:
         // Check if the use token is "T" by name
         if sym15.name == "T":
           local_type_uses = local_type_uses + 1
@@ -1528,7 +1528,7 @@ fn main(): i32
   // -----------------------------------------------------------------
   let src18: string = "fn identity<T>(x: T): T\n  return x\n"
   let r18: ResolveResult = resolve(src18)
-  let r18_gp: i64 = count_symbols_of_kind(r18, SymbolKind.GenericParam)
+  let r18_gp: i64 = count_symbols_of_kind(r18, SymbolKind::GenericParam)
   let r18_diags: i64 = count_diags(r18)
   if r18_gp >= 1:
     if r18_diags == 0:
@@ -1565,7 +1565,7 @@ fn main(): i32
   let src20: string = "concept Showable:\n  fn show(self): string\n"
   let r20: ResolveResult = resolve(src20)
   let r20_diags: i64 = count_diags(r20)
-  let r20_type_syms: i64 = count_symbols_of_kind(r20, SymbolKind.Type)
+  let r20_type_syms: i64 = count_symbols_of_kind(r20, SymbolKind::Type)
   if r20_diags == 0:
     if r20_type_syms >= 1:
       print("PASS concept_resolve_no_err")
@@ -1610,7 +1610,7 @@ fn main(): i32
   cfi = 0
   while cfi < cf_r2.diags.length():
     let fd: FileDiagnostic = cf_r2.diags.get(cfi)
-    if fd.diag.severity == Severity.Error:
+    if fd.diag.severity == Severity::Error:
       cf_r2_errs = cf_r2_errs + 1
     cfi = cfi + 1
   if cf_r2_errs == 0:
@@ -1686,7 +1686,7 @@ fn main(): i32
   cfi = 0
   while cfi < cf_r6.diags.length():
     let fd6: FileDiagnostic = cf_r6.diags.get(cfi)
-    if fd6.diag.severity == Severity.Error:
+    if fd6.diag.severity == Severity::Error:
       cf_r6_errs = cf_r6_errs + 1
     cfi = cfi + 1
   if cf_r6_errs == 0:
@@ -1707,7 +1707,7 @@ fn main(): i32
   cfi = 0
   while cfi < cf_r7.diags.length():
     let fd7: FileDiagnostic = cf_r7.diags.get(cfi)
-    if fd7.diag.severity == Severity.Error:
+    if fd7.diag.severity == Severity::Error:
       cf_r7_errs = cf_r7_errs + 1
     cfi = cfi + 1
   if cf_r7_errs == 0:
@@ -1750,7 +1750,7 @@ fn main(): i32
   cfi = 0
   while cfi < cf_r10.diags.length():
     let fd10: FileDiagnostic = cf_r10.diags.get(cfi)
-    if fd10.diag.severity == Severity.Error:
+    if fd10.diag.severity == Severity::Error:
       cf_r10_errs = cf_r10_errs + 1
     cfi = cfi + 1
   if cf_r10_errs == 0:
@@ -1769,7 +1769,7 @@ fn main(): i32
   cfi = 0
   while cfi < cf_r11.diags.length():
     let fd11: FileDiagnostic = cf_r11.diags.get(cfi)
-    if fd11.diag.severity == Severity.Error:
+    if fd11.diag.severity == Severity::Error:
       cf_r11_errs = cf_r11_errs + 1
     cfi = cfi + 1
   if cf_r11_errs == 0:
@@ -1821,10 +1821,10 @@ fn main(): i32
         let probe_key: string = uses_key(main_fid, tti)
         let probe_found: Option<i64> = cf_r2.uses.get(probe_key)
         match probe_found:
-          Option.Some(v):
+          Option::Some(v):
             uses_ok = true
             tti = tok_count
-          Option.None:
+          Option::None:
             tti = tti + 1
   if uses_ok:
     print("PASS uses_file_provenance")

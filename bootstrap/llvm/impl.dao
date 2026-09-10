@@ -167,32 +167,32 @@ class MirBackendInput:
 // to satisfy the fail-closed contract (TASK_30 §9.2 / §13).
 fn ll_type_from_mir(types: Vector<DaoType>, type_idx: i64): LlType
   if type_idx < 0:
-    return LlType.LlVoid
+    return LlType::LlVoid
   if type_idx >= types.length():
-    return LlType.LlUnsupported
+    return LlType::LlUnsupported
   let t: DaoType = types.get(type_idx)
   match t.kind:
-    TypeKind.TVoid:
-      return LlType.LlVoid
-    TypeKind.TString:
-      return LlType.LlPtr
-    TypeKind.TStruct:
-      return LlType.LlStruct
-    TypeKind.TBuiltin:
+    TypeKind::TVoid:
+      return LlType::LlVoid
+    TypeKind::TString:
+      return LlType::LlPtr
+    TypeKind::TStruct:
+      return LlType::LlStruct
+    TypeKind::TBuiltin:
       // See register_builtins in typecheck/impl.dao for the canonical
       // builtin_id → name mapping: i32=2, i64=3, f32=8, f64=9, bool=10.
       if t.builtin_id == to_i64(2):
-        return LlType.LlI32
+        return LlType::LlI32
       if t.builtin_id == to_i64(3):
-        return LlType.LlI64
+        return LlType::LlI64
       if t.builtin_id == to_i64(8):
-        return LlType.LlF32
+        return LlType::LlF32
       if t.builtin_id == to_i64(9):
-        return LlType.LlF64
+        return LlType::LlF64
       if t.builtin_id == to_i64(10):
-        return LlType.LlI1
-      return LlType.LlUnsupported
-  return LlType.LlUnsupported
+        return LlType::LlI1
+      return LlType::LlUnsupported
+  return LlType::LlUnsupported
 
 // Serialize an LlType to its textual LLVM form.  Primitive-only
 // by construction: callers must use `bs_type_text(types, type_idx)`
@@ -203,43 +203,43 @@ fn ll_type_from_mir(types: Vector<DaoType>, type_idx: i64): LlType
 // wrong text downstream.
 fn ll_type_text(ty: LlType): string
   match ty:
-    LlType.LlI32:
+    LlType::LlI32:
       return "i32"
-    LlType.LlI64:
+    LlType::LlI64:
       return "i64"
-    LlType.LlF32:
+    LlType::LlF32:
       return "float"
-    LlType.LlF64:
+    LlType::LlF64:
       return "double"
-    LlType.LlI1:
+    LlType::LlI1:
       return "i1"
-    LlType.LlVoid:
+    LlType::LlVoid:
       return "void"
-    LlType.LlPtr:
+    LlType::LlPtr:
       return "ptr"
-    LlType.LlStruct:
+    LlType::LlStruct:
       // Caller bug — use bs_type_text instead.  Left as a loud
       // marker because silent <struct> would leak into IR.
       return "<bug:ll_type_text-of-LlStruct-use-bs_type_text>"
-    LlType.LlUnsupported:
+    LlType::LlUnsupported:
       return "<unsupported>"
   return "<unsupported>"
 
 fn ll_type_is_float(ty: LlType): bool
   match ty:
-    LlType.LlF32:
+    LlType::LlF32:
       return true
-    LlType.LlF64:
+    LlType::LlF64:
       return true
   return false
 
 fn ll_type_is_int(ty: LlType): bool
   match ty:
-    LlType.LlI32:
+    LlType::LlI32:
       return true
-    LlType.LlI64:
+    LlType::LlI64:
       return true
-    LlType.LlI1:
+    LlType::LlI1:
       return true
   return false
 
@@ -264,7 +264,7 @@ fn bs_type_text(types: Vector<DaoType>, type_idx: i64): string
     return "<unsupported>"
   let t: DaoType = types.get(type_idx)
   match t.kind:
-    TypeKind.TStruct:
+    TypeKind::TStruct:
       return "%struct." + t.name
   return ll_type_text(ll_type_from_mir(types, type_idx))
 
@@ -368,7 +368,7 @@ class BS:
   // Extern-declare dedup: list of mangled names already emitted.
   extern_emitted: Vector<string>
 
-  // Call arg bundles — LlInstKind.LlCall stores an index into this
+  // Call arg bundles — LlInstKind::LlCall stores an index into this
   // list rather than carrying Vector<string>/Vector<LlType> inline
   // (enum-class variants over vectors are expensive to thread).
   call_arg_bundles: Vector<CallArgs>
@@ -424,7 +424,7 @@ fn bs_reset_fn_state(bs: BS): BS
 // and set had_error.  Returns the updated BS.
 fn bs_check_supported_type(bs: BS, ty: LlType, context: string): BS
   match ty:
-    LlType.LlUnsupported:
+    LlType::LlUnsupported:
       bs = bs_error(bs, "bootstrap llvm backend encountered unsupported type kind in " + context)
   return bs
 
@@ -568,7 +568,7 @@ fn bs_ensure_struct_def(bs: BS, type_idx: i64): BS
     let field_type_idx: i64 = bs.type_info.get(t.info_lp + fi * to_i64(2) + to_i64(1))
     let field_kind: LlType = ll_type_from_mir(bs.types, field_type_idx)
     match field_kind:
-      LlType.LlStruct:
+      LlType::LlStruct:
         bs = bs_ensure_struct_def(bs, field_type_idx)
     field_tys = field_tys.push(bs_type_text(bs.types, field_type_idx))
     fi = fi + to_i64(1)
@@ -704,12 +704,12 @@ fn bs_lower_params(bs: BS, params_raw: Vector<i64>, param_count: i64): ParamsR
     let local_node_idx: i64 = params_raw.get(i)
     let node: MirNode = bs.mir_nodes.get(local_node_idx)
     match node:
-      MirNode.MirLocal(sym, type_idx, is_param):
+      MirNode::MirLocal(sym, type_idx, is_param):
         let ty: LlType = ll_type_from_mir(bs.types, type_idx)
         bs = bs_check_supported_type(bs, ty, "function parameter")
         let ty_txt: string = bs_type_text(bs.types, type_idx)
         match ty:
-          LlType.LlStruct:
+          LlType::LlStruct:
             bs = bs_ensure_struct_def(bs, type_idx)
         out = out.push(LlParam("%arg" + i64_to_string(i), ty_txt))
     i = i + to_i64(1)
@@ -745,7 +745,7 @@ fn bs_lower_struct_ctor(bs: BS, insts: Vector<LlInst>, type_idx: i64, arg_list_l
   bs = fr_tmp.bs
   let tmp_name: string = fr_tmp.name
   let alloca_inst: LlInst = LlInst(
-    LlInstKind.LlAlloca(struct_ty_text), tmp_name)
+    LlInstKind::LlAlloca(ty_text = struct_ty_text), tmp_name)
   insts = insts.push(alloca_inst)
   // GEP + store each field.
   let fi: i64 = to_i64(0)
@@ -757,11 +757,11 @@ fn bs_lower_struct_ctor(bs: BS, insts: Vector<LlInst>, type_idx: i64, arg_list_l
     bs = fr_gep.bs
     let gep_name: string = fr_gep.name
     let gep_inst: LlInst = LlInst(
-      LlInstKind.LlGepField(tmp_name, struct_ty_text, fi),
+      LlInstKind::LlGepField(ptr_text = tmp_name, struct_ty_text = struct_ty_text, field_index = fi),
       gep_name)
     insts = insts.push(gep_inst)
     let store_inst: LlInst = LlInst(
-      LlInstKind.LlStore(gep_name, arg_text, arg_ty_text),
+      LlInstKind::LlStore(ptr_name = gep_name, value_text = arg_text, value_ty_text = arg_ty_text),
       "")
     insts = insts.push(store_inst)
     fi = fi + to_i64(1)
@@ -770,26 +770,26 @@ fn bs_lower_struct_ctor(bs: BS, insts: Vector<LlInst>, type_idx: i64, arg_list_l
   bs = fr_load.bs
   let load_name: string = fr_load.name
   let load_inst: LlInst = LlInst(
-    LlInstKind.LlLoad(tmp_name, struct_ty_text),
+    LlInstKind::LlLoad(ptr_name = tmp_name, ty_text = struct_ty_text),
     load_name)
   insts = insts.push(load_inst)
   return StructCtorR(bs, insts, load_name, struct_ty_text)
 
 // Classify a MirCall's callee as a struct constructor (the callee
-// is a MirFnRef to a SymbolKind.Type symbol).  Returns true iff
+// is a MirFnRef to a SymbolKind::Type symbol).  Returns true iff
 // the call should be lowered via bs_lower_struct_ctor rather than
 // the normal `call` instruction.
 fn bs_call_is_struct_ctor(bs: BS, callee_mir_idx: i64): bool
   let callee_node: MirNode = bs.mir_nodes.get(callee_mir_idx)
   match callee_node:
-    MirNode.MirFnRef(callee_sym, callee_ti):
+    MirNode::MirFnRef(callee_sym, callee_ti):
       if callee_sym < 0:
         return false
       if callee_sym >= bs.symbols.length():
         return false
       let sym: Symbol = bs.symbols.get(callee_sym)
       match sym.kind:
-        SymbolKind.Type:
+        SymbolKind::Type:
           return true
   return false
 
@@ -801,22 +801,22 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
   let node: MirNode = bs.mir_nodes.get(mir_node_idx)
   match node:
     // ---------- constants (inlined as operand text) ----------
-    MirNode.MirConstInt(value, type_idx):
+    MirNode::MirConstInt(value, type_idx):
       let ty: LlType = ll_type_from_mir(bs.types, type_idx)
       bs = bs_set_value(bs, mir_node_idx, i64_to_string(value), ll_type_text(ty))
       return LowerStepR(bs, insts)
-    MirNode.MirConstBool(value, type_idx):
+    MirNode::MirConstBool(value, type_idx):
       let v: string = "false"
       if value > 0:
         v = "true"
       bs = bs_set_value(bs, mir_node_idx, v, "i1")
       return LowerStepR(bs, insts)
-    MirNode.MirConstFloat(tok, type_idx):
+    MirNode::MirConstFloat(tok, type_idx):
       let lex: string = bs_tok_lex(bs, tok)
       let ty: LlType = ll_type_from_mir(bs.types, type_idx)
       bs = bs_set_value(bs, mir_node_idx, lex, ll_type_text(ty))
       return LowerStepR(bs, insts)
-    MirNode.MirConstString(tok, type_idx):
+    MirNode::MirConstString(tok, type_idx):
       // Emit a module-global and materialize via GEP.
       let raw: string = bs_tok_lex(bs, tok)
       // Decode Dao escapes and re-escape for LLVM IR c"..." form.
@@ -829,14 +829,14 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       bs = fr_gs.bs
       let result: string = fr_gs.name
       let inst: LlInst = LlInst(
-        LlInstKind.LlGepString(gname, nbytes),
+        LlInstKind::LlGepString(global_name = gname, length = nbytes),
         result)
       insts = insts.push(inst)
       bs = bs_set_value(bs, mir_node_idx, result, "ptr")
       return LowerStepR(bs, insts)
 
     // ---------- memory ----------
-    MirNode.MirLoad(local_idx, type_idx):
+    MirNode::MirLoad(local_idx, type_idx):
       let slot_name: string = bs_slot_name_by_index(bs, local_idx)
       let slot_ty: string = bs_slot_ty_by_index(bs, local_idx)
       if slot_name == "":
@@ -848,13 +848,13 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       bs = fr_ld.bs
       let result: string = fr_ld.name
       let inst: LlInst = LlInst(
-        LlInstKind.LlLoad(slot_name, ty_text),
+        LlInstKind::LlLoad(ptr_name = slot_name, ty_text = ty_text),
         result)
       insts = insts.push(inst)
       bs = bs_set_value(bs, mir_node_idx, result, ty_text)
       return LowerStepR(bs, insts)
 
-    MirNode.MirStore(local_idx, value_node):
+    MirNode::MirStore(local_idx, value_node):
       let slot_name: string = bs_slot_name_by_index(bs, local_idx)
       let slot_ty_text: string = bs_slot_ty_by_index(bs, local_idx)
       if slot_name == "":
@@ -863,13 +863,13 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       let val_text: string = bs_get_value_text(bs, value_node)
       // Store uses the slot's type text (already struct-aware).
       let inst: LlInst = LlInst(
-        LlInstKind.LlStore(slot_name, val_text, slot_ty_text),
+        LlInstKind::LlStore(ptr_name = slot_name, value_text = val_text, value_ty_text = slot_ty_text),
         "")
       insts = insts.push(inst)
       return LowerStepR(bs, insts)
 
     // ---------- binary / unary ----------
-    MirNode.MirBinary(op_tok, lhs, rhs, type_idx):
+    MirNode::MirBinary(op_tok, lhs, rhs, type_idx):
       let tk: Token = bs.toks.get(op_tok)
       let lhs_text: string = bs_get_value_text(bs, lhs)
       let rhs_text: string = bs_get_value_text(bs, rhs)
@@ -884,13 +884,13 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
         if ll_type_is_float(operand_ty):
           let pred: string = ll_fcmp_pred(tk.kind)
           let inst: LlInst = LlInst(
-            LlInstKind.LlFCmp(pred, lhs_text, rhs_text, operand_ty),
+            LlInstKind::LlFCmp(pred = pred, lhs_text = lhs_text, rhs_text = rhs_text, operand_ty = operand_ty),
             result)
           insts = insts.push(inst)
         else:
           let pred: string = ll_icmp_pred(tk.kind)
           let inst: LlInst = LlInst(
-            LlInstKind.LlICmp(pred, lhs_text, rhs_text, operand_ty),
+            LlInstKind::LlICmp(pred = pred, lhs_text = lhs_text, rhs_text = rhs_text, operand_ty = operand_ty),
             result)
           insts = insts.push(inst)
         bs = bs_set_value(bs, mir_node_idx, result, "i1")
@@ -909,13 +909,13 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
         bs = bs_error(bs, "bootstrap llvm backend: unsupported binary op " + tk_name(tk.kind))
         return LowerStepR(bs, insts)
       let inst: LlInst = LlInst(
-        LlInstKind.LlBinOp(op, lhs_text, rhs_text, operand_ty),
+        LlInstKind::LlBinOp(op = op, lhs_text = lhs_text, rhs_text = rhs_text, ty = operand_ty),
         result)
       insts = insts.push(inst)
       bs = bs_set_value(bs, mir_node_idx, result, ll_type_text(operand_ty))
       return LowerStepR(bs, insts)
 
-    MirNode.MirUnary(op_tok, operand, type_idx):
+    MirNode::MirUnary(op_tok, operand, type_idx):
       let tk: Token = bs.toks.get(op_tok)
       let operand_text: string = bs_get_value_text(bs, operand)
       let ty: LlType = ll_type_from_mir(bs.types, type_idx)
@@ -925,13 +925,13 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       if tk_name(tk.kind) == "Minus":
         if ll_type_is_float(ty):
           let inst: LlInst = LlInst(
-            LlInstKind.LlFNeg(operand_text, ty),
+            LlInstKind::LlFNeg(operand_text = operand_text, ty = ty),
             result)
           insts = insts.push(inst)
         else:
           // sub 0, x
           let inst: LlInst = LlInst(
-            LlInstKind.LlBinOp("sub", "0", operand_text, ty),
+            LlInstKind::LlBinOp(op = "sub", lhs_text = "0", rhs_text = operand_text, ty = ty),
             result)
           insts = insts.push(inst)
         bs = bs_set_value(bs, mir_node_idx, result, ll_type_text(ty))
@@ -939,7 +939,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       if tk_name(tk.kind) == "Bang":
         // xor %x, true  (on i1)
         let inst: LlInst = LlInst(
-          LlInstKind.LlBinOp("xor", operand_text, "true", LlType.LlI1),
+          LlInstKind::LlBinOp(op = "xor", lhs_text = operand_text, rhs_text = "true", ty = LlType::LlI1),
           result)
         insts = insts.push(inst)
         bs = bs_set_value(bs, mir_node_idx, result, "i1")
@@ -948,7 +948,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       return LowerStepR(bs, insts)
 
     // ---------- calls ----------
-    MirNode.MirFnRef(sym, type_idx):
+    MirNode::MirFnRef(sym, type_idx):
       // Not a real LLVM instruction — the callee is materialized
       // inline as the mangled name.  Record the mapping so the
       // subsequent MirCall picks it up via bs_get_value_text.
@@ -959,7 +959,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       bs = bs_set_value(bs, mir_node_idx, name, "ptr")
       return LowerStepR(bs, insts)
 
-    MirNode.MirCall(callee, arg_list_lp, arg_count, type_idx):
+    MirNode::MirCall(callee, arg_list_lp, arg_count, type_idx):
       // Struct constructor calls route to a dedicated aggregate
       // helper rather than the normal `call` path.
       if bs_call_is_struct_ctor(bs, callee):
@@ -992,21 +992,21 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       let result: string = ""
       let needs_result: bool = true
       match ret_ty:
-        LlType.LlVoid:
+        LlType::LlVoid:
           needs_result = false
       if needs_result:
         let fr_call: FreshR = bs_fresh_value(bs)
         bs = fr_call.bs
         result = fr_call.name
       let inst: LlInst = LlInst(
-        LlInstKind.LlCall(callee_text, bundle_idx, args_raw.length(), ret_ty_text),
+        LlInstKind::LlCall(callee = callee_text, arg_list_lp = bundle_idx, arg_count = args_raw.length(), ret_ty_text = ret_ty_text),
         result)
       insts = insts.push(inst)
       if result != "":
         bs = bs_set_value(bs, mir_node_idx, result, ret_ty_text)
       return LowerStepR(bs, insts)
 
-    MirNode.MirFieldAccess(obj, field_tok, field_index, type_idx):
+    MirNode::MirFieldAccess(obj, field_tok, field_index, type_idx):
       if field_index < 0:
         bs = bs_error(bs, "bootstrap llvm backend: MirFieldAccess has unresolved field_index (-1)")
         return LowerStepR(bs, insts)
@@ -1024,29 +1024,29 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       bs = fr_ev.bs
       let result: string = fr_ev.name
       let inst: LlInst = LlInst(
-        LlInstKind.LlExtractValue(obj_text, obj_ty_text, field_index),
+        LlInstKind::LlExtractValue(agg_text = obj_text, agg_ty_text = obj_ty_text, field_index = field_index),
         result)
       insts = insts.push(inst)
       bs = bs_set_value(bs, mir_node_idx, result, field_ty_text)
       return LowerStepR(bs, insts)
 
-    MirNode.MirErrorExpr(tok):
+    MirNode::MirErrorExpr(tok):
       bs = bs_error(bs, "bootstrap llvm backend rejects MirErrorExpr sentinel")
       return LowerStepR(bs, insts)
 
     // ---------- terminators ----------
-    MirNode.MirReturn(value, has_value):
+    MirNode::MirReturn(value, has_value):
       if has_value > 0:
         let val_text: string = bs_get_value_text(bs, value)
         let val_ty_text: string = bs_get_value_ty(bs, value)
         let inst: LlInst = LlInst(
-          LlInstKind.LlRet(val_text, val_ty_text, to_i64(1)),
+          LlInstKind::LlRet(value_text = val_text, value_ty_text = val_ty_text, has_value = to_i64(1)),
           "")
         insts = insts.push(inst)
       else:
         if fn_ret_ty_text == "void":
           let inst: LlInst = LlInst(
-            LlInstKind.LlRet("", "void", to_i64(0)),
+            LlInstKind::LlRet(value_text = "", value_ty_text = "void", has_value = to_i64(0)),
             "")
           insts = insts.push(inst)
         else:
@@ -1056,24 +1056,24 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
           // IR in a non-void function either way; `unreachable` is right
           // for the first case, and the block loop rejects the second by
           // checking whether any branch reaches the block.
-          let dead: LlInst = LlInst(LlInstKind.LlUnreachable, "")
+          let dead: LlInst = LlInst(LlInstKind::LlUnreachable, "")
           insts = insts.push(dead)
       return LowerStepR(bs, insts)
 
-    MirNode.MirBr(target_block):
+    MirNode::MirBr(target_block):
       let label: string = bs_get_block_label(bs, target_block)
       let inst: LlInst = LlInst(
-        LlInstKind.LlBr(label),
+        LlInstKind::LlBr(target_label = label),
         "")
       insts = insts.push(inst)
       return LowerStepR(bs, insts)
 
-    MirNode.MirCondBr(cond, then_block, else_block):
+    MirNode::MirCondBr(cond, then_block, else_block):
       let cond_text: string = bs_get_value_text(bs, cond)
       let then_label: string = bs_get_block_label(bs, then_block)
       let else_label: string = bs_get_block_label(bs, else_block)
       let inst: LlInst = LlInst(
-        LlInstKind.LlCondBr(cond_text, then_label, else_label),
+        LlInstKind::LlCondBr(cond_text = cond_text, then_label = then_label, else_label = else_label),
         "")
       insts = insts.push(inst)
       return LowerStepR(bs, insts)
@@ -1087,23 +1087,23 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
 // and need to resolve back to LlType for a new instruction.
 fn ll_type_text_to_lltype(t: string): LlType
   if t == "i32":
-    return LlType.LlI32
+    return LlType::LlI32
   if t == "i64":
-    return LlType.LlI64
+    return LlType::LlI64
   if t == "float":
-    return LlType.LlF32
+    return LlType::LlF32
   if t == "double":
-    return LlType.LlF64
+    return LlType::LlF64
   if t == "i1":
-    return LlType.LlI1
+    return LlType::LlI1
   if t == "void":
-    return LlType.LlVoid
+    return LlType::LlVoid
   if t == "ptr":
-    return LlType.LlPtr
-  return LlType.LlUnsupported
+    return LlType::LlPtr
+  return LlType::LlUnsupported
 
 // Call argument bundles live in a side table on BS because
-// LlInstKind.LlCall stores only an index into the bundle list,
+// LlInstKind::LlCall stores only an index into the bundle list,
 // and Dao's enum-class variants cannot hold Vector<string> directly
 // without additional boxing overhead.  Indexing is deterministic.
 class CallArgs:
@@ -1206,7 +1206,7 @@ fn decode_string_literal(raw: string): StrDecode
 // Check whether an LlInst is a terminator (ret / br / cond_br).
 fn ll_inst_is_unreachable(inst: LlInst): bool
   match inst.kind:
-    LlInstKind.LlUnreachable:
+    LlInstKind::LlUnreachable:
       return true
   return false
 
@@ -1215,15 +1215,15 @@ fn mir_block_targets(bs: BS, block_node_idx: i64): Vector<i64>
   let targets: Vector<i64> = Vector<i64>::new()
   let mb: MirNode = bs.mir_nodes.get(block_node_idx)
   match mb:
-    MirNode.MirBlock(block_id, inst_list_lp, inst_count):
+    MirNode::MirBlock(block_id, inst_list_lp, inst_count):
       let insts_raw: Vector<i64> = read_mir_list(bs.mir_idx, inst_list_lp)
       let ii: i64 = to_i64(0)
       while ii < insts_raw.length():
         let inst: MirNode = bs.mir_nodes.get(insts_raw.get(ii))
         match inst:
-          MirNode.MirBr(target_block):
+          MirNode::MirBr(target_block):
             targets = targets.push(target_block)
-          MirNode.MirCondBr(cond, then_block, else_block):
+          MirNode::MirCondBr(cond, then_block, else_block):
             targets = targets.push(then_block)
             targets = targets.push(else_block)
         ii = ii + to_i64(1)
@@ -1267,13 +1267,13 @@ fn i64_vector_contains(xs: Vector<i64>, x: i64): bool
 
 fn ll_inst_is_terminator(inst: LlInst): bool
   match inst.kind:
-    LlInstKind.LlRet(v, t, h):
+    LlInstKind::LlRet(v, t, h):
       return true
-    LlInstKind.LlBr(target):
+    LlInstKind::LlBr(target):
       return true
-    LlInstKind.LlCondBr(c, tl, el):
+    LlInstKind::LlCondBr(c, tl, el):
       return true
-    LlInstKind.LlUnreachable:
+    LlInstKind::LlUnreachable:
       return true
   return false
 
@@ -1284,7 +1284,7 @@ fn ll_inst_is_terminator(inst: LlInst): bool
 fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
   let node: MirNode = bs.mir_nodes.get(mir_fn_idx)
   match node:
-    MirNode.MirFunction(fn_sym, ret_type, param_count, local_list_lp, local_count, block_list_lp, block_count, is_extern_i):
+    MirNode::MirFunction(fn_sym, ret_type, param_count, local_list_lp, local_count, block_list_lp, block_count, is_extern_i):
       bs = bs_reset_fn_state(bs)
 
       let name: string = mangle_function_sym(bs.symbols, fn_sym)
@@ -1297,7 +1297,7 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
       let ret_ty_text: string = bs_type_text(bs.types, ret_type)
       // Register struct def if the return type is a struct.
       match ret_ty:
-        LlType.LlStruct:
+        LlType::LlStruct:
           bs = bs_ensure_struct_def(bs, ret_type)
 
       // Read the local node list.  First `param_count` are params.
@@ -1329,7 +1329,7 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
         let local_node_idx: i64 = locals_raw.get(li)
         let ln: MirNode = bs.mir_nodes.get(local_node_idx)
         match ln:
-          MirNode.MirLocal(lsym, ltype_idx, lis_param):
+          MirNode::MirLocal(lsym, ltype_idx, lis_param):
             let slot_name: string = "%slot" + i64_to_string(li)
             let slot_ty: LlType = ll_type_from_mir(bs.types, ltype_idx)
             bs = bs_check_supported_type(bs, slot_ty, "local slot")
@@ -1337,7 +1337,7 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
             let slot_ty_text: string = bs_type_text(bs.types, ltype_idx)
             // Register struct defs for struct-typed locals.
             match slot_ty:
-              LlType.LlStruct:
+              LlType::LlStruct:
                 bs = bs_ensure_struct_def(bs, ltype_idx)
             bs = bs_set_slot(bs, local_node_idx, slot_name, slot_ty_text)
         li = li + to_i64(1)
@@ -1368,7 +1368,7 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
         let slot_ty_text: string = bs_slot_ty_by_index(bs, ai)
         let slot_ty: LlType = ll_type_text_to_lltype(slot_ty_text)
         let alloca_inst: LlInst = LlInst(
-          LlInstKind.LlAlloca(slot_ty_text),
+          LlInstKind::LlAlloca(ty_text = slot_ty_text),
           slot_name)
         entry_insts = entry_insts.push(alloca_inst)
         ai = ai + to_i64(1)
@@ -1381,7 +1381,7 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
         let slot_ty_text: string = bs_slot_ty_by_index(bs, pi)
         let arg_name: string = "%arg" + i64_to_string(pi)
         let store_inst: LlInst = LlInst(
-          LlInstKind.LlStore(slot_name, arg_name, slot_ty_text),
+          LlInstKind::LlStore(ptr_name = slot_name, value_text = arg_name, value_ty_text = slot_ty_text),
           "")
         entry_insts = entry_insts.push(store_inst)
         pi = pi + to_i64(1)
@@ -1398,7 +1398,7 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
         let block_node_idx: i64 = blocks_raw.get(block_i)
         let mb: MirNode = bs.mir_nodes.get(block_node_idx)
         match mb:
-          MirNode.MirBlock(block_id, inst_list_lp, inst_count):
+          MirNode::MirBlock(block_id, inst_list_lp, inst_count):
             let insts_raw: Vector<i64> = read_mir_list(bs.mir_idx, inst_list_lp)
             let this_insts: Vector<LlInst> = Vector<LlInst>::new()
             if block_i == to_i64(0):
@@ -1448,7 +1448,7 @@ fn lower_mir_to_ll_module(bs: BS, root: i64): BS
     return bs
   let root_node: MirNode = bs.mir_nodes.get(root)
   match root_node:
-    MirNode.MirModule(fn_list_lp, fn_count):
+    MirNode::MirModule(fn_list_lp, fn_count):
       let fn_indices: Vector<i64> = read_mir_list(bs.mir_idx, fn_list_lp)
       let i: i64 = to_i64(0)
       while i < fn_indices.length():
@@ -1514,36 +1514,36 @@ fn serialize_cond_br(cond: string, then_label: string, else_label: string): stri
 fn serialize_inst(bs: BS, inst: LlInst): string
   let rhs: string = ""
   match inst.kind:
-    LlInstKind.LlAlloca(ty_text):
+    LlInstKind::LlAlloca(ty_text):
       rhs = serialize_alloca(ty_text)
-    LlInstKind.LlStore(ptr, value_text, value_ty_text):
+    LlInstKind::LlStore(ptr, value_text, value_ty_text):
       rhs = serialize_store(ptr, value_text, value_ty_text)
-    LlInstKind.LlLoad(ptr, ty_text):
+    LlInstKind::LlLoad(ptr, ty_text):
       rhs = serialize_load(ptr, ty_text)
-    LlInstKind.LlBinOp(op, lhs, rhs_text, ty):
+    LlInstKind::LlBinOp(op, lhs, rhs_text, ty):
       rhs = serialize_binop(op, lhs, rhs_text, ty)
-    LlInstKind.LlFNeg(operand, ty):
+    LlInstKind::LlFNeg(operand, ty):
       rhs = serialize_fneg(operand, ty)
-    LlInstKind.LlICmp(pred, lhs, rhs_text, op_ty):
+    LlInstKind::LlICmp(pred, lhs, rhs_text, op_ty):
       rhs = serialize_icmp(pred, lhs, rhs_text, op_ty)
-    LlInstKind.LlFCmp(pred, lhs, rhs_text, op_ty):
+    LlInstKind::LlFCmp(pred, lhs, rhs_text, op_ty):
       rhs = serialize_fcmp(pred, lhs, rhs_text, op_ty)
-    LlInstKind.LlCall(callee, bundle_idx, arg_count, ret_ty_text):
+    LlInstKind::LlCall(callee, bundle_idx, arg_count, ret_ty_text):
       let args: CallArgs = bs.call_arg_bundles.get(bundle_idx)
       rhs = serialize_call(callee, args, ret_ty_text)
-    LlInstKind.LlGepString(gname, len):
+    LlInstKind::LlGepString(gname, len):
       rhs = serialize_gep_string(gname, len)
-    LlInstKind.LlGepField(ptr_text, struct_ty_text, fidx):
+    LlInstKind::LlGepField(ptr_text, struct_ty_text, fidx):
       rhs = "getelementptr inbounds " + struct_ty_text + ", ptr " + ptr_text + ", i32 0, i32 " + i64_to_string(fidx)
-    LlInstKind.LlExtractValue(agg_text, agg_ty_text, fidx):
+    LlInstKind::LlExtractValue(agg_text, agg_ty_text, fidx):
       rhs = "extractvalue " + agg_ty_text + " " + agg_text + ", " + i64_to_string(fidx)
-    LlInstKind.LlRet(value_text, ty_text, has_value):
+    LlInstKind::LlRet(value_text, ty_text, has_value):
       rhs = serialize_ret(value_text, ty_text, has_value)
-    LlInstKind.LlBr(target):
+    LlInstKind::LlBr(target):
       rhs = serialize_br(target)
-    LlInstKind.LlCondBr(cond, then_label, else_label):
+    LlInstKind::LlCondBr(cond, then_label, else_label):
       rhs = serialize_cond_br(cond, then_label, else_label)
-    LlInstKind.LlUnreachable:
+    LlInstKind::LlUnreachable:
       rhs = "unreachable"
   if inst.result_name != "":
     return "  " + inst.result_name + " = " + rhs

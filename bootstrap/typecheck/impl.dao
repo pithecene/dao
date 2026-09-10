@@ -65,7 +65,7 @@ class TS:
   return_type: i64
   loop_depth: i64
   expr_types: HashMap<i64>   // keyed by expr_id_key(module_id, node_idx)
-  variant_set: HashMap<i64>  // D4: "{type_idx}:{variant_name}" → 1
+  variant_set: HashMap<i64>  // program-wide variant registry, keyed by name (see tc_pass1)
 
 class TypeR:
   ts: TS
@@ -145,33 +145,33 @@ fn ts_node_span(ts: TS, node_idx: i64): Span
     return Span(to_i64(0), to_i64(1))
   let node: Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node.IdentE(tidx):
+    Node::IdentE(tidx):
       return ts_tok_span(ts, tidx)
-    Node.IntLitE(tidx):
+    Node::IntLitE(tidx):
       return ts_tok_span(ts, tidx)
-    Node.FloatLitE(tidx):
+    Node::FloatLitE(tidx):
       return ts_tok_span(ts, tidx)
-    Node.StringLitE(tidx):
+    Node::StringLitE(tidx):
       return ts_tok_span(ts, tidx)
-    Node.BoolLitE(tidx):
+    Node::BoolLitE(tidx):
       return ts_tok_span(ts, tidx)
-    Node.BinaryE(op_tidx, left, right):
+    Node::BinaryE(op_tidx, left, right):
       return ts_tok_span(ts, op_tidx)
-    Node.UnaryE(op_tidx, operand):
+    Node::UnaryE(op_tidx, operand):
       return ts_tok_span(ts, op_tidx)
-    Node.CallE(callee, args_lp, arg_count, targs_lp, names_lp):
+    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp):
       return ts_node_span(ts, callee)
-    Node.FieldE(obj, field_tidx):
+    Node::FieldE(obj, field_tidx):
       return ts_tok_span(ts, field_tidx)
-    Node.LetS(name_tidx, type_node, init_node):
+    Node::LetS(name_tidx, type_node, init_node):
       return ts_tok_span(ts, name_tidx)
-    Node.ReturnS(val_node):
+    Node::ReturnS(val_node):
       return Span(to_i64(0), to_i64(1))
-    Node.BreakS(tidx):
+    Node::BreakS(tidx):
       return ts_tok_span(ts, tidx)
-    Node.NamedT(tidx):
+    Node::NamedT(tidx):
       return ts_tok_span(ts, tidx)
-    Node.QualNameE(seg_lp, seg_count):
+    Node::QualNameE(seg_lp, seg_count):
       let segs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
       if segs.length() > 0:
         return ts_tok_span(ts, segs.get(0))
@@ -186,9 +186,9 @@ fn lookup_use(ts: TS, tok_idx: i64): i64
   let key: string = uses_key(ts.tc.file_id, tok_idx)
   let result: Option<i64> = ts.tc.uses_map.get(key)
   match result:
-    Option.Some(sym_idx):
+    Option::Some(sym_idx):
       return sym_idx
-    Option.None:
+    Option::None:
       return to_i64(-1)
 
 // =========================================================================
@@ -196,19 +196,19 @@ fn lookup_use(ts: TS, tok_idx: i64): i64
 // =========================================================================
 
 fn register_builtins(ts: TS): TS
-  let r0: TypeR = ts_add_type(ts, DaoType(TypeKind.TBuiltin, to_i64(0), "i8", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r1: TypeR = ts_add_type(r0.ts, DaoType(TypeKind.TBuiltin, to_i64(1), "i16", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r2: TypeR = ts_add_type(r1.ts, DaoType(TypeKind.TBuiltin, to_i64(2), "i32", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r3: TypeR = ts_add_type(r2.ts, DaoType(TypeKind.TBuiltin, to_i64(3), "i64", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r4: TypeR = ts_add_type(r3.ts, DaoType(TypeKind.TBuiltin, to_i64(4), "u8", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r5: TypeR = ts_add_type(r4.ts, DaoType(TypeKind.TBuiltin, to_i64(5), "u16", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r6: TypeR = ts_add_type(r5.ts, DaoType(TypeKind.TBuiltin, to_i64(6), "u32", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r7: TypeR = ts_add_type(r6.ts, DaoType(TypeKind.TBuiltin, to_i64(7), "u64", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r8: TypeR = ts_add_type(r7.ts, DaoType(TypeKind.TBuiltin, to_i64(8), "f32", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r9: TypeR = ts_add_type(r8.ts, DaoType(TypeKind.TBuiltin, to_i64(9), "f64", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r10: TypeR = ts_add_type(r9.ts, DaoType(TypeKind.TBuiltin, to_i64(10), "bool", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r11: TypeR = ts_add_type(r10.ts, DaoType(TypeKind.TVoid, to_i64(-1), "void", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r12: TypeR = ts_add_type(r11.ts, DaoType(TypeKind.TString, to_i64(-1), "string", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r0: TypeR = ts_add_type(ts, DaoType(TypeKind::TBuiltin, to_i64(0), "i8", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r1: TypeR = ts_add_type(r0.ts, DaoType(TypeKind::TBuiltin, to_i64(1), "i16", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r2: TypeR = ts_add_type(r1.ts, DaoType(TypeKind::TBuiltin, to_i64(2), "i32", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r3: TypeR = ts_add_type(r2.ts, DaoType(TypeKind::TBuiltin, to_i64(3), "i64", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r4: TypeR = ts_add_type(r3.ts, DaoType(TypeKind::TBuiltin, to_i64(4), "u8", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r5: TypeR = ts_add_type(r4.ts, DaoType(TypeKind::TBuiltin, to_i64(5), "u16", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r6: TypeR = ts_add_type(r5.ts, DaoType(TypeKind::TBuiltin, to_i64(6), "u32", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r7: TypeR = ts_add_type(r6.ts, DaoType(TypeKind::TBuiltin, to_i64(7), "u64", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r8: TypeR = ts_add_type(r7.ts, DaoType(TypeKind::TBuiltin, to_i64(8), "f32", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r9: TypeR = ts_add_type(r8.ts, DaoType(TypeKind::TBuiltin, to_i64(9), "f64", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r10: TypeR = ts_add_type(r9.ts, DaoType(TypeKind::TBuiltin, to_i64(10), "bool", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r11: TypeR = ts_add_type(r10.ts, DaoType(TypeKind::TVoid, to_i64(-1), "void", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r12: TypeR = ts_add_type(r11.ts, DaoType(TypeKind::TString, to_i64(-1), "string", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
   return r12.ts
 
 // =========================================================================
@@ -272,7 +272,7 @@ fn is_numeric(ts: TS, type_idx: i64): bool
     return false
   let t: DaoType = ts.types.get(type_idx)
   match t.kind:
-    TypeKind.TBuiltin:
+    TypeKind::TBuiltin:
       if t.builtin_id >= 0:
         if t.builtin_id <= 9:
           return true
@@ -283,7 +283,7 @@ fn is_integer(ts: TS, type_idx: i64): bool
     return false
   let t: DaoType = ts.types.get(type_idx)
   match t.kind:
-    TypeKind.TBuiltin:
+    TypeKind::TBuiltin:
       if t.builtin_id >= 0:
         if t.builtin_id <= 7:
           return true
@@ -294,7 +294,7 @@ fn is_float(ts: TS, type_idx: i64): bool
     return false
   let t: DaoType = ts.types.get(type_idx)
   match t.kind:
-    TypeKind.TBuiltin:
+    TypeKind::TBuiltin:
       if t.builtin_id == 8:
         return true
       if t.builtin_id == 9:
@@ -306,7 +306,7 @@ fn is_bool_type(ts: TS, type_idx: i64): bool
     return false
   let t: DaoType = ts.types.get(type_idx)
   match t.kind:
-    TypeKind.TBuiltin:
+    TypeKind::TBuiltin:
       return t.builtin_id == 10
   return false
 
@@ -315,7 +315,7 @@ fn is_string_type(ts: TS, type_idx: i64): bool
     return false
   let t: DaoType = ts.types.get(type_idx)
   match t.kind:
-    TypeKind.TString:
+    TypeKind::TString:
       return true
   return false
 
@@ -324,7 +324,7 @@ fn is_void_type(ts: TS, type_idx: i64): bool
     return false
   let t: DaoType = ts.types.get(type_idx)
   match t.kind:
-    TypeKind.TVoid:
+    TypeKind::TVoid:
       return true
   return false
 
@@ -381,7 +381,7 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
     return TypeR(ts, to_i64(-1))
   let node: Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node.NamedT(tidx):
+    Node::NamedT(tidx):
       let name: string = ts_tok_name(ts, tidx)
       let bi: i64 = builtin_type_index(name)
       if bi >= 0:
@@ -396,7 +396,7 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
           if existing_ti >= 0:
             return TypeR(ts, existing_ti)
           // Create a new TGenericParam type
-          let tr: TypeR = ts_add_type(ts, DaoType(TypeKind.TGenericParam, sym_idx, name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+          let tr: TypeR = ts_add_type(ts, DaoType(TypeKind::TGenericParam, sym_idx, name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
           let ts2: TS = ts_set_sym_type(tr.ts, sym_idx, tr.type_idx)
           return TypeR(ts2, tr.type_idx)
         let ti: i64 = vec_i64_get(ts.sym_types, sym_idx)
@@ -411,19 +411,19 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
             let existing_ti: i64 = vec_i64_get(ts.sym_types, gi)
             if existing_ti >= 0:
               return TypeR(ts, existing_ti)
-            let tr: TypeR = ts_add_type(ts, DaoType(TypeKind.TGenericParam, gi, name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+            let tr: TypeR = ts_add_type(ts, DaoType(TypeKind::TGenericParam, gi, name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
             let ts2: TS = ts_set_sym_type(tr.ts, gi, tr.type_idx)
             return TypeR(ts2, tr.type_idx)
         gi = gi + 1
       return TypeR(ts, to_i64(-1))
-    Node.PointerT(inner):
+    Node::PointerT(inner):
       let inner_r: TypeR = resolve_ast_type(ts, inner)
       if inner_r.type_idx < 0:
         return TypeR(inner_r.ts, to_i64(-1))
       return find_or_add_pointer_type(inner_r.ts, inner_r.type_idx)
-    Node.GenericT(name_tidx, args_lp, arg_count):
+    Node::GenericT(name_tidx, args_lp, arg_count):
       return TypeR(ts, to_i64(-1))
-    Node.ErrorT(t):
+    Node::ErrorT(t):
       return TypeR(ts, to_i64(-1))
   return TypeR(ts, to_i64(-1))
 
@@ -473,7 +473,7 @@ fn tc_register_type_aliases(ts: TS, decls: Vector<i64>): TS
     let decl_idx: i64 = decls.get(i)
     let node: Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node.TypeAliasD(name_tidx, target_type):
+      Node::TypeAliasD(name_tidx, target_type):
         let target_r: TypeR = resolve_ast_type(r, target_type)
         r = target_r.ts
         let sym_idx: i64 = find_sym_by_decl(r, decl_idx, "Type")
@@ -490,9 +490,9 @@ fn tc_register_struct_shells(ts: TS, decls: Vector<i64>): TS
     let decl_idx: i64 = decls.get(i)
     let node: Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node.ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
+      Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
         let name: string = ts_tok_name(r, name_tidx)
-        let tr: TypeR = ts_add_type(r, DaoType(TypeKind.TStruct, to_i64(-1), name, decl_idx, to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+        let tr: TypeR = ts_add_type(r, DaoType(TypeKind::TStruct, to_i64(-1), name, decl_idx, to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
         r = tr.ts
         let sym_idx: i64 = find_sym_by_decl(r, decl_idx, "Type")
         if sym_idx >= 0:
@@ -507,7 +507,7 @@ fn tc_register_enums(ts: TS, decls: Vector<i64>): TS
     let decl_idx: i64 = decls.get(i)
     let node: Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node.EnumDeclD(name_tidx, tparams_lp, variants_lp):
+      Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
         let name: string = ts_tok_name(r, name_tidx)
         let info_start: i64 = r.type_info.length()
         let pairs: Vector<i64> = read_pairs(r.tc.idx_data, variants_lp)
@@ -531,24 +531,31 @@ fn tc_register_enums(ts: TS, decls: Vector<i64>): TS
             pi = pi + 2
           variant_count = variant_count + 1
           vi = vi + 2
-        let tr: TypeR = ts_add_type(r, DaoType(TypeKind.TEnum, to_i64(-1), name, decl_idx, info_start, variant_count, to_i64(-1), to_i64(-1)))
+        let tr: TypeR = ts_add_type(r, DaoType(TypeKind::TEnum, to_i64(-1), name, decl_idx, info_start, variant_count, to_i64(-1), to_i64(-1)))
         r = tr.ts
         let sym_idx: i64 = find_sym_by_decl(r, decl_idx, "Type")
         if sym_idx >= 0:
           r = ts_set_sym_type(r, sym_idx, tr.type_idx)
-        // D4: Register variant names in variant_set for cross-module
-        // validation. Key: "{type_idx}:{variant_name}". We have access
-        // to the originating module's tokens here (via TC.toks) because
-        // this runs during pass1 of the declaring module.
+        // The variant registry is program-wide and keyed by name, so a
+        // construction in any module reads it without the declaring
+        // module's tokens (type_info holds token indexes of this
+        // module).  Keys: "{type_idx}:{variant}" -> parameter count;
+        // "{type_idx}:{variant}:{param}" -> parameter index;
+        // "{type_idx}:{variant}:{param}:type" -> parameter type index.
         let vr: i64 = 0
         let v_offset: i64 = info_start
         while vr < variant_count:
-          let vname_tidx: i64 = r.type_info.get(v_offset)
-          let vname: string = ts_tok_name(r, vname_tidx)
+          let vname: string = ts_tok_name(r, r.type_info.get(v_offset))
           let vkey: string = i64_to_string(tr.type_idx) + ":" + vname
-          r.variant_set = r.variant_set.set(vkey, to_i64(1))
-          let payload_count: i64 = r.type_info.get(v_offset + 1)
-          v_offset = v_offset + 2 + payload_count * 2
+          let param_count: i64 = r.type_info.get(v_offset + 1)
+          r.variant_set = r.variant_set.set(vkey, param_count)
+          let pi2: i64 = 0
+          while pi2 < param_count:
+            let pname: string = ts_tok_name(r, r.type_info.get(v_offset + 2 + pi2 * 2))
+            r.variant_set = r.variant_set.set(vkey + ":" + pname, pi2)
+            r.variant_set = r.variant_set.set(vkey + ":" + pname + ":type", r.type_info.get(v_offset + 2 + pi2 * 2 + 1))
+            pi2 = pi2 + 1
+          v_offset = v_offset + 2 + param_count * 2
           vr = vr + 1
     i = i + 1
   return r
@@ -561,7 +568,7 @@ fn tc_fill_struct_fields(ts: TS, decls: Vector<i64>): TS
     let decl_idx: i64 = decls.get(i)
     let node: Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node.ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
+      Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
         let pairs: Vector<i64> = read_pairs(r.tc.idx_data, fields_lp)
         let field_info_start: i64 = r.type_info.length()
         let field_count: i64 = 0
@@ -625,7 +632,7 @@ fn tc_register_fn_sig_core(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64
     ret_ti = to_i64(11)
   let fname: string = ts_tok_name(r, name_tidx)
   let fn_name: string = "fn " + fname
-  let tr: TypeR = ts_add_type(r, DaoType(TypeKind.TFunction, to_i64(-1), fn_name, decl_idx, param_info_start, param_count, ret_ti, to_i64(-1)))
+  let tr: TypeR = ts_add_type(r, DaoType(TypeKind::TFunction, to_i64(-1), fn_name, decl_idx, param_info_start, param_count, ret_ti, to_i64(-1)))
   return tr
 
 fn tc_register_functions(ts: TS, decls: Vector<i64>): TS
@@ -642,17 +649,17 @@ fn tc_register_functions(ts: TS, decls: Vector<i64>): TS
     let fn_params_lp: i64 = to_i64(-1)
     let fn_ret_type: i64 = to_i64(-1)
     match node:
-      Node.FnDeclD(nt, tp, plp, rtn, blp):
+      Node::FnDeclD(nt, tp, plp, rtn, blp):
         is_fn = true
         fn_name_tidx = nt
         fn_params_lp = plp
         fn_ret_type = rtn
-      Node.ExprFnD(nt, tp, plp, rtn, be):
+      Node::ExprFnD(nt, tp, plp, rtn, be):
         is_fn = true
         fn_name_tidx = nt
         fn_params_lp = plp
         fn_ret_type = rtn
-      Node.ExternFnD(nt, tp, plp, rtn):
+      Node::ExternFnD(nt, tp, plp, rtn):
         is_fn = true
         fn_name_tidx = nt
         fn_params_lp = plp
@@ -681,7 +688,7 @@ fn tc_register_methods(ts: TS, decls: Vector<i64>): TS
     let decl_idx: i64 = decls.get(i)
     let node: Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node.ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
+      Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
         if methods_lp >= 0:
           let class_name: string = ts_tok_name(r, name_tidx)
           let methods: Vector<i64> = read_list(r.tc.idx_data, methods_lp)
@@ -690,7 +697,7 @@ fn tc_register_methods(ts: TS, decls: Vector<i64>): TS
             let meth_idx: i64 = methods.get(mi)
             let meth_node: Node = r.tc.nodes.get(meth_idx)
             match meth_node:
-              Node.FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
+              Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
                 // Register method function type (including self param)
                 let tr: TypeR = tc_register_fn_sig_core(r, meth_idx, m_name_tidx, m_params_lp, m_ret_type)
                 r = tr.ts
@@ -726,9 +733,9 @@ fn extract_type_name(ts: TS, type_node_idx: i64): string
     return ""
   let tnode: Node = ts.tc.nodes.get(type_node_idx)
   match tnode:
-    Node.NamedT(t_tidx):
+    Node::NamedT(t_tidx):
       return ts_tok_name(ts, t_tidx)
-    Node.GenericT(t_name_tidx, t_args_lp, t_arg_count):
+    Node::GenericT(t_name_tidx, t_args_lp, t_arg_count):
       return ts_tok_name(ts, t_name_tidx)
   return ""
 
@@ -739,7 +746,7 @@ fn tc_register_concepts(ts: TS, decls: Vector<i64>): TS
     let decl_idx: i64 = decls.get(i)
     let node: Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node.ConceptDeclD(name_tidx, tparams_lp, methods_lp):
+      Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp):
         let csym: i64 = find_sym_by_decl(r, decl_idx, "Type")
         if csym >= 0:
           let cname: string = ts_tok_name(r, name_tidx)
@@ -761,17 +768,17 @@ fn tc_register_concepts(ts: TS, decls: Vector<i64>): TS
               let cm_ret_type: i64 = to_i64(-1)
               let cm_valid: bool = false
               match meth_node:
-                Node.ExternFnD(mn, mt, mp, mr):
+                Node::ExternFnD(mn, mt, mp, mr):
                   cm_name_tidx = mn
                   cm_params_lp = mp
                   cm_ret_type = mr
                   cm_valid = true
-                Node.FnDeclD(mn, mt, mp, mr, mb):
+                Node::FnDeclD(mn, mt, mp, mr, mb):
                   cm_name_tidx = mn
                   cm_params_lp = mp
                   cm_ret_type = mr
                   cm_valid = true
-                Node.ExprFnD(mn, mt, mp, mr, mb):
+                Node::ExprFnD(mn, mt, mp, mr, mb):
                   cm_name_tidx = mn
                   cm_params_lp = mp
                   cm_ret_type = mr
@@ -789,7 +796,7 @@ fn tc_register_concepts(ts: TS, decls: Vector<i64>): TS
           while pi < method_pairs.length():
             r = ts_push_type_info(r, method_pairs.get(pi))
             pi = pi + 1
-          let tr: TypeR = ts_add_type(r, DaoType(TypeKind.TConcept, to_i64(-1), cname, decl_idx, info_start, method_count, to_i64(-1), to_i64(-1)))
+          let tr: TypeR = ts_add_type(r, DaoType(TypeKind::TConcept, to_i64(-1), cname, decl_idx, info_start, method_count, to_i64(-1), to_i64(-1)))
           r = tr.ts
           r = ts_set_sym_type(r, csym, tr.type_idx)
     i = i + 1
@@ -809,7 +816,7 @@ fn tc_register_extend_methods(ts: TS, decls: Vector<i64>): TS
     let decl_idx: i64 = decls.get(i)
     let node: Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node.ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
+      Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
         if methods_lp >= 0:
           let target_name: string = extract_type_name(r, target_type_node)
           // Find the target type index. The target type may be imported
@@ -833,7 +840,7 @@ fn tc_register_extend_methods(ts: TS, decls: Vector<i64>): TS
             let meth_idx: i64 = methods.get(mi)
             let meth_node: Node = r.tc.nodes.get(meth_idx)
             match meth_node:
-              Node.FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
+              Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
                 // Register function type via tc_register_fn_sig_core
                 let tr: TypeR = tc_register_fn_sig_core(r, meth_idx, m_name_tidx, m_params_lp, m_ret_type)
                 r = tr.ts
@@ -870,7 +877,7 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
     let decl_idx: i64 = decls.get(i)
     let node: Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node.ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
+      Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
         // Look up the concept type via the resolver-bound identity in
         // TC.concept_bindings, NOT by scanning symbols by name.
         // The resolver already bound the concept name to its sym_idx
@@ -881,16 +888,16 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
         let cb_found: Option<i64> = r.tc.concept_bindings.get(cb_key)
         let concept_sym_idx: i64 = to_i64(-1)
         match cb_found:
-          Option.Some(sym):
+          Option::Some(sym):
             concept_sym_idx = sym
-          Option.None:
+          Option::None:
             concept_sym_idx = to_i64(-1)
         if concept_sym_idx >= 0:
           let cti: i64 = vec_i64_get(r.sym_types, concept_sym_idx)
           if cti >= 0:
             let ct: DaoType = r.types.get(cti)
             match ct.kind:
-              TypeKind.TConcept:
+              TypeKind::TConcept:
                 concept_ti = cti
         if concept_ti < 0:
           i = i + 1
@@ -976,7 +983,7 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
 fn tc_pass1(ts: TS, file_node_idx: i64): TS
   let file_node: Node = ts.tc.nodes.get(file_node_idx)
   match file_node:
-    Node.FileN(module_decl, imports_lp, decls_lp):
+    Node::FileN(module_decl, imports_lp, decls_lp):
       let decls: Vector<i64> = read_list(ts.tc.idx_data, decls_lp)
       let r: TS = ts
       r = tc_register_type_aliases(r, decls)
@@ -1000,37 +1007,37 @@ fn check_expr(ts: TS, node_idx: i64): TS
     return ts
   let node: Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node.IntLitE(tidx):
+    Node::IntLitE(tidx):
       return ts_set_expr_type(ts, node_idx, to_i64(2))
-    Node.FloatLitE(tidx):
+    Node::FloatLitE(tidx):
       return ts_set_expr_type(ts, node_idx, to_i64(9))
-    Node.StringLitE(tidx):
+    Node::StringLitE(tidx):
       return ts_set_expr_type(ts, node_idx, to_i64(12))
-    Node.BoolLitE(tidx):
+    Node::BoolLitE(tidx):
       return ts_set_expr_type(ts, node_idx, to_i64(10))
-    Node.IdentE(tidx):
+    Node::IdentE(tidx):
       return check_ident_expr(ts, node_idx, tidx)
-    Node.QualNameE(seg_lp, seg_count):
+    Node::QualNameE(seg_lp, seg_count):
       return check_qualname_expr(ts, node_idx, seg_lp, seg_count)
-    Node.BinaryE(op_tidx, left, right):
+    Node::BinaryE(op_tidx, left, right):
       return check_binary_expr(ts, node_idx, op_tidx, left, right)
-    Node.UnaryE(op_tidx, operand):
+    Node::UnaryE(op_tidx, operand):
       return check_unary_expr(ts, node_idx, op_tidx, operand)
-    Node.CallE(callee, args_lp, arg_count, targs_lp, names_lp):
+    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp):
       return check_call_expr(ts, node_idx, callee, args_lp, names_lp)
-    Node.FieldE(obj, field_tidx):
+    Node::FieldE(obj, field_tidx):
       return check_field_expr(ts, node_idx, obj, field_tidx)
-    Node.PipeE(left, right):
+    Node::PipeE(left, right):
       return check_pipe_expr(ts, node_idx, left, right)
-    Node.IndexE(obj, idx_expr):
+    Node::IndexE(obj, idx_expr):
       let r: TS = check_expr(ts, obj)
       r = check_expr(r, idx_expr)
       return r
-    Node.TryE(operand):
+    Node::TryE(operand):
       return check_expr(ts, operand)
-    Node.LambdaE(params_lp, param_count, body):
+    Node::LambdaE(params_lp, param_count, body):
       return check_expr(ts, body)
-    Node.ListLitE(elems_lp, elem_count):
+    Node::ListLitE(elems_lp, elem_count):
       let elems: Vector<i64> = read_list(ts.tc.idx_data, elems_lp)
       let r: TS = ts
       let ei: i64 = 0
@@ -1038,7 +1045,7 @@ fn check_expr(ts: TS, node_idx: i64): TS
         r = check_expr(r, elems.get(ei))
         ei = ei + 1
       return r
-    Node.ErrorE(t):
+    Node::ErrorE(t):
       return ts
   return ts
 
@@ -1061,9 +1068,9 @@ fn tc_export_lookup(ts: TS, target_mid: i64, name: string): i64
   let table: ExportTable = ts.tc.exports.tables.get(target_mid)
   let found: Option<i64> = table.entries.get(name)
   match found:
-    Option.Some(sym_idx):
+    Option::Some(sym_idx):
       return sym_idx
-    Option.None:
+    Option::None:
       return to_i64(-1)
   return to_i64(-1)
 
@@ -1099,7 +1106,7 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
         if exp_ti >= 0:
           let exp_type: DaoType = ts.types.get(exp_ti)
           match exp_type.kind:
-            TypeKind.TEnum:
+            TypeKind::TEnum:
               // mod::Enum::Variant — validate the variant exists via
               // variant_set (populated during pass1 of the declaring
               // module) then type as the enum type.
@@ -1108,12 +1115,12 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
               let vcheck_key: string = i64_to_string(exp_ti) + ":" + variant_name
               let vcheck: Option<i64> = ts.variant_set.get(vcheck_key)
               match vcheck:
-                Option.Some(v):
+                Option::Some(v):
                   return ts_set_expr_type(ts, node_idx, exp_ti)
-                Option.None:
+                Option::None:
                   let vsp: Span = ts_tok_span(ts, variant_tidx)
                   return ts_add_diag(ts, vsp, "'" + variant_name + "' is not a variant of enum '" + second_name + "'")
-            TypeKind.TStruct:
+            TypeKind::TStruct:
               let sp: Span = ts_tok_span(ts, segs.get(2))
               return ts_add_diag(ts, sp, "associated items on imported types are not supported in this release (Task 28)")
       let sp: Span = ts_tok_span(ts, segs.get(2))
@@ -1137,15 +1144,15 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
   if segs.length() == 2:
     let head_type: DaoType = ts.types.get(ti)
     match head_type.kind:
-      TypeKind.TEnum:
+      TypeKind::TEnum:
         let variant_tidx: i64 = segs.get(1)
         let variant_name: string = ts_tok_name(ts, variant_tidx)
         let vkey: string = i64_to_string(ti) + ":" + variant_name
         let known: Option<i64> = ts.variant_set.get(vkey)
         match known:
-          Option.Some(v):
+          Option::Some(v):
             return ts_set_expr_type(ts, node_idx, ti)
-          Option.None:
+          Option::None:
             let vsp: Span = ts_tok_span(ts, variant_tidx)
             return ts_add_diag(ts, vsp, "'" + variant_name + "' is not a variant of enum '" + head_type.name + "'")
   return ts_set_expr_type(ts, node_idx, ti)
@@ -1154,9 +1161,9 @@ fn get_expr_type(ts: TS, node_idx: i64): i64
   let key: string = expr_id_key(ts.tc.module_id, node_idx)
   let found: Option<i64> = ts.expr_types.get(key)
   match found:
-    Option.Some(ti):
+    Option::Some(ti):
       return ti
-    Option.None:
+    Option::None:
       return to_i64(-1)
 
 fn check_binary_expr(ts: TS, node_idx: i64, op_tidx: i64, left: i64, right: i64): TS
@@ -1272,12 +1279,12 @@ fn find_or_add_pointer_type(ts: TS, pointee_ti: i64): TypeR
   while i < ts.types.length():
     let t: DaoType = ts.types.get(i)
     match t.kind:
-      TypeKind.TPointer:
+      TypeKind::TPointer:
         if t.pointee == pointee_ti:
           return TypeR(ts, i)
     i = i + 1
   let ptr_name: string = "*" + type_name(ts, pointee_ti)
-  return ts_add_type(ts, DaoType(TypeKind.TPointer, to_i64(-1), ptr_name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), pointee_ti))
+  return ts_add_type(ts, DaoType(TypeKind::TPointer, to_i64(-1), ptr_name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), pointee_ti))
 
 // True if the AST node is an lvalue: identifier, field access,
 // index expression, or dereferenced pointer.  Used by addr-of to
@@ -1287,13 +1294,13 @@ fn is_lvalue_expr(ts: TS, node_idx: i64): bool
     return false
   let node: Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node.IdentE(t):
+    Node::IdentE(t):
       return true
-    Node.FieldE(o, f):
+    Node::FieldE(o, f):
       return true
-    Node.IndexE(o, i):
+    Node::IndexE(o, i):
       return true
-    Node.UnaryE(op_tidx, operand):
+    Node::UnaryE(op_tidx, operand):
       // *ptr is an lvalue.
       let op_tok: Token = ts.tc.toks.get(op_tidx)
       if tk_name(op_tok.kind) == "Star":
@@ -1332,7 +1339,7 @@ fn check_unary_expr(ts: TS, node_idx: i64, op_tidx: i64, operand: i64): TS
     if ot >= 0:
       let ptr_type: DaoType = r.types.get(ot)
       match ptr_type.kind:
-        TypeKind.TPointer:
+        TypeKind::TPointer:
           return ts_set_expr_type(r, node_idx, ptr_type.pointee)
       let sp: Span = ts_tok_span(r, op_tidx)
       r = ts_add_diag(r, sp, "cannot dereference non-pointer type " + type_name(r, ot))
@@ -1364,11 +1371,11 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
     // Direct callee resolution (workaround for expr_types loss through call chains)
     let callee_node: Node = r.tc.nodes.get(callee)
     match callee_node:
-      Node.IdentE(ct):
+      Node::IdentE(ct):
         let csym: i64 = lookup_use(r, ct)
         if csym >= 0:
           callee_ti = vec_i64_get(r.sym_types, csym)
-      Node.QualNameE(seg_lp2, seg_count2):
+      Node::QualNameE(seg_lp2, seg_count2):
         let csegs: Vector<i64> = read_list(r.tc.idx_data, seg_lp2)
         if csegs.length() > 0:
           let csym: i64 = lookup_use(r, csegs.get(0))
@@ -1387,12 +1394,12 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
     return r
   let callee_type: DaoType = r.types.get(callee_ti)
   match callee_type.kind:
-    TypeKind.TFunction:
+    TypeKind::TFunction:
       // Detect method call: callee is a FieldE and first param is self
       let is_method: bool = false
       let callee_node2: Node = r.tc.nodes.get(callee)
       match callee_node2:
-        Node.FieldE(mobj, mfield):
+        Node::FieldE(mobj, mfield):
           if callee_type.info_count > 0:
             is_method = true
       let param_offset: i64 = 0
@@ -1415,7 +1422,7 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
               r = ts_add_diag(r, sp, "argument type mismatch: expected " + type_name(r, param_ti) + ", got " + type_name(r, arg_ti))
         ci = ci + 1
       return ts_set_expr_type(r, node_idx, callee_type.ret_type)
-    TypeKind.TStruct:
+    TypeKind::TStruct:
       if args.length() != callee_type.info_count:
         let sp: Span = ts_node_span(r, callee)
         r = ts_add_diag(r, sp, "constructor arity mismatch: expected " + i64_to_string(callee_type.info_count) + " fields, got " + i64_to_string(args.length()))
@@ -1431,78 +1438,82 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
               r = ts_add_diag(r, sp, "field type mismatch: expected " + type_name(r, field_type_idx) + ", got " + type_name(r, arg_ti))
         ci = ci + 1
       return ts_set_expr_type(r, node_idx, callee_ti)
-    TypeKind.TEnum:
-      // A variant construction: the callee's last segment names the
-      // variant.  Its fields sit in type_info from info_lp -- per
-      // variant: name, field count, then (field name token, type index)
-      // per field -- and a variant with fields is constructed by field
-      // name, every field once (CONTRACT_SYNTAX_SURFACE.md, enum class).
+    TypeKind::TEnum:
+      // A variant construction, `Enum::Variant(param = value, ..)`: the
+      // callee's last segment names the variant, a member of the enum's
+      // namespace; its parameters come from the registry by name, so
+      // this works in any module (CONTRACT_SYNTAX_SURFACE.md, enum class).
       let variant_name: string = ""
       let callee_node3: Node = r.tc.nodes.get(callee)
       match callee_node3:
-        Node.QualNameE(vseg_lp, vseg_count):
+        Node::QualNameE(vseg_lp, vseg_count):
           let vsegs: Vector<i64> = read_list(r.tc.idx_data, vseg_lp)
           if vsegs.length() >= 2:
             variant_name = ts_tok_name(r, vsegs.get(vsegs.length() - 1))
       if variant_name != "":
         let names: Vector<i64> = read_list(r.tc.idx_data, names_lp)
-        let v_offset: i64 = callee_type.info_lp
-        let vi: i64 = 0
-        while vi < callee_type.info_count:
-          let vname: string = ts_tok_name(r, r.type_info.get(v_offset))
-          let field_count: i64 = r.type_info.get(v_offset + 1)
-          if vname == variant_name:
-            return check_variant_construction(r, node_idx, callee, callee_ti, variant_name, v_offset + 2, field_count, args, names)
-          v_offset = v_offset + 2 + field_count * 2
-          vi = vi + 1
+        return check_variant_construction(r, node_idx, callee, callee_ti, variant_name, args, names)
       return ts_set_expr_type(r, node_idx, callee_ti)
   return r
 
-// The arguments of `Variant(...)` against its fields at `fields_lp` in
-// type_info (field name token, type index, per field).  A fieldless
-// variant takes no arguments; one with fields takes each field by name,
-// once, and its value must have the field's type.
-fn check_variant_construction(ts: TS, node_idx: i64, callee: i64, enum_ti: i64, variant_name: string, fields_lp: i64, field_count: i64, args: Vector<i64>, names: Vector<i64>): TS
+// The arguments of `Enum::Variant(...)` against the variant's
+// parameters in the registry.  A variant without parameters is written
+// bare, never called; one with parameters takes each by name, once,
+// with a value of the parameter's type.  Each named argument's
+// parameter index is recorded in expr_types under `<expr key>:param`,
+// which HIR reads to lower the arguments in declaration order.
+fn check_variant_construction(ts: TS, node_idx: i64, callee: i64, enum_ti: i64, variant_name: string, args: Vector<i64>, names: Vector<i64>): TS
   let r: TS = ts
   let sp: Span = ts_node_span(r, callee)
-  if field_count == to_i64(0):
-    if args.length() != to_i64(0):
-      return ts_add_diag(r, sp, "variant '" + variant_name + "' has no fields; construct it without arguments")
-    return ts_set_expr_type(r, node_idx, enum_ti)
+  let vkey: string = i64_to_string(enum_ti) + ":" + variant_name
+  let registered: Option<i64> = r.variant_set.get(vkey)
+  let param_count: i64 = to_i64(-1)
+  match registered:
+    Option::Some(n):
+      param_count = n
+    Option::None:
+      // An unknown variant was diagnosed by the callee's own check.
+      return r
+  if param_count == to_i64(0):
+    return ts_add_diag(r, sp, "variant '" + variant_name + "' has no parameters; write it without parentheses")
   let ai: i64 = 0
   while ai < args.length():
     let name_tidx: i64 = names.get(ai)
     if name_tidx < 0:
       let asp: Span = ts_node_span(r, args.get(ai))
-      return ts_add_diag(r, asp, "variant '" + variant_name + "' is constructed by field name: " + variant_name + "(field = value)")
+      return ts_add_diag(r, asp, "variant '" + variant_name + "' is constructed by parameter name: " + variant_name + "(name = value)")
     let arg_name: string = ts_tok_name(r, name_tidx)
-    let fi: i64 = 0
-    let found: bool = false
-    while fi < field_count:
-      if ts_tok_name(r, r.type_info.get(fields_lp + fi * 2)) == arg_name:
-        found = true
-        let field_ti: i64 = r.type_info.get(fields_lp + fi * 2 + 1)
+    let pkey: string = vkey + ":" + arg_name
+    let param: Option<i64> = r.variant_set.get(pkey)
+    match param:
+      Option::Some(param_index):
+        let aj: i64 = 0
+        while aj < ai:
+          if names.get(aj) >= 0:
+            if ts_tok_name(r, names.get(aj)) == arg_name:
+              let dsp: Span = ts_tok_span(r, name_tidx)
+              return ts_add_diag(r, dsp, "parameter '" + arg_name + "' of variant '" + variant_name + "' is given twice")
+          aj = aj + 1
+        let param_ti: i64 = to_i64(-1)
+        let ptype: Option<i64> = r.variant_set.get(pkey + ":type")
+        match ptype:
+          Option::Some(t):
+            param_ti = t
+          Option::None:
+            param_ti = to_i64(-1)
         let arg_ti: i64 = get_expr_type(r, args.get(ai))
         if arg_ti >= 0:
-          if field_ti >= 0:
-            if types_equal(r, arg_ti, field_ti) == false:
+          if param_ti >= 0:
+            if types_equal(r, arg_ti, param_ti) == false:
               let vsp: Span = ts_node_span(r, args.get(ai))
-              r = ts_add_diag(r, vsp, "field '" + arg_name + "' of variant '" + variant_name + "' has type " + type_name(r, field_ti) + ", got " + type_name(r, arg_ti))
-      fi = fi + 1
-    if found == false:
-      let nsp: Span = ts_tok_span(r, name_tidx)
-      return ts_add_diag(r, nsp, "variant '" + variant_name + "' has no field '" + arg_name + "'")
-    // A field named twice.
-    let aj: i64 = 0
-    while aj < ai:
-      if names.get(aj) >= 0:
-        if ts_tok_name(r, names.get(aj)) == arg_name:
-          let dsp: Span = ts_tok_span(r, name_tidx)
-          return ts_add_diag(r, dsp, "field '" + arg_name + "' of variant '" + variant_name + "' is given twice")
-      aj = aj + 1
+              r = ts_add_diag(r, vsp, "parameter '" + arg_name + "' of variant '" + variant_name + "' has type " + type_name(r, param_ti) + ", got " + type_name(r, arg_ti))
+        r.expr_types = r.expr_types.set(expr_id_key(r.tc.module_id, args.get(ai)) + ":param", param_index)
+      Option::None:
+        let nsp: Span = ts_tok_span(r, name_tidx)
+        return ts_add_diag(r, nsp, "variant '" + variant_name + "' has no parameter '" + arg_name + "'")
     ai = ai + 1
-  if args.length() != field_count:
-    return ts_add_diag(r, sp, "variant '" + variant_name + "' expects " + i64_to_string(field_count) + " field(s), got " + i64_to_string(args.length()))
+  if args.length() != param_count:
+    return ts_add_diag(r, sp, "variant '" + variant_name + "' takes " + i64_to_string(param_count) + " parameter(s), got " + i64_to_string(args.length()))
   return ts_set_expr_type(r, node_idx, enum_ti)
 
 fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
@@ -1512,7 +1523,7 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
     return r
   let obj_type: DaoType = r.types.get(obj_ti)
   match obj_type.kind:
-    TypeKind.TStruct:
+    TypeKind::TStruct:
       let field_name: string = ts_tok_name(r, field_tidx)
       // Try field lookup first
       let fi: i64 = 0
@@ -1550,7 +1561,7 @@ fn check_pipe_expr(ts: TS, node_idx: i64, left: i64, right: i64): TS
   if rhs_ti >= 0:
     let rhs_type: DaoType = r.types.get(rhs_ti)
     match rhs_type.kind:
-      TypeKind.TFunction:
+      TypeKind::TFunction:
         // RHS must accept at least 1 param, and LHS type must match first param
         if rhs_type.info_count < 1:
           let sp: Span = ts_node_span(r, right)
@@ -1577,27 +1588,27 @@ fn check_stmt(ts: TS, node_idx: i64): TS
     return ts
   let node: Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node.LetS(name_tidx, type_node, init_node):
+    Node::LetS(name_tidx, type_node, init_node):
       return check_let_stmt(ts, node_idx, name_tidx, type_node, init_node)
-    Node.AssignS(target, value):
+    Node::AssignS(target, value):
       return check_assign_stmt(ts, node_idx, target, value)
-    Node.IfS(cond, then_lp, else_lp):
+    Node::IfS(cond, then_lp, else_lp):
       return check_if_stmt(ts, cond, then_lp, else_lp)
-    Node.WhileS(cond, body_lp):
+    Node::WhileS(cond, body_lp):
       return check_while_stmt(ts, cond, body_lp)
-    Node.ResourceS(kind_tidx, name_tidx, body_lp):
+    Node::ResourceS(kind_tidx, name_tidx, body_lp):
       return check_body_stmts(ts, body_lp)
-    Node.ForS(var_tidx, iter_node, body_lp):
+    Node::ForS(var_tidx, iter_node, body_lp):
       return check_for_stmt(ts, var_tidx, iter_node, body_lp)
-    Node.ReturnS(val_node):
+    Node::ReturnS(val_node):
       return check_return_stmt(ts, val_node)
-    Node.BreakS(tidx):
+    Node::BreakS(tidx):
       return check_break_stmt(ts, tidx)
-    Node.MatchS(scrut_node, arms_lp):
+    Node::MatchS(scrut_node, arms_lp):
       return check_match_stmt(ts, scrut_node, arms_lp)
-    Node.ExprStmtS(expr_node):
+    Node::ExprStmtS(expr_node):
       return check_expr(ts, expr_node)
-    Node.ErrorS(t):
+    Node::ErrorS(t):
       return ts
   return ts
 
@@ -1638,16 +1649,16 @@ fn is_lvalue(ts: TS, node_idx: i64): bool
     return false
   let node: Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node.IdentE(tidx):
+    Node::IdentE(tidx):
       return true
-    Node.FieldE(obj, ftidx):
+    Node::FieldE(obj, ftidx):
       return true
-    Node.IndexE(obj, idx_expr):
+    Node::IndexE(obj, idx_expr):
       return true
-    Node.UnaryE(op_tidx, operand):
+    Node::UnaryE(op_tidx, operand):
       // Deref (*ptr = val) is an lvalue — Tier B, accept for now
       let tok: Token = ts.tc.toks.get(op_tidx)
-      if tok.kind == TK.Star:
+      if tok.kind == TK::Star:
         return true
   return false
 
@@ -1720,6 +1731,20 @@ fn check_break_stmt(ts: TS, tidx: i64): TS
     return ts_add_diag(ts, sp, "break outside of loop")
   return ts
 
+// A match pattern: `Enum::Variant` or `Enum::Variant(bindings)`, or a
+// constant.  A pattern with bindings is checked by its callee alone --
+// the bindings are names it introduces, no arguments -- and takes the
+// callee's type.
+fn check_pattern(ts: TS, pat_node: i64): TS
+  match ts.tc.nodes.get(pat_node):
+    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp):
+      let r: TS = check_expr(ts, callee)
+      let callee_ti: i64 = get_expr_type(r, callee)
+      if callee_ti >= 0:
+        return ts_set_expr_type(r, pat_node, callee_ti)
+      return r
+  return check_expr(ts, pat_node)
+
 fn check_match_stmt(ts: TS, scrut_node: i64, arms_lp: i64): TS
   let r: TS = check_expr(ts, scrut_node)
   let scrut_ti: i64 = get_expr_type(r, scrut_node)
@@ -1728,7 +1753,7 @@ fn check_match_stmt(ts: TS, scrut_node: i64, arms_lp: i64): TS
   while i < arms.length():
     let pat_node: i64 = arms.get(i)
     let body_lp2: i64 = arms.get(i + 1)
-    r = check_expr(r, pat_node)
+    r = check_pattern(r, pat_node)
     // Compare pattern type against scrutinee type
     if scrut_ti >= 0:
       let pat_ti: i64 = get_expr_type(r, pat_node)
@@ -1823,7 +1848,7 @@ fn tc_check_method_body(ts: TS, class_decl_idx: i64, meth_idx: i64, m_name_tidx:
   let class_name: string = ""
   let class_node: Node = r.tc.nodes.get(class_decl_idx)
   match class_node:
-    Node.ClassDeclD(cn_tidx, cn_tp, cn_fl, cn_ml):
+    Node::ClassDeclD(cn_tidx, cn_tp, cn_fl, cn_ml):
       class_name = ts_tok_name(r, cn_tidx)
   let mname: string = ts_tok_name(r, m_name_tidx)
   let mangled: string = class_name + "." + mname
@@ -1873,7 +1898,7 @@ fn tc_check_extend_method_body(ts: TS, extend_decl_idx: i64, meth_idx: i64, m_na
   let target_name: string = ""
   let extend_node: Node = r.tc.nodes.get(extend_decl_idx)
   match extend_node:
-    Node.ExtendDeclD(target_type_node, cn_tidx, e_mlp):
+    Node::ExtendDeclD(target_type_node, cn_tidx, e_mlp):
       target_name = extract_type_name(r, target_type_node)
   let mname: string = ts_tok_name(r, m_name_tidx)
   let mangled: string = target_name + "." + mname
@@ -1928,7 +1953,7 @@ fn tc_check_extend_method_body(ts: TS, extend_decl_idx: i64, meth_idx: i64, m_na
 fn tc_pass2(ts: TS, file_node_idx: i64): TS
   let file_node: Node = ts.tc.nodes.get(file_node_idx)
   match file_node:
-    Node.FileN(module_decl, imports_lp, decls_lp):
+    Node::FileN(module_decl, imports_lp, decls_lp):
       let decls: Vector<i64> = read_list(ts.tc.idx_data, decls_lp)
       let r: TS = ts
       let i: i64 = 0
@@ -1936,11 +1961,11 @@ fn tc_pass2(ts: TS, file_node_idx: i64): TS
         let decl_idx: i64 = decls.get(i)
         let node: Node = r.tc.nodes.get(decl_idx)
         match node:
-          Node.FnDeclD(name_tidx, tparams_lp, params_lp, ret_type_node, body_lp):
+          Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_type_node, body_lp):
             r = tc_check_fn_body(r, decl_idx, name_tidx, params_lp, ret_type_node, body_lp)
-          Node.ExprFnD(name_tidx, tparams_lp, params_lp, ret_type_node, body_expr):
+          Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_type_node, body_expr):
             r = tc_check_expr_fn_body(r, decl_idx, name_tidx, params_lp, ret_type_node, body_expr)
-          Node.ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
+          Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
             if methods_lp >= 0:
               let meths: Vector<i64> = read_list(r.tc.idx_data, methods_lp)
               let mi: i64 = 0
@@ -1948,10 +1973,10 @@ fn tc_pass2(ts: TS, file_node_idx: i64): TS
                 let meth_idx: i64 = meths.get(mi)
                 let meth_node: Node = r.tc.nodes.get(meth_idx)
                 match meth_node:
-                  Node.FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
+                  Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
                     r = tc_check_method_body(r, decl_idx, meth_idx, m_name_tidx, m_params_lp, m_ret_type, m_body_lp)
                 mi = mi + 1
-          Node.ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
+          Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
             if methods_lp >= 0:
               let meths: Vector<i64> = read_list(r.tc.idx_data, methods_lp)
               let mi: i64 = 0
@@ -1959,7 +1984,7 @@ fn tc_pass2(ts: TS, file_node_idx: i64): TS
                 let meth_idx: i64 = meths.get(mi)
                 let meth_node: Node = r.tc.nodes.get(meth_idx)
                 match meth_node:
-                  Node.FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
+                  Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
                     r = tc_check_extend_method_body(r, decl_idx, meth_idx, m_name_tidx, m_params_lp, m_ret_type, m_body_lp)
                 mi = mi + 1
         i = i + 1
@@ -2348,11 +2373,11 @@ fn main(): i32
   while ti19 < tc_count_types(r19):
     let t19: DaoType = r19.types.get(ti19)
     match t19.kind:
-      TypeKind.TGenericParam:
+      TypeKind::TGenericParam:
         found_gp = true
-      TypeKind.TFunction:
+      TypeKind::TFunction:
         found_gp = found_gp
-      TypeKind.TStruct:
+      TypeKind::TStruct:
         found_gp = found_gp
     ti19 = ti19 + 1
   if found_gp:
@@ -2405,7 +2430,7 @@ fn main(): i32
   while di23 < tc_count_diags(r23c):
     let d23: Diagnostic = r23c.diags.get(di23)
     // Check for param type mismatch diagnostic
-    if d23.severity == Severity.Error:
+    if d23.severity == Severity::Error:
       has_param_mismatch = true
     di23 = di23 + 1
   if has_param_mismatch:
@@ -2533,14 +2558,14 @@ fn main(): i32
   let d3_found_binding: bool = false
   let d3_root: Node = d3_po.nodes.get(d3_po.root)
   match d3_root:
-    Node.FileN(md3, il3, dl3):
+    Node::FileN(md3, il3, dl3):
       let d3_decls: Vector<i64> = read_list(d3_po.idx, dl3)
       let d3i: i64 = 0
       while d3i < d3_decls.length():
         let d3_didx: i64 = d3_decls.get(d3i)
         let d3_node: Node = d3_po.nodes.get(d3_didx)
         match d3_node:
-          Node.ExtendDeclD(t3, c3, m3):
+          Node::ExtendDeclD(t3, c3, m3):
             let d3_sym: i64 = program_extend_concept_sym(d3_p, d3_sf.file_id, d3_didx)
             if d3_sym >= 0:
               d3_found_binding = true
@@ -2969,32 +2994,39 @@ fn main(): i32
     print("FAIL qualified_variant_unknown: expected 1 diagnostic, got " + i64_to_string(tc_count_diags(r45)))
 
   // Test 46: qualified variants as match patterns check against the
-  // scrutinee's type.  (Pattern bindings and literal widening are the
-  // resolver's and the checker's own deferrals, so the arms bind
-  // nothing and return i32.)
-  let src46: string = "enum Color:\n  Red\n  Green\n\nfn pick(c: Color): i32\n  match c:\n    Color::Red:\n      return 1\n    Color::Green:\n      return 2\n  return 0\n"
+  // scrutinee's type, with and without bindings; a binding is no
+  // argument, so the construction rule leaves it alone.  (The binding
+  // itself is the resolver's deferral: its one "unknown name" is the
+  // only diagnostic expected.)
+  let src46: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn pick(s: Shape): i32\n  match s:\n    Shape::Circle(r):\n      return 1\n    Shape::Dot:\n      return 2\n  return 0\n"
   let r46: TypeCheckResult = typecheck(src46)
-  if tc_count_diags(r46) == 0:
+  let construction_diag: bool = false
+  let di46: i64 = 0
+  while di46 < r46.diags.length():
+    if index_of(r46.diags.get(di46).message, "constructed by parameter name") >= 0:
+      construction_diag = true
+    di46 = di46 + 1
+  if tc_count_diags(r46) <= 1 and construction_diag == false:
     print("PASS qualified_variant_pattern")
     pass_count = pass_count + 1
   else:
-    print("FAIL qualified_variant_pattern: expected 0 diagnostics, got " + i64_to_string(tc_count_diags(r46)))
-    let di46: i64 = 0
-    while di46 < r46.diags.length():
-      print("  diag: " + r46.diags.get(di46).message)
-      di46 = di46 + 1
+    print("FAIL qualified_variant_pattern: expected at most the binding's resolver diagnostic, got " + i64_to_string(tc_count_diags(r46)))
+    let dj46: i64 = 0
+    while dj46 < r46.diags.length():
+      print("  diag: " + r46.diags.get(dj46).message)
+      dj46 = dj46 + 1
 
   // Test 47: constructions that miss the variant's shape are diagnosed,
   // once per site: no arguments for a field, a positional argument, a
   // name that is no field, a field given twice, a fieldless variant
   // with an argument.
-  let src47: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn main(): i32\n  let a: Shape = Shape::Circle()\n  let b: Shape = Shape::Circle(3)\n  let c: Shape = Shape::Circle(q = 3)\n  let d: Shape = Shape::Circle(r = 3, r = 4)\n  let e: Shape = Shape::Dot(1)\n  return 0\n"
+  let src47: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn main(): i32\n  let a: Shape = Shape::Circle()\n  let b: Shape = Shape::Circle(3)\n  let c: Shape = Shape::Circle(q = 3)\n  let d: Shape = Shape::Circle(r = 3, r = 4)\n  let e: Shape = Shape::Dot(1)\n  let f: Shape = Shape::Dot()\n  return 0\n"
   let r47: TypeCheckResult = typecheck(src47)
-  if tc_count_diags(r47) == 5:
+  if tc_count_diags(r47) == 6:
     print("PASS qualified_variant_shape")
     pass_count = pass_count + 1
   else:
-    print("FAIL qualified_variant_shape: expected 5 diagnostics, got " + i64_to_string(tc_count_diags(r47)))
+    print("FAIL qualified_variant_shape: expected 6 diagnostics, got " + i64_to_string(tc_count_diags(r47)))
     let di47: i64 = 0
     while di47 < r47.diags.length():
       print("  diag: " + r47.diags.get(di47).message)
