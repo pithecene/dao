@@ -1,0 +1,618 @@
+module bootstrap::hir_tests
+// Test runner for the bootstrap hir.  Assembled after the
+// shared base and every library it exercises; never compiled
+// standalone.
+
+// =========================================================================
+// Section 61: Tests
+// =========================================================================
+
+fn hir_get_kind_at(hr: HirResult, idx: i64): string
+  if idx < 0:
+    return "invalid"
+  if idx >= hr.hir_nodes.length():
+    return "invalid"
+  return hir_node_kind(hr.hir_nodes.get(idx))
+
+fn hir_count_nodes(hr: HirResult): i64
+  return hr.hir_nodes.length()
+
+fn hir_count_diags(hr: HirResult): i64
+  return hr.diags.length()
+
+fn main(): i32
+  print("=== bootstrap/hir: Task 24 — Bootstrap HIR ===")
+  print("")
+
+  let pass_count: i32 = 0
+  let total: i32 = 25
+
+  // Test 1: simple_fn
+  let src1: string = "fn add(a: i32, b: i32): i32\n  return a + b\n"
+  let r1: HirResult = lower_to_hir(src1)
+  if r1.root >= 0:
+    if hir_get_kind_at(r1, r1.root) == "HirFile":
+      print("PASS simple_fn")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL simple_fn: root is not HirFile, got " + hir_get_kind_at(r1, r1.root))
+  else:
+    print("FAIL simple_fn: root < 0")
+
+  // Test 2: let_binding
+  let src2: string = "fn main(): i32\n  let x: i32 = 42\n  return x\n"
+  let r2: HirResult = lower_to_hir(src2)
+  if r2.root >= 0:
+    // Check that we have HirLet somewhere
+    let found_let: bool = false
+    let i2: i64 = 0
+    while i2 < hir_count_nodes(r2):
+      if hir_node_kind(r2.hir_nodes.get(i2)) == "HirLet":
+        found_let = true
+      i2 = i2 + 1
+    if found_let:
+      print("PASS let_binding")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL let_binding: no HirLet found")
+  else:
+    print("FAIL let_binding: root < 0")
+
+  // Test 3: if_else
+  let src3: string = "fn check(x: i32): i32\n  if x > 0:\n    return 1\n  else:\n    return 0\n"
+  let r3: HirResult = lower_to_hir(src3)
+  if r3.root >= 0:
+    let found_if: bool = false
+    let i3: i64 = 0
+    while i3 < hir_count_nodes(r3):
+      if hir_node_kind(r3.hir_nodes.get(i3)) == "HirIf":
+        found_if = true
+      i3 = i3 + 1
+    if found_if:
+      print("PASS if_else")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL if_else: no HirIf found")
+  else:
+    print("FAIL if_else: root < 0")
+
+  // Test 4: while_loop
+  let src4: string = "fn count(): i32\n  let i: i32 = 0\n  while i < 10:\n    i = i + 1\n  return i\n"
+  let r4: HirResult = lower_to_hir(src4)
+  if r4.root >= 0:
+    let found_while: bool = false
+    let i4: i64 = 0
+    while i4 < hir_count_nodes(r4):
+      if hir_node_kind(r4.hir_nodes.get(i4)) == "HirWhile":
+        found_while = true
+      i4 = i4 + 1
+    if found_while:
+      print("PASS while_loop")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL while_loop: no HirWhile found")
+  else:
+    print("FAIL while_loop: root < 0")
+
+  // Test 5: binary_expr
+  let src5: string = "fn calc(): i32\n  return 1 + 2 * 3\n"
+  let r5: HirResult = lower_to_hir(src5)
+  if r5.root >= 0:
+    let found_bin: bool = false
+    let bin_has_type: bool = false
+    let i5: i64 = 0
+    while i5 < hir_count_nodes(r5):
+      let n5: HirNode = r5.hir_nodes.get(i5)
+      if hir_node_kind(n5) == "HirBinary":
+        found_bin = true
+        match n5:
+          HirNode::HirBinary(op, l, r6, ti):
+            if ti >= 0:
+              bin_has_type = true
+      i5 = i5 + 1
+    if found_bin:
+      if bin_has_type:
+        print("PASS binary_expr")
+        pass_count = pass_count + 1
+      else:
+        print("FAIL binary_expr: HirBinary has no type")
+    else:
+      print("FAIL binary_expr: no HirBinary found")
+  else:
+    print("FAIL binary_expr: root < 0")
+
+  // Test 6: fn_call
+  let src6: string = "fn double(x: i32): i32\n  return x * 2\nfn main(): i32\n  return double(5)\n"
+  let r6: HirResult = lower_to_hir(src6)
+  if r6.root >= 0:
+    let found_call: bool = false
+    let i6: i64 = 0
+    while i6 < hir_count_nodes(r6):
+      if hir_node_kind(r6.hir_nodes.get(i6)) == "HirCall":
+        found_call = true
+      i6 = i6 + 1
+    if found_call:
+      print("PASS fn_call")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL fn_call: no HirCall found")
+  else:
+    print("FAIL fn_call: root < 0")
+
+  // Test 7: struct_decl
+  let src7: string = "class Point:\n  x: i32\n  y: i32\nfn main(): i32\n  return 0\n"
+  let r7: HirResult = lower_to_hir(src7)
+  if r7.root >= 0:
+    let found_struct: bool = false
+    let i7: i64 = 0
+    while i7 < hir_count_nodes(r7):
+      if hir_node_kind(r7.hir_nodes.get(i7)) == "HirStruct":
+        found_struct = true
+      i7 = i7 + 1
+    if found_struct:
+      print("PASS struct_decl")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL struct_decl: no HirStruct found")
+  else:
+    print("FAIL struct_decl: root < 0")
+
+  // Test 8: struct_constructor
+  let src8: string = "class Point:\n  x: i32\n  y: i32\nfn main(): i32\n  let p: Point = Point(1, 2)\n  return 0\n"
+  let r8: HirResult = lower_to_hir(src8)
+  if r8.root >= 0:
+    let found_call8: bool = false
+    let call_has_type8: bool = false
+    let i8: i64 = 0
+    while i8 < hir_count_nodes(r8):
+      let n8: HirNode = r8.hir_nodes.get(i8)
+      if hir_node_kind(n8) == "HirCall":
+        found_call8 = true
+        match n8:
+          HirNode::HirCall(callee, args_lp, ac, ti):
+            if ti >= 0:
+              call_has_type8 = true
+      i8 = i8 + 1
+    if found_call8:
+      if call_has_type8:
+        print("PASS struct_constructor")
+        pass_count = pass_count + 1
+      else:
+        print("FAIL struct_constructor: HirCall has no type")
+    else:
+      print("FAIL struct_constructor: no HirCall found")
+  else:
+    print("FAIL struct_constructor: root < 0")
+
+  // Test 9: field_access
+  let src9: string = "class Point:\n  x: i32\n  y: i32\nfn get_x(p: Point): i32\n  return p.x\n"
+  let r9: HirResult = lower_to_hir(src9)
+  if r9.root >= 0:
+    let found_field: bool = false
+    let i9: i64 = 0
+    while i9 < hir_count_nodes(r9):
+      if hir_node_kind(r9.hir_nodes.get(i9)) == "HirFieldAccess":
+        found_field = true
+      i9 = i9 + 1
+    if found_field:
+      print("PASS field_access")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL field_access: no HirFieldAccess found")
+  else:
+    print("FAIL field_access: root < 0")
+
+  // Test 10: enum_decl
+  let src10: string = "enum Color:\n  Red\n  Green\n  Blue\nfn main(): i32\n  return 0\n"
+  let r10: HirResult = lower_to_hir(src10)
+  if r10.root >= 0:
+    let found_enum: bool = false
+    let i10: i64 = 0
+    while i10 < hir_count_nodes(r10):
+      if hir_node_kind(r10.hir_nodes.get(i10)) == "HirEnum":
+        found_enum = true
+      i10 = i10 + 1
+    if found_enum:
+      print("PASS enum_decl")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL enum_decl: no HirEnum found")
+  else:
+    print("FAIL enum_decl: root < 0")
+
+  // Test 11: expr_fn (desugared to block + return)
+  let src11: string = "fn square(x: i32): i32 = x * x\nfn main(): i32\n  return 0\n"
+  let r11: HirResult = lower_to_hir(src11)
+  if r11.root >= 0:
+    // The expr fn should be desugared: HirFunction body contains HirReturn
+    let found_fn11: bool = false
+    let found_ret11: bool = false
+    let i11: i64 = 0
+    while i11 < hir_count_nodes(r11):
+      let n11: HirNode = r11.hir_nodes.get(i11)
+      if hir_node_kind(n11) == "HirFunction":
+        found_fn11 = true
+      if hir_node_kind(n11) == "HirReturn":
+        found_ret11 = true
+      i11 = i11 + 1
+    if found_fn11:
+      if found_ret11:
+        print("PASS expr_fn")
+        pass_count = pass_count + 1
+      else:
+        print("FAIL expr_fn: no HirReturn found (desugaring failed)")
+    else:
+      print("FAIL expr_fn: no HirFunction found")
+  else:
+    print("FAIL expr_fn: root < 0")
+
+  // Test 12: extern_fn
+  let src12: string = "extern fn puts(s: string): i32\nfn main(): i32\n  return 0\n"
+  let r12: HirResult = lower_to_hir(src12)
+  if r12.root >= 0:
+    let found_extern: bool = false
+    let i12: i64 = 0
+    while i12 < hir_count_nodes(r12):
+      let n12: HirNode = r12.hir_nodes.get(i12)
+      match n12:
+        HirNode::HirFunction(nt, tp, plp, rti, blp, is_ext, co):
+          if is_ext > 0:
+            found_extern = true
+      i12 = i12 + 1
+    if found_extern:
+      print("PASS extern_fn")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL extern_fn: no extern HirFunction found")
+  else:
+    print("FAIL extern_fn: root < 0")
+
+  // Test 13: full_program
+  let src13: string = "enum Dir:\n  Up\n  Down\nclass Vec2:\n  x: i32\n  y: i32\nfn add(a: Vec2, b: Vec2): Vec2\n  return Vec2(a.x + b.x, a.y + b.y)\nfn main(): i32\n  let v: Vec2 = Vec2(1, 2)\n  return v.x\n"
+  let r13: HirResult = lower_to_hir(src13)
+  if r13.root >= 0:
+    let has_enum13: bool = false
+    let has_struct13: bool = false
+    let has_fn13: bool = false
+    let i13: i64 = 0
+    while i13 < hir_count_nodes(r13):
+      let k13: string = hir_node_kind(r13.hir_nodes.get(i13))
+      if k13 == "HirEnum":
+        has_enum13 = true
+      if k13 == "HirStruct":
+        has_struct13 = true
+      if k13 == "HirFunction":
+        has_fn13 = true
+      i13 = i13 + 1
+    if has_enum13:
+      if has_struct13:
+        if has_fn13:
+          print("PASS full_program")
+          pass_count = pass_count + 1
+        else:
+          print("FAIL full_program: missing HirFunction")
+      else:
+        print("FAIL full_program: missing HirStruct")
+    else:
+      print("FAIL full_program: missing HirEnum")
+  else:
+    print("FAIL full_program: root < 0")
+
+  // Test 14: generic_fn_lower — fn identity<T> lowers with type params in HIR
+  let src14g: string = "fn identity<T>(x: T): T\n  return x\n"
+  let r14g: HirResult = lower_to_hir(src14g)
+  if r14g.root >= 0:
+    let found_fn14: bool = false
+    let has_tparams14: bool = false
+    let i14g: i64 = 0
+    while i14g < hir_count_nodes(r14g):
+      let n14g: HirNode = r14g.hir_nodes.get(i14g)
+      match n14g:
+        HirNode::HirFunction(nm, tp_lp, pl, rt, bl, ie, co2):
+          found_fn14 = true
+          if tp_lp >= 0:
+            let tps: Vector<i64> = read_list(r14g.hir_idx, tp_lp)
+            if tps.length() > 0:
+              has_tparams14 = true
+      i14g = i14g + 1
+    if found_fn14:
+      if has_tparams14:
+        print("PASS generic_fn_lower")
+        pass_count = pass_count + 1
+      else:
+        print("FAIL generic_fn_lower: HirFunction found but tparams_lp empty or -1")
+    else:
+      print("FAIL generic_fn_lower: no HirFunction found")
+  else:
+    print("FAIL generic_fn_lower: root < 0")
+
+  // Test 15: extend methods lower to HirFunction nodes
+  let src15e: string = "class Foo:\n  x: i32\n\nconcept Printable:\n  fn to_string(self): string\n\nextend Foo as Printable:\n  fn to_string(self): string\n    return \"Foo\"\n"
+  let r15e: HirResult = lower_to_hir(src15e)
+  if r15e.root >= 0:
+    // Count HirFunction nodes — should have at least one for the extend method
+    let fn_count_15e: i64 = 0
+    let i15e: i64 = 0
+    while i15e < hir_count_nodes(r15e):
+      let n15e: HirNode = r15e.hir_nodes.get(i15e)
+      match n15e:
+        HirNode::HirFunction(nm, tp_lp, pl, rt, bl, ie, co):
+          fn_count_15e = fn_count_15e + 1
+      i15e = i15e + 1
+    if fn_count_15e >= 1:
+      print("PASS extend_lower")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL extend_lower: expected >= 1 HirFunction, got " + i64_to_string(fn_count_15e))
+  else:
+    print("FAIL extend_lower: root < 0")
+
+  // Test 16: self_lower_smoke
+  let self_src: string = "fn id(x: i32): i32\n  return x\nfn main(): i32\n  let a: i32 = id(42)\n  return a\n"
+  let r15: HirResult = lower_to_hir(self_src)
+  if r15.root >= 0:
+    if hir_count_nodes(r15) > 5:
+      print("PASS self_lower_smoke")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL self_lower_smoke: too few HIR nodes: " + i64_to_string(hir_count_nodes(r15)))
+  else:
+    print("FAIL self_lower_smoke: root < 0")
+
+  // -----------------------------------------------------------------
+  // Task 27 D6/D7: Program-level HIR lowering
+  // -----------------------------------------------------------------
+
+  // Test 17: program_run_hir produces HirProgram root with HirModules.
+  let d7_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  d7_inputs = d7_inputs.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
+  d7_inputs = d7_inputs.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
+  let d7_pg: ProgramGraph = build_program(d7_inputs)
+  let d7_p: Program = program_from_graph(d7_pg)
+  d7_p = program_run_resolve(d7_p)
+  d7_p = program_run_typecheck(d7_p)
+  d7_p = program_run_hir(d7_p)
+  let d7_1_ok: bool = true
+  if d7_p.hir.initialized == false:
+    d7_1_ok = false
+  if d7_p.hir.root < 0:
+    d7_1_ok = false
+  if d7_p.hir.module_count != 2:
+    d7_1_ok = false
+  if d7_1_ok:
+    print("PASS d7_program_hir_root")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL d7_program_hir_root")
+
+  // Test 18: HirProgram dump includes HirModule nodes.
+  // Build an HirResult from the program's accumulated hir_nodes/hir_idx
+  // and verify the dump contains the expected node kinds.
+  let d7_inputs2: Vector<SourceInput> = Vector<SourceInput>::new()
+  d7_inputs2 = d7_inputs2.push(SourceInput("a.dao", "module mod_a\nfn fa(): i32 -> 1\n", false))
+  let d7_pg2: ProgramGraph = build_program(d7_inputs2)
+  let d7_p2: Program = program_from_graph(d7_pg2)
+  d7_p2 = program_run_resolve(d7_p2)
+  d7_p2 = program_run_typecheck(d7_p2)
+  d7_p2 = program_run_hir(d7_p2)
+  let d7_2_ok: bool = true
+  if d7_p2.hir.root < 0:
+    d7_2_ok = false
+  if d7_p2.hir.module_count != 1:
+    d7_2_ok = false
+  if d7_p2.hir.hir_nodes_count <= 0:
+    d7_2_ok = false
+  if d7_2_ok:
+    print("PASS d7_single_module_hir")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL d7_single_module_hir")
+
+  // -----------------------------------------------------------------
+  // Task 27 D9/D10: On-disk multi-file HIR smoke test
+  // -----------------------------------------------------------------
+
+  // Test 19: Three-file smoke through full pipeline including HIR.
+  let hir_smoke_base: string = "testdata/bootstrap/multifile/smoke/"
+  let hir_smoke_ok: bool = false
+  if file_exists(hir_smoke_base + "core_fmt.dao"):
+    let hs_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+    hs_inputs = hs_inputs.push(SourceInput("core_fmt.dao", read_file(hir_smoke_base + "core_fmt.dao"), false))
+    hs_inputs = hs_inputs.push(SourceInput("app_math.dao", read_file(hir_smoke_base + "app_math.dao"), false))
+    hs_inputs = hs_inputs.push(SourceInput("app_main.dao", read_file(hir_smoke_base + "app_main.dao"), false))
+    let hs_pg: ProgramGraph = build_program(hs_inputs)
+    let hs_p: Program = program_from_graph(hs_pg)
+    hs_p = program_run_resolve(hs_p)
+    hs_p = program_run_typecheck(hs_p)
+    hs_p = program_run_hir(hs_p)
+    if hs_p.hir.initialized:
+      if hs_p.hir.root >= 0:
+        if hs_p.hir.module_count == 3:
+          hir_smoke_ok = true
+  if hir_smoke_ok:
+    print("PASS d10_hir_three_file_smoke")
+    pass_count = pass_count + 1
+  else:
+    if file_exists(hir_smoke_base + "core_fmt.dao"):
+      print("FAIL d10_hir_three_file_smoke")
+    else:
+      print("SKIP d10_hir_three_file_smoke: fixtures not found at " + hir_smoke_base)
+
+  // -----------------------------------------------------------------
+  // Test 20: method_dispatch — dot-call desugaring
+  // -----------------------------------------------------------------
+  // obj.method(args) should desugar to HirCall(HirIdent(mangled_sym), [obj, args])
+  // instead of HirCall(HirFieldAccess(obj, method), [args]).
+  let src20: string = "class Point:\n  x: i32\n  y: i32\n\n  fn sum(self): i32\n    return self.x + self.y\n\nfn main(): i32\n  let p: Point = Point(1, 2)\n  return p.sum()\n"
+  let r20: HirResult = lower_to_hir(src20)
+  // After desugaring, the call p.sum() should produce:
+  //   HirCall(HirIdent(sym=Point.sum), [p])
+  // NOT:
+  //   HirCall(HirFieldAccess(p, sum), [])
+  // Verify: any HirCall whose callee is an HirIdent (desugared method)
+  // rather than an HirFieldAccess (undesugared dot-call).
+  let found_ident_callee: bool = false
+  let found_field_callee: bool = false
+  let i20: i64 = 0
+  while i20 < hir_count_nodes(r20):
+    let n20: HirNode = r20.hir_nodes.get(i20)
+    match n20:
+      HirNode::HirCall(callee20, a20, n20c, t20):
+        let callee_node20: HirNode = r20.hir_nodes.get(callee20)
+        match callee_node20:
+          HirNode::HirIdent(sym20, ti20, tok20):
+            // Desugared method call: callee is a symbol ref.
+            // Check arg_count > 0 (self was prepended).
+            if n20c > 0:
+              found_ident_callee = true
+          HirNode::HirFieldAccess(o20, f20, ft20):
+            // Undesugared dot-call — this should NOT happen for
+            // method calls after desugaring.  (Field accesses
+            // inside the method body like self.x are fine — they
+            // are not callees of a HirCall.)
+            found_field_callee = true
+    i20 = i20 + 1
+  // We only check that the desugaring produced at least one
+  // HirCall(HirIdent, ...) with self prepended.  Other calls in the
+  // program (e.g. prelude concept methods on generic params) may still
+  // have HirFieldAccess callees — that's expected until those are
+  // desugared too.
+  if found_ident_callee:
+    print("PASS method_dispatch")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL method_dispatch: no desugared HirCall(HirIdent, ...) found")
+
+  // -----------------------------------------------------------------
+  // Test 21: method_dispatch_module_isolation
+  // -----------------------------------------------------------------
+  // Two modules each define a class with the same method name.
+  // When lowering module B, hir_find_method_sym must not accidentally
+  // pick module A's mangled symbol — the module-visibility filter
+  // guarantees extend-method isolation (Task 26 §6.5).
+  //
+  // This test verifies the filter by running program_run_hir on two
+  // modules that each declare `class Point` with method `kind(self)`
+  // returning a distinct integer.  Both modules must lower cleanly
+  // without cross-module symbol contamination.
+  let iso_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  iso_inputs = iso_inputs.push(SourceInput("a.dao", "module iso::a\nclass Point:\n  x: i32\n\n  fn kind(self): i32\n    return 1\n\nfn use_a(): i32\n  let p: Point = Point(0)\n  return p.kind()\n", false))
+  iso_inputs = iso_inputs.push(SourceInput("b.dao", "module iso::b\nclass Point:\n  y: i32\n\n  fn kind(self): i32\n    return 2\n\nfn use_b(): i32\n  let q: Point = Point(0)\n  return q.kind()\n", false))
+  let iso_pg: ProgramGraph = build_program(iso_inputs)
+  let iso_p: Program = program_from_graph(iso_pg)
+  iso_p = program_run_resolve(iso_p)
+  iso_p = program_run_typecheck(iso_p)
+  iso_p = program_run_hir(iso_p)
+  // Success criteria: both modules lowered without diagnostic storms,
+  // two HirModules produced, and HIR nodes accumulated beyond the
+  // minimum.  If hir_find_method_sym had module-leaking behavior,
+  // one module's lowering would pick the other's mangled symbol
+  // (observable only by inspecting symbol identities — we assert the
+  // coarser-grained success of a clean lowering here).
+  let iso_ok: bool = true
+  if iso_p.hir.initialized == false:
+    iso_ok = false
+  if iso_p.hir.module_count != 2:
+    iso_ok = false
+  if iso_p.diags.length() > iso_p.resolve.diags.length():
+    iso_ok = false
+  if iso_ok:
+    print("PASS method_dispatch_module_isolation")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL method_dispatch_module_isolation")
+
+  // -----------------------------------------------------------------
+  // Test 22: lower_to_hir_respects_own_module
+  // -----------------------------------------------------------------
+  // Regression: lower_to_hir(src) must NOT double-prepend a synthetic
+  // `module test` declaration when the source already has its own
+  // module line.  Before wrap_test_module existed, the adapter
+  // unconditionally prepended, producing two consecutive module
+  // declarations and a parse error.
+  let src22: string = "module app\nfn main(): i32\n  return 42\n"
+  let r22: HirResult = lower_to_hir(src22)
+  // Success means it lowered without error — root is valid.
+  if r22.root >= 0:
+    if hir_count_nodes(r22) > 0:
+      print("PASS lower_to_hir_respects_own_module")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL lower_to_hir_respects_own_module: empty HIR")
+  else:
+    print("FAIL lower_to_hir_respects_own_module: root < 0")
+
+  // -----------------------------------------------------------------
+  // Test 23: resource_block_lowers — the block keeps its identity in
+  // HIR (HirResource) with its body lowered.
+  // -----------------------------------------------------------------
+  let src23: string = "fn f(): i64\n  let n: i64 = 0\n  resource memory pool =>\n    n = 1\n  return n\n"
+  let r23: HirResult = lower_to_hir(src23)
+  let has_resource: bool = false
+  let hi: i64 = 0
+  while hi < hir_count_nodes(r23):
+    if hir_get_kind_at(r23, hi) == "HirResource":
+      has_resource = true
+    hi = hi + 1
+  if r23.root >= 0 and has_resource and hir_count_diags(r23) == 0:
+    print("PASS resource_block_lowers")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL resource_block_lowers: expected a HirResource node and no diagnostics")
+
+  // -----------------------------------------------------------------
+  // Test 24: qualified_variant_lowers — a `Enum::Variant` constructor
+  // and a `Enum::Variant` match pattern lower with no diagnostics; the
+  // constructor's callee is a HirQualName.
+  // -----------------------------------------------------------------
+  let src24: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn area(s: Shape): i64\n  match s:\n    Shape::Circle(r):\n      return r\n    Shape::Dot:\n      return 0\n  return 0\n\nfn main(): i32\n  let c: Shape = Shape::Circle(r = 3)\n  return 0\n"
+  let r24: HirResult = lower_to_hir(src24)
+  let has_qual: bool = false
+  let qi: i64 = 0
+  while qi < hir_count_nodes(r24):
+    if hir_get_kind_at(r24, qi) == "HirQualName":
+      has_qual = true
+    qi = qi + 1
+  if r24.root >= 0 and has_qual and hir_count_diags(r24) == 0:
+    print("PASS qualified_variant_lowers")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL qualified_variant_lowers: expected HirQualName nodes and no diagnostics, got " + i64_to_string(hir_count_diags(r24)))
+
+  // -----------------------------------------------------------------
+  // Test 25: named_construction_in_field_order — arguments given out of
+  // declaration order reach HirCall in declaration order.
+  // -----------------------------------------------------------------
+  let src25: string = "enum class Pair:\n  Both(a: i64, b: i64)\n\nfn main(): i32\n  let p: Pair = Pair::Both(b = 2, a = 1)\n  return 0\n"
+  let r25: HirResult = lower_to_hir(src25)
+  let order_ok: bool = false
+  let oi: i64 = 0
+  while oi < hir_count_nodes(r25):
+    match r25.hir_nodes.get(oi):
+      HirNode::HirCall(callee, args_lp, arg_count, ti):
+        if arg_count == 2:
+          let first_arg: i64 = r25.hir_idx.get(args_lp - 2)
+          match r25.hir_nodes.get(first_arg):
+            HirNode::HirIntLit(tok, lit_ti):
+              let lit_tok: Token = r25.toks.get(tok)
+              if substring(r25.src, lit_tok.offset, lit_tok.len) == "1":
+                order_ok = true
+    oi = oi + 1
+  if r25.root >= 0 and order_ok and hir_count_diags(r25) == 0:
+    print("PASS named_construction_in_field_order")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL named_construction_in_field_order: expected the first lowered argument to be the literal 1, no diagnostics (" + i64_to_string(hir_count_diags(r25)) + ")")
+
+  // -----------------------------------------------------------------
+  // Summary
+  // -----------------------------------------------------------------
+
+  print("")
+  print(i32_to_string(pass_count) + " / " + i32_to_string(total) + " tests passed")
+  if pass_count == total:
+    print("ALL TESTS PASSED")
+  else:
+    print("SOME TESTS FAILED")
+  return 0
+

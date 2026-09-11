@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
-# assemble.sh — Concatenate shared base with subsystem sources.
+# assemble.sh — Compose each bootstrap program from explicit source
+# files: the shared base, the library fragments a program builds on,
+# and finally that program's own test runner.
 #
 # Run from repository root:
 #   bash bootstrap/assemble.sh
 #
-# Produces *.gen.dao (compiled by daoc) from:
-#   bootstrap/shared/base.dao  (token model, lexer, AST, parser)
-#   bootstrap/<subsystem>/*.dao  (subsystem-specific source)
+# Source layout (no marker surgery — every input is a whole file):
+#   bootstrap/shared/base.dao        token model, lexer, AST, parser, module graph
+#   bootstrap/<sub>/impl.dao         a subsystem's library, no test runner
+#   bootstrap/<sub>/tests.dao        a subsystem's test runner, never compiled alone
+#
+# A program includes the library fragments of every earlier phase it
+# depends on, in dependency order, then exactly one test runner.
 
 set -euo pipefail
-# Work from repo root. Prefer git if available, fall back to script location.
 if command -v git &>/dev/null && git rev-parse --show-toplevel &>/dev/null; then
   cd "$(git rev-parse --show-toplevel)"
 else
@@ -18,10 +23,10 @@ fi
 
 SHARED=bootstrap/shared/base.dao
 
-# Strip a leading `module <path>` line (plus blank/comment lines before
-# it) from a file on stdout. Used when concatenating real Dao files
-# that each carry their own module declaration — the generated output
-# file gets exactly one synthetic module declaration at the top.
+# Strip a leading `module <path>` line (plus the blank/comment lines
+# before it) from a file on stdout.  Each real input carries its own
+# module declaration; the generated file gets exactly one synthetic
+# declaration at the top.
 strip_module() {
   awk '
     BEGIN { found = 0 }
@@ -38,17 +43,16 @@ strip_module() {
   ' "$1"
 }
 
+# assemble <out.gen.dao> <input>...
+# The shared base is prepended to every program automatically.
 assemble() {
   local out="$1"
   shift
   local gen_module="${out##*/}"
   gen_module="${gen_module%.gen.dao}"
-  # Generated files declare a single synthetic module identity
-  # (`bootstrap::<name>::gen`). Per-file module declarations from the
-  # concatenated inputs are stripped by strip_module.
   echo "module bootstrap::${gen_module}::gen" > "$out"
-  echo "// GENERATED — do not edit. Edit bootstrap/shared/base.dao or" >> "$out"
-  echo "// the subsystem source instead, then run: bash bootstrap/assemble.sh" >> "$out"
+  echo "// GENERATED — do not edit. Edit bootstrap/shared/base.dao or the" >> "$out"
+  echo "// subsystem impl.dao / tests.dao, then run: bash bootstrap/assemble.sh" >> "$out"
   echo "" >> "$out"
   strip_module "$SHARED" >> "$out"
   for src in "$@"; do
@@ -58,6 +62,16 @@ assemble() {
   echo "  assembled $out"
 }
 
+# Library fragments, in dependency order.  A program lists the fragments
+# it needs, then its own test runner last.
+RESOLVER=bootstrap/resolver/impl.dao
+TYPECHECK=bootstrap/typecheck/impl.dao
+HIR=bootstrap/hir/impl.dao
+MIR=bootstrap/mir/impl.dao
+LLVM=bootstrap/llvm/impl.dao
+
+# lexer, parser and graph draw their library entirely from the shared
+# base, so each is just the base plus its own test runner.
 assemble bootstrap/lexer/lexer.gen.dao \
   bootstrap/lexer/tests.dao
 
@@ -68,56 +82,33 @@ assemble bootstrap/graph/graph.gen.dao \
   bootstrap/graph/tests.dao
 
 assemble bootstrap/resolver/resolver.gen.dao \
-  bootstrap/resolver/impl.dao
+  "$RESOLVER" \
+  bootstrap/resolver/tests.dao
 
-# Type checker: include resolver library (everything before BEGIN_RESOLVER_TESTS).
-RESOLVER_LIB=$(mktemp)
-sed '/^\/\/ BEGIN_RESOLVER_TESTS/,$d' bootstrap/resolver/impl.dao > "$RESOLVER_LIB"
 assemble bootstrap/typecheck/typecheck.gen.dao \
-  "$RESOLVER_LIB" \
-  bootstrap/typecheck/impl.dao
-rm -f "$RESOLVER_LIB"
+  "$RESOLVER" \
+  "$TYPECHECK" \
+  bootstrap/typecheck/tests.dao
 
-# HIR: include resolver library + typecheck library (before their test markers).
-RESOLVER_LIB2=$(mktemp)
-sed '/^\/\/ BEGIN_RESOLVER_TESTS/,$d' bootstrap/resolver/impl.dao > "$RESOLVER_LIB2"
-TYPECHECK_LIB=$(mktemp)
-sed '/^\/\/ BEGIN_TYPECHECK_TESTS/,$d' bootstrap/typecheck/impl.dao > "$TYPECHECK_LIB"
 assemble bootstrap/hir/hir.gen.dao \
-  "$RESOLVER_LIB2" \
-  "$TYPECHECK_LIB" \
-  bootstrap/hir/impl.dao
-rm -f "$RESOLVER_LIB2" "$TYPECHECK_LIB"
+  "$RESOLVER" \
+  "$TYPECHECK" \
+  "$HIR" \
+  bootstrap/hir/tests.dao
 
-# MIR: include resolver + typecheck + hir libs (before their test markers).
-RESOLVER_LIB3=$(mktemp)
-sed '/^\/\/ BEGIN_RESOLVER_TESTS/,$d' bootstrap/resolver/impl.dao > "$RESOLVER_LIB3"
-TYPECHECK_LIB2=$(mktemp)
-sed '/^\/\/ BEGIN_TYPECHECK_TESTS/,$d' bootstrap/typecheck/impl.dao > "$TYPECHECK_LIB2"
-HIR_LIB=$(mktemp)
-sed '/^\/\/ BEGIN_HIR_TESTS/,$d' bootstrap/hir/impl.dao > "$HIR_LIB"
 assemble bootstrap/mir/mir.gen.dao \
-  "$RESOLVER_LIB3" \
-  "$TYPECHECK_LIB2" \
-  "$HIR_LIB" \
-  bootstrap/mir/impl.dao
-rm -f "$RESOLVER_LIB3" "$TYPECHECK_LIB2" "$HIR_LIB"
+  "$RESOLVER" \
+  "$TYPECHECK" \
+  "$HIR" \
+  "$MIR" \
+  bootstrap/mir/tests.dao
 
-# LLVM backend: include resolver + typecheck + hir + mir libs (before test markers).
-RESOLVER_LIB4=$(mktemp)
-sed '/^\/\/ BEGIN_RESOLVER_TESTS/,$d' bootstrap/resolver/impl.dao > "$RESOLVER_LIB4"
-TYPECHECK_LIB3=$(mktemp)
-sed '/^\/\/ BEGIN_TYPECHECK_TESTS/,$d' bootstrap/typecheck/impl.dao > "$TYPECHECK_LIB3"
-HIR_LIB2=$(mktemp)
-sed '/^\/\/ BEGIN_HIR_TESTS/,$d' bootstrap/hir/impl.dao > "$HIR_LIB2"
-MIR_LIB=$(mktemp)
-sed '/^\/\/ BEGIN_MIR_TESTS/,$d' bootstrap/mir/impl.dao > "$MIR_LIB"
 assemble bootstrap/llvm/llvm.gen.dao \
-  "$RESOLVER_LIB4" \
-  "$TYPECHECK_LIB3" \
-  "$HIR_LIB2" \
-  "$MIR_LIB" \
-  bootstrap/llvm/impl.dao
-rm -f "$RESOLVER_LIB4" "$TYPECHECK_LIB3" "$HIR_LIB2" "$MIR_LIB"
+  "$RESOLVER" \
+  "$TYPECHECK" \
+  "$HIR" \
+  "$MIR" \
+  "$LLVM" \
+  bootstrap/llvm/tests.dao
 
 echo "done — 8 files assembled"
