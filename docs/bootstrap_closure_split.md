@@ -1,8 +1,11 @@
 # Closure Split — Compiler, Test Harness, Stdlib
 
-Measurement only.  No task follows from this document; it exists so
-that a later decision rests on the split rather than on a single
-aggregate number.
+Measurement only.  It exists so the decision about what the bootstrap
+compiles next rests on the split rather than on a single aggregate
+number.  It is the opening measurement of the authorized corpus/source
+hygiene task: that task acts on this split (physical implementation /
+test separation, retiring the marker-based source slicing); this
+document does not itself change any source.
 
 ## 1. Why the split matters
 
