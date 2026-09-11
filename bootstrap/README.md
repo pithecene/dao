@@ -143,6 +143,8 @@ uses map over the bootstrap parser's AST.
 - Duplicate declaration diagnostics
 - `let` / `for` / lambda / param / field declarations
 - `resource` block bodies in a block scope (Task 37)
+- Match arms in their own scope: a pattern's parenthesized names are
+  declarations of that arm (Task 39), its constructor a use
 
 **Tier B deferrals**:
 
@@ -150,7 +152,7 @@ uses map over the bootstrap parser's AST.
 - Generic type parameters and where clauses
 - Concept / extend resolution
 - Mode block scoping
-- Match arm destructuring bindings
+- Match arm `..` (rest) and `as` (whole-variant) forms
 
 **How to run tests**:
 

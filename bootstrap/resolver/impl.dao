@@ -533,6 +533,55 @@ fn resolve_body_in_new_scope(rs: RS, list_pos: i64): RS
   let r: RS = resolve_body_stmts(sr.rs, list_pos)
   return rs_pop_scope(r)
 
+// One match arm.  A pattern that takes a variant apart names the
+// variant and binds a name per payload parameter (`ADR_ENUM_CLASS.md`,
+// "Named destructuring"): the variant path is a use of an existing
+// declaration, and the names are declarations of this arm, in the
+// arm's own scope, which the body sees and which ends with the arm.
+// Any other pattern is a value and resolves as an expression.
+//
+// `binders_lp` doubles as the verdict, as the sentinel style
+// elsewhere in the compiler does: -1 until a variant pattern is
+// recognized, so the two shapes do not nest.
+fn resolve_match_arm(rs: RS, pat_node: i64, body_lp: i64): RS
+  let r: RS = rs
+  let binders_lp: i64 = to_i64(-1)
+  match r.rc.nodes.get(pat_node):
+    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp):
+      // Only a variant reached with `::` takes a value apart, so
+      // `Box(x):` is an ordinary call whose `x` is a use.
+      match r.rc.nodes.get(callee):
+        Node::QualNameE(seg_lp, seg_count):
+          binders_lp = args_lp
+          r = resolve_expr(r, callee)
+          // A pattern's call-site type arguments are types of the
+          // enclosing scope, as a call's are.
+          if targs_lp >= 0:
+            let targs: Vector<i64> = read_list(r.rc.idx_data, targs_lp)
+            let ti: i64 = 0
+            while ti < targs.length():
+              r = resolve_type_node(r, targs.get(ti))
+              ti = ti + 1
+  if binders_lp < 0:
+    r = resolve_expr(r, pat_node)
+  let sr: ScopeR = rs_push_scope(r, ScopeKind::BlockScope)
+  r = sr.rs
+  if binders_lp >= 0:
+    let binders: Vector<i64> = read_list(r.rc.idx_data, binders_lp)
+    let bi: i64 = 0
+    while bi < binders.length():
+      let binder: i64 = binders.get(bi)
+      // A binding that is not a plain name declares nothing; the
+      // type checker diagnoses the pattern.
+      match r.rc.nodes.get(binder):
+        Node::IdentE(tidx):
+          let name: string = tok_name(r, tidx)
+          let bsr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Local, name, binder, r.current_scope, r.owner_module_id))
+          r = scope_declare(bsr.rs, name, bsr.sym_idx, tidx)
+      bi = bi + 1
+  r = resolve_body_stmts(r, body_lp)
+  return rs_pop_scope(r)
+
 fn resolve_stmt(rs: RS, node_idx: i64): RS
   if node_idx < 0:
     return rs
@@ -584,12 +633,7 @@ fn resolve_stmt(rs: RS, node_idx: i64): RS
       let arms: Vector<i64> = read_pairs(r.rc.idx_data, arms_lp)
       let i: i64 = 0
       while i < arms.length():
-        let pat_node: i64 = arms.get(i)
-        let body_lp2: i64 = arms.get(i + 1)
-        // Resolve pattern as expression in current scope
-        r = resolve_expr(r, pat_node)
-        // Resolve body in new scope
-        r = resolve_body_in_new_scope(r, body_lp2)
+        r = resolve_match_arm(r, arms.get(i), arms.get(i + 1))
         i = i + 2
       return r
     Node::ExprStmtS(expr_node):
@@ -1352,6 +1396,17 @@ fn count_symbols_of_kind(result: ResolveResult, kind: SymbolKind): i64
     i = i + 1
   return count
 
+fn count_locals_named(result: ResolveResult, name: string): i64
+  let n: i64 = 0
+  let i: i64 = 0
+  while i < result.symbols.length():
+    let sym: Symbol = result.symbols.get(i)
+    if sym.name == name:
+      if symbol_kind_name(sym.kind) == "Local":
+        n = n + 1
+    i = i + 1
+  return n
+
 fn count_diags(result: ResolveResult): i64
   return result.diags.length()
 
@@ -1413,7 +1468,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 46
+  let total: i32 = 56
 
   // -----------------------------------------------------------------
   // Test 1: forward_ref — fn calls fn defined later in file; no diagnostic
@@ -2273,6 +2328,135 @@ fn main(): i32
     print("FAIL prelude_exports_per_module: " + i64_to_string(program_error_count(pe_r)) + " errors")
 
   // -----------------------------------------------------------------
+  // Match-arm bindings (ADR_ENUM_CLASS.md, "Named destructuring"): the
+  // names a pattern binds are declarations of that arm.
+  // -----------------------------------------------------------------
+  let arm_enum: string = "enum class E:\n  Both(x: i32, y: i32)\n  One(v: i32)\n  None\n\n"
+
+  // Test 47: destructuring — both bound names resolve in the body.
+  let src47: string = arm_enum + "fn f(e: E): i32\n  match e:\n    E::Both(a, b):\n      return a + b\n    E::One(c):\n      return c\n    E::None:\n      return 0\n  return 0\n"
+  let r47: ResolveResult = resolve(src47)
+  if count_diags(r47) == 0:
+    print("PASS match_arm_destructuring")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL match_arm_destructuring: " + i64_to_string(count_diags(r47)) + " diagnostics")
+
+  // Test 48: a binder is a declaration, not a use — the pattern's own
+  // name produces no diagnostic and a Local symbol carrying its node.
+  let binder_ok: bool = false
+  if count_diags(r47) == 0:
+    if count_locals_named(r47, "a") == 1:
+      let bi48: i64 = 0
+      while bi48 < r47.symbols.length():
+        let sym48: Symbol = r47.symbols.get(bi48)
+        if sym48.name == "a":
+          if symbol_kind_name(sym48.kind) == "Local":
+            if sym48.decl_node >= 0:
+              binder_ok = true
+        bi48 = bi48 + 1
+  if binder_ok:
+    print("PASS match_binder_is_a_declaration")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL match_binder_is_a_declaration")
+
+  // Test 49: arm isolation — a binding of one arm is unknown in another.
+  let src49: string = arm_enum + "fn f(e: E): i32\n  match e:\n    E::Both(a, b):\n      return a\n    E::One(c):\n      return a\n  return 0\n"
+  let r49: ResolveResult = resolve(src49)
+  if count_diags(r49) == 1:
+    print("PASS match_arm_isolation")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL match_arm_isolation: expected 1 diagnostic, got " + i64_to_string(count_diags(r49)))
+
+  // Test 50: a binding is unknown after the match.
+  let src50: string = arm_enum + "fn f(e: E): i32\n  match e:\n    E::One(c):\n      return c\n  return c\n"
+  let r50: ResolveResult = resolve(src50)
+  if count_diags(r50) == 1:
+    print("PASS match_binding_ends_with_the_arm")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL match_binding_ends_with_the_arm: expected 1 diagnostic, got " + i64_to_string(count_diags(r50)))
+
+  // Test 51: a binder shadows an outer local; both symbols exist and
+  // the body resolves without a diagnostic.
+  let src51: string = arm_enum + "fn f(e: E): i32\n  let a: i32 = 1\n  match e:\n    E::Both(a, b):\n      return a\n  return a\n"
+  let r51: ResolveResult = resolve(src51)
+  let shadow_ok: bool = false
+  if count_diags(r51) == 0:
+    if count_locals_named(r51, "a") == 2:
+      shadow_ok = true
+  if shadow_ok:
+    print("PASS match_binder_shadows_outer_local")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL match_binder_shadows_outer_local: " + i64_to_string(count_diags(r51)) + " diagnostics, " + i64_to_string(count_locals_named(r51, "a")) + " locals named 'a'")
+
+  // Test 52: a parameterless variant pattern binds nothing and resolves.
+  let src52: string = arm_enum + "fn f(e: E): i32\n  match e:\n    E::None:\n      return 0\n  return 1\n"
+  let r52: ResolveResult = resolve(src52)
+  if count_diags(r52) == 0:
+    print("PASS match_fieldless_variant")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL match_fieldless_variant: " + i64_to_string(count_diags(r52)) + " diagnostics")
+
+  // Test 53: one pattern may not bind a name twice.
+  let src54: string = arm_enum + "fn f(e: E): i32\n  match e:\n    E::Both(a, a):\n      return a\n  return 0\n"
+  let r54: ResolveResult = resolve(src54)
+  if count_diags(r54) == 1:
+    print("PASS match_duplicate_binder")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL match_duplicate_binder: expected 1 diagnostic, got " + i64_to_string(count_diags(r54)))
+
+  // Test 54: a call-shaped pattern whose callee is not a variant is an
+  // expression, not a destructuring: `Box(x):` uses `x` (the host's
+  // rule; only a `::` variant takes a value apart).
+  let src55: string = "class Box:\n  n: i32\n\nfn f(b: Box): i32\n  match b:\n    Box(x):\n      return 1\n  return 0\n"
+  let r55: ResolveResult = resolve(src55)
+  if count_diags(r55) == 1:
+    print("PASS match_call_pattern_is_not_destructuring")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL match_call_pattern_is_not_destructuring: expected 1 diagnostic (unknown name 'x'), got " + i64_to_string(count_diags(r55)))
+
+  // Test 55: a pattern's call-site type arguments resolve as types of
+  // the enclosing scope, as a call's do — the use is recorded.
+  let src56: string = "class Cell:\n  n: i32\n\nenum class E:\n  One(v: i32)\n\nfn f(e: E): i32\n  match e:\n    E<Cell>::One(a):\n      return a\n  return 0\n"
+  let r56: ResolveResult = resolve(src56)
+  let targ_used: bool = false
+  let u56: i64 = 0
+  while u56 < r56.uses.length():
+    let sym56: i64 = r56.uses.get(u56 + 1)
+    if sym56 >= 0:
+      if r56.symbols.get(sym56).name == "Cell":
+        targ_used = true
+    u56 = u56 + 2
+  if targ_used:
+    print("PASS match_pattern_type_arguments")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL match_pattern_type_arguments: the type argument's use was not recorded")
+
+  // Test 56: a cross-module pattern — the qualified constructor
+  // resolves through the import binding, the binders are arm-local.
+  let ma_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  ma_inputs = ma_inputs.push(SourceInput("shapes.dao", "module app::shapes\nenum class E:\n  Both(x: i32, y: i32)\n  None\n", false))
+  ma_inputs = ma_inputs.push(SourceInput("main.dao", "module app::main\nimport app::shapes\nfn f(e: shapes::E): i32\n  match e:\n    shapes::E::Both(a, b):\n      return a + b\n    shapes::E::None:\n      return 0\n  return 0\n", false))
+  let ma_r: ProgramResolveResult = resolve_inputs(ma_inputs)
+  if program_error_count(ma_r) == 0:
+    print("PASS match_cross_module_pattern")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL match_cross_module_pattern: " + i64_to_string(program_error_count(ma_r)) + " errors")
+    let mj: i64 = 0
+    while mj < ma_r.diags.length():
+      print("  diag: " + ma_r.diags.get(mj).path + ": " + ma_r.diags.get(mj).diag.message)
+      mj = mj + 1
+
+  // -----------------------------------------------------------------
   // Summary
   // -----------------------------------------------------------------
 
@@ -2294,8 +2478,7 @@ fn main(): i32
   //     registration is implemented; conformance checking is deferred)
   //   - Mode block scoping (a resource block's body is a block scope)
   //   - Yield statement resolution
-  //   - Match arm destructuring bindings (patterns resolved as
-  //     expressions, but no binding introduction)
+  //   - Match arm `..` (rest) and `as` (whole-variant) forms
   //   - Cross-file / module resolution
 
   return 0
