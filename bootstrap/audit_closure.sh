@@ -313,7 +313,8 @@ resource_block_sites() {
   echo "boundary Task 40 established: \`impl.dao\` and \`base.dao\` (the"
   echo "compiler the Stage-2 crossing runs) against \`tests.dao\` (the"
   echo "bootstrap test harness).  Measurement only -- it selects no task and"
-  echo "changes no column above; it exists so a compiler requirement is not"
+  echo "changes no column above.  String fixtures and comments are stripped"
+  echo "before counting.  It exists so a compiler requirement is not"
   echo "confused with a reporting convenience.  A function with zero compiler"
   echo "call sites is needed only to print test status."
   echo
@@ -323,7 +324,7 @@ prelude = {}
 for f in sorted(pathlib.Path("stdlib/core").glob("*.dao")) + sorted(pathlib.Path("stdlib/io").glob("*.dao")):
     for m in re.finditer(r'^\s*(?:extern\s+)?fn\s+([a-z_][A-Za-z0-9_]*)', f.read_text(), re.M):
         prelude.setdefault(m.group(1), str(f))
-strip = lambda s: re.sub(r'//.*$', '', s, flags=re.M)
+strip = lambda s: re.sub(r'"(?:\\.|[^"\\])*"', '""', re.sub(r'//.*$', '', s, flags=re.M))
 lib, test = {}, {}
 files = sorted(pathlib.Path("bootstrap").glob("*/impl.dao")) + sorted(pathlib.Path("bootstrap").glob("*/tests.dao")) + [pathlib.Path("bootstrap/shared/base.dao")]
 for f in files:
