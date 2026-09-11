@@ -30,8 +30,8 @@ bash bootstrap/assemble.sh
 This produces one `<subsystem>.gen.dao` per subsystem (lexer, parser,
 graph, resolver, typecheck, hir, mir, llvm).  Each is `base.dao` plus
 the `impl.dao` (library only) of every upstream subsystem it depends
-on, in dependency order, plus the subsystem's own `tests.dao` runner
-last.  Production code lives in `impl.dao`, the test runner in
+on, in dependency order, then the subsystem's own `impl.dao`, then its
+own `tests.dao` runner last.  Production code lives in `impl.dao`, the test runner in
 `tests.dao`; the two are separate files and `assemble.sh` composes them
 explicitly (no marker slicing).  `assemble.sh` is the exact statement
 of that composition.

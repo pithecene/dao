@@ -316,7 +316,8 @@ resource_block_sites() {
   echo "changes no column above.  String fixtures and comments are stripped"
   echo "before counting.  It exists so a compiler requirement is not"
   echo "confused with a reporting convenience.  A function with zero compiler"
-  echo "call sites is needed only to print test status."
+  echo "call sites is needed only by the test harness (fixtures, validation,"
+  echo "or reporting), not by the compiler the Stage-2 crossing runs."
   echo
   python3 - <<'PYSPLIT'
 import pathlib, re
