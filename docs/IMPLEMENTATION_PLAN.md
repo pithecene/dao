@@ -837,26 +837,6 @@ corpus writes 53–458 destructuring arms per program and no `..` or
 audit makes one the frontier.
 
 
-### Task 40 — Bootstrap Generic Parameter Bounds
-
-Status: **spec** — `docs/task_specs/TASK_40_BOOTSTRAP_GENERIC_PARAMETER_BOUNDS.md`;
-chosen by the closure audit rerun on Task 39's head.
-
-**Objective**: after Task 39 the compiler corpus's resolve column is
-one name on every program — `unknown name 'print'`.  `print` is
-`stdlib/core/printable.dao`'s `fn print<T: Printable>(x: T): void`,
-and the bootstrap parser reads a type-parameter list but not a bound,
-so the declaration is lost to recovery and the 566 uses the audit
-counts resolve to nothing.  Measured with the closure probe over purpose-built prelude
-modules, a bound costs its own declaration and nothing else (its
-neighbours survive), and exactly four prelude declarations carry one:
-`print` and math's `min`/`max`/`clamp`.  Task 40 teaches the parser
-the host's bound grammar (`T: C`, `T: C + D`), widens
-`GenericParamT` to carry its bounds, resolves them as ordinary type
-nodes, and closes the corpus's resolve column.  Conformance checking,
-`derived concept`, `mode` blocks and `yield` stay out.
-
-
 ### Task 14 — Numeric Type Expansion
 
 **Objective**: Implement the numeric semantics frozen in

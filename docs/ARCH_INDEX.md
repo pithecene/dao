@@ -30,6 +30,7 @@ Contracts and explanatory material.
 
 - `ARCH_INDEX.md` — this file
 - `contracts/` — normative contracts for structure, syntax, the module system, execution contexts, compiler architecture, bootstrap/interop posture, tooling boundaries, runtime ABI, numeric semantics, and C ABI interop
+- `bootstrap_closure_split.md` — measurement separating compiler-implementation closure from bootstrap test-harness closure
 - `ROADMAP.md` — staged implementation plan from frontend skeleton to self-hosting, tooling maturity, and GPU expansion
 - `IMPLEMENTATION_PLAN.md` — concrete task sequence, toolchain decisions, and delivery order (Tasks 0–5 in full; Tasks 6+ summarized with status)
 - `task_specs/` — detailed per-task design specs for Tasks 6+
