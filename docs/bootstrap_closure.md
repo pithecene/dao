@@ -400,20 +400,12 @@ the parse column above:
 
 ### The current frontier
 
-The earliest measured stage with diagnostics is **typecheck** (7914 over the
-eight programs), with its most frequent messages — the probe reports at
-most 50 diagnostics per stage per program, so these counts are a sample
-of that column, not its whole:
-
-- `typecheck` ×224: type mismatch in '+': i64 vs i32
-- `typecheck` ×64: type mismatch: cannot assign i32 to i64
-- `typecheck` ×48: constructor arity mismatch: expected 7 fields, got 0
-- `typecheck` ×32: unknown type in annotation
-- `typecheck` ×24: type mismatch in '==': i64 vs i32
-
-The `hir`, `mir` and `llvm` columns run the single-source adapters
-without the prelude and are not frontier evidence until the program
-pipeline reaches them.
+The earliest stage with a non-zero column in the matrix above, read
+off that matrix; the "First blocking diagnostic" column names it per
+program, and "What each stage rejects" lists the messages.  The
+`hir`, `mir` and `llvm` columns run the single-source adapters
+without the prelude (see the prelude section) and are not frontier
+evidence until the program pipeline reaches them.
 
 ## 4. Reading the matrix
 
