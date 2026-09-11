@@ -307,6 +307,55 @@ resource_block_sites() {
     echo "| $p | $(generic_qualified_sites "$p") | $(resource_block_sites "$p") | ${parse:-—} |"
   done
   echo
+  echo "### Closure surfaces: compiler implementation vs test harness"
+  echo
+  echo "Prelude call sites the corpus makes, split by the physical file"
+  echo "boundary Task 40 established: \`impl.dao\` and \`base.dao\` (the"
+  echo "compiler the Stage-2 crossing runs) against \`tests.dao\` (the"
+  echo "bootstrap test harness).  Measurement only -- it selects no task and"
+  echo "changes no column above.  String fixtures and comments are stripped"
+  echo "before counting.  It exists so a compiler requirement is not"
+  echo "confused with a reporting convenience.  A function with zero compiler"
+  echo "call sites is needed only by the test harness (fixtures, validation,"
+  echo "or reporting), not by the compiler the Stage-2 crossing runs."
+  echo
+  python3 - <<'PYSPLIT'
+import pathlib, re
+prelude = {}
+for f in sorted(pathlib.Path("stdlib/core").glob("*.dao")) + sorted(pathlib.Path("stdlib/io").glob("*.dao")):
+    for m in re.finditer(r'^\s*(?:extern\s+)?fn\s+([a-z_][A-Za-z0-9_]*)', f.read_text(), re.M):
+        prelude.setdefault(m.group(1), str(f))
+def strip(s):
+    out = []; i = 0; n = len(s); st = None
+    while i < n:
+        c = s[i]
+        if st is None:
+            if c == '"': st = 'str'; out.append('"')
+            elif c == '/' and i + 1 < n and s[i+1] == '/': st = 'com'; i += 1
+            else: out.append(c)
+        elif st == 'str':
+            if c == '\\' and i + 1 < n: i += 1
+            elif c == '"': st = None; out.append('"')
+            elif c == '\n': st = None; out.append('\n')
+        else:
+            if c == '\n': st = None; out.append('\n')
+        i += 1
+    return ''.join(out)
+lib, test = {}, {}
+files = sorted(pathlib.Path("bootstrap").glob("*/impl.dao")) + sorted(pathlib.Path("bootstrap").glob("*/tests.dao")) + [pathlib.Path("bootstrap/shared/base.dao")]
+for f in files:
+    text = strip(f.read_text()); dst = test if f.name == "tests.dao" else lib
+    for n in prelude:
+        dst[n] = dst.get(n, 0) + len(re.findall(r'(?<![A-Za-z0-9_.])' + re.escape(n) + r'\s*\(', text))
+rows = [(n, lib.get(n, 0), test.get(n, 0)) for n in prelude if lib.get(n, 0) or test.get(n, 0)]
+rows.sort(key=lambda r: -(r[1] + r[2]))
+print("| Prelude function | Compiler | Harness |")
+print("|---|---:|---:|")
+for n, l, tt in rows:
+    print(f"| `{n}` | {l} | {tt} |")
+print(f"| **Total** | **{sum(r[1] for r in rows)}** | **{sum(r[2] for r in rows)}** |")
+PYSPLIT
+  echo
   echo "## 4. Reading the matrix"
   echo
   echo "- **Tier B-Bootstrap** is the set of constructs in §1 whose lowering the"
