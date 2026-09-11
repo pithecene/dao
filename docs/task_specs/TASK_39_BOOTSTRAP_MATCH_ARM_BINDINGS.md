@@ -106,46 +106,37 @@ in the stdlib, or in the examples.
 
 ## 5. Design
 
-### 5.1 One description of a pattern's shape
+### 5.1 Where the rule lives
 
-The parser's representation stays as it is.  What the passes lack is a
-single answer to "what does this arm's pattern name, and what does it
-bind", so `shared/base.dao` gains one describer beside the AST it
-describes:
-
-- input: the AST arrays and a pattern node;
-- output: the **constructor** node (the pattern itself when it binds
-  nothing), the **binder** nodes in written order, whether the pattern
-  is parenthesized at all, the first binder that is not a plain name
-  (or none), and the first binder written as a named argument (or
-  none) — the two malformed shapes `check_pattern` diagnoses, each
-  with the node or token its diagnostic points at.
-
-The resolver declares from it; `check_pattern` reads its shape from it
-instead of walking the call itself, keeping its diagnostics and their
-wording — including `E::V(field = x)`, whose binder is a plain name
-and whose fault is only visible in the call's argument names.  A
-pattern's shape is then described once, so the passes cannot drift
-into different pattern grammars.
+The parser's representation stays as it is, and so does every pass but
+the resolver.  A match arm's scope is a resolver rule, so the resolver
+reads the AST it already has: a destructuring arm is a `CallE` whose
+callee is the variant's qualified name and whose arguments are the
+names the arm binds.  No shared description of a pattern is
+introduced, and the type checker's `check_pattern` — which already
+reads that shape for its own diagnostics — is untouched.
 
 ### 5.2 The resolver
 
 `Node::MatchS` resolves as the host's does:
 
 1. the scrutinee, in the enclosing scope;
-2. per arm: the pattern's **constructor** as a use — a qualified name
-   (`Node::CallE` callee, or the bare pattern) resolves as it does
-   today, so `Token::Identifier` and `m::E::Variant` keep their uses
-   and their diagnostics;
+2. per arm, the pattern's **variant path** as a use — the `CallE`'s
+   qualified callee — so `Token::Identifier` and `m::E::Variant` keep
+   their uses and their diagnostics, along with any call-site type
+   arguments the pattern carries, which are types of the enclosing
+   scope as a call's are;
 3. the arm's **block scope**, opened before the body;
-4. each binder declared into that scope as a `SymbolKind::Local`
-   whose declaration node is the binder's own `IdentE` node, so a
-   binder is a declaration with a span, not a use;
+4. each argument that is a plain identifier declared into that scope
+   as a `SymbolKind::Local` whose declaration node is the identifier
+   itself, so a binder is a declaration with a span, not a use;
 5. the body, resolved in that scope;
 6. the scope closed at the arm's end.
 
 A binder is not resolved as a use, and a duplicate binder in one
-pattern is `scope_declare`'s existing duplicate diagnostic.
+pattern is `scope_declare`'s existing duplicate diagnostic.  An
+argument that is not a plain identifier declares nothing and keeps the
+type checker's existing diagnostic.
 
 ### 5.3 What stays a use
 
@@ -153,6 +144,9 @@ pattern is `scope_declare`'s existing duplicate diagnostic.
   has it: only a parenthesized pattern binds.
 - A literal pattern is a value.
 - A parameterless variant pattern (`Option::None:`) binds nothing.
+- A call-shaped pattern whose callee is not a qualified name is an
+  ordinary expression — only a variant reached with `::` takes a value
+  apart — so `Box(x):` uses `x` rather than declaring it.
 - A pattern whose parenthesized arguments are not all plain
   identifiers keeps `check_pattern`'s diagnostic; the resolver
   declares the identifiers it does have and leaves the rest alone,
@@ -160,8 +154,9 @@ pattern is `scope_declare`'s existing duplicate diagnostic.
 
 ### 5.4 Later passes
 
-The type checker's behavior is unchanged: it reads the same shape
-through the describer and emits the same diagnostics.  Binder symbols
+The type checker is untouched by this task: `check_pattern` already
+treats a pattern's arguments as bindings and keeps its diagnostics and
+their wording.  Binder symbols
 have no declared type node, so their types come from the variant's
 parameters when the type checker learns to type a binding — that is
 not this task, and the type checker does not regress: it types today's
@@ -185,13 +180,17 @@ outside frontier selection (Task 38 §5.4).
   HIR or MIR; the later-stage program pipeline.
 - Generics, the prelude's unparsed constructs, resource MIR, Task 32,
   Task 33's remaining rows.
+- Any shared cross-pass description of a pattern: one lexical rule
+  that one pass needs does not earn a new semantic layer in
+  `shared/base.dao`.
 
 ## 7. Delivery
 
 Two PRs:
 
 1. This spec; `docs/IMPLEMENTATION_PLAN.md` (Task 39 entry).
-2. The implementation: §5.1–§5.3, the tests of §8, `bootstrap/README.md`
+2. The implementation: §5.2–§5.3 in the resolver alone, the tests of
+   §8, `bootstrap/README.md`
    (the resolver's Tier A scope gains match-arm binding scopes; the
    Tier B deferral loses that line, keeping `..`/`as`), the resolver's
    in-source deferral inventory, and the audit rerun on the head.
@@ -213,18 +212,20 @@ Resolver suite:
   local; the body's `x` resolves to it, and the outer `x` is intact
   after the match.
 - **fieldless variant** — `E::None:` resolves as today and binds
-  nothing.
-- **constant pattern** — a bare identifier pattern stays a use: an
-  undeclared one still diagnoses `unknown name`.
+  nothing; a pattern that is not a call resolves as an expression.
+- **non-variant call pattern** — `Box(x):` declares nothing; `x` is a
+  use.
+- **pattern type arguments** — `E<Cell>::One(a):` records the use of
+  `Cell`.
 - **cross-module variant** — `m::E::V(x)` resolves the qualified
   constructor through the import binding while `x` is arm-local.
 - **duplicate binder** — `E::Both(a, a):` diagnoses a duplicate
   declaration.
 
-Type checker suite: the existing pattern diagnostics (parameterless
-variant written with parentheses, named argument in a pattern, arity,
-a non-identifier binder) keep their messages after moving to the
-shared describer.
+Type checker suite: unchanged — the existing pattern diagnostics
+(parameterless variant written with parentheses, named argument in a
+pattern, arity, a non-identifier binder) keep their tests and their
+messages because the pass is not touched.
 
 Corpus, through the audit:
 
@@ -241,8 +242,8 @@ Corpus, through the audit:
    name handling anywhere.
 2. The §8 tests pass; every existing suite stays green; `validate_ir`
    stays green.
-3. A pattern's shape is described in one place and read by the
-   resolver and the type checker.
+3. The change is confined to the resolver: no other pass and no
+   shared type is touched.
 4. `bash bootstrap/audit_closure.sh` is rerun and
    `docs/bootstrap_closure.md` committed from the head.
 5. The binder `unknown name` family is gone from the compiler
