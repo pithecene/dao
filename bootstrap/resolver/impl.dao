@@ -2458,9 +2458,9 @@ fn main(): i32
       mj = mj + 1
 
   // -----------------------------------------------------------------
-  // Generic parameter bounds (Task 40): a bound is a type of the
-  // declaration's scope; the parameter is declared before its bounds
-  // resolve, as the host's `declare_type_params` has it.
+  // Generic parameter bounds: a bound is a type of the declaration's
+  // scope; the parameter is declared before its bounds resolve, as
+  // the host's `declare_type_params` has it.
   // -----------------------------------------------------------------
 
   // Test 58: a bounded declaration is declared and callable, and the
@@ -2543,8 +2543,9 @@ fn main(): i32
   //   - Import declaration resolution
   //   - Overload resolution by arity / name mangling
   //   - Static method calls (Type::method)
-  //   - Generic type parameter constraints / where clauses (parsing and
-  //     resolution of generic params is implemented in Tier A)
+  //   - Conformance of a type argument to a generic parameter's bound;
+  //     `where` clauses (parsing and resolution of generic parameters
+  //     and their bounds is implemented in Tier A)
   //   - Concept / extend conformance validation (parsing and symbol
   //     registration is implemented; conformance checking is deferred)
   //   - Mode block scoping (a resource block's body is a block scope)

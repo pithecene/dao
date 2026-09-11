@@ -727,7 +727,7 @@ fn main(): i32
   //   - mode blocks
   //   - yield statements
   //   - function types (fn(T): R as a type)
-  //   - generic parameter bounds / where clauses
+  //   - `where` clauses
   //   - call-site type arguments on a field access (`obj.method<T>(..)`)
   //   - import declarations
   //   - pipe continuation across newlines with INDENT/DEDENT

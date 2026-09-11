@@ -763,9 +763,10 @@ fn lex(src: string): LexResult
 // Single arena enum with all node kinds. Children referenced by index
 // into nodes vector. Variable-length children use a shared idx list.
 //
-// Tier B deferrals: concept, derived, extend, mode, resource, yield,
-// function types, generic parameter bounds / where clauses.
-// (GenericParamT nodes and parse_type_params are Tier A.)
+// Tier B deferrals: derived concept, mode, yield, function types,
+// `where` clauses.  (GenericParamT nodes, their bounds, and
+// parse_type_params are Tier A; so are `concept`, `extend` and
+// `resource`.)
 
 enum class Node:
   // --- Expressions ---

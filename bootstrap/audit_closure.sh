@@ -180,6 +180,23 @@ resource_block_sites() {
   grep -c -E '^[[:space:]]*resource[[:space:]]+[a-z]+[[:space:]]+[A-Za-z_]+[[:space:]]*=>' "bootstrap/$1/$1.gen.dao" 2>/dev/null
 }
 
+# The frontier: the earliest measured stage whose column is non-zero on any
+# program.  `hir`, `mir` and `llvm` run the single-source adapters without the
+# prelude (see the prelude section), so they are not frontier evidence and are
+# not considered here.  Named from the matrix rather than by hand, so the
+# document cannot claim a closed stage is the next one to work on.
+FRONTIER=""
+FRONTIER_TOTAL=0
+for stage in lex parse resolve typecheck; do
+  total="$(grep -oE "	$stage=[0-9]+" "$AUDIT_OUT/closure.txt" | cut -d= -f2 | paste -sd+ - | sed 's/^$/0/')"
+  total=$(( $(echo "${total:-0}" | sed 's/+/ + /g' | tr -d '\n') ))
+  if [ "$total" -gt 0 ]; then
+    FRONTIER="$stage"
+    FRONTIER_TOTAL="$total"
+    break
+  fi
+done
+
 {
   echo "# Bootstrap Closure — Dao"
   echo
@@ -297,8 +314,8 @@ resource_block_sites() {
   echo "left the \`resource memory\` blocks Task 35 E3 placed in the pipeline"
   echo "drivers (one \"expected expression\" per block, then one \"expected"
   echo "declaration\" per statement skipped recovering); Task 37 taught it those."
-  echo "The parse column is closed for the corpus; the resolve column is the"
-  echo "next.  Sites per program against the parse column above:"
+  echo "The parse column is closed for the corpus.  Sites per program against"
+  echo "the parse column above:"
   echo
   echo "| Program | \`Type<Args>::\` sites | \`resource\` blocks | parse diagnostics |"
   echo "|---|---|---|---|"
@@ -306,6 +323,26 @@ resource_block_sites() {
     parse="$(grep "^$p	" "$AUDIT_OUT/closure.txt" | grep -oE '	parse=[0-9]+' | sed 's/.*=//')"
     echo "| $p | $(generic_qualified_sites "$p") | $(resource_block_sites "$p") | ${parse:-—} |"
   done
+  echo
+  echo "### The current frontier"
+  echo
+  if [ -n "$FRONTIER" ]; then
+    echo "The earliest measured stage with diagnostics is **$FRONTIER** ($FRONTIER_TOTAL over the"
+    echo "eight programs), with its most frequent messages — the probe reports at"
+    echo "most 50 diagnostics per stage per program, so these counts are a sample"
+    echo "of that column, not its whole:"
+    echo
+    cat "$AUDIT_OUT"/probe-*.log 2>/dev/null | grep -h "diag $FRONTIER: " | sed "s/.*diag $FRONTIER: //" \
+      | sort | uniq -c | sort -rn | head -5 \
+      | awk -v stage="$FRONTIER" '{ n=$1; $1=""; sub(/^ /, ""); gsub(/\|/, "\\|"); printf "- `%s` ×%s: %s\n", stage, n, $0 }'
+  else
+    echo "Every measured stage is closed for the corpus: the program pipeline"
+    echo "reaches the end of typechecking with no diagnostics on any program."
+  fi
+  echo
+  echo "The \`hir\`, \`mir\` and \`llvm\` columns run the single-source adapters"
+  echo "without the prelude and are not frontier evidence until the program"
+  echo "pipeline reaches them."
   echo
   echo "## 4. Reading the matrix"
   echo
