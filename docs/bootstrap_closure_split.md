@@ -29,9 +29,11 @@ Each subsystem file is cut at its `// BEGIN_<X>_TESTS` marker — the
 same line `assemble.sh` cuts at when it takes a subsystem's library
 portion for a downstream program.  Text before the marker is library;
 text from the marker on is harness; `*/tests.dao` is harness entire;
-`shared/base.dao` is library entire.  Comments are stripped before
-counting, and a call site is a prelude name followed by `(` that is
-neither a method selector nor part of a longer identifier.
+`shared/base.dao` is library entire.  Comments and string-literal contents are stripped before counting
+(the corpus embeds Dao source as string fixtures in its tests, and a
+name inside such a string is not a call), and a call site is a prelude
+name followed by `(` that is neither a method selector nor part of a
+longer identifier.
 
 Reproduced with:
 
@@ -42,7 +44,7 @@ prelude = {}
 for p in sorted(pathlib.Path("stdlib/core").glob("*.dao")) + sorted(pathlib.Path("stdlib/io").glob("*.dao")):
     for m in re.finditer(r'^\s*(?:extern\s+)?fn\s+([a-z_][A-Za-z0-9_]*)', p.read_text(), re.M):
         prelude.setdefault(m.group(1), str(p))
-strip = lambda s: re.sub(r'//.*$', '', s, flags=re.M)
+strip = lambda s: re.sub(r'"(?:\\.|[^"\\])*"', '""', re.sub(r'//.*$', '', s, flags=re.M))
 lib, test = {}, {}
 root = pathlib.Path("bootstrap")
 for p in sorted(root.glob("*/impl.dao")) + sorted(root.glob("*/tests.dao")) + [root/"shared/base.dao"]:
@@ -65,8 +67,8 @@ EOF
 | Prelude function | Library | Harness | Declared in |
 |---|---:|---:|---|
 | `to_i64` | 617 | 148 | `core/convert.dao` |
-| `print` | **0** | **569** | `core/printable.dao` |
-| `new` | 222 | 83 | `core/hashmap.dao`, `core/vector.dao` |
+| `print` | **0** | **564** | `core/printable.dao` |
+| `new` | 222 | 80 | `core/hashmap.dao`, `core/vector.dao` |
 | `i64_to_string` | 42 | 144 | `core/to_string.dao` |
 | `substring` | 26 | 11 | `core/string.dao` |
 | `char_at` | 22 | 0 | `core/string.dao` |
@@ -75,32 +77,33 @@ EOF
 | `file_exists` | 0 | 16 | `io/file.dao` |
 | `length` | 4 | 11 | `core/hashmap.dao`, `core/vector.dao` |
 | `i32_to_string` | 0 | 15 | `core/to_string.dao` |
-| `to_string` | 0 | 11 | `core/printable.dao` |
 | `eprint` | 0 | 11 | `io/file.dao` |
 | `index_of` | 0 | 8 | `core/string.dao` |
 | `write_file` | 1 | 2 | `io/file.dao` |
 | `starts_with` | 2 | 0 | `core/string.dao` |
 | `str_compare` | 1 | 0 | `core/string.dao` |
-| `size_of`, `ptr_offset`, `copy_out` | 0 | 1 each | `core/builtins.dao` |
-| `eq`, `abs` | 0 | 2, 1 | `core/equatable.dao`, `core/math.dao` |
-| **Total** | **953** | **1054** | |
+| **Total** | **953** | **1029** | |
 
 Library-only: `char_at`, `make_error`, `starts_with`, `str_compare`.
 
-Harness-only: `print`, `to_string`, `eprint`, `read_file`,
-`file_exists`, `i32_to_string`, `index_of`, `eq`, `abs`, `size_of`,
-`ptr_offset`, `copy_out`.
+Harness-only: `print`, `eprint`, `read_file`, `file_exists`,
+`i32_to_string`, `index_of`.
+
+Names that appear only inside string fixtures — `to_string`, `eq`,
+`abs`, `size_of`, `ptr_offset`, `copy_out` — have zero real call sites
+in either surface once strings are stripped, and are not listed.
 
 ## 4. The finding
 
-**`print` has zero call sites in compiler library code.**  All 569 are
+**`print` has zero call sites in compiler library code.**  All 564 are
 harness reporting — `print("PASS ...")`, `print("FAIL ...")`, and the
-closure probe's own output, which lives in `llvm/impl.dao`'s test
-section.  The single library-looking hit at `typecheck/impl.dao:1473`
-is a comment (`// D4: Module-qualified call (e.g. fmt::print(...))`)
-and disappears once comments are stripped.
-
-`to_string` is harness-only for the same reason.
+closure probe's own output, which lives in the `llvm` test runner.
+The single library-looking hit at `typecheck/impl.dao:1473` is a
+comment (`// D4: Module-qualified call (e.g. fmt::print(...))`) and
+disappears once comments are stripped.  `to_string` — the method
+`print` calls on its constrained parameter — has no free-function call
+site at all once string fixtures are excluded; it appears in the
+corpus only as a declaration and as method syntax.
 
 This matters because `print` is declared as
 
