@@ -837,25 +837,22 @@ corpus writes 53–458 destructuring arms per program and no `..` or
 audit makes one the frontier.
 
 
-### Task 40 — Bootstrap Generic Parameter Bounds
+### Task 40 — Bootstrap Corpus Boundary and Source Hygiene
 
-Status: **spec** — `docs/task_specs/TASK_40_BOOTSTRAP_GENERIC_PARAMETER_BOUNDS.md`;
-chosen by the closure audit rerun on Task 39's head.
+Status: **spec** — `docs/task_specs/TASK_40_BOOTSTRAP_CORPUS_HYGIENE.md`.
+Authorized after Task 39.
 
-**Objective**: after Task 39 the compiler corpus's resolve column is
-one name on every program — `unknown name 'print'`.  `print` is
-`stdlib/core/printable.dao`'s `fn print<T: Printable>(x: T): void`,
-and the bootstrap parser reads a type-parameter list but not a bound,
-so the declaration is lost to recovery and the 566 uses the audit
-counts resolve to nothing.  Measured with the closure probe over purpose-built prelude
-modules, a bound costs its own declaration and nothing else (its
-neighbours survive), and exactly four prelude declarations carry one:
-`print` and math's `min`/`max`/`clamp`.  Task 40 teaches the parser
-the host's bound grammar (`T: C`, `T: C + D`), widens
-`GenericParamT` to carry its bounds, resolves them as ordinary type
-nodes, and closes the corpus's resolve column.  Conformance checking,
-`derived concept`, `mode` blocks and `yield` stay out.
-
+**Objective**: separate the compiler implementation corpus from the
+bootstrap test harness physically, and retire the marker-based `sed`
+slicing in `assemble.sh`.  Each subsystem with a library splits into
+`impl.dao` (library, no `fn main()`) and `tests.dao` (runner); the
+build composes explicit files in dependency order.  A pure
+reorganization — the assembled program bodies are code-line-identical
+before and after — motivated by the measured compiler/test-harness
+closure split (`docs/bootstrap_closure_split.md`): the `print` family,
+the chain behind the audit's costliest vertical, has zero
+compiler-library call sites.  No language feature; generic bounds are
+Task 41 (prior work at tag `task41-genbounds-prior-work`).
 
 ### Task 14 — Numeric Type Expansion
 

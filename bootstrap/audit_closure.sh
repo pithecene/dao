@@ -180,11 +180,6 @@ resource_block_sites() {
   grep -c -E '^[[:space:]]*resource[[:space:]]+[a-z]+[[:space:]]+[A-Za-z_]+[[:space:]]*=>' "bootstrap/$1/$1.gen.dao" 2>/dev/null
 }
 
-# The frontier: the earliest measured stage whose column is non-zero on any
-# program.  `hir`, `mir` and `llvm` run the single-source adapters without the
-# prelude (see the prelude section), so they are not frontier evidence and are
-# not considered here.  Named from the matrix rather than by hand, so the
-# document cannot claim a closed stage is the next one to work on.
 {
   echo "# Bootstrap Closure — Dao"
   echo
@@ -302,8 +297,8 @@ resource_block_sites() {
   echo "left the \`resource memory\` blocks Task 35 E3 placed in the pipeline"
   echo "drivers (one \"expected expression\" per block, then one \"expected"
   echo "declaration\" per statement skipped recovering); Task 37 taught it those."
-  echo "The parse column is closed for the corpus.  Sites per program against"
-  echo "the parse column above:"
+  echo "The parse column is closed for the corpus; the resolve column is the"
+  echo "next.  Sites per program against the parse column above:"
   echo
   echo "| Program | \`Type<Args>::\` sites | \`resource\` blocks | parse diagnostics |"
   echo "|---|---|---|---|"
@@ -311,15 +306,6 @@ resource_block_sites() {
     parse="$(grep "^$p	" "$AUDIT_OUT/closure.txt" | grep -oE '	parse=[0-9]+' | sed 's/.*=//')"
     echo "| $p | $(generic_qualified_sites "$p") | $(resource_block_sites "$p") | ${parse:-—} |"
   done
-  echo
-  echo "### The current frontier"
-  echo
-  echo "The earliest stage with a non-zero column in the matrix above, read"
-  echo "off that matrix; the \"First blocking diagnostic\" column names it per"
-  echo "program, and \"What each stage rejects\" lists the messages.  The"
-  echo "\`hir\`, \`mir\` and \`llvm\` columns run the single-source adapters"
-  echo "without the prelude (see the prelude section) and are not frontier"
-  echo "evidence until the program pipeline reaches them."
   echo
   echo "## 4. Reading the matrix"
   echo

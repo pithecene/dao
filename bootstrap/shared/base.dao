@@ -763,10 +763,9 @@ fn lex(src: string): LexResult
 // Single arena enum with all node kinds. Children referenced by index
 // into nodes vector. Variable-length children use a shared idx list.
 //
-// Tier B deferrals: derived concept, mode, yield, function types,
-// `where` clauses.  (GenericParamT nodes, their bounds, and
-// parse_type_params are Tier A; so are `concept`, `extend` and
-// `resource`.)
+// Tier B deferrals: concept, derived, extend, mode, resource, yield,
+// function types, generic parameter bounds / where clauses.
+// (GenericParamT nodes and parse_type_params are Tier A.)
 
 enum class Node:
   // --- Expressions ---
@@ -790,7 +789,7 @@ enum class Node:
   NamedT(tok: i64)
   GenericT(name: i64, args_lp: i64, arg_count: i64)
   PointerT(inner: i64)
-  GenericParamT(tok: i64, bounds_lp: i64)
+  GenericParamT(tok: i64)
   ErrorT(tok: i64)
   // --- Statements ---
   LetS(name: i64, typ: i64, init: i64)
@@ -952,64 +951,6 @@ fn read_list(idx_data: Vector<i64>, lp: i64): Vector<i64>
     result = result.push(idx_data.get(lp - count + i))
     i = i + 1
   return result
-
-// --- Match-arm patterns ---------------------------------------------
-//
-// A match arm's pattern is parsed as an expression: a destructuring
-// arm reaches the parser as a call whose callee is the variant's
-// qualified name and whose arguments are the names the arm binds
-// (`ADR_ENUM_CLASS.md`, "Named destructuring" — the parenthesized
-// names are bindings in field order, never arguments).  Every pass
-// that reads an arm needs the same answer to what the pattern names
-// and what it binds, so the answer lives here, beside the AST it
-// describes, rather than once per pass.
-class PatternShape:
-  ctor: i64              // the constructor expression; the pattern itself when it binds nothing
-  binders: Vector<i64>   // the binding expressions, in written order
-  binds: bool            // the pattern is parenthesized, so it binds
-  first_non_ident: i64   // the first binding that is not a plain name, or -1
-  first_named_tok: i64   // the name token of the first binding written `x = ...`, or -1
-  targs_lp: i64          // the pattern's call-site type arguments, or -1
-
-fn pattern_shape(nodes: Vector<Node>, idx_data: Vector<i64>, pat_node: i64): PatternShape
-  if pat_node < 0:
-    return PatternShape(to_i64(-1), Vector<i64>::new(), false, to_i64(-1), to_i64(-1), to_i64(-1))
-  match nodes.get(pat_node):
-    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp):
-      // Only a variant reached with `::` destructures: a variant is
-      // the one thing a pattern takes apart (CONTRACT_SYNTAX_SURFACE.md),
-      // so `Box(x):` is a call expression whose `x` is a use, as the
-      // host has it, and not a class taken apart by position.
-      let qualified: bool = false
-      match nodes.get(callee):
-        Node::QualNameE(seg_lp, seg_count):
-          qualified = true
-      if qualified == false:
-        return PatternShape(pat_node, Vector<i64>::new(), false, to_i64(-1), to_i64(-1), to_i64(-1))
-      let binders: Vector<i64> = read_list(idx_data, args_lp)
-      let first_non_ident: i64 = to_i64(-1)
-      let i: i64 = 0
-      while i < binders.length():
-        let is_ident: bool = false
-        match nodes.get(binders.get(i)):
-          Node::IdentE(tok):
-            is_ident = true
-        if is_ident == false:
-          if first_non_ident < 0:
-            first_non_ident = binders.get(i)
-        i = i + 1
-      // A binding written `field = x` is a plain name with a name
-      // token beside it: the fault is visible only here.
-      let names: Vector<i64> = read_list(idx_data, names_lp)
-      let first_named_tok: i64 = to_i64(-1)
-      let ni: i64 = 0
-      while ni < names.length():
-        if names.get(ni) >= 0:
-          if first_named_tok < 0:
-            first_named_tok = names.get(ni)
-        ni = ni + 1
-      return PatternShape(callee, binders, true, first_non_ident, first_named_tok, targs_lp)
-  return PatternShape(pat_node, Vector<i64>::new(), false, to_i64(-1), to_i64(-1), to_i64(-1))
 
 // flush_pairs: push collected pairs contiguously to idx, then push count.
 // items contains [a0, b0, a1, b1, ...] — count is number of pairs.
@@ -1911,31 +1852,6 @@ fn parse_declaration(pc: PC, ps: PS): PR
 
 // Parse optional type parameters: <T, U, V> — returns PR where .node = list_pos
 // Returns -1 if no type params are present.
-// A generic parameter's bounds: `T: C` and `T: C + D` name the
-// concepts the argument must conform to (CONTRACT_SYNTAX_SURFACE.md).
-// Conformance is the type checker's, later; the parser reads the
-// types and the parameter carries them.  `ps` sits just past the
-// parameter's name token `name_tidx`.
-fn parse_type_param_bounds(pc: PC, ps: PS, name_tidx: i64): PR
-  if tk_name(peek_kind(pc, ps)) != tk_name(TK::Colon):
-    return ps_add_node(ps, Node::GenericParamT(tok = name_tidx, bounds_lp = to_i64(-1)))
-  let cur: PS = ps_advance(pc, ps)
-  let bounds: Vector<i64> = Vector<i64>::new()
-  let first: PR = parse_type(pc, cur)
-  bounds = bounds.push(first.node)
-  cur = first.ps
-  let done: bool = false
-  while done == false:
-    if tk_name(peek_kind(pc, cur)) == tk_name(TK::Plus):
-      cur = ps_advance(pc, cur)
-      let more: PR = parse_type(pc, cur)
-      bounds = bounds.push(more.node)
-      cur = more.ps
-    else:
-      done = true
-  let fl: FlushResult = flush_list(cur, bounds)
-  return ps_add_node(fl.ps, Node::GenericParamT(tok = name_tidx, bounds_lp = fl.list_pos))
-
 fn parse_type_params(pc: PC, ps: PS): PR
   if tk_name(peek_kind(pc, ps)) != tk_name(TK::Lt):
     return PR(ps, to_i64(-1))
@@ -1945,7 +1861,7 @@ fn parse_type_params(pc: PC, ps: PS): PR
   if tk_name(peek_kind(pc, ps2)) == tk_name(TK::Identifier):
     let tidx: i64 = ps2.pos
     let ps3: PS = ps_advance(pc, ps2)
-    let gp: PR = parse_type_param_bounds(pc, ps3, tidx)
+    let gp: PR = ps_add_node(ps3, Node::GenericParamT(tok = tidx))
     collected = collected.push(gp.node)
     let cur: PS = gp.ps
     let done: bool = false
@@ -1954,7 +1870,7 @@ fn parse_type_params(pc: PC, ps: PS): PR
         cur = ps_advance(pc, cur)
         let tidx2: i64 = cur.pos
         cur = expect(pc, cur, TK::Identifier)
-        let gp2: PR = parse_type_param_bounds(pc, cur, tidx2)
+        let gp2: PR = ps_add_node(cur, Node::GenericParamT(tok = tidx2))
         collected = collected.push(gp2.node)
         cur = gp2.ps
       else:
@@ -2620,7 +2536,7 @@ fn node_kind_name(n: Node): string
       return "GenericT"
     Node::PointerT(a):
       return "PointerT"
-    Node::GenericParamT(t, blp):
+    Node::GenericParamT(t):
       return "GenericParamT"
     Node::ErrorT(t):
       return "ErrorT"

@@ -533,34 +533,52 @@ fn resolve_body_in_new_scope(rs: RS, list_pos: i64): RS
   let r: RS = resolve_body_stmts(sr.rs, list_pos)
   return rs_pop_scope(r)
 
-// One match arm.  The pattern's constructor is a use of an existing
-// declaration; the names it binds are declarations of this arm, in
-// the arm's own scope, and the body sees them
-// (`ADR_ENUM_CLASS.md`, "Named destructuring"; the host resolver's
-// `MatchStatement` does the same).  A binding that is not a plain
-// name is the type checker's diagnostic, not a declaration.
+// One match arm.  A pattern that takes a variant apart names the
+// variant and binds a name per payload parameter (`ADR_ENUM_CLASS.md`,
+// "Named destructuring"): the variant path is a use of an existing
+// declaration, and the names are declarations of this arm, in the
+// arm's own scope, which the body sees and which ends with the arm.
+// Any other pattern is a value and resolves as an expression.
+//
+// `binders_lp` doubles as the verdict, as the sentinel style
+// elsewhere in the compiler does: -1 until a variant pattern is
+// recognized, so the two shapes do not nest.
 fn resolve_match_arm(rs: RS, pat_node: i64, body_lp: i64): RS
-  let shape: PatternShape = pattern_shape(rs.rc.nodes, rs.rc.idx_data, pat_node)
-  let r: RS = resolve_expr(rs, shape.ctor)
-  // A pattern may carry call-site type arguments (`E<T>::V(x):`); they
-  // are type nodes of the enclosing scope, as they are in a call.
-  if shape.targs_lp >= 0:
-    let targs: Vector<i64> = read_list(r.rc.idx_data, shape.targs_lp)
-    let ti: i64 = 0
-    while ti < targs.length():
-      r = resolve_type_node(r, targs.get(ti))
-      ti = ti + 1
+  let r: RS = rs
+  let binders_lp: i64 = to_i64(-1)
+  match r.rc.nodes.get(pat_node):
+    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp):
+      // Only a variant reached with `::` takes a value apart, so
+      // `Box(x):` is an ordinary call whose `x` is a use.
+      match r.rc.nodes.get(callee):
+        Node::QualNameE(seg_lp, seg_count):
+          binders_lp = args_lp
+          r = resolve_expr(r, callee)
+          // A pattern's call-site type arguments are types of the
+          // enclosing scope, as a call's are.
+          if targs_lp >= 0:
+            let targs: Vector<i64> = read_list(r.rc.idx_data, targs_lp)
+            let ti: i64 = 0
+            while ti < targs.length():
+              r = resolve_type_node(r, targs.get(ti))
+              ti = ti + 1
+  if binders_lp < 0:
+    r = resolve_expr(r, pat_node)
   let sr: ScopeR = rs_push_scope(r, ScopeKind::BlockScope)
   r = sr.rs
-  let bi: i64 = 0
-  while bi < shape.binders.length():
-    let binder: i64 = shape.binders.get(bi)
-    match r.rc.nodes.get(binder):
-      Node::IdentE(tidx):
-        let name: string = tok_name(r, tidx)
-        let bsr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Local, name, binder, r.current_scope, r.owner_module_id))
-        r = scope_declare(bsr.rs, name, bsr.sym_idx, tidx)
-    bi = bi + 1
+  if binders_lp >= 0:
+    let binders: Vector<i64> = read_list(r.rc.idx_data, binders_lp)
+    let bi: i64 = 0
+    while bi < binders.length():
+      let binder: i64 = binders.get(bi)
+      // A binding that is not a plain name declares nothing; the
+      // type checker diagnoses the pattern.
+      match r.rc.nodes.get(binder):
+        Node::IdentE(tidx):
+          let name: string = tok_name(r, tidx)
+          let bsr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Local, name, binder, r.current_scope, r.owner_module_id))
+          r = scope_declare(bsr.rs, name, bsr.sym_idx, tidx)
+      bi = bi + 1
   r = resolve_body_stmts(r, body_lp)
   return rs_pop_scope(r)
 
@@ -638,19 +656,10 @@ fn resolve_type_params(rs: RS, tparams_lp: i64, node_idx: i64): RS
     let tp_node_idx: i64 = tparams.get(i)
     let tp_node: Node = r.rc.nodes.get(tp_node_idx)
     match tp_node:
-      Node::GenericParamT(tidx, bounds_lp):
-        // The parameter is declared before its bounds resolve, as the
-        // host's `declare_type_params` has it, so a bound may name the
-        // parameter it bounds (`T: C<T>`).
+      Node::GenericParamT(tidx):
         let tname: string = tok_name(r, tidx)
         let sym_r: SymR = rs_add_symbol(r, Symbol(SymbolKind::GenericParam, tname, node_idx, r.current_scope, r.owner_module_id))
         r = scope_declare(sym_r.rs, tname, sym_r.sym_idx, tidx)
-        if bounds_lp >= 0:
-          let bounds: Vector<i64> = read_list(r.rc.idx_data, bounds_lp)
-          let bi: i64 = 0
-          while bi < bounds.length():
-            r = resolve_type_node(r, bounds.get(bi))
-            bi = bi + 1
     i = i + 1
   return r
 
@@ -1459,7 +1468,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 61
+  let total: i32 = 56
 
   // -----------------------------------------------------------------
   // Test 1: forward_ref — fn calls fn defined later in file; no diagnostic
@@ -2393,17 +2402,7 @@ fn main(): i32
   else:
     print("FAIL match_fieldless_variant: " + i64_to_string(count_diags(r52)) + " diagnostics")
 
-  // Test 53: a bare identifier pattern stays a use — only a
-  // parenthesized pattern binds.
-  let src53: string = "fn f(n: i32): i32\n  match n:\n    limit:\n      return 1\n  return 0\n"
-  let r53: ResolveResult = resolve(src53)
-  if count_diags(r53) == 1:
-    print("PASS match_bare_pattern_is_a_use")
-    pass_count = pass_count + 1
-  else:
-    print("FAIL match_bare_pattern_is_a_use: expected 1 diagnostic (unknown name 'limit'), got " + i64_to_string(count_diags(r53)))
-
-  // Test 54: one pattern may not bind a name twice.
+  // Test 53: one pattern may not bind a name twice.
   let src54: string = arm_enum + "fn f(e: E): i32\n  match e:\n    E::Both(a, a):\n      return a\n  return 0\n"
   let r54: ResolveResult = resolve(src54)
   if count_diags(r54) == 1:
@@ -2412,7 +2411,7 @@ fn main(): i32
   else:
     print("FAIL match_duplicate_binder: expected 1 diagnostic, got " + i64_to_string(count_diags(r54)))
 
-  // Test 55: a call-shaped pattern whose callee is not a variant is an
+  // Test 54: a call-shaped pattern whose callee is not a variant is an
   // expression, not a destructuring: `Box(x):` uses `x` (the host's
   // rule; only a `::` variant takes a value apart).
   let src55: string = "class Box:\n  n: i32\n\nfn f(b: Box): i32\n  match b:\n    Box(x):\n      return 1\n  return 0\n"
@@ -2423,7 +2422,7 @@ fn main(): i32
   else:
     print("FAIL match_call_pattern_is_not_destructuring: expected 1 diagnostic (unknown name 'x'), got " + i64_to_string(count_diags(r55)))
 
-  // Test 56: a pattern's call-site type arguments resolve as types of
+  // Test 55: a pattern's call-site type arguments resolve as types of
   // the enclosing scope, as a call's do — the use is recorded.
   let src56: string = "class Cell:\n  n: i32\n\nenum class E:\n  One(v: i32)\n\nfn f(e: E): i32\n  match e:\n    E<Cell>::One(a):\n      return a\n  return 0\n"
   let r56: ResolveResult = resolve(src56)
@@ -2441,7 +2440,7 @@ fn main(): i32
   else:
     print("FAIL match_pattern_type_arguments: the type argument's use was not recorded")
 
-  // Test 57: a cross-module pattern — the qualified constructor
+  // Test 56: a cross-module pattern — the qualified constructor
   // resolves through the import binding, the binders are arm-local.
   let ma_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
   ma_inputs = ma_inputs.push(SourceInput("shapes.dao", "module app::shapes\nenum class E:\n  Both(x: i32, y: i32)\n  None\n", false))
@@ -2456,76 +2455,6 @@ fn main(): i32
     while mj < ma_r.diags.length():
       print("  diag: " + ma_r.diags.get(mj).path + ": " + ma_r.diags.get(mj).diag.message)
       mj = mj + 1
-
-  // -----------------------------------------------------------------
-  // Generic parameter bounds: a bound is a type of the declaration's
-  // scope; the parameter is declared before its bounds resolve, as
-  // the host's `declare_type_params` has it.
-  // -----------------------------------------------------------------
-
-  // Test 58: a bounded declaration is declared and callable, and the
-  // bound's name records a use.
-  let src58: string = "concept C:\n  fn show(self): string\n\nfn f<T: C>(x: T): T\n  return x\n\nfn g(n: i32): i32\n  return f(n)\n"
-  let r58: ResolveResult = resolve(src58)
-  let bound_used: bool = false
-  let u58: i64 = 0
-  while u58 < r58.uses.length():
-    let s58: i64 = r58.uses.get(u58 + 1)
-    if s58 >= 0:
-      if r58.symbols.get(s58).name == "C":
-        bound_used = true
-    u58 = u58 + 2
-  if count_diags(r58) == 0:
-    if bound_used:
-      print("PASS generic_bound_resolves")
-      pass_count = pass_count + 1
-    else:
-      print("FAIL generic_bound_resolves: the bound recorded no use")
-  else:
-    print("FAIL generic_bound_resolves: " + i64_to_string(count_diags(r58)) + " diagnostics")
-
-  // Test 59: an unresolved unqualified bound leaves the declaration
-  // intact and says nothing, as every unresolved type name does.
-  let src59: string = "fn f<T: Missing>(x: T): T\n  return x\n\nfn g(n: i32): i32\n  return f(n)\n"
-  let r59: ResolveResult = resolve(src59)
-  if count_diags(r59) == 0:
-    print("PASS generic_bound_unresolved_is_silent")
-    pass_count = pass_count + 1
-  else:
-    print("FAIL generic_bound_unresolved_is_silent: " + i64_to_string(count_diags(r59)) + " diagnostics")
-
-  // Test 60: a qualified bound whose module is unknown diagnoses its
-  // head, as `let p: missing::Point` does — the behavior is pinned.
-  let src60: string = "fn f<T: missing::C>(x: T): T\n  return x\n"
-  let r60: ResolveResult = resolve(src60)
-  if count_diags(r60) == 1:
-    print("PASS generic_bound_qualified_diagnoses_its_head")
-    pass_count = pass_count + 1
-  else:
-    print("FAIL generic_bound_qualified_diagnoses_its_head: expected 1 diagnostic, got " + i64_to_string(count_diags(r60)))
-
-  // Test 61: a bound may name the parameter it bounds — the parameter
-  // is declared first, so the inner `T` reaches it.
-  let src61: string = "concept C:\n  fn show(self): string\n\nfn f<T: C<T>>(x: T): T\n  return x\n"
-  let r61: ResolveResult = resolve(src61)
-  let inner_ok: bool = false
-  let u61: i64 = 0
-  while u61 < r61.uses.length():
-    let s61: i64 = r61.uses.get(u61 + 1)
-    if s61 >= 0:
-      let sym61: Symbol = r61.symbols.get(s61)
-      if sym61.name == "T":
-        if symbol_kind_name(sym61.kind) == "GenericParam":
-          inner_ok = true
-    u61 = u61 + 2
-  if count_diags(r61) == 0:
-    if inner_ok:
-      print("PASS generic_bound_names_its_parameter")
-      pass_count = pass_count + 1
-    else:
-      print("FAIL generic_bound_names_its_parameter: the inner T reached no parameter")
-  else:
-    print("FAIL generic_bound_names_its_parameter: " + i64_to_string(count_diags(r61)) + " diagnostics")
 
   // -----------------------------------------------------------------
   // Summary
@@ -2543,9 +2472,8 @@ fn main(): i32
   //   - Import declaration resolution
   //   - Overload resolution by arity / name mangling
   //   - Static method calls (Type::method)
-  //   - Conformance of a type argument to a generic parameter's bound;
-  //     `where` clauses (parsing and resolution of generic parameters
-  //     and their bounds is implemented in Tier A)
+  //   - Generic type parameter constraints / where clauses (parsing and
+  //     resolution of generic params is implemented in Tier A)
   //   - Concept / extend conformance validation (parsing and symbol
   //     registration is implemented; conformance checking is deferred)
   //   - Mode block scoping (a resource block's body is a block scope)
