@@ -83,11 +83,12 @@ fitting is the host's implemented behaviour and the parity target.
 
 ### Change
 
-- integer-literal typing takes an expected type: in an annotated
-  `let x: T = <lit>` and a `return <lit>` against the function's return
-  type, and in a binary arithmetic/compare/assignment where the peer
-  operand is a concrete integer type, a literal adopts that integer
-  type; absent context it stays `i32`;
+- integer-literal typing takes an expected type in four contexts: an
+  annotated `let x: T = <lit>`; a `return <lit>` against the function's
+  return type; a binary arithmetic/compare/assignment where the peer
+  operand is a concrete integer type; and a call argument against its
+  formal parameter's type (`take(1)` where `take(x: i64)`).  A literal
+  adopts that integer type; absent context it stays `i32`;
 - `check_binary_expr` fits a literal operand to a concrete-integer peer
   before the equality check, so `i64_value + 1` types as `i64`;
 - no change for two non-literal integers of different widths — that
@@ -127,6 +128,8 @@ Type-checker suite:
 - `n + 1` and `1 + n` both fit the literal to `n: i64` (either operand
   order).
 - a comparison `n == 0` with `n: i64` type-checks; the result is `bool`.
+- `take(1)` where `take(x: i64)` types the literal argument `i64`; no
+  diagnostic.
 - two non-literal integers of different width (`a: i64`, `b: i32`,
   `a + b`) still diagnoses `i64 vs i32` — contextual fitting does not
   become width coercion.
