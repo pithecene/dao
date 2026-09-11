@@ -846,8 +846,8 @@ chosen by the closure audit rerun on Task 39's head.
 one name on every program — `unknown name 'print'`.  `print` is
 `stdlib/core/printable.dao`'s `fn print<T: Printable>(x: T): void`,
 and the bootstrap parser reads a type-parameter list but not a bound,
-so the declaration is lost to recovery and 557 call sites resolve to
-nothing.  Measured with the closure probe over purpose-built prelude
+so the declaration is lost to recovery and the 566 uses the audit
+counts resolve to nothing.  Measured with the closure probe over purpose-built prelude
 modules, a bound costs its own declaration and nothing else (its
 neighbours survive), and exactly four prelude declarations carry one:
 `print` and math's `min`/`max`/`clamp`.  Task 40 teaches the parser

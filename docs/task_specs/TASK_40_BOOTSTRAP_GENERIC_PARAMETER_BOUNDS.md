@@ -23,8 +23,8 @@ fn print<T: Printable>(x: T): void -> __dao_io_write_stdout(x.to_string())
 
 The bootstrap parser reads a type-parameter list (`<T>`) but not a
 bound (`<T: Printable>`): it stops at the colon, the declaration is
-lost to recovery, and 557 call sites across the corpus resolve to
-nothing.  This task teaches the parser the bound, and the corpus's
+lost to recovery, and the 566 uses the audit counts across the corpus
+resolve to nothing.  This task teaches the parser the bound, and the corpus's
 resolve column closes.
 
 ## 2. Measured: one construct, one declaration the corpus needs
@@ -43,9 +43,9 @@ nothing else, and a rejected `derived concept` costs only the concept.
 
 The whole prelude carries a bound on four declarations:
 
-| Declaration | File | Corpus call sites |
+| Declaration | File | Unresolved uses (audit) |
 |---|---|---|
-| `print<T: Printable>` | `core/printable.dao` | **557** |
+| `print<T: Printable>` | `core/printable.dao` | **566** |
 | `min<T: Numeric>` | `core/math.dao` | 0 |
 | `max<T: Numeric>` | `core/math.dao` | 0 |
 | `clamp<T: Numeric>` | `core/math.dao` | 0 |
@@ -56,10 +56,16 @@ One of the four is a name the compiler corpus needs, and its absence is
 The bound's own concept (`Printable`, `Numeric`) is declared with
 `derived concept`, which the parser also rejects — so a bound will name
 a type the resolver cannot find.  That is not an obstacle: an
-unresolved type node is silent in the resolver by design ("No
-diagnostic on unresolved type — matches host resolver"), so `print` is
-declared, callable, and resolvable with its bound unresolved.  Closing
-`derived concept` is a later slice, and the audit says when.
+unresolved *unqualified* type name is silent in the resolver by design
+("No diagnostic on unresolved type — matches host resolver"), so
+`print` is declared, callable, and resolvable with `Printable`
+unresolved.  A *qualified* bound (`T: m::C`) behaves as every
+qualified type annotation does today — `resolve_type_node` sends a
+`QualNameE` through `resolve_expr`, which diagnoses an unknown module
+head, exactly as `let p: missing::Point` does.  That is the type
+surface's existing behavior, not a hole this task opens, and §7 pins
+it.  Closing `derived concept` is a later slice, and the audit says
+when.
 
 ## 3. What the bootstrap has today
 
@@ -93,10 +99,14 @@ label is unchanged.
 
 ### 4.3 Resolver
 
-A parameter's bounds are type nodes of the scope the declaration sits
-in, resolved with `resolve_type_node` before the parameter itself is
-declared — a bound may not name the parameter it bounds.  An
-unresolved bound stays silent, as every unresolved type node does.
+Each parameter is declared and then its bounds are resolved, in
+written order — the host's order
+(`compiler/frontend/resolve/resolve.cpp`, `declare_type_params`), so a
+self-referential bound (`T: C<T>`) reaches the parameter it bounds
+rather than an outer declaration's.  A bound is an ordinary type node
+of the declaration's scope; an unresolved unqualified bound stays
+silent, and a qualified one diagnoses its module head as any qualified
+type does.
 
 ### 4.4 Type checker and HIR
 
@@ -129,12 +139,16 @@ Two PRs:
 
 Parser suite:
 
-- `fn f<T: C>(x: T): T` parses; the parameter carries one bound.
-- `fn f<T: C + D>(x: T): T` parses; two bounds, in written order.
-- `fn f<T: C, U: D>(x: T, y: U): T` parses; a bound per parameter.
-- `fn f<T>(x: T): T` still parses, with no bound.
-- `class Box<T: C>:` and `enum class E<T: C>:` parse.
-- A malformed bound (`fn f<T: >(x: T): T`) diagnoses rather than
+Each fixture is a complete declaration — a body, fields, variants —
+so a bound is the only thing under test:
+
+- `fn f<T: C>(x: T): T -> x` parses; the parameter carries one bound.
+- `fn f<T: C + D>(x: T): T -> x` parses; two bounds, in written order.
+- `fn f<T: C, U: D>(x: T, y: U): T -> x` parses; a bound per parameter.
+- `fn f<T>(x: T): T -> x` still parses, with no bound.
+- `class Box<T: C>:` with a field, and `enum class E<T: C>:` with a
+  variant, parse.
+- A malformed bound (`fn f<T: >(x: T): T -> x`) diagnoses rather than
   hanging or swallowing the declaration.
 
 Resolver suite:
@@ -142,8 +156,13 @@ Resolver suite:
 - a bounded declaration is declared and callable: `fn f<T: C>` with a
   concept `C` in scope resolves, and a call to `f` resolves;
 - the bound's name records a use when it resolves;
-- an unresolved bound (`fn f<T: Missing>`) leaves the declaration
-  intact and emits no diagnostic;
+- an unresolved unqualified bound (`fn f<T: Missing>`) leaves the
+  declaration intact and emits no diagnostic;
+- an unresolved qualified bound (`fn f<T: missing::C>`) diagnoses its
+  module head, as `let p: missing::Point` does — the behavior is
+  pinned, not claimed silent;
+- a bound may name the parameter it bounds (`fn f<T: C<T>>`): the
+  parameter is declared first, so the inner `T` reaches it;
 - the parameter is still a `GenericParam` in the declaration's scope.
 
 Type checker suite: a bounded declaration types as its unbounded
@@ -155,8 +174,8 @@ Corpus, through the audit:
   reads 0 for all eight;
 - `math.dao`'s parse diagnostics fall to 0 and `printable.dao`'s to
   the `derived concept` alone;
-- the typecheck column's movement is reported, not hidden: 557 call
-  sites that resolved to nothing now type against a generic signature,
+- the typecheck column's movement is reported, not hidden: 566 uses
+  that resolved to nothing now type against a generic signature,
   and whatever that surfaces belongs to the audit and to the task the
   audit names next.
 
