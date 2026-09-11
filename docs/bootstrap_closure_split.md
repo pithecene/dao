@@ -29,9 +29,11 @@ Each subsystem file is cut at its `// BEGIN_<X>_TESTS` marker — the
 same line `assemble.sh` cuts at when it takes a subsystem's library
 portion for a downstream program.  Text before the marker is library;
 text from the marker on is harness; `*/tests.dao` is harness entire;
-`shared/base.dao` is library entire.  Comments and string-literal contents are stripped before counting
-(the corpus embeds Dao source as string fixtures in its tests, and a
-name inside such a string is not a call), and a call site is a prelude
+`shared/base.dao` is library entire.  Comments and string-literal contents are stripped together in one
+context-tracking pass before counting (the corpus embeds Dao source as
+string fixtures in its tests, and a name inside such a string is not a
+call; a `//` inside a string is not a comment), and a call site is a
+prelude
 name followed by `(` that is neither a method selector nor part of a
 longer identifier.
 
@@ -44,7 +46,24 @@ prelude = {}
 for p in sorted(pathlib.Path("stdlib/core").glob("*.dao")) + sorted(pathlib.Path("stdlib/io").glob("*.dao")):
     for m in re.finditer(r'^\s*(?:extern\s+)?fn\s+([a-z_][A-Za-z0-9_]*)', p.read_text(), re.M):
         prelude.setdefault(m.group(1), str(p))
-strip = lambda s: re.sub(r'"(?:\\.|[^"\\])*"', '""', re.sub(r'//.*$', '', s, flags=re.M))
+def strip(s):
+    # One pass over the source, tracking string vs line-comment context,
+    # so `//` inside a string and `"` inside a comment are both handled.
+    out = []; i = 0; n = len(s); st = None  # None | 'str' | 'com'
+    while i < n:
+        c = s[i]
+        if st is None:
+            if c == '"': st = 'str'; out.append('"')
+            elif c == '/' and i + 1 < n and s[i+1] == '/': st = 'com'; i += 1
+            else: out.append(c)
+        elif st == 'str':
+            if c == '\\' and i + 1 < n: i += 1
+            elif c == '"': st = None; out.append('"')
+            elif c == '\n': st = None; out.append('\n')
+        else:
+            if c == '\n': st = None; out.append('\n')
+        i += 1
+    return ''.join(out)
 lib, test = {}, {}
 root = pathlib.Path("bootstrap")
 for p in sorted(root.glob("*/impl.dao")) + sorted(root.glob("*/tests.dao")) + [root/"shared/base.dao"]:
