@@ -185,15 +185,31 @@ resource_block_sites() {
 # prelude (see the prelude section), so they are not frontier evidence and are
 # not considered here.  Named from the matrix rather than by hand, so the
 # document cannot claim a closed stage is the next one to work on.
+PROGRAM_COUNT=0
+for p in $PROGRAMS; do PROGRAM_COUNT=$((PROGRAM_COUNT + 1)); done
 FRONTIER=""
 FRONTIER_TOTAL=0
+UNMEASURED=""          # the first stage some program never reached, and which
+UNMEASURED_PROGRAMS="" # programs those are: a missing column is not a zero one
 for stage in lex parse resolve typecheck; do
-  total="$(grep -oE "	$stage=[0-9]+" "$AUDIT_OUT/closure.txt" | cut -d= -f2 | paste -sd+ - | sed 's/^$/0/')"
-  total=$(( $(echo "${total:-0}" | sed 's/+/ + /g' | tr -d '\n') ))
+  total=0
+  recorded=0
+  for p in $PROGRAMS; do
+    n="$(grep "^$p	" "$AUDIT_OUT/closure.txt" | grep -oE "	$stage=[0-9]+" | cut -d= -f2)"
+    if [ -n "$n" ]; then
+      recorded=$((recorded + 1))
+      total=$((total + n))
+    else
+      case " $UNMEASURED_PROGRAMS " in *" $p "*) ;; *) UNMEASURED_PROGRAMS="$UNMEASURED_PROGRAMS $p" ;; esac
+    fi
+  done
   if [ "$total" -gt 0 ]; then
     FRONTIER="$stage"
     FRONTIER_TOTAL="$total"
     break
+  fi
+  if [ "$recorded" -lt "$PROGRAM_COUNT" ] && [ -z "$UNMEASURED" ]; then
+    UNMEASURED="$stage"
   fi
 done
 
@@ -332,9 +348,17 @@ done
     echo "most 50 diagnostics per stage per program, so these counts are a sample"
     echo "of that column, not its whole:"
     echo
-    cat "$AUDIT_OUT"/probe-*.log 2>/dev/null | grep -h "diag $FRONTIER: " | sed "s/.*diag $FRONTIER: //" \
+    # One log per program: probe-$p.log already holds every stage's output
+    # for that program, so the per-stage files must not be read again.
+    for p in $PROGRAMS; do cat "$AUDIT_OUT/probe-$p.log" 2>/dev/null; done \
+      | grep -h "diag $FRONTIER: " | sed "s/.*diag $FRONTIER: //" \
       | sort | uniq -c | sort -rn | head -5 \
       | awk -v stage="$FRONTIER" '{ n=$1; $1=""; sub(/^ /, ""); gsub(/\|/, "\\|"); printf "- `%s` ×%s: %s\n", stage, n, $0 }'
+  elif [ -n "$UNMEASURED" ]; then
+    echo "No measured stage reports a diagnostic, but the matrix is incomplete:"
+    echo "**$UNMEASURED** was never recorded for$UNMEASURED_PROGRAMS, which died"
+    echo "earlier — the last column of the matrix says where and why.  A missing"
+    echo "column is not a closed one, so the frontier is that failure."
   else
     echo "Every measured stage is closed for the corpus: the program pipeline"
     echo "reaches the end of typechecking with no diagnostics on any program."

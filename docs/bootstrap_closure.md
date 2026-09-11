@@ -405,11 +405,11 @@ eight programs), with its most frequent messages — the probe reports at
 most 50 diagnostics per stage per program, so these counts are a sample
 of that column, not its whole:
 
-- `typecheck` ×448: type mismatch in '+': i64 vs i32
-- `typecheck` ×128: type mismatch: cannot assign i32 to i64
-- `typecheck` ×96: constructor arity mismatch: expected 7 fields, got 0
-- `typecheck` ×64: unknown type in annotation
-- `typecheck` ×48: type mismatch in '==': i64 vs i32
+- `typecheck` ×224: type mismatch in '+': i64 vs i32
+- `typecheck` ×64: type mismatch: cannot assign i32 to i64
+- `typecheck` ×48: constructor arity mismatch: expected 7 fields, got 0
+- `typecheck` ×32: unknown type in annotation
+- `typecheck` ×24: type mismatch in '==': i64 vs i32
 
 The `hir`, `mir` and `llvm` columns run the single-source adapters
 without the prelude and are not frontier evidence until the program
