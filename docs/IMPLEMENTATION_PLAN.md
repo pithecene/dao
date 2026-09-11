@@ -837,6 +837,23 @@ corpus writes 53–458 destructuring arms per program and no `..` or
 audit makes one the frontier.
 
 
+### Task 40 — Bootstrap Corpus Boundary and Source Hygiene
+
+Status: **spec** — `docs/task_specs/TASK_40_BOOTSTRAP_CORPUS_HYGIENE.md`.
+Authorized after Task 39.
+
+**Objective**: separate the compiler implementation corpus from the
+bootstrap test harness physically, and retire the marker-based `sed`
+slicing in `assemble.sh`.  Each subsystem with a library splits into
+`impl.dao` (library, no `fn main()`) and `tests.dao` (runner); the
+build composes explicit files in dependency order.  A pure
+reorganization — the assembled program bodies are code-line-identical
+before and after — motivated by the measured compiler/test-harness
+closure split (`docs/bootstrap_closure_split.md`): the `print` family,
+the chain behind the audit's costliest vertical, has zero
+compiler-library call sites.  No language feature; generic bounds are
+Task 41 (prior work at tag `task41-genbounds-prior-work`).
+
 ### Task 14 — Numeric Type Expansion
 
 **Objective**: Implement the numeric semantics frozen in

@@ -3,7 +3,7 @@
 Measurement only.  It exists so the decision about what the bootstrap
 compiles next rests on the split rather than on a single aggregate
 number.  It is the opening measurement of the authorized corpus/source
-hygiene task: that task acts on this split (physical implementation /
+hygiene task (`docs/task_specs/TASK_40_BOOTSTRAP_CORPUS_HYGIENE.md`): that task acts on this split (physical implementation /
 test separation, retiring the marker-based source slicing); this
 document does not itself change any source.
 
