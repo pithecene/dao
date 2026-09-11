@@ -190,17 +190,19 @@ for p in $PROGRAMS; do PROGRAM_COUNT=$((PROGRAM_COUNT + 1)); done
 FRONTIER=""
 FRONTIER_TOTAL=0
 UNMEASURED=""          # the first stage some program never reached, and which
-UNMEASURED_PROGRAMS="" # programs those are: a missing column is not a zero one
+UNMEASURED_PROGRAMS="" # programs those are -- that stage's own, since a
+                       # missing column is not a zero one
 for stage in lex parse resolve typecheck; do
   total=0
   recorded=0
+  missing=""
   for p in $PROGRAMS; do
     n="$(grep "^$p	" "$AUDIT_OUT/closure.txt" | grep -oE "	$stage=[0-9]+" | cut -d= -f2)"
     if [ -n "$n" ]; then
       recorded=$((recorded + 1))
       total=$((total + n))
     else
-      case " $UNMEASURED_PROGRAMS " in *" $p "*) ;; *) UNMEASURED_PROGRAMS="$UNMEASURED_PROGRAMS $p" ;; esac
+      missing="$missing $p"
     fi
   done
   if [ "$total" -gt 0 ]; then
@@ -210,6 +212,7 @@ for stage in lex parse resolve typecheck; do
   fi
   if [ "$recorded" -lt "$PROGRAM_COUNT" ] && [ -z "$UNMEASURED" ]; then
     UNMEASURED="$stage"
+    UNMEASURED_PROGRAMS="$missing"
   fi
 done
 
