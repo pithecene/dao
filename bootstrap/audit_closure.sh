@@ -325,7 +325,22 @@ prelude = {}
 for f in sorted(pathlib.Path("stdlib/core").glob("*.dao")) + sorted(pathlib.Path("stdlib/io").glob("*.dao")):
     for m in re.finditer(r'^\s*(?:extern\s+)?fn\s+([a-z_][A-Za-z0-9_]*)', f.read_text(), re.M):
         prelude.setdefault(m.group(1), str(f))
-strip = lambda s: re.sub(r'"(?:\\.|[^"\\])*"', '""', re.sub(r'//.*$', '', s, flags=re.M))
+def strip(s):
+    out = []; i = 0; n = len(s); st = None
+    while i < n:
+        c = s[i]
+        if st is None:
+            if c == '"': st = 'str'; out.append('"')
+            elif c == '/' and i + 1 < n and s[i+1] == '/': st = 'com'; i += 1
+            else: out.append(c)
+        elif st == 'str':
+            if c == '\\' and i + 1 < n: i += 1
+            elif c == '"': st = None; out.append('"')
+            elif c == '\n': st = None; out.append('\n')
+        else:
+            if c == '\n': st = None; out.append('\n')
+        i += 1
+    return ''.join(out)
 lib, test = {}, {}
 files = sorted(pathlib.Path("bootstrap").glob("*/impl.dao")) + sorted(pathlib.Path("bootstrap").glob("*/tests.dao")) + [pathlib.Path("bootstrap/shared/base.dao")]
 for f in files:
