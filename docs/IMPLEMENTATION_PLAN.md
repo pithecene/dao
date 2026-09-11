@@ -854,6 +854,27 @@ the chain behind the audit's costliest vertical, has zero
 compiler-library call sites.  No language feature; generic bounds are
 Task 41 (prior work at tag `task41-genbounds-prior-work`).
 
+### Task 41 — Bootstrap Semantic Frontend Closure
+
+Status: **spec** — `docs/task_specs/TASK_41_BOOTSTRAP_FRONTEND_CLOSURE.md`.
+Authorized after Task 40.
+
+**Objective**: bring the real compiler corpus and the prelude it needs
+through resolve → typecheck → HIR with the host's semantics, one
+measured slice at a time — a construct is given its real meaning or
+rejected explicitly, never parsed and ignored.  The merged-main audit
+shows the compiler-path resolve closed (the resolve column is
+harness-only `print`, per Task 40's closure surfaces) and the typecheck
+column as the real frontier: integer-literal width (`i64 vs i32`),
+generic static-factory calls (`constructor arity mismatch`), and
+qualified/generic annotation typing.  The vertical also owns generic
+bounds with meaning, `derived concept`, constrained method
+availability, generic call inference, and `mode unsafe`/`yield` at the
+frontend (lowering deferred, never erased).  Slice 1 is contextual
+integer-literal typing (host parity); later slices follow the audit.
+Not chased: the harness `print` requirement; program MIR/backend
+(Tasks 42–45); real modules (Task 46).
+
 ### Task 14 — Numeric Type Expansion
 
 **Objective**: Implement the numeric semantics frozen in
