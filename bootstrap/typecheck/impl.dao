@@ -1255,11 +1255,52 @@ fn get_expr_type(ts: TS, node_idx: i64): i64
     Option::None:
       return to_i64(-1)
 
+// An integer literal defaults to i32 but adopts a concrete integer
+// context, and a float literal a concrete float context — the host's
+// contextual literal fitting (`check_int_literal` / `check_float_literal`).
+// Refit `node` to `expected` when `node` is such a literal and
+// `expected` is the matching concrete kind; return the type `node`
+// should carry.  Non-literal operands are never coerced (the numeric
+// contract forbids implicit width coercion between named integers).
+fn fit_literal(ts: TS, node_idx: i64, expected_ti: i64): TS
+  if expected_ti < 0:
+    return ts
+  match ts.tc.nodes.get(node_idx):
+    Node::IntLitE(tidx):
+      if is_integer(ts, expected_ti):
+        return ts_set_expr_type(ts, node_idx, expected_ti)
+    Node::FloatLitE(tidx):
+      if is_float(ts, expected_ti):
+        return ts_set_expr_type(ts, node_idx, expected_ti)
+  return ts
+
+fn is_literal_node(ts: TS, node_idx: i64): bool
+  match ts.tc.nodes.get(node_idx):
+    Node::IntLitE(tidx):
+      return true
+    Node::FloatLitE(tidx):
+      return true
+  return false
+
 fn check_binary_expr(ts: TS, node_idx: i64, op_tidx: i64, left: i64, right: i64): TS
   let r: TS = check_expr(ts, left)
   r = check_expr(r, right)
   let lt: i64 = get_expr_type(r, left)
   let rt: i64 = get_expr_type(r, right)
+  // Contextual literal fitting: a literal operand adopts a concrete
+  // numeric peer's type (host `check_binary`), so `n + 1` with `n: i64`
+  // is `i64 + i64`.  Only a literal side moves; two named integers of
+  // different width still mismatch.
+  if is_literal_node(r, left):
+    if is_literal_node(r, right) == false:
+      if is_numeric(r, rt):
+        r = fit_literal(r, left, rt)
+        lt = get_expr_type(r, left)
+  else:
+    if is_literal_node(r, right):
+      if is_numeric(r, lt):
+        r = fit_literal(r, right, lt)
+        rt = get_expr_type(r, right)
   let op_tok: Token = r.tc.toks.get(op_tidx)
   let op_name_str: string = tk_name(op_tok.kind)
   if op_name_str == "Plus":
@@ -1502,8 +1543,10 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
         return r
       let ci: i64 = 0
       while ci < args.length():
-        let arg_ti: i64 = get_expr_type(r, args.get(ci))
         let param_ti: i64 = r.type_info.get(callee_type.info_lp + param_offset + ci)
+        // A literal argument adopts the parameter's concrete type (host).
+        r = fit_literal(r, args.get(ci), param_ti)
+        let arg_ti: i64 = get_expr_type(r, args.get(ci))
         if arg_ti >= 0:
           if param_ti >= 0:
             if types_equal(r, arg_ti, param_ti) == false:
@@ -1707,6 +1750,9 @@ fn check_let_stmt(ts: TS, node_idx: i64, name_tidx: i64, type_node: i64, init_no
         r = ts_add_diag(r, sp, "unknown type in annotation")
   if init_node >= 0:
     r = check_expr(r, init_node)
+    // A literal initializer adopts a concrete annotated type (host).
+    if annot_ti >= 0:
+      r = fit_literal(r, init_node, annot_ti)
     let init_ti: i64 = get_expr_type(r, init_node)
     if annot_ti >= 0:
       if init_ti >= 0:
@@ -1799,6 +1845,9 @@ fn check_return_stmt(ts: TS, val_node: i64): TS
         return ts_add_diag(ts, sp, "return with no value in function returning " + type_name(ts, ts.return_type))
     return ts
   let r: TS = check_expr(ts, val_node)
+  // A literal return value adopts the function's concrete return type.
+  if r.return_type >= 0:
+    r = fit_literal(r, val_node, r.return_type)
   let val_ti: i64 = get_expr_type(r, val_node)
   if val_ti >= 0:
     if r.return_type >= 0:

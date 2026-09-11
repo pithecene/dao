@@ -42,7 +42,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 55
+  let total: i32 = 63
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -1112,6 +1112,75 @@ fn main(): i32
         ci_j = ci_j + 1
   else:
     print("FAIL colliding_decl_indices_stay_apart: the fixture declares no colliding methods (a=" + i64_to_string(ci_a_idx) + " b=" + i64_to_string(ci_b_idx) + "); retune it")
+
+  // -----------------------------------------------------------------
+  // Task 41 slice 1: contextual integer-literal typing.
+  // -----------------------------------------------------------------
+
+  // A literal initializer adopts a concrete annotated integer type.
+  let lt1: TypeCheckResult = typecheck("fn f(): i64\n  let x: i64 = 1\n  return x\n")
+  if tc_count_diags(lt1) == 0:
+    print("PASS lit_annotated_i64")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL lit_annotated_i64: " + i64_to_string(tc_count_diags(lt1)) + " diags")
+
+  // `n + 1` with n: i64 fits the literal to i64 — no mismatch, result i64.
+  let lt2: TypeCheckResult = typecheck("fn f(n: i64): i64\n  return n + 1\n")
+  if tc_count_diags(lt2) == 0:
+    print("PASS lit_binary_peer_i64")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL lit_binary_peer_i64: " + i64_to_string(tc_count_diags(lt2)) + " diags")
+
+  // Literal on the left fits the concrete peer on the right too.
+  let lt3: TypeCheckResult = typecheck("fn f(n: i64): i64\n  return 1 + n\n")
+  if tc_count_diags(lt3) == 0:
+    print("PASS lit_binary_peer_left")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL lit_binary_peer_left: " + i64_to_string(tc_count_diags(lt3)) + " diags")
+
+  // A comparison of an i64 value with a literal types clean.
+  let lt4: TypeCheckResult = typecheck("fn f(n: i64): bool\n  return n == 0\n")
+  if tc_count_diags(lt4) == 0:
+    print("PASS lit_compare_i64")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL lit_compare_i64: " + i64_to_string(tc_count_diags(lt4)) + " diags")
+
+  // A literal argument adopts the parameter's concrete type.
+  let lt5: TypeCheckResult = typecheck("fn take(x: i64): i64\n  return x\n\nfn g(): i64\n  return take(1)\n")
+  if tc_count_diags(lt5) == 0:
+    print("PASS lit_call_arg_i64")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL lit_call_arg_i64: " + i64_to_string(tc_count_diags(lt5)) + " diags")
+
+  // `return 0` in an i64 function fits the literal.
+  let lt6: TypeCheckResult = typecheck("fn f(): i64\n  return 0\n")
+  if tc_count_diags(lt6) == 0:
+    print("PASS lit_return_i64")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL lit_return_i64: " + i64_to_string(tc_count_diags(lt6)) + " diags")
+
+  // Two NAMED integers of different width still mismatch — fitting is
+  // not width coercion.
+  let lt7: TypeCheckResult = typecheck("fn f(a: i64, b: i32): i64\n  return a + b\n")
+  if tc_count_diags(lt7) == 1:
+    print("PASS named_width_still_mismatches")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL named_width_still_mismatches: expected 1 diag, got " + i64_to_string(tc_count_diags(lt7)))
+
+  // Absent any concrete context, a literal is still i32.
+  let lt8: TypeCheckResult = typecheck("fn f(): i32\n  let x: i32 = 1\n  return x\n")
+  if tc_count_diags(lt8) == 0:
+    print("PASS lit_default_i32")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL lit_default_i32: " + i64_to_string(tc_count_diags(lt8)) + " diags")
 
   // -----------------------------------------------------------------
   // Summary
