@@ -29,7 +29,7 @@ This has three costs:
 The compiler/test-harness split matters because it changes what the
 audit says blocks Stage 2.  Measured (`docs/bootstrap_closure_split.md`,
 this stack's #302): of the prelude call sites the corpus makes, the
-`print` family — 569 sites, the chain behind the audit's costliest
+`print` family — 564 sites, the chain behind the audit's costliest
 semantic vertical — has **zero** compiler-library call sites.  It is
 entirely test-status reporting.
 
@@ -49,12 +49,18 @@ bootstrap/hir/impl.dao         library only
 bootstrap/hir/tests.dao        the test runner
 bootstrap/mir/impl.dao         library only
 bootstrap/mir/tests.dao        the test runner
-bootstrap/llvm/impl.dao        library only  (backend lowering + closure probe library)
-bootstrap/llvm/tests.dao       the test runner + the closure-probe main()
+bootstrap/llvm/impl.dao        library only  (backend lowering — no probe, no runner)
+bootstrap/llvm/tests.dao       the test runner and the whole closure probe (helpers + main)
 ```
 
 `lexer`, `parser` and `graph` already keep only a `tests.dao`; their
 library is the shared base.  They are unchanged.
+
+The `llvm` closure probe (`closure_probe`, `closure_probe_stage`, their
+helpers, and `main`) sits after the `BEGIN_LLVM_TESTS` marker, so it is
+harness in full: `llvm/impl.dao` is backend lowering only, and the
+entire probe moves to `llvm/tests.dao`.  The probe's own prelude calls
+(for example `eprint`) are therefore harness, not compiler demand.
 
 An `impl.dao` must not contain a test runner.  A `tests.dao` is never
 compiled standalone — it is assembled after the base and every library
