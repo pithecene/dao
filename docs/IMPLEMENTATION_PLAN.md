@@ -816,6 +816,26 @@ concept`, `mode` blocks, generic bounds, `yield`); the audit reports
 them per file rather than the task closing them, and the rerun audit
 names the next task.
 
+### Task 39 — Bootstrap Match-Arm Binding Resolution
+
+Status: **spec** — `docs/task_specs/TASK_39_BOOTSTRAP_MATCH_ARM_BINDINGS.md`;
+chosen by the closure audit rerun on Task 38's head.
+
+**Objective**: with the prelude in the program, the compiler corpus's
+resolve column is one family — `unknown name 'a'`, `'t'`, `'b'`,
+`'c'`, `'lp'` — and those are the names match arms bind
+(`Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp):`).  The bootstrap
+resolver resolves an arm's pattern as an expression, so every binder
+is an unresolved use and so is every mention of it in the arm's body;
+the host declares each binding as a local of the arm's scope
+(`ADR_ENUM_CLASS.md`, "Named destructuring").  Task 39 gives the
+bootstrap those scopes: one shared description of a pattern's shape in
+`shared/base.dao`, read by the resolver — which declares the binders —
+and by the type checker, whose pattern diagnostics are unchanged.  The
+corpus writes 53–458 destructuring arms per program and no `..` or
+`as` arm anywhere, so those two contract forms stay deferred until an
+audit makes one the frontier.
+
 
 ### Task 14 — Numeric Type Expansion
 
