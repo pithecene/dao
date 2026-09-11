@@ -91,7 +91,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 75
+  let total: i32 = 85
 
   // -----------------------------------------------------------------
   // Expression tests
@@ -650,6 +650,68 @@ fn main(): i32
       pass_count = pass_count + 1
     else:
       print("FAIL eq_arg_is_comparison: expected one positional BinaryE argument")
+
+  // -----------------------------------------------------------------
+  // Generic parameter bounds (CONTRACT_SYNTAX_SURFACE.md): `T: C` and
+  // `T: C + D` name the concepts an argument must conform to.  Each
+  // fixture is a complete declaration, so the bound is what is tested.
+  // -----------------------------------------------------------------
+  let gb1: ParseOutput = parse("fn f<T: C>(x: T): T -> x\n")
+  if expect_no_parse_errors_po("generic_bound_single", gb1):
+    pass_count = pass_count + 1
+
+  let gb2: ParseOutput = parse("fn f<T: C + D>(x: T): T -> x\n")
+  if expect_no_parse_errors_po("generic_bound_sum", gb2):
+    pass_count = pass_count + 1
+
+  let gb3: ParseOutput = parse("fn f<T: C, U: D>(x: T, y: U): T -> x\n")
+  if expect_no_parse_errors_po("generic_bound_per_parameter", gb3):
+    pass_count = pass_count + 1
+
+  let gb4: ParseOutput = parse("fn f<T>(x: T): T -> x\n")
+  if expect_no_parse_errors_po("generic_parameter_without_bound", gb4):
+    pass_count = pass_count + 1
+
+  let gb5: ParseOutput = parse("class Box<T: C>:\n  item: T\n")
+  if expect_no_parse_errors_po("generic_bound_on_class", gb5):
+    pass_count = pass_count + 1
+
+  let gb6: ParseOutput = parse("enum class E<T: C>:\n  One(v: T)\n")
+  if expect_no_parse_errors_po("generic_bound_on_enum_class", gb6):
+    pass_count = pass_count + 1
+
+  // A bound may name the parameter it bounds, and a qualified bound
+  // is an ordinary qualified type.
+  let gb7: ParseOutput = parse("fn f<T: C<T>>(x: T): T -> x\n")
+  if expect_no_parse_errors_po("generic_bound_names_its_parameter", gb7):
+    pass_count = pass_count + 1
+
+  let gb8: ParseOutput = parse("fn f<T: m::C>(x: T): T -> x\n")
+  if expect_no_parse_errors_po("generic_bound_qualified", gb8):
+    pass_count = pass_count + 1
+
+  // A missing bound type is diagnosed, and the declaration is not
+  // swallowed whole.
+  let gb9: ParseOutput = parse("fn f<T: >(x: T): T -> x\n")
+  if expect_parse_errors_po("generic_bound_missing_type", gb9, 1):
+    pass_count = pass_count + 1
+
+  // The parameter carries its bounds on the node.
+  let gb10: ParseOutput = parse("fn f<T: C + D>(x: T): T -> x\n")
+  let bounds_ok: bool = false
+  let gi: i64 = 0
+  while gi < gb10.nodes.length():
+    match gb10.nodes.get(gi):
+      Node::GenericParamT(tok, bounds_lp):
+        if bounds_lp >= 0:
+          if read_list(gb10.idx, bounds_lp).length() == 2:
+            bounds_ok = true
+    gi = gi + 1
+  if bounds_ok:
+    print("PASS generic_bound_node_carries_bounds")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL generic_bound_node_carries_bounds: the parameter node carries no two bounds")
 
   print("")
   print("--- results ---")

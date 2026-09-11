@@ -86,16 +86,18 @@ slice of Dao syntax.
 `Type<Args>::member(args)` and `f<Args>(args)` read with the host's
 rule, the type arguments carried on `CallE` (Task 36); `resource <kind>
 <name> =>` blocks and their suites (Task 37); named call arguments
-(`f(name = expr)`), the names carried on `CallE` beside the arguments
+(`f(name = expr)`), the names carried on `CallE` beside the arguments;
+generic parameter bounds — `T: C` and `T: C + D` on a `fn`, `class`,
+or `enum class`, the bound types carried on `GenericParamT` (Task 40)
 
 **Tier B deferrals** (explicitly not supported yet):
 
-- `concept`, `derived concept`, `extend`
+- `derived concept` (`concept` and `extend` parse)
 - Class methods and conformance blocks
 - `mode` blocks
 - `yield`
 - Function types (`fn(T): R`)
-- Generic parameter bounds and `where` clauses
+- `where` clauses; conformance checking of a bound
 - `import` declarations
 - Pipe continuation across newlines
 

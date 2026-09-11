@@ -10,38 +10,38 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 73759 |
-| `CallExpr` | 24602 |
-| `Callee` | 24602 |
-| `Args` | 22065 |
-| `FieldExpr` | 16486 |
-| `BinaryExpr` | 11388 |
-| `LetStatement` | 10731 |
-| `Value` | 8452 |
-| `Target` | 8452 |
-| `Assignment` | 8452 |
-| `IntLiteral` | 8427 |
-| `Condition` | 6994 |
-| `QualifiedName` | 6289 |
-| `Then` | 5689 |
-| `IfStatement` | 5689 |
-| `ReturnStatement` | 5628 |
-| `StringLiteral` | 5028 |
-| `Param` | 3903 |
-| `BoolLiteral` | 2771 |
-| `Pattern` | 2701 |
-| `Arm` | 2701 |
-| `ReturnType` | 1676 |
-| `FunctionDecl` | 1676 |
-| `Else` | 1328 |
-| `WhileStatement` | 1305 |
+| `Identifier` | 74349 |
+| `CallExpr` | 24816 |
+| `Callee` | 24816 |
+| `Args` | 22262 |
+| `FieldExpr` | 16591 |
+| `BinaryExpr` | 11467 |
+| `LetStatement` | 10816 |
+| `Value` | 8530 |
+| `Target` | 8530 |
+| `Assignment` | 8530 |
+| `IntLiteral` | 8481 |
+| `Condition` | 7054 |
+| `QualifiedName` | 6306 |
+| `Then` | 5733 |
+| `IfStatement` | 5733 |
+| `ReturnStatement` | 5644 |
+| `StringLiteral` | 5069 |
+| `Param` | 3927 |
+| `BoolLiteral` | 2801 |
+| `Pattern` | 2702 |
+| `Arm` | 2702 |
+| `ReturnType` | 1684 |
+| `FunctionDecl` | 1684 |
+| `Else` | 1343 |
+| `WhileStatement` | 1321 |
 | `Variant` | 1181 |
-| `UnaryExpr` | 1144 |
+| `UnaryExpr` | 1152 |
 | `Field` | 1138 |
-| `TypeArgs` | 1024 |
-| `Scrutinee` | 670 |
-| `MatchStatement` | 670 |
-| `ExpressionStatement` | 586 |
+| `TypeArgs` | 1032 |
+| `Scrutinee` | 671 |
+| `MatchStatement` | 671 |
+| `ExpressionStatement` | 598 |
 | `ClassDecl` | 264 |
 | `BreakStatement` | 64 |
 | `ResourceBlock` | 42 |
@@ -234,14 +234,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 55 | 0 | 0 | 0 | 29 | 467 | 0 | 21 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 57 | 0 | 0 | 0 | 52 | 397 | 0 | 38 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 58 | 1 | 0 | 0 | 38 | 437 | 0 | 21 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 126 | 1 | 0 | 0 | 131 | 757 | 0 | 71 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 222 | 1 | 0 | 0 | 133 | 1166 | 0 | 153 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 330 | 2 | 0 | 0 | 80 | 1353 | 0 | 191 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 336 | 2 | 0 | 0 | 35 | 1318 | 0 | 241 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 451 | 2 | 0 | 0 | 68 | 1395 | 0 | 312 | — | resolve: unknown name 'print'; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 54 | 0 | 0 | 0 | 0 | 498 | 0 | 21 | — | typecheck: constructor arity mismatch: expected 7 fields, got 0; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 58 | 1 | 0 | 0 | 0 | 456 | 0 | 39 | — | typecheck: constructor arity mismatch: expected 7 fields, got 0; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 57 | 1 | 0 | 0 | 0 | 477 | 0 | 21 | — | typecheck: constructor arity mismatch: expected 7 fields, got 0; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 127 | 1 | 0 | 0 | 0 | 915 | 0 | 71 | — | typecheck: constructor arity mismatch: expected 7 fields, got 0; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 225 | 1 | 0 | 0 | 0 | 1304 | 0 | 153 | — | typecheck: constructor arity mismatch: expected 7 fields, got 0; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 325 | 2 | 0 | 0 | 0 | 1438 | 0 | 191 | — | typecheck: constructor arity mismatch: expected 7 fields, got 0; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 338 | 2 | 0 | 0 | 0 | 1358 | 0 | 241 | — | typecheck: constructor arity mismatch: expected 7 fields, got 0; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 453 | 2 | 0 | 0 | 0 | 1468 | 0 | 312 | — | typecheck: constructor arity mismatch: expected 7 fields, got 0; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 
@@ -251,7 +251,6 @@ named, not inferred.
 
 **lexer**
 
-- `resolve` ×29: unknown name 'print'
 - `typecheck` ×28: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
@@ -263,19 +262,17 @@ named, not inferred.
 
 **parser**
 
-- `resolve` ×50: unknown name 'print'
 - `typecheck` ×28: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
 - `typecheck` ×4: unknown type in annotation
 - `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `mir` ×29: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×30: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 - `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `mir` ×1: unsupported assignment target
 
 **graph**
 
-- `resolve` ×38: unknown name 'print'
 - `typecheck` ×28: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
@@ -287,7 +284,6 @@ named, not inferred.
 
 **resolver**
 
-- `resolve` ×50: unknown name 'print'
 - `typecheck` ×28: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
@@ -299,7 +295,6 @@ named, not inferred.
 
 **typecheck**
 
-- `resolve` ×50: unknown name 'print'
 - `typecheck` ×28: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
@@ -311,7 +306,6 @@ named, not inferred.
 
 **hir**
 
-- `resolve` ×50: unknown name 'print'
 - `typecheck` ×28: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
@@ -323,7 +317,6 @@ named, not inferred.
 
 **mir**
 
-- `resolve` ×35: unknown name 'print'
 - `typecheck` ×28: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
@@ -335,7 +328,6 @@ named, not inferred.
 
 **llvm**
 
-- `resolve` ×50: unknown name 'print'
 - `typecheck` ×28: type mismatch in '+': i64 vs i32
 - `typecheck` ×8: type mismatch: cannot assign i32 to i64
 - `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
@@ -366,13 +358,13 @@ diagnostics per stage, and the first.
 | `stdlib/core/diagnostic.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/equatable.dao` | 1 | 0 | 12 | expected declaration (fn, extern, class, enum, type, concept, or extend) |
 | `stdlib/core/hashmap.dao` | 122 | 23 | 47 | expected expression |
-| `stdlib/core/math.dao` | 118 | 0 | 0 | expected Gt, got Colon |
+| `stdlib/core/math.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/memory.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/numeric.dao` | 0 | 0 | 10 | extend method 'less_than' param 1 has type i8, concept requires <unresolved> |
 | `stdlib/core/option.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/overflow.dao` | 0 | 0 | 46 | return type mismatch: expected void, got Option |
 | `stdlib/core/panic.dao` | 0 | 0 | 0 | — |
-| `stdlib/core/printable.dao` | 24 | 0 | 12 | expected declaration (fn, extern, class, enum, type, concept, or extend) |
+| `stdlib/core/printable.dao` | 1 | 0 | 12 | expected declaration (fn, extern, class, enum, type, concept, or extend) |
 | `stdlib/core/range.dao` | 4 | 2 | 0 | expected expression |
 | `stdlib/core/result.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/span.dao` | 0 | 0 | 0 | — |
@@ -397,14 +389,14 @@ next.  Sites per program against the parse column above:
 
 | Program | `Type<Args>::` sites | `resource` blocks | parse diagnostics |
 |---|---|---|---|
-| lexer | 60 | 0 | 0 |
-| parser | 65 | 0 | 0 |
-| graph | 71 | 0 | 0 |
-| resolver | 120 | 0 | 0 |
-| typecheck | 152 | 0 | 0 |
-| hir | 165 | 4 | 0 |
-| mir | 181 | 10 | 0 |
-| llvm | 219 | 28 | 0 |
+| lexer | 61 | 0 | 0 |
+| parser | 66 | 0 | 0 |
+| graph | 72 | 0 | 0 |
+| resolver | 121 | 0 | 0 |
+| typecheck | 153 | 0 | 0 |
+| hir | 166 | 4 | 0 |
+| mir | 182 | 10 | 0 |
+| llvm | 220 | 28 | 0 |
 
 ## 4. Reading the matrix
 

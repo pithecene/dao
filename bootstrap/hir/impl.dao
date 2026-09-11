@@ -675,7 +675,9 @@ fn lower_type_params(hs: HS, ast_tparams_lp: i64): HirFlush
     if tp_node_idx >= 0:
       let tp_node: Node = hs.nodes.get(tp_node_idx)
       match tp_node:
-        Node::GenericParamT(tidx):
+        Node::GenericParamT(tidx, bounds_lp):
+          // A bound is a conformance obligation, the type checker's
+          // later; HIR carries the parameter's name as it always has.
           tok_indices = tok_indices.push(tidx)
     i = i + 1
   if tok_indices.length() == 0:

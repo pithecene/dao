@@ -638,10 +638,19 @@ fn resolve_type_params(rs: RS, tparams_lp: i64, node_idx: i64): RS
     let tp_node_idx: i64 = tparams.get(i)
     let tp_node: Node = r.rc.nodes.get(tp_node_idx)
     match tp_node:
-      Node::GenericParamT(tidx):
+      Node::GenericParamT(tidx, bounds_lp):
+        // The parameter is declared before its bounds resolve, as the
+        // host's `declare_type_params` has it, so a bound may name the
+        // parameter it bounds (`T: C<T>`).
         let tname: string = tok_name(r, tidx)
         let sym_r: SymR = rs_add_symbol(r, Symbol(SymbolKind::GenericParam, tname, node_idx, r.current_scope, r.owner_module_id))
         r = scope_declare(sym_r.rs, tname, sym_r.sym_idx, tidx)
+        if bounds_lp >= 0:
+          let bounds: Vector<i64> = read_list(r.rc.idx_data, bounds_lp)
+          let bi: i64 = 0
+          while bi < bounds.length():
+            r = resolve_type_node(r, bounds.get(bi))
+            bi = bi + 1
     i = i + 1
   return r
 
@@ -1450,7 +1459,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 57
+  let total: i32 = 61
 
   // -----------------------------------------------------------------
   // Test 1: forward_ref — fn calls fn defined later in file; no diagnostic
@@ -2447,6 +2456,76 @@ fn main(): i32
     while mj < ma_r.diags.length():
       print("  diag: " + ma_r.diags.get(mj).path + ": " + ma_r.diags.get(mj).diag.message)
       mj = mj + 1
+
+  // -----------------------------------------------------------------
+  // Generic parameter bounds (Task 40): a bound is a type of the
+  // declaration's scope; the parameter is declared before its bounds
+  // resolve, as the host's `declare_type_params` has it.
+  // -----------------------------------------------------------------
+
+  // Test 58: a bounded declaration is declared and callable, and the
+  // bound's name records a use.
+  let src58: string = "concept C:\n  fn show(self): string\n\nfn f<T: C>(x: T): T\n  return x\n\nfn g(n: i32): i32\n  return f(n)\n"
+  let r58: ResolveResult = resolve(src58)
+  let bound_used: bool = false
+  let u58: i64 = 0
+  while u58 < r58.uses.length():
+    let s58: i64 = r58.uses.get(u58 + 1)
+    if s58 >= 0:
+      if r58.symbols.get(s58).name == "C":
+        bound_used = true
+    u58 = u58 + 2
+  if count_diags(r58) == 0:
+    if bound_used:
+      print("PASS generic_bound_resolves")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL generic_bound_resolves: the bound recorded no use")
+  else:
+    print("FAIL generic_bound_resolves: " + i64_to_string(count_diags(r58)) + " diagnostics")
+
+  // Test 59: an unresolved unqualified bound leaves the declaration
+  // intact and says nothing, as every unresolved type name does.
+  let src59: string = "fn f<T: Missing>(x: T): T\n  return x\n\nfn g(n: i32): i32\n  return f(n)\n"
+  let r59: ResolveResult = resolve(src59)
+  if count_diags(r59) == 0:
+    print("PASS generic_bound_unresolved_is_silent")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL generic_bound_unresolved_is_silent: " + i64_to_string(count_diags(r59)) + " diagnostics")
+
+  // Test 60: a qualified bound whose module is unknown diagnoses its
+  // head, as `let p: missing::Point` does — the behavior is pinned.
+  let src60: string = "fn f<T: missing::C>(x: T): T\n  return x\n"
+  let r60: ResolveResult = resolve(src60)
+  if count_diags(r60) == 1:
+    print("PASS generic_bound_qualified_diagnoses_its_head")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL generic_bound_qualified_diagnoses_its_head: expected 1 diagnostic, got " + i64_to_string(count_diags(r60)))
+
+  // Test 61: a bound may name the parameter it bounds — the parameter
+  // is declared first, so the inner `T` reaches it.
+  let src61: string = "concept C:\n  fn show(self): string\n\nfn f<T: C<T>>(x: T): T\n  return x\n"
+  let r61: ResolveResult = resolve(src61)
+  let inner_ok: bool = false
+  let u61: i64 = 0
+  while u61 < r61.uses.length():
+    let s61: i64 = r61.uses.get(u61 + 1)
+    if s61 >= 0:
+      let sym61: Symbol = r61.symbols.get(s61)
+      if sym61.name == "T":
+        if symbol_kind_name(sym61.kind) == "GenericParam":
+          inner_ok = true
+    u61 = u61 + 2
+  if count_diags(r61) == 0:
+    if inner_ok:
+      print("PASS generic_bound_names_its_parameter")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL generic_bound_names_its_parameter: the inner T reached no parameter")
+  else:
+    print("FAIL generic_bound_names_its_parameter: " + i64_to_string(count_diags(r61)) + " diagnostics")
 
   // -----------------------------------------------------------------
   // Summary

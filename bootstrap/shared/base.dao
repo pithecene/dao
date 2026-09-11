@@ -789,7 +789,7 @@ enum class Node:
   NamedT(tok: i64)
   GenericT(name: i64, args_lp: i64, arg_count: i64)
   PointerT(inner: i64)
-  GenericParamT(tok: i64)
+  GenericParamT(tok: i64, bounds_lp: i64)
   ErrorT(tok: i64)
   // --- Statements ---
   LetS(name: i64, typ: i64, init: i64)
@@ -1910,6 +1910,31 @@ fn parse_declaration(pc: PC, ps: PS): PR
 
 // Parse optional type parameters: <T, U, V> — returns PR where .node = list_pos
 // Returns -1 if no type params are present.
+// A generic parameter's bounds: `T: C` and `T: C + D` name the
+// concepts the argument must conform to (CONTRACT_SYNTAX_SURFACE.md).
+// Conformance is the type checker's, later; the parser reads the
+// types and the parameter carries them.  `ps` sits just past the
+// parameter's name token `name_tidx`.
+fn parse_type_param_bounds(pc: PC, ps: PS, name_tidx: i64): PR
+  if tk_name(peek_kind(pc, ps)) != tk_name(TK::Colon):
+    return ps_add_node(ps, Node::GenericParamT(tok = name_tidx, bounds_lp = to_i64(-1)))
+  let cur: PS = ps_advance(pc, ps)
+  let bounds: Vector<i64> = Vector<i64>::new()
+  let first: PR = parse_type(pc, cur)
+  bounds = bounds.push(first.node)
+  cur = first.ps
+  let done: bool = false
+  while done == false:
+    if tk_name(peek_kind(pc, cur)) == tk_name(TK::Plus):
+      cur = ps_advance(pc, cur)
+      let more: PR = parse_type(pc, cur)
+      bounds = bounds.push(more.node)
+      cur = more.ps
+    else:
+      done = true
+  let fl: FlushResult = flush_list(cur, bounds)
+  return ps_add_node(fl.ps, Node::GenericParamT(tok = name_tidx, bounds_lp = fl.list_pos))
+
 fn parse_type_params(pc: PC, ps: PS): PR
   if tk_name(peek_kind(pc, ps)) != tk_name(TK::Lt):
     return PR(ps, to_i64(-1))
@@ -1919,7 +1944,7 @@ fn parse_type_params(pc: PC, ps: PS): PR
   if tk_name(peek_kind(pc, ps2)) == tk_name(TK::Identifier):
     let tidx: i64 = ps2.pos
     let ps3: PS = ps_advance(pc, ps2)
-    let gp: PR = ps_add_node(ps3, Node::GenericParamT(tok = tidx))
+    let gp: PR = parse_type_param_bounds(pc, ps3, tidx)
     collected = collected.push(gp.node)
     let cur: PS = gp.ps
     let done: bool = false
@@ -1928,7 +1953,7 @@ fn parse_type_params(pc: PC, ps: PS): PR
         cur = ps_advance(pc, cur)
         let tidx2: i64 = cur.pos
         cur = expect(pc, cur, TK::Identifier)
-        let gp2: PR = ps_add_node(cur, Node::GenericParamT(tok = tidx2))
+        let gp2: PR = parse_type_param_bounds(pc, cur, tidx2)
         collected = collected.push(gp2.node)
         cur = gp2.ps
       else:
@@ -2594,7 +2619,7 @@ fn node_kind_name(n: Node): string
       return "GenericT"
     Node::PointerT(a):
       return "PointerT"
-    Node::GenericParamT(t):
+    Node::GenericParamT(t, blp):
       return "GenericParamT"
     Node::ErrorT(t):
       return "ErrorT"
