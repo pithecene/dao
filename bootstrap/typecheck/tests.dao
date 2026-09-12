@@ -42,7 +42,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 63
+  let total: i32 = 66
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -1181,6 +1181,37 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL lit_default_i32: " + i64_to_string(tc_count_diags(lt8)) + " diags")
+
+  // -----------------------------------------------------------------
+  // Task 41 slice 2: static / factory method calls (Type::method).
+  // -----------------------------------------------------------------
+
+  // A static factory `Cell::new()` types clean and is not read as
+  // zero-argument construction of the 1-field Cell.
+  let sf1: TypeCheckResult = typecheck("class Cell:\n  n: i32\n  fn new(): Cell\n    return Cell(0)\n\nfn f(): i32\n  let c: Cell = Cell::new()\n  return 0\n")
+  if tc_count_diags(sf1) == 0:
+    print("PASS static_factory_new")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL static_factory_new: " + i64_to_string(tc_count_diags(sf1)) + " diags")
+
+  // A static method with a parameter checks its argument (and fits a
+  // literal to the parameter type).
+  let sf2: TypeCheckResult = typecheck("class Cell:\n  n: i64\n  fn of(v: i64): Cell\n    return Cell(v)\n\nfn f(): i32\n  let c: Cell = Cell::of(1)\n  return 0\n")
+  if tc_count_diags(sf2) == 0:
+    print("PASS static_method_arg")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL static_method_arg: " + i64_to_string(tc_count_diags(sf2)) + " diags")
+
+  // The factory'"'"'s return type flows: assigning `Cell::new()` to a
+  // wrongly-typed local still diagnoses (the result is a Cell).
+  let sf3: TypeCheckResult = typecheck("class Cell:\n  n: i32\n  fn new(): Cell\n    return Cell(0)\n\nfn f(): i32\n  let x: i32 = Cell::new()\n  return x\n")
+  if tc_count_diags(sf3) == 1:
+    print("PASS static_factory_return_type_flows")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL static_factory_return_type_flows: expected 1 diag, got " + i64_to_string(tc_count_diags(sf3)))
 
   // -----------------------------------------------------------------
   // Summary
