@@ -763,10 +763,11 @@ fn lex(src: string): LexResult
 // Single arena enum with all node kinds. Children referenced by index
 // into nodes vector. Variable-length children use a shared idx list.
 //
-// Tier B deferrals: mode, yield, function types, `where` clauses.
+// Tier B deferrals: function types (fn(T): R as a type), `where` clauses.
 // (GenericParamT with its concept bounds, `derived concept`, concept,
-// extend, and resource are parsed; generic parameter bounds `<T: A + B>`
-// are preserved on GenericParamT and resolved.)
+// extend, resource, `mode` blocks, and `yield` are parsed and preserved;
+// generic parameter bounds `<T: A + B>` are resolved; mode/yield are
+// carried into HIR fail-closed, rejected at MIR in Tier A.)
 
 enum class Node:
   // --- Expressions ---
@@ -802,6 +803,11 @@ enum class Node:
   IfS(cond: i64, then_lp: i64, else_lp: i64)
   WhileS(cond: i64, body_lp: i64)
   ResourceS(kind: i64, name: i64, body_lp: i64)
+  // `mode <name> =>` block (host ModeBlock).  Parsed, preserved, and
+  // carried into HIR fail-closed; lowering waits for a later task.
+  ModeS(name: i64, body_lp: i64)
+  // `yield <expr>` (host YieldStatement).  Same fail-closed posture.
+  YieldS(value: i64)
   ForS(var_tok: i64, iter: i64, body_lp: i64)
   ReturnS(value: i64)
   BreakS(tok: i64)
@@ -1653,6 +1659,10 @@ fn parse_statement(pc: PC, ps: PS): PR
     return parse_match_stmt(pc, ps)
   if tk_name(k) == tk_name(TK::KwResource):
     return parse_resource_stmt(pc, ps)
+  if tk_name(k) == tk_name(TK::KwMode):
+    return parse_mode_stmt(pc, ps)
+  if tk_name(k) == tk_name(TK::KwYield):
+    return parse_yield_stmt(pc, ps)
 
   // Expression or assignment
   let expr: PR = parse_expr(pc, ps)
@@ -1769,6 +1779,26 @@ fn parse_resource_stmt(pc: PC, ps: PS): PR
   let ps5: PS = expect(pc, ps4, TK::FatArrow)
   let body: PR = parse_suite(pc, ps5)
   return ps_add_node(body.ps, Node::ResourceS(kind = kind_tidx, name = name_tidx, body_lp = body.node))
+
+// `mode <name> =>` and its suite (host `parse_mode_block`).  The mode
+// name is preserved; the body is a block.
+fn parse_mode_stmt(pc: PC, ps: PS): PR
+  let ps2: PS = ps_advance(pc, ps)          // consume 'mode'
+  let name_tidx: i64 = ps2.pos
+  let ps3: PS = expect(pc, ps2, TK::Identifier)
+  let ps4: PS = expect(pc, ps3, TK::FatArrow)
+  let body: PR = parse_suite(pc, ps4)
+  return ps_add_node(body.ps, Node::ModeS(name = name_tidx, body_lp = body.node))
+
+// `yield <expr>` (host `parse_yield_statement`).  The value is preserved.
+fn parse_yield_stmt(pc: PC, ps: PS): PR
+  let ps2: PS = ps_advance(pc, ps)          // consume 'yield'
+  let val: PR = parse_expr(pc, ps2)
+  if val.node < 0:
+    let psr: PS = sync_to_stmt(pc, val.ps)
+    return ps_add_node(psr, Node::ErrorS(tok = ps.pos))
+  let ps3: PS = match_tok(pc, val.ps, TK::Newline)
+  return ps_add_node(ps3, Node::YieldS(value = val.node))
 
 fn parse_for_stmt(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
@@ -2594,6 +2624,10 @@ fn node_kind_name(n: Node): string
       return "WhileS"
     Node::ResourceS(a, b, c):
       return "ResourceS"
+    Node::ModeS(a, b):
+      return "ModeS"
+    Node::YieldS(a):
+      return "YieldS"
     Node::ForS(a, b, c):
       return "ForS"
     Node::ReturnS(a):

@@ -43,6 +43,10 @@ enum class HirNode:
   HirIf(cond: i64, then_lp: i64, else_lp: i64)
   HirWhile(cond: i64, body_lp: i64)
   HirResource(kind: i64, name: i64, body_lp: i64)
+  // `mode` block and `yield` carried fail-closed: preserved through HIR,
+  // rejected at MIR (Tier A) rather than silently erased.
+  HirMode(name: i64, body_lp: i64)
+  HirYield(value: i64)
   HirFor(var_name: i64, iter: i64, body_lp: i64)
   HirReturn(value: i64)
   HirBreak(tok: i64)
@@ -498,6 +502,14 @@ fn lower_stmt(hs: HS, node_idx: i64): HirR
     Node::ResourceS(kind_tidx, name_tidx, body_lp):
       let body_fl: HirFlush = lower_body_stmts(hs, body_lp)
       return hs_add_node(body_fl.hs, HirNode::HirResource(kind = kind_tidx, name = name_tidx, body_lp = body_fl.list_pos))
+    Node::ModeS(name_tidx, body_lp):
+      let mode_body_fl: HirFlush = lower_body_stmts(hs, body_lp)
+      return hs_add_node(mode_body_fl.hs, HirNode::HirMode(name = name_tidx, body_lp = mode_body_fl.list_pos))
+    Node::YieldS(val_node):
+      if val_node < 0:
+        return hs_add_node(hs, HirNode::HirYield(value = to_i64(-1)))
+      let yr: HirR = lower_expr(hs, val_node)
+      return hs_add_node(yr.hs, HirNode::HirYield(value = yr.hir))
     Node::ForS(var_tidx, iter_node, body_lp):
       return lower_for_stmt(hs, var_tidx, iter_node, body_lp)
     Node::ReturnS(val_node):
@@ -1179,6 +1191,10 @@ fn hir_node_kind(node: HirNode): string
       return "HirWhile"
     HirNode::HirResource(a, b, c):
       return "HirResource"
+    HirNode::HirMode(a, b):
+      return "HirMode"
+    HirNode::HirYield(a):
+      return "HirYield"
     HirNode::HirFor(a, b, c):
       return "HirFor"
     HirNode::HirReturn(a):
@@ -1351,6 +1367,22 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
       while ri < rbody.length():
         line = line + hir_dump_node(hr, rbody.get(ri), indent + 1)
         ri = ri + 1
+      return line
+    HirNode::HirMode(name_tidx, body_lp):
+      let mode_tok: Token = hr.toks.get(name_tidx)
+      line = line + " " + substring(hr.src, mode_tok.offset, mode_tok.len) + "\n"
+      let mbody: Vector<i64> = read_list(hr.hir_idx, body_lp)
+      let mi: i64 = 0
+      while mi < mbody.length():
+        line = line + hir_dump_node(hr, mbody.get(mi), indent + 1)
+        mi = mi + 1
+      return line
+    HirNode::HirYield(val):
+      if val >= 0:
+        line = line + "\n"
+        line = line + hir_dump_node(hr, val, indent + 1)
+        return line
+      line = line + "\n"
       return line
     HirNode::HirFor(var_tidx, iter, body_lp):
       line = line + "\n"

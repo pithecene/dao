@@ -89,7 +89,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 59
+  let total: i32 = 61
 
   // -----------------------------------------------------------------
   // Test 1: forward_ref — fn calls fn defined later in file; no diagnostic
@@ -1120,6 +1120,32 @@ fn main(): i32
     print("FAIL derived_concept_resolves: expected 0 diagnostics, got " + i64_to_string(r_dc_diags))
 
   // -----------------------------------------------------------------
+  // Test: mode_block_resolves — a `mode <name> =>` block body resolves
+  // in a fresh block scope (outer locals visible), no diagnostic.
+  // -----------------------------------------------------------------
+  let src_mode: string = "fn f(): i64\n  let n: i64 = 0\n  mode unsafe =>\n    n = 1\n  return n\n"
+  let r_mode: ResolveResult = resolve(src_mode)
+  let r_mode_diags: i64 = count_diags(r_mode)
+  if r_mode_diags == 0:
+    print("PASS mode_block_resolves")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL mode_block_resolves: expected 0 diagnostics, got " + i64_to_string(r_mode_diags))
+
+  // -----------------------------------------------------------------
+  // Test: yield_value_resolves — a `yield <expr>` resolves its value
+  // against the visible scope, no diagnostic.
+  // -----------------------------------------------------------------
+  let src_yld: string = "fn g(): i64\n  let x: i64 = 1\n  yield x\n  return 0\n"
+  let r_yld: ResolveResult = resolve(src_yld)
+  let r_yld_diags: i64 = count_diags(r_yld)
+  if r_yld_diags == 0:
+    print("PASS yield_value_resolves")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL yield_value_resolves: expected 0 diagnostics, got " + i64_to_string(r_yld_diags))
+
+  // -----------------------------------------------------------------
   // Summary
   // -----------------------------------------------------------------
 
@@ -1140,8 +1166,8 @@ fn main(): i32
   //     scope; conformance enforcement at instantiation is a later slice)
   //   - Concept / extend conformance validation (parsing and symbol
   //     registration is implemented; conformance checking is deferred)
-  //   - Mode block scoping (a resource block's body is a block scope)
-  //   - Yield statement resolution
+  //   - Yield-in-generator legality (a `yield` value resolves; whether the
+  //     enclosing function is a generator is a later semantic slice)
   //   - Match arm `..` (rest) and `as` (whole-variant) forms
   //   - Cross-file / module resolution
 
