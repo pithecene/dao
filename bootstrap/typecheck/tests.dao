@@ -61,7 +61,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 68
+  let total: i32 = 72
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -1198,6 +1198,20 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL static_call_respects_type_shadowing: local Box::make borrowed the prelude's static method (0 diagnostics in main.dao)")
+
+  // -----------------------------------------------------------------
+  // A unary-negated literal fits its context like a bare literal, and a
+  // literal fits a match arm's scrutinee type and a pipe target's first
+  // parameter.
+  // -----------------------------------------------------------------
+  if tc_expect_clean("negated_literal_fits_return", "fn f(): i64\n  return -1\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("negated_literal_fits_annotation", "fn f(): i64\n  let x: i64 = -1\n  return x\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("literal_pattern_fits_scrutinee", "fn f(): i32\n  let n: i64 = 5\n  match n:\n    0:\n      return 0\n  return 1\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("literal_fits_pipe_target_param", "fn take(x: i64): i64\n  return x\n\nfn g(): i64\n  let r: i64 = 1 |> take\n  return r\n"):
+    pass_count = pass_count + 1
 
   // -----------------------------------------------------------------
   // Summary
