@@ -1244,19 +1244,26 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
           Option::None:
             let vsp: Span = ts_tok_span(ts, variant_tidx)
             return ts_add_diag(ts, vsp, "'" + variant_name + "' is not a variant of enum '" + head_type.name + "'")
-    // `Type::method` is a static/factory method reference when the
-    // type declares a method of that name (mangled `Type.method`):
-    // e.g. `Builder::new()`, `Vector<T>::new()`.  Type the qualified
-    // name as the method's function type so the call checks against
-    // the method signature and yields its return type, rather than
-    // reading as zero-argument construction of the type.
+    // `Type::method` is a static/factory method reference when the type
+    // declares a method of that name (mangled `Type.method`): e.g.
+    // `Builder::new()`, `Vector<T>::new()`.  Type the qualified name as
+    // the method's function type so the call checks against the method
+    // signature and yields its return type, rather than reading as
+    // zero-argument construction of the type.  The method must belong to
+    // the resolved type, not a same-named type further out: a module's
+    // own `Box` shadows the prelude's, so `Box::make` must miss the
+    // prelude's method when the local `Box` declares none (the host
+    // resolver binds `Type::method` only where the method's module
+    // matches the type's — resolve.cpp).
     let member_name: string = ts_tok_name(ts, segs.get(1))
     let mangled: string = head_type.name + "." + member_name
-    let msym: i64 = find_visible_method_sym(ts.tc.symbols, mangled, ts.tc.module_id)
-    if msym >= 0:
-      let mti: i64 = vec_i64_get(ts.sym_types, msym)
-      if mti >= 0:
-        return ts_set_expr_type(ts, node_idx, mti)
+    let type_owner: i64 = type_owner_module(ts.tc.symbols, head_type.decl_node)
+    if type_owner >= 0:
+      let msym: i64 = find_inherent_method_sym(ts.tc.symbols, mangled, type_owner)
+      if msym >= 0:
+        let mti: i64 = vec_i64_get(ts.sym_types, msym)
+        if mti >= 0:
+          return ts_set_expr_type(ts, node_idx, mti)
   return ts_set_expr_type(ts, node_idx, ti)
 
 fn get_expr_type(ts: TS, node_idx: i64): i64
@@ -1811,6 +1818,10 @@ fn check_assign_stmt(ts: TS, node_idx: i64, target: i64, value: i64): TS
     let sp: Span = ts_node_span(r, target)
     r = ts_add_diag(r, sp, "invalid assignment target: expected identifier, field, or index expression")
   let target_ti: i64 = get_expr_type(r, target)
+  // A literal value adopts the assignment target's concrete type (host
+  // `check_assignment` checks the value against the target as expected).
+  if target_ti >= 0:
+    r = fit_literal(r, value, target_ti)
   let value_ti: i64 = get_expr_type(r, value)
   if target_ti >= 0:
     if value_ti >= 0:
