@@ -91,7 +91,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 75
+  let total: i32 = 78
 
   // -----------------------------------------------------------------
   // Expression tests
@@ -425,6 +425,24 @@ fn main(): i32
   if expect_no_parse_errors_po("generic_class_no_err", r35):
     pass_count = pass_count + 1
 
+  // Test 35a: Bounded type parameter — fn foo<T: Printable>(x: T): T
+  let src35a: string = "fn foo<T: Printable>(x: T): T\n  return x\n"
+  let r35a: ParseOutput = parse(src35a)
+  if expect_no_parse_errors_po("generic_fn_bound_no_err", r35a):
+    pass_count = pass_count + 1
+
+  // Test 35b: Multiple bounds — fn foo<T: A + B>(x: T): T
+  let src35b: string = "fn foo<T: A + B>(x: T): T\n  return x\n"
+  let r35b: ParseOutput = parse(src35b)
+  if expect_no_parse_errors_po("generic_fn_multibound_no_err", r35b):
+    pass_count = pass_count + 1
+
+  // Test 35c: Bounded class parameter — class Box<T: Printable>
+  let src35c: string = "class Box<T: Printable>:\n  value: T\n"
+  let r35c: ParseOutput = parse(src35c)
+  if expect_no_parse_errors_po("generic_class_bound_no_err", r35c):
+    pass_count = pass_count + 1
+
   // -----------------------------------------------------------------
   // Method tests
   // -----------------------------------------------------------------
@@ -665,7 +683,8 @@ fn main(): i32
   //   - mode blocks
   //   - yield statements
   //   - function types (fn(T): R as a type)
-  //   - generic parameter bounds / where clauses
+  //   - `where` clauses (generic parameter bounds `<T: A + B>` now parse
+  //     and are preserved on GenericParamT; `where` clauses stay deferred)
   //   - call-site type arguments on a field access (`obj.method<T>(..)`)
   //   - import declarations
   //   - pipe continuation across newlines with INDENT/DEDENT

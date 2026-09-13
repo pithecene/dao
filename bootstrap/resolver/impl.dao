@@ -646,6 +646,27 @@ fn resolve_stmt(rs: RS, node_idx: i64): RS
 // Section 27: Declaration resolution (Pass 2)
 // =========================================================================
 
+// Resolve a type parameter's concept bounds.  Each bound names a concept;
+// record a use of the bound name that resolves in scope, exactly as
+// `extend Type as Concept` resolves its concept name (reusing the same
+// machinery).  A bound whose concept does not resolve here is left for a
+// later cross-module pass (Task 42), as the extend path does — the bound
+// is preserved in the AST regardless, never erased.
+fn resolve_generic_bounds(rs: RS, bounds_lp: i64): RS
+  if bounds_lp < 0:
+    return rs
+  let bounds: Vector<i64> = read_list(rs.rc.idx_data, bounds_lp)
+  let r: RS = rs
+  let i: i64 = 0
+  while i < bounds.length():
+    let btidx: i64 = bounds.get(i)
+    let bname: string = tok_name(r, btidx)
+    let bsym: i64 = scope_lookup(r, bname)
+    if bsym >= 0:
+      r = rs_add_use(r, btidx, bsym)
+    i = i + 1
+  return r
+
 fn resolve_type_params(rs: RS, tparams_lp: i64, node_idx: i64): RS
   if tparams_lp < 0:
     return rs
@@ -656,10 +677,11 @@ fn resolve_type_params(rs: RS, tparams_lp: i64, node_idx: i64): RS
     let tp_node_idx: i64 = tparams.get(i)
     let tp_node: Node = r.rc.nodes.get(tp_node_idx)
     match tp_node:
-      Node::GenericParamT(tidx):
+      Node::GenericParamT(tidx, bounds_lp):
         let tname: string = tok_name(r, tidx)
         let sym_r: SymR = rs_add_symbol(r, Symbol(SymbolKind::GenericParam, tname, node_idx, r.current_scope, r.owner_module_id))
         r = scope_declare(sym_r.rs, tname, sym_r.sym_idx, tidx)
+        r = resolve_generic_bounds(r, bounds_lp)
     i = i + 1
   return r
 
