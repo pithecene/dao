@@ -118,7 +118,7 @@ fn vec_i64_get(v: Vector<i64>, idx: i64): i64
 // at or past it came from a wider module (a prelude type reached across
 // the module boundary) and would overrun `types` / `type_info`.  Return
 // -1 for such, so the type reads as unresolved here rather than crashing
-// (cross-module type layout is Task 42).
+// (cross-module type layout is deferred to a later program-level pass).
 fn sym_type_at(ts: TS, sym_idx: i64): i64
   let ti: i64 = vec_i64_get(ts.sym_types, sym_idx)
   if ti < 0:
@@ -407,7 +407,7 @@ fn builtin_type_index(name: string): i64
 // `info_lp` / `info_count` that overruns this module's `type_info`, so a
 // per-field walk `type_info.get(info_lp + i*2)` reads out of bounds.
 // Report whether the layout is walkable here; a caller skips the walk
-// when it is not (fail-closed — cross-module generic layout is Task 42).
+// when it is not (fail-closed — cross-module generic layout is deferred to a later program-level pass).
 fn layout_walkable(ts: TS, t: DaoType): bool
   if t.info_lp < 0:
     return false
@@ -483,8 +483,8 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
       // `types` / `type_info` / token arrays under a type index a wider
       // module registered (a prelude `Vector`), overrunning a smaller
       // program module's arrays across many reads.  Safe cross-module
-      // generic layout is the program-level work of Task 42; until then a
-      // generic annotation reads as unresolved, as before.
+      // generic layout is later program-level work; until then a generic
+      // annotation reads as unresolved, as before.
       return TypeR(ts, to_i64(-1))
     Node::ErrorT(t):
       return TypeR(ts, to_i64(-1))
@@ -1059,7 +1059,7 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
           // type_info (a prelude concept named by a prelude `extend`) must
           // not be walked here: reading its `info_lp` would overrun this
           // module's type_info.  Walk zero methods in that case, leaving
-          // the cross-module conformance to the host (Task 42).
+          // the cross-module conformance to the host (a later program-level pass).
           let req_count: i64 = to_i64(0)
           if layout_walkable(r, concept_type):
             req_count = concept_type.info_count
@@ -1098,7 +1098,7 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
                         // Skip param 0 (self) since it differs by design
                         // (impl has the concrete type, concept has Self placeholder).
                         // Compare only when both param lists are in this module's
-                        // type_info; a cross-module method type would overrun it (Task 42).
+                        // type_info; a cross-module method type would overrun it (a later program-level pass).
                         let cmp_count: i64 = to_i64(1)
                         if fn_params_walkable(r, impl_type):
                           if fn_params_walkable(r, req_type):
@@ -1369,6 +1369,18 @@ fn fit_literal(ts: TS, node_idx: i64, expected_ti: i64): TS
     Node::FloatLitE(tidx):
       if is_float(ts, expected_ti):
         return ts_set_expr_type(ts, node_idx, expected_ti)
+    Node::UnaryE(op_tidx, operand):
+      // A unary +/- over a numeric literal (`-1`) is still a literal for
+      // fitting: adopt the context on the operand and the unary node.
+      match ts.tc.nodes.get(operand):
+        Node::IntLitE(t2):
+          if is_integer(ts, expected_ti):
+            let ri: TS = ts_set_expr_type(ts, operand, expected_ti)
+            return ts_set_expr_type(ri, node_idx, expected_ti)
+        Node::FloatLitE(t2):
+          if is_float(ts, expected_ti):
+            let rf: TS = ts_set_expr_type(ts, operand, expected_ti)
+            return ts_set_expr_type(rf, node_idx, expected_ti)
   return ts
 
 fn is_literal_node(ts: TS, node_idx: i64): bool
@@ -1377,6 +1389,12 @@ fn is_literal_node(ts: TS, node_idx: i64): bool
       return true
     Node::FloatLitE(tidx):
       return true
+    Node::UnaryE(op_tidx, operand):
+      match ts.tc.nodes.get(operand):
+        Node::IntLitE(t2):
+          return true
+        Node::FloatLitE(t2):
+          return true
   return false
 
 fn check_binary_expr(ts: TS, node_idx: i64, op_tidx: i64, left: i64, right: i64): TS
@@ -1645,7 +1663,7 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
       // module's `type_info`; a callee from a wider module (a prelude
       // function or method) may overrun it, so walk params only when they
       // are in range (fail-closed — a literal argument then keeps its
-      // default type; cross-module argument typing is Task 42).
+      // default type; cross-module argument typing is deferred to a later program-level pass).
       let walk_params: bool = fn_params_walkable(r, callee_type)
       while ci < args.length():
         if walk_params:
@@ -1669,7 +1687,7 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
       // Field-type checks read the struct's layout from this module's
       // `type_info`; a cross-module generic head's layout may overrun it,
       // so walk fields only when the layout is in range (element typing
-      // for such heads is Task 42).  Arity is already checked above.
+      // for such heads is deferred to a later program-level pass).  Arity is already checked above.
       let walk_fields: bool = layout_walkable(r, callee_type)
       while ci < args.length():
         let arg_ti: i64 = get_expr_type(r, args.get(ci))
@@ -1772,8 +1790,10 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
     TypeKind::TStruct:
       let field_name: string = ts_tok_name(r, field_tidx)
       // Field lookup reads this module's `type_info`; skip it when a
-      // cross-module generic head's layout would overrun it (Task 42).
-      if layout_walkable(r, obj_type):
+      // cross-module generic head's layout would overrun it (element
+      // typing for such heads is deferred to a later program-level pass).
+      let obj_walkable: bool = layout_walkable(r, obj_type)
+      if obj_walkable:
         let fi: i64 = 0
         while fi < obj_type.info_count:
           let f_name_tidx: i64 = r.type_info.get(obj_type.info_lp + fi * 2)
@@ -1790,9 +1810,9 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
         if meth_ti >= 0:
           return ts_set_expr_type(r, node_idx, meth_ti)
       // A member miss is a diagnostic only when the layout was walkable;
-      // a cross-module generic head's fields are unknown here (Task 42),
-      // so leave such an access unresolved rather than falsely reporting.
-      if layout_walkable(r, obj_type):
+      // a cross-module generic head's fields are unknown here, so leave
+      // such an access unresolved rather than falsely reporting.
+      if obj_walkable:
         let sp: Span = ts_tok_span(r, field_tidx)
         r = ts_add_diag(r, sp, "no field '" + field_name + "' on type " + type_name(r, obj_ti))
       return r
@@ -1803,6 +1823,11 @@ fn check_pipe_expr(ts: TS, node_idx: i64, left: i64, right: i64): TS
   r = check_expr(r, right)
   let lhs_ti: i64 = get_expr_type(r, left)
   let rhs_ti: i64 = get_expr_type(r, right)
+  // A pipe target reached across the module boundary can carry a type
+  // index past this module's `types`; leave such a pipe unchecked rather
+  // than reading out of bounds (as the call and field paths do).
+  if rhs_ti >= r.types.length():
+    return r
   if rhs_ti >= 0:
     let rhs_type: DaoType = r.types.get(rhs_ti)
     match rhs_type.kind:
@@ -1815,10 +1840,14 @@ fn check_pipe_expr(ts: TS, node_idx: i64, left: i64, right: i64): TS
         // Check LHS type against first param type.  Read the param slot
         // only when the function's params live in this module's type_info
         // (`info_lp` >= 0 and in range); a cross-module target's slot would
-        // index out of bounds (Task 42).
+        // index out of bounds (a later program-level pass).
         if lhs_ti >= 0:
           if fn_params_walkable(r, rhs_type):
             let first_param_ti: i64 = r.type_info.get(rhs_type.info_lp)
+            // A literal piped in adopts the first parameter's type, as a
+            // literal call argument does.
+            r = fit_literal(r, left, first_param_ti)
+            lhs_ti = get_expr_type(r, left)
             if types_equal(r, lhs_ti, first_param_ti) == false:
               let sp2: Span = ts_node_span(r, left)
               r = ts_add_diag(r, sp2, "pipe argument type mismatch: expected " + type_name(r, first_param_ti) + ", got " + type_name(r, lhs_ti))
@@ -2068,8 +2097,11 @@ fn check_match_stmt(ts: TS, scrut_node: i64, arms_lp: i64): TS
     let pat_node: i64 = arms.get(i)
     let body_lp2: i64 = arms.get(i + 1)
     r = check_pattern(r, pat_node)
-    // Compare pattern type against scrutinee type
+    // Compare pattern type against scrutinee type; a literal pattern
+    // adopts the scrutinee's concrete integer/float type first, as a
+    // literal in any other context does.
     if scrut_ti >= 0:
+      r = fit_literal(r, pat_node, scrut_ti)
       let pat_ti: i64 = get_expr_type(r, pat_node)
       if pat_ti >= 0:
         if types_equal(r, scrut_ti, pat_ti) == false:
