@@ -669,7 +669,10 @@ fn lower_type_params(hs: HS, ast_tparams_lp: i64): HirFlush
     if tp_node_idx >= 0:
       let tp_node: Node = hs.nodes.get(tp_node_idx)
       match tp_node:
-        Node::GenericParamT(tidx):
+        Node::GenericParamT(tidx, bounds_lp):
+          // HIR carries the parameter name; the concept bound is preserved
+          // in the AST and resolved by the resolver.  Lowering the bound
+          // into HIR is deferred to the generic-inference slice.
           tok_indices = tok_indices.push(tidx)
     i = i + 1
   if tok_indices.length() == 0:

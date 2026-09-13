@@ -789,7 +789,11 @@ enum class Node:
   NamedT(tok: i64)
   GenericT(name: i64, args_lp: i64, arg_count: i64)
   PointerT(inner: i64)
-  GenericParamT(tok: i64)
+  // A generic type parameter.  `bounds` is a list_pos of concept-name
+  // token indices (`<T: A + B>`), or -1 when the parameter is unbounded.
+  // The bound is parsed and preserved here (never erased); resolution
+  // and legality live in the resolver.
+  GenericParamT(tok: i64, bounds: i64)
   ErrorT(tok: i64)
   // --- Statements ---
   LetS(name: i64, typ: i64, init: i64)
@@ -1850,8 +1854,33 @@ fn parse_declaration(pc: PC, ps: PS): PR
   let ps2: PS = ps_add_diag(ps, sp, "expected declaration (fn, extern, class, enum, type, concept, or extend)")
   return ps_add_node(ps_advance(pc, ps2), Node::ErrorD(tok = ps.pos))
 
-// Parse optional type parameters: <T, U, V> — returns PR where .node = list_pos
-// Returns -1 if no type params are present.
+// Parse an optional concept bound after a type parameter name:
+// `: Concept` or `: A + B`.  Returns PR where .node is a list_pos of the
+// bound concept-name token indices, or -1 when there is no bound.  The
+// bound names are preserved for the resolver; parsing does not judge them.
+fn parse_type_param_bounds(pc: PC, ps: PS): PR
+  if tk_name(peek_kind(pc, ps)) != tk_name(TK::Colon):
+    return PR(ps, to_i64(-1))
+  let ps2: PS = ps_advance(pc, ps)      // consume ':'
+  let bounds: Vector<i64> = Vector<i64>::new()
+  let btidx: i64 = ps2.pos
+  let ps3: PS = expect(pc, ps2, TK::Identifier)
+  bounds = bounds.push(btidx)
+  let cur: PS = ps3
+  let done: bool = false
+  while done == false:
+    if tk_name(peek_kind(pc, cur)) == tk_name(TK::Plus):
+      cur = ps_advance(pc, cur)          // consume '+'
+      let btidx2: i64 = cur.pos
+      cur = expect(pc, cur, TK::Identifier)
+      bounds = bounds.push(btidx2)
+    else:
+      done = true
+  let fl: FlushResult = flush_list(cur, bounds)
+  return PR(fl.ps, fl.list_pos)
+
+// Parse optional type parameters: <T, U: C, V: A + B> — returns PR where
+// .node = list_pos.  Returns -1 if no type params are present.
 fn parse_type_params(pc: PC, ps: PS): PR
   if tk_name(peek_kind(pc, ps)) != tk_name(TK::Lt):
     return PR(ps, to_i64(-1))
@@ -1861,7 +1890,8 @@ fn parse_type_params(pc: PC, ps: PS): PR
   if tk_name(peek_kind(pc, ps2)) == tk_name(TK::Identifier):
     let tidx: i64 = ps2.pos
     let ps3: PS = ps_advance(pc, ps2)
-    let gp: PR = ps_add_node(ps3, Node::GenericParamT(tok = tidx))
+    let b1: PR = parse_type_param_bounds(pc, ps3)
+    let gp: PR = ps_add_node(b1.ps, Node::GenericParamT(tok = tidx, bounds = b1.node))
     collected = collected.push(gp.node)
     let cur: PS = gp.ps
     let done: bool = false
@@ -1869,8 +1899,9 @@ fn parse_type_params(pc: PC, ps: PS): PR
       if tk_name(peek_kind(pc, cur)) == tk_name(TK::Comma):
         cur = ps_advance(pc, cur)
         let tidx2: i64 = cur.pos
-        cur = expect(pc, cur, TK::Identifier)
-        let gp2: PR = ps_add_node(cur, Node::GenericParamT(tok = tidx2))
+        let curi: PS = expect(pc, cur, TK::Identifier)
+        let b2: PR = parse_type_param_bounds(pc, curi)
+        let gp2: PR = ps_add_node(b2.ps, Node::GenericParamT(tok = tidx2, bounds = b2.node))
         collected = collected.push(gp2.node)
         cur = gp2.ps
       else:
@@ -2536,7 +2567,7 @@ fn node_kind_name(n: Node): string
       return "GenericT"
     Node::PointerT(a):
       return "PointerT"
-    Node::GenericParamT(t):
+    Node::GenericParamT(t, b):
       return "GenericParamT"
     Node::ErrorT(t):
       return "ErrorT"
