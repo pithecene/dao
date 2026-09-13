@@ -112,6 +112,21 @@ fn vec_i64_get(v: Vector<i64>, idx: i64): i64
     return to_i64(-1)
   return v.get(idx)
 
+// A symbol's type index, valid in *this* module's `types` array.  Every
+// in-module symbol's type is appended to `types` before its index is
+// recorded, so an in-module index is always < `types.length()`; an index
+// at or past it came from a wider module (a prelude type reached across
+// the module boundary) and would overrun `types` / `type_info`.  Return
+// -1 for such, so the type reads as unresolved here rather than crashing
+// (cross-module type layout is Task 42).
+fn sym_type_at(ts: TS, sym_idx: i64): i64
+  let ti: i64 = vec_i64_get(ts.sym_types, sym_idx)
+  if ti < 0:
+    return to_i64(-1)
+  if ti >= ts.types.length():
+    return to_i64(-1)
+  return ti
+
 fn ts_set_sym_type(ts: TS, sym_idx: i64, type_idx: i64): TS
   ts.sym_types = vec_i64_set(ts.sym_types, sym_idx, type_idx)
   return ts
@@ -270,6 +285,8 @@ fn program_init_typecheck(p: Program): Program
 fn is_numeric(ts: TS, type_idx: i64): bool
   if type_idx < 0:
     return false
+  if type_idx >= ts.types.length():
+    return false
   let t: DaoType = ts.types.get(type_idx)
   match t.kind:
     TypeKind::TBuiltin:
@@ -281,6 +298,8 @@ fn is_numeric(ts: TS, type_idx: i64): bool
 fn is_integer(ts: TS, type_idx: i64): bool
   if type_idx < 0:
     return false
+  if type_idx >= ts.types.length():
+    return false
   let t: DaoType = ts.types.get(type_idx)
   match t.kind:
     TypeKind::TBuiltin:
@@ -291,6 +310,8 @@ fn is_integer(ts: TS, type_idx: i64): bool
 
 fn is_float(ts: TS, type_idx: i64): bool
   if type_idx < 0:
+    return false
+  if type_idx >= ts.types.length():
     return false
   let t: DaoType = ts.types.get(type_idx)
   match t.kind:
@@ -304,6 +325,8 @@ fn is_float(ts: TS, type_idx: i64): bool
 fn is_bool_type(ts: TS, type_idx: i64): bool
   if type_idx < 0:
     return false
+  if type_idx >= ts.types.length():
+    return false
   let t: DaoType = ts.types.get(type_idx)
   match t.kind:
     TypeKind::TBuiltin:
@@ -313,6 +336,8 @@ fn is_bool_type(ts: TS, type_idx: i64): bool
 fn is_string_type(ts: TS, type_idx: i64): bool
   if type_idx < 0:
     return false
+  if type_idx >= ts.types.length():
+    return false
   let t: DaoType = ts.types.get(type_idx)
   match t.kind:
     TypeKind::TString:
@@ -321,6 +346,8 @@ fn is_string_type(ts: TS, type_idx: i64): bool
 
 fn is_void_type(ts: TS, type_idx: i64): bool
   if type_idx < 0:
+    return false
+  if type_idx >= ts.types.length():
     return false
   let t: DaoType = ts.types.get(type_idx)
   match t.kind:
@@ -335,6 +362,8 @@ fn types_equal(ts: TS, a: i64, b: i64): bool
 
 fn type_name(ts: TS, type_idx: i64): string
   if type_idx < 0:
+    return "<unknown>"
+  if type_idx >= ts.types.length():
     return "<unknown>"
   let t: DaoType = ts.types.get(type_idx)
   return t.name
@@ -386,6 +415,19 @@ fn layout_walkable(ts: TS, t: DaoType): bool
     return true
   return false
 
+// A function type stores its `info_count` parameter type slots singly at
+// `info_lp` (its return type is a separate field), so its walkable span is
+// `info_count`, not `info_count * 2`.  A callee reached from a wider
+// module (a prelude function or method) can carry an `info_lp` that
+// overruns this module's `type_info`; report whether the parameter slots
+// are in range so a caller skips the per-argument walk otherwise.
+fn fn_params_walkable(ts: TS, t: DaoType): bool
+  if t.info_lp < 0:
+    return false
+  if t.info_lp + t.info_count <= ts.type_info.length():
+    return true
+  return false
+
 // =========================================================================
 // Section 41: AST type node resolution
 // =========================================================================
@@ -406,14 +448,14 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
         let sk: string = symbol_kind_name(sym.kind)
         if sk == "GenericParam":
           // Check if we already have a TGenericParam type for this symbol
-          let existing_ti: i64 = vec_i64_get(ts.sym_types, sym_idx)
+          let existing_ti: i64 = sym_type_at(ts, sym_idx)
           if existing_ti >= 0:
             return TypeR(ts, existing_ti)
           // Create a new TGenericParam type
           let tr: TypeR = ts_add_type(ts, DaoType(TypeKind::TGenericParam, sym_idx, name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
           let ts2: TS = ts_set_sym_type(tr.ts, sym_idx, tr.type_idx)
           return TypeR(ts2, tr.type_idx)
-        let ti: i64 = vec_i64_get(ts.sym_types, sym_idx)
+        let ti: i64 = sym_type_at(ts, sym_idx)
         return TypeR(ts, ti)
       // sym not found in uses_map — might be an unresolved type param
       // Try to find it by scanning symbols for GenericParam with matching name
@@ -422,7 +464,7 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
         let gsym: Symbol = ts.tc.symbols.get(gi)
         if gsym.name == name:
           if symbol_kind_name(gsym.kind) == "GenericParam":
-            let existing_ti: i64 = vec_i64_get(ts.sym_types, gi)
+            let existing_ti: i64 = sym_type_at(ts, gi)
             if existing_ti >= 0:
               return TypeR(ts, existing_ti)
             let tr: TypeR = ts_add_type(ts, DaoType(TypeKind::TGenericParam, gi, name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
@@ -436,28 +478,13 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
         return TypeR(inner_r.ts, to_i64(-1))
       return find_or_add_pointer_type(inner_r.ts, inner_r.type_idx)
     Node::GenericT(name_tidx, args_lp, arg_count):
-      // A generic annotation `G<Args>` resolves to G's head type;
-      // concrete instantiation (element typing) is Task 42.
-      let base_name: string = ts_tok_name(ts, name_tidx)
-      let base_bi: i64 = builtin_type_index(base_name)
-      if base_bi >= 0:
-        return TypeR(ts, base_bi)
-      let base_sym: i64 = lookup_use(ts, name_tidx)
-      if base_sym >= 0:
-        let head_ti: i64 = vec_i64_get(ts.sym_types, base_sym)
-        // Return the head only when its field layout is walkable in the
-        // current type_info: `info_lp` indexes the type_info of the
-        // module that registered the type, which may exceed a smaller
-        // module's.  A dangling head would make downstream field / call
-        // loops read out of bounds, so leave such an annotation
-        // unresolved (as before), never crashing.  Full generic layout
-        // is Task 42.
-        if head_ti >= 0:
-          let ht: DaoType = ts.types.get(head_ti)
-          if ht.info_lp < 0:
-            return TypeR(ts, head_ti)
-          if ht.info_lp + ht.info_count * 2 <= ts.type_info.length():
-            return TypeR(ts, head_ti)
+      // A generic annotation `G<Args>` stays unresolved for now.  Typing
+      // it to G's head lets a generic value flow into the per-module
+      // `types` / `type_info` / token arrays under a type index a wider
+      // module registered (a prelude `Vector`), overrunning a smaller
+      // program module's arrays across many reads.  Safe cross-module
+      // generic layout is the program-level work of Task 42; until then a
+      // generic annotation reads as unresolved, as before.
       return TypeR(ts, to_i64(-1))
     Node::ErrorT(t):
       return TypeR(ts, to_i64(-1))
@@ -654,7 +681,7 @@ fn tc_fill_struct_fields(ts: TS, decls: Vector<i64>): TS
         // Update struct type with field info
         let struct_sym: i64 = find_sym_by_decl(r, decl_idx, "Type")
         if struct_sym >= 0:
-          let struct_ti: i64 = vec_i64_get(r.sym_types, struct_sym)
+          let struct_ti: i64 = sym_type_at(r, struct_sym)
           if struct_ti >= 0:
             let t: DaoType = r.types.get(struct_ti)
             t.info_lp = field_info_start
@@ -774,7 +801,7 @@ fn tc_register_methods(ts: TS, decls: Vector<i64>): TS
                 // Set self param type to the enclosing struct type
                 let struct_sym: i64 = find_sym_by_decl(r, decl_idx, "Type")
                 if struct_sym >= 0:
-                  let struct_ti: i64 = vec_i64_get(r.sym_types, struct_sym)
+                  let struct_ti: i64 = sym_type_at(r, struct_sym)
                   if struct_ti >= 0:
                     let self_sym: i64 = find_param_sym(r, meth_idx, "self")
                     if self_sym >= 0:
@@ -962,9 +989,9 @@ fn tc_register_extend_methods(ts: TS, decls: Vector<i64>): TS
             let tsym: Symbol = r.tc.symbols.get(tsi)
             if tsym.name == target_name:
               if symbol_kind_name(tsym.kind) == "Type":
-                target_ti = vec_i64_get(r.sym_types, tsi)
+                target_ti = sym_type_at(r, tsi)
               if symbol_kind_name(tsym.kind) == "Builtin":
-                target_ti = vec_i64_get(r.sym_types, tsi)
+                target_ti = sym_type_at(r, tsi)
             tsi = tsi + 1
           let methods: Vector<i64> = read_list(r.tc.idx_data, methods_lp)
           let mi: i64 = 0
@@ -1017,7 +1044,7 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
           Option::None:
             concept_sym_idx = to_i64(-1)
         if concept_sym_idx >= 0:
-          let cti: i64 = vec_i64_get(r.sym_types, concept_sym_idx)
+          let cti: i64 = sym_type_at(r, concept_sym_idx)
           if cti >= 0:
             let ct: DaoType = r.types.get(cti)
             match ct.kind:
@@ -1028,9 +1055,17 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
         else:
           let concept_type: DaoType = r.types.get(concept_ti)
           let target_name: string = extract_type_name(r, target_type_node)
+          // A concept whose required-method list lives in another module's
+          // type_info (a prelude concept named by a prelude `extend`) must
+          // not be walked here: reading its `info_lp` would overrun this
+          // module's type_info.  Walk zero methods in that case, leaving
+          // the cross-module conformance to the host (Task 42).
+          let req_count: i64 = to_i64(0)
+          if layout_walkable(r, concept_type):
+            req_count = concept_type.info_count
           // Check each required concept method
           let req_mi: i64 = 0
-          while req_mi < concept_type.info_count:
+          while req_mi < req_count:
             let req_name_tidx: i64 = r.type_info.get(concept_type.info_lp + req_mi * 2)
             let req_fn_ti: i64 = r.type_info.get(concept_type.info_lp + req_mi * 2 + 1)
             let req_name: string = ts_tok_name(r, req_name_tidx)
@@ -1046,7 +1081,7 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
                   if is_method_symbol(sym):
                     found_method = true
                   // Check full signature match: param count, each param type, return type.
-                  let impl_ti: i64 = vec_i64_get(r.sym_types, si)
+                  let impl_ti: i64 = sym_type_at(r, si)
                   if impl_ti >= 0:
                     if req_fn_ti >= 0:
                       let impl_type: DaoType = r.types.get(impl_ti)
@@ -1062,8 +1097,14 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
                         // Param counts match — compare each non-self param type.
                         // Skip param 0 (self) since it differs by design
                         // (impl has the concrete type, concept has Self placeholder).
+                        // Compare only when both param lists are in this module's
+                        // type_info; a cross-module method type would overrun it (Task 42).
+                        let cmp_count: i64 = to_i64(1)
+                        if fn_params_walkable(r, impl_type):
+                          if fn_params_walkable(r, req_type):
+                            cmp_count = impl_type.info_count
                         let pi: i64 = 1
-                        while pi < impl_type.info_count:
+                        while pi < cmp_count:
                           let impl_param_ti: i64 = r.type_info.get(impl_type.info_lp + pi)
                           let req_param_ti: i64 = r.type_info.get(req_type.info_lp + pi)
                           if impl_param_ti != req_param_ti:
@@ -1178,7 +1219,7 @@ fn check_ident_expr(ts: TS, node_idx: i64, tidx: i64): TS
   let sym_idx: i64 = lookup_use(ts, tidx)
   if sym_idx < 0:
     return ts
-  let ti: i64 = vec_i64_get(ts.sym_types, sym_idx)
+  let ti: i64 = sym_type_at(ts, sym_idx)
   if ti >= 0:
     return ts_set_expr_type(ts, node_idx, ti)
   return ts
@@ -1227,7 +1268,7 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
       // Exactly 3 segments: check if second segment is an exported enum.
       let exp_sym: i64 = tc_export_lookup(ts, target_mid, second_name)
       if exp_sym >= 0:
-        let exp_ti: i64 = vec_i64_get(ts.sym_types, exp_sym)
+        let exp_ti: i64 = sym_type_at(ts, exp_sym)
         if exp_ti >= 0:
           let exp_type: DaoType = ts.types.get(exp_ti)
           match exp_type.kind:
@@ -1256,14 +1297,14 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
       let mod_name: string = ts_tok_name(ts, first_tidx)
       let sp: Span = ts_tok_span(ts, second_tidx)
       return ts_add_diag(ts, sp, "no exported symbol '" + second_name + "' in module '" + mod_name + "'")
-    let exp_ti: i64 = vec_i64_get(ts.sym_types, exported_sym)
+    let exp_ti: i64 = sym_type_at(ts, exported_sym)
     if exp_ti >= 0:
       return ts_set_expr_type(ts, node_idx, exp_ti)
     return ts
   // Non-module first segment: the name's own type.  A two-segment name
   // whose head is an enum is a variant access, `Enum::Variant`; the
   // variant must exist, as for `mod::Enum::Variant` above.
-  let ti: i64 = vec_i64_get(ts.sym_types, sym_idx)
+  let ti: i64 = sym_type_at(ts, sym_idx)
   if ti < 0:
     return ts
   if segs.length() == 2:
@@ -1297,7 +1338,7 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
     if type_owner >= 0:
       let msym: i64 = find_inherent_method_sym(ts.tc.symbols, mangled, type_owner)
       if msym >= 0:
-        let mti: i64 = vec_i64_get(ts.sym_types, msym)
+        let mti: i64 = sym_type_at(ts, msym)
         if mti >= 0:
           return ts_set_expr_type(ts, node_idx, mti)
   return ts_set_expr_type(ts, node_idx, ti)
@@ -1560,7 +1601,7 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
       Node::IdentE(ct):
         let csym: i64 = lookup_use(r, ct)
         if csym >= 0:
-          callee_ti = vec_i64_get(r.sym_types, csym)
+          callee_ti = sym_type_at(r, csym)
       Node::QualNameE(seg_lp2, seg_count2):
         let csegs: Vector<i64> = read_list(r.tc.idx_data, seg_lp2)
         if csegs.length() > 0:
@@ -1573,10 +1614,12 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
                 let fn_name: string = ts_tok_name(r, csegs.get(1))
                 let exp_sym: i64 = tc_export_lookup(r, csym_obj.decl_node, fn_name)
                 if exp_sym >= 0:
-                  callee_ti = vec_i64_get(r.sym_types, exp_sym)
+                  callee_ti = sym_type_at(r, exp_sym)
             else:
-              callee_ti = vec_i64_get(r.sym_types, csym)
+              callee_ti = sym_type_at(r, csym)
   if callee_ti < 0:
+    return r
+  if callee_ti >= r.types.length():
     return r
   let callee_type: DaoType = r.types.get(callee_ti)
   match callee_type.kind:
@@ -1598,16 +1641,23 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
         r = ts_add_diag(r, sp, "arity mismatch: expected " + i64_to_string(expected_args) + " arguments, got " + i64_to_string(args.length()))
         return r
       let ci: i64 = 0
+      // Parameter-type checks read the callee's param slots from this
+      // module's `type_info`; a callee from a wider module (a prelude
+      // function or method) may overrun it, so walk params only when they
+      // are in range (fail-closed — a literal argument then keeps its
+      // default type; cross-module argument typing is Task 42).
+      let walk_params: bool = fn_params_walkable(r, callee_type)
       while ci < args.length():
-        let param_ti: i64 = r.type_info.get(callee_type.info_lp + param_offset + ci)
-        // A literal argument adopts the parameter's concrete type (host).
-        r = fit_literal(r, args.get(ci), param_ti)
-        let arg_ti: i64 = get_expr_type(r, args.get(ci))
-        if arg_ti >= 0:
-          if param_ti >= 0:
-            if types_equal(r, arg_ti, param_ti) == false:
-              let sp: Span = ts_node_span(r, args.get(ci))
-              r = ts_add_diag(r, sp, "argument type mismatch: expected " + type_name(r, param_ti) + ", got " + type_name(r, arg_ti))
+        if walk_params:
+          let param_ti: i64 = r.type_info.get(callee_type.info_lp + param_offset + ci)
+          // A literal argument adopts the parameter's concrete type (host).
+          r = fit_literal(r, args.get(ci), param_ti)
+          let arg_ti: i64 = get_expr_type(r, args.get(ci))
+          if arg_ti >= 0:
+            if param_ti >= 0:
+              if types_equal(r, arg_ti, param_ti) == false:
+                let sp: Span = ts_node_span(r, args.get(ci))
+                r = ts_add_diag(r, sp, "argument type mismatch: expected " + type_name(r, param_ti) + ", got " + type_name(r, arg_ti))
         ci = ci + 1
       return ts_set_expr_type(r, node_idx, callee_type.ret_type)
     TypeKind::TStruct:
@@ -1715,6 +1765,8 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
   let obj_ti: i64 = get_expr_type(r, obj)
   if obj_ti < 0:
     return r
+  if obj_ti >= r.types.length():
+    return r
   let obj_type: DaoType = r.types.get(obj_ti)
   match obj_type.kind:
     TypeKind::TStruct:
@@ -1734,7 +1786,7 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
       let mangled_name: string = obj_type.name + "." + field_name
       let msym: i64 = find_method_sym_for_receiver(r.tc.symbols, mangled_name, r.tc.module_id, obj_type.decl_node)
       if msym >= 0:
-        let meth_ti: i64 = vec_i64_get(r.sym_types, msym)
+        let meth_ti: i64 = sym_type_at(r, msym)
         if meth_ti >= 0:
           return ts_set_expr_type(r, node_idx, meth_ti)
       // A member miss is a diagnostic only when the layout was walkable;
@@ -1760,12 +1812,16 @@ fn check_pipe_expr(ts: TS, node_idx: i64, left: i64, right: i64): TS
           let sp: Span = ts_node_span(r, right)
           r = ts_add_diag(r, sp, "pipe target function takes no arguments")
           return r
-        // Check LHS type against first param type
+        // Check LHS type against first param type.  Read the param slot
+        // only when the function's params live in this module's type_info
+        // (`info_lp` >= 0 and in range); a cross-module target's slot would
+        // index out of bounds (Task 42).
         if lhs_ti >= 0:
-          let first_param_ti: i64 = r.type_info.get(rhs_type.info_lp)
-          if types_equal(r, lhs_ti, first_param_ti) == false:
-            let sp2: Span = ts_node_span(r, left)
-            r = ts_add_diag(r, sp2, "pipe argument type mismatch: expected " + type_name(r, first_param_ti) + ", got " + type_name(r, lhs_ti))
+          if fn_params_walkable(r, rhs_type):
+            let first_param_ti: i64 = r.type_info.get(rhs_type.info_lp)
+            if types_equal(r, lhs_ti, first_param_ti) == false:
+              let sp2: Span = ts_node_span(r, left)
+              r = ts_add_diag(r, sp2, "pipe argument type mismatch: expected " + type_name(r, first_param_ti) + ", got " + type_name(r, lhs_ti))
         return ts_set_expr_type(r, node_idx, rhs_type.ret_type)
     // RHS not a function
     let sp3: Span = ts_node_span(r, right)
@@ -2043,7 +2099,7 @@ fn tc_check_fn_body(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, ret_t
   let fn_ti: i64 = to_i64(-1)
   let sym_idx: i64 = find_callable_sym_by_decl(r, decl_idx)
   if sym_idx >= 0:
-    fn_ti = vec_i64_get(r.sym_types, sym_idx)
+    fn_ti = sym_type_at(r, sym_idx)
   let old_return_type: i64 = r.return_type
   if fn_ti >= 0:
     let fn_type: DaoType = r.types.get(fn_ti)
@@ -2071,7 +2127,7 @@ fn tc_check_expr_fn_body(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, 
   let fn_ti: i64 = to_i64(-1)
   let sym_idx: i64 = find_callable_sym_by_decl(r, decl_idx)
   if sym_idx >= 0:
-    fn_ti = vec_i64_get(r.sym_types, sym_idx)
+    fn_ti = sym_type_at(r, sym_idx)
   let old_return_type: i64 = r.return_type
   if fn_ti >= 0:
     let fn_type: DaoType = r.types.get(fn_ti)
@@ -2112,7 +2168,7 @@ fn tc_check_method_body(ts: TS, class_decl_idx: i64, meth_idx: i64, m_name_tidx:
   let mangled: string = class_name + "." + mname
   let msym: i64 = find_visible_method_sym(r.tc.symbols, mangled, r.tc.module_id)
   if msym >= 0:
-    fn_ti = vec_i64_get(r.sym_types, msym)
+    fn_ti = sym_type_at(r, msym)
   let old_return_type: i64 = r.return_type
   if fn_ti >= 0:
     let fn_type: DaoType = r.types.get(fn_ti)
@@ -2130,7 +2186,7 @@ fn tc_check_method_body(ts: TS, class_decl_idx: i64, meth_idx: i64, m_name_tidx:
         // Self type is the enclosing struct
         let struct_sym: i64 = find_sym_by_decl(r, class_decl_idx, "Type")
         if struct_sym >= 0:
-          let struct_ti: i64 = vec_i64_get(r.sym_types, struct_sym)
+          let struct_ti: i64 = sym_type_at(r, struct_sym)
           if struct_ti >= 0:
             r = ts_set_sym_type(r, p_sym, struct_ti)
       else:
@@ -2156,7 +2212,7 @@ fn tc_check_extend_method_body(ts: TS, extend_decl_idx: i64, meth_idx: i64, m_na
   let fn_ti: i64 = to_i64(-1)
   let msym: i64 = find_visible_method_sym(r.tc.symbols, mangled, r.tc.module_id)
   if msym >= 0:
-    fn_ti = vec_i64_get(r.sym_types, msym)
+    fn_ti = sym_type_at(r, msym)
   let old_return_type: i64 = r.return_type
   if fn_ti >= 0:
     let fn_type: DaoType = r.types.get(fn_ti)
@@ -2178,9 +2234,9 @@ fn tc_check_extend_method_body(ts: TS, extend_decl_idx: i64, meth_idx: i64, m_na
           let tsym: Symbol = r.tc.symbols.get(tsi)
           if tsym.name == target_name:
             if symbol_kind_name(tsym.kind) == "Type":
-              target_ti = vec_i64_get(r.sym_types, tsi)
+              target_ti = sym_type_at(r, tsi)
             if symbol_kind_name(tsym.kind) == "Builtin":
-              target_ti = vec_i64_get(r.sym_types, tsi)
+              target_ti = sym_type_at(r, tsi)
           tsi = tsi + 1
         if target_ti >= 0:
           r = ts_set_sym_type(r, p_sym, target_ti)
