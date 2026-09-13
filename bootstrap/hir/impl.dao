@@ -926,8 +926,9 @@ fn lower_decl(hs: HS, decl_idx: i64): HirR
       return lower_enum_decl(hs, decl_idx, name_tidx, tparams_lp, variants_lp)
     Node::TypeAliasD(name_tidx, target_type):
       return lower_type_alias_decl(hs, decl_idx, name_tidx, target_type)
-    Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp):
-      // Concepts produce no runtime code — emit a no-op
+    Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
+      // Concepts produce no runtime code — emit a no-op.  The derived
+      // marker is preserved on the AST; it drives no lowering yet.
       return hs_add_node(hs, HirNode::HirErrorStmt(tok = to_i64(0)))
     Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
       // Extend methods are emitted in lower_file; return a no-op here
