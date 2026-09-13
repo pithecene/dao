@@ -829,7 +829,7 @@ fn tc_register_concepts(ts: TS, decls: Vector<i64>): TS
     let decl_idx: i64 = decls.get(i)
     let node: Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp):
+      Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
         let csym: i64 = find_sym_by_decl(r, decl_idx, "Type")
         if csym >= 0:
           let cname: string = ts_tok_name(r, name_tidx)

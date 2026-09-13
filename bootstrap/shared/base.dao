@@ -763,9 +763,10 @@ fn lex(src: string): LexResult
 // Single arena enum with all node kinds. Children referenced by index
 // into nodes vector. Variable-length children use a shared idx list.
 //
-// Tier B deferrals: concept, derived, extend, mode, resource, yield,
-// function types, generic parameter bounds / where clauses.
-// (GenericParamT nodes and parse_type_params are Tier A.)
+// Tier B deferrals: mode, yield, function types, `where` clauses.
+// (GenericParamT with its concept bounds, `derived concept`, concept,
+// extend, and resource are parsed; generic parameter bounds `<T: A + B>`
+// are preserved on GenericParamT and resolved.)
 
 enum class Node:
   // --- Expressions ---
@@ -814,7 +815,10 @@ enum class Node:
   ClassDeclD(name: i64, tparams: i64, fields: i64, methods: i64)
   EnumDeclD(name: i64, tparams: i64, variants: i64)
   TypeAliasD(name: i64, typ: i64)
-  ConceptDeclD(name: i64, tparams: i64, methods: i64)
+  // A concept declaration.  `derived` is 1 for `derived concept` (the
+  // conformance is auto-derived, host `ConceptDecl::is_derived`), 0 for a
+  // plain `concept`.  The marker is preserved, never silently erased.
+  ConceptDeclD(name: i64, tparams: i64, methods: i64, is_derived: i64)
   ExtendDeclD(target: i64, concept_name: i64, methods: i64)
   ErrorD(tok: i64)
   // --- Module / Import ---
@@ -1846,7 +1850,16 @@ fn parse_declaration(pc: PC, ps: PS): PR
   if tk_name(k) == tk_name(TK::KwType):
     return parse_type_alias(pc, ps)
   if tk_name(k) == tk_name(TK::KwConcept):
-    return parse_concept_decl(pc, ps)
+    return parse_concept_decl(pc, ps, to_i64(0))
+  if tk_name(k) == tk_name(TK::KwDerived):
+    // `derived concept ...` — consume `derived`, require `concept` next,
+    // then parse the concept body with the derived marker set.
+    let ps_d: PS = ps_advance(pc, ps)
+    if tk_name(peek_kind(pc, ps_d)) == tk_name(TK::KwConcept):
+      return parse_concept_decl(pc, ps_d, to_i64(1))
+    let sp_d: Span = tok_span(pc, ps_d)
+    let ps_de: PS = ps_add_diag(ps_d, sp_d, "expected 'concept' after 'derived'")
+    return ps_add_node(ps_advance(pc, ps_de), Node::ErrorD(tok = ps.pos))
   if tk_name(k) == tk_name(TK::KwExtend):
     return parse_extend_decl(pc, ps)
 
@@ -2248,7 +2261,7 @@ fn parse_type_alias(pc: PC, ps: PS): PR
   let cur: PS = match_tok(pc, ty.ps, TK::Newline)
   return ps_add_node(cur, Node::TypeAliasD(name = name_tidx, typ = ty.node))
 
-fn parse_concept_decl(pc: PC, ps: PS): PR
+fn parse_concept_decl(pc: PC, ps: PS, is_derived: i64): PR
   let ps2: PS = ps_advance(pc, ps)
   let name_tidx: i64 = ps2.pos
   let ps3: PS = expect(pc, ps2, TK::Identifier)
@@ -2337,7 +2350,7 @@ fn parse_concept_decl(pc: PC, ps: PS): PR
     methods_lp = mfl.list_pos
 
   cur = expect(pc, cur, TK::Dedent)
-  return ps_add_node(cur, Node::ConceptDeclD(name = name_tidx, tparams = tparams_lp, methods = methods_lp))
+  return ps_add_node(cur, Node::ConceptDeclD(name = name_tidx, tparams = tparams_lp, methods = methods_lp, is_derived = is_derived))
 
 fn parse_extend_decl(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
@@ -2605,7 +2618,7 @@ fn node_kind_name(n: Node): string
       return "EnumDeclD"
     Node::TypeAliasD(a, b):
       return "TypeAliasD"
-    Node::ConceptDeclD(a, b, c):
+    Node::ConceptDeclD(a, b, c, d):
       return "ConceptDeclD"
     Node::ExtendDeclD(a, b, c):
       return "ExtendDeclD"
