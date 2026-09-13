@@ -372,6 +372,20 @@ fn builtin_type_index(name: string): i64
     return to_i64(12)
   return to_i64(-1)
 
+// A type's field / method layout lives in the `type_info` of the module
+// that registered it.  A type reached from a wider module (a prelude
+// generic head named in a smaller program module, say) can carry an
+// `info_lp` / `info_count` that overruns this module's `type_info`, so a
+// per-field walk `type_info.get(info_lp + i*2)` reads out of bounds.
+// Report whether the layout is walkable here; a caller skips the walk
+// when it is not (fail-closed — cross-module generic layout is Task 42).
+fn layout_walkable(ts: TS, t: DaoType): bool
+  if t.info_lp < 0:
+    return false
+  if t.info_lp + t.info_count * 2 <= ts.type_info.length():
+    return true
+  return false
+
 // =========================================================================
 // Section 41: AST type node resolution
 // =========================================================================
@@ -1602,14 +1616,20 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
         r = ts_add_diag(r, sp, "constructor arity mismatch: expected " + i64_to_string(callee_type.info_count) + " fields, got " + i64_to_string(args.length()))
         return r
       let ci: i64 = 0
+      // Field-type checks read the struct's layout from this module's
+      // `type_info`; a cross-module generic head's layout may overrun it,
+      // so walk fields only when the layout is in range (element typing
+      // for such heads is Task 42).  Arity is already checked above.
+      let walk_fields: bool = layout_walkable(r, callee_type)
       while ci < args.length():
         let arg_ti: i64 = get_expr_type(r, args.get(ci))
-        let field_type_idx: i64 = r.type_info.get(callee_type.info_lp + ci * 2 + 1)
-        if arg_ti >= 0:
-          if field_type_idx >= 0:
-            if types_equal(r, arg_ti, field_type_idx) == false:
-              let sp: Span = ts_node_span(r, args.get(ci))
-              r = ts_add_diag(r, sp, "field type mismatch: expected " + type_name(r, field_type_idx) + ", got " + type_name(r, arg_ti))
+        if walk_fields:
+          let field_type_idx: i64 = r.type_info.get(callee_type.info_lp + ci * 2 + 1)
+          if arg_ti >= 0:
+            if field_type_idx >= 0:
+              if types_equal(r, arg_ti, field_type_idx) == false:
+                let sp: Span = ts_node_span(r, args.get(ci))
+                r = ts_add_diag(r, sp, "field type mismatch: expected " + type_name(r, field_type_idx) + ", got " + type_name(r, arg_ti))
         ci = ci + 1
       return ts_set_expr_type(r, node_idx, callee_ti)
     TypeKind::TEnum:
@@ -1699,15 +1719,17 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
   match obj_type.kind:
     TypeKind::TStruct:
       let field_name: string = ts_tok_name(r, field_tidx)
-      // Try field lookup first
-      let fi: i64 = 0
-      while fi < obj_type.info_count:
-        let f_name_tidx: i64 = r.type_info.get(obj_type.info_lp + fi * 2)
-        let f_type_idx: i64 = r.type_info.get(obj_type.info_lp + fi * 2 + 1)
-        let f_name: string = ts_tok_name(r, f_name_tidx)
-        if f_name == field_name:
-          return ts_set_expr_type(r, node_idx, f_type_idx)
-        fi = fi + 1
+      // Field lookup reads this module's `type_info`; skip it when a
+      // cross-module generic head's layout would overrun it (Task 42).
+      if layout_walkable(r, obj_type):
+        let fi: i64 = 0
+        while fi < obj_type.info_count:
+          let f_name_tidx: i64 = r.type_info.get(obj_type.info_lp + fi * 2)
+          let f_type_idx: i64 = r.type_info.get(obj_type.info_lp + fi * 2 + 1)
+          let f_name: string = ts_tok_name(r, f_name_tidx)
+          if f_name == field_name:
+            return ts_set_expr_type(r, node_idx, f_type_idx)
+          fi = fi + 1
       // Try method lookup: look for mangled symbol "StructName.fieldName"
       let mangled_name: string = obj_type.name + "." + field_name
       let msym: i64 = find_method_sym_for_receiver(r.tc.symbols, mangled_name, r.tc.module_id, obj_type.decl_node)
@@ -1715,8 +1737,12 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
         let meth_ti: i64 = vec_i64_get(r.sym_types, msym)
         if meth_ti >= 0:
           return ts_set_expr_type(r, node_idx, meth_ti)
-      let sp: Span = ts_tok_span(r, field_tidx)
-      r = ts_add_diag(r, sp, "no field '" + field_name + "' on type " + type_name(r, obj_ti))
+      // A member miss is a diagnostic only when the layout was walkable;
+      // a cross-module generic head's fields are unknown here (Task 42),
+      // so leave such an access unresolved rather than falsely reporting.
+      if layout_walkable(r, obj_type):
+        let sp: Span = ts_tok_span(r, field_tidx)
+        r = ts_add_diag(r, sp, "no field '" + field_name + "' on type " + type_name(r, obj_ti))
       return r
   return r
 
