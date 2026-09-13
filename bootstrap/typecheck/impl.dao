@@ -1798,6 +1798,10 @@ fn check_assign_stmt(ts: TS, node_idx: i64, target: i64, value: i64): TS
     let sp: Span = ts_node_span(r, target)
     r = ts_add_diag(r, sp, "invalid assignment target: expected identifier, field, or index expression")
   let target_ti: i64 = get_expr_type(r, target)
+  // A literal value adopts the assignment target's concrete type (host
+  // `check_assignment` checks the value against the target as expected).
+  if target_ti >= 0:
+    r = fit_literal(r, value, target_ti)
   let value_ti: i64 = get_expr_type(r, value)
   if target_ti >= 0:
     if value_ti >= 0:
