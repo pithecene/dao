@@ -61,7 +61,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 68
+  let total: i32 = 71
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -1198,6 +1198,18 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL static_call_respects_type_shadowing: local Box::make borrowed the prelude's static method (0 diagnostics in main.dao)")
+
+  // -----------------------------------------------------------------
+  // Generic type annotations resolve to the head type (concrete
+  // instantiation is Task 42), so `let b: Box<i64>` no longer reports
+  // "unknown type in annotation".
+  // -----------------------------------------------------------------
+  if tc_expect_clean("generic_annotation_resolves", "class Box<T>:\n  n: i32\n\nfn f(): i32\n  let b: Box<i64> = Box(0)\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("nested_generic_annotation", "class Box<T>:\n  n: i32\n\nfn f(): i32\n  let b: Box<Box<i64>> = Box(0)\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_factory_matches_annotation", "class Box<T>:\n  n: i32\n  fn make(): Box<T>\n    return Box(0)\n\nfn f(): i32\n  let v: Box<i64> = Box::make()\n  return 0\n"):
+    pass_count = pass_count + 1
 
   // -----------------------------------------------------------------
   // Summary

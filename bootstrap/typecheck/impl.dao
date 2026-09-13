@@ -422,6 +422,28 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
         return TypeR(inner_r.ts, to_i64(-1))
       return find_or_add_pointer_type(inner_r.ts, inner_r.type_idx)
     Node::GenericT(name_tidx, args_lp, arg_count):
+      // A generic annotation `G<Args>` resolves to G's head type;
+      // concrete instantiation (element typing) is Task 42.
+      let base_name: string = ts_tok_name(ts, name_tidx)
+      let base_bi: i64 = builtin_type_index(base_name)
+      if base_bi >= 0:
+        return TypeR(ts, base_bi)
+      let base_sym: i64 = lookup_use(ts, name_tidx)
+      if base_sym >= 0:
+        let head_ti: i64 = vec_i64_get(ts.sym_types, base_sym)
+        // Return the head only when its field layout is walkable in the
+        // current type_info: `info_lp` indexes the type_info of the
+        // module that registered the type, which may exceed a smaller
+        // module's.  A dangling head would make downstream field / call
+        // loops read out of bounds, so leave such an annotation
+        // unresolved (as before), never crashing.  Full generic layout
+        // is Task 42.
+        if head_ti >= 0:
+          let ht: DaoType = ts.types.get(head_ti)
+          if ht.info_lp < 0:
+            return TypeR(ts, head_ti)
+          if ht.info_lp + ht.info_count * 2 <= ts.type_info.length():
+            return TypeR(ts, head_ti)
       return TypeR(ts, to_i64(-1))
     Node::ErrorT(t):
       return TypeR(ts, to_i64(-1))
