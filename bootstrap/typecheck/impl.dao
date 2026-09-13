@@ -981,7 +981,7 @@ fn tc_register_concepts(ts: TS, decls: Vector<i64>): TS
     let decl_idx: i64 = decls.get(i)
     let node: Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp):
+      Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
         let csym: i64 = find_sym_by_decl(r, decl_idx, "Type")
         if csym >= 0:
           let cname: string = ts_tok_name(r, name_tidx)
@@ -2525,7 +2525,7 @@ fn tc_pass2(ts: TS, file_node_idx: i64): TS
             r = tc_bind_generic_bounds(r, tparams_lp)
           Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
             r = tc_bind_generic_bounds(r, tparams_lp)
-          Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp):
+          Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
             r = tc_bind_generic_bounds(r, tparams_lp)
             // A concept's required methods may carry their own parameters
             // (signature-only, expression-bodied, or block-bodied forms).
