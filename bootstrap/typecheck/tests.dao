@@ -61,7 +61,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 64
+  let total: i32 = 72
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -1157,6 +1157,60 @@ fn main(): i32
   // Fitting moves only a literal: two named integers of different width
   // still mismatch.
   if tc_expect_diags("named_integers_of_different_width_mismatch", "fn f(a: i64, b: i32): i64\n  return a + b\n", to_i64(1)):
+    pass_count = pass_count + 1
+
+  // -----------------------------------------------------------------
+  // Static / factory method calls (`Type::method`): a static method is
+  // typed by its signature, not read as zero-argument construction, and
+  // its return type flows.
+  // -----------------------------------------------------------------
+  // A static factory `Cell::new()` types clean and is not read as
+  // zero-argument construction of the 1-field Cell.
+  if tc_expect_clean("static_factory_new", "class Cell:\n  n: i32\n  fn new(): Cell\n    return Cell(0)\n\nfn f(): i32\n  let c: Cell = Cell::new()\n  return 0\n"):
+    pass_count = pass_count + 1
+  // A static method with a parameter checks its argument (and fits a
+  // literal to the parameter type).
+  if tc_expect_clean("static_method_arg", "class Cell:\n  n: i64\n  fn of(v: i64): Cell\n    return Cell(v)\n\nfn f(): i32\n  let c: Cell = Cell::of(1)\n  return 0\n"):
+    pass_count = pass_count + 1
+  // The factory's return type flows: assigning `Cell::new()` to a
+  // wrongly-typed local still diagnoses (the result is a Cell).
+  if tc_expect_diags("static_factory_return_type_flows", "class Cell:\n  n: i32\n  fn new(): Cell\n    return Cell(0)\n\nfn f(): i32\n  let x: i32 = Cell::new()\n  return x\n", to_i64(1)):
+    pass_count = pass_count + 1
+
+  // A static `Type::method` reaches only the resolved type's own method:
+  // a module-local `Box` with no `make` must not borrow the prelude
+  // `Box`'s static `make` through a same-named-mangle match.
+  let shadow_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  shadow_inputs = shadow_inputs.push(SourceInput("stdlib/core/box.dao", "module core::box\nclass Box:\n  n: i32\n  fn make(): Box\n    return Box(0)\n", true))
+  shadow_inputs = shadow_inputs.push(SourceInput("main.dao", "module app::main\nclass Box:\n  n: i32\nfn f(): i32\n  let b: Box = Box::make()\n  return 0\n", false))
+  let shadow_p: Program = program_from_graph(build_program(shadow_inputs))
+  shadow_p = program_run_resolve(shadow_p)
+  shadow_p = program_run_typecheck(shadow_p)
+  let shadow_errors: i64 = 0
+  let shadow_i: i64 = 0
+  while shadow_i < shadow_p.diags.length():
+    let shadow_fd: FileDiagnostic = shadow_p.diags.get(shadow_i)
+    if shadow_fd.path == "main.dao":
+      shadow_errors = shadow_errors + 1
+    shadow_i = shadow_i + 1
+  if shadow_errors > 0:
+    print("PASS static_call_respects_type_shadowing")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL static_call_respects_type_shadowing: local Box::make borrowed the prelude's static method (0 diagnostics in main.dao)")
+
+  // -----------------------------------------------------------------
+  // A unary-negated literal fits its context like a bare literal, and a
+  // literal fits a match arm's scrutinee type and a pipe target's first
+  // parameter.
+  // -----------------------------------------------------------------
+  if tc_expect_clean("negated_literal_fits_return", "fn f(): i64\n  return -1\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("negated_literal_fits_annotation", "fn f(): i64\n  let x: i64 = -1\n  return x\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("literal_pattern_fits_scrutinee", "fn f(): i32\n  let n: i64 = 5\n  match n:\n    0:\n      return 0\n  return 1\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("literal_fits_pipe_target_param", "fn take(x: i64): i64\n  return x\n\nfn g(): i64\n  let r: i64 = 1 |> take\n  return r\n"):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------
