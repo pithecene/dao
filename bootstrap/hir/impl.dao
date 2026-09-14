@@ -407,6 +407,26 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
             let field_name: string = substring(hs.src, hs.toks.get(mfield_tidx).offset, hs.toks.get(mfield_tidx).len)
             let mangled: string = obj_type.name + "." + field_name
             let msym: i64 = hir_find_method_sym(hs, mangled, obj_type.decl_node)
+            if msym < 0:
+              // No `Type.method` symbol.  When the struct has a field of
+              // this name (a function-typed field) the normal call path
+              // below calls the field's value.  Otherwise the checker
+              // typed the call through a conformance the struct derives
+              // structurally; lowering it needs the concept's default
+              // method with `self` substituted, so reject here rather
+              // than lower the field access as a callee.
+              let has_field: bool = false
+              if obj_type.info_lp >= 0:
+                if obj_type.info_lp + obj_type.info_count * 2 <= hs.type_info.length():
+                  let hfi: i64 = 0
+                  while hfi < obj_type.info_count:
+                    let hf_tidx: i64 = hs.type_info.get(obj_type.info_lp + hfi * 2)
+                    if substring(hs.src, hs.toks.get(hf_tidx).offset, hs.toks.get(hf_tidx).len) == field_name:
+                      has_field = true
+                    hfi = hfi + 1
+              if has_field == false:
+                let dcur: HS = hs_add_diag(hs, Span(to_i64(0), to_i64(1)), "method '" + field_name + "' reached through a derived conformance of '" + obj_type.name + "' is not lowered in Tier A HIR")
+                return hs_add_node(dcur, HirNode::HirErrorExpr(tok = to_i64(0)))
             if msym >= 0:
               // Found the method symbol.  Desugar:
               //   CallE(FieldE(obj, method), [a1, a2])
@@ -434,6 +454,15 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
                     TypeKind::TFunction:
                       call_ti = mt.ret_type
               return hs_add_node(callee_hir.hs, HirNode::HirCall(callee = callee_hir.hir, args_lp = fl.list_pos, arg_count = hir_args.length(), typ = call_ti))
+          TypeKind::TGenericParam:
+            // The checker typed this call through a bound concept of the
+            // type parameter: the callee is the concept's requirement,
+            // resolved to a concrete method only at an instantiation
+            // (generic inference).  Reject here rather than lower the
+            // field access as a callee.
+            let gfield: string = substring(hs.src, hs.toks.get(mfield_tidx).offset, hs.toks.get(mfield_tidx).len)
+            let gcur: HS = hs_add_diag(hs, Span(to_i64(0), to_i64(1)), "method '" + gfield + "' on type parameter '" + obj_type.name + "' through its bound is not lowered in Tier A HIR (needs an instantiation)")
+            return hs_add_node(gcur, HirNode::HirErrorExpr(tok = to_i64(0)))
 
   // ---------------------------------------------------------------
   // Normal call path (non-method)

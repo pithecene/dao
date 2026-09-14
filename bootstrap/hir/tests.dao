@@ -25,7 +25,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 25
+  let total: i32 = 27
 
   // Test 1: simple_fn
   let src1: string = "fn add(a: i32, b: i32): i32\n  return a + b\n"
@@ -603,6 +603,28 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL named_construction_in_field_order: expected the first lowered argument to be the literal 1, no diagnostics (" + i64_to_string(hir_count_diags(r25)) + ")")
+
+  // Test 26: a call the checker typed through a derived conformance is
+  // rejected at HIR (no `Type.method` symbol exists; lowering it needs
+  // the concept's default method with `self` substituted) — never
+  // lowered as a call on a field access.
+  let src26d: string = "derived concept Show:\n  fn show(self): string\n\nextend i64 as Show:\n  fn show(self): string\n    return \"n\"\n\nclass P:\n  x: i64\n\nfn f(p: P): string\n  return p.show()\n"
+  let r26d: HirResult = lower_to_hir(src26d)
+  if hir_count_diags(r26d) >= 1:
+    print("PASS derived_dispatch_rejected_in_hir")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL derived_dispatch_rejected_in_hir: expected a diagnostic, got 0")
+
+  // Test 27: a call typed through a type parameter's bound is rejected
+  // at HIR until an instantiation resolves it.
+  let src27b: string = "concept Printable:\n  fn to_string(self): string\n\nfn show<T: Printable>(x: T): string\n  return x.to_string()\n"
+  let r27b: HirResult = lower_to_hir(src27b)
+  if hir_count_diags(r27b) >= 1:
+    print("PASS bound_dispatch_rejected_in_hir")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL bound_dispatch_rejected_in_hir: expected a diagnostic, got 0")
 
   // -----------------------------------------------------------------
   // Summary
