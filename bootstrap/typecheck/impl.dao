@@ -56,14 +56,24 @@ class TC:
   exports: ExportTables          // cross-module export lookup (D4)
 
 // Mutable type checker state — threaded through all operations.
+// The context of the function body being checked: what a `return`,
+// `break`, `yield`, or dereference is measured against.  Entered per
+// function body (tc_enter_fn_ctx) and restored after it.
+class CheckCtx:
+  return_type: i64      // the function's return type, -1 when unresolved
+  loop_depth: i64       // enclosing loops — `break` legality
+  in_generator: i64     // 1 inside a function declared `Generator<T>`
+  gen_elem: i64         // that T's type index, -1 when unresolved
+  unsafe_depth: i64     // enclosing `mode unsafe =>` blocks — dereference legality
+  resource_depth: i64   // enclosing `resource memory` blocks — `yield` legality
+
 class TS:
   tc: TC
   types: Vector<DaoType>
   type_info: Vector<i64>
   sym_types: Vector<i64>
   diags: Vector<Diagnostic>
-  return_type: i64
-  loop_depth: i64
+  ctx: CheckCtx              // the body being checked (see CheckCtx)
   expr_types: HashMap<i64>   // keyed by expr_id_key(module_id, node_idx)
   variant_set: HashMap<i64>  // program-wide variant registry, keyed by name (see tc_pass1)
   conform: Conformance       // pass-2 conformance state (explicit extends, derived concepts)
@@ -140,13 +150,71 @@ fn ts_set_sym_type(ts: TS, sym_idx: i64, type_idx: i64): TS
   ts.sym_types = vec_i64_set(ts.sym_types, sym_idx, type_idx)
   return ts
 
+fn ctx_with_loop(c: CheckCtx, v: i64): CheckCtx
+  return CheckCtx(c.return_type, v, c.in_generator, c.gen_elem, c.unsafe_depth, c.resource_depth)
+
+fn ctx_with_unsafe(c: CheckCtx, v: i64): CheckCtx
+  return CheckCtx(c.return_type, c.loop_depth, c.in_generator, c.gen_elem, v, c.resource_depth)
+
+fn ctx_with_resource(c: CheckCtx, v: i64): CheckCtx
+  return CheckCtx(c.return_type, c.loop_depth, c.in_generator, c.gen_elem, c.unsafe_depth, v)
+
 fn ts_inc_loop_depth(ts: TS): TS
-  ts.loop_depth = ts.loop_depth + 1
+  ts.ctx = ctx_with_loop(ts.ctx, ts.ctx.loop_depth + 1)
   return ts
 
 fn ts_dec_loop_depth(ts: TS): TS
-  ts.loop_depth = ts.loop_depth - 1
+  ts.ctx = ctx_with_loop(ts.ctx, ts.ctx.loop_depth - 1)
   return ts
+
+// The return-type annotation node of a function-like declaration, or -1.
+fn fn_ret_type_node(ts: TS, decl_idx: i64): i64
+  let node: Node = ts.tc.nodes.get(decl_idx)
+  match node:
+    Node::FnDeclD(f_name, f_tparams, f_params, f_ret, f_body):
+      return f_ret
+    Node::ExprFnD(e_name, e_tparams, e_params, e_ret, e_body):
+      return e_ret
+    Node::ExternFnD(x_name, x_tparams, x_params, x_ret):
+      return x_ret
+  return to_i64(-1)
+
+// Enter a function body: its return type from the function's type, and
+// whether the declared return annotation names `Generator<T>` — the
+// compiler-provided coroutine type (CONTRACT_SYNTAX_SURFACE.md,
+// "Generator<T> type") — in which case `yield` is legal, `T` is the
+// element type a yielded value must have, and a valued `return` is
+// not.  The annotation is read off the declaration because the
+// bootstrap has no generator type kind yet; `T` resolves as a type.
+// Loop, mode, and resource nesting start at zero for the body.
+fn tc_enter_fn_ctx(ts: TS, fn_ti: i64): TS
+  let r: TS = ts
+  let ret_ti: i64 = to_i64(-1)
+  let decl_idx: i64 = to_i64(-1)
+  if fn_ti >= 0:
+    let fn_type: DaoType = r.types.get(fn_ti)
+    ret_ti = fn_type.ret_type
+    decl_idx = fn_type.decl_node
+  let in_gen: i64 = 0
+  let gen_elem: i64 = to_i64(-1)
+  if decl_idx >= 0:
+    if decl_idx < r.tc.nodes.length():
+      let ret_node: i64 = fn_ret_type_node(r, decl_idx)
+      if ret_node >= 0:
+        let rn: Node = r.tc.nodes.get(ret_node)
+        match rn:
+          Node::GenericT(g_name_tidx, g_args_lp, g_arg_count):
+            if ts_tok_name(r, g_name_tidx) == "Generator":
+              in_gen = 1
+              if g_arg_count == 1:
+                let gargs: Vector<i64> = read_list(r.tc.idx_data, g_args_lp)
+                let er: TypeR = resolve_ast_type(r, gargs.get(0))
+                r = er.ts
+                gen_elem = er.type_idx
+              else:
+                r = ts_add_diag(r, ts_node_span(r, ret_node), "Generator requires exactly one type argument")
+  r.ctx = CheckCtx(ret_ti, to_i64(0), in_gen, gen_elem, to_i64(0), to_i64(0))
+  return r
 
 fn ts_push_type_info(ts: TS, val: i64): TS
   ts.type_info = ts.type_info.push(val)
@@ -274,8 +342,7 @@ fn program_init_typecheck(p: Program): Program
     Vector<i64>::new(),
     Vector<i64>::new(),
     Vector<Diagnostic>::new(),
-    to_i64(-1),
-    to_i64(0),
+    CheckCtx(to_i64(-1), to_i64(0), to_i64(0), to_i64(-1), to_i64(0), to_i64(0)),
     HashMap<i64>::new(),
     HashMap<i64>::new(),
     Conformance(HashMap<i64>::new(), Vector<i64>::new()))
@@ -1739,10 +1806,12 @@ fn check_unary_expr(ts: TS, node_idx: i64, op_tidx: i64, operand: i64): TS
         return r
     return ts_set_expr_type(r, node_idx, to_i64(10))
   if op_name_str == "Star":
-    // Dereference: *ptr where ptr: *T produces T.
-    // NOTE: Host compiler additionally requires `mode unsafe =>` for
-    // deref.  The bootstrap type checker does not yet track active
-    // modes; the unsafe-mode check is deferred to a later Tier B slice.
+    // Dereference: *ptr where ptr: *T produces T, and requires an
+    // enclosing `mode unsafe =>` (host check_unary).
+    if r.ctx.unsafe_depth == 0:
+      let spu: Span = ts_tok_span(r, op_tidx)
+      r = ts_add_diag(r, spu, "dereference requires 'mode unsafe =>'")
+      return ts_set_expr_type(r, node_idx, to_i64(-1))
     if ot >= 0:
       let ptr_type: DaoType = r.types.get(ot)
       match ptr_type.kind:
@@ -2092,13 +2161,53 @@ fn check_stmt(ts: TS, node_idx: i64): TS
     Node::WhileS(cond, body_lp):
       return check_while_stmt(ts, cond, body_lp)
     Node::ResourceS(kind_tidx, name_tidx, body_lp):
+      // A `resource memory` block is an allocation domain; its body is
+      // checked with the domain nesting recorded (a `yield` inside it is
+      // rejected — CONTRACT_EXECUTION_CONTEXTS.md, Resources §8).
+      if ts_tok_name(ts, kind_tidx) == "memory":
+        let rr: TS = ts
+        rr.ctx = ctx_with_resource(rr.ctx, rr.ctx.resource_depth + 1)
+        rr = check_body_stmts(rr, body_lp)
+        rr.ctx = ctx_with_resource(rr.ctx, rr.ctx.resource_depth - 1)
+        return rr
       return check_body_stmts(ts, body_lp)
     Node::ModeS(name_tidx, body_lp):
-      return check_body_stmts(ts, body_lp)
+      // `mode <name> =>` enters an execution / safety context for its body
+      // (CONTRACT_EXECUTION_CONTEXTS.md: `unsafe`, `gpu`, `parallel`).
+      // `unsafe` is what a dereference requires (host check_unary); `gpu`
+      // and `parallel` carry no checking rule yet and are entered as
+      // ordinary blocks.  Any other name is a diagnostic.
+      let mode_name: string = ts_tok_name(ts, name_tidx)
+      if mode_name == "unsafe":
+        let ru: TS = ts
+        ru.ctx = ctx_with_unsafe(ru.ctx, ru.ctx.unsafe_depth + 1)
+        ru = check_body_stmts(ru, body_lp)
+        ru.ctx = ctx_with_unsafe(ru.ctx, ru.ctx.unsafe_depth - 1)
+        return ru
+      if mode_name == "gpu":
+        return check_body_stmts(ts, body_lp)
+      if mode_name == "parallel":
+        return check_body_stmts(ts, body_lp)
+      return ts_add_diag(ts, ts_tok_span(ts, name_tidx), "unknown mode '" + mode_name + "'")
     Node::YieldS(val_node):
-      if val_node >= 0:
-        return check_expr(ts, val_node)
-      return ts
+      // `yield` is legal only in a generator function (declared
+      // `Generator<T>`), never inside a `resource memory` block, and its
+      // value must be `T` (CONTRACT_SYNTAX_SURFACE.md, generator rules).
+      let sp_y: Span = ts_node_span(ts, node_idx)
+      if ts.ctx.in_generator == 0:
+        return ts_add_diag(ts, sp_y, "yield is only valid inside a generator function")
+      if ts.ctx.resource_depth > 0:
+        return ts_add_diag(ts, sp_y, "yield within a resource memory block is invalid")
+      if val_node < 0:
+        return ts
+      let ry: TS = check_expr(ts, val_node)
+      if ry.ctx.gen_elem >= 0:
+        ry = fit_literal(ry, val_node, ry.ctx.gen_elem)
+        let yt: i64 = get_expr_type(ry, val_node)
+        if yt >= 0:
+          if types_equal(ry, yt, ry.ctx.gen_elem) == false:
+            ry = ts_add_diag(ry, ts_node_span(ry, val_node), "yield type " + type_name(ry, yt) + " does not match Generator element type " + type_name(ry, ry.ctx.gen_elem))
+      return ry
     Node::ForS(var_tidx, iter_node, body_lp):
       return check_for_stmt(ts, var_tidx, iter_node, body_lp)
     Node::ReturnS(val_node):
@@ -2218,26 +2327,33 @@ fn check_for_stmt(ts: TS, var_tidx: i64, iter_node: i64, body_lp: i64): TS
   return r
 
 fn check_return_stmt(ts: TS, val_node: i64): TS
+  if ts.ctx.in_generator > 0:
+    // A generator terminates with a bare `return`; it produces values
+    // with `yield`, never with `return value`.
+    if val_node < 0:
+      return ts
+    let rg: TS = check_expr(ts, val_node)
+    return ts_add_diag(rg, ts_node_span(rg, val_node), "'return value' is invalid in a generator function; use yield to produce values")
   if val_node < 0:
-    if ts.return_type >= 0:
-      if is_void_type(ts, ts.return_type) == false:
+    if ts.ctx.return_type >= 0:
+      if is_void_type(ts, ts.ctx.return_type) == false:
         let sp: Span = Span(to_i64(0), to_i64(1))
-        return ts_add_diag(ts, sp, "return with no value in function returning " + type_name(ts, ts.return_type))
+        return ts_add_diag(ts, sp, "return with no value in function returning " + type_name(ts, ts.ctx.return_type))
     return ts
   let r: TS = check_expr(ts, val_node)
   // A literal return value adopts the function's concrete return type.
-  if r.return_type >= 0:
-    r = fit_literal(r, val_node, r.return_type)
+  if r.ctx.return_type >= 0:
+    r = fit_literal(r, val_node, r.ctx.return_type)
   let val_ti: i64 = get_expr_type(r, val_node)
   if val_ti >= 0:
-    if r.return_type >= 0:
-      if types_equal(r, val_ti, r.return_type) == false:
+    if r.ctx.return_type >= 0:
+      if types_equal(r, val_ti, r.ctx.return_type) == false:
         let sp: Span = ts_node_span(r, val_node)
-        r = ts_add_diag(r, sp, "return type mismatch: expected " + type_name(r, r.return_type) + ", got " + type_name(r, val_ti))
+        r = ts_add_diag(r, sp, "return type mismatch: expected " + type_name(r, r.ctx.return_type) + ", got " + type_name(r, val_ti))
   return r
 
 fn check_break_stmt(ts: TS, tidx: i64): TS
-  if ts.loop_depth <= 0:
+  if ts.ctx.loop_depth <= 0:
     let sp: Span = ts_tok_span(ts, tidx)
     return ts_add_diag(ts, sp, "break outside of loop")
   return ts
@@ -2355,10 +2471,8 @@ fn tc_check_fn_body(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, ret_t
   let sym_idx: i64 = find_callable_sym_by_decl(r, decl_idx)
   if sym_idx >= 0:
     fn_ti = sym_type_at(r, sym_idx)
-  let old_return_type: i64 = r.return_type
-  if fn_ti >= 0:
-    let fn_type: DaoType = r.types.get(fn_ti)
-    r.return_type = fn_type.ret_type
+  let old_ctx: CheckCtx = r.ctx
+  r = tc_enter_fn_ctx(r, fn_ti)
   // Declare param types
   let pairs: Vector<i64> = read_pairs(r.tc.idx_data, params_lp)
   let pi: i64 = 0
@@ -2374,7 +2488,7 @@ fn tc_check_fn_body(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, ret_t
         r = ts_set_sym_type(r, p_sym, pt_r.type_idx)
     pi = pi + 2
   r = check_body_stmts(r, body_lp)
-  r.return_type = old_return_type
+  r.ctx = old_ctx
   return r
 
 fn tc_check_expr_fn_body(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, ret_type_node: i64, body_expr: i64): TS
@@ -2383,10 +2497,8 @@ fn tc_check_expr_fn_body(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, 
   let sym_idx: i64 = find_callable_sym_by_decl(r, decl_idx)
   if sym_idx >= 0:
     fn_ti = sym_type_at(r, sym_idx)
-  let old_return_type: i64 = r.return_type
-  if fn_ti >= 0:
-    let fn_type: DaoType = r.types.get(fn_ti)
-    r.return_type = fn_type.ret_type
+  let old_ctx: CheckCtx = r.ctx
+  r = tc_enter_fn_ctx(r, fn_ti)
   let pairs: Vector<i64> = read_pairs(r.tc.idx_data, params_lp)
   let pi: i64 = 0
   while pi < pairs.length():
@@ -2403,11 +2515,11 @@ fn tc_check_expr_fn_body(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, 
   r = check_expr(r, body_expr)
   let body_ti: i64 = get_expr_type(r, body_expr)
   if body_ti >= 0:
-    if r.return_type >= 0:
-      if types_equal(r, body_ti, r.return_type) == false:
+    if r.ctx.return_type >= 0:
+      if types_equal(r, body_ti, r.ctx.return_type) == false:
         let sp: Span = ts_node_span(r, body_expr)
-        r = ts_add_diag(r, sp, "expression body type mismatch: expected " + type_name(r, r.return_type) + ", got " + type_name(r, body_ti))
-  r.return_type = old_return_type
+        r = ts_add_diag(r, sp, "expression body type mismatch: expected " + type_name(r, r.ctx.return_type) + ", got " + type_name(r, body_ti))
+  r.ctx = old_ctx
   return r
 
 fn tc_check_method_body(ts: TS, class_decl_idx: i64, meth_idx: i64, m_name_tidx: i64, m_params_lp: i64, m_ret_type: i64, m_body_lp: i64): TS
@@ -2424,10 +2536,8 @@ fn tc_check_method_body(ts: TS, class_decl_idx: i64, meth_idx: i64, m_name_tidx:
   let msym: i64 = find_visible_method_sym(r.tc.symbols, mangled, r.tc.module_id)
   if msym >= 0:
     fn_ti = sym_type_at(r, msym)
-  let old_return_type: i64 = r.return_type
-  if fn_ti >= 0:
-    let fn_type: DaoType = r.types.get(fn_ti)
-    r.return_type = fn_type.ret_type
+  let old_ctx: CheckCtx = r.ctx
+  r = tc_enter_fn_ctx(r, fn_ti)
   // Declare param types — self gets the enclosing struct type
   let pairs: Vector<i64> = read_pairs(r.tc.idx_data, m_params_lp)
   let pi: i64 = 0
@@ -2451,7 +2561,7 @@ fn tc_check_method_body(ts: TS, class_decl_idx: i64, meth_idx: i64, m_name_tidx:
           r = ts_set_sym_type(r, p_sym, pt_r.type_idx)
     pi = pi + 2
   r = check_body_stmts(r, m_body_lp)
-  r.return_type = old_return_type
+  r.ctx = old_ctx
   return r
 
 fn tc_check_extend_method_body(ts: TS, extend_decl_idx: i64, meth_idx: i64, m_name_tidx: i64, m_params_lp: i64, m_ret_type: i64, m_body_lp: i64): TS
@@ -2468,10 +2578,8 @@ fn tc_check_extend_method_body(ts: TS, extend_decl_idx: i64, meth_idx: i64, m_na
   let msym: i64 = find_visible_method_sym(r.tc.symbols, mangled, r.tc.module_id)
   if msym >= 0:
     fn_ti = sym_type_at(r, msym)
-  let old_return_type: i64 = r.return_type
-  if fn_ti >= 0:
-    let fn_type: DaoType = r.types.get(fn_ti)
-    r.return_type = fn_type.ret_type
+  let old_ctx: CheckCtx = r.ctx
+  r = tc_enter_fn_ctx(r, fn_ti)
   // Declare param types — self gets the target type
   let pairs: Vector<i64> = read_pairs(r.tc.idx_data, m_params_lp)
   let pi: i64 = 0
@@ -2502,7 +2610,7 @@ fn tc_check_extend_method_body(ts: TS, extend_decl_idx: i64, meth_idx: i64, m_na
           r = ts_set_sym_type(r, p_sym, pt_r.type_idx)
     pi = pi + 2
   r = check_body_stmts(r, m_body_lp)
-  r.return_type = old_return_type
+  r.ctx = old_ctx
   return r
 
 // =========================================================================
@@ -2786,7 +2894,7 @@ fn build_module_tc(p: Program, mid: i64): TC
 
 // Helper: build per-module TS from accumulated program state.
 fn build_module_ts(tc: TC, types: Vector<DaoType>, type_info: Vector<i64>, sym_types: Vector<i64>, expr_types: HashMap<i64>, variant_set: HashMap<i64>): TS
-  return TS(tc, types, type_info, sym_types, Vector<Diagnostic>::new(), to_i64(-1), to_i64(0), expr_types, variant_set, Conformance(HashMap<i64>::new(), Vector<i64>::new()))
+  return TS(tc, types, type_info, sym_types, Vector<Diagnostic>::new(), CheckCtx(to_i64(-1), to_i64(0), to_i64(0), to_i64(-1), to_i64(0), to_i64(0)), expr_types, variant_set, Conformance(HashMap<i64>::new(), Vector<i64>::new()))
 
 
 // Run type checking over the full program in two passes:
