@@ -66,6 +66,15 @@ class TS:
   loop_depth: i64
   expr_types: HashMap<i64>   // keyed by expr_id_key(module_id, node_idx)
   variant_set: HashMap<i64>  // program-wide variant registry, keyed by name (see tc_pass1)
+  conform: Conformance       // pass-2 conformance state (explicit extends, derived concepts)
+
+// Pass-2 conformance state: the conformances known in the module being
+// checked — explicit `extend`s and derived ones — keyed
+// conform_key(type_ti, concept_ti), and the module's `derived concept`
+// types.  Grouped so the checker state carries one field for it.
+class Conformance:
+  known: HashMap<i64>
+  derived_concepts: Vector<i64>
 
 class TypeR:
   ts: TS
@@ -268,7 +277,8 @@ fn program_init_typecheck(p: Program): Program
     to_i64(-1),
     to_i64(0),
     HashMap<i64>::new(),
-    HashMap<i64>::new())
+    HashMap<i64>::new(),
+    Conformance(HashMap<i64>::new(), Vector<i64>::new()))
   let seeded: TS = register_builtins(dummy_ts)
   let td: TypeCheckData = TypeCheckData(
     true,
@@ -1980,6 +1990,22 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
         let meth_ti: i64 = sym_type_at(r, msym)
         if meth_ti >= 0:
           return ts_set_expr_type(r, node_idx, meth_ti)
+      // A derived concept the struct conforms to structurally provides
+      // its methods; the concept's signature types the access.
+      let dci: i64 = 0
+      while dci < r.conform.derived_concepts.length():
+        let dcti: i64 = r.conform.derived_concepts.get(dci)
+        if ts_conforms(r, obj_ti, dcti):
+          if dcti < r.types.length():
+            let dct: DaoType = r.types.get(dcti)
+            if layout_walkable(r, dct):
+              let dmi: i64 = 0
+              while dmi < dct.info_count:
+                let dm_name_tidx: i64 = r.type_info.get(dct.info_lp + dmi * 2)
+                if ts_tok_name(r, dm_name_tidx) == field_name:
+                  return ts_set_expr_type(r, node_idx, r.type_info.get(dct.info_lp + dmi * 2 + 1))
+                dmi = dmi + 1
+        dci = dci + 1
       // A member miss is a diagnostic only when the layout was walkable;
       // a cross-module generic head's fields are unknown here, so leave
       // such an access unresolved rather than falsely reporting.
@@ -2495,12 +2521,200 @@ fn tc_check_extend_method_body(ts: TS, extend_decl_idx: i64, meth_idx: i64, m_na
   r.return_type = old_return_type
   return r
 
+// =========================================================================
+// Section 44b: Derived conformance (the host's compute_derived_conformances)
+// =========================================================================
+
+fn conform_key(ti: i64, concept_ti: i64): string
+  return i64_to_string(ti) + ":" + i64_to_string(concept_ti)
+
+// Whether type `ti` is known in this module to conform to concept
+// `concept_ti` — by an explicit `extend`, or derived — a constant-time
+// lookup in the conformance map.
+fn ts_conforms(ts: TS, ti: i64, concept_ti: i64): bool
+  let found: Option<i64> = ts.conform.known.get(conform_key(ti, concept_ti))
+  match found:
+    Option::Some(v):
+      return true
+    Option::None:
+      return false
+  return false
+
+fn ts_record_conformance(ts: TS, ti: i64, concept_ti: i64): TS
+  ts.conform = Conformance(ts.conform.known.set(conform_key(ti, concept_ti), to_i64(1)), ts.conform.derived_concepts)
+  return ts
+
+fn ts_add_derived_concept(ts: TS, concept_ti: i64): TS
+  ts.conform = Conformance(ts.conform.known, ts.conform.derived_concepts.push(concept_ti))
+  return ts
+
+// A `derived concept` is conformed to structurally: a class conforms when
+// every field's type conforms (explicitly, or itself derived), computed
+// to a fixpoint so derivation is transitive and independent of
+// declaration order — the host's rule.  A class with an explicit extend
+// for the concept keeps that conformance.  (The bootstrap parses no
+// inline `as` / `deny` blocks; an extend is the explicit form here.)
+//
+// The declarations are walked once up front: every `derived concept` is
+// collected, and every `extend <type> as <concept>` is resolved into the
+// conformance map (the resolver bound each extend's concept name; the
+// target type is resolved here).  Classes and their field types are then
+// indexed once, and derivation propagates through a worklist over that
+// index, reading only the map.
+fn tc_compute_derived_conformances(ts: TS, decls: Vector<i64>): TS
+  let r: TS = ts
+  let i: i64 = 0
+  while i < decls.length():
+    let decl_idx: i64 = decls.get(i)
+    let node: Node = r.tc.nodes.get(decl_idx)
+    match node:
+      Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
+        if is_derived > 0:
+          let csym: i64 = find_sym_by_decl(r, decl_idx, "Type")
+          if csym >= 0:
+            let cti: i64 = sym_type_at(r, csym)
+            if cti >= 0:
+              r = ts_add_derived_concept(r, cti)
+      Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
+        let cb_key: string = extend_binding_key(r.tc.file_id, decl_idx)
+        let cb_found: Option<i64> = r.tc.concept_bindings.get(cb_key)
+        let esym: i64 = to_i64(-1)
+        match cb_found:
+          Option::Some(sym):
+            esym = sym
+          Option::None:
+            esym = to_i64(-1)
+        if esym >= 0:
+          let ecti: i64 = sym_type_at(r, esym)
+          if ecti >= 0:
+            let tr: TypeR = resolve_ast_type(r, target_type_node)
+            r = tr.ts
+            if tr.type_idx >= 0:
+              r = ts_record_conformance(r, tr.type_idx, ecti)
+    i = i + 1
+  if r.conform.derived_concepts.length() == 0:
+    return r
+  // Index the classes once: each class's struct type and field types are
+  // read from the type layout a single time, and a reverse index maps a
+  // field type to the classes carrying a field of that type.  Derivation
+  // then propagates through a worklist — a class is re-examined only when
+  // one of its field types newly conforms — so a dependency chain costs
+  // its edges, never a rescan of every declaration per class.
+  let class_tis: Vector<i64> = Vector<i64>::new()
+  let cf_start: Vector<i64> = Vector<i64>::new()
+  let cf_count: Vector<i64> = Vector<i64>::new()
+  let cf_tis: Vector<i64> = Vector<i64>::new()
+  // "n:<fti>" → number of dependents of field type fti;
+  // "d:<fti>:<j>" → the j-th dependent's class index.
+  let dep_index: HashMap<i64> = HashMap<i64>::new()
+  let ci: i64 = 0
+  while ci < decls.length():
+    let cdecl: i64 = decls.get(ci)
+    let cnode: Node = r.tc.nodes.get(cdecl)
+    match cnode:
+      Node::ClassDeclD(cname_tidx, ctparams_lp, cfields_lp, cmethods_lp):
+        let ssym: i64 = find_sym_by_decl(r, cdecl, "Type")
+        if ssym >= 0:
+          let sti: i64 = sym_type_at(r, ssym)
+          if sti >= 0:
+            let st: DaoType = r.types.get(sti)
+            if layout_walkable(r, st):
+              let k: i64 = class_tis.length()
+              class_tis = class_tis.push(sti)
+              cf_start = cf_start.push(cf_tis.length())
+              cf_count = cf_count.push(st.info_count)
+              let fi: i64 = 0
+              while fi < st.info_count:
+                let fti: i64 = r.type_info.get(st.info_lp + fi * 2 + 1)
+                cf_tis = cf_tis.push(fti)
+                if fti >= 0:
+                  let nkey: string = "n:" + i64_to_string(fti)
+                  let n: i64 = hm_get_or(dep_index, nkey, to_i64(0))
+                  dep_index = dep_index.set("d:" + i64_to_string(fti) + ":" + i64_to_string(n), k)
+                  dep_index = dep_index.set(nkey, n + 1)
+                fi = fi + 1
+    ci = ci + 1
+  // Per derived concept: count each class's fields that do not yet
+  // conform (one pass over its fields), record the classes with none, and
+  // propagate along the dependency edges — each newly conforming type
+  // decrements the count of every class carrying a field of that type,
+  // once per such field; a class is recorded when its count reaches zero.
+  // Every field is examined once and every edge once.  A field of
+  // unresolved type blocks its class (count -1).
+  let di: i64 = 0
+  while di < r.conform.derived_concepts.length():
+    let dcti: i64 = r.conform.derived_concepts.get(di)
+    let pending: Vector<i64> = Vector<i64>::new()
+    let queue: Vector<i64> = Vector<i64>::new()
+    let k: i64 = 0
+    while k < class_tis.length():
+      let sti: i64 = class_tis.get(k)
+      let cnt: i64 = 0
+      let blocked: bool = false
+      let fi: i64 = 0
+      while fi < cf_count.get(k):
+        let fti: i64 = cf_tis.get(cf_start.get(k) + fi)
+        if fti < 0:
+          blocked = true
+        else:
+          if ts_conforms(r, fti, dcti) == false:
+            cnt = cnt + 1
+        fi = fi + 1
+      if blocked:
+        pending = pending.push(to_i64(-1))
+      else:
+        pending = pending.push(cnt)
+      k = k + 1
+    // Every count is taken against the conformances known before this
+    // concept's derivation starts; only then are the classes with no
+    // pending field recorded and queued.  Recording during the count
+    // would let a later class omit an already-derived field from its
+    // count and still receive that field's decrement.
+    let zk: i64 = 0
+    while zk < class_tis.length():
+      if pending.get(zk) == 0:
+        let zsti: i64 = class_tis.get(zk)
+        if ts_conforms(r, zsti, dcti) == false:
+          r = ts_record_conformance(r, zsti, dcti)
+          queue = queue.push(zsti)
+      zk = zk + 1
+    let qi: i64 = 0
+    while qi < queue.length():
+      let done_ti: i64 = queue.get(qi)
+      let dn: i64 = hm_get_or(dep_index, "n:" + i64_to_string(done_ti), to_i64(0))
+      let dj: i64 = 0
+      while dj < dn:
+        let dep_k: i64 = hm_get_or(dep_index, "d:" + i64_to_string(done_ti) + ":" + i64_to_string(dj), to_i64(-1))
+        if dep_k >= 0:
+          let p: i64 = pending.get(dep_k)
+          if p > 0:
+            let p2: i64 = p - 1
+            pending = pending.set(dep_k, p2)
+            if p2 == 0:
+              let dsti: i64 = class_tis.get(dep_k)
+              if ts_conforms(r, dsti, dcti) == false:
+                r = ts_record_conformance(r, dsti, dcti)
+                queue = queue.push(dsti)
+        dj = dj + 1
+      qi = qi + 1
+    di = di + 1
+  return r
+
+fn hm_get_or(m: HashMap<i64>, key: string, dflt: i64): i64
+  let found: Option<i64> = m.get(key)
+  match found:
+    Option::Some(v):
+      return v
+    Option::None:
+      return dflt
+  return dflt
+
 fn tc_pass2(ts: TS, file_node_idx: i64): TS
   let file_node: Node = ts.tc.nodes.get(file_node_idx)
   match file_node:
     Node::FileN(module_decl, imports_lp, decls_lp):
       let decls: Vector<i64> = read_list(ts.tc.idx_data, decls_lp)
-      let r: TS = ts
+      let r: TS = tc_compute_derived_conformances(ts, decls)
       let i: i64 = 0
       while i < decls.length():
         let decl_idx: i64 = decls.get(i)
@@ -2588,7 +2802,7 @@ fn build_module_tc(p: Program, mid: i64): TC
 
 // Helper: build per-module TS from accumulated program state.
 fn build_module_ts(tc: TC, types: Vector<DaoType>, type_info: Vector<i64>, sym_types: Vector<i64>, expr_types: HashMap<i64>, variant_set: HashMap<i64>): TS
-  return TS(tc, types, type_info, sym_types, Vector<Diagnostic>::new(), to_i64(-1), to_i64(0), expr_types, variant_set)
+  return TS(tc, types, type_info, sym_types, Vector<Diagnostic>::new(), to_i64(-1), to_i64(0), expr_types, variant_set, Conformance(HashMap<i64>::new(), Vector<i64>::new()))
 
 
 // Run type checking over the full program in two passes:

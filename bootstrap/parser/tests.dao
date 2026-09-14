@@ -456,14 +456,13 @@ fn main(): i32
   if expect_no_parse_errors_po("generic_class_bound_no_err", r35c):
     pass_count = pass_count + 1
 
-<<<<<<< HEAD
   // Test 35d: Qualified bound — fn f<T: core::Printable>(x: T): T
   let src35q: string = "fn f<T: core::Printable>(x: T): T\n  return x\n"
   let r35q: ParseOutput = parse(src35q)
   if expect_no_parse_errors_po("generic_fn_qualified_bound_no_err", r35q):
     pass_count = pass_count + 1
-=======
-  // Test 35d: `derived concept` parses and is marked derived
+
+  // Test 35e: `derived concept` parses and is marked derived
   let src35d: string = "derived concept Ord:\n  fn cmp(self, o: Ord): i64\n"
   let r35d: ParseOutput = parse(src35d)
   if expect_no_parse_errors_po("derived_concept_no_err", r35d):
@@ -475,7 +474,7 @@ fn main(): i32
   else:
     print("FAIL derived_concept_flag_set: expected 1, got " + i64_to_string(df35d))
 
-  // Test 35e: a plain `concept` is not marked derived (distinct representation)
+  // Test 35f: a plain `concept` is not marked derived (distinct representation)
   let src35e: string = "concept Eq:\n  fn eq(self, o: Eq): bool\n"
   let r35e: ParseOutput = parse(src35e)
   let df35e: i64 = concept_derived_flag(r35e)
@@ -484,7 +483,6 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL plain_concept_flag_unset: expected 0, got " + i64_to_string(df35e))
->>>>>>> 80b6fa7 (feat(bootstrap): ✨ Task 41 slice 5 — parse and preserve `derived concept`)
 
   // -----------------------------------------------------------------
   // Method tests
