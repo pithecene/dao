@@ -61,7 +61,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 86
+  let total: i32 = 87
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -1230,6 +1230,8 @@ fn main(): i32
   if tc_expect_diags("method_bound_unknown_concept", "class C:\n  x: i64\n  fn m<T: Nope>(self): i64\n    return 1\n", 1):
     pass_count = pass_count + 1
   if tc_expect_diags("concept_method_bound_unknown_concept", "concept K:\n  fn m<T: Nope>(self): i64\n", 1):
+    pass_count = pass_count + 1
+  if tc_expect_diags("expr_method_bound_unknown_concept", "class C:\n  x: i64\n  fn m<T: Nope>(self): i64 -> 1\n", 1):
     pass_count = pass_count + 1
   if tc_expect_diags("bound_generic_class_head_rejected", "class Box<T>:\n  v: T\n\nfn f<U: Box<i64>>(x: U): U\n  return x\n", 1):
     pass_count = pass_count + 1

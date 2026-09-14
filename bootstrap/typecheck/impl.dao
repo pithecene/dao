@@ -578,6 +578,17 @@ fn find_param_sym(ts: TS, decl_idx: i64, param_name: string): i64
     si = si + 1
   return to_i64(-1)
 
+// Whether a concept's method table can be read in this module.  A
+// concept's method names are token indices into its declaring module's
+// token vector (`builtin_id` records that module), so only a concept this
+// module declared — or any concept in single-file mode — is read; another
+// module's concept is unreadable here, never misread through this
+// module's tokens.
+fn concept_readable(ts: TS, ct: DaoType): bool
+  if ts.tc.module_id < 0:
+    return true
+  return ct.builtin_id == ts.tc.module_id
+
 // A type parameter's bound concepts are stored singly at `info_lp`
 // (`info_count` slots, each a TConcept type index, or -1 for a bound
 // whose concept lives outside this module's `types`).  Report whether the
@@ -645,6 +656,11 @@ fn tc_bind_generic_bounds(ts: TS, tparams_lp: i64): TS
         let tname: string = ts_tok_name(r, tidx)
         // The resolver bound the declaring token to the parameter's symbol.
         let tsym: i64 = lookup_use(r, tidx)
+        if tsym < 0:
+          // The resolver binds every type parameter it visits; one with
+          // no symbol was never resolved, so its bounds cannot be
+          // validated — fail closed rather than skip.
+          r = ts_add_diag(r, ts_tok_span(r, tidx), "type parameter '" + tname + "' was never resolved")
         if tsym >= 0:
           if bounds_lp >= 0:
             let gtr: TypeR = generic_param_type(r, tsym, tname)
@@ -1041,7 +1057,10 @@ fn tc_register_concepts(ts: TS, decls: Vector<i64>): TS
           while pi < method_pairs.length():
             r = ts_push_type_info(r, method_pairs.get(pi))
             pi = pi + 1
-          let tr: TypeR = ts_add_type(r, DaoType(TypeKind::TConcept, to_i64(-1), cname, decl_idx, info_start, method_count, to_i64(-1), to_i64(-1)))
+          // `builtin_id` carries the declaring module: a concept's method
+          // names are token indices into that module's token vector, so a
+          // reader in another module must treat the table as unreadable.
+          let tr: TypeR = ts_add_type(r, DaoType(TypeKind::TConcept, r.tc.module_id, cname, decl_idx, info_start, method_count, to_i64(-1), to_i64(-1)))
           r = tr.ts
           r = ts_set_sym_type(r, csym, tr.type_idx)
     i = i + 1
@@ -2014,13 +2033,16 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
           else:
             if cti < r.types.length():
               let ct: DaoType = r.types.get(cti)
-              if layout_walkable(r, ct):
-                let gm: i64 = 0
-                while gm < ct.info_count:
-                  let req_name_tidx: i64 = r.type_info.get(ct.info_lp + gm * 2)
-                  if ts_tok_name(r, req_name_tidx) == m_name:
-                    return ts_set_expr_type(r, node_idx, r.type_info.get(ct.info_lp + gm * 2 + 1))
-                  gm = gm + 1
+              if concept_readable(r, ct):
+                if layout_walkable(r, ct):
+                  let gm: i64 = 0
+                  while gm < ct.info_count:
+                    let req_name_tidx: i64 = r.type_info.get(ct.info_lp + gm * 2)
+                    if ts_tok_name(r, req_name_tidx) == m_name:
+                      return ts_set_expr_type(r, node_idx, r.type_info.get(ct.info_lp + gm * 2 + 1))
+                    gm = gm + 1
+                else:
+                  unreadable = true
               else:
                 unreadable = true
             else:
