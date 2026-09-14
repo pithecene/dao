@@ -89,7 +89,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 58
+  let total: i32 = 59
 
   // -----------------------------------------------------------------
   // Test 1: forward_ref — fn calls fn defined later in file; no diagnostic
@@ -1105,6 +1105,20 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL unbound_concept_deferred: expected 0 diagnostics, got " + i64_to_string(r_gu_diags))
+
+  // -----------------------------------------------------------------
+  // Test: derived_concept_resolves — a `derived concept` declaration
+  // resolves with no diagnostic (previously a parse error), the derived
+  // marker being preserved distinctly on the decl node.
+  // -----------------------------------------------------------------
+  let src_dc: string = "derived concept Ord:\n  fn cmp(self, o: Ord): i64\n"
+  let r_dc: ResolveResult = resolve(src_dc)
+  let r_dc_diags: i64 = count_diags(r_dc)
+  if r_dc_diags == 0:
+    print("PASS derived_concept_resolves")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL derived_concept_resolves: expected 0 diagnostics, got " + i64_to_string(r_dc_diags))
 
   // -----------------------------------------------------------------
   // Summary

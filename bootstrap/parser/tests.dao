@@ -82,6 +82,19 @@ fn parse_expr_str(src: string): PR
   let ps: PS = PS(to_i64(0), Vector<Node>::new(), Vector<i64>::new(), lr.diagnostics)
   return parse_expr(pc, ps)
 
+// The `derived` flag of the first ConceptDeclD node in a parse output,
+// or -1 if there is none.  Used to check that `derived concept` is
+// represented distinctly from a plain `concept`.
+fn concept_derived_flag(po: ParseOutput): i64
+  let i: i64 = 0
+  while i < po.nodes.length():
+    let n: Node = po.nodes.get(i)
+    match n:
+      Node::ConceptDeclD(a, b, c, d):
+        return d
+    i = i + 1
+  return to_i64(-1)
+
 // =========================================================================
 // Section 18: Golden parse tests
 // =========================================================================
@@ -91,7 +104,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 79
+  let total: i32 = 82
 
   // -----------------------------------------------------------------
   // Expression tests
@@ -449,6 +462,28 @@ fn main(): i32
   if expect_no_parse_errors_po("generic_fn_qualified_bound_no_err", r35q):
     pass_count = pass_count + 1
 
+  // Test 35e: `derived concept` parses and is marked derived
+  let src35d: string = "derived concept Ord:\n  fn cmp(self, o: Ord): i64\n"
+  let r35d: ParseOutput = parse(src35d)
+  if expect_no_parse_errors_po("derived_concept_no_err", r35d):
+    pass_count = pass_count + 1
+  let df35d: i64 = concept_derived_flag(r35d)
+  if df35d == 1:
+    print("PASS derived_concept_flag_set")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL derived_concept_flag_set: expected 1, got " + i64_to_string(df35d))
+
+  // Test 35f: a plain `concept` is not marked derived (distinct representation)
+  let src35e: string = "concept Eq:\n  fn eq(self, o: Eq): bool\n"
+  let r35e: ParseOutput = parse(src35e)
+  let df35e: i64 = concept_derived_flag(r35e)
+  if df35e == 0:
+    print("PASS plain_concept_flag_unset")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL plain_concept_flag_unset: expected 0, got " + i64_to_string(df35e))
+
   // -----------------------------------------------------------------
   // Method tests
   // -----------------------------------------------------------------
@@ -684,7 +719,6 @@ fn main(): i32
   // Tier B deferrals (documented, not silently omitted)
   // -----------------------------------------------------------------
   // The following syntax is explicitly deferred to Tier B:
-  //   - derived concept declarations
   //   - conformance blocks (as / deny)
   //   - mode blocks
   //   - yield statements

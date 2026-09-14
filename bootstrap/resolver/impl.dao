@@ -903,7 +903,7 @@ fn resolve_decl(rs: RS, node_idx: i64): RS
       return resolve_enum_decl(rs, node_idx, name_tidx, tparams_lp, variants_lp)
     Node::TypeAliasD(name_tidx, target_type):
       return resolve_type_alias_decl(rs, node_idx, name_tidx, target_type)
-    Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp):
+    Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
       return resolve_concept_decl(rs, node_idx, name_tidx, tparams_lp, methods_lp)
     Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
       return resolve_extend_decl(rs, node_idx, target_type_node, concept_name_tidx, methods_lp)
@@ -966,7 +966,7 @@ fn collect_top_level(rs: RS, file_node_idx: i64): RS
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Type, name, decl_idx, r.current_scope, r.owner_module_id))
             r = declare_top_level(sr.rs, name, sr.sym_idx, name_tidx)
-          Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp):
+          Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Type, name, decl_idx, r.current_scope, r.owner_module_id))
             r = declare_top_level(sr.rs, name, sr.sym_idx, name_tidx)
@@ -1092,7 +1092,7 @@ fn build_export_table(rs: RS, file_node_idx: i64): HashMap<i64>
             name_tidx = nt
           Node::TypeAliasD(nt, tt):
             name_tidx = nt
-          Node::ConceptDeclD(nt, tp, mlp):
+          Node::ConceptDeclD(nt, tp, mlp, dv):
             name_tidx = nt
         if name_tidx >= 0:
           let name: string = tok_name(rs, name_tidx)
