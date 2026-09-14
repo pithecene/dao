@@ -486,6 +486,17 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
       // generic layout is later program-level work; until then a generic
       // annotation reads as unresolved, as before.
       return TypeR(ts, to_i64(-1))
+    Node::QualNameE(seg_lp, seg_count):
+      // A qualified type (`core::Printable`): the resolver bound its last
+      // segment; read that symbol's type when it is in this module's
+      // `types` (a symbol reached across the module boundary reads as
+      // unresolved here, as `sym_type_at` guards).
+      let qsegs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+      if qsegs.length() > 0:
+        let qsym: i64 = lookup_use(ts, qsegs.get(qsegs.length() - 1))
+        if qsym >= 0:
+          return TypeR(ts, sym_type_at(ts, qsym))
+      return TypeR(ts, to_i64(-1))
     Node::ErrorT(t):
       return TypeR(ts, to_i64(-1))
   return TypeR(ts, to_i64(-1))
@@ -556,6 +567,147 @@ fn find_param_sym(ts: TS, decl_idx: i64, param_name: string): i64
           return si
     si = si + 1
   return to_i64(-1)
+
+// A type parameter's bound concepts are stored singly at `info_lp`
+// (`info_count` slots, each a TConcept type index, or -1 for a bound
+// whose concept lives outside this module's `types`).  Report whether the
+// slots are in range of this module's `type_info`.
+fn bounds_walkable(ts: TS, t: DaoType): bool
+  if t.info_lp < 0:
+    return false
+  if t.info_lp + t.info_count <= ts.type_info.length():
+    return true
+  return false
+
+// The TGenericParam type for `sym_idx`, created on first use.
+fn generic_param_type(ts: TS, sym_idx: i64, name: string): TypeR
+  let existing_ti: i64 = sym_type_at(ts, sym_idx)
+  if existing_ti >= 0:
+    return TypeR(ts, existing_ti)
+  let tr: TypeR = ts_add_type(ts, DaoType(TypeKind::TGenericParam, sym_idx, name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let ts2: TS = ts_set_sym_type(tr.ts, sym_idx, tr.type_idx)
+  return TypeR(ts2, tr.type_idx)
+
+// The symbol the resolver bound a bound type node's head name to (a use
+// recorded for its name token), or -1 when the name resolved to nothing.
+fn bound_symbol(ts: TS, b_node: i64): i64
+  let node: Node = ts.tc.nodes.get(b_node)
+  match node:
+    Node::NamedT(tidx):
+      return lookup_use(ts, tidx)
+    Node::GenericT(name_tidx, args_lp, arg_count):
+      return lookup_use(ts, name_tidx)
+    Node::QualNameE(seg_lp, seg_count):
+      let segs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+      if segs.length() > 0:
+        return lookup_use(ts, segs.get(segs.length() - 1))
+      return to_i64(-1)
+  return to_i64(-1)
+
+// Whether `sym_idx` was declared by the module being checked (its
+// declaration and type are readable here); a symbol from another module
+// (a prelude concept) has neither in this module's arrays.
+fn sym_in_module(ts: TS, sym_idx: i64): bool
+  if ts.tc.module_id < 0:
+    return true
+  let sym: Symbol = ts.tc.symbols.get(sym_idx)
+  return sym.owner_module_id == ts.tc.module_id
+
+// Bind a declaration's generic parameter bounds: for each `<T: A + B>`
+// record the bound concepts on T's TGenericParam type, so a body derives
+// member availability from them (`x.to_string()` where `T: Printable`
+// types through Printable's signature).  A bound that names nothing in
+// scope, or names a non-concept, is a diagnostic (fail-closed).  A bound
+// whose concept is a symbol with no readable type in this module (a
+// prelude concept) is recorded as -1: its members cannot be read here,
+// so a member access through it stays unresolved rather than falsely
+// reported.
+fn tc_bind_generic_bounds(ts: TS, tparams_lp: i64): TS
+  if tparams_lp < 0:
+    return ts
+  let r: TS = ts
+  let tparams: Vector<i64> = read_list(r.tc.idx_data, tparams_lp)
+  let i: i64 = 0
+  while i < tparams.length():
+    let tp_node: Node = r.tc.nodes.get(tparams.get(i))
+    match tp_node:
+      Node::GenericParamT(tidx, bounds_lp):
+        let tname: string = ts_tok_name(r, tidx)
+        // The resolver bound the declaring token to the parameter's symbol.
+        let tsym: i64 = lookup_use(r, tidx)
+        if tsym >= 0:
+          if bounds_lp >= 0:
+            let gtr: TypeR = generic_param_type(r, tsym, tname)
+            r = gtr.ts
+            let bounds: Vector<i64> = read_list(r.tc.idx_data, bounds_lp)
+            let bound_tis: Vector<i64> = Vector<i64>::new()
+            let bi: i64 = 0
+            while bi < bounds.length():
+              let b_node: i64 = bounds.get(bi)
+              let btr: TypeR = resolve_ast_type(r, b_node)
+              r = btr.ts
+              let b_name: string = extract_type_name(r, b_node)
+              if btr.type_idx >= 0:
+                let bt: DaoType = r.types.get(btr.type_idx)
+                let is_concept: bool = false
+                match bt.kind:
+                  TypeKind::TConcept:
+                    is_concept = true
+                if is_concept:
+                  bound_tis = bound_tis.push(btr.type_idx)
+                else:
+                  r = ts_add_diag(r, ts_node_span(r, b_node), "bound '" + b_name + "' on type parameter '" + tname + "' is not a concept")
+              else:
+                let b_sym: i64 = bound_symbol(r, b_node)
+                if b_sym < 0:
+                  r = ts_add_diag(r, ts_node_span(r, b_node), "unknown concept '" + b_name + "' in bound of type parameter '" + tname + "'")
+                else:
+                  // The bound names a symbol but did not resolve as a
+                  // type: a generic head (`Iter<i64>`), or a symbol from
+                  // another module.  Read the head symbol's own type — a
+                  // concept head is the bound (its arguments substitute
+                  // at an instantiation, generic-inference work), any
+                  // other kind is not a concept.  A symbol whose type is
+                  // unreadable here and that this module did not declare
+                  // (a prelude concept) is recorded as -1, never falsely
+                  // reported; one this module declared with no readable
+                  // type is not a concept.
+                  let head_ti: i64 = sym_type_at(r, b_sym)
+                  if head_ti >= 0:
+                    let ht: DaoType = r.types.get(head_ti)
+                    let head_is_concept: bool = false
+                    match ht.kind:
+                      TypeKind::TConcept:
+                        head_is_concept = true
+                    if head_is_concept:
+                      bound_tis = bound_tis.push(head_ti)
+                    else:
+                      r = ts_add_diag(r, ts_node_span(r, b_node), "bound '" + b_name + "' on type parameter '" + tname + "' is not a concept")
+                  else:
+                    if sym_in_module(r, b_sym):
+                      r = ts_add_diag(r, ts_node_span(r, b_node), "bound '" + b_name + "' on type parameter '" + tname + "' is not a concept")
+                    else:
+                      // Another module's symbol: its kind is readable even
+                      // when its type is not.  Only a type-declaring symbol
+                      // can be a concept; a function, module, value, or
+                      // variant is rejected here.  A type-declaring symbol
+                      // (concept, class, enum, alias) cannot be told apart
+                      // without its declaration, so it is recorded as -1.
+                      let b_sym_obj: Symbol = r.tc.symbols.get(b_sym)
+                      if symbol_kind_name(b_sym_obj.kind) == "Type":
+                        bound_tis = bound_tis.push(to_i64(-1))
+                      else:
+                        r = ts_add_diag(r, ts_node_span(r, b_node), "bound '" + b_name + "' on type parameter '" + tname + "' is not a concept")
+              bi = bi + 1
+            let info_start: i64 = r.type_info.length()
+            let pi: i64 = 0
+            while pi < bound_tis.length():
+              r = ts_push_type_info(r, bound_tis.get(pi))
+              pi = pi + 1
+            let gt: DaoType = r.types.get(gtr.type_idx)
+            r.types = r.types.set(gtr.type_idx, DaoType(TypeKind::TGenericParam, gt.builtin_id, gt.name, gt.decl_node, info_start, bound_tis.length(), gt.ret_type, gt.pointee))
+    i = i + 1
+  return r
 
 fn tc_register_type_aliases(ts: TS, decls: Vector<i64>): TS
   let r: TS = ts
@@ -1816,6 +1968,45 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
         let sp: Span = ts_tok_span(r, field_tidx)
         r = ts_add_diag(r, sp, "no field '" + field_name + "' on type " + type_name(r, obj_ti))
       return r
+    TypeKind::TGenericParam:
+      // A member access on a type parameter: its bound concepts are the
+      // only source of members.  The first bound requiring the member
+      // types the access through the concept's method signature (so a
+      // call checks arity, argument types, and result against it).  With
+      // no bound providing the member the access is a diagnostic.  A
+      // bound recorded as -1 (a concept whose type is unreadable in this
+      // module) cannot be searched, so an access no readable bound
+      // provides stays unresolved rather than falsely reported.
+      let m_name: string = ts_tok_name(r, field_tidx)
+      let unreadable: bool = false
+      if bounds_walkable(r, obj_type):
+        let gb: i64 = 0
+        while gb < obj_type.info_count:
+          let cti: i64 = r.type_info.get(obj_type.info_lp + gb)
+          if cti < 0:
+            unreadable = true
+          else:
+            if cti < r.types.length():
+              let ct: DaoType = r.types.get(cti)
+              if layout_walkable(r, ct):
+                let gm: i64 = 0
+                while gm < ct.info_count:
+                  let req_name_tidx: i64 = r.type_info.get(ct.info_lp + gm * 2)
+                  if ts_tok_name(r, req_name_tidx) == m_name:
+                    return ts_set_expr_type(r, node_idx, r.type_info.get(ct.info_lp + gm * 2 + 1))
+                  gm = gm + 1
+              else:
+                unreadable = true
+            else:
+              unreadable = true
+          gb = gb + 1
+      if unreadable == false:
+        let spg: Span = ts_tok_span(r, field_tidx)
+        if obj_type.info_count > 0:
+          r = ts_add_diag(r, spg, "no bound of type parameter '" + obj_type.name + "' provides '" + m_name + "'")
+        else:
+          r = ts_add_diag(r, spg, "'" + m_name + "' on unconstrained type parameter '" + obj_type.name + "'")
+      return r
   return r
 
 fn check_pipe_expr(ts: TS, node_idx: i64, left: i64, right: i64): TS
@@ -2294,10 +2485,13 @@ fn tc_pass2(ts: TS, file_node_idx: i64): TS
         let node: Node = r.tc.nodes.get(decl_idx)
         match node:
           Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_type_node, body_lp):
+            r = tc_bind_generic_bounds(r, tparams_lp)
             r = tc_check_fn_body(r, decl_idx, name_tidx, params_lp, ret_type_node, body_lp)
           Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_type_node, body_expr):
+            r = tc_bind_generic_bounds(r, tparams_lp)
             r = tc_check_expr_fn_body(r, decl_idx, name_tidx, params_lp, ret_type_node, body_expr)
           Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
+            r = tc_bind_generic_bounds(r, tparams_lp)
             if methods_lp >= 0:
               let meths: Vector<i64> = read_list(r.tc.idx_data, methods_lp)
               let mi: i64 = 0
@@ -2306,7 +2500,10 @@ fn tc_pass2(ts: TS, file_node_idx: i64): TS
                 let meth_node: Node = r.tc.nodes.get(meth_idx)
                 match meth_node:
                   Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
+                    r = tc_bind_generic_bounds(r, m_tparams_lp)
                     r = tc_check_method_body(r, decl_idx, meth_idx, m_name_tidx, m_params_lp, m_ret_type, m_body_lp)
+                  Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
+                    r = tc_bind_generic_bounds(r, m_tparams_lp)
                 mi = mi + 1
           Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
             if methods_lp >= 0:
@@ -2317,8 +2514,34 @@ fn tc_pass2(ts: TS, file_node_idx: i64): TS
                 let meth_node: Node = r.tc.nodes.get(meth_idx)
                 match meth_node:
                   Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
+                    r = tc_bind_generic_bounds(r, m_tparams_lp)
                     r = tc_check_extend_method_body(r, decl_idx, meth_idx, m_name_tidx, m_params_lp, m_ret_type, m_body_lp)
+                  Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
+                    r = tc_bind_generic_bounds(r, m_tparams_lp)
                 mi = mi + 1
+          // Every declaration that takes type parameters has its bounds
+          // validated, body or none.
+          Node::ExternFnD(name_tidx, tparams_lp, params_lp, ret_type_node):
+            r = tc_bind_generic_bounds(r, tparams_lp)
+          Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
+            r = tc_bind_generic_bounds(r, tparams_lp)
+          Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp):
+            r = tc_bind_generic_bounds(r, tparams_lp)
+            // A concept's required methods may carry their own parameters
+            // (signature-only, expression-bodied, or block-bodied forms).
+            if methods_lp >= 0:
+              let cmeths: Vector<i64> = read_list(r.tc.idx_data, methods_lp)
+              let cmi: i64 = 0
+              while cmi < cmeths.length():
+                let cmeth_node: Node = r.tc.nodes.get(cmeths.get(cmi))
+                match cmeth_node:
+                  Node::FnDeclD(c_name_tidx, c_tparams_lp, c_params_lp, c_ret_type, c_body_lp):
+                    r = tc_bind_generic_bounds(r, c_tparams_lp)
+                  Node::ExprFnD(c_name_tidx, c_tparams_lp, c_params_lp, c_ret_type, c_body_expr):
+                    r = tc_bind_generic_bounds(r, c_tparams_lp)
+                  Node::ExternFnD(c_name_tidx, c_tparams_lp, c_params_lp, c_ret_type):
+                    r = tc_bind_generic_bounds(r, c_tparams_lp)
+                cmi = cmi + 1
         i = i + 1
       return r
   return ts
