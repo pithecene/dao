@@ -610,6 +610,13 @@ fn resolve_stmt(rs: RS, node_idx: i64): RS
     Node::ResourceS(kind_tidx, name_tidx, body_lp):
       // The domain's name binds nothing in Tier A; its body is a block.
       return resolve_body_in_new_scope(rs, body_lp)
+    Node::ModeS(name_tidx, body_lp):
+      // The mode name binds nothing; its body is a block scope.
+      return resolve_body_in_new_scope(rs, body_lp)
+    Node::YieldS(val_node):
+      if val_node >= 0:
+        return resolve_expr(rs, val_node)
+      return rs
     Node::ForS(var_tidx, iter_node, body_lp):
       // Resolve iterable in outer scope
       let r: RS = resolve_expr(rs, iter_node)

@@ -61,7 +61,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 86
+  let total: i32 = 94
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -208,7 +208,7 @@ fn main(): i32
     print("FAIL correct_addr_of: expected 0 diagnostics, got " + i64_to_string(tc_count_diags(r15a)))
 
   // Test 15b: correct_deref — *p where p: *i32 produces i32
-  let src15b: string = "fn test(): i32\n  let x: i32 = 1\n  let p: *i32 = &x\n  let y: i32 = *p\n  return 0\n"
+  let src15b: string = "fn test(): i32\n  let x: i32 = 1\n  let p: *i32 = &x\n  mode unsafe =>\n    let y: i32 = *p\n  return 0\n"
   let r15b: TypeCheckResult = typecheck(src15b)
   if tc_count_diags(r15b) == 0:
     print("PASS correct_deref")
@@ -217,7 +217,7 @@ fn main(): i32
     print("FAIL correct_deref: expected 0 diagnostics, got " + i64_to_string(tc_count_diags(r15b)))
 
   // Test 15c: err_deref_non_pointer — *x where x: i32 should diagnose
-  let src15c: string = "fn test(): i32\n  let x: i32 = 1\n  let y: i32 = *x\n  return 0\n"
+  let src15c: string = "fn test(): i32\n  let x: i32 = 1\n  mode unsafe =>\n    let y: i32 = *x\n  return 0\n"
   let r15c: TypeCheckResult = typecheck(src15c)
   let found_deref_err: bool = false
   let d15c: i64 = 0
@@ -553,16 +553,16 @@ fn main(): i32
   let d4_sf: SourceFile = program_file_of_module(d4_p1, d4_main_mid)
   let d4_po: ParseOutput = d4_sf.parse_output
   let d4_tc: TC = TC(d4_po.nodes, d4_po.idx, d4_po.toks, d4_sf.source_text, d4_p1.resolve.symbols, d4_p1.resolve.scopes, d4_p1.resolve.uses, d4_sf.file_id, d4_p1.resolve.extend_concept_bindings, d4_main_mid, d4_p1.resolve.module_exports)
-  let d4_ts: TS = TS(d4_tc, d4_p1.typecheck.types, d4_p1.typecheck.type_info, d4_p1.typecheck.sym_types, Vector<Diagnostic>::new(), to_i64(-1), to_i64(0), HashMap<i64>::new(), HashMap<i64>::new(), Conformance(HashMap<i64>::new(), Vector<i64>::new()))
+  let d4_ts: TS = TS(d4_tc, d4_p1.typecheck.types, d4_p1.typecheck.type_info, d4_p1.typecheck.sym_types, Vector<Diagnostic>::new(), CheckCtx(to_i64(-1), to_i64(0), to_i64(0), to_i64(-1), to_i64(0), to_i64(0)), HashMap<i64>::new(), HashMap<i64>::new(), Conformance(HashMap<i64>::new(), Vector<i64>::new()))
   // Run pass1 on math first (to register the exported function type).
   let d4_math_mid: i64 = find_module_by_name(d4_p1.graph.modules, "app::math")
   let d4_math_sf: SourceFile = program_file_of_module(d4_p1, d4_math_mid)
   let d4_math_po: ParseOutput = d4_math_sf.parse_output
   let d4_math_tc: TC = TC(d4_math_po.nodes, d4_math_po.idx, d4_math_po.toks, d4_math_sf.source_text, d4_p1.resolve.symbols, d4_p1.resolve.scopes, d4_p1.resolve.uses, d4_math_sf.file_id, d4_p1.resolve.extend_concept_bindings, d4_math_mid, d4_p1.resolve.module_exports)
-  let d4_math_ts: TS = TS(d4_math_tc, d4_p1.typecheck.types, d4_p1.typecheck.type_info, d4_p1.typecheck.sym_types, Vector<Diagnostic>::new(), to_i64(-1), to_i64(0), HashMap<i64>::new(), HashMap<i64>::new(), Conformance(HashMap<i64>::new(), Vector<i64>::new()))
+  let d4_math_ts: TS = TS(d4_math_tc, d4_p1.typecheck.types, d4_p1.typecheck.type_info, d4_p1.typecheck.sym_types, Vector<Diagnostic>::new(), CheckCtx(to_i64(-1), to_i64(0), to_i64(0), to_i64(-1), to_i64(0), to_i64(0)), HashMap<i64>::new(), HashMap<i64>::new(), Conformance(HashMap<i64>::new(), Vector<i64>::new()))
   d4_math_ts = tc_pass1(d4_math_ts, d4_math_po.root)
   // Now run both passes on main using math's accumulated types/sym_types.
-  d4_ts = TS(d4_tc, d4_math_ts.types, d4_math_ts.type_info, d4_math_ts.sym_types, Vector<Diagnostic>::new(), to_i64(-1), to_i64(0), HashMap<i64>::new(), d4_math_ts.variant_set, Conformance(HashMap<i64>::new(), Vector<i64>::new()))
+  d4_ts = TS(d4_tc, d4_math_ts.types, d4_math_ts.type_info, d4_math_ts.sym_types, Vector<Diagnostic>::new(), CheckCtx(to_i64(-1), to_i64(0), to_i64(0), to_i64(-1), to_i64(0), to_i64(0)), HashMap<i64>::new(), d4_math_ts.variant_set, Conformance(HashMap<i64>::new(), Vector<i64>::new()))
   d4_ts = tc_pass1(d4_ts, d4_po.root)
   d4_ts = tc_pass2(d4_ts, d4_po.root)
 
@@ -598,10 +598,10 @@ fn main(): i32
   let d4_a_sf: SourceFile = program_file_of_module(d4_p2, d4_a_mid)
   let d4_a_po: ParseOutput = d4_a_sf.parse_output
   let d4_a_tc: TC = TC(d4_a_po.nodes, d4_a_po.idx, d4_a_po.toks, d4_a_sf.source_text, d4_p2.resolve.symbols, d4_p2.resolve.scopes, d4_p2.resolve.uses, d4_a_sf.file_id, d4_p2.resolve.extend_concept_bindings, d4_a_mid, d4_p2.resolve.module_exports)
-  let d4_a_ts: TS = TS(d4_a_tc, d4_p2.typecheck.types, d4_p2.typecheck.type_info, d4_p2.typecheck.sym_types, Vector<Diagnostic>::new(), to_i64(-1), to_i64(0), HashMap<i64>::new(), HashMap<i64>::new(), Conformance(HashMap<i64>::new(), Vector<i64>::new()))
+  let d4_a_ts: TS = TS(d4_a_tc, d4_p2.typecheck.types, d4_p2.typecheck.type_info, d4_p2.typecheck.sym_types, Vector<Diagnostic>::new(), CheckCtx(to_i64(-1), to_i64(0), to_i64(0), to_i64(-1), to_i64(0), to_i64(0)), HashMap<i64>::new(), HashMap<i64>::new(), Conformance(HashMap<i64>::new(), Vector<i64>::new()))
   d4_a_ts = tc_pass1(d4_a_ts, d4_a_po.root)
   // Now typecheck app::b.
-  let d4_b_ts: TS = TS(d4_b_tc, d4_a_ts.types, d4_a_ts.type_info, d4_a_ts.sym_types, Vector<Diagnostic>::new(), to_i64(-1), to_i64(0), HashMap<i64>::new(), d4_a_ts.variant_set, Conformance(HashMap<i64>::new(), Vector<i64>::new()))
+  let d4_b_ts: TS = TS(d4_b_tc, d4_a_ts.types, d4_a_ts.type_info, d4_a_ts.sym_types, Vector<Diagnostic>::new(), CheckCtx(to_i64(-1), to_i64(0), to_i64(0), to_i64(-1), to_i64(0), to_i64(0)), HashMap<i64>::new(), d4_a_ts.variant_set, Conformance(HashMap<i64>::new(), Vector<i64>::new()))
   d4_b_ts = tc_pass1(d4_b_ts, d4_b_po.root)
   d4_b_ts = tc_pass2(d4_b_ts, d4_b_po.root)
 
@@ -631,14 +631,14 @@ fn main(): i32
   let d4_c_sf: SourceFile = program_file_of_module(d4_p3, d4_c_mid)
   let d4_c_po: ParseOutput = d4_c_sf.parse_output
   let d4_c_tc: TC = TC(d4_c_po.nodes, d4_c_po.idx, d4_c_po.toks, d4_c_sf.source_text, d4_p3.resolve.symbols, d4_p3.resolve.scopes, d4_p3.resolve.uses, d4_c_sf.file_id, d4_p3.resolve.extend_concept_bindings, d4_c_mid, d4_p3.resolve.module_exports)
-  let d4_c_ts: TS = TS(d4_c_tc, d4_p3.typecheck.types, d4_p3.typecheck.type_info, d4_p3.typecheck.sym_types, Vector<Diagnostic>::new(), to_i64(-1), to_i64(0), HashMap<i64>::new(), HashMap<i64>::new(), Conformance(HashMap<i64>::new(), Vector<i64>::new()))
+  let d4_c_ts: TS = TS(d4_c_tc, d4_p3.typecheck.types, d4_p3.typecheck.type_info, d4_p3.typecheck.sym_types, Vector<Diagnostic>::new(), CheckCtx(to_i64(-1), to_i64(0), to_i64(0), to_i64(-1), to_i64(0), to_i64(0)), HashMap<i64>::new(), HashMap<i64>::new(), Conformance(HashMap<i64>::new(), Vector<i64>::new()))
   d4_c_ts = tc_pass1(d4_c_ts, d4_c_po.root)
   // Run pass1+pass2 on app::d with colors' variant_set.
   let d4_d_mid: i64 = find_module_by_name(d4_p3.graph.modules, "app::d")
   let d4_d_sf: SourceFile = program_file_of_module(d4_p3, d4_d_mid)
   let d4_d_po: ParseOutput = d4_d_sf.parse_output
   let d4_d_tc: TC = TC(d4_d_po.nodes, d4_d_po.idx, d4_d_po.toks, d4_d_sf.source_text, d4_p3.resolve.symbols, d4_p3.resolve.scopes, d4_p3.resolve.uses, d4_d_sf.file_id, d4_p3.resolve.extend_concept_bindings, d4_d_mid, d4_p3.resolve.module_exports)
-  let d4_d_ts: TS = TS(d4_d_tc, d4_c_ts.types, d4_c_ts.type_info, d4_c_ts.sym_types, Vector<Diagnostic>::new(), to_i64(-1), to_i64(0), HashMap<i64>::new(), d4_c_ts.variant_set, Conformance(HashMap<i64>::new(), Vector<i64>::new()))
+  let d4_d_ts: TS = TS(d4_d_tc, d4_c_ts.types, d4_c_ts.type_info, d4_c_ts.sym_types, Vector<Diagnostic>::new(), CheckCtx(to_i64(-1), to_i64(0), to_i64(0), to_i64(-1), to_i64(0), to_i64(0)), HashMap<i64>::new(), d4_c_ts.variant_set, Conformance(HashMap<i64>::new(), Vector<i64>::new()))
   d4_d_ts = tc_pass1(d4_d_ts, d4_d_po.root)
   d4_d_ts = tc_pass2(d4_d_ts, d4_d_po.root)
   let d4_3_ok: bool = false
@@ -1256,6 +1256,26 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL derived_conformance_no_double_count: expected >= 1 diagnostic, got 0")
+  // `mode` and `yield` carry their contract meaning: a dereference needs
+  // an enclosing `mode unsafe =>`; unknown modes are rejected; `yield`
+  // is legal only in a `Generator<T>` function, yields `T`, and never
+  // sits in a `resource memory` block; a generator returns bare.
+  if tc_expect_diags("deref_requires_unsafe_mode", "fn test(): i32\n  let x: i32 = 1\n  let p: *i32 = &x\n  let y: i32 = *p\n  return 0\n", 1):
+    pass_count = pass_count + 1
+  if tc_expect_diags("unknown_mode_rejected", "fn f(): i64\n  mode warp =>\n    return 1\n  return 0\n", 1):
+    pass_count = pass_count + 1
+  if tc_expect_clean("gpu_mode_body_checked", "fn f(): i64\n  mode gpu =>\n    return 1\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_diags("yield_outside_generator", "fn g(): i64\n  yield 1\n  return 0\n", 1):
+    pass_count = pass_count + 1
+  if tc_expect_clean("yield_in_generator", "fn g(): Generator<i64>\n  yield 1\n  return\n"):
+    pass_count = pass_count + 1
+  if tc_expect_diags("yield_type_mismatch", "fn g(): Generator<i64>\n  yield \"s\"\n  return\n", 1):
+    pass_count = pass_count + 1
+  if tc_expect_diags("return_value_in_generator", "fn g(): Generator<i64>\n  return 1\n", 1):
+    pass_count = pass_count + 1
+  if tc_expect_diags("yield_in_resource_block_rejected", "fn g(): Generator<i64>\n  resource memory pool =>\n    yield 1\n  return\n", 1):
+    pass_count = pass_count + 1
   let r_unc: TypeCheckResult = typecheck("fn f<T>(x: T): string\n  return x.to_string()\n")
   if tc_count_diags(r_unc) >= 1:
     print("PASS unconstrained_param_member_rejected")
