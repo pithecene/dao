@@ -1834,6 +1834,129 @@ fn check_unary_expr(ts: TS, node_idx: i64, op_tidx: i64, operand: i64): TS
     return ts_set_expr_type(r, node_idx, to_i64(-1))
   return ts_set_expr_type(r, node_idx, ot)
 
+// =========================================================================
+// Section 43b: Generic call inference (host infer_type_bindings /
+// substitute_generics)
+// =========================================================================
+
+// Whether a parameter type mentions a type parameter — directly, or
+// through a pointer — i.e. is a pattern an argument's type binds.
+fn param_pattern_is_generic(ts: TS, ti: i64): bool
+  if ti < 0:
+    return false
+  if ti >= ts.types.length():
+    return false
+  let t: DaoType = ts.types.get(ti)
+  match t.kind:
+    TypeKind::TGenericParam:
+      return true
+    TypeKind::TPointer:
+      return param_pattern_is_generic(ts, t.pointee)
+  return false
+
+class BindR:
+  ts: TS
+  bindings: HashMap<i64>
+
+fn binding_key(gp_ti: i64): string
+  return i64_to_string(gp_ti)
+
+// Whether type parameter `gp_ti` carries `concept_ti` among its readable
+// bounds — a type parameter satisfies a bound another parameter's bound
+// already guarantees.
+fn type_param_has_bound(ts: TS, gp_ti: i64, concept_ti: i64): bool
+  let gt: DaoType = ts.types.get(gp_ti)
+  if bounds_walkable(ts, gt):
+    let bi: i64 = 0
+    while bi < gt.info_count:
+      if ts.type_info.get(gt.info_lp + bi) == concept_ti:
+        return true
+      bi = bi + 1
+  return false
+
+// Match a parameter pattern against an argument's type.  A type
+// parameter binds to the argument's type — the first argument binds,
+// a later one must agree — and the bound type must satisfy every
+// readable bound of the parameter (an explicit extend, a derived
+// conformance, or, for a type-parameter argument, one of its own
+// bounds).  A bound recorded as -1 (a concept whose type is unreadable
+// in this module) cannot be checked here and is left to a program-level
+// pass, as the codebase's cross-module guards do.  A pointer pattern
+// recurses into its pointee.
+fn infer_binding(ts: TS, pattern_ti: i64, concrete_ti: i64, bindings: HashMap<i64>, arg_node: i64): BindR
+  let r: TS = ts
+  let b: HashMap<i64> = bindings
+  if pattern_ti < 0:
+    return BindR(r, b)
+  if pattern_ti >= r.types.length():
+    return BindR(r, b)
+  if concrete_ti < 0:
+    return BindR(r, b)
+  if concrete_ti >= r.types.length():
+    return BindR(r, b)
+  let pt: DaoType = r.types.get(pattern_ti)
+  match pt.kind:
+    TypeKind::TGenericParam:
+      let prev: i64 = hm_get_or(b, binding_key(pattern_ti), to_i64(-1))
+      if prev >= 0:
+        if types_equal(r, prev, concrete_ti) == false:
+          r = ts_add_diag(r, ts_node_span(r, arg_node), "conflicting types for generic parameter '" + pt.name + "': " + type_name(r, prev) + " vs " + type_name(r, concrete_ti))
+        return BindR(r, b)
+      b = b.set(binding_key(pattern_ti), concrete_ti)
+      if bounds_walkable(r, pt):
+        let ct: DaoType = r.types.get(concrete_ti)
+        let concrete_is_param: bool = false
+        match ct.kind:
+          TypeKind::TGenericParam:
+            concrete_is_param = true
+        let bi: i64 = 0
+        while bi < pt.info_count:
+          let cti: i64 = r.type_info.get(pt.info_lp + bi)
+          if cti >= 0:
+            let holds: bool = false
+            if concrete_is_param:
+              holds = type_param_has_bound(r, concrete_ti, cti)
+            else:
+              holds = ts_conforms(r, concrete_ti, cti)
+            if holds == false:
+              let cname: string = "?"
+              if cti < r.types.length():
+                let cdt: DaoType = r.types.get(cti)
+                cname = cdt.name
+              r = ts_add_diag(r, ts_node_span(r, arg_node), "type " + type_name(r, concrete_ti) + " does not satisfy bound '" + cname + "' of type parameter '" + pt.name + "'")
+          bi = bi + 1
+      return BindR(r, b)
+    TypeKind::TPointer:
+      let cp: DaoType = r.types.get(concrete_ti)
+      match cp.kind:
+        TypeKind::TPointer:
+          return infer_binding(r, pt.pointee, cp.pointee, b, arg_node)
+      r = ts_add_diag(r, ts_node_span(r, arg_node), "argument type mismatch: expected " + type_name(r, pattern_ti) + ", got " + type_name(r, concrete_ti))
+      return BindR(r, b)
+  return BindR(r, b)
+
+// A type with a call's bindings substituted: a bound type parameter
+// becomes its binding, a pointer to one a pointer to the binding; any
+// other type, and an unbound parameter, is returned as is.
+fn substitute_bindings(ts: TS, ti: i64, bindings: HashMap<i64>): TypeR
+  if ti < 0:
+    return TypeR(ts, ti)
+  if ti >= ts.types.length():
+    return TypeR(ts, ti)
+  let t: DaoType = ts.types.get(ti)
+  match t.kind:
+    TypeKind::TGenericParam:
+      let bound: i64 = hm_get_or(bindings, binding_key(ti), to_i64(-1))
+      if bound >= 0:
+        return TypeR(ts, bound)
+      return TypeR(ts, ti)
+    TypeKind::TPointer:
+      let inner: TypeR = substitute_bindings(ts, t.pointee, bindings)
+      if inner.type_idx != t.pointee:
+        return find_or_add_pointer_type(inner.ts, inner.type_idx)
+      return TypeR(inner.ts, ti)
+  return TypeR(ts, ti)
+
 fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i64): TS
   let r: TS = check_expr(ts, callee)
   let args: Vector<i64> = read_list(r.tc.idx_data, args_lp)
@@ -1896,19 +2019,33 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
       // are in range (fail-closed — a literal argument then keeps its
       // default type; cross-module argument typing is deferred to a later program-level pass).
       let walk_params: bool = fn_params_walkable(r, callee_type)
+      // Generic call inference: a parameter typed by a type parameter
+      // binds it to the argument's type (a literal argument keeps its
+      // default type, as the host infers), agreement and bounds are
+      // checked per binding, and the result is the return type with the
+      // bindings substituted.
+      let bindings: HashMap<i64> = HashMap<i64>::new()
       while ci < args.length():
         if walk_params:
           let param_ti: i64 = r.type_info.get(callee_type.info_lp + param_offset + ci)
-          // A literal argument adopts the parameter's concrete type (host).
-          r = fit_literal(r, args.get(ci), param_ti)
-          let arg_ti: i64 = get_expr_type(r, args.get(ci))
-          if arg_ti >= 0:
-            if param_ti >= 0:
-              if types_equal(r, arg_ti, param_ti) == false:
-                let sp: Span = ts_node_span(r, args.get(ci))
-                r = ts_add_diag(r, sp, "argument type mismatch: expected " + type_name(r, param_ti) + ", got " + type_name(r, arg_ti))
+          if param_pattern_is_generic(r, param_ti):
+            let garg_ti: i64 = get_expr_type(r, args.get(ci))
+            if garg_ti >= 0:
+              let br: BindR = infer_binding(r, param_ti, garg_ti, bindings, args.get(ci))
+              r = br.ts
+              bindings = br.bindings
+          else:
+            // A literal argument adopts the parameter's concrete type (host).
+            r = fit_literal(r, args.get(ci), param_ti)
+            let arg_ti: i64 = get_expr_type(r, args.get(ci))
+            if arg_ti >= 0:
+              if param_ti >= 0:
+                if types_equal(r, arg_ti, param_ti) == false:
+                  let sp: Span = ts_node_span(r, args.get(ci))
+                  r = ts_add_diag(r, sp, "argument type mismatch: expected " + type_name(r, param_ti) + ", got " + type_name(r, arg_ti))
         ci = ci + 1
-      return ts_set_expr_type(r, node_idx, callee_type.ret_type)
+      let sr: TypeR = substitute_bindings(r, callee_type.ret_type, bindings)
+      return ts_set_expr_type(sr.ts, node_idx, sr.type_idx)
     TypeKind::TStruct:
       if args.length() != callee_type.info_count:
         let sp: Span = ts_node_span(r, callee)

@@ -61,7 +61,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 94
+  let total: i32 = 100
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -1275,6 +1275,25 @@ fn main(): i32
   if tc_expect_diags("return_value_in_generator", "fn g(): Generator<i64>\n  return 1\n", 1):
     pass_count = pass_count + 1
   if tc_expect_diags("yield_in_resource_block_rejected", "fn g(): Generator<i64>\n  resource memory pool =>\n    yield 1\n  return\n", 1):
+    pass_count = pass_count + 1
+  // Generic call inference: an argument binds the parameter's type
+  // parameter, later arguments must agree, the binding must satisfy the
+  // parameter's bounds, and the result type is substituted.
+  if tc_expect_clean("infer_binding_substitutes_result", "fn id<T>(x: T): T\n  return x\n\nfn f(): i64\n  let n: i64 = 1\n  return id(n)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("infer_bound_satisfied", "concept Show:\n  fn show(self): string\n\nextend i64 as Show:\n  fn show(self): string\n    return \"n\"\n\nfn show_it<T: Show>(x: T): T\n  return x\n\nfn f(): i64\n  let n: i64 = 1\n  return show_it(n)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_diags("infer_bound_violated", "concept Show:\n  fn show(self): string\n\nfn show_it<T: Show>(x: T): T\n  return x\n\nfn f(): string\n  let s: string = \"a\"\n  return show_it(s)\n", 1):
+    pass_count = pass_count + 1
+  let r_cb: TypeCheckResult = typecheck("fn pair<T>(a: T, b: T): T\n  return a\n\nfn f(): i64\n  let n: i64 = 1\n  let s: string = \"a\"\n  return pair(n, s)\n")
+  if tc_count_diags(r_cb) >= 1:
+    print("PASS infer_conflicting_bindings_rejected")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL infer_conflicting_bindings_rejected: expected >= 1 diagnostic, got 0")
+  if tc_expect_clean("infer_pointer_pattern", "fn deref_id<T>(p: *T): T\n  mode unsafe =>\n    return *p\n\nfn g(): i64\n  let n: i64 = 1\n  return deref_id(&n)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("infer_param_bound_forwarded", "concept Show:\n  fn show(self): string\n\nfn a<T: Show>(x: T): T\n  return x\n\nfn b<U: Show>(y: U): U\n  return a(y)\n"):
     pass_count = pass_count + 1
   let r_unc: TypeCheckResult = typecheck("fn f<T>(x: T): string\n  return x.to_string()\n")
   if tc_count_diags(r_unc) >= 1:
