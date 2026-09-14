@@ -789,10 +789,11 @@ enum class Node:
   NamedT(tok: i64)
   GenericT(name: i64, args_lp: i64, arg_count: i64)
   PointerT(inner: i64)
-  // A generic type parameter.  `bounds` is a list_pos of concept-name
-  // token indices (`<T: A + B>`), or -1 when the parameter is unbounded.
-  // The bound is parsed and preserved here (never erased); resolution
-  // and legality live in the resolver.
+  // A generic type parameter.  `bounds` is a list_pos of bound type
+  // nodes (`<T: A + B>`, `<T: core::Printable>`), or -1 when the
+  // parameter is unbounded.  The resolver resolves each bound as a type;
+  // the type checker records the bound concepts on the parameter's
+  // TGenericParam type and derives method availability from them.
   GenericParamT(tok: i64, bounds: i64)
   ErrorT(tok: i64)
   // --- Statements ---
@@ -1855,25 +1856,28 @@ fn parse_declaration(pc: PC, ps: PS): PR
   return ps_add_node(ps_advance(pc, ps2), Node::ErrorD(tok = ps.pos))
 
 // Parse an optional concept bound after a type parameter name:
-// `: Concept` or `: A + B`.  Returns PR where .node is a list_pos of the
-// bound concept-name token indices, or -1 when there is no bound.  The
-// bound names are preserved for the resolver; parsing does not judge them.
+// `: Concept`, `: A + B`, or a qualified `: core::Printable`.  Each bound
+// is a full type node (as the host's `parse_type()` does), so qualified
+// and generic concept names parse.  Returns PR where .node is a list_pos
+// of the bound type-node indices, or -1 when there is no bound.  The
+// bounds are preserved for the resolver and type checker.
 fn parse_type_param_bounds(pc: PC, ps: PS): PR
   if tk_name(peek_kind(pc, ps)) != tk_name(TK::Colon):
     return PR(ps, to_i64(-1))
   let ps2: PS = ps_advance(pc, ps)      // consume ':'
   let bounds: Vector<i64> = Vector<i64>::new()
-  let btidx: i64 = ps2.pos
-  let ps3: PS = expect(pc, ps2, TK::Identifier)
-  bounds = bounds.push(btidx)
-  let cur: PS = ps3
+  let first: PR = parse_type(pc, ps2)
+  let cur: PS = first.ps
+  if first.node >= 0:
+    bounds = bounds.push(first.node)
   let done: bool = false
   while done == false:
     if tk_name(peek_kind(pc, cur)) == tk_name(TK::Plus):
       cur = ps_advance(pc, cur)          // consume '+'
-      let btidx2: i64 = cur.pos
-      cur = expect(pc, cur, TK::Identifier)
-      bounds = bounds.push(btidx2)
+      let next_b: PR = parse_type(pc, cur)
+      cur = next_b.ps
+      if next_b.node >= 0:
+        bounds = bounds.push(next_b.node)
     else:
       done = true
   let fl: FlushResult = flush_list(cur, bounds)

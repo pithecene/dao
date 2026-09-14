@@ -656,13 +656,18 @@ fn lower_body_stmts(hs: HS, list_pos: i64): HirFlush
 
 // Re-lower AST type param list into HIR-owned idx.
 // AST tparams_lp points to GenericParamT node indices in ast_idx.
-// HIR stores the param name token indices directly in hir_idx.
+// HIR stores (name token, type index) pairs via hir_flush_pairs: the
+// type index is the parameter's TGenericParam type, which carries the
+// parameter's bound concepts (`info_lp` / `info_count`, recorded by the
+// type checker), so a bound reaches HIR with its meaning rather than as
+// a bare name; -1 when the checker never typed the parameter.
 fn lower_type_params(hs: HS, ast_tparams_lp: i64): HirFlush
   if ast_tparams_lp < 0:
     // No type params — return a flush with list_pos = -1
     return HirFlush(hs, to_i64(-1))
   let tparam_nodes: Vector<i64> = read_list(hs.idx_data, ast_tparams_lp)
-  let tok_indices: Vector<i64> = Vector<i64>::new()
+  let items: Vector<i64> = Vector<i64>::new()
+  let count: i64 = 0
   let i: i64 = 0
   while i < tparam_nodes.length():
     let tp_node_idx: i64 = tparam_nodes.get(i)
@@ -670,14 +675,22 @@ fn lower_type_params(hs: HS, ast_tparams_lp: i64): HirFlush
       let tp_node: Node = hs.nodes.get(tp_node_idx)
       match tp_node:
         Node::GenericParamT(tidx, bounds_lp):
-          // HIR carries the parameter name; the concept bound is preserved
-          // in the AST and resolved by the resolver.  Lowering the bound
-          // into HIR is deferred to the generic-inference slice.
-          tok_indices = tok_indices.push(tidx)
+          items = items.push(tidx)
+          items = items.push(hir_generic_param_type(hs, tidx))
+          count = count + 1
     i = i + 1
-  if tok_indices.length() == 0:
+  if count == 0:
     return HirFlush(hs, to_i64(-1))
-  return hir_flush_list(hs, tok_indices)
+  return hir_flush_pairs(hs, items, count)
+
+// The TGenericParam type index of the type parameter declared at token
+// `tidx` (the resolver binds a parameter's declaring token to its
+// symbol), or -1 when the checker never typed it.
+fn hir_generic_param_type(hs: HS, tidx: i64): i64
+  let sym_idx: i64 = hir_lookup_use(hs, tidx)
+  if sym_idx < 0:
+    return to_i64(-1)
+  return hir_sym_type(hs, sym_idx)
 
 fn lower_fn_decl_with_owner(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, params_lp: i64, ret_type_node: i64, body_lp: i64, class_owner_tidx: i64): HirR
   let tp_fl: HirFlush = lower_type_params(hs, tparams_lp)
@@ -1218,6 +1231,44 @@ fn hir_node_kind(node: HirNode): string
 // Section 60: HIR textual dump
 // =========================================================================
 
+// `<T: A + B, U>` for a HIR type-parameter pair list ((name token, type
+// index) pairs, see lower_type_params): each parameter's bound concepts
+// are read off its TGenericParam type; a bound whose concept type is
+// unreadable in this module prints as `?`.
+fn hir_tparams_label(hr: HirResult, tparams_lp: i64): string
+  let count: i64 = hr.hir_idx.get(tparams_lp)
+  let start: i64 = tparams_lp - count * 2
+  let line: string = "<"
+  let i: i64 = 0
+  while i < count:
+    if i > 0:
+      line = line + ", "
+    let tp_tidx: i64 = hr.hir_idx.get(start + i * 2)
+    let tp_ti: i64 = hr.hir_idx.get(start + i * 2 + 1)
+    if tp_tidx >= 0:
+      let tp_tok: Token = hr.toks.get(tp_tidx)
+      line = line + substring(hr.src, tp_tok.offset, tp_tok.len)
+    if tp_ti >= 0:
+      if tp_ti < hr.types.length():
+        let gt: DaoType = hr.types.get(tp_ti)
+        if gt.info_count > 0:
+          if gt.info_lp + gt.info_count <= hr.type_info.length():
+            line = line + ": "
+            let bi: i64 = 0
+            while bi < gt.info_count:
+              if bi > 0:
+                line = line + " + "
+              let cti: i64 = hr.type_info.get(gt.info_lp + bi)
+              let bound_label: string = "?"
+              if cti >= 0:
+                if cti < hr.types.length():
+                  let ct: DaoType = hr.types.get(cti)
+                  bound_label = ct.name
+              line = line + bound_label
+              bi = bi + 1
+    i = i + 1
+  return line + ">"
+
 fn hir_type_label(hr: HirResult, ti: i64): string
   if ti < 0:
     return "<unknown>"
@@ -1267,18 +1318,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
         let co_tok: Token = hr.toks.get(class_owner)
         line = line + " [" + substring(hr.src, co_tok.offset, co_tok.len) + ".]"
       if tparams_lp >= 0:
-        let tps: Vector<i64> = read_list(hr.hir_idx, tparams_lp)
-        line = line + "<"
-        let tpi: i64 = 0
-        while tpi < tps.length():
-          if tpi > 0:
-            line = line + ", "
-          let tp_tidx: i64 = tps.get(tpi)
-          if tp_tidx >= 0:
-            let tp_tok: Token = hr.toks.get(tp_tidx)
-            line = line + substring(hr.src, tp_tok.offset, tp_tok.len)
-          tpi = tpi + 1
-        line = line + ">"
+        line = line + hir_tparams_label(hr, tparams_lp)
       if is_extern > 0:
         line = line + " [extern]"
       line = line + " -> " + hir_type_label(hr, ret_ti)

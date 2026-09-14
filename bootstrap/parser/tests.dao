@@ -91,7 +91,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 78
+  let total: i32 = 79
 
   // -----------------------------------------------------------------
   // Expression tests
@@ -441,6 +441,12 @@ fn main(): i32
   let src35c: string = "class Box<T: Printable>:\n  value: T\n"
   let r35c: ParseOutput = parse(src35c)
   if expect_no_parse_errors_po("generic_class_bound_no_err", r35c):
+    pass_count = pass_count + 1
+
+  // Test 35d: Qualified bound — fn f<T: core::Printable>(x: T): T
+  let src35q: string = "fn f<T: core::Printable>(x: T): T\n  return x\n"
+  let r35q: ParseOutput = parse(src35q)
+  if expect_no_parse_errors_po("generic_fn_qualified_bound_no_err", r35q):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------

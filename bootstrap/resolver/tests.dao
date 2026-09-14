@@ -1093,8 +1093,9 @@ fn main(): i32
 
   // -----------------------------------------------------------------
   // Test: unbound_concept_deferred — a bound naming an undeclared concept
-  // raises no resolve diagnostic (left for a later cross-module pass,
-  // as the `extend` concept-name path does), and does not crash.
+  // raises no *resolve* diagnostic: this resolver never diagnoses an
+  // unknown type name (host parity); the type checker reports a bound it
+  // finds no concept behind.  The resolve pass must also survive it.
   // -----------------------------------------------------------------
   let src_gu: string = "fn show<T: Nope>(x: T): T\n  return x\n"
   let r_gu: ResolveResult = resolve(src_gu)
