@@ -25,7 +25,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 33
+  let total: i32 = 36
 
   // Test 1: simple_fn
   let src1: string = "fn add(a: i32, b: i32): i32\n  return a + b\n"
@@ -734,6 +734,73 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL checker_diagnostic_reaches_hir: expected the checker's diagnostic in the HIR result, got 0")
+
+  // Test 34: a generator function's HIR return type is its generator
+  // type, never void.
+  let src34g: string = "fn g(): Generator<i32>\n  yield 1\n  return\n"
+  let r34g: HirResult = lower_to_hir(src34g)
+  let gen_ret34: string = ""
+  let i34g: i64 = 0
+  while i34g < hir_count_nodes(r34g):
+    match r34g.hir_nodes.get(i34g):
+      HirNode::HirFunction(nm, tp_lp, pl, rt, bl, ie, co):
+        if rt >= 0 and rt < r34g.types.length():
+          gen_ret34 = r34g.types.get(rt).name
+    i34g = i34g + 1
+  if gen_ret34 == "Generator<i32>" and hir_count_diags(r34g) == 0:
+    print("PASS generator_return_type_in_hir")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL generator_return_type_in_hir: expected return type Generator<i32> and no diagnostics, got '" + gen_ret34 + "' and " + i64_to_string(hir_count_diags(r34g)) + " diagnostics")
+
+  // Test 35: `mode` and `yield` are preserved in HIR: the mode's name,
+  // its body, and the yielded operand.
+  let src35: string = "fn g(): Generator<i32>\n  mode unsafe =>\n    yield 7\n  return\n"
+  let r35: HirResult = lower_to_hir(src35)
+  let mode_name35: string = ""
+  let yields_in_mode35: i64 = 0
+  let i35: i64 = 0
+  while i35 < hir_count_nodes(r35):
+    match r35.hir_nodes.get(i35):
+      HirNode::HirMode(name_tidx, body_lp):
+        let mt35: Token = r35.toks.get(name_tidx)
+        mode_name35 = substring(r35.src, mt35.offset, mt35.len)
+        let body35: Vector<i64> = read_list(r35.hir_idx, body_lp)
+        let b35: i64 = 0
+        while b35 < body35.length():
+          match r35.hir_nodes.get(body35.get(b35)):
+            HirNode::HirYield(value):
+              if value >= 0:
+                yields_in_mode35 = yields_in_mode35 + 1
+          b35 = b35 + 1
+    i35 = i35 + 1
+  if mode_name35 == "unsafe" and yields_in_mode35 == 1 and hir_count_diags(r35) == 0:
+    print("PASS mode_and_yield_preserved_in_hir")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL mode_and_yield_preserved_in_hir: expected mode 'unsafe' holding one yield with an operand, got mode '" + mode_name35 + "' and " + i64_to_string(yields_in_mode35) + " yields")
+
+  // Test 36: an enum payload annotated `Generator<i64>` carries the
+  // checker's generator type into HIR.
+  let r36: HirResult = lower_to_hir("enum class E:\n  Item(values: Generator<i64>)\n\nfn main(): i32\n  return 0\n")
+  let payload36: string = ""
+  let i36: i64 = 0
+  while i36 < hir_count_nodes(r36):
+    match r36.hir_nodes.get(i36):
+      HirNode::HirEnum(en, etp, variants_lp):
+        let vpairs36: Vector<i64> = read_pairs(r36.hir_idx, variants_lp)
+        if vpairs36.length() >= 2:
+          let ptys36: Vector<i64> = read_list(r36.hir_idx, vpairs36.get(1))
+          if ptys36.length() == 1:
+            let pt36: i64 = ptys36.get(0)
+            if pt36 >= 0 and pt36 < r36.types.length():
+              payload36 = r36.types.get(pt36).name
+    i36 = i36 + 1
+  if payload36 == "Generator<i64>":
+    print("PASS generator_payload_type_in_hir")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL generator_payload_type_in_hir: expected payload type Generator<i64>, got '" + payload36 + "'")
 
   // -----------------------------------------------------------------
   // Summary

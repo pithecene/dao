@@ -19,9 +19,10 @@ module bootstrap::hir
 //   - Index expressions
 //   - Generics / monomorphization
 //   - Methods / extend
-//   - Mode blocks (a resource block lowers to HirResource; its domain
-//     has no HIR representation beyond the block)
-//   - Yield / generators
+//   - Execution-mode and resource domains beyond the block: `mode`
+//     blocks and `yield` are represented (HirMode, HirYield) and a
+//     resource block lowers to HirResource, but none of them lowers past
+//     HIR yet — MIR rejects each fail-closed
 
 enum class HirNode:
   // Program (D6/D7: multi-module root)
@@ -596,7 +597,7 @@ fn lower_stmt(hs: HS, node_idx: i64): HirR
     Node::ModeS(name_tidx, body_lp):
       let mode_body_fl: HirFlush = lower_body_stmts(hs, body_lp)
       return hs_add_node(mode_body_fl.hs, HirNode::HirMode(name = name_tidx, body_lp = mode_body_fl.list_pos))
-    Node::YieldS(val_node):
+    Node::YieldS(yield_tidx, val_node):
       if val_node < 0:
         return hs_add_node(hs, HirNode::HirYield(value = to_i64(-1)))
       let yr: HirR = lower_expr(hs, val_node)

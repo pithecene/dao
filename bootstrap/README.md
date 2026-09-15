@@ -77,7 +77,8 @@ slice of Dao syntax.
   payloads), `type` alias, `concept` / `derived concept`, `extend`,
   generic parameters with bounds
 - Statements: `let`, assignment, `if`/`else`/`else if`, `while`,
-  `for...in`, `return`, `break`, `match`, expression statements
+  `for...in`, `return`, `break`, `match`, `mode <name> =>` blocks,
+  `yield`, expression statements
 - Expressions: full precedence tower (pipe through primary), call,
   field access, index, try (`?`), lambda, list literals, qualified
   names
@@ -93,8 +94,6 @@ rule, the type arguments carried on `CallE` (Task 36); `resource <kind>
 **Tier B deferrals** (explicitly not supported yet):
 
 - Inline conformance blocks (`as` / `deny` in a class body)
-- `mode` blocks
-- `yield`
 - Function types (`fn(T): R`)
 - `where` clauses
 - Pipe continuation across newlines
@@ -150,7 +149,6 @@ uses map over the bootstrap parser's AST.
 
 - Overload resolution
 - `where` clauses
-- Mode block scoping
 - Match arm `..` (rest) and `as` (whole-variant) forms
 
 **How to run tests**:
@@ -182,7 +180,7 @@ correctness for Tier A Dao syntax.
 **Tier B deferrals**:
 
 - Generics, inference, substitution (a generic annotation other than a
-  concept's self form reads as unresolved)
+  concept's self form and `Generator<T>` reads as unresolved)
 - Concept default method bodies (unchecked, as in the host)
 - Lowering a member a concept provides through a derived conformance or
   a bound (typed; rejected fail-closed at HIR)
@@ -343,7 +341,7 @@ same change as the bootstrap work that closes a row.
 | §4 exports, same-module access | conforms (Task 26) |
 | §5 `extend` scoping | conforms (Task 26 §6.5) — module granularity, not imported |
 | §6 qualified forms | `b::f`, `b::T`, `b::E::V` conform (Task 27 D4); `b::C` in conformance positions and `b::T::m` are rejected until the bootstrap has concepts and methods — Task 33 |
-| §7 prelude | partial (Tasks 38, 41) — scope order, shadowing, identity, reserved names, prelude method and `extend` visibility, and derived conformance through the prelude conform; prelude files load partially (the parser lacks `mode` blocks and `yield`); the `hir`/`mir`/`llvm` probe columns are not yet measured with the prelude |
+| §7 prelude | partial (Tasks 38, 41) — scope order, shadowing, identity, reserved names, prelude method and `extend` visibility, and derived conformance through the prelude conform; prelude files load partially; the `hir`/`mir`/`llvm` probe columns are not yet measured with the prelude |
 | §8 entry module | not implemented — no driver or entry concept; MIR flattens every function of every module — Task 33 |
 | §9 determinism | graph construction conforms (Task 25 §8; graph tests 7–8); program-level output determinism is unverified — Task 33 |
 

@@ -806,8 +806,9 @@ enum class Node:
   // `mode <name> =>` block (host ModeBlock).  Parsed, preserved, and
   // carried into HIR fail-closed; lowering waits for a later task.
   ModeS(name: i64, body_lp: i64)
-  // `yield <expr>` (host YieldStatement).  Same fail-closed posture.
-  YieldS(value: i64)
+  // `yield <expr>` (host YieldStatement): its keyword token locates it.
+  // Same fail-closed posture.
+  YieldS(tok: i64, value: i64)
   ForS(var_tok: i64, iter: i64, body_lp: i64)
   ReturnS(value: i64)
   BreakS(tok: i64)
@@ -1811,7 +1812,7 @@ fn parse_yield_stmt(pc: PC, ps: PS): PR
     let psr: PS = sync_to_stmt(pc, val.ps)
     return ps_add_node(psr, Node::ErrorS(tok = ps.pos))
   let ps3: PS = match_tok(pc, val.ps, TK::Newline)
-  return ps_add_node(ps3, Node::YieldS(value = val.node))
+  return ps_add_node(ps3, Node::YieldS(tok = ps.pos, value = val.node))
 
 fn parse_for_stmt(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
@@ -2640,7 +2641,7 @@ fn node_kind_name(n: Node): string
       return "ResourceS"
     Node::ModeS(a, b):
       return "ModeS"
-    Node::YieldS(a):
+    Node::YieldS(a, b):
       return "YieldS"
     Node::ForS(a, b, c):
       return "ForS"
@@ -2785,6 +2786,7 @@ enum TypeKind:
   TEnum
   TGenericParam
   TConcept
+  TGenerator      // `Generator<T>`, the compiler-provided coroutine type; `pointee` is T
 
 class DaoType:
   kind: TypeKind
@@ -2794,7 +2796,7 @@ class DaoType:
   info_lp: i64
   info_count: i64
   ret_type: i64
-  pointee: i64      // a pointer type's pointee; else -1
+  pointee: i64      // a pointer type's pointee, a generator's element type; else -1
 
 // --- Task 27: Program-level pass payloads ---
 //
