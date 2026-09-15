@@ -124,7 +124,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 198
+  let total: i32 = 199
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -1632,31 +1632,34 @@ fn main(): i32
   if tc_expect_program_errors("derived_conformance_survives_local_extend", Vector<SourceInput>::new().push(SourceInput("lib.dao", dc_both, false)), dc_wrap, "main.dao", 0):
     pass_count = pass_count + 1
   // `mode` and `yield` carry their contract meaning: a dereference needs
-  // an enclosing `mode unsafe =>`; unknown modes are rejected; `yield`
+  // an enclosing `mode unsafe =>`; any mode name checks its body; `yield`
   // is legal only in a `Generator<T>` function, yields `T`, and never
   // sits in a `resource memory` block; a generator returns bare.
   if tc_expect_diags("deref_requires_unsafe_mode", "fn test(): i32\n  let x: i32 = 1\n  let p: *i32 = &x\n  let y: i32 = *p\n  return 0\n", 1):
     pass_count = pass_count + 1
-  if tc_expect_diags("unknown_mode_rejected", "fn f(): i64\n  mode warp =>\n    return 1\n  return 0\n", 1):
+  if tc_expect_diags("other_mode_body_checked", "fn f(): i64\n  mode warp =>\n    let s: string = true\n  return 0\n", 1):
     pass_count = pass_count + 1
   if tc_expect_clean("gpu_mode_body_checked", "fn f(): i64\n  mode gpu =>\n    return 1\n  return 0\n"):
     pass_count = pass_count + 1
   if tc_expect_diags("yield_outside_generator", "fn g(): i64\n  yield 1\n  return 0\n", 1):
     pass_count = pass_count + 1
-  if tc_expect_clean("yield_in_generator", "fn g(): Generator<i64>\n  yield 1\n  return\n"):
+  if tc_expect_clean("yield_in_generator", "fn g(): Generator<i32>\n  yield 1\n  return\n"):
+    pass_count = pass_count + 1
+  // A yielded literal keeps its default type (host check_yield).
+  if tc_expect_diag_containing("yield_literal_keeps_default_type", "fn g(): Generator<i64>\n  yield 1\n  return\n", "does not match Generator element type i64"):
     pass_count = pass_count + 1
   if tc_expect_diags("yield_type_mismatch", "fn g(): Generator<i64>\n  yield \"s\"\n  return\n", 1):
     pass_count = pass_count + 1
   if tc_expect_diags("return_value_in_generator", "fn g(): Generator<i64>\n  return 1\n", 1):
     pass_count = pass_count + 1
-  if tc_expect_diags("yield_in_resource_block_rejected", "fn g(): Generator<i64>\n  resource memory pool =>\n    yield 1\n  return\n", 1):
+  if tc_expect_diags("yield_in_resource_block_rejected", "fn g(): Generator<i32>\n  resource memory pool =>\n    yield 1\n  return\n", 1):
     pass_count = pass_count + 1
   // `Generator<T>` is a type of its own kind: a call of a generator
   // function has it (one element type, one generator type), it is no
   // other type, and it takes exactly one argument, reported once.
-  if tc_expect_clean("generator_call_typed", "fn g(): Generator<i64>\n  yield 1\n  return\n\nfn h(): i32\n  let it: Generator<i64> = g()\n  return 0\n"):
+  if tc_expect_clean("generator_call_typed", "fn g(): Generator<i32>\n  yield 1\n  return\n\nfn h(): i32\n  let it: Generator<i32> = g()\n  return 0\n"):
     pass_count = pass_count + 1
-  if tc_expect_diag_containing("generator_call_is_no_element", "fn g(): Generator<i64>\n  yield 1\n  return\n\nfn h(): i32\n  let n: i64 = g()\n  return 0\n", "Generator<i64>"):
+  if tc_expect_diag_containing("generator_call_is_no_element", "fn g(): Generator<i32>\n  yield 1\n  return\n\nfn h(): i32\n  let n: i32 = g()\n  return 0\n", "Generator<i32>"):
     pass_count = pass_count + 1
   if tc_expect_diag_containing("generator_arity_rejected", "fn g(): Generator<i64, i64>\n  return\n", "exactly one type argument"):
     pass_count = pass_count + 1
@@ -1756,7 +1759,7 @@ fn main(): i32
   //   - Try operator (requires generic Option/Result)
   //   - Addr-of unary operator semantics
   //   - Index expressions
-  //   - Checking rules inside `mode gpu` / `mode parallel`; resource-block
+  //   - Checking rules of modes other than `unsafe`; resource-block
   //     domain semantics beyond `yield` legality (bodies are checked)
   //   - C ABI type validation
   //   - Structural function type comparison
