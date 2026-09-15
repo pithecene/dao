@@ -1357,10 +1357,12 @@ fn main(): i32
     pass_count = pass_count + 1
   if tc_expect_diag_containing("generator_applied_self_wrong_args_rejected", "concept C<T>:\n  fn take(self, g: Generator<C<bool>>): bool\n", "applies only its own type parameters"):
     pass_count = pass_count + 1
-  // An expression body is a return value, which a generator never has.
-  if tc_expect_diag_containing("generator_expression_body_rejected", "fn forward(g: Generator<i64>): Generator<i64> -> g\n", "invalid in a generator function"):
+  // An expression body is held to its return type by type alone, a
+  // generator's too (host check_function): a generator of the element
+  // type is accepted, one of another element is not.
+  if tc_expect_clean("generator_expression_body_accepted", "fn forward(g: Generator<i64>): Generator<i64> -> g\n"):
     pass_count = pass_count + 1
-  if tc_expect_diag_containing("generator_expression_method_body_rejected", "class P:\n  x: i32\n  fn forward(self, g: Generator<i64>): Generator<i64> -> g\n", "invalid in a generator function"):
+  if tc_expect_diag_containing("generator_expression_method_body_mismatch", "class P:\n  x: i32\n  fn forward(self, g: Generator<i32>): Generator<i64> -> g\n", "expression body type mismatch"):
     pass_count = pass_count + 1
   if tc_expect_diag_containing("generator_alias_cycle_rejected", "type G = Generator<G>\n", "no resolvable target"):
     pass_count = pass_count + 1
