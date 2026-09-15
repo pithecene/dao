@@ -3312,11 +3312,8 @@ fn tc_check_expr_fn_body(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, 
 // body is the function's return, so a literal adopts the return type as
 // a `return` value does (check_return_stmt).
 fn tc_check_expr_body_value(ts: TS, body_expr: i64): TS
-  if ts.ctx.in_generator > 0:
-    // The body is the function's return value (HIR lowers it as
-    // `return <expr>`), and a generator produces values only by `yield`.
-    let rg: TS = check_expr(ts, body_expr)
-    return ts_add_diag(rg, ts_node_span(rg, body_expr), "'return value' is invalid in a generator function; use yield to produce values")
+  // Checked against the return type whatever it is, a generator's too:
+  // host check_function holds an expression body only to assignability.
   let r: TS = check_expr(ts, body_expr)
   if r.ctx.return_type >= 0:
     r = fit_literal(r, body_expr, r.ctx.return_type)
