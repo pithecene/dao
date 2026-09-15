@@ -61,7 +61,11 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
+<<<<<<< HEAD
   let total: i32 = 94
+=======
+  let total: i32 = 199
+>>>>>>> a870b80 (fix(typecheck): 🐛 slice 8 Codex review — mode names and yield literals as the host)
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -1257,25 +1261,112 @@ fn main(): i32
   else:
     print("FAIL derived_conformance_no_double_count: expected >= 1 diagnostic, got 0")
   // `mode` and `yield` carry their contract meaning: a dereference needs
-  // an enclosing `mode unsafe =>`; unknown modes are rejected; `yield`
+  // an enclosing `mode unsafe =>`; any mode name checks its body; `yield`
   // is legal only in a `Generator<T>` function, yields `T`, and never
   // sits in a `resource memory` block; a generator returns bare.
   if tc_expect_diags("deref_requires_unsafe_mode", "fn test(): i32\n  let x: i32 = 1\n  let p: *i32 = &x\n  let y: i32 = *p\n  return 0\n", 1):
     pass_count = pass_count + 1
-  if tc_expect_diags("unknown_mode_rejected", "fn f(): i64\n  mode warp =>\n    return 1\n  return 0\n", 1):
+  if tc_expect_diags("other_mode_body_checked", "fn f(): i64\n  mode warp =>\n    let s: string = true\n  return 0\n", 1):
     pass_count = pass_count + 1
   if tc_expect_clean("gpu_mode_body_checked", "fn f(): i64\n  mode gpu =>\n    return 1\n  return 0\n"):
     pass_count = pass_count + 1
   if tc_expect_diags("yield_outside_generator", "fn g(): i64\n  yield 1\n  return 0\n", 1):
     pass_count = pass_count + 1
-  if tc_expect_clean("yield_in_generator", "fn g(): Generator<i64>\n  yield 1\n  return\n"):
+  if tc_expect_clean("yield_in_generator", "fn g(): Generator<i32>\n  yield 1\n  return\n"):
+    pass_count = pass_count + 1
+  // A yielded literal keeps its default type (host check_yield).
+  if tc_expect_diag_containing("yield_literal_keeps_default_type", "fn g(): Generator<i64>\n  yield 1\n  return\n", "does not match Generator element type i64"):
     pass_count = pass_count + 1
   if tc_expect_diags("yield_type_mismatch", "fn g(): Generator<i64>\n  yield \"s\"\n  return\n", 1):
     pass_count = pass_count + 1
   if tc_expect_diags("return_value_in_generator", "fn g(): Generator<i64>\n  return 1\n", 1):
     pass_count = pass_count + 1
-  if tc_expect_diags("yield_in_resource_block_rejected", "fn g(): Generator<i64>\n  resource memory pool =>\n    yield 1\n  return\n", 1):
+  if tc_expect_diags("yield_in_resource_block_rejected", "fn g(): Generator<i32>\n  resource memory pool =>\n    yield 1\n  return\n", 1):
     pass_count = pass_count + 1
+<<<<<<< HEAD
+=======
+  // `Generator<T>` is a type of its own kind: a call of a generator
+  // function has it (one element type, one generator type), it is no
+  // other type, and it takes exactly one argument, reported once.
+  if tc_expect_clean("generator_call_typed", "fn g(): Generator<i32>\n  yield 1\n  return\n\nfn h(): i32\n  let it: Generator<i32> = g()\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_call_is_no_element", "fn g(): Generator<i32>\n  yield 1\n  return\n\nfn h(): i32\n  let n: i32 = g()\n  return 0\n", "Generator<i32>"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_arity_rejected", "fn g(): Generator<i64, i64>\n  return\n", "exactly one type argument"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("bare_generator_rejected", "fn g(): Generator\n  return\n", "exactly one type argument"):
+    pass_count = pass_count + 1
+  // A parameter annotation is read again for the body: still one report.
+  if tc_expect_diag_containing("generator_parameter_arity_reported_once", "fn f(x: Generator<i64, i64>): i32\n  return 0\n", "exactly one type argument"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_unknown_element_rejected", "fn g(): Generator<Missing>\n  return\n", "unknown type 'Missing'"):
+    pass_count = pass_count + 1
+  // An alias of a generator binds after the alias its element names,
+  // whatever the declaration order, so the element type is kept.
+  if tc_expect_diag_containing("generator_alias_forward_element", "type G = Generator<Element>\ntype Element = i64\n\nfn g(): G\n  yield \"s\"\n  return\n", "does not match Generator element type i64"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_of_concept_alias_rejected", "concept C:\n  fn f(self): i32\n\ntype Bad = Generator<C>\n", "is a concept, not a type"):
+    pass_count = pass_count + 1
+  // A concept's own name inside a generator in its signature means the
+  // conforming type there too.
+  if tc_expect_clean("generator_signature_substitutes_concept", "concept Copies:\n  fn copies(self): Generator<Copies>\n\nextend i32 as Copies:\n  fn copies(self): Generator<i32>\n    yield self\n    return\n"):
+    pass_count = pass_count + 1
+  // A `yield` diagnostic points at its keyword, whatever the operand:
+  // the source is wrapped as `module test`, so `yield` sits at 26.
+  let r_ys: TypeCheckResult = typecheck("fn g(): i64\n  yield [1]\n  return 0\n")
+  let ys_at: i64 = to_i64(-1)
+  let ysi: i64 = 0
+  while ysi < r_ys.diags.length():
+    if index_of(r_ys.diags.get(ysi).message, "only valid inside a generator") >= 0:
+      ys_at = r_ys.diags.get(ysi).span.offset
+    ysi = ysi + 1
+  if ys_at == to_i64(26):
+    print("PASS yield_diagnostic_located")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL yield_diagnostic_located: expected the yield legality diagnostic at offset 26, got " + i64_to_string(ys_at))
+  if tc_expect_diag_containing("generator_alias_unknown_element_rejected", "type Bad = Generator<Missing>\n", "unknown type 'Missing'"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_pointer_unknown_element_rejected", "fn g(): Generator<*Missing>\n  return\n", "unknown type 'Missing'"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_unknown_generic_element_rejected", "fn g(): Generator<Missing<i64>>\n  return\n", "unknown type 'Missing'"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_unknown_nested_argument_rejected", "class Box<T>:\n  v: T\n\nfn g(): Generator<Box<Missing>>\n  return\n", "unknown type 'Missing'"):
+    pass_count = pass_count + 1
+  let r_gq: TypeCheckResult = typecheck("enum E:\n  A\n\nfn g(): Generator<E::Missing>\n  return\n")
+  let gq_seen: bool = false
+  let gqi: i64 = 0
+  while gqi < r_gq.diags.length():
+    if index_of(r_gq.diags.get(gqi).message, "unknown type 'Missing'") >= 0:
+      gq_seen = true
+    gqi = gqi + 1
+  if gq_seen:
+    print("PASS generator_qualified_unknown_element_rejected")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL generator_qualified_unknown_element_rejected: expected an unknown type 'Missing' diagnostic")
+  // A generator element is an annotation in its own right: a concept
+  // nested in it is no type, in a bound alias too; in a concept's own
+  // signatures its applied self form is the conforming type, and any
+  // other application of the concept is rejected.
+  if tc_expect_diag_containing("generator_alias_nested_concept_rejected", "class Box<T>:\n  v: T\n\nconcept C:\n  fn f(self): i32\n\ntype Bad = Generator<Box<C>>\n", "is a concept, not a type"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generator_applied_self_substituted", "concept C<T>:\n  fn take(self, g: Generator<C<T>>): bool\n\nfn f<U: C<i32>>(u: U, g: Generator<U>): bool\n  return u.take(g)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("generator_applied_self_mismatch_rejected", "concept C<T>:\n  fn take(self, g: Generator<C<T>>): bool\n\nfn f<U: C<i32>>(u: U, g: Generator<i64>): bool\n  return u.take(g)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_applied_self_wrong_args_rejected", "concept C<T>:\n  fn take(self, g: Generator<C<bool>>): bool\n", "applies only its own type parameters"):
+    pass_count = pass_count + 1
+  // An expression body is a return value, which a generator never has.
+  if tc_expect_diag_containing("generator_expression_body_rejected", "fn forward(g: Generator<i64>): Generator<i64> -> g\n", "invalid in a generator function"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_expression_method_body_rejected", "class P:\n  x: i32\n  fn forward(self, g: Generator<i64>): Generator<i64> -> g\n", "invalid in a generator function"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_alias_cycle_rejected", "type G = Generator<G>\n", "no resolvable target"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_alias_cycle_through_argument_rejected", "class Box<T>:\n  v: T\n\ntype G = Generator<Box<G>>\n", "no resolvable target"):
+    pass_count = pass_count + 1
+>>>>>>> a870b80 (fix(typecheck): 🐛 slice 8 Codex review — mode names and yield literals as the host)
   let r_unc: TypeCheckResult = typecheck("fn f<T>(x: T): string\n  return x.to_string()\n")
   if tc_count_diags(r_unc) >= 1:
     print("PASS unconstrained_param_member_rejected")
@@ -1300,8 +1391,13 @@ fn main(): i32
   //   - Try operator (requires generic Option/Result)
   //   - Deref / addr-of unary operators
   //   - Index expressions
+<<<<<<< HEAD
   //   - Mode blocks; resource-block domain semantics (bodies are checked)
   //   - Yield / Generator checking
+=======
+  //   - Checking rules of modes other than `unsafe`; resource-block
+  //     domain semantics beyond `yield` legality (bodies are checked)
+>>>>>>> a870b80 (fix(typecheck): 🐛 slice 8 Codex review — mode names and yield literals as the host)
   //   - C ABI type validation
   //   - Structural function type comparison
   //   - For-loop element type inference from iterables
