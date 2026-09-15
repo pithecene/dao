@@ -309,8 +309,9 @@ fn block_advance(br: BlockR): BlockR
 //
 // Resolve a field name token to its positional index within a struct's
 // type_info field list.  Used by MirFieldAccess lowering.
-// type_info stores pairs of (name_tidx, field_type_idx) starting at
-// DaoType.info_lp with DaoType.info_count pairs.
+// type_info stores pairs of (field symbol index, field_type_idx)
+// starting at DaoType.info_lp with DaoType.info_count pairs; the symbol
+// is program-wide, so the name reads the same from any module.
 
 fn mir_resolve_field_index(ms: MS, struct_type_idx: i64, field_tok: i64): i64
   if struct_type_idx < 0:
@@ -323,13 +324,11 @@ fn mir_resolve_field_index(ms: MS, struct_type_idx: i64, field_tok: i64): i64
       // Extract the field name from the field_tok.
       let ft: Token = ms.toks.get(field_tok)
       let field_name: string = substring(ms.src, ft.offset, ft.len)
-      // Walk the struct's field pairs in type_info.
+      // Walk the struct's field pairs in type_info; each name slot holds
+      // the field's symbol (field_slot_name), readable from any module.
       let i: i64 = to_i64(0)
       while i < t.info_count:
-        let name_tidx: i64 = ms.type_info.get(t.info_lp + i * to_i64(2))
-        let ntok: Token = ms.toks.get(name_tidx)
-        let fname: string = substring(ms.src, ntok.offset, ntok.len)
-        if fname == field_name:
+        if field_slot_name(ms.symbols, ms.type_info.get(t.info_lp + i * to_i64(2))) == field_name:
           return i
         i = i + to_i64(1)
   return to_i64(-1)
@@ -727,32 +726,35 @@ fn lower_to_mir(src: string): MirResult
     p = program_run_resolve(p)
   resource memory typecheck =>
     p = program_run_typecheck(p)
-  resource memory hir =>
-    p = program_run_hir(p)
 
-  // Lower from HirResult constructed off the single module.
+  // Lower the single module to HIR here (the MIR state needs the HIR
+  // nodes, which the program-level HIR pass does not publish), so the
+  // HIR stage runs once and its diagnostics are reported once.
   let mid: i64 = to_i64(0)
   let sf: SourceFile = program_file_of_module(p, mid)
   let po: ParseOutput = sf.parse_output
-  let hs: HS = HS(po.nodes, po.idx, po.toks, sf.source_text, p.resolve.symbols, p.typecheck.types, p.typecheck.type_info, p.typecheck.expr_types, p.typecheck.sym_types, p.resolve.uses, Vector<HirNode>::new(), Vector<i64>::new(), Vector<Diagnostic>::new(), mid, sf.file_id)
+  let hs: HS = hs_new(p, mid, arena_empty())
   let result: HirR = HirR(hs, to_i64(-1))
   resource memory hir_lowering =>
     result = lower_file(hs, po.root)
   let final_hs: HS = result.hs
 
   let ms: MS = MS(
-    final_hs.hir_nodes,
-    final_hs.hir_idx,
-    final_hs.types,
-    final_hs.type_info,
-    final_hs.toks,
-    final_hs.src,
+    final_hs.arena.nodes,
+    final_hs.arena.idx,
+    final_hs.typecheck.types,
+    final_hs.typecheck.type_info,
+    final_hs.unit.toks,
+    final_hs.unit.src,
     p.resolve.symbols,
     p.typecheck.sym_types,
     p.resolve.uses,
     Vector<MirNode>::new(),
     Vector<i64>::new(),
-    Vector<Diagnostic>::new(),
+    // Every diagnostic of the stages before MIR travels with the
+    // result: a construct HIR rejected fail-closed is reported here,
+    // never turned into a silent MirErrorExpr.
+    program_and_hir_diags(p, final_hs.diags),
     sf.file_id,
     to_i64(-1),
     Vector<i64>::new(),

@@ -29,7 +29,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 9
+  let total: i32 = 14
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -199,6 +199,70 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL resource_block_rejected: expected one diagnostic naming HirResource, got " + i64_to_string(r9.diags.length()))
+
+  // -----------------------------------------------------------------
+  // Tests 10–11: what HIR rejected fail-closed reaches MIR's result as
+  // diagnostics — a member a concept provides, and a method taken as a
+  // value — never as a silent MirErrorExpr.
+  // -----------------------------------------------------------------
+  let src10: string = "derived concept Show:\n  fn show(self): string\n\nextend i64 as Show:\n  fn show(self): string\n    return \"n\"\n\nclass P:\n  x: i64\n\nfn f(p: P): string\n  return p.show()\n"
+  let r10: MirResult = lower_to_mir(src10)
+  let derived_rejected: bool = false
+  let d10: i64 = 0
+  while d10 < r10.diags.length():
+    if index_of(r10.diags.get(d10).message, "derived conformance or a bound") >= 0:
+      derived_rejected = true
+    d10 = d10 + 1
+  if derived_rejected:
+    print("PASS derived_member_call_rejected_in_mir")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL derived_member_call_rejected_in_mir: expected HIR's rejection among the MIR diagnostics, got " + i64_to_string(r10.diags.length()))
+
+  let src11: string = "class C:\n  x: i64\n  fn get(self): i64 -> self.x\n\nfn f(c: C): i64\n  let g = c.get\n  return 0\n"
+  let r11: MirResult = lower_to_mir(src11)
+  let value_rejected: bool = false
+  let d11: i64 = 0
+  while d11 < r11.diags.length():
+    if index_of(r11.diags.get(d11).message, "taken as a value") >= 0:
+      value_rejected = true
+    d11 = d11 + 1
+  if value_rejected:
+    print("PASS method_value_rejected_in_mir")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL method_value_rejected_in_mir: expected HIR's rejection among the MIR diagnostics, got " + i64_to_string(r11.diags.length()))
+
+  // -----------------------------------------------------------------
+  // Tests 12–13: a static call `C::make()` lowers to a call of the
+  // method symbol (no error expression), and a checker diagnostic — a
+  // static method called through a value — reaches MIR's result.
+  // -----------------------------------------------------------------
+  let src12: string = "class C:\n  x: i32\n  fn make(): i32 -> 7\n\nfn f(): i32\n  return C::make()\n"
+  let r12: MirResult = lower_to_mir(src12)
+  if r12.diags.length() == 0 and mir_count_kind(r12, "MirErrorExpr") == 0 and mir_contains_kind(r12, "MirCall"):
+    print("PASS static_call_lowered_in_mir")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL static_call_lowered_in_mir: expected a call, no error expression, no diagnostics; got " + i64_to_string(r12.diags.length()) + " diagnostics, " + i64_to_string(mir_count_kind(r12, "MirErrorExpr")) + " error expressions")
+
+  let src13: string = "class C:\n  x: i32\n  fn make(): i32 -> 7\n\nfn f(c: C): i32\n  return c.make()\n"
+  let r13: MirResult = lower_to_mir(src13)
+  if r13.diags.length() >= 1:
+    print("PASS checker_diagnostic_reaches_mir")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL checker_diagnostic_reaches_mir: expected the checker's diagnostic in the MIR result, got 0")
+
+  // Test 14: a static method taken as a value is a function reference,
+  // lowered without an error expression.
+  let src14: string = "class C:\n  x: i32\n  fn make(): i32 -> 7\n\nfn f(): i32\n  let g = C::make\n  return g()\n"
+  let r14: MirResult = lower_to_mir(src14)
+  if r14.diags.length() == 0 and mir_count_kind(r14, "MirErrorExpr") == 0 and mir_contains_kind(r14, "MirFnRef"):
+    print("PASS static_method_value_lowered_in_mir")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL static_method_value_lowered_in_mir: expected a function reference, no error expression, no diagnostics; got " + i64_to_string(r14.diags.length()) + " diagnostics, " + i64_to_string(mir_count_kind(r14, "MirErrorExpr")) + " error expressions")
 
   // -----------------------------------------------------------------
   // Summary

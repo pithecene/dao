@@ -25,7 +25,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 27
+  let total: i32 = 33
 
   // Test 1: simple_fn
   let src1: string = "fn add(a: i32, b: i32): i32\n  return a + b\n"
@@ -625,6 +625,115 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL bound_dispatch_rejected_in_hir: expected a diagnostic, got 0")
+
+  // Test 28: a concept-provided method taken as a value (not called) is
+  // rejected too — there is no field to read and no implementation to
+  // name, so it must never lower as a field access.
+  let src28v: string = "derived concept Show:\n  fn show(self): string\n\nextend i64 as Show:\n  fn show(self): string\n    return \"n\"\n\nclass P:\n  x: i64\n\nfn f(p: P): i64\n  let g = p.show\n  return 0\n"
+  let r28v: HirResult = lower_to_hir(src28v)
+  if hir_count_diags(r28v) >= 1:
+    print("PASS derived_method_value_rejected_in_hir")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL derived_method_value_rejected_in_hir: expected a diagnostic, got 0")
+
+  // Test 29: an expression-bodied method of a class and of an extend
+  // lowers to an owned HirFunction like a block-bodied one.
+  let src29m: string = "class C:\n  x: i64\n  fn get(self): i64 -> self.x\n\nconcept Show:\n  fn show(self): string\n\nextend C as Show:\n  fn show(self): string -> \"c\"\n"
+  let r29m: HirResult = lower_to_hir(src29m)
+  let owned_29m: i64 = 0
+  let i29m: i64 = 0
+  while i29m < hir_count_nodes(r29m):
+    match r29m.hir_nodes.get(i29m):
+      HirNode::HirFunction(nm, tp_lp, pl, rt, bl, ie, co):
+        if co >= 0:
+          owned_29m = owned_29m + 1
+    i29m = i29m + 1
+  if owned_29m == 2 and hir_count_diags(r29m) == 0:
+    print("PASS expr_methods_lowered")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL expr_methods_lowered: expected 2 owned functions and no diagnostics, got " + i64_to_string(owned_29m) + " and " + i64_to_string(hir_count_diags(r29m)))
+
+  // Test 30: a method an extend gave a builtin receiver desugars to a
+  // call of the method symbol with the receiver as its first argument —
+  // never a field access on the builtin.
+  let src30b: string = "concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string -> \"n\"\n\nfn f(n: i32): string\n  return n.show()\n"
+  let r30b: HirResult = lower_to_hir(src30b)
+  let method_calls_30b: i64 = 0
+  let field_accesses_30b: i64 = 0
+  let i30b: i64 = 0
+  while i30b < hir_count_nodes(r30b):
+    match r30b.hir_nodes.get(i30b):
+      HirNode::HirCall(callee, args_lp, arg_count, ct):
+        if arg_count == 1:
+          match r30b.hir_nodes.get(callee):
+            HirNode::HirIdent(sym, typ, tok):
+              if sym >= 0:
+                method_calls_30b = method_calls_30b + 1
+      HirNode::HirFieldAccess(obj, field, ft):
+        field_accesses_30b = field_accesses_30b + 1
+    i30b = i30b + 1
+  if method_calls_30b == 1 and field_accesses_30b == 0 and hir_count_diags(r30b) == 0:
+    print("PASS builtin_receiver_method_call_lowered")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL builtin_receiver_method_call_lowered: expected one method call, no field access, no diagnostics; got " + i64_to_string(method_calls_30b) + ", " + i64_to_string(field_accesses_30b) + ", " + i64_to_string(hir_count_diags(r30b)))
+
+  // Test 31: a method taken as a value — a class's own, or one an
+  // extend gave a builtin — is rejected, never lowered as a field read.
+  let src31v: string = "class C:\n  x: i64\n  fn get(self): i64 -> self.x\n\nfn f(c: C): i64\n  let g = c.get\n  return 0\n"
+  let r31v: HirResult = lower_to_hir(src31v)
+  let src31w: string = "concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string -> \"n\"\n\nfn f(n: i32): i32\n  let g = n.show\n  return 0\n"
+  let r31w: HirResult = lower_to_hir(src31w)
+  if hir_count_diags(r31v) >= 1 and hir_count_diags(r31w) >= 1:
+    print("PASS method_value_rejected_in_hir")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL method_value_rejected_in_hir: expected a diagnostic for each, got " + i64_to_string(hir_count_diags(r31v)) + " and " + i64_to_string(hir_count_diags(r31w)))
+
+  // Test 32: a method's parameter and a class's field symbols are found
+  // in their own module: two modules' declarations at one index each
+  // bind their own (the second module's must not take the first's).
+  let m32_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  m32_inputs = m32_inputs.push(SourceInput("a.dao", "module app::a\nclass Box:\n  x: i32\n  fn get(self): i32 -> self.x\n", false))
+  m32_inputs = m32_inputs.push(SourceInput("b.dao", "module app::b\nclass Box:\n  x: i64\n  fn get(self): i64 -> self.x\n", false))
+  let m32_p: Program = program_from_graph(build_program(m32_inputs))
+  m32_p = program_run_resolve(m32_p)
+  m32_p = program_run_typecheck(m32_p)
+  let m32_mid: i64 = find_module_by_name(m32_p.graph.modules, "app::b")
+  let m32_hs: HS = build_module_hs(m32_p, m32_mid)
+  let m32_root: Node = m32_hs.unit.nodes.get(program_file_of_module(m32_p, m32_mid).parse_output.root)
+  let m32_ok: bool = false
+  match m32_root:
+    Node::FileN(m32_md, m32_ilp, m32_dlp):
+      let m32_decls: Vector<i64> = read_list(m32_hs.unit.idx_data, m32_dlp)
+      let m32_class: Node = m32_hs.unit.nodes.get(m32_decls.get(to_i64(0)))
+      match m32_class:
+        Node::ClassDeclD(m32_nt, m32_tp, m32_fl, m32_ml):
+          let m32_meths: Vector<i64> = read_list(m32_hs.unit.idx_data, m32_ml)
+          let m32_self: i64 = hir_find_param_sym(m32_hs, m32_meths.get(to_i64(0)), "self")
+          let m32_field: i64 = hir_find_field_sym(m32_hs, m32_decls.get(to_i64(0)), "x")
+          if m32_self >= 0 and m32_field >= 0:
+            if m32_hs.symbols.get(m32_self).owner_module_id == m32_mid:
+              if m32_hs.symbols.get(m32_field).owner_module_id == m32_mid:
+                m32_ok = true
+  if m32_ok:
+    print("PASS symbols_found_in_own_module")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL symbols_found_in_own_module: the second module's `self` or `x` was not its own symbol")
+
+  // Test 33: a checker diagnostic reaches the HIR result — a static
+  // method called through a value is reported, not desugared with an
+  // invented receiver.
+  let src33s: string = "class C:\n  x: i32\n  fn make(): i32 -> 7\n\nfn f(c: C): i32\n  return c.make()\n"
+  let r33s: HirResult = lower_to_hir(src33s)
+  if hir_count_diags(r33s) >= 1:
+    print("PASS checker_diagnostic_reaches_hir")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL checker_diagnostic_reaches_hir: expected the checker's diagnostic in the HIR result, got 0")
 
   // -----------------------------------------------------------------
   // Summary
