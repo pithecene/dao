@@ -315,7 +315,8 @@ fn populate_builtins(rs: RS): RS
   r = declare_builtin(r, "string")
   r = declare_builtin(r, "void")
   // The compiler-provided coroutine type, predeclared like `string` and
-  // `void` (the host's kPredeclaredTypes): no module may declare it.
+  // `void`: `Generator<T>` is not user-definable
+  // (CONTRACT_SYNTAX_SURFACE.md, Generator Functions).
   r = declare_builtin(r, "Generator")
   return r
 

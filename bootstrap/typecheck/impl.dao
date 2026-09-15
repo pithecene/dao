@@ -36,7 +36,7 @@ module bootstrap::typecheck
 //   - Try operator (requires generic Option/Result)
 //   - Addr-of unary operator semantics
 //   - Index expressions
-//   - Checking rules of modes other than `unsafe` (their bodies are
+//   - Checking rules of `mode gpu` / `mode parallel` (their bodies are
 //     checked as blocks); resource-block domain semantics beyond `yield`
 //     legality (bodies are checked)
 //   - C ABI type validation
@@ -2965,23 +2965,31 @@ fn check_stmt(ts: TS, node_idx: i64): TS
         return rr
       return check_body_stmts(ts, body_lp)
     Node::ModeS(name_tidx, body_lp):
-      // `mode <name> =>` enters an execution / safety context for its body,
-      // whatever the name, and the body is checked (host
-      // check_mode_block).  `unsafe` is the context a dereference requires
-      // (host check_unary); no other mode carries a checking rule yet.
-      if ts_tok_name(ts, name_tidx) == "unsafe":
+      // `mode <name> =>` enters one of the canonical modes
+      // (CONTRACT_EXECUTION_CONTEXTS.md, Modes: `unsafe`, `gpu`,
+      // `parallel`) for its body.  `unsafe` is the context a dereference
+      // requires; `gpu` and `parallel` carry no checking rule yet.  Any
+      // other name is no mode the language defines, so it is diagnosed
+      // fail-closed, and its body is still checked.
+      let mode_name: string = ts_tok_name(ts, name_tidx)
+      if mode_name == "unsafe":
         let ru: TS = ts
         ru.ctx = ctx_with_unsafe(ru.ctx, ru.ctx.unsafe_depth + 1)
         ru = check_body_stmts(ru, body_lp)
         ru.ctx = ctx_with_unsafe(ru.ctx, ru.ctx.unsafe_depth - 1)
         return ru
-      return check_body_stmts(ts, body_lp)
+      if mode_name == "gpu" or mode_name == "parallel":
+        return check_body_stmts(ts, body_lp)
+      return check_body_stmts(ts_add_diag(ts, ts_tok_span(ts, name_tidx), "unknown mode '" + mode_name + "'"), body_lp)
     Node::YieldS(yield_tidx, val_node):
       // `yield` is legal only in a generator function (declared
-      // `Generator<T>`), never inside a `resource memory` block, and its
-      // value must be `T` (CONTRACT_SYNTAX_SURFACE.md, generator rules;
-      // host check_yield).  The value is checked first and with no
-      // expected type, so a literal keeps its default type, as the host's.
+      // `Generator<T>`), never inside a `resource memory` block
+      // (CONTRACT_EXECUTION_CONTEXTS.md, Resources law 8), and its value
+      // must match `T` (CONTRACT_SYNTAX_SURFACE.md, Generator Functions).
+      // The value is checked with no expected type: contextual literal
+      // typing is confined to the contexts that explicitly implement it
+      // (CONTRACT_TYPECHECKING_BASELINE.md §3), and `yield` is none of
+      // them, so a literal keeps its default type.
       let sp_y: Span = ts_node_span(ts, node_idx)
       let ry: TS = ts
       if val_node >= 0:
@@ -3312,8 +3320,12 @@ fn tc_check_expr_fn_body(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, 
 // body is the function's return, so a literal adopts the return type as
 // a `return` value does (check_return_stmt).
 fn tc_check_expr_body_value(ts: TS, body_expr: i64): TS
-  // Checked against the return type whatever it is, a generator's too:
-  // host check_function holds an expression body only to assignability.
+  if ts.ctx.in_generator > 0:
+    // The body is the function's value, a `return value`, which is
+    // invalid in a generator function (CONTRACT_SYNTAX_SURFACE.md,
+    // Generator Functions): a generator produces values only by `yield`.
+    let rg: TS = check_expr(ts, body_expr)
+    return ts_add_diag(rg, ts_node_span(rg, body_expr), "'return value' is invalid in a generator function; use yield to produce values")
   let r: TS = check_expr(ts, body_expr)
   if r.ctx.return_type >= 0:
     r = fit_literal(r, body_expr, r.ctx.return_type)

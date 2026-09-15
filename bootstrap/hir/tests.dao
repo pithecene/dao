@@ -737,7 +737,7 @@ fn main(): i32
 
   // Test 34: a generator function's HIR return type is its generator
   // type, never void.
-  let src34g: string = "fn g(): Generator<i64>\n  yield 1\n  return\n"
+  let src34g: string = "fn g(): Generator<i32>\n  yield 1\n  return\n"
   let r34g: HirResult = lower_to_hir(src34g)
   let gen_ret34: string = ""
   let i34g: i64 = 0
@@ -747,15 +747,15 @@ fn main(): i32
         if rt >= 0 and rt < r34g.types.length():
           gen_ret34 = r34g.types.get(rt).name
     i34g = i34g + 1
-  if gen_ret34 == "Generator<i64>":
+  if gen_ret34 == "Generator<i32>" and hir_count_diags(r34g) == 0:
     print("PASS generator_return_type_in_hir")
     pass_count = pass_count + 1
   else:
-    print("FAIL generator_return_type_in_hir: expected return type Generator<i64>, got '" + gen_ret34 + "'")
+    print("FAIL generator_return_type_in_hir: expected return type Generator<i32> and no diagnostics, got '" + gen_ret34 + "' and " + i64_to_string(hir_count_diags(r34g)) + " diagnostics")
 
   // Test 35: `mode` and `yield` are preserved in HIR: the mode's name,
   // its body, and the yielded operand.
-  let src35: string = "fn g(): Generator<i64>\n  mode unsafe =>\n    yield 7\n  return\n"
+  let src35: string = "fn g(): Generator<i32>\n  mode unsafe =>\n    yield 7\n  return\n"
   let r35: HirResult = lower_to_hir(src35)
   let mode_name35: string = ""
   let yields_in_mode35: i64 = 0
@@ -774,7 +774,7 @@ fn main(): i32
                 yields_in_mode35 = yields_in_mode35 + 1
           b35 = b35 + 1
     i35 = i35 + 1
-  if mode_name35 == "unsafe" and yields_in_mode35 == 1:
+  if mode_name35 == "unsafe" and yields_in_mode35 == 1 and hir_count_diags(r35) == 0:
     print("PASS mode_and_yield_preserved_in_hir")
     pass_count = pass_count + 1
   else:

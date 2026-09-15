@@ -1632,12 +1632,13 @@ fn main(): i32
   if tc_expect_program_errors("derived_conformance_survives_local_extend", Vector<SourceInput>::new().push(SourceInput("lib.dao", dc_both, false)), dc_wrap, "main.dao", 0):
     pass_count = pass_count + 1
   // `mode` and `yield` carry their contract meaning: a dereference needs
-  // an enclosing `mode unsafe =>`; any mode name checks its body; `yield`
+  // an enclosing `mode unsafe =>`; a mode the contract does not define is
+  // rejected, its body still checked; `yield`
   // is legal only in a `Generator<T>` function, yields `T`, and never
   // sits in a `resource memory` block; a generator returns bare.
   if tc_expect_diags("deref_requires_unsafe_mode", "fn test(): i32\n  let x: i32 = 1\n  let p: *i32 = &x\n  let y: i32 = *p\n  return 0\n", 1):
     pass_count = pass_count + 1
-  if tc_expect_diags("other_mode_body_checked", "fn f(): i64\n  mode warp =>\n    let s: string = true\n  return 0\n", 1):
+  if tc_expect_diags("unknown_mode_rejected_body_checked", "fn f(): i64\n  mode warp =>\n    let s: string = true\n  return 0\n", 2):
     pass_count = pass_count + 1
   if tc_expect_clean("gpu_mode_body_checked", "fn f(): i64\n  mode gpu =>\n    return 1\n  return 0\n"):
     pass_count = pass_count + 1
@@ -1726,12 +1727,11 @@ fn main(): i32
     pass_count = pass_count + 1
   if tc_expect_diag_containing("generator_applied_self_wrong_args_rejected", "concept C<T>:\n  fn take(self, g: Generator<C<bool>>): bool\n", "applies only its own type parameters"):
     pass_count = pass_count + 1
-  // An expression body is held to its return type by type alone, a
-  // generator's too (host check_function): a generator of the element
-  // type is accepted, one of another element is not.
-  if tc_expect_clean("generator_expression_body_accepted", "fn forward(g: Generator<i64>): Generator<i64> -> g\n"):
+  // An expression body is a return value, which a generator function
+  // never has (CONTRACT_SYNTAX_SURFACE.md, Generator Functions).
+  if tc_expect_diag_containing("generator_expression_body_rejected", "fn forward(g: Generator<i64>): Generator<i64> -> g\n", "invalid in a generator function"):
     pass_count = pass_count + 1
-  if tc_expect_diag_containing("generator_expression_method_body_mismatch", "class P:\n  x: i32\n  fn forward(self, g: Generator<i32>): Generator<i64> -> g\n", "expression body type mismatch"):
+  if tc_expect_diag_containing("generator_expression_method_body_rejected", "class P:\n  x: i32\n  fn forward(self, g: Generator<i64>): Generator<i64> -> g\n", "invalid in a generator function"):
     pass_count = pass_count + 1
   if tc_expect_diag_containing("generator_alias_cycle_rejected", "type G = Generator<G>\n", "no resolvable target"):
     pass_count = pass_count + 1
@@ -1761,7 +1761,7 @@ fn main(): i32
   //   - Try operator (requires generic Option/Result)
   //   - Addr-of unary operator semantics
   //   - Index expressions
-  //   - Checking rules of modes other than `unsafe`; resource-block
+  //   - Checking rules of `mode gpu` / `mode parallel`; resource-block
   //     domain semantics beyond `yield` legality (bodies are checked)
   //   - C ABI type validation
   //   - Structural function type comparison
