@@ -24,6 +24,11 @@ Laws:
 1. `mode` blocks are unary.
 2. `mode` blocks do not bind user-defined names.
 3. `mode` blocks alter execution semantics, not ordinary control flow.
+4. `mode unsafe` gates raw memory access through a pointer: the
+   operations `Ptr.get`, `Ptr.set`, and `Ptr.offset` require an
+   enclosing `mode unsafe =>`.  `Ptr<T>::new`, `Ptr.is_null`, and
+   `Ptr.cast` operate on the pointer value itself and need no unsafe
+   context (`ADR_RAW_POINTER_SURFACE.md`).
 
 ## Resources
 

@@ -114,7 +114,6 @@ Operators without a dedicated initial category:
 - `operator.logical` — `!`, `and`, `or`
 - `operator.member` — `.`
 - `operator.range` — `..`
-- `operator.address` — `&` (address-of), unary `*` (dereference), and the `*` of a pointer type; the binary `*` is `operator.arithmetic`
 - `operator.try` — `?`
 
 Literals and uses:
