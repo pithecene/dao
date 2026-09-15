@@ -83,15 +83,45 @@ Dao distinguishes:
 
 `string` is not a builtin scalar.
 
+### Compiler-standard types
+- `Generator<T>`
+- `Ptr<T>`
+
+Their meaning is fixed by the compiler, and no module may declare
+either name.
+
 ### Compiler-supported special/internal types
 - `void`, if currently retained by implementation and examples
 
 ## 8. Pointer baseline
 
-Pointer creation and dereference are part of the baseline type model.
+Pointers are the compiler-standard `Ptr<T>` (`ADR_RAW_POINTER_SURFACE.md`).
 
-Unsafe restrictions may be enforced through mode-aware semantic
-checking.
+### Type formation
+`Ptr<T>` requires exactly one type argument.
+
+### Operations
+
+| Operation | Type | Requires `mode unsafe =>` |
+|---|---|---|
+| `Ptr<T>::new()` | `Ptr<T>`, the null pointer | no |
+| `p.get()` | `T` | yes |
+| `p.set(value: T)` | `void` | yes |
+| `p.offset(elements: i64)` | `Ptr<T>` | yes |
+| `p.cast<U>()` | `Ptr<U>` | no |
+| `p.is_null()` | `bool` | no |
+
+`get`, `set`, and `offset` are errors on `Ptr<void>`, which has no
+readable or writable value and no element size.  `offset` counts
+elements of `T`.
+
+### Assignability
+Pointer types are invariant under §4: `Ptr<A>` is assignable to
+`Ptr<B>` only when `A` and `B` are the same semantic type.  There is
+no implicit conversion between `Ptr<T>` and `Ptr<void>` and no
+covariance through a pointer or generic argument
+(`Generator<Ptr<i32>>` is unassignable to `Generator<Ptr<void>>`).
+`cast<U>()` is the only pointee conversion.
 
 ## 9. Pipe baseline
 

@@ -16,7 +16,7 @@ Defines the currently frozen syntax surface for Dao's early design phase.
 ### Block-bodied form
 
 ```dao
-fn read(ptr: *i32): i32
+fn read(ptr: Ptr<i32>): i32
     let value: i32
     return value
 ```
@@ -233,7 +233,7 @@ Rules:
 
 ```dao
 class SecretKey:
-    data: *u8
+    data: Ptr<u8>
     len: i32
 
     deny Printable
@@ -263,7 +263,7 @@ Rules:
 
 ```dao
 class List<T>:
-    data: *T
+    data: Ptr<T>
     len: i32
     cap: i32
 ```
@@ -362,11 +362,39 @@ This contract does not yet freeze:
 - `Iterable<T>` as a stdlib concept (API convention, not
   compiler-blessed)
 
+## Pointers
+
+```dao
+let p: Ptr<i32> = Ptr<i32>::new()
+
+if p.is_null() == false:
+    mode unsafe =>
+        let x: i32 = p.get()
+        p.set(x + 1)
+        let next: Ptr<i32> = p.offset(1)
+
+let opaque: Ptr<void> = p.cast<void>()
+```
+
+Rules:
+- `Ptr<T>` is the one pointer type spelling: an ordinary generic type
+  application of the compiler-standard `Ptr`, with exactly one type
+  argument
+- pointer operations are ordinary calls: `Ptr<T>::new()` (the null
+  pointer), `get()`, `set(value)`, `offset(elements)`, `cast<U>()`,
+  `is_null()`
+- there is no pointer punctuation: `*T` as a type, unary `*` as a
+  dereference or an assignment target, and unary `&` as address-of are
+  rejected
+- there are no pointer properties with compiler-special meaning
+- obtaining a pointer to an existing place is an open decision
+- see `ADR_RAW_POINTER_SURFACE.md` for the full design
+
 ## Modes and Resources
 
 ```dao
 mode unsafe =>
-    value = *ptr
+    value = ptr.get()
 
 resource memory Search =>
     let open = PriorityQueue[NodeId]()

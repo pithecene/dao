@@ -92,16 +92,16 @@ Examples:
 | `__dao_conv_f32_to_string`| `(x: f32): string`                   |
 | `__dao_conv_f64_to_string`| `(x: f64): string`                   |
 | `__dao_conv_bool_to_string`| `(x: bool): string`                 |
-| `__dao_gen_alloc`         | `(size: i64, align: i64): *void`     |
-| `__dao_gen_free`          | `(ptr: *void): void`                 |
-| `__dao_mem_resource_enter`| `(): *void`                           |
-| `__dao_mem_resource_exit` | `(domain: *void): void`              |
-| `__dao_mem_alloc`         | `(size: i64, align: i64): *void`     |
-| `__dao_mem_realloc`       | `(ptr: *void, old_size: i64, new_size: i64, align: i64): *void` |
-| `__dao_mem_free`          | `(ptr: *void): void`                 |
-| `__dao_mem_alloc_outer`   | `(size: i64, align: i64): *void`     |
-| `__dao_mem_alloc_owner`   | `(owner: *void, size: i64, align: i64): *void` |
-| `__dao_str_from_bytes`    | `(bytes: *u8, len: i64): string`     |
+| `__dao_gen_alloc`         | `(size: i64, align: i64): Ptr<void>`     |
+| `__dao_gen_free`          | `(ptr: Ptr<void>): void`                 |
+| `__dao_mem_resource_enter`| `(): Ptr<void>`                           |
+| `__dao_mem_resource_exit` | `(domain: Ptr<void>): void`              |
+| `__dao_mem_alloc`         | `(size: i64, align: i64): Ptr<void>`     |
+| `__dao_mem_realloc`       | `(ptr: Ptr<void>, old_size: i64, new_size: i64, align: i64): Ptr<void>` |
+| `__dao_mem_free`          | `(ptr: Ptr<void>): void`                 |
+| `__dao_mem_alloc_outer`   | `(size: i64, align: i64): Ptr<void>`     |
+| `__dao_mem_alloc_owner`   | `(owner: Ptr<void>, size: i64, align: i64): Ptr<void>` |
+| `__dao_str_from_bytes`    | `(bytes: Ptr<u8>, len: i64): string`     |
 | `__dao_str_copy_outer`    | `(s: string): string`                |
 | `__dao_conv_i32_to_f64`  | `(x: i32): f64`                       |
 | `__dao_conv_i32_to_i64`  | `(x: i32): i64`                       |
