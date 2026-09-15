@@ -807,8 +807,9 @@ enum class Node:
   // `mode <name> =>` block (host ModeBlock).  Parsed, preserved, and
   // carried into HIR fail-closed; lowering waits for a later task.
   ModeS(name: i64, body_lp: i64)
-  // `yield <expr>` (host YieldStatement).  Same fail-closed posture.
-  YieldS(value: i64)
+  // `yield <expr>` (host YieldStatement): its keyword token locates it.
+  // Same fail-closed posture.
+  YieldS(tok: i64, value: i64)
   ForS(var_tok: i64, iter: i64, body_lp: i64)
   ReturnS(value: i64)
   BreakS(tok: i64)
@@ -1799,7 +1800,7 @@ fn parse_yield_stmt(pc: PC, ps: PS): PR
     let psr: PS = sync_to_stmt(pc, val.ps)
     return ps_add_node(psr, Node::ErrorS(tok = ps.pos))
   let ps3: PS = match_tok(pc, val.ps, TK::Newline)
-  return ps_add_node(ps3, Node::YieldS(value = val.node))
+  return ps_add_node(ps3, Node::YieldS(tok = ps.pos, value = val.node))
 
 fn parse_for_stmt(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
@@ -2630,7 +2631,7 @@ fn node_kind_name(n: Node): string
       return "ResourceS"
     Node::ModeS(a, b):
       return "ModeS"
-    Node::YieldS(a):
+    Node::YieldS(a, b):
       return "YieldS"
     Node::ForS(a, b, c):
       return "ForS"
@@ -2775,16 +2776,17 @@ enum TypeKind:
   TEnum
   TGenericParam
   TConcept
+  TGenerator      // `Generator<T>`, the compiler-provided coroutine type; `pointee` is T
 
 class DaoType:
   kind: TypeKind
-  builtin_id: i64
+  builtin_id: i64   // a builtin's id; a struct's, enum's, or concept's declaring module; a function type's 1 when its first parameter is `self`
   name: string
   decl_node: i64
   info_lp: i64
   info_count: i64
   ret_type: i64
-  pointee: i64
+  pointee: i64      // a pointer type's pointee, a generator's element type; else -1
 
 // --- Task 27: Program-level pass payloads ---
 //
@@ -2792,12 +2794,47 @@ class DaoType:
 // `bootstrap/resolver/impl.dao`) can reference it.  `HirData` is
 // still a stub; D7 fills it with real fields.
 
+// What the resolved program fixes before any type is registered,
+// indexed once by the type checker (registry_new) for constant-time
+// reads in every later pass: the symbol each declaration introduces,
+// keyed by the declaring module and the file-local declaration index
+// (a declaration index alone is ambiguous across modules).
+class ProgramIndex:
+  type_syms: HashMap<i64>       // decl_key(module, decl) → the "Type" symbol declared there
+  callables: HashMap<i64>       // decl_key(module, decl) → the callable symbol declared there
+  members: HashMap<i64>         // member_key(module, decl, kind, name) → a Param / Field symbol; kind "Local" keyed without a name
+  prelude_modules: HashMap<i64> // module id (as text) → 1 for a prelude module
+
+fn program_index_empty(): ProgramIndex
+  return ProgramIndex(HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new())
+
+// A declaration's identity across the program: its index is file-local,
+// so the owning module is half the key.
+fn decl_key(module_id: i64, decl_idx: i64): string
+  return i64_to_string(module_id) + ":" + i64_to_string(decl_idx)
+
+// A member of a declaration: a parameter or field by kind and name, a
+// local by kind alone.
+fn member_key(module_id: i64, decl_idx: i64, kind: string, name: string): string
+  return decl_key(module_id, decl_idx) + ":" + kind + ":" + name
+
+// What a program's type check publishes for the later passes beyond
+// the type tables: every expression's type, method dispatch, and the
+// declaration indexes.
+class ProgramLookup:
+  expr_types: HashMap<i64>       // key: expr_type_key(module_id, node_idx)
+  methods: HashMap<i64>          // method dispatch by owner type and name (typecheck dispatch_key_*)
+  index: ProgramIndex            // the resolved program's declaration indexes
+
+fn program_lookup_empty(): ProgramLookup
+  return ProgramLookup(HashMap<i64>::new(), HashMap<i64>::new(), program_index_empty())
+
 class TypeCheckData:
   initialized: bool
   types: Vector<DaoType>
   type_info: Vector<i64>
   sym_types: Vector<i64>
-  expr_types: HashMap<i64>       // key: expr_type_key(module_id, node_idx)
+  lookup: ProgramLookup
 
 class HirData:
   initialized: bool
@@ -2826,11 +2863,11 @@ fn wrap_test_module(src: string): string
     return src
   return "module test\n" + src
 
-// Read helpers for TypeCheckData.expr_types.
+// Read helpers for the published expression types.
 
 fn tc_get_expr_type(td: TypeCheckData, module_id: i64, node_idx: i64): i64
   let key: string = expr_id_key(module_id, node_idx)
-  let found: Option<i64> = td.expr_types.get(key)
+  let found: Option<i64> = td.lookup.expr_types.get(key)
   match found:
     Option::Some(ty):
       return ty
@@ -2839,7 +2876,7 @@ fn tc_get_expr_type(td: TypeCheckData, module_id: i64, node_idx: i64): i64
 
 fn tc_set_expr_type(td: TypeCheckData, module_id: i64, node_idx: i64, ty: i64): TypeCheckData
   let key: string = expr_id_key(module_id, node_idx)
-  td.expr_types = td.expr_types.set(key, ty)
+  td.lookup = ProgramLookup(td.lookup.expr_types.set(key, ty), td.lookup.methods, td.lookup.index)
   return td
 
 // --- Graph construction ---
@@ -2896,8 +2933,19 @@ fn topo_sort(modules: Vector<ModuleEntry>, edges: Vector<i64>, edge_count: i64):
   return result
 
 // Build a module graph from source inputs.
+// Whether input `a` is ordered before `b`: the prelude's files first,
+// as the host orders them, so every prelude module precedes every other
+// module in the dependency order without an import edge (its
+// declarations, extends, and conformances are in every module's
+// environment, CONTRACT_MODULE_SYSTEM.md §7.2); then by path, for
+// deterministic file ids.
+fn input_before(a: SourceInput, b: SourceInput): bool
+  if a.is_prelude != b.is_prelude:
+    return a.is_prelude
+  return str_compare(a.path, b.path) < 0
+
 fn build_program(inputs: Vector<SourceInput>): ProgramGraph
-  // Sort inputs by path for deterministic file_id assignment.
+  // Order the inputs (input_before) for deterministic file_id assignment.
   // (Simple insertion sort — input counts are small for bootstrap.)
   let sorted: Vector<SourceInput> = Vector<SourceInput>::new()
   let si: i64 = 0
@@ -2907,7 +2955,7 @@ fn build_program(inputs: Vector<SourceInput>): ProgramGraph
     let j: i64 = 0
     while j < sorted.length():
       let existing: SourceInput = sorted.get(j)
-      if str_compare(inp.path, existing.path) < 0:
+      if input_before(inp, existing):
         insert_at = j
         j = sorted.length()
       j = j + 1

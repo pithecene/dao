@@ -89,7 +89,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 61
+  let total: i32 = 62
 
   // -----------------------------------------------------------------
   // Test 1: forward_ref — fn calls fn defined later in file; no diagnostic
@@ -800,6 +800,16 @@ fn main(): i32
   else:
     print("FAIL builtin_protection: " + i64_to_string(program_error_count(bp_r)) + " errors")
 
+  // `Generator` is predeclared, as in the host: no module declares it.
+  let gp_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  gp_inputs = gp_inputs.push(SourceInput("main.dao", "module app::main\ntype Generator = i64\n", false))
+  let gp_r: ProgramResolveResult = resolve_inputs(gp_inputs)
+  if program_error_count(gp_r) == 1 and program_has_message(gp_r, "duplicate top-level declaration 'Generator'"):
+    print("PASS generator_name_predeclared")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL generator_name_predeclared: " + i64_to_string(program_error_count(gp_r)) + " errors")
+
   // Test 39: prelude_identity — `greeting()` and `greet::greeting()`
   // after `import core::greet` resolve to one symbol, owned by the
   // prelude module.
@@ -1167,8 +1177,8 @@ fn main(): i32
   //     scope; conformance enforcement at instantiation is a later slice)
   //   - Concept / extend conformance validation (parsing and symbol
   //     registration is implemented; conformance checking is deferred)
-  //   - Yield-in-generator legality (a `yield` value resolves; whether the
-  //     enclosing function is a generator is a later semantic slice)
+  //   - Yield-in-generator legality (a `yield` value resolves here; whether
+  //     the enclosing function is a generator is the type checker's rule)
   //   - Match arm `..` (rest) and `as` (whole-variant) forms
   //   - Cross-file / module resolution
 

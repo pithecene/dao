@@ -158,7 +158,7 @@ class MirBackendInput:
 //   bool → i1, void → void, string → ptr
 //
 // Everything else (i8, i16, u8..u64, struct, enum, pointer, fn,
-// generic param, concept) is fail-closed: the caller receives
+// generic param, concept, generator) is fail-closed: the caller receives
 // LlUnsupported and must surface a diagnostic.
 
 // Returns the LlType for a MIR type index.  Returns LlUnsupported
@@ -1629,6 +1629,17 @@ fn serialize_module(bs: BS): string
 
 fn lower_mir_to_llvm_text(input: MirBackendInput): LlvmTextResult
   let bs: BS = bs_new(input)
+  // Every diagnostic of the stages before the backend travels with the
+  // result; an error fails it, so a construct the checker, HIR, or MIR
+  // rejected is never emitted as if it were sound.  A warning or note
+  // is carried without failing the result.
+  let ui: i64 = to_i64(0)
+  while ui < input.mir.diags.length():
+    let ud: Diagnostic = input.mir.diags.get(ui)
+    bs.diags = bs.diags.push(ud)
+    if ud.severity == Severity::Error:
+      bs.had_error = to_i64(1)
+    ui = ui + to_i64(1)
   // Each stage in its own domain: its scratch is reclaimed at the exit and the result is copied out.
   resource memory lowering =>
     bs = lower_mir_to_ll_module(bs, input.mir.root)

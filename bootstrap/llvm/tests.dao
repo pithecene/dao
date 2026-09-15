@@ -300,7 +300,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 20
+  let total: i32 = 23
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -428,7 +428,7 @@ fn main(): i32
   // -----------------------------------------------------------------
   // Test 8: if_else_cfg — conditional branch emits cond_br + then/else/merge
   // -----------------------------------------------------------------
-  let src8: string = "fn f(x: i32): i32\n  if x > 0\n    return 1\n  else\n    return 2\n"
+  let src8: string = "fn f(x: i32): i32\n  if x > 0:\n    return 1\n  else:\n    return 2\n"
   let r8: LlvmTextResult = lower_source_to_llvm_text(src8)
   write_failures = write_failures + emit_ir("if_else_cfg", r8, -1)
   if r8.ok:
@@ -448,7 +448,7 @@ fn main(): i32
   // -----------------------------------------------------------------
   // Test 9: while_cfg — while loop emits header/body/exit + back-edge
   // -----------------------------------------------------------------
-  let src9: string = "fn f(n: i32): i32\n  let i: i32 = 0\n  while i < n\n    i = i + 1\n  return i\n"
+  let src9: string = "fn f(n: i32): i32\n  let i: i32 = 0\n  while i < n:\n    i = i + 1\n  return i\n"
   let r9: LlvmTextResult = lower_source_to_llvm_text(src9)
   write_failures = write_failures + emit_ir("while_cfg", r9, -1)
   if r9.ok:
@@ -709,6 +709,45 @@ fn main(): i32
   else:
     print("FAIL nested_total_if: a function whose every arm returns was rejected")
     print(diags_text(nt_r.diags))
+
+  // Test 21: a rejection upstream — a satisfaction mismatch the checker
+  // diagnosed — fails the backend result: no `ok`, the diagnostic
+  // carried, nothing emitted as if it were sound.
+  let src21: string = "derived concept Show:\n  fn f(self): i32\n\nextend i32 as Show:\n  fn f(self): bool -> true\n\nfn main(): i32\n  return 0\n"
+  let r21: LlvmTextResult = lower_source_to_llvm_text(src21)
+  if r21.ok == false and r21.diags.length() >= 1:
+    print("PASS upstream_rejection_fails_backend")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL upstream_rejection_fails_backend: expected ok=false with the checker's diagnostic, got ok=" + bool_to_string(r21.ok) + " and " + i64_to_string(r21.diags.length()) + " diagnostics")
+
+  // Test 22: an upstream warning travels with the backend result but
+  // leaves an otherwise sound module `ok`.
+  let in22: MirBackendInput = lower_to_mir_backend_input("fn main(): i32\n  return 0\n")
+  let mir22: MirResult = in22.mir
+  mir22.diags = mir22.diags.push(make_warning(Span(to_i64(0), to_i64(1)), "upstream warning"))
+  in22.mir = mir22
+  let r22: LlvmTextResult = lower_mir_to_llvm_text(in22)
+  if r22.ok and r22.diags.length() == to_i64(1):
+    print("PASS upstream_warning_keeps_backend_ok")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL upstream_warning_keeps_backend_ok: expected ok=true with the warning carried, got ok=" + bool_to_string(r22.ok) + " and " + i64_to_string(r22.diags.length()) + " diagnostics")
+
+  // Test 23: a generator signature has no Tier A lowering: a generator
+  // function with no `yield` still fails the backend on its return type.
+  let r23: LlvmTextResult = lower_source_to_llvm_text("fn g(): Generator<i64>\n  return\n\nfn main(): i32\n  return 0\n")
+  let saw23: bool = false
+  let d23: i64 = 0
+  while d23 < r23.diags.length():
+    if index_of(r23.diags.get(d23).message, "function return type") >= 0:
+      saw23 = true
+    d23 = d23 + 1
+  if r23.ok == false and saw23:
+    print("PASS generator_signature_rejected_by_backend")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL generator_signature_rejected_by_backend: expected ok=false with an unsupported return type diagnostic, got ok=" + bool_to_string(r23.ok) + " and " + i64_to_string(r23.diags.length()) + " diagnostics")
 
   // -----------------------------------------------------------------
   // Summary

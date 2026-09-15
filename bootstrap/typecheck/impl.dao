@@ -15,23 +15,35 @@ module bootstrap::typecheck
 //       bootstrap/typecheck/impl.dao \
 //       > bootstrap/typecheck/typecheck.gen.dao
 //
+// Covered here: concepts, `extend`, derived conformance with the host's
+// module visibility, method dispatch by the receiver's type (a class's
+// own methods and extends, over a program-wide index), generic
+// parameter bounds and member access through them, contextual literal
+// typing, static factory calls, `mode unsafe =>` as the context a
+// dereference requires, and generators (`Generator<T>` as a type of its
+// own kind, `yield` checked against it).  A member a concept provides through a
+// derived conformance or a bound is typed here and rejected by HIR
+// until its implementation is synthesized or instantiated.
+//
 // Tier B deferrals:
 //   - Generic type inference, substitution, instantiation (TGenericParam
-//     types are registered in Tier A; full monomorphization is deferred)
-//   - Concept / extend / derived conformance
-//   - Method tables and method dispatch
+//     types are registered; a generic annotation other than a concept's
+//     self form and `Generator<T>` reads as unresolved; full
+//     monomorphization is deferred)
+//   - Concept default method bodies (unchecked, as in the host)
 //   - Lambda contextual typing
 //   - List literal type inference
 //   - Try operator (requires generic Option/Result)
-//   - Deref / addr-of unary operators
+//   - Addr-of unary operator semantics
 //   - Index expressions
-//   - Mode blocks; resource-block domain semantics (bodies are checked)
-//   - Yield / Generator checking
+//   - Checking rules inside `mode gpu` / `mode parallel` (their bodies
+//     are checked as blocks); resource-block domain semantics beyond
+//     `yield` legality (bodies are checked)
 //   - C ABI type validation
 //
-// NOTE: The TS class is split into TC (immutable parse context, 7 fields)
-// and TS (mutable type checker state, 8 fields) to stay under the Dao
-// compiler's limit for reliable class field access in function arguments.
+// The checker state is `TC` (the module's parse context) and `TS` (the
+// mutable state: type tables, diagnostics, the body context `CheckCtx`,
+// and the program-wide `Registry`).
 
 // TypeKind and DaoType promoted to shared/base.dao in D1a so that
 // TypeCheckData can carry `types: Vector<DaoType>` and every pass
@@ -62,8 +74,8 @@ class TC:
 class CheckCtx:
   return_type: i64      // the function's return type, -1 when unresolved
   loop_depth: i64       // enclosing loops — `break` legality
-  in_generator: i64     // 1 inside a function declared `Generator<T>`
-  gen_elem: i64         // that T's type index, -1 when unresolved
+  in_generator: i64     // 1 when the return type is a TGenerator
+  gen_elem: i64         // that generator's element type, -1 when unresolved
   unsafe_depth: i64     // enclosing `mode unsafe =>` blocks — dereference legality
   resource_depth: i64   // enclosing `resource memory` blocks — `yield` legality
 
@@ -74,17 +86,109 @@ class TS:
   sym_types: Vector<i64>
   diags: Vector<Diagnostic>
   ctx: CheckCtx              // the body being checked (see CheckCtx)
-  expr_types: HashMap<i64>   // keyed by expr_id_key(module_id, node_idx)
-  variant_set: HashMap<i64>  // program-wide variant registry, keyed by name (see tc_pass1)
-  conform: Conformance       // pass-2 conformance state (explicit extends, derived concepts)
+  reg: Registry              // program-wide registries threaded across modules (see Registry)
 
-// Pass-2 conformance state: the conformances known in the module being
-// checked — explicit `extend`s and derived ones — keyed
-// conform_key(type_ti, concept_ti), and the module's `derived concept`
-// types.  Grouped so the checker state carries one field for it.
+// The registries a program's type check threads across its modules in
+// topo order — expression types, the variant registry, conformances —
+// and two program facts indexed once from the resolved program: the
+// type-declaring symbol of every declaration, and the prelude modules.
+class Registry:
+  expr_types: HashMap<i64>      // keyed by expr_id_key(module_id, node_idx)
+  variant_set: HashMap<i64>     // program-wide variant registry, keyed by name (see tc_pass1)
+  conform: Conformance          // conformance state (explicit extends, derived concepts)
+  methods: HashMap<i64>         // method dispatch by owner type and name (dispatch_key_*), filled by tc_bind_self
+  index: ProgramIndex           // the resolved program's declaration indexes
+  generators: HashMap<i64>      // the generator type per element type index (find_or_add_generator_type)
+
+
+// The registries for a resolved program: the declaration indexes
+// (ProgramIndex) built in one scan of the symbols, every accumulating
+// registry empty.
+fn registry_new(symbols: Vector<Symbol>, modules: Vector<ModuleEntry>): Registry
+  let type_syms: HashMap<i64> = HashMap<i64>::new()
+  let callables: HashMap<i64> = HashMap<i64>::new()
+  let members: HashMap<i64> = HashMap<i64>::new()
+  let si: i64 = 0
+  while si < symbols.length():
+    let sym: Symbol = symbols.get(si)
+    let kind: string = symbol_kind_name(sym.kind)
+    if kind == "Type":
+      type_syms = type_syms.set(decl_key(sym.owner_module_id, sym.decl_node), si)
+    if is_method_symbol(sym):
+      callables = callables.set(decl_key(sym.owner_module_id, sym.decl_node), si)
+    if kind == "Param" or kind == "Field":
+      members = members.set(member_key(sym.owner_module_id, sym.decl_node, kind, sym.name), si)
+    if kind == "Local":
+      members = members.set(member_key(sym.owner_module_id, sym.decl_node, kind, ""), si)
+    si = si + 1
+  let preludes: HashMap<i64> = HashMap<i64>::new()
+  let mi: i64 = 0
+  while mi < modules.length():
+    let me: ModuleEntry = modules.get(mi)
+    if me.is_prelude:
+      preludes = preludes.set(i64_to_string(me.module_id), to_i64(1))
+    mi = mi + 1
+  return Registry(HashMap<i64>::new(), HashMap<i64>::new(), conformance_empty(), HashMap<i64>::new(), ProgramIndex(type_syms, callables, members, preludes), HashMap<i64>::new())
+
+fn conformance_empty(): Conformance
+  return Conformance(HashMap<i64>::new(), Vector<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new())
+
+// The registries with nothing declared: for a state that checks no
+// declarations (builtin seeding).
+fn registry_empty(): Registry
+  return registry_new(Vector<Symbol>::new(), Vector<ModuleEntry>::new())
+
+fn reg_with_expr_types(rg: Registry, m: HashMap<i64>): Registry
+  return Registry(m, rg.variant_set, rg.conform, rg.methods, rg.index, rg.generators)
+
+fn reg_with_variant_set(rg: Registry, m: HashMap<i64>): Registry
+  return Registry(rg.expr_types, m, rg.conform, rg.methods, rg.index, rg.generators)
+
+fn reg_with_conform(rg: Registry, c: Conformance): Registry
+  return Registry(rg.expr_types, rg.variant_set, c, rg.methods, rg.index, rg.generators)
+
+fn reg_with_methods(rg: Registry, m: HashMap<i64>): Registry
+  return Registry(rg.expr_types, rg.variant_set, rg.conform, m, rg.index, rg.generators)
+
+fn reg_with_generators(rg: Registry, m: HashMap<i64>): Registry
+  return Registry(rg.expr_types, rg.variant_set, rg.conform, rg.methods, rg.index, m)
+
+// The "Type" symbol the declaration at `decl_idx` of the module being
+// checked introduces (a class, enum, alias, or concept), or -1 — a
+// constant-time read of the program's index.
+fn type_sym_of_decl(ts: TS, decl_idx: i64): i64
+  return hm_get_or(ts.reg.index.type_syms, decl_key(ts.tc.module_id, decl_idx), to_i64(-1))
+
+// The callable symbol the declaration at `decl_idx` of the module being
+// checked introduces (a free function, a class's method, an extend's
+// method), or -1 — a constant-time read of the program's index.
+fn callable_sym_of_decl(ts: TS, decl_idx: i64): i64
+  return hm_get_or(ts.reg.index.callables, decl_key(ts.tc.module_id, decl_idx), to_i64(-1))
+
+// A member symbol of the declaration at `decl_idx` of module `module_id`
+// — a "Param" or "Field" by name, a "Local" by kind — or -1: a
+// constant-time read of the program's index, shared with HIR.
+fn member_sym_of(index: ProgramIndex, module_id: i64, decl_idx: i64, kind: string, name: string): i64
+  return hm_get_or(index.members, member_key(module_id, decl_idx, kind, name), to_i64(-1))
+
+// A fresh checker state over a module (`tc`) and the accumulated type
+// tables, with no diagnostics and no body context yet.  The one place a
+// TS is built field by field; every other site goes through here.
+fn ts_new(tc: TC, types: Vector<DaoType>, type_info: Vector<i64>, sym_types: Vector<i64>, reg: Registry): TS
+  return TS(tc, types, type_info, sym_types, Vector<Diagnostic>::new(), ctx_outside_fn(), reg)
+
+// The program's conformance state, accumulated across every module
+// before any body is checked: the conformances known — explicit
+// `extend`s and derived ones — keyed conform_key(type, concept,
+// visible-from), where the third component is the module an extend is
+// visible from or conform_everywhere(); the program's `derived
+// concept` types; and the concept method signatures substituted per
+// receiver.  Grouped so the registry carries one field for it.
 class Conformance:
   known: HashMap<i64>
   derived_concepts: Vector<i64>
+  subst_cache: HashMap<i64>  // concept method signatures per receiver, keyed "fn_ti:concept_ti:self_ti"
+  providers: HashMap<i64>    // derived concepts by member name: "<name>" → how many, "<name>:<j>" → the j-th concept (provider_key), "<name>:<j>:fn" → its member signature (provider_fn_key)
 
 class TypeR:
   ts: TS
@@ -115,7 +219,7 @@ fn ts_set_expr_type(ts: TS, node_idx: i64, type_idx: i64): TS
   // Key by (module_id, node_idx) so the per-program expr_types
   // HashMap disambiguates nodes across modules.
   let key: string = expr_id_key(ts.tc.module_id, node_idx)
-  ts.expr_types = ts.expr_types.set(key, type_idx)
+  ts.reg = reg_with_expr_types(ts.reg, ts.reg.expr_types.set(key, type_idx))
   return ts
 
 fn vec_i64_set(v: Vector<i64>, idx: i64, val: i64): Vector<i64>
@@ -159,6 +263,10 @@ fn ctx_with_unsafe(c: CheckCtx, v: i64): CheckCtx
 fn ctx_with_resource(c: CheckCtx, v: i64): CheckCtx
   return CheckCtx(c.return_type, c.loop_depth, c.in_generator, c.gen_elem, c.unsafe_depth, v)
 
+// The context outside any function body: no return type, no nesting.
+fn ctx_outside_fn(): CheckCtx
+  return CheckCtx(to_i64(-1), to_i64(0), to_i64(0), to_i64(-1), to_i64(0), to_i64(0))
+
 fn ts_inc_loop_depth(ts: TS): TS
   ts.ctx = ctx_with_loop(ts.ctx, ts.ctx.loop_depth + 1)
   return ts
@@ -167,52 +275,28 @@ fn ts_dec_loop_depth(ts: TS): TS
   ts.ctx = ctx_with_loop(ts.ctx, ts.ctx.loop_depth - 1)
   return ts
 
-// The return-type annotation node of a function-like declaration, or -1.
-fn fn_ret_type_node(ts: TS, decl_idx: i64): i64
-  let node: Node = ts.tc.nodes.get(decl_idx)
-  match node:
-    Node::FnDeclD(f_name, f_tparams, f_params, f_ret, f_body):
-      return f_ret
-    Node::ExprFnD(e_name, e_tparams, e_params, e_ret, e_body):
-      return e_ret
-    Node::ExternFnD(x_name, x_tparams, x_params, x_ret):
-      return x_ret
-  return to_i64(-1)
-
-// Enter a function body: its return type from the function's type, and
-// whether the declared return annotation names `Generator<T>` — the
-// compiler-provided coroutine type (CONTRACT_SYNTAX_SURFACE.md,
-// "Generator<T> type") — in which case `yield` is legal, `T` is the
-// element type a yielded value must have, and a valued `return` is
-// not.  The annotation is read off the declaration because the
-// bootstrap has no generator type kind yet; `T` resolves as a type.
-// Loop, mode, and resource nesting start at zero for the body.
+// Enter a function body: its return type from the function's type.  A
+// function whose return type is a generator (`Generator<T>`, the
+// compiler-provided coroutine type, CONTRACT_SYNTAX_SURFACE.md) is a
+// generator body: `yield` is legal, the generator's element type is what
+// a yielded value must have, and a valued `return` is invalid.  Loop,
+// mode, and resource nesting start at zero for the body.
 fn tc_enter_fn_ctx(ts: TS, fn_ti: i64): TS
   let r: TS = ts
   let ret_ti: i64 = to_i64(-1)
-  let decl_idx: i64 = to_i64(-1)
   if fn_ti >= 0:
-    let fn_type: DaoType = r.types.get(fn_ti)
-    ret_ti = fn_type.ret_type
-    decl_idx = fn_type.decl_node
+    if fn_ti < r.types.length():
+      let fn_type: DaoType = r.types.get(fn_ti)
+      ret_ti = fn_type.ret_type
   let in_gen: i64 = 0
   let gen_elem: i64 = to_i64(-1)
-  if decl_idx >= 0:
-    if decl_idx < r.tc.nodes.length():
-      let ret_node: i64 = fn_ret_type_node(r, decl_idx)
-      if ret_node >= 0:
-        let rn: Node = r.tc.nodes.get(ret_node)
-        match rn:
-          Node::GenericT(g_name_tidx, g_args_lp, g_arg_count):
-            if ts_tok_name(r, g_name_tidx) == "Generator":
-              in_gen = 1
-              if g_arg_count == 1:
-                let gargs: Vector<i64> = read_list(r.tc.idx_data, g_args_lp)
-                let er: TypeR = resolve_ast_type(r, gargs.get(0))
-                r = er.ts
-                gen_elem = er.type_idx
-              else:
-                r = ts_add_diag(r, ts_node_span(r, ret_node), "Generator requires exactly one type argument")
+  if ret_ti >= 0:
+    if ret_ti < r.types.length():
+      let rt: DaoType = r.types.get(ret_ti)
+      match rt.kind:
+        TypeKind::TGenerator:
+          in_gen = 1
+          gen_elem = rt.pointee
   r.ctx = CheckCtx(ret_ti, to_i64(0), in_gen, gen_elem, to_i64(0), to_i64(0))
   return r
 
@@ -261,6 +345,8 @@ fn ts_node_span(ts: TS, node_idx: i64): Span
       return Span(to_i64(0), to_i64(1))
     Node::BreakS(tidx):
       return ts_tok_span(ts, tidx)
+    Node::YieldS(yield_tidx, val_node):
+      return ts_tok_span(ts, yield_tidx)
     Node::NamedT(tidx):
       return ts_tok_span(ts, tidx)
     Node::QualNameE(seg_lp, seg_count):
@@ -336,23 +422,14 @@ fn program_init_typecheck(p: Program): Program
     HashMap<i64>::new(),  // concept_bindings
     to_i64(-1),
     ExportTables(Vector<ExportTable>::new()))
-  let dummy_ts: TS = TS(
-    dummy_tc,
-    Vector<DaoType>::new(),
-    Vector<i64>::new(),
-    Vector<i64>::new(),
-    Vector<Diagnostic>::new(),
-    CheckCtx(to_i64(-1), to_i64(0), to_i64(0), to_i64(-1), to_i64(0), to_i64(0)),
-    HashMap<i64>::new(),
-    HashMap<i64>::new(),
-    Conformance(HashMap<i64>::new(), Vector<i64>::new()))
+  let dummy_ts: TS = ts_new(dummy_tc, Vector<DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), registry_empty())
   let seeded: TS = register_builtins(dummy_ts)
   let td: TypeCheckData = TypeCheckData(
     true,
     seeded.types,
     seeded.type_info,
     seeded.sym_types,
-    HashMap<i64>::new())
+    program_lookup_empty())
   return Program(p.graph, p.resolve, td, p.hir, p.diags)
 
 // =========================================================================
@@ -435,6 +512,20 @@ fn is_void_type(ts: TS, type_idx: i64): bool
 fn types_equal(ts: TS, a: i64, b: i64): bool
   if a == b:
     return true
+  // Two generators, one of whose element type is unresolved, compare as
+  // an unresolved type does everywhere else: never a reported mismatch.
+  if a >= 0 and b >= 0 and a < ts.types.length() and b < ts.types.length():
+    let ta: DaoType = ts.types.get(a)
+    let tb: DaoType = ts.types.get(b)
+    if is_generator_kind(ta) and is_generator_kind(tb):
+      if ta.pointee < 0 or tb.pointee < 0:
+        return true
+  return false
+
+fn is_generator_kind(t: DaoType): bool
+  match t.kind:
+    TypeKind::TGenerator:
+      return true
   return false
 
 fn type_name(ts: TS, type_idx: i64): string
@@ -555,13 +646,29 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
         return TypeR(inner_r.ts, to_i64(-1))
       return find_or_add_pointer_type(inner_r.ts, inner_r.type_idx)
     Node::GenericT(name_tidx, args_lp, arg_count):
-      // A generic annotation `G<Args>` stays unresolved for now.  Typing
-      // it to G's head lets a generic value flow into the per-module
-      // `types` / `type_info` / token arrays under a type index a wider
-      // module registered (a prelude `Vector`), overrunning a smaller
-      // program module's arrays across many reads.  Safe cross-module
-      // generic layout is later program-level work; until then a generic
-      // annotation reads as unresolved, as before.
+      // `Generator<T>` is the compiler-provided coroutine type
+      // (CONTRACT_SYNTAX_SURFACE.md), declared by no module: it is a type
+      // of its own kind whose element is T, so a generator function's
+      // signature, its calls, and HIR all carry it.  A malformed spelling
+      // reads as unresolved here and is diagnosed once, where the
+      // annotation is resolved (generator_spelling_diags).
+      if is_generator_head(ts, name_tidx):
+        if arg_count != 1:
+          return TypeR(ts, to_i64(-1))
+        let gargs: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+        let elem_r: TypeR = resolve_ast_type(ts, gargs.get(0))
+        let gen_r: TypeR = find_or_add_generator_type(elem_r.ts, elem_r.type_idx)
+        // Recorded under the annotation node, so HIR reads the generator
+        // type an annotation denotes (enum payloads) instead of
+        // re-resolving the spelling.
+        return TypeR(ts_set_expr_type(gen_r.ts, node_idx, gen_r.type_idx), gen_r.type_idx)
+      // Any other generic annotation `G<Args>` stays unresolved for now.
+      // Typing it to G's head lets a generic value flow into the
+      // per-module `types` / `type_info` / token arrays under a type index
+      // a wider module registered (a prelude `Vector`), overrunning a
+      // smaller program module's arrays across many reads.  Safe
+      // cross-module generic layout is later program-level work; until
+      // then a generic annotation reads as unresolved, as before.
       return TypeR(ts, to_i64(-1))
     Node::QualNameE(seg_lp, seg_count):
       // A qualified type (`core::Printable`): the resolver bound its last
@@ -576,6 +683,330 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
       return TypeR(ts, to_i64(-1))
     Node::ErrorT(t):
       return TypeR(ts, to_i64(-1))
+  return TypeR(ts, to_i64(-1))
+
+// Whether a type head token names the compiler-provided `Generator`:
+// the predeclared builtin symbol (no module may declare the name), or,
+// where no resolution ran, the bare spelling.
+fn is_generator_head(ts: TS, name_tidx: i64): bool
+  if ts_tok_name(ts, name_tidx) != "Generator":
+    return false
+  let sym: i64 = lookup_use(ts, name_tidx)
+  if sym < 0:
+    return true
+  if sym >= ts.tc.symbols.length():
+    return false
+  return symbol_kind_name(ts.tc.symbols.get(sym).kind) == "Builtin"
+
+// Diagnose a malformed `Generator` nested in an ordinary annotation's
+// spelling (through pointers and generic arguments): bare `Generator`,
+// any argument count but one, or an element naming no type at all.  A
+// generator at the top of an annotation is resolve_generator_annotation's.
+// Run where an annotation is resolved, once per annotation site, so a
+// signature re-read for its body reports nothing twice.
+fn generator_spelling_diags(ts: TS, node_idx: i64): TS
+  if node_idx < 0:
+    return ts
+  let node: Node = ts.tc.nodes.get(node_idx)
+  match node:
+    Node::NamedT(tidx):
+      if is_generator_head(ts, tidx):
+        return ts_add_diag(ts, ts_tok_span(ts, tidx), "Generator requires exactly one type argument")
+    Node::PointerT(inner):
+      return generator_spelling_diags(ts, inner)
+    Node::GenericT(name_tidx, args_lp, arg_count):
+      let args: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+      let r: TS = ts
+      if is_generator_head(r, name_tidx):
+        if arg_count != 1:
+          return ts_add_diag(r, ts_tok_span(r, name_tidx), "Generator requires exactly one type argument")
+        let unknown_tidx: i64 = unknown_named_type(r, args.get(0))
+        if unknown_tidx >= 0:
+          return ts_add_diag(r, ts_tok_span(r, unknown_tidx), "unknown type '" + ts_tok_name(r, unknown_tidx) + "' in Generator")
+      let ai: i64 = 0
+      while ai < args.length():
+        r = generator_spelling_diags(r, args.get(ai))
+        ai = ai + 1
+      return r
+  return ts
+
+// The first name token of an annotation, through its pointers and
+// generic arguments, that names no type at all (no builtin, no symbol)
+// — a plain name or a generic head — or -1.
+fn unknown_named_type(ts: TS, node_idx: i64): i64
+  if node_idx < 0:
+    return to_i64(-1)
+  match ts.tc.nodes.get(node_idx):
+    Node::NamedT(tidx):
+      if builtin_type_index(ts_tok_name(ts, tidx)) < 0 and lookup_use(ts, tidx) < 0:
+        return tidx
+    Node::GenericT(name_tidx, args_lp, arg_count):
+      if is_generator_head(ts, name_tidx) == false and lookup_use(ts, name_tidx) < 0:
+        return name_tidx
+      let args: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+      let ai: i64 = 0
+      while ai < args.length():
+        let in_arg: i64 = unknown_named_type(ts, args.get(ai))
+        if in_arg >= 0:
+          return in_arg
+        ai = ai + 1
+    Node::QualNameE(seg_lp, seg_count):
+      // The resolver binds a qualified type by its last segment.
+      let qsegs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+      if qsegs.length() > 0:
+        let last: i64 = qsegs.get(qsegs.length() - 1)
+        if lookup_use(ts, last) < 0:
+          return last
+    Node::PointerT(inner):
+      return unknown_named_type(ts, inner)
+  return to_i64(-1)
+
+// The concept a type names — the type itself, or the pointee of a
+// pointer to one or the element of a generator of one, recursively — or
+// -1 when it names none.
+fn concept_named_by(ts: TS, ti: i64): i64
+  if ti < 0:
+    return to_i64(-1)
+  if ti >= ts.types.length():
+    return to_i64(-1)
+  let t: DaoType = ts.types.get(ti)
+  match t.kind:
+    TypeKind::TConcept:
+      return ti
+    TypeKind::TPointer:
+      return concept_named_by(ts, t.pointee)
+    TypeKind::TGenerator:
+      return concept_named_by(ts, t.pointee)
+  return to_i64(-1)
+
+// The first concept other than `allowed` an annotation names anywhere
+// in its spelling — through pointers, a generic head, and generic
+// arguments — or -1.  A generic annotation reads as unresolved (its
+// instantiation is deferred), so this reads the spelling the type
+// resolution did not.
+fn annotation_names_concept(ts: TS, node_idx: i64, allowed: i64): i64
+  if node_idx < 0:
+    return to_i64(-1)
+  let node: Node = ts.tc.nodes.get(node_idx)
+  match node:
+    Node::PointerT(inner):
+      return annotation_names_concept(ts, inner, allowed)
+    Node::NamedT(tidx):
+      return concept_other_than(ts, sym_type_at(ts, lookup_use(ts, tidx)), allowed)
+    Node::QualNameE(seg_lp, seg_count):
+      // A qualified name (`lib::C`): the resolver bound its last segment.
+      let qsegs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+      if qsegs.length() == 0:
+        return to_i64(-1)
+      return concept_other_than(ts, sym_type_at(ts, lookup_use(ts, qsegs.get(qsegs.length() - 1))), allowed)
+    Node::GenericT(name_tidx, args_lp, arg_count):
+      let head: i64 = concept_other_than(ts, sym_type_at(ts, lookup_use(ts, name_tidx)), allowed)
+      if head >= 0:
+        return head
+      let args: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+      let ai: i64 = 0
+      while ai < args.length():
+        let in_arg: i64 = annotation_names_concept(ts, args.get(ai), allowed)
+        if in_arg >= 0:
+          return in_arg
+        ai = ai + 1
+  return to_i64(-1)
+
+// concept_named_by, except that `allowed` names none.
+fn concept_other_than(ts: TS, ti: i64, allowed: i64): i64
+  let named: i64 = concept_named_by(ts, ti)
+  if named == allowed:
+    return to_i64(-1)
+  return named
+
+// The applied self form (see resolve_annotation) as a type: the
+// concept itself, wrapped in the annotation's pointers.
+fn resolve_applied_self(ts: TS, node_idx: i64, self_concept: i64): TypeR
+  let node: Node = ts.tc.nodes.get(node_idx)
+  match node:
+    Node::PointerT(inner):
+      let inner_r: TypeR = resolve_applied_self(ts, inner, self_concept)
+      return find_or_add_pointer_type(inner_r.ts, inner_r.type_idx)
+  return TypeR(ts, self_concept)
+
+// The type-parameter nodes the concept `concept_ti` declares (its
+// declaration is in the module being checked), in order.
+fn concept_type_params(ts: TS, concept_ti: i64): Vector<i64>
+  let none: Vector<i64> = Vector<i64>::new()
+  if concept_ti < 0:
+    return none
+  if concept_ti >= ts.types.length():
+    return none
+  let decl_idx: i64 = ts.types.get(concept_ti).decl_node
+  if decl_idx < 0:
+    return none
+  if decl_idx >= ts.tc.nodes.length():
+    return none
+  let node: Node = ts.tc.nodes.get(decl_idx)
+  match node:
+    Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
+      if tparams_lp < 0:
+        return none
+      return read_list(ts.tc.idx_data, tparams_lp)
+  return none
+
+// A type parameter's name, from its `GenericParamT` node.
+fn type_param_name(ts: TS, tp_node: i64): string
+  let node: Node = ts.tc.nodes.get(tp_node)
+  match node:
+    Node::GenericParamT(tidx, bounds_lp):
+      return ts_tok_name(ts, tidx)
+  return ""
+
+// A type parameter's symbol (the resolver bound its declaring token).
+fn type_param_symbol(ts: TS, tp_node: i64): i64
+  let node: Node = ts.tc.nodes.get(tp_node)
+  match node:
+    Node::GenericParamT(tidx, bounds_lp):
+      return lookup_use(ts, tidx)
+  return to_i64(-1)
+
+// The concept's type parameters as written in its head, `A, B`.
+fn concept_type_param_list(ts: TS, concept_ti: i64): string
+  let tparams: Vector<i64> = concept_type_params(ts, concept_ti)
+  let out: string = ""
+  let i: i64 = 0
+  while i < tparams.length():
+    if i > 0:
+      out = out + ", "
+    out = out + type_param_name(ts, tparams.get(i))
+    i = i + 1
+  return out
+
+// Whether a generic annotation (through its pointers) applies the
+// concept's own type parameters, each by its bare name in its own
+// position — the only application that is the concept's self form.
+fn applied_self_matches_params(ts: TS, node_idx: i64, concept_ti: i64): bool
+  if node_idx < 0:
+    return false
+  let node: Node = ts.tc.nodes.get(node_idx)
+  match node:
+    Node::PointerT(inner):
+      return applied_self_matches_params(ts, inner, concept_ti)
+    Node::GenericT(name_tidx, args_lp, arg_count):
+      let tparams: Vector<i64> = concept_type_params(ts, concept_ti)
+      let args: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+      if args.length() != tparams.length():
+        return false
+      let i: i64 = 0
+      while i < args.length():
+        // By symbol, not spelling: a method's own `T` shadowing the
+        // concept's `T` is a different parameter (the resolver bound
+        // each declaring token to its symbol).
+        let arg: Node = ts.tc.nodes.get(args.get(i))
+        let matches: bool = false
+        match arg:
+          Node::NamedT(tidx):
+            let arg_sym: i64 = lookup_use(ts, tidx)
+            if arg_sym >= 0:
+              matches = arg_sym == type_param_symbol(ts, tparams.get(i))
+        if matches == false:
+          return false
+        i = i + 1
+      return true
+  return false
+
+// The concept a generic annotation's head names, or -1 for a
+// non-generic annotation or a head that is no concept.
+fn generic_head_concept(ts: TS, node_idx: i64): i64
+  if node_idx < 0:
+    return to_i64(-1)
+  let node: Node = ts.tc.nodes.get(node_idx)
+  match node:
+    Node::PointerT(inner):
+      return generic_head_concept(ts, inner)
+    Node::GenericT(name_tidx, args_lp, arg_count):
+      return concept_named_by(ts, sym_type_at(ts, lookup_use(ts, name_tidx)))
+  return to_i64(-1)
+
+// A type annotation, resolved as a type and then held to the host's
+// rule: a concept's name is a type only in the concept's own method
+// signatures (`self_concept`), where it means the conforming type;
+// anywhere else it constrains a type parameter (`<T: Eq>`), it does
+// not stand for one.  Such an annotation is diagnosed and reads as
+// unresolved.
+fn resolve_annotation(ts: TS, node_idx: i64, self_concept: i64): TypeR
+  if generator_under_pointers(ts, node_idx):
+    return resolve_generator_annotation(ts, node_idx, self_concept)
+  let tr0: TypeR = resolve_ast_type(ts, node_idx)
+  let tr: TypeR = TypeR(generator_spelling_diags(tr0.ts, node_idx), tr0.type_idx)
+  let named: i64 = concept_named_by(tr.ts, tr.type_idx)
+  if named == self_concept and named >= 0:
+    return tr
+  if named < 0:
+    // A generic annotation reads as unresolved (deferred instantiation),
+    // so its whole spelling is inspected: `C<i32>`, `Box<C>`, or
+    // `Pair<Self, C>` with `C` a concept is no type, wherever `C` sits.
+    named = annotation_names_concept(tr.ts, node_idx, self_concept)
+  if named < 0:
+    if self_concept >= 0 and tr.type_idx < 0 and generic_head_concept(tr.ts, node_idx) == self_concept:
+      // The applied self form (`C<T>` in C's signatures, under its
+      // pointer wrappers) reads as the concept, so a member lookup
+      // substitutes the receiver for it as for the bare name.  It is
+      // the self form only when it applies the concept's own type
+      // parameters, each in its place: `C<bool>` or `C<B, A>` names
+      // some other instantiation, which no substitution could keep,
+      // and is rejected.
+      if applied_self_matches_params(tr.ts, node_idx, self_concept) == false:
+        let sname: string = type_name(tr.ts, self_concept)
+        let rs: TS = ts_add_diag(tr.ts, ts_node_span(tr.ts, node_idx), "'" + sname + "' in its own signatures applies only its own type parameters, in order (" + sname + "<" + concept_type_param_list(tr.ts, self_concept) + ">)")
+        return TypeR(rs, to_i64(-1))
+      return resolve_applied_self(tr.ts, node_idx, self_concept)
+    // A type, or the self name inside a deferred generic (`Box<C>` in
+    // C's signatures: unresolved, as every generic annotation is until
+    // instantiation is typed).
+    return tr
+  let cname: string = type_name(tr.ts, named)
+  let r: TS = ts_add_diag(tr.ts, ts_node_span(tr.ts, node_idx), "'" + cname + "' is a concept, not a type; use it as a bound (<T: " + cname + ">)")
+  return TypeR(r, to_i64(-1))
+
+// Whether an annotation is a `Generator` spelling, bare or applied,
+// under any pointers.
+fn generator_under_pointers(ts: TS, node_idx: i64): bool
+  if node_idx < 0:
+    return false
+  match ts.tc.nodes.get(node_idx):
+    Node::PointerT(inner):
+      return generator_under_pointers(ts, inner)
+    Node::NamedT(tidx):
+      return is_generator_head(ts, tidx)
+    Node::GenericT(name_tidx, args_lp, arg_count):
+      return is_generator_head(ts, name_tidx)
+  return false
+
+// A generator annotation (under any pointers), resolved element first:
+// the element is an annotation in its own right, held to every rule
+// resolve_annotation applies — a concept is no type, the applied self
+// form in a concept's own signatures, unknown names — and the generator
+// wraps what it resolved to.  An element that resolves to nothing still
+// makes a generator, so the function stays a generator body.
+fn resolve_generator_annotation(ts: TS, node_idx: i64, self_concept: i64): TypeR
+  match ts.tc.nodes.get(node_idx):
+    Node::PointerT(inner):
+      let ir: TypeR = resolve_generator_annotation(ts, inner, self_concept)
+      if ir.type_idx < 0:
+        return ir
+      return find_or_add_pointer_type(ir.ts, ir.type_idx)
+    Node::NamedT(tidx):
+      return TypeR(ts_add_diag(ts, ts_tok_span(ts, tidx), "Generator requires exactly one type argument"), to_i64(-1))
+    Node::GenericT(name_tidx, args_lp, arg_count):
+      if arg_count != 1:
+        return TypeR(ts_add_diag(ts, ts_tok_span(ts, name_tidx), "Generator requires exactly one type argument"), to_i64(-1))
+      let elem: i64 = read_list(ts.tc.idx_data, args_lp).get(0)
+      let diags_before: i64 = ts.diags.length()
+      let er: TypeR = resolve_annotation(ts, elem, self_concept)
+      let r: TS = er.ts
+      if er.type_idx < 0 and r.diags.length() == diags_before:
+        let unknown_tidx: i64 = unknown_named_type(r, elem)
+        if unknown_tidx >= 0:
+          r = ts_add_diag(r, ts_tok_span(r, unknown_tidx), "unknown type '" + ts_tok_name(r, unknown_tidx) + "' in Generator")
+      let gr: TypeR = find_or_add_generator_type(r, er.type_idx)
+      return TypeR(ts_set_expr_type(gr.ts, node_idx, gr.type_idx), gr.type_idx)
   return TypeR(ts, to_i64(-1))
 
 // =========================================================================
@@ -602,48 +1033,31 @@ fn find_callable_sym(symbols: Vector<Symbol>, decl_idx: i64, module_id: i64): i6
   return to_i64(-1)
 
 fn find_callable_sym_by_decl(ts: TS, decl_idx: i64): i64
-  return find_callable_sym(ts.tc.symbols, decl_idx, ts.tc.module_id)
+  if ts.tc.module_id < 0:
+    return find_callable_sym(ts.tc.symbols, decl_idx, ts.tc.module_id)
+  return callable_sym_of_decl(ts, decl_idx)
 
-// The symbol of the given kind declared at `decl_idx` in this module.
-// A declaration index is file-local, so the module is half the
-// identity here too: without it, two modules' declarations at one
-// index take each other's symbols.
-fn find_sym_by_decl(ts: TS, decl_idx: i64, kind_name: string): i64
-  let si: i64 = 0
-  while si < ts.tc.symbols.length():
-    let sym: Symbol = ts.tc.symbols.get(si)
-    if sym.decl_node == decl_idx:
-      if symbol_kind_name(sym.kind) == kind_name:
-        if ts.tc.module_id < 0:
-          return si
-        if sym.owner_module_id == ts.tc.module_id:
-          return si
-    si = si + 1
-  return to_i64(-1)
-
-// Find a symbol for a field by decl_node, kind, and name
+// The field symbol named `field_name` of the class declared at
+// `decl_idx` in this module, or -1.
 fn find_field_sym(ts: TS, decl_idx: i64, field_name: string): i64
-  let si: i64 = 0
-  while si < ts.tc.symbols.length():
-    let sym: Symbol = ts.tc.symbols.get(si)
-    if sym.decl_node == decl_idx:
-      if symbol_kind_name(sym.kind) == "Field":
-        if sym.name == field_name:
-          return si
-    si = si + 1
-  return to_i64(-1)
+  return member_sym_of(ts.reg.index, ts.tc.module_id, decl_idx, "Field", field_name)
+
+// The name a struct layout's field slot carries: the slot holds the
+// field's symbol index (program-wide, so a struct declared in another
+// module is read the same way), or -1 for a field the resolver never
+// declared, which names nothing.
+fn field_slot_name(symbols: Vector<Symbol>, slot: i64): string
+  if slot < 0:
+    return ""
+  if slot >= symbols.length():
+    return ""
+  return symbols.get(slot).name
 
 // Find a param symbol by decl_node and param name
+// The parameter symbol named `param_name` of the callable declared at
+// `decl_idx` in this module, or -1.
 fn find_param_sym(ts: TS, decl_idx: i64, param_name: string): i64
-  let si: i64 = 0
-  while si < ts.tc.symbols.length():
-    let sym: Symbol = ts.tc.symbols.get(si)
-    if sym.decl_node == decl_idx:
-      if symbol_kind_name(sym.kind) == "Param":
-        if sym.name == param_name:
-          return si
-    si = si + 1
-  return to_i64(-1)
+  return member_sym_of(ts.reg.index, ts.tc.module_id, decl_idx, "Param", param_name)
 
 // A type parameter's bound concepts are stored singly at `info_lp`
 // (`info_count` slots, each a TConcept type index, or -1 for a bound
@@ -712,6 +1126,11 @@ fn tc_bind_generic_bounds(ts: TS, tparams_lp: i64): TS
         let tname: string = ts_tok_name(r, tidx)
         // The resolver bound the declaring token to the parameter's symbol.
         let tsym: i64 = lookup_use(r, tidx)
+        if tsym < 0:
+          // The resolver binds every type parameter it visits; one with
+          // no symbol was never resolved, so its bounds cannot be
+          // validated — fail closed rather than skip.
+          r = ts_add_diag(r, ts_tok_span(r, tidx), "type parameter '" + tname + "' was never resolved")
         if tsym >= 0:
           if bounds_lp >= 0:
             let gtr: TypeR = generic_param_type(r, tsym, tname)
@@ -786,7 +1205,130 @@ fn tc_bind_generic_bounds(ts: TS, tparams_lp: i64): TS
     i = i + 1
   return r
 
-fn tc_register_type_aliases(ts: TS, decls: Vector<i64>): TS
+// The program's aliases, resolved once in dependency order: an alias
+// whose target names another alias — declared anywhere, in any module
+// — is bound after that one (a depth-first walk over the program's
+// alias graph with a cycle guard), so every chain costs its length.
+// The maps: "d:<sym>" → the alias's declaration, "m:<sym>" → its module,
+// "t:<sym>" → how many symbols its target's spelling names and
+// "t:<sym>:<j>" → the j-th (annotation_symbol_refs); `order` lists the
+// alias symbols.  tc_check_aliases then diagnoses what could not bind.
+class AliasGraph:
+  edges: HashMap<i64>
+  order: Vector<i64>
+
+fn alias_graph_of(p: Program, acc: TcAccum): AliasGraph
+  let g: AliasGraph = AliasGraph(HashMap<i64>::new(), Vector<i64>::new())
+  let ti: i64 = 0
+  while ti < p.graph.topo_order.length():
+    let mid: i64 = p.graph.topo_order.get(ti)
+    let ts: TS = ts_new(build_module_tc(p, mid), acc.types, acc.type_info, acc.sym_types, acc.reg)
+    let root: Node = ts.tc.nodes.get(program_file_of_module(p, mid).parse_output.root)
+    match root:
+      Node::FileN(module_decl, imports_lp, decls_lp):
+        let decls: Vector<i64> = read_list(ts.tc.idx_data, decls_lp)
+        let i: i64 = 0
+        while i < decls.length():
+          let decl_idx: i64 = decls.get(i)
+          let node: Node = ts.tc.nodes.get(decl_idx)
+          match node:
+            Node::TypeAliasD(name_tidx, target_type):
+              let sym_idx: i64 = type_sym_of_decl(ts, decl_idx)
+              if sym_idx >= 0:
+                let k: string = i64_to_string(sym_idx)
+                g.edges = g.edges.set("d:" + k, decl_idx)
+                g.edges = g.edges.set("m:" + k, mid)
+                let refs: Vector<i64> = annotation_symbol_refs(ts, target_type, Vector<i64>::new())
+                g.edges = g.edges.set("t:" + k, refs.length())
+                let ri: i64 = 0
+                while ri < refs.length():
+                  g.edges = g.edges.set("t:" + k + ":" + i64_to_string(ri), refs.get(ri))
+                  ri = ri + 1
+                g.order = g.order.push(sym_idx)
+          i = i + 1
+    ti = ti + 1
+  return g
+
+// The accumulated state and the walk's marks (symbol → 1 once bound,
+// 2 while its target is being bound).
+class AliasBindR:
+  acc: TcAccum
+  marks: HashMap<i64>
+
+fn tc_resolve_aliases(p: Program, acc: TcAccum): TcAccum
+  let g: AliasGraph = alias_graph_of(p, acc)
+  let st: AliasBindR = AliasBindR(acc, HashMap<i64>::new())
+  let i: i64 = 0
+  while i < g.order.length():
+    st = bind_alias(p, g, g.order.get(i), st)
+    i = i + 1
+  return st.acc
+
+// Bind one alias, after every alias its target's spelling names.  An
+// alias naming an alias that stayed unbound — a cycle, reached through
+// pointers, generic arguments, or a generator's element — stays unbound
+// itself, and is diagnosed as such.
+fn bind_alias(p: Program, g: AliasGraph, sym_idx: i64, st: AliasBindR): AliasBindR
+  let k: string = i64_to_string(sym_idx)
+  if hm_get_or(st.marks, k, to_i64(0)) != 0:
+    return st
+  let r: AliasBindR = AliasBindR(st.acc, st.marks.set(k, to_i64(2)))
+  let target_unbound: bool = false
+  let ref_count: i64 = hm_get_or(g.edges, "t:" + k, to_i64(0))
+  let ri: i64 = 0
+  while ri < ref_count:
+    let ref_sym: i64 = hm_get_or(g.edges, "t:" + k + ":" + i64_to_string(ri), to_i64(-1))
+    if ref_sym >= 0 and g.edges.contains("d:" + i64_to_string(ref_sym)):
+      r = bind_alias(p, g, ref_sym, r)
+      if vec_i64_get(r.acc.sym_types, ref_sym) < 0:
+        target_unbound = true
+    ri = ri + 1
+  let mid: i64 = hm_get_or(g.edges, "m:" + k, to_i64(-1))
+  let decl_idx: i64 = hm_get_or(g.edges, "d:" + k, to_i64(-1))
+  let ts: TS = ts_new(build_module_tc(p, mid), r.acc.types, r.acc.type_info, r.acc.sym_types, r.acc.reg)
+  let node: Node = ts.tc.nodes.get(decl_idx)
+  match node:
+    Node::TypeAliasD(name_tidx, target_type):
+      let target_r: TypeR = resolve_ast_type(ts, target_type)
+      ts = target_r.ts
+      let ti: i64 = to_i64(-1)
+      if target_unbound == false and target_r.type_idx >= 0 and concept_named_by(ts, target_r.type_idx) < 0:
+        ti = target_r.type_idx
+      ts = ts_set_sym_type(ts, sym_idx, ti)
+  let acc2: TcAccum = TcAccum(ts.types, ts.type_info, ts.sym_types, ts.reg, r.acc.diags)
+  return AliasBindR(acc2, r.marks.set(k, to_i64(1)))
+
+// Every symbol an annotation's spelling names — through pointers,
+// generic heads and their arguments (a generator's element among them),
+// a qualified name by its last segment — appended to `out`.
+fn annotation_symbol_refs(ts: TS, node_idx: i64, out: Vector<i64>): Vector<i64>
+  if node_idx < 0:
+    return out
+  let node: Node = ts.tc.nodes.get(node_idx)
+  match node:
+    Node::PointerT(inner):
+      return annotation_symbol_refs(ts, inner, out)
+    Node::NamedT(tidx):
+      return out.push(lookup_use(ts, tidx))
+    Node::GenericT(name_tidx, args_lp, arg_count):
+      let acc: Vector<i64> = out.push(lookup_use(ts, name_tidx))
+      let args: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+      let ai: i64 = 0
+      while ai < args.length():
+        acc = annotation_symbol_refs(ts, args.get(ai), acc)
+        ai = ai + 1
+      return acc
+    Node::QualNameE(seg_lp, seg_count):
+      let qsegs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+      if qsegs.length() == 0:
+        return out
+      return out.push(lookup_use(ts, qsegs.get(qsegs.length() - 1)))
+  return out
+
+// An alias the walk could not bind names a concept (diagnosed as
+// such), an unknown type, or an alias cycle: never a silent unresolved
+// type.
+fn tc_check_aliases(ts: TS, decls: Vector<i64>): TS
   let r: TS = ts
   let i: i64 = 0
   while i < decls.length():
@@ -794,12 +1336,16 @@ fn tc_register_type_aliases(ts: TS, decls: Vector<i64>): TS
     let node: Node = r.tc.nodes.get(decl_idx)
     match node:
       Node::TypeAliasD(name_tidx, target_type):
-        let target_r: TypeR = resolve_ast_type(r, target_type)
-        r = target_r.ts
-        let sym_idx: i64 = find_sym_by_decl(r, decl_idx, "Type")
+        let sym_idx: i64 = type_sym_of_decl(r, decl_idx)
+        // Every alias's target is held to the annotation rules once (the
+        // walk bound it without diagnostics: a generator of an invalid
+        // element binds); one left unbound is also reported as such.
         if sym_idx >= 0:
-          if target_r.type_idx >= 0:
-            r = ts_set_sym_type(r, sym_idx, target_r.type_idx)
+          let diags_before: i64 = r.diags.length()
+          let target_r: TypeR = resolve_annotation(r, target_type, to_i64(-1))
+          r = target_r.ts
+          if sym_type_at(r, sym_idx) < 0 and r.diags.length() == diags_before:
+            r = ts_add_diag(r, ts_node_span(r, target_type), "type alias '" + ts_tok_name(r, name_tidx) + "' has no resolvable target (an unknown type, or an alias cycle)")
     i = i + 1
   return r
 
@@ -812,15 +1358,19 @@ fn tc_register_struct_shells(ts: TS, decls: Vector<i64>): TS
     match node:
       Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
         let name: string = ts_tok_name(r, name_tidx)
-        let tr: TypeR = ts_add_type(r, DaoType(TypeKind::TStruct, to_i64(-1), name, decl_idx, to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+        // `builtin_id` records the declaring module: a declaration index
+        // is file-local, so the type itself must say whose it is.
+        let tr: TypeR = ts_add_type(r, DaoType(TypeKind::TStruct, r.tc.module_id, name, decl_idx, to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
         r = tr.ts
-        let sym_idx: i64 = find_sym_by_decl(r, decl_idx, "Type")
+        let sym_idx: i64 = type_sym_of_decl(r, decl_idx)
         if sym_idx >= 0:
           r = ts_set_sym_type(r, sym_idx, tr.type_idx)
     i = i + 1
   return r
 
-fn tc_register_enums(ts: TS, decls: Vector<i64>): TS
+// Register every enum's type — its identity, with no variant table yet —
+// before any signature in the program is resolved (tc_pass_shells).
+fn tc_register_enum_shells(ts: TS, decls: Vector<i64>): TS
   let r: TS = ts
   let i: i64 = 0
   while i < decls.length():
@@ -828,7 +1378,28 @@ fn tc_register_enums(ts: TS, decls: Vector<i64>): TS
     let node: Node = r.tc.nodes.get(decl_idx)
     match node:
       Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
-        let name: string = ts_tok_name(r, name_tidx)
+        let tr: TypeR = ts_add_type(r, DaoType(TypeKind::TEnum, r.tc.module_id, ts_tok_name(r, name_tidx), decl_idx, to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+        r = tr.ts
+        let sym_idx: i64 = type_sym_of_decl(r, decl_idx)
+        if sym_idx >= 0:
+          r = ts_set_sym_type(r, sym_idx, tr.type_idx)
+    i = i + 1
+  return r
+
+// Fill each enum's variant table and the program-wide variant registry
+// (the type tc_register_enum_shells registered).
+fn tc_fill_enum_variants(ts: TS, decls: Vector<i64>): TS
+  let r: TS = ts
+  let i: i64 = 0
+  while i < decls.length():
+    let decl_idx: i64 = decls.get(i)
+    let node: Node = r.tc.nodes.get(decl_idx)
+    match node:
+      Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
+        let enum_sym: i64 = type_sym_of_decl(r, decl_idx)
+        let enum_ti: i64 = to_i64(-1)
+        if enum_sym >= 0:
+          enum_ti = sym_type_at(r, enum_sym)
         let info_start: i64 = r.type_info.length()
         let pairs: Vector<i64> = read_pairs(r.tc.idx_data, variants_lp)
         let vi: i64 = 0
@@ -844,18 +1415,18 @@ fn tc_register_enums(ts: TS, decls: Vector<i64>): TS
           r = ts_push_type_info(r, payload_fields.length() / 2)
           let pi: i64 = 0
           while pi < payload_fields.length():
-            let pt_r: TypeR = resolve_ast_type(r, payload_fields.get(pi + 1))
+            let pt_r: TypeR = resolve_annotation(r, payload_fields.get(pi + 1), to_i64(-1))
             r = pt_r.ts
             r = ts_push_type_info(r, payload_fields.get(pi))
             r = ts_push_type_info(r, pt_r.type_idx)
             pi = pi + 2
           variant_count = variant_count + 1
           vi = vi + 2
-        let tr: TypeR = ts_add_type(r, DaoType(TypeKind::TEnum, to_i64(-1), name, decl_idx, info_start, variant_count, to_i64(-1), to_i64(-1)))
-        r = tr.ts
-        let sym_idx: i64 = find_sym_by_decl(r, decl_idx, "Type")
-        if sym_idx >= 0:
-          r = ts_set_sym_type(r, sym_idx, tr.type_idx)
+        if enum_ti >= 0:
+          let et: DaoType = r.types.get(enum_ti)
+          et.info_lp = info_start
+          et.info_count = variant_count
+          r.types = r.types.set(enum_ti, et)
         // The variant registry is program-wide and keyed by name, so a
         // construction in any module reads it without the declaring
         // module's tokens (type_info holds token indexes of this
@@ -866,14 +1437,14 @@ fn tc_register_enums(ts: TS, decls: Vector<i64>): TS
         let v_offset: i64 = info_start
         while vr < variant_count:
           let vname: string = ts_tok_name(r, r.type_info.get(v_offset))
-          let vkey: string = i64_to_string(tr.type_idx) + ":" + vname
+          let vkey: string = i64_to_string(enum_ti) + ":" + vname
           let param_count: i64 = r.type_info.get(v_offset + 1)
-          r.variant_set = r.variant_set.set(vkey, param_count)
+          r.reg = reg_with_variant_set(r.reg, r.reg.variant_set.set(vkey, param_count))
           let pi2: i64 = 0
           while pi2 < param_count:
             let pname: string = ts_tok_name(r, r.type_info.get(v_offset + 2 + pi2 * 2))
-            r.variant_set = r.variant_set.set(vkey + ":" + pname, pi2)
-            r.variant_set = r.variant_set.set(vkey + ":" + pname + ":type", r.type_info.get(v_offset + 2 + pi2 * 2 + 1))
+            r.reg = reg_with_variant_set(r.reg, r.reg.variant_set.set(vkey + ":" + pname, pi2))
+            r.reg = reg_with_variant_set(r.reg, r.reg.variant_set.set(vkey + ":" + pname + ":type", r.type_info.get(v_offset + 2 + pi2 * 2 + 1)))
             pi2 = pi2 + 1
           v_offset = v_offset + 2 + param_count * 2
           vr = vr + 1
@@ -896,19 +1467,20 @@ fn tc_fill_struct_fields(ts: TS, decls: Vector<i64>): TS
         while fi < pairs.length():
           let f_tidx: i64 = pairs.get(fi)
           let f_type_node: i64 = pairs.get(fi + 1)
-          let ft_r: TypeR = resolve_ast_type(r, f_type_node)
+          let ft_r: TypeR = resolve_annotation(r, f_type_node, to_i64(-1))
           r = ft_r.ts
-          r = ts_push_type_info(r, f_tidx)
-          r = ts_push_type_info(r, ft_r.type_idx)
-          // Register field symbol type
+          // The layout names a field by its symbol (see field_slot_name),
+          // which any module can read; the symbol's type is the field's.
           let fname: string = ts_tok_name(r, f_tidx)
           let fsym: i64 = find_field_sym(r, decl_idx, fname)
+          r = ts_push_type_info(r, fsym)
+          r = ts_push_type_info(r, ft_r.type_idx)
           if fsym >= 0:
             r = ts_set_sym_type(r, fsym, ft_r.type_idx)
           field_count = field_count + 1
           fi = fi + 2
         // Update struct type with field info
-        let struct_sym: i64 = find_sym_by_decl(r, decl_idx, "Type")
+        let struct_sym: i64 = type_sym_of_decl(r, decl_idx)
         if struct_sym >= 0:
           let struct_ti: i64 = sym_type_at(r, struct_sym)
           if struct_ti >= 0:
@@ -922,7 +1494,10 @@ fn tc_fill_struct_fields(ts: TS, decls: Vector<i64>): TS
 // Register fn signature. Only modifies types and type_info; sym_types
 // is set by the caller to work around a compiler bug with HashMap fields
 // being lost when TS is passed through function calls.
-fn tc_register_fn_sig_core(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, ret_type_node: i64): TypeR
+// Register a callable's signature as a function type.  `self_concept`
+// is the concept whose own method this is (its name in the signature
+// means the conforming type), or -1 for every other callable.
+fn tc_register_fn_sig_core(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, ret_type_node: i64, self_concept: i64): TypeR
   let r: TS = ts
   let pairs: Vector<i64> = read_pairs(r.tc.idx_data, params_lp)
   let param_info_start: i64 = r.type_info.length()
@@ -931,7 +1506,7 @@ fn tc_register_fn_sig_core(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64
   while pi < pairs.length():
     let p_tidx: i64 = pairs.get(pi)
     let p_type_node: i64 = pairs.get(pi + 1)
-    let pt_r: TypeR = resolve_ast_type(r, p_type_node)
+    let pt_r: TypeR = resolve_annotation(r, p_type_node, self_concept)
     r = pt_r.ts
     r = ts_push_type_info(r, pt_r.type_idx)
     // Set the param symbol's declared type here so extern fns (which
@@ -945,14 +1520,21 @@ fn tc_register_fn_sig_core(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64
       r.sym_types = vec_i64_set(r.sym_types, p_sym, pt_r.type_idx)
     param_count = param_count + 1
     pi = pi + 2
-  let ret_r: TypeR = resolve_ast_type(r, ret_type_node)
+  let ret_r: TypeR = resolve_annotation(r, ret_type_node, self_concept)
   r = ret_r.ts
   let ret_ti: i64 = ret_r.type_idx
   if ret_ti < 0:
     ret_ti = to_i64(11)
+  // A function type records whether its first parameter is `self`
+  // (`builtin_id` 1), so a requirement and an implementation are held
+  // to the same receiver shape.
+  let takes_self: i64 = to_i64(0)
+  if pairs.length() >= 2:
+    if ts_tok_name(r, pairs.get(0)) == "self":
+      takes_self = to_i64(1)
   let fname: string = ts_tok_name(r, name_tidx)
   let fn_name: string = "fn " + fname
-  let tr: TypeR = ts_add_type(r, DaoType(TypeKind::TFunction, to_i64(-1), fn_name, decl_idx, param_info_start, param_count, ret_ti, to_i64(-1)))
+  let tr: TypeR = ts_add_type(r, DaoType(TypeKind::TFunction, takes_self, fn_name, decl_idx, param_info_start, param_count, ret_ti, to_i64(-1)))
   return tr
 
 fn tc_register_functions(ts: TS, decls: Vector<i64>): TS
@@ -985,7 +1567,7 @@ fn tc_register_functions(ts: TS, decls: Vector<i64>): TS
         fn_params_lp = plp
         fn_ret_type = rtn
     if is_fn:
-      let tr: TypeR = tc_register_fn_sig_core(r, decl_idx, fn_name_tidx, fn_params_lp, fn_ret_type)
+      let tr: TypeR = tc_register_fn_sig_core(r, decl_idx, fn_name_tidx, fn_params_lp, fn_ret_type, to_i64(-1))
       r = tr.ts
       let fn_sym: i64 = find_callable_sym_by_decl(r, decl_idx)
       fn_syms = fn_syms.push(fn_sym)
@@ -1001,6 +1583,42 @@ fn tc_register_functions(ts: TS, decls: Vector<i64>): TS
     j = j + 1
   return r
 
+// The type a method's owner declaration gives its methods — what
+// `self` is and where they dispatch: a class's struct type, or the
+// type an extend's target annotation resolves to in the extend's
+// module.
+fn method_owner(ts: TS, owner_decl_idx: i64): TypeR
+  let node: Node = ts.tc.nodes.get(owner_decl_idx)
+  match node:
+    Node::ClassDeclD(cn_tidx, cn_tparams_lp, cn_fields_lp, cn_methods_lp):
+      let ssym: i64 = type_sym_of_decl(ts, owner_decl_idx)
+      if ssym >= 0:
+        return TypeR(ts, sym_type_at(ts, ssym))
+      return TypeR(ts, to_i64(-1))
+    Node::ExtendDeclD(target_type_node, concept_name_tidx, e_methods_lp):
+      return resolve_ast_type(ts, target_type_node)
+  return TypeR(ts, to_i64(-1))
+
+// Register one method's signature (block- or expression-bodied alike):
+// its function type, on its mangled symbol, bound to its owner.
+fn tc_register_method_sig(ts: TS, owner_ti: i64, meth_idx: i64, m_name_tidx: i64, m_params_lp: i64, m_ret_type: i64): TS
+  let tr: TypeR = tc_register_fn_sig_core(ts, meth_idx, m_name_tidx, m_params_lp, m_ret_type, to_i64(-1))
+  let r: TS = tr.ts
+  let msym: i64 = callable_sym_of_decl(r, meth_idx)
+  if msym >= 0:
+    r = ts_set_sym_type(r, msym, tr.type_idx)
+  return tc_bind_self(r, meth_idx, msym, m_name_tidx, owner_ti)
+
+// An extend's method must take `self` first (the host's
+// validate_receiver): a conformance method has a receiver.  A class's
+// own method may be static instead.
+fn tc_require_receiver(ts: TS, m_name_tidx: i64, m_params_lp: i64): TS
+  let pairs: Vector<i64> = read_pairs(ts.tc.idx_data, m_params_lp)
+  if pairs.length() >= 2:
+    if ts_tok_name(ts, pairs.get(0)) == "self":
+      return ts
+  return ts_add_diag(ts, ts_tok_span(ts, m_name_tidx), "method '" + ts_tok_name(ts, m_name_tidx) + "' must have 'self' as its first parameter")
+
 fn tc_register_methods(ts: TS, decls: Vector<i64>): TS
   let r: TS = ts
   let i: i64 = 0
@@ -1010,7 +1628,8 @@ fn tc_register_methods(ts: TS, decls: Vector<i64>): TS
     match node:
       Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
         if methods_lp >= 0:
-          let class_name: string = ts_tok_name(r, name_tidx)
+          let own: TypeR = method_owner(r, decl_idx)
+          r = own.ts
           let methods: Vector<i64> = read_list(r.tc.idx_data, methods_lp)
           let mi: i64 = 0
           while mi < methods.length():
@@ -1018,23 +1637,9 @@ fn tc_register_methods(ts: TS, decls: Vector<i64>): TS
             let meth_node: Node = r.tc.nodes.get(meth_idx)
             match meth_node:
               Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
-                // Register method function type (including self param)
-                let tr: TypeR = tc_register_fn_sig_core(r, meth_idx, m_name_tidx, m_params_lp, m_ret_type)
-                r = tr.ts
-                // Find the mangled symbol and set its type
-                let mname: string = ts_tok_name(r, m_name_tidx)
-                let mangled: string = class_name + "." + mname
-                let msym: i64 = find_visible_method_sym(r.tc.symbols, mangled, r.tc.module_id)
-                if msym >= 0:
-                  r = ts_set_sym_type(r, msym, tr.type_idx)
-                // Set self param type to the enclosing struct type
-                let struct_sym: i64 = find_sym_by_decl(r, decl_idx, "Type")
-                if struct_sym >= 0:
-                  let struct_ti: i64 = sym_type_at(r, struct_sym)
-                  if struct_ti >= 0:
-                    let self_sym: i64 = find_param_sym(r, meth_idx, "self")
-                    if self_sym >= 0:
-                      r = ts_set_sym_type(r, self_sym, struct_ti)
+                r = tc_register_method_sig(r, own.type_idx, meth_idx, m_name_tidx, m_params_lp, m_ret_type)
+              Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
+                r = tc_register_method_sig(r, own.type_idx, meth_idx, m_name_tidx, m_params_lp, m_ret_type)
             mi = mi + 1
     i = i + 1
   return r
@@ -1051,6 +1656,40 @@ fn extract_type_name(ts: TS, type_node_idx: i64): string
       return ts_tok_name(ts, t_name_tidx)
   return ""
 
+// Register every concept's type — its identity, with no method table
+// yet — before any signature in the module is resolved, so a
+// signature naming a concept resolves it whatever the declaration
+// order: the concept's own name in its signatures means the conforming
+// type (a member lookup substitutes the receiver, concept_method_sig),
+// and any other concept named as a type is diagnosed.  `builtin_id`
+// records the declaring module.  A concept's method-name tokens index
+// that module's token vector; a member lookup matches methods through
+// their types' names instead (method_type_named), which holds from any
+// module.
+fn tc_register_concept_shells(ts: TS, decls: Vector<i64>): TS
+  let r: TS = ts
+  let i: i64 = 0
+  while i < decls.length():
+    let decl_idx: i64 = decls.get(i)
+    let node: Node = r.tc.nodes.get(decl_idx)
+    match node:
+      Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
+        let csym: i64 = type_sym_of_decl(r, decl_idx)
+        if csym >= 0:
+          let cname: string = ts_tok_name(r, name_tidx)
+          let ctr: TypeR = ts_add_type(r, concept_type(r.tc.module_id, cname, decl_idx, to_i64(-1), to_i64(0)))
+          r = ctr.ts
+          r = ts_set_sym_type(r, csym, ctr.type_idx)
+    i = i + 1
+  return r
+
+// Register each concept's method signatures and attach the method table
+// to the type tc_register_concept_shells registered.  A method's
+// default body (expression or block) is abstract over `self`'s type;
+// the host checks nothing of it beyond its signature (concept-level
+// reasoning is deferred there too), and a concept lowers to no code, so
+// the bootstrap registers the signature and leaves the body unchecked
+// as the host does.
 fn tc_register_concepts(ts: TS, decls: Vector<i64>): TS
   let r: TS = ts
   let i: i64 = 0
@@ -1059,8 +1698,11 @@ fn tc_register_concepts(ts: TS, decls: Vector<i64>): TS
     let node: Node = r.tc.nodes.get(decl_idx)
     match node:
       Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
-        let csym: i64 = find_sym_by_decl(r, decl_idx, "Type")
+        let csym: i64 = type_sym_of_decl(r, decl_idx)
+        let cti: i64 = to_i64(-1)
         if csym >= 0:
+          cti = sym_type_at(r, csym)
+        if cti >= 0:
           let cname: string = ts_tok_name(r, name_tidx)
           // Register concept method signatures. Collect pairs
           // (name_tidx, fn_type_idx) locally first, then flush to
@@ -1096,7 +1738,7 @@ fn tc_register_concepts(ts: TS, decls: Vector<i64>): TS
                   cm_ret_type = mr
                   cm_valid = true
               if cm_valid:
-                let mtr: TypeR = tc_register_fn_sig_core(r, meth_idx, cm_name_tidx, cm_params_lp, cm_ret_type)
+                let mtr: TypeR = tc_register_fn_sig_core(r, meth_idx, cm_name_tidx, cm_params_lp, cm_ret_type, cti)
                 r = mtr.ts
                 method_pairs = method_pairs.push(cm_name_tidx)
                 method_pairs = method_pairs.push(mtr.type_idx)
@@ -1108,9 +1750,8 @@ fn tc_register_concepts(ts: TS, decls: Vector<i64>): TS
           while pi < method_pairs.length():
             r = ts_push_type_info(r, method_pairs.get(pi))
             pi = pi + 1
-          let tr: TypeR = ts_add_type(r, DaoType(TypeKind::TConcept, to_i64(-1), cname, decl_idx, info_start, method_count, to_i64(-1), to_i64(-1)))
-          r = tr.ts
-          r = ts_set_sym_type(r, csym, tr.type_idx)
+          // Attach the method table to the concept's registered type.
+          r.types = r.types.set(cti, concept_type(r.tc.module_id, cname, decl_idx, info_start, method_count))
     i = i + 1
   return r
 
@@ -1138,64 +1779,106 @@ fn is_method_symbol(sym: Symbol): bool
     return true
   return symbol_kind_name(sym.kind) == "Function"
 
-fn find_visible_method_sym(symbols: Vector<Symbol>, mangled: string, module_id: i64): i64
-  let outer: i64 = to_i64(-1)
-  let i: i64 = 0
-  while i < symbols.length():
-    let sym: Symbol = symbols.get(i)
-    if sym.name == mangled:
-      if is_method_symbol(sym):
-        if sym.owner_module_id == module_id:
-          return i
-        if sym_visible_in_module(sym, module_id):
-          outer = i
-    i = i + 1
-  return outer
+// Where a method is found at dispatch: the receiver's type and the
+// method's own name — never the owner's spelling, which an alias
+// (`extend Alias as C`) or a same-named type can share.  A class's own
+// method is keyed by its type alone; an extend's by its type and the
+// module the extend is visible from (its declaring module, or
+// conform_everywhere() for the prelude's — CONTRACT_MODULE_SYSTEM.md
+// §5, §7.2).
+fn dispatch_key_inherent(owner_ti: i64, name: string): string
+  return "I:" + i64_to_string(owner_ti) + ":" + name
 
-// A class's own method, declared with the type in `owner`'s module.
-fn find_inherent_method_sym(symbols: Vector<Symbol>, mangled: string, owner: i64): i64
-  let i: i64 = 0
-  while i < symbols.length():
-    let sym: Symbol = symbols.get(i)
-    if sym.name == mangled:
-      if symbol_kind_name(sym.kind) == "Method":
-        if sym.owner_module_id == owner:
-          return i
-    i = i + 1
-  return to_i64(-1)
+fn dispatch_key_extend(owner_ti: i64, name: string, from_module: i64): string
+  return "E:" + i64_to_string(owner_ti) + ":" + name + ":" + i64_to_string(from_module)
 
-// The module that declares the type whose declaration is `type_decl_node`,
-// or -1 for a builtin or unresolved type.
-fn type_owner_module(symbols: Vector<Symbol>, type_decl_node: i64): i64
-  if type_decl_node < 0:
+// Bind a method to the type it belongs to: its `self` parameter (the
+// symbol and the signature's first slot), when it has one, takes
+// `owner_ti`, and the method is entered into the dispatch index under
+// that type — a class's own method as inherent,
+// an extend's as visible from the extend's module (everywhere for the
+// prelude's).  Nothing is bound for an unresolved owner or a method
+// the resolver never declared.
+fn tc_bind_self(ts: TS, meth_idx: i64, msym: i64, m_name_tidx: i64, owner_ti: i64): TS
+  if owner_ti < 0:
+    return ts
+  if msym < 0:
+    return ts
+  let r: TS = ts
+  let self_sym: i64 = find_param_sym(r, meth_idx, "self")
+  if self_sym >= 0:
+    r = ts_set_sym_type(r, self_sym, owner_ti)
+  // The signature's receiver slot names the owner too, so a qualified
+  // call (`C::get(c)`) checks its first argument against it.
+  let fn_ti: i64 = sym_type_at(r, msym)
+  if fn_ti >= 0:
+    let ft: DaoType = r.types.get(fn_ti)
+    if ft.builtin_id == 1 and fn_params_walkable(r, ft) and ft.info_count > 0:
+      r.type_info = vec_i64_set(r.type_info, ft.info_lp, owner_ti)
+  let name: string = ts_tok_name(r, m_name_tidx)
+  let sym: Symbol = r.tc.symbols.get(msym)
+  let key: string = dispatch_key_inherent(owner_ti, name)
+  if symbol_kind_name(sym.kind) != "Method":
+    let from_module: i64 = r.tc.module_id
+    if module_in_prelude(r):
+      from_module = conform_everywhere()
+    key = dispatch_key_extend(owner_ti, name, from_module)
+  // One type answers one name once: a second method for it — an extend
+  // written through an alias of an already extended type, say, or an
+  // extend redefining the type's own method, which dispatch would
+  // always prefer — is a conflict, never a silent replacement.
+  let existing: i64 = hm_get_or(r.reg.methods, key, to_i64(-1))
+  if existing < 0 and symbol_kind_name(sym.kind) != "Method":
+    existing = hm_get_or(r.reg.methods, dispatch_key_inherent(owner_ti, name), to_i64(-1))
+  if existing < 0 and symbol_kind_name(sym.kind) == "Method":
+    // The type's own method registered after an extend of it visible
+    // here — one of a prelude file registered earlier — conflicts too.
+    existing = hm_get_or(r.reg.methods, dispatch_key_extend(owner_ti, name, r.tc.module_id), to_i64(-1))
+    if existing < 0:
+      existing = hm_get_or(r.reg.methods, dispatch_key_extend(owner_ti, name, conform_everywhere()), to_i64(-1))
+  if existing >= 0 and existing != msym:
+    // Two methods of one mangled name in one resolver namespace (one
+    // module, or the prelude's files) are the resolver's duplicate
+    // declaration, already reported.  Every other conflict — spelled
+    // through an alias, or a module's extend of a prelude type, which
+    // the resolver lets shadow the prelude's name — is the checker's.
+    if existing < r.tc.symbols.length():
+      let es: Symbol = r.tc.symbols.get(existing)
+      if es.name == sym.name and same_resolver_namespace(r, es.owner_module_id, sym.owner_module_id):
+        return r
+    return ts_add_diag(r, ts_tok_span(r, m_name_tidx), "method '" + name + "' is already defined for type " + type_name(r, owner_ti))
+  r.reg = reg_with_methods(r.reg, r.reg.methods.set(key, msym))
+  return r
+
+// The class's own method named `name` of the type `owner_ti`, whatever
+// the class's spelling here, or -1.
+fn find_inherent_method_sym(methods: HashMap<i64>, name: string, owner_ti: i64): i64
+  return hm_get_or(methods, dispatch_key_inherent(owner_ti, name), to_i64(-1))
+
+// The method named `name` a receiver of type `receiver_ti` answers to,
+// as seen from `module_id`, in precedence order: the type's own method,
+// then an `extend` of this type this module wrote, then a prelude one.
+// Every candidate is matched to the receiver by the type it belongs to,
+// never by the owner's spelling: a value of `core::box`'s `Box`
+// answers with that module's method even where this module declares
+// its own `Box` (§7.4 shadows the name, not the value's type); another
+// type's own method is never a candidate; an extend written through an
+// alias answers for the type the alias names.  An `extend` is not the
+// type's own: the orphan rule lets any module write one for a foreign
+// type, and this module's wins over the prelude's (§5, §7.2).  Both the
+// type checker and the HIR builder dispatch through here, so they
+// cannot disagree about which symbol a call means.  Three constant-time
+// reads of the dispatch index.
+fn find_method_sym_for_receiver(methods: HashMap<i64>, module_id: i64, name: string, receiver_ti: i64): i64
+  if receiver_ti < 0:
     return to_i64(-1)
-  let i: i64 = 0
-  while i < symbols.length():
-    let sym: Symbol = symbols.get(i)
-    if sym.decl_node == type_decl_node:
-      if symbol_kind_name(sym.kind) == "Type":
-        return sym.owner_module_id
-    i = i + 1
-  return to_i64(-1)
-
-// The method a receiver of this type answers to, in precedence order:
-// the type's own method, then an `extend` this module wrote, then a
-// visible prelude one.  A type's own methods are declared with it, so
-// the receiver's type — not its name — picks them: a value of
-// `core::box`'s `Box` answers with that module's method even where
-// this module declares its own `Box` (§7.4 shadows the name, not the
-// value's type).  An `extend` is not the type's own: the orphan rule
-// lets any module write one for a foreign type, and this module's wins
-// over the prelude's (§5, §7.2).  Both the type checker and the HIR
-// builder dispatch through here, so they cannot disagree about which
-// symbol a call means.
-fn find_method_sym_for_receiver(symbols: Vector<Symbol>, mangled: string, module_id: i64, type_decl_node: i64): i64
-  let type_owner: i64 = type_owner_module(symbols, type_decl_node)
-  if type_owner >= 0:
-    let inherent: i64 = find_inherent_method_sym(symbols, mangled, type_owner)
-    if inherent >= 0:
-      return inherent
-  return find_visible_method_sym(symbols, mangled, module_id)
+  let inherent: i64 = find_inherent_method_sym(methods, name, receiver_ti)
+  if inherent >= 0:
+    return inherent
+  let local: i64 = hm_get_or(methods, dispatch_key_extend(receiver_ti, name, module_id), to_i64(-1))
+  if local >= 0:
+    return local
+  return hm_get_or(methods, dispatch_key_extend(receiver_ti, name, conform_everywhere()), to_i64(-1))
 
 fn tc_register_extend_methods(ts: TS, decls: Vector<i64>): TS
   let r: TS = ts
@@ -1206,22 +1889,13 @@ fn tc_register_extend_methods(ts: TS, decls: Vector<i64>): TS
     match node:
       Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
         if methods_lp >= 0:
-          let target_name: string = extract_type_name(r, target_type_node)
-          // Find the target type index. The target type may be imported
-          // from another module or be a builtin, so this scan is NOT
-          // filtered by owner_module_id — the orphan rule allows
-          // extending foreign types with local concepts. Only the
-          // extend METHOD symbols (below) are module-scoped.
-          let target_ti: i64 = to_i64(-1)
-          let tsi: i64 = 0
-          while tsi < r.tc.symbols.length():
-            let tsym: Symbol = r.tc.symbols.get(tsi)
-            if tsym.name == target_name:
-              if symbol_kind_name(tsym.kind) == "Type":
-                target_ti = sym_type_at(r, tsi)
-              if symbol_kind_name(tsym.kind) == "Builtin":
-                target_ti = sym_type_at(r, tsi)
-            tsi = tsi + 1
+          // The target is the type the annotation resolves to in this
+          // module's scope (a foreign type the orphan rule lets this
+          // module extend, a builtin, or a local one that shadows a
+          // prelude name).  Only the extend METHOD symbols are
+          // module-scoped.
+          let own: TypeR = method_owner(r, decl_idx)
+          r = own.ts
           let methods: Vector<i64> = read_list(r.tc.idx_data, methods_lp)
           let mi: i64 = 0
           while mi < methods.length():
@@ -1229,20 +1903,11 @@ fn tc_register_extend_methods(ts: TS, decls: Vector<i64>): TS
             let meth_node: Node = r.tc.nodes.get(meth_idx)
             match meth_node:
               Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
-                // Register function type via tc_register_fn_sig_core
-                let tr: TypeR = tc_register_fn_sig_core(r, meth_idx, m_name_tidx, m_params_lp, m_ret_type)
-                r = tr.ts
-                // Find the mangled symbol and set its type
-                let mname: string = ts_tok_name(r, m_name_tidx)
-                let mangled: string = target_name + "." + mname
-                let msym: i64 = find_visible_method_sym(r.tc.symbols, mangled, r.tc.module_id)
-                if msym >= 0:
-                  r = ts_set_sym_type(r, msym, tr.type_idx)
-                // Set self param type to the target type
-                if target_ti >= 0:
-                  let self_sym: i64 = find_param_sym(r, meth_idx, "self")
-                  if self_sym >= 0:
-                    r = ts_set_sym_type(r, self_sym, target_ti)
+                r = tc_require_receiver(r, m_name_tidx, m_params_lp)
+                r = tc_register_method_sig(r, own.type_idx, meth_idx, m_name_tidx, m_params_lp, m_ret_type)
+              Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
+                r = tc_require_receiver(r, m_name_tidx, m_params_lp)
+                r = tc_register_method_sig(r, own.type_idx, meth_idx, m_name_tidx, m_params_lp, m_ret_type)
             mi = mi + 1
     i = i + 1
   return r
@@ -1280,91 +1945,116 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
               TypeKind::TConcept:
                 concept_ti = cti
         if concept_ti < 0:
-          i = i + 1
+          // The name after `as` names no concept: nothing in scope, or a
+          // type that is no concept.  Diagnosed here, once; the
+          // conformance pass records nothing for it.
+          if concept_sym_idx < 0:
+            r = ts_add_diag(r, ts_tok_span(r, concept_name_tidx), "unknown concept '" + concept_name + "' in extend")
+          else:
+            r = ts_add_diag(r, ts_tok_span(r, concept_name_tidx), "'" + concept_name + "' is not a concept")
         else:
           let concept_type: DaoType = r.types.get(concept_ti)
-          let target_name: string = extract_type_name(r, target_type_node)
-          // A concept whose required-method list lives in another module's
-          // type_info (a prelude concept named by a prelude `extend`) must
-          // not be walked here: reading its `info_lp` would overrun this
-          // module's type_info.  Walk zero methods in that case, leaving
-          // the cross-module conformance to the host (a later program-level pass).
+          // The concept's own name in a required signature means the
+          // conforming type, so each requirement is compared as its
+          // signature for this extend's target — a type, never a concept
+          // (resolve_annotation diagnoses `extend C as C`).
+          let target_r: TypeR = resolve_annotation(r, target_type_node, to_i64(-1))
+          r = target_r.ts
+          // The requirements of a concept declared in any module are
+          // walked (the type tables are program-wide, and a requirement's
+          // name is read off its type); only a table still out of range —
+          // a shell whose signatures never registered — walks zero.
           let req_count: i64 = to_i64(0)
           if layout_walkable(r, concept_type):
             req_count = concept_type.info_count
           // Check each required concept method
           let req_mi: i64 = 0
           while req_mi < req_count:
-            let req_name_tidx: i64 = r.type_info.get(concept_type.info_lp + req_mi * 2)
-            let req_fn_ti: i64 = r.type_info.get(concept_type.info_lp + req_mi * 2 + 1)
-            let req_name: string = ts_tok_name(r, req_name_tidx)
-            // Look for mangled symbol TargetName.methodName
-            let mangled: string = target_name + "." + req_name
+            // The requirement's name is read off its method type, which
+            // any module can read (the name token is the concept's own
+            // module's).
+            let req_name: string = method_type_name(r, r.type_info.get(concept_type.info_lp + req_mi * 2 + 1))
+            let req_sig: TypeR = concept_method_sig(r, r.type_info.get(concept_type.info_lp + req_mi * 2 + 1), concept_ti, target_r.type_idx)
+            r = req_sig.ts
+            let req_fn_ti: i64 = req_sig.type_idx
             let found_method: bool = false
-            let chosen: i64 = find_visible_method_sym(r.tc.symbols, mangled, r.tc.module_id)
-            let si: i64 = 0
-            while si < r.tc.symbols.length():
-              let sym: Symbol = r.tc.symbols.get(si)
-              if si == chosen:
-                if sym.name == mangled:
-                  if is_method_symbol(sym):
-                    found_method = true
-                  // Check full signature match: param count, each param type, return type.
-                  let impl_ti: i64 = sym_type_at(r, si)
-                  if impl_ti >= 0:
-                    if req_fn_ti >= 0:
-                      let impl_type: DaoType = r.types.get(impl_ti)
-                      let req_type: DaoType = r.types.get(req_fn_ti)
-                      // Compare param counts (both include self)
-                      if impl_type.info_count != req_type.info_count:
-                        let sp: Span = Span(to_i64(0), to_i64(1))
-                        if concept_name_tidx >= 0:
-                          let tok: Token = r.tc.toks.get(concept_name_tidx)
-                          sp = Span(tok.offset, tok.len)
-                        r = ts_add_diag(r, sp, "extend method '" + req_name + "' has " + i64_to_string(impl_type.info_count) + " param(s), concept requires " + i64_to_string(req_type.info_count))
-                      else:
-                        // Param counts match — compare each non-self param type.
-                        // Skip param 0 (self) since it differs by design
-                        // (impl has the concrete type, concept has Self placeholder).
-                        // Compare only when both param lists are in this module's
-                        // type_info; a cross-module method type would overrun it (a later program-level pass).
-                        let cmp_count: i64 = to_i64(1)
-                        if fn_params_walkable(r, impl_type):
-                          if fn_params_walkable(r, req_type):
-                            cmp_count = impl_type.info_count
-                        let pi: i64 = 1
-                        while pi < cmp_count:
-                          let impl_param_ti: i64 = r.type_info.get(impl_type.info_lp + pi)
-                          let req_param_ti: i64 = r.type_info.get(req_type.info_lp + pi)
-                          if impl_param_ti != req_param_ti:
-                            // Diagnose mismatch. Unresolved (-1) on either side
-                            // is also a mismatch when the other side resolved.
-                            let sp_p: Span = Span(to_i64(0), to_i64(1))
-                            if concept_name_tidx >= 0:
-                              let tok_p: Token = r.tc.toks.get(concept_name_tidx)
-                              sp_p = Span(tok_p.offset, tok_p.len)
-                            let impl_pname: string = "<unresolved>"
-                            if impl_param_ti >= 0:
-                              impl_pname = type_name(r, impl_param_ti)
-                            let req_pname: string = "<unresolved>"
-                            if req_param_ti >= 0:
-                              req_pname = type_name(r, req_param_ti)
-                            r = ts_add_diag(r, sp_p, "extend method '" + req_name + "' param " + i64_to_string(pi) + " has type " + impl_pname + ", concept requires " + req_pname)
-                          pi = pi + 1
-                      // Compare return types
-                      if impl_type.ret_type != req_type.ret_type:
-                        let sp2: Span = Span(to_i64(0), to_i64(1))
-                        if concept_name_tidx >= 0:
-                          let tok2: Token = r.tc.toks.get(concept_name_tidx)
-                          sp2 = Span(tok2.offset, tok2.len)
-                        let impl_rname: string = "<unresolved>"
-                        if impl_type.ret_type >= 0:
-                          impl_rname = type_name(r, impl_type.ret_type)
-                        let req_rname: string = "<unresolved>"
-                        if req_type.ret_type >= 0:
-                          req_rname = type_name(r, req_type.ret_type)
-                        r = ts_add_diag(r, sp2, "extend method '" + req_name + "' returns " + impl_rname + ", concept requires " + req_rname)
-              si = si + 1
+            // The candidate is the method the target type itself answers
+            // with (its own, or an extend of this very type), never a
+            // same-named type's.
+            let chosen: i64 = find_method_sym_for_receiver(r.reg.methods, r.tc.module_id, req_name, target_r.type_idx)
+            if chosen >= 0:
+              found_method = true
+            // Check full signature match: param count, each param type, return type.
+            let impl_ti: i64 = sym_type_at(r, chosen)
+            if impl_ti >= 0:
+              if req_fn_ti >= 0:
+                let impl_type: DaoType = r.types.get(impl_ti)
+                let req_type: DaoType = r.types.get(req_fn_ti)
+                // A requirement taking `self` is met only by a method
+                // taking `self` (a class's static method is no match),
+                // and a static requirement only by a static method.
+                if impl_type.builtin_id != req_type.builtin_id:
+                  let sp_s: Span = Span(to_i64(0), to_i64(1))
+                  if concept_name_tidx >= 0:
+                    let tok_s: Token = r.tc.toks.get(concept_name_tidx)
+                    sp_s = Span(tok_s.offset, tok_s.len)
+                  if req_type.builtin_id == 1:
+                    r = ts_add_diag(r, sp_s, "method '" + req_name + "' must take self as concept '" + concept_name + "' requires")
+                  else:
+                    r = ts_add_diag(r, sp_s, "method '" + req_name + "' takes self but concept '" + concept_name + "' requires a static method")
+                // Compare param counts (both include self)
+                if impl_type.info_count != req_type.info_count:
+                  let sp: Span = Span(to_i64(0), to_i64(1))
+                  if concept_name_tidx >= 0:
+                    let tok: Token = r.tc.toks.get(concept_name_tidx)
+                    sp = Span(tok.offset, tok.len)
+                  r = ts_add_diag(r, sp, "extend method '" + req_name + "' has " + i64_to_string(impl_type.info_count) + " param(s), concept requires " + i64_to_string(req_type.info_count))
+                else:
+                  // Param counts match — compare each non-self param type.
+                  // Skip param 0 (self) since it differs by design
+                  // (impl has the concrete type, concept has Self placeholder).
+                  // The tables are program-wide; a parameter list still out
+                  // of range (a shell whose signature never registered)
+                  // compares zero parameters.
+                  let cmp_count: i64 = req_type.builtin_id
+                  if fn_params_walkable(r, impl_type):
+                    if fn_params_walkable(r, req_type):
+                      cmp_count = impl_type.info_count
+                  // `self` (slot 0 of a receiver-taking pair) differs by
+                  // design: the concept's placeholder against the concrete
+                  // type; a static pair compares every parameter.
+                  let pi: i64 = req_type.builtin_id
+                  while pi < cmp_count:
+                    let impl_param_ti: i64 = r.type_info.get(impl_type.info_lp + pi)
+                    let req_param_ti: i64 = r.type_info.get(req_type.info_lp + pi)
+                    if impl_param_ti != req_param_ti:
+                      // Diagnose mismatch. Unresolved (-1) on either side
+                      // is also a mismatch when the other side resolved.
+                      let sp_p: Span = Span(to_i64(0), to_i64(1))
+                      if concept_name_tidx >= 0:
+                        let tok_p: Token = r.tc.toks.get(concept_name_tidx)
+                        sp_p = Span(tok_p.offset, tok_p.len)
+                      let impl_pname: string = "<unresolved>"
+                      if impl_param_ti >= 0:
+                        impl_pname = type_name(r, impl_param_ti)
+                      let req_pname: string = "<unresolved>"
+                      if req_param_ti >= 0:
+                        req_pname = type_name(r, req_param_ti)
+                      r = ts_add_diag(r, sp_p, "extend method '" + req_name + "' param " + i64_to_string(pi) + " has type " + impl_pname + ", concept requires " + req_pname)
+                    pi = pi + 1
+                // Compare return types
+                if impl_type.ret_type != req_type.ret_type:
+                  let sp2: Span = Span(to_i64(0), to_i64(1))
+                  if concept_name_tidx >= 0:
+                    let tok2: Token = r.tc.toks.get(concept_name_tidx)
+                    sp2 = Span(tok2.offset, tok2.len)
+                  let impl_rname: string = "<unresolved>"
+                  if impl_type.ret_type >= 0:
+                    impl_rname = type_name(r, impl_type.ret_type)
+                  let req_rname: string = "<unresolved>"
+                  if req_type.ret_type >= 0:
+                    req_rname = type_name(r, req_type.ret_type)
+                  r = ts_add_diag(r, sp2, "extend method '" + req_name + "' returns " + impl_rname + ", concept requires " + req_rname)
             if found_method == false:
               let sp3: Span = Span(to_i64(0), to_i64(1))
               if concept_name_tidx >= 0:
@@ -1375,21 +2065,60 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
     i = i + 1
   return r
 
+// The file-level passes of a program's type check, in order.  Each runs
+// over every module before the next starts (run_program_pass), so a
+// signature in one module resolves a type or concept declared in any
+// other and an extend is checked against a concept's full requirements
+// — the prelude's files see one another as one namespace.  Derivation
+// (derive_program_conformances) runs program-wide between Collect and
+// Bodies, so every class's derived conformances are known before any
+// body is checked.
+enum TcPass:
+  Shells         // struct, enum, and concept identities (tc_pass_shells)
+  Declarations   // every other declaration and signature (tc_pass1)
+  Satisfaction   // extends against their concepts' requirements (tc_pass_satisfaction)
+  Collect        // derived concepts and extends into the conformance map (tc_pass_collect)
+  Bodies         // function bodies (tc_pass2) — after program-wide derivation
+
+fn tc_file_pass(ts: TS, pass: TcPass, file_node_idx: i64): TS
+  match pass:
+    TcPass::Shells:
+      return tc_pass_shells(ts, file_node_idx)
+    TcPass::Declarations:
+      return tc_pass1(ts, file_node_idx)
+    TcPass::Satisfaction:
+      return tc_pass_satisfaction(ts, file_node_idx)
+    TcPass::Collect:
+      return tc_pass_collect(ts, file_node_idx)
+    TcPass::Bodies:
+      return tc_pass2(ts, file_node_idx)
+  return ts
+
+// The identities of a file's structs, enums, and concepts, registered
+// before any alias or signature anywhere is resolved
+// (tc_resolve_aliases runs between this pass and the next).
+fn tc_pass_shells(ts: TS, file_node_idx: i64): TS
+  let file_node: Node = ts.tc.nodes.get(file_node_idx)
+  match file_node:
+    Node::FileN(module_decl, imports_lp, decls_lp):
+      let decls: Vector<i64> = read_list(ts.tc.idx_data, decls_lp)
+      let r: TS = tc_register_struct_shells(ts, decls)
+      r = tc_register_enum_shells(r, decls)
+      return tc_register_concept_shells(r, decls)
+  return ts
+
 fn tc_pass1(ts: TS, file_node_idx: i64): TS
   let file_node: Node = ts.tc.nodes.get(file_node_idx)
   match file_node:
     Node::FileN(module_decl, imports_lp, decls_lp):
       let decls: Vector<i64> = read_list(ts.tc.idx_data, decls_lp)
-      let r: TS = ts
-      r = tc_register_type_aliases(r, decls)
-      r = tc_register_struct_shells(r, decls)
-      r = tc_register_enums(r, decls)
+      let r: TS = tc_check_aliases(ts, decls)
+      r = tc_fill_enum_variants(r, decls)
       r = tc_fill_struct_fields(r, decls)
       r = tc_register_functions(r, decls)
       r = tc_register_methods(r, decls)
       r = tc_register_concepts(r, decls)
       r = tc_register_extend_methods(r, decls)
-      r = tc_check_concept_satisfaction(r, decls)
       return r
   return ts
 
@@ -1508,7 +2237,7 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
               let variant_tidx: i64 = segs.get(2)
               let variant_name: string = ts_tok_name(ts, variant_tidx)
               let vcheck_key: string = i64_to_string(exp_ti) + ":" + variant_name
-              let vcheck: Option<i64> = ts.variant_set.get(vcheck_key)
+              let vcheck: Option<i64> = ts.reg.variant_set.get(vcheck_key)
               match vcheck:
                 Option::Some(v):
                   return ts_set_expr_type(ts, node_idx, exp_ti)
@@ -1530,9 +2259,13 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
     if exp_ti >= 0:
       return ts_set_expr_type(ts, node_idx, exp_ti)
     return ts
-  // Non-module first segment: the name's own type.  A two-segment name
-  // whose head is an enum is a variant access, `Enum::Variant`; the
-  // variant must exist, as for `mod::Enum::Variant` above.
+  // Non-module first segment: a type's own namespace.  A two-segment
+  // name whose head is an enum is a variant access, `Enum::Variant`; the
+  // variant must exist, as for `mod::Enum::Variant` above.  A value's
+  // name (`c::make` with `c` a parameter) is no namespace: the host
+  // reaches a type's members through the type, never through a value.
+  if symbol_kind_name(ts.tc.symbols.get(sym_idx).kind) != "Type":
+    return ts_add_diag(ts, ts_tok_span(ts, first_tidx), "'" + ts_tok_name(ts, first_tidx) + "' is a value, not a type: '" + ts_tok_name(ts, first_tidx) + "::…' names nothing")
   let ti: i64 = sym_type_at(ts, sym_idx)
   if ti < 0:
     return ts
@@ -1543,7 +2276,7 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
         let variant_tidx: i64 = segs.get(1)
         let variant_name: string = ts_tok_name(ts, variant_tidx)
         let vkey: string = i64_to_string(ti) + ":" + variant_name
-        let known: Option<i64> = ts.variant_set.get(vkey)
+        let known: Option<i64> = ts.reg.variant_set.get(vkey)
         match known:
           Option::Some(v):
             return ts_set_expr_type(ts, node_idx, ti)
@@ -1562,19 +2295,19 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
     // resolver binds `Type::method` only where the method's module
     // matches the type's — resolve.cpp).
     let member_name: string = ts_tok_name(ts, segs.get(1))
-    let mangled: string = head_type.name + "." + member_name
-    let type_owner: i64 = type_owner_module(ts.tc.symbols, head_type.decl_node)
-    if type_owner >= 0:
-      let msym: i64 = find_inherent_method_sym(ts.tc.symbols, mangled, type_owner)
-      if msym >= 0:
-        let mti: i64 = sym_type_at(ts, msym)
-        if mti >= 0:
-          return ts_set_expr_type(ts, node_idx, mti)
+    let msym: i64 = find_inherent_method_sym(ts.reg.methods, member_name, ti)
+    if msym >= 0:
+      let mti: i64 = sym_type_at(ts, msym)
+      if mti >= 0:
+        return ts_set_expr_type(ts, node_idx, mti)
+    // Neither a variant nor a method of the type: the member does not
+    // exist, and the name is not the type itself.
+    return ts_add_diag(ts, ts_tok_span(ts, segs.get(1)), "no member '" + member_name + "' on type " + type_name(ts, ti))
   return ts_set_expr_type(ts, node_idx, ti)
 
 fn get_expr_type(ts: TS, node_idx: i64): i64
   let key: string = expr_id_key(ts.tc.module_id, node_idx)
-  let found: Option<i64> = ts.expr_types.get(key)
+  let found: Option<i64> = ts.reg.expr_types.get(key)
   match found:
     Option::Some(ti):
       return ti
@@ -1760,6 +2493,24 @@ fn find_or_add_pointer_type(ts: TS, pointee_ti: i64): TypeR
   let ptr_name: string = "*" + type_name(ts, pointee_ti)
   return ts_add_type(ts, DaoType(TypeKind::TPointer, to_i64(-1), ptr_name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), pointee_ti))
 
+// The generator type yielding `elem_ti`: one per element type, found in
+// constant time through the registry's generator index.  An unresolved
+// element (-1) still makes a generator, so the function stays a
+// generator body; its element compares as unknown (types_equal).
+fn find_or_add_generator_type(ts: TS, elem_ti: i64): TypeR
+  let key: string = i64_to_string(elem_ti)
+  let known: i64 = hm_get_or(ts.reg.generators, key, to_i64(-1))
+  if known >= 0:
+    return TypeR(ts, known)
+  let tr: TypeR = ts_add_type(ts, generator_type(elem_ti, "Generator<" + type_name(ts, elem_ti) + ">"))
+  let r: TS = tr.ts
+  r.reg = reg_with_generators(r.reg, r.reg.generators.set(key, tr.type_idx))
+  return TypeR(r, tr.type_idx)
+
+// A generator type: its element type in `pointee`.
+fn generator_type(elem_ti: i64, name: string): DaoType
+  return DaoType(TypeKind::TGenerator, to_i64(-1), name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), elem_ti)
+
 // True if the AST node is an lvalue: identifier, field access,
 // index expression, or dereferenced pointer.  Used by addr-of to
 // reject taking the address of temporaries/literals.
@@ -1873,18 +2624,33 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
   let callee_type: DaoType = r.types.get(callee_ti)
   match callee_type.kind:
     TypeKind::TFunction:
-      // Detect method call: callee is a FieldE and first param is self
+      // A dot-call (`obj.m(...)`) is a method call: the method takes
+      // `self` (its function type says so), and the receiver fills it.
+      // A static method reached through a value is a diagnostic — it is
+      // called as `Type::m(...)`, and a receiver is no argument of it.
       let is_method: bool = false
       let callee_node2: Node = r.tc.nodes.get(callee)
       match callee_node2:
         Node::FieldE(mobj, mfield):
-          if callee_type.info_count > 0:
+          if callee_type.builtin_id == 1:
             is_method = true
+          else:
+            return ts_add_diag(r, ts_tok_span(r, mfield), "static method '" + ts_tok_name(r, mfield) + "' is called through a value; call it as " + type_name(r, get_expr_type(r, mobj)) + "::" + ts_tok_name(r, mfield) + "(...)")
       let param_offset: i64 = 0
       let expected_args: i64 = callee_type.info_count
       if is_method:
         param_offset = 1
         expected_args = callee_type.info_count - 1
+      // A function or method takes its arguments positionally; a named
+      // argument belongs to a variant construction
+      // (`Enum::Variant(name = value)`, CONTRACT_SYNTAX_SURFACE.md) and
+      // is diagnosed here rather than silently taken as positional.
+      let names: Vector<i64> = read_list(r.tc.idx_data, names_lp)
+      let ni: i64 = 0
+      while ni < names.length():
+        if names.get(ni) >= 0:
+          return ts_add_diag(r, ts_tok_span(r, names.get(ni)), "named argument '" + ts_tok_name(r, names.get(ni)) + "' in a call: a function or method takes its arguments positionally (named arguments construct a variant)")
+        ni = ni + 1
       if args.length() != expected_args:
         let sp: Span = ts_node_span(r, callee)
         r = ts_add_diag(r, sp, "arity mismatch: expected " + i64_to_string(expected_args) + " arguments, got " + i64_to_string(args.length()))
@@ -1910,6 +2676,14 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
         ci = ci + 1
       return ts_set_expr_type(r, node_idx, callee_type.ret_type)
     TypeKind::TStruct:
+      // A class is constructed positionally (`Point(1, 2)`); a named
+      // argument constructs a variant, never a class.
+      let cnames: Vector<i64> = read_list(r.tc.idx_data, names_lp)
+      let cni: i64 = 0
+      while cni < cnames.length():
+        if cnames.get(cni) >= 0:
+          return ts_add_diag(r, ts_tok_span(r, cnames.get(cni)), "named argument '" + ts_tok_name(r, cnames.get(cni)) + "' in a constructor: a class is constructed positionally (named arguments construct a variant)")
+        cni = cni + 1
       if args.length() != callee_type.info_count:
         let sp: Span = ts_node_span(r, callee)
         r = ts_add_diag(r, sp, "constructor arity mismatch: expected " + i64_to_string(callee_type.info_count) + " fields, got " + i64_to_string(args.length()))
@@ -1959,7 +2733,7 @@ fn check_variant_construction(ts: TS, node_idx: i64, callee: i64, enum_ti: i64, 
   let r: TS = ts
   let sp: Span = ts_node_span(r, callee)
   let vkey: string = i64_to_string(enum_ti) + ":" + variant_name
-  let registered: Option<i64> = r.variant_set.get(vkey)
+  let registered: Option<i64> = r.reg.variant_set.get(vkey)
   let param_count: i64 = to_i64(-1)
   match registered:
     Option::Some(n):
@@ -1977,7 +2751,7 @@ fn check_variant_construction(ts: TS, node_idx: i64, callee: i64, enum_ti: i64, 
       return ts_add_diag(r, asp, "variant '" + variant_name + "' is constructed by parameter name: " + variant_name + "(name = value)")
     let arg_name: string = ts_tok_name(r, name_tidx)
     let pkey: string = vkey + ":" + arg_name
-    let param: Option<i64> = r.variant_set.get(pkey)
+    let param: Option<i64> = r.reg.variant_set.get(pkey)
     match param:
       Option::Some(param_index):
         let aj: i64 = 0
@@ -1988,19 +2762,22 @@ fn check_variant_construction(ts: TS, node_idx: i64, callee: i64, enum_ti: i64, 
               return ts_add_diag(r, dsp, "parameter '" + arg_name + "' of variant '" + variant_name + "' is given twice")
           aj = aj + 1
         let param_ti: i64 = to_i64(-1)
-        let ptype: Option<i64> = r.variant_set.get(pkey + ":type")
+        let ptype: Option<i64> = r.reg.variant_set.get(pkey + ":type")
         match ptype:
           Option::Some(t):
             param_ti = t
           Option::None:
             param_ti = to_i64(-1)
+        // A literal argument adopts the parameter's concrete type, as a
+        // call argument does (host).
+        r = fit_literal(r, args.get(ai), param_ti)
         let arg_ti: i64 = get_expr_type(r, args.get(ai))
         if arg_ti >= 0:
           if param_ti >= 0:
             if types_equal(r, arg_ti, param_ti) == false:
               let vsp: Span = ts_node_span(r, args.get(ai))
               r = ts_add_diag(r, vsp, "parameter '" + arg_name + "' of variant '" + variant_name + "' has type " + type_name(r, param_ti) + ", got " + type_name(r, arg_ti))
-        r.expr_types = r.expr_types.set(expr_id_key(r.tc.module_id, args.get(ai)) + ":param", param_index)
+        r.reg = reg_with_expr_types(r.reg, r.reg.expr_types.set(expr_id_key(r.tc.module_id, args.get(ai)) + ":param", param_index))
       Option::None:
         let nsp: Span = ts_tok_span(r, name_tidx)
         return ts_add_diag(r, nsp, "variant '" + variant_name + "' has no parameter '" + arg_name + "'")
@@ -2020,42 +2797,47 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
   match obj_type.kind:
     TypeKind::TStruct:
       let field_name: string = ts_tok_name(r, field_tidx)
-      // Field lookup reads this module's `type_info`; skip it when a
-      // cross-module generic head's layout would overrun it (element
-      // typing for such heads is deferred to a later program-level pass).
+      // Field lookup reads the layout's field symbols (program-wide, so
+      // another module's struct is read the same way); it is skipped when
+      // a cross-module generic head's layout would overrun `type_info`
+      // (element typing for such heads is deferred to a later
+      // program-level pass).
       let obj_walkable: bool = layout_walkable(r, obj_type)
       if obj_walkable:
         let fi: i64 = 0
         while fi < obj_type.info_count:
-          let f_name_tidx: i64 = r.type_info.get(obj_type.info_lp + fi * 2)
+          let f_sym: i64 = r.type_info.get(obj_type.info_lp + fi * 2)
           let f_type_idx: i64 = r.type_info.get(obj_type.info_lp + fi * 2 + 1)
-          let f_name: string = ts_tok_name(r, f_name_tidx)
+          let f_name: string = field_slot_name(r.tc.symbols, f_sym)
           if f_name == field_name:
             return ts_set_expr_type(r, node_idx, f_type_idx)
           fi = fi + 1
       // Try method lookup: look for mangled symbol "StructName.fieldName"
-      let mangled_name: string = obj_type.name + "." + field_name
-      let msym: i64 = find_method_sym_for_receiver(r.tc.symbols, mangled_name, r.tc.module_id, obj_type.decl_node)
+      let msym: i64 = find_method_sym_for_receiver(r.reg.methods, r.tc.module_id, field_name, obj_ti)
       if msym >= 0:
         let meth_ti: i64 = sym_type_at(r, msym)
         if meth_ti >= 0:
           return ts_set_expr_type(r, node_idx, meth_ti)
       // A derived concept the struct conforms to structurally provides
       // its methods; the concept's signature types the access.
+      // Every derived concept providing the member (by name, from the
+      // providers index) that the struct conforms to is consulted: one
+      // types the access; two is an ambiguity neither conformance
+      // outranks, and is diagnosed.
+      let provider_cti: i64 = to_i64(-1)
+      let provider_fn: i64 = to_i64(-1)
+      let providers: Vector<i64> = derived_providers_of(r.reg, field_name)
       let dci: i64 = 0
-      while dci < r.conform.derived_concepts.length():
-        let dcti: i64 = r.conform.derived_concepts.get(dci)
+      while dci + 1 < providers.length():
+        let dcti: i64 = providers.get(dci)
         if ts_conforms(r, obj_ti, dcti):
-          if dcti < r.types.length():
-            let dct: DaoType = r.types.get(dcti)
-            if layout_walkable(r, dct):
-              let dmi: i64 = 0
-              while dmi < dct.info_count:
-                let dm_name_tidx: i64 = r.type_info.get(dct.info_lp + dmi * 2)
-                if ts_tok_name(r, dm_name_tidx) == field_name:
-                  return ts_set_expr_type(r, node_idx, r.type_info.get(dct.info_lp + dmi * 2 + 1))
-                dmi = dmi + 1
-        dci = dci + 1
+          if provider_cti >= 0:
+            return ts_add_diag(r, ts_tok_span(r, field_tidx), "member '" + field_name + "' of type " + type_name(r, obj_ti) + " is provided by more than one derived concept (" + type_name(r, provider_cti) + ", " + type_name(r, dcti) + ")")
+          provider_cti = dcti
+          provider_fn = providers.get(dci + 1)
+        dci = dci + 2
+      if provider_cti >= 0:
+        return ts_set_concept_member(r, node_idx, provider_fn, provider_cti, obj_ti)
       // A member miss is a diagnostic only when the layout was walkable;
       // a cross-module generic head's fields are unknown here, so leave
       // such an access unresolved rather than falsely reporting.
@@ -2065,8 +2847,9 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
       return r
     TypeKind::TGenericParam:
       // A member access on a type parameter: its bound concepts are the
-      // only source of members.  The first bound requiring the member
-      // types the access through the concept's method signature (so a
+      // only source of members.  The first bound requiring the member,
+      // in declaration order (the host's constraint search), types the
+      // access through the concept's method signature (so a
       // call checks arity, argument types, and result against it).  With
       // no bound providing the member the access is a diagnostic.  A
       // bound recorded as -1 (a concept whose type is unreadable in this
@@ -2086,9 +2869,9 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
               if layout_walkable(r, ct):
                 let gm: i64 = 0
                 while gm < ct.info_count:
-                  let req_name_tidx: i64 = r.type_info.get(ct.info_lp + gm * 2)
-                  if ts_tok_name(r, req_name_tidx) == m_name:
-                    return ts_set_expr_type(r, node_idx, r.type_info.get(ct.info_lp + gm * 2 + 1))
+                  let gm_fn_ti: i64 = r.type_info.get(ct.info_lp + gm * 2 + 1)
+                  if method_type_named(r, gm_fn_ti, m_name):
+                    return ts_set_concept_member(r, node_idx, gm_fn_ti, cti, obj_ti)
                   gm = gm + 1
               else:
                 unreadable = true
@@ -2102,7 +2885,17 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
         else:
           r = ts_add_diag(r, spg, "'" + m_name + "' on unconstrained type parameter '" + obj_type.name + "'")
       return r
-  return r
+  // Any other receiver (a builtin, a pointer, an enum) has exactly the
+  // methods an `extend` visible here gave it (`extend i32 as Show`,
+  // the prelude's extends); a member no such extend provides is a
+  // diagnostic, as on a struct.
+  let member: string = ts_tok_name(r, field_tidx)
+  let ext_sym: i64 = find_method_sym_for_receiver(r.reg.methods, r.tc.module_id, member, obj_ti)
+  if ext_sym >= 0:
+    let ext_ti: i64 = sym_type_at(r, ext_sym)
+    if ext_ti >= 0:
+      return ts_set_expr_type(r, node_idx, ext_ti)
+  return ts_add_diag(r, ts_tok_span(r, field_tidx), "no method '" + member + "' on type " + type_name(r, obj_ti))
 
 fn check_pipe_expr(ts: TS, node_idx: i64, left: i64, right: i64): TS
   let r: TS = check_expr(ts, left)
@@ -2189,7 +2982,7 @@ fn check_stmt(ts: TS, node_idx: i64): TS
       if mode_name == "parallel":
         return check_body_stmts(ts, body_lp)
       return ts_add_diag(ts, ts_tok_span(ts, name_tidx), "unknown mode '" + mode_name + "'")
-    Node::YieldS(val_node):
+    Node::YieldS(yield_tidx, val_node):
       // `yield` is legal only in a generator function (declared
       // `Generator<T>`), never inside a `resource memory` block, and its
       // value must be `T` (CONTRACT_SYNTAX_SURFACE.md, generator rules).
@@ -2226,11 +3019,13 @@ fn check_let_stmt(ts: TS, node_idx: i64, name_tidx: i64, type_node: i64, init_no
   let r: TS = ts
   let annot_ti: i64 = to_i64(-1)
   if type_node >= 0:
-    let tr: TypeR = resolve_ast_type(r, type_node)
+    let diags_before: i64 = r.diags.length()
+    let tr: TypeR = resolve_annotation(r, type_node, to_i64(-1))
     r = tr.ts
     annot_ti = tr.type_idx
+    // An annotation the resolution itself diagnosed is not also unknown.
     if annot_ti < 0:
-      if type_node >= 0:
+      if r.diags.length() == diags_before:
         let sp: Span = ts_node_span(r, type_node)
         r = ts_add_diag(r, sp, "unknown type in annotation")
   if init_node >= 0:
@@ -2245,7 +3040,7 @@ fn check_let_stmt(ts: TS, node_idx: i64, name_tidx: i64, type_node: i64, init_no
           let sp: Span = ts_tok_span(r, name_tidx)
           r = ts_add_diag(r, sp, "type mismatch: cannot assign " + type_name(r, init_ti) + " to " + type_name(r, annot_ti))
   // Register local type
-  let local_sym: i64 = find_sym_by_decl(r, node_idx, "Local")
+  let local_sym: i64 = member_sym_of(r.reg.index, r.tc.module_id, node_idx, "Local", "")
   if local_sym >= 0:
     if annot_ti >= 0:
       r = ts_set_sym_type(r, local_sym, annot_ti)
@@ -2378,7 +3173,7 @@ fn check_pattern(ts: TS, pat_node: i64): TS
           if segs.length() >= 2:
             variant_name = ts_tok_name(r, segs.get(segs.length() - 1))
       if variant_name != "":
-        let registered: Option<i64> = r.variant_set.get(i64_to_string(callee_ti) + ":" + variant_name)
+        let registered: Option<i64> = r.reg.variant_set.get(i64_to_string(callee_ti) + ":" + variant_name)
         match registered:
           Option::Some(param_count):
             let sp: Span = ts_node_span(r, callee)
@@ -2416,7 +3211,7 @@ fn check_pattern(ts: TS, pat_node: i64): TS
         let segs: Vector<i64> = read_list(r.tc.idx_data, seg_lp)
         if segs.length() >= 2:
           let bare_name: string = ts_tok_name(r, segs.get(segs.length() - 1))
-          let bare: Option<i64> = r.variant_set.get(i64_to_string(pat_ti) + ":" + bare_name)
+          let bare: Option<i64> = r.reg.variant_set.get(i64_to_string(pat_ti) + ":" + bare_name)
           match bare:
             Option::Some(param_count):
               if param_count > to_i64(0):
@@ -2512,33 +3307,39 @@ fn tc_check_expr_fn_body(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, 
       if pt_r.type_idx >= 0:
         r = ts_set_sym_type(r, p_sym, pt_r.type_idx)
     pi = pi + 2
-  r = check_expr(r, body_expr)
+  r = tc_check_expr_body_value(r, body_expr)
+  r.ctx = old_ctx
+  return r
+
+// An expression body's value, against the entered return context: the
+// body is the function's return, so a literal adopts the return type as
+// a `return` value does (check_return_stmt).
+fn tc_check_expr_body_value(ts: TS, body_expr: i64): TS
+  if ts.ctx.in_generator > 0:
+    // The body is the function's return value (HIR lowers it as
+    // `return <expr>`), and a generator produces values only by `yield`.
+    let rg: TS = check_expr(ts, body_expr)
+    return ts_add_diag(rg, ts_node_span(rg, body_expr), "'return value' is invalid in a generator function; use yield to produce values")
+  let r: TS = check_expr(ts, body_expr)
+  if r.ctx.return_type >= 0:
+    r = fit_literal(r, body_expr, r.ctx.return_type)
   let body_ti: i64 = get_expr_type(r, body_expr)
   if body_ti >= 0:
     if r.ctx.return_type >= 0:
       if types_equal(r, body_ti, r.ctx.return_type) == false:
         let sp: Span = ts_node_span(r, body_expr)
         r = ts_add_diag(r, sp, "expression body type mismatch: expected " + type_name(r, r.ctx.return_type) + ", got " + type_name(r, body_ti))
-  r.ctx = old_ctx
   return r
 
-fn tc_check_method_body(ts: TS, class_decl_idx: i64, meth_idx: i64, m_name_tidx: i64, m_params_lp: i64, m_ret_type: i64, m_body_lp: i64): TS
+// Enter a method's body: its return context from its function type,
+// `self` typed as the owner, the other parameters as annotated.
+fn tc_enter_method(ts: TS, owner_ti: i64, meth_idx: i64, m_name_tidx: i64, m_params_lp: i64): TS
   let r: TS = ts
   let fn_ti: i64 = to_i64(-1)
-  // Find the mangled symbol for this method
-  let class_name: string = ""
-  let class_node: Node = r.tc.nodes.get(class_decl_idx)
-  match class_node:
-    Node::ClassDeclD(cn_tidx, cn_tp, cn_fl, cn_ml):
-      class_name = ts_tok_name(r, cn_tidx)
-  let mname: string = ts_tok_name(r, m_name_tidx)
-  let mangled: string = class_name + "." + mname
-  let msym: i64 = find_visible_method_sym(r.tc.symbols, mangled, r.tc.module_id)
+  let msym: i64 = callable_sym_of_decl(r, meth_idx)
   if msym >= 0:
     fn_ti = sym_type_at(r, msym)
-  let old_ctx: CheckCtx = r.ctx
   r = tc_enter_fn_ctx(r, fn_ti)
-  // Declare param types — self gets the enclosing struct type
   let pairs: Vector<i64> = read_pairs(r.tc.idx_data, m_params_lp)
   let pi: i64 = 0
   while pi < pairs.length():
@@ -2548,68 +3349,29 @@ fn tc_check_method_body(ts: TS, class_decl_idx: i64, meth_idx: i64, m_name_tidx:
     let p_sym: i64 = find_param_sym(r, meth_idx, p_name)
     if p_sym >= 0:
       if p_name == "self":
-        // Self type is the enclosing struct
-        let struct_sym: i64 = find_sym_by_decl(r, class_decl_idx, "Type")
-        if struct_sym >= 0:
-          let struct_ti: i64 = sym_type_at(r, struct_sym)
-          if struct_ti >= 0:
-            r = ts_set_sym_type(r, p_sym, struct_ti)
+        if owner_ti >= 0:
+          r = ts_set_sym_type(r, p_sym, owner_ti)
       else:
         let pt_r: TypeR = resolve_ast_type(r, p_type_node)
         r = pt_r.ts
         if pt_r.type_idx >= 0:
           r = ts_set_sym_type(r, p_sym, pt_r.type_idx)
     pi = pi + 2
+  return r
+
+// A block-bodied method of a class or an extend.
+fn tc_check_method_body(ts: TS, owner_ti: i64, meth_idx: i64, m_name_tidx: i64, m_params_lp: i64, m_body_lp: i64): TS
+  let old_ctx: CheckCtx = ts.ctx
+  let r: TS = tc_enter_method(ts, owner_ti, meth_idx, m_name_tidx, m_params_lp)
   r = check_body_stmts(r, m_body_lp)
   r.ctx = old_ctx
   return r
 
-fn tc_check_extend_method_body(ts: TS, extend_decl_idx: i64, meth_idx: i64, m_name_tidx: i64, m_params_lp: i64, m_ret_type: i64, m_body_lp: i64): TS
-  let r: TS = ts
-  // Get target type name from the extend decl
-  let target_name: string = ""
-  let extend_node: Node = r.tc.nodes.get(extend_decl_idx)
-  match extend_node:
-    Node::ExtendDeclD(target_type_node, cn_tidx, e_mlp):
-      target_name = extract_type_name(r, target_type_node)
-  let mname: string = ts_tok_name(r, m_name_tidx)
-  let mangled: string = target_name + "." + mname
-  let fn_ti: i64 = to_i64(-1)
-  let msym: i64 = find_visible_method_sym(r.tc.symbols, mangled, r.tc.module_id)
-  if msym >= 0:
-    fn_ti = sym_type_at(r, msym)
-  let old_ctx: CheckCtx = r.ctx
-  r = tc_enter_fn_ctx(r, fn_ti)
-  // Declare param types — self gets the target type
-  let pairs: Vector<i64> = read_pairs(r.tc.idx_data, m_params_lp)
-  let pi: i64 = 0
-  while pi < pairs.length():
-    let p_tidx: i64 = pairs.get(pi)
-    let p_type_node: i64 = pairs.get(pi + 1)
-    let p_name: string = ts_tok_name(r, p_tidx)
-    let p_sym: i64 = find_param_sym(r, meth_idx, p_name)
-    if p_sym >= 0:
-      if p_name == "self":
-        // Self type is the target type
-        let target_ti: i64 = to_i64(-1)
-        let tsi: i64 = 0
-        while tsi < r.tc.symbols.length():
-          let tsym: Symbol = r.tc.symbols.get(tsi)
-          if tsym.name == target_name:
-            if symbol_kind_name(tsym.kind) == "Type":
-              target_ti = sym_type_at(r, tsi)
-            if symbol_kind_name(tsym.kind) == "Builtin":
-              target_ti = sym_type_at(r, tsi)
-          tsi = tsi + 1
-        if target_ti >= 0:
-          r = ts_set_sym_type(r, p_sym, target_ti)
-      else:
-        let pt_r: TypeR = resolve_ast_type(r, p_type_node)
-        r = pt_r.ts
-        if pt_r.type_idx >= 0:
-          r = ts_set_sym_type(r, p_sym, pt_r.type_idx)
-    pi = pi + 2
-  r = check_body_stmts(r, m_body_lp)
+// An expression-bodied method of a class or an extend.
+fn tc_check_method_expr_body(ts: TS, owner_ti: i64, meth_idx: i64, m_name_tidx: i64, m_params_lp: i64, m_body_expr: i64): TS
+  let old_ctx: CheckCtx = ts.ctx
+  let r: TS = tc_enter_method(ts, owner_ti, meth_idx, m_name_tidx, m_params_lp)
+  r = tc_check_expr_body_value(r, m_body_expr)
   r.ctx = old_ctx
   return r
 
@@ -2617,28 +3379,213 @@ fn tc_check_extend_method_body(ts: TS, extend_decl_idx: i64, meth_idx: i64, m_na
 // Section 44b: Derived conformance (the host's compute_derived_conformances)
 // =========================================================================
 
-fn conform_key(ti: i64, concept_ti: i64): string
-  return i64_to_string(ti) + ":" + i64_to_string(concept_ti)
+// The conformance map is keyed by (type, concept, visible-from): an
+// `extend` reaches only its declaring module (CONTRACT_MODULE_SYSTEM.md
+// §5.1–2), so its entry carries that module id and two modules' extends
+// of one type coexist; one in the prelude is seen by every module
+// (§5.3), and a derived conformance is a property of the type — both
+// carry conform_everywhere().
+fn conform_key(ti: i64, concept_ti: i64, from_module: i64): string
+  return i64_to_string(ti) + ":" + i64_to_string(concept_ti) + ":" + i64_to_string(from_module)
 
-// Whether type `ti` is known in this module to conform to concept
-// `concept_ti` — by an explicit `extend`, or derived — a constant-time
-// lookup in the conformance map.
+fn conform_everywhere(): i64 -> to_i64(-1)
+
+// Whether type `ti` conforms to concept `concept_ti` as seen from module
+// `from_module` — everywhere, or by an `extend` of that module — two
+// constant-time lookups in the conformance map.
+fn reg_conforms(reg: Registry, ti: i64, concept_ti: i64, from_module: i64): bool
+  if reg.conform.known.contains(conform_key(ti, concept_ti, conform_everywhere())):
+    return true
+  return reg.conform.known.contains(conform_key(ti, concept_ti, from_module))
+
+// reg_conforms as seen from the module being checked.
 fn ts_conforms(ts: TS, ti: i64, concept_ti: i64): bool
-  let found: Option<i64> = ts.conform.known.get(conform_key(ti, concept_ti))
-  match found:
-    Option::Some(v):
-      return true
-    Option::None:
-      return false
-  return false
+  return reg_conforms(ts.reg, ti, concept_ti, ts.tc.module_id)
 
-fn ts_record_conformance(ts: TS, ti: i64, concept_ti: i64): TS
-  ts.conform = Conformance(ts.conform.known.set(conform_key(ti, concept_ti), to_i64(1)), ts.conform.derived_concepts)
+// Record that `ti` conforms to `concept_ti`, visible from `from_module`
+// (a module id, or conform_everywhere()).
+fn reg_record_conformance(reg: Registry, ti: i64, concept_ti: i64, from_module: i64): Registry
+  let c: Conformance = reg.conform
+  return reg_with_conform(reg, Conformance(c.known.set(conform_key(ti, concept_ti, from_module), to_i64(1)), c.derived_concepts, c.subst_cache, c.providers))
+
+fn ts_record_conformance(ts: TS, ti: i64, concept_ti: i64, from_module: i64): TS
+  ts.reg = reg_record_conformance(ts.reg, ti, concept_ti, from_module)
   return ts
 
+// Whether the module being checked is a prelude module
+// (CONTRACT_MODULE_SYSTEM.md §7), from the program's index.
+fn module_in_prelude(ts: TS): bool
+  return ts.reg.index.prelude_modules.contains(i64_to_string(ts.tc.module_id))
+
+// Whether declarations of modules `a` and `b` share one resolver
+// namespace, where one name declared twice is a duplicate: the same
+// module, or two of the prelude's files.
+fn same_resolver_namespace(ts: TS, a: i64, b: i64): bool
+  if a == b:
+    return true
+  let pm: HashMap<i64> = ts.reg.index.prelude_modules
+  return pm.contains(i64_to_string(a)) and pm.contains(i64_to_string(b))
+
+// Record a `derived concept`, and index it under each member it
+// provides together with that member's signature, so a member access
+// consults only the concepts providing that name and reads the
+// signature directly (provider_key, provider_fn_key).
 fn ts_add_derived_concept(ts: TS, concept_ti: i64): TS
-  ts.conform = Conformance(ts.conform.known, ts.conform.derived_concepts.push(concept_ti))
+  let c: Conformance = ts.reg.conform
+  let providers: HashMap<i64> = c.providers
+  if concept_ti < ts.types.length():
+    let ct: DaoType = ts.types.get(concept_ti)
+    if layout_walkable(ts, ct):
+      let mi: i64 = 0
+      while mi < ct.info_count:
+        let fn_ti: i64 = ts.type_info.get(ct.info_lp + mi * 2 + 1)
+        let name: string = method_type_name(ts, fn_ti)
+        let n: i64 = hm_get_or(providers, name, to_i64(0))
+        providers = providers.set(provider_key(name, n), concept_ti)
+        providers = providers.set(provider_fn_key(name, n), fn_ti)
+        providers = providers.set(name, n + 1)
+        mi = mi + 1
+  ts.reg = reg_with_conform(ts.reg, Conformance(c.known, c.derived_concepts.push(concept_ti), c.subst_cache, providers))
   return ts
+
+fn provider_key(name: string, j: i64): string
+  return name + ":" + i64_to_string(j)
+
+fn provider_fn_key(name: string, j: i64): string
+  return name + ":" + i64_to_string(j) + ":fn"
+
+// The derived concepts providing a member named `name`, in
+// declaration order, as flat (concept type, member signature) pairs.
+fn derived_providers_of(reg: Registry, name: string): Vector<i64>
+  let out: Vector<i64> = Vector<i64>::new()
+  let n: i64 = hm_get_or(reg.conform.providers, name, to_i64(0))
+  let j: i64 = 0
+  while j < n:
+    out = out.push(hm_get_or(reg.conform.providers, provider_key(name, j), to_i64(-1)))
+    out = out.push(hm_get_or(reg.conform.providers, provider_fn_key(name, j), to_i64(-1)))
+    j = j + 1
+  return out
+
+// A concept type: `builtin_id` records the declaring module, `decl_node`
+// its declaration, and the method table (name-token / method-type pairs)
+// lives at `info_lp` for `info_count` methods.
+fn concept_type(module_id: i64, name: string, decl_idx: i64, info_lp: i64, info_count: i64): DaoType
+  return DaoType(TypeKind::TConcept, module_id, name, decl_idx, info_lp, info_count, to_i64(-1), to_i64(-1))
+
+// A function type derived from `ft` with a different parameter table and
+// result: `info_lp` / `info_count` locate the parameter type slots.
+fn fn_type_with(ft: DaoType, info_lp: i64, info_count: i64, ret: i64): DaoType
+  return DaoType(TypeKind::TFunction, ft.builtin_id, ft.name, ft.decl_node, info_lp, info_count, ret, ft.pointee)
+
+// Whether the method type `fn_ti` is the concept method named `name`.  A
+// method's type carries its name as "fn <name>", so the match reads the
+// shared type table and holds from any module — a method-name token
+// indexes the declaring module's token vector and is never read here.
+fn method_type_named(ts: TS, fn_ti: i64, name: string): bool
+  return method_type_name(ts, fn_ti) == name
+
+// The method name a function type carries (its name is "fn <name>"),
+// or "" for no function type.
+fn method_type_name(ts: TS, fn_ti: i64): string
+  if fn_ti < 0:
+    return ""
+  if fn_ti >= ts.types.length():
+    return ""
+  let mt: DaoType = ts.types.get(fn_ti)
+  if starts_with(mt.name, "fn "):
+    return substring(mt.name, to_i64(3), length(mt.name) - 3)
+  return ""
+
+// `ti` with the concept's own type replaced by the receiver's: the type
+// itself, the pointee of a pointer to it, or the element of a generator
+// of it, recursively.  Any other generic annotation resolves to no type
+// in this checker (deferred by design), so no other compound occurrence
+// of the concept can appear here.
+fn subst_self(ts: TS, ti: i64, concept_ti: i64, self_ti: i64): TypeR
+  if ti < 0:
+    return TypeR(ts, ti)
+  if ti == concept_ti:
+    return TypeR(ts, self_ti)
+  if ti >= ts.types.length():
+    return TypeR(ts, ti)
+  let t: DaoType = ts.types.get(ti)
+  match t.kind:
+    TypeKind::TPointer:
+      let inner: TypeR = subst_self(ts, t.pointee, concept_ti, self_ti)
+      if inner.type_idx != t.pointee:
+        return find_or_add_pointer_type(inner.ts, inner.type_idx)
+      return TypeR(inner.ts, ti)
+    TypeKind::TGenerator:
+      let elem: TypeR = subst_self(ts, t.pointee, concept_ti, self_ti)
+      if elem.type_idx != t.pointee:
+        return find_or_add_generator_type(elem.ts, elem.type_idx)
+      return TypeR(elem.ts, ti)
+  return TypeR(ts, ti)
+
+// The signature a concept method has for receiver type `self_ti`: the
+// concept's own name in a parameter or result position means the
+// conforming type (CONTRACT_SYNTAX_SURFACE.md, concepts), so those slots
+// are substituted; a signature that names the concept nowhere is returned
+// as is.  Substituted signatures are interned per (method, concept,
+// receiver) so a call site never allocates twice.
+fn concept_method_sig(ts: TS, fn_ti: i64, concept_ti: i64, self_ti: i64): TypeR
+  let r: TS = ts
+  if fn_ti < 0:
+    return TypeR(r, fn_ti)
+  if fn_ti >= r.types.length():
+    return TypeR(r, fn_ti)
+  let key: string = i64_to_string(fn_ti) + ":" + i64_to_string(concept_ti) + ":" + i64_to_string(self_ti)
+  let cached: i64 = hm_get_or(r.reg.conform.subst_cache, key, to_i64(-1))
+  if cached >= 0:
+    return TypeR(r, cached)
+  let ft: DaoType = r.types.get(fn_ti)
+  if fn_params_walkable(r, ft) == false:
+    return TypeR(r, fn_ti)
+  let changed: bool = false
+  let slots: Vector<i64> = Vector<i64>::new()
+  let pi: i64 = 0
+  while pi < ft.info_count:
+    let s: i64 = r.type_info.get(ft.info_lp + pi)
+    let ss: TypeR = subst_self(r, s, concept_ti, self_ti)
+    r = ss.ts
+    if ss.type_idx != s:
+      changed = true
+    slots = slots.push(ss.type_idx)
+    pi = pi + 1
+  let rs: TypeR = subst_self(r, ft.ret_type, concept_ti, self_ti)
+  r = rs.ts
+  let ret: i64 = rs.type_idx
+  if ret != ft.ret_type:
+    changed = true
+  if changed == false:
+    return TypeR(r, fn_ti)
+  let start: i64 = r.type_info.length()
+  let si: i64 = 0
+  while si < slots.length():
+    r = ts_push_type_info(r, slots.get(si))
+    si = si + 1
+  let nr: TypeR = ts_add_type(r, fn_type_with(ft, start, slots.length(), ret))
+  r = nr.ts
+  let c2: Conformance = r.reg.conform
+  r.reg = reg_with_conform(r.reg, Conformance(c2.known, c2.derived_concepts, c2.subst_cache.set(key, nr.type_idx), c2.providers))
+  return TypeR(r, nr.type_idx)
+
+// Type a member access that concept `concept_ti` provides — through a
+// derived conformance or a bound — as the concept method's signature for
+// the receiver, and record the providing concept under the access's
+// `:concept` key.  No implementation exists to dispatch such a member
+// to yet; the lowering passes read that key to reject it fail-closed
+// instead of lowering a field access.
+fn ts_set_concept_member(ts: TS, node_idx: i64, fn_ti: i64, concept_ti: i64, self_ti: i64): TS
+  let sr: TypeR = concept_method_sig(ts, fn_ti, concept_ti, self_ti)
+  let r: TS = sr.ts
+  r.reg = reg_with_expr_types(r.reg, r.reg.expr_types.set(concept_member_key(r.tc.module_id, node_idx), concept_ti))
+  return ts_set_expr_type(r, node_idx, sr.type_idx)
+
+// The expression-table key under which a member access records the
+// concept that provides it (see ts_set_concept_member).
+fn concept_member_key(module_id: i64, node_idx: i64): string
+  return expr_id_key(module_id, node_idx) + ":concept"
 
 // A `derived concept` is conformed to structurally: a class conforms when
 // every field's type conforms (explicitly, or itself derived), computed
@@ -2647,14 +3594,27 @@ fn ts_add_derived_concept(ts: TS, concept_ti: i64): TS
 // for the concept keeps that conformance.  (The bootstrap parses no
 // inline `as` / `deny` blocks; an extend is the explicit form here.)
 //
-// The declarations are walked once up front: every `derived concept` is
-// collected, and every `extend <type> as <concept>` is resolved into the
-// conformance map (the resolver bound each extend's concept name; the
-// target type is resolved here).  Classes and their field types are then
-// indexed once, and derivation propagates through a worklist over that
-// index, reading only the map.
-fn tc_compute_derived_conformances(ts: TS, decls: Vector<i64>): TS
+// Two program-wide steps share the work.  First every module's
+// declarations are collected (tc_collect_conformances): each `derived
+// concept`, and each `extend <type> as <concept>` resolved into the
+// conformance map (the resolver bound the extend's concept name; the
+// target type is resolved here).  Then every module's classes and their
+// field types are indexed once (index_file_classes), and derivation
+// propagates through one worklist over that program-wide index
+// (derive_program_conformances), reading only the map.  Collection
+// precedes every derivation and derivation precedes every body, so a
+// class derives through a concept or extend declared in any module it
+// can see, whatever the order the modules are checked in — the
+// prelude's files see one another as one namespace.
+//
+// Whether a field conforms is asked from the class's own module — the
+// host's rule: an `extend` in another module is not in scope there
+// unless it is the prelude's, so a class never derives through it.
+fn tc_collect_conformances(ts: TS, decls: Vector<i64>): TS
   let r: TS = ts
+  let extend_visible_from: i64 = r.tc.module_id
+  if module_in_prelude(r):
+    extend_visible_from = conform_everywhere()
   let i: i64 = 0
   while i < decls.length():
     let decl_idx: i64 = decls.get(i)
@@ -2662,7 +3622,7 @@ fn tc_compute_derived_conformances(ts: TS, decls: Vector<i64>): TS
     match node:
       Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
         if is_derived > 0:
-          let csym: i64 = find_sym_by_decl(r, decl_idx, "Type")
+          let csym: i64 = type_sym_of_decl(r, decl_idx)
           if csym >= 0:
             let cti: i64 = sym_type_at(r, csym)
             if cti >= 0:
@@ -2677,79 +3637,100 @@ fn tc_compute_derived_conformances(ts: TS, decls: Vector<i64>): TS
           Option::None:
             esym = to_i64(-1)
         if esym >= 0:
-          let ecti: i64 = sym_type_at(r, esym)
+          // A name after `as` that is no concept, and a concept-valued
+          // target, were diagnosed by the satisfaction pass; neither
+          // conforms anything.
+          let ecti: i64 = concept_named_by(r, sym_type_at(r, esym))
           if ecti >= 0:
             let tr: TypeR = resolve_ast_type(r, target_type_node)
             r = tr.ts
-            if tr.type_idx >= 0:
-              r = ts_record_conformance(r, tr.type_idx, ecti)
+            if tr.type_idx >= 0 and concept_named_by(r, tr.type_idx) < 0:
+              r = ts_record_conformance(r, tr.type_idx, ecti, extend_visible_from)
     i = i + 1
-  if r.conform.derived_concepts.length() == 0:
-    return r
-  // Index the classes once: each class's struct type and field types are
-  // read from the type layout a single time, and a reverse index maps a
-  // field type to the classes carrying a field of that type.  Derivation
-  // then propagates through a worklist — a class is re-examined only when
-  // one of its field types newly conforms — so a dependency chain costs
-  // its edges, never a rescan of every declaration per class.
-  let class_tis: Vector<i64> = Vector<i64>::new()
-  let cf_start: Vector<i64> = Vector<i64>::new()
-  let cf_count: Vector<i64> = Vector<i64>::new()
-  let cf_tis: Vector<i64> = Vector<i64>::new()
-  // "n:<fti>" → number of dependents of field type fti;
-  // "d:<fti>:<j>" → the j-th dependent's class index.
-  let dep_index: HashMap<i64> = HashMap<i64>::new()
+  return r
+
+// The program's classes, indexed once for derivation: each class's
+// struct type, declaring module (what its fields' conformance is asked
+// from), and field types, and a reverse index from a field type to the
+// classes carrying a field of that type.
+class ClassIndex:
+  tis: Vector<i64>       // class k's struct type
+  mods: Vector<i64>      // class k's declaring module
+  f_start: Vector<i64>   // class k's first slot in f_tis
+  f_count: Vector<i64>   // class k's field count
+  f_tis: Vector<i64>     // every class's field types, contiguous per class
+  deps: HashMap<i64>     // "n:<fti>" → dependents of field type fti; "d:<fti>:<j>" → the j-th one's k
+
+fn class_index_empty(): ClassIndex
+  return ClassIndex(Vector<i64>::new(), Vector<i64>::new(), Vector<i64>::new(), Vector<i64>::new(), Vector<i64>::new(), HashMap<i64>::new())
+
+// Add a file's classes to the index: each class's struct type and field
+// types are read from the type layout a single time.
+fn index_file_classes(ts: TS, file_node_idx: i64, idx: ClassIndex): ClassIndex
+  let file_node: Node = ts.tc.nodes.get(file_node_idx)
+  match file_node:
+    Node::FileN(module_decl, imports_lp, decls_lp):
+      return index_module_classes(ts, read_list(ts.tc.idx_data, decls_lp), idx)
+  return idx
+
+fn index_module_classes(ts: TS, decls: Vector<i64>, idx: ClassIndex): ClassIndex
+  let x: ClassIndex = idx
   let ci: i64 = 0
   while ci < decls.length():
     let cdecl: i64 = decls.get(ci)
-    let cnode: Node = r.tc.nodes.get(cdecl)
+    let cnode: Node = ts.tc.nodes.get(cdecl)
     match cnode:
       Node::ClassDeclD(cname_tidx, ctparams_lp, cfields_lp, cmethods_lp):
-        let ssym: i64 = find_sym_by_decl(r, cdecl, "Type")
+        let ssym: i64 = type_sym_of_decl(ts, cdecl)
         if ssym >= 0:
-          let sti: i64 = sym_type_at(r, ssym)
+          let sti: i64 = sym_type_at(ts, ssym)
           if sti >= 0:
-            let st: DaoType = r.types.get(sti)
-            if layout_walkable(r, st):
-              let k: i64 = class_tis.length()
-              class_tis = class_tis.push(sti)
-              cf_start = cf_start.push(cf_tis.length())
-              cf_count = cf_count.push(st.info_count)
+            let st: DaoType = ts.types.get(sti)
+            if layout_walkable(ts, st):
+              let k: i64 = x.tis.length()
+              x.tis = x.tis.push(sti)
+              x.mods = x.mods.push(ts.tc.module_id)
+              x.f_start = x.f_start.push(x.f_tis.length())
+              x.f_count = x.f_count.push(st.info_count)
               let fi: i64 = 0
               while fi < st.info_count:
-                let fti: i64 = r.type_info.get(st.info_lp + fi * 2 + 1)
-                cf_tis = cf_tis.push(fti)
+                let fti: i64 = ts.type_info.get(st.info_lp + fi * 2 + 1)
+                x.f_tis = x.f_tis.push(fti)
                 if fti >= 0:
                   let nkey: string = "n:" + i64_to_string(fti)
-                  let n: i64 = hm_get_or(dep_index, nkey, to_i64(0))
-                  dep_index = dep_index.set("d:" + i64_to_string(fti) + ":" + i64_to_string(n), k)
-                  dep_index = dep_index.set(nkey, n + 1)
+                  let n: i64 = hm_get_or(x.deps, nkey, to_i64(0))
+                  x.deps = x.deps.set("d:" + i64_to_string(fti) + ":" + i64_to_string(n), k)
+                  x.deps = x.deps.set(nkey, n + 1)
                 fi = fi + 1
     ci = ci + 1
-  // Per derived concept: count each class's fields that do not yet
-  // conform (one pass over its fields), record the classes with none, and
-  // propagate along the dependency edges — each newly conforming type
-  // decrements the count of every class carrying a field of that type,
-  // once per such field; a class is recorded when its count reaches zero.
-  // Every field is examined once and every edge once.  A field of
-  // unresolved type blocks its class (count -1).
+  return x
+
+// Derive every indexed class's conformances to every derived concept.
+// Per concept: count each class's fields that do not yet conform (one
+// pass over its fields), record the classes with none, and propagate
+// along the dependency edges — each newly conforming type decrements
+// the count of every class carrying a field of that type, once per such
+// field; a class is recorded when its count reaches zero.  Every field
+// is examined once and every edge once.  A field of unresolved type
+// blocks its class (count -1).
+fn derive_program_conformances(reg: Registry, idx: ClassIndex): Registry
+  let r: Registry = reg
   let di: i64 = 0
   while di < r.conform.derived_concepts.length():
     let dcti: i64 = r.conform.derived_concepts.get(di)
     let pending: Vector<i64> = Vector<i64>::new()
     let queue: Vector<i64> = Vector<i64>::new()
     let k: i64 = 0
-    while k < class_tis.length():
-      let sti: i64 = class_tis.get(k)
+    while k < idx.tis.length():
       let cnt: i64 = 0
       let blocked: bool = false
       let fi: i64 = 0
-      while fi < cf_count.get(k):
-        let fti: i64 = cf_tis.get(cf_start.get(k) + fi)
+      while fi < idx.f_count.get(k):
+        let fti: i64 = idx.f_tis.get(idx.f_start.get(k) + fi)
         if fti < 0:
           blocked = true
         else:
-          if ts_conforms(r, fti, dcti) == false:
+          if reg_conforms(r, fti, dcti, idx.mods.get(k)) == false:
             cnt = cnt + 1
         fi = fi + 1
       if blocked:
@@ -2763,34 +3744,50 @@ fn tc_compute_derived_conformances(ts: TS, decls: Vector<i64>): TS
     // would let a later class omit an already-derived field from its
     // count and still receive that field's decrement.
     let zk: i64 = 0
-    while zk < class_tis.length():
+    while zk < idx.tis.length():
       if pending.get(zk) == 0:
-        let zsti: i64 = class_tis.get(zk)
-        if ts_conforms(r, zsti, dcti) == false:
-          r = ts_record_conformance(r, zsti, dcti)
-          queue = queue.push(zsti)
+        let zstep: DeriveStep = derive_class(r, idx, zk, dcti, queue)
+        r = zstep.reg
+        queue = zstep.queue
       zk = zk + 1
     let qi: i64 = 0
     while qi < queue.length():
       let done_ti: i64 = queue.get(qi)
-      let dn: i64 = hm_get_or(dep_index, "n:" + i64_to_string(done_ti), to_i64(0))
+      let dn: i64 = hm_get_or(idx.deps, "n:" + i64_to_string(done_ti), to_i64(0))
       let dj: i64 = 0
       while dj < dn:
-        let dep_k: i64 = hm_get_or(dep_index, "d:" + i64_to_string(done_ti) + ":" + i64_to_string(dj), to_i64(-1))
-        if dep_k >= 0:
+        let dep_k: i64 = hm_get_or(idx.deps, "d:" + i64_to_string(done_ti) + ":" + i64_to_string(dj), to_i64(-1))
+        // A dependent whose own module's `extend` already conformed this
+        // type counted it as conforming; only the others are decremented.
+        if dep_k >= 0 and r.conform.known.contains(conform_key(done_ti, dcti, idx.mods.get(dep_k))) == false:
           let p: i64 = pending.get(dep_k)
           if p > 0:
             let p2: i64 = p - 1
             pending = pending.set(dep_k, p2)
             if p2 == 0:
-              let dsti: i64 = class_tis.get(dep_k)
-              if ts_conforms(r, dsti, dcti) == false:
-                r = ts_record_conformance(r, dsti, dcti)
-                queue = queue.push(dsti)
+              let dstep: DeriveStep = derive_class(r, idx, dep_k, dcti, queue)
+              r = dstep.reg
+              queue = dstep.queue
         dj = dj + 1
       qi = qi + 1
     di = di + 1
   return r
+
+// The registries and worklist after a class is recorded as deriving.
+class DeriveStep:
+  reg: Registry
+  queue: Vector<i64>
+
+// Record that class `k` derives `dcti` — visible everywhere, as a
+// derivation is a property of the type — and queue it for propagation
+// to its dependents.  A class already conforming everywhere (the
+// prelude's extend) was counted as conforming by every dependent, so
+// there is nothing to record or propagate.
+fn derive_class(reg: Registry, idx: ClassIndex, k: i64, dcti: i64, queue: Vector<i64>): DeriveStep
+  let sti: i64 = idx.tis.get(k)
+  if reg.conform.known.contains(conform_key(sti, dcti, conform_everywhere())):
+    return DeriveStep(reg, queue)
+  return DeriveStep(reg_record_conformance(reg, sti, dcti, conform_everywhere()), queue.push(sti))
 
 fn hm_get_or(m: HashMap<i64>, key: string, dflt: i64): i64
   let found: Option<i64> = m.get(key)
@@ -2801,12 +3798,52 @@ fn hm_get_or(m: HashMap<i64>, key: string, dflt: i64): i64
       return dflt
   return dflt
 
+// The conformance-collection pass over a file (tc_collect_conformances).
+fn tc_pass_collect(ts: TS, file_node_idx: i64): TS
+  let file_node: Node = ts.tc.nodes.get(file_node_idx)
+  match file_node:
+    Node::FileN(module_decl, imports_lp, decls_lp):
+      return tc_collect_conformances(ts, read_list(ts.tc.idx_data, decls_lp))
+  return ts
+
+// The concept-satisfaction pass over a file: every extend's methods
+// against the concept's requirements, once every module's signatures
+// and method tables exist.
+fn tc_pass_satisfaction(ts: TS, file_node_idx: i64): TS
+  let file_node: Node = ts.tc.nodes.get(file_node_idx)
+  match file_node:
+    Node::FileN(module_decl, imports_lp, decls_lp):
+      return tc_check_concept_satisfaction(ts, read_list(ts.tc.idx_data, decls_lp))
+  return ts
+
+// The bodies of a class's or an extend's methods, block- or
+// expression-bodied, each with its bounds validated first.
+fn tc_check_owner_methods(ts: TS, owner_decl_idx: i64, methods_lp: i64): TS
+  if methods_lp < 0:
+    return ts
+  let own: TypeR = method_owner(ts, owner_decl_idx)
+  let r: TS = own.ts
+  let meths: Vector<i64> = read_list(r.tc.idx_data, methods_lp)
+  let mi: i64 = 0
+  while mi < meths.length():
+    let meth_idx: i64 = meths.get(mi)
+    let meth_node: Node = r.tc.nodes.get(meth_idx)
+    match meth_node:
+      Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
+        r = tc_bind_generic_bounds(r, m_tparams_lp)
+        r = tc_check_method_body(r, own.type_idx, meth_idx, m_name_tidx, m_params_lp, m_body_lp)
+      Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
+        r = tc_bind_generic_bounds(r, m_tparams_lp)
+        r = tc_check_method_expr_body(r, own.type_idx, meth_idx, m_name_tidx, m_params_lp, m_body_expr)
+    mi = mi + 1
+  return r
+
 fn tc_pass2(ts: TS, file_node_idx: i64): TS
   let file_node: Node = ts.tc.nodes.get(file_node_idx)
   match file_node:
     Node::FileN(module_decl, imports_lp, decls_lp):
       let decls: Vector<i64> = read_list(ts.tc.idx_data, decls_lp)
-      let r: TS = tc_compute_derived_conformances(ts, decls)
+      let r: TS = ts
       let i: i64 = 0
       while i < decls.length():
         let decl_idx: i64 = decls.get(i)
@@ -2820,33 +3857,9 @@ fn tc_pass2(ts: TS, file_node_idx: i64): TS
             r = tc_check_expr_fn_body(r, decl_idx, name_tidx, params_lp, ret_type_node, body_expr)
           Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
             r = tc_bind_generic_bounds(r, tparams_lp)
-            if methods_lp >= 0:
-              let meths: Vector<i64> = read_list(r.tc.idx_data, methods_lp)
-              let mi: i64 = 0
-              while mi < meths.length():
-                let meth_idx: i64 = meths.get(mi)
-                let meth_node: Node = r.tc.nodes.get(meth_idx)
-                match meth_node:
-                  Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
-                    r = tc_bind_generic_bounds(r, m_tparams_lp)
-                    r = tc_check_method_body(r, decl_idx, meth_idx, m_name_tidx, m_params_lp, m_ret_type, m_body_lp)
-                  Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
-                    r = tc_bind_generic_bounds(r, m_tparams_lp)
-                mi = mi + 1
+            r = tc_check_owner_methods(r, decl_idx, methods_lp)
           Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
-            if methods_lp >= 0:
-              let meths: Vector<i64> = read_list(r.tc.idx_data, methods_lp)
-              let mi: i64 = 0
-              while mi < meths.length():
-                let meth_idx: i64 = meths.get(mi)
-                let meth_node: Node = r.tc.nodes.get(meth_idx)
-                match meth_node:
-                  Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
-                    r = tc_bind_generic_bounds(r, m_tparams_lp)
-                    r = tc_check_extend_method_body(r, decl_idx, meth_idx, m_name_tidx, m_params_lp, m_ret_type, m_body_lp)
-                  Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
-                    r = tc_bind_generic_bounds(r, m_tparams_lp)
-                mi = mi + 1
+            r = tc_check_owner_methods(r, decl_idx, methods_lp)
           // Every declaration that takes type parameters has its bounds
           // validated, body or none.
           Node::ExternFnD(name_tidx, tparams_lp, params_lp, ret_type_node):
@@ -2892,86 +3905,76 @@ fn build_module_tc(p: Program, mid: i64): TC
   let po: ParseOutput = sf.parse_output
   return TC(po.nodes, po.idx, po.toks, sf.source_text, p.resolve.symbols, p.resolve.scopes, p.resolve.uses, sf.file_id, p.resolve.extend_concept_bindings, mid, p.resolve.module_exports)
 
-// Helper: build per-module TS from accumulated program state.
-fn build_module_ts(tc: TC, types: Vector<DaoType>, type_info: Vector<i64>, sym_types: Vector<i64>, expr_types: HashMap<i64>, variant_set: HashMap<i64>): TS
-  return TS(tc, types, type_info, sym_types, Vector<Diagnostic>::new(), CheckCtx(to_i64(-1), to_i64(0), to_i64(0), to_i64(-1), to_i64(0), to_i64(0)), expr_types, variant_set, Conformance(HashMap<i64>::new(), Vector<i64>::new()))
 
 
-// Run type checking over the full program in two passes:
-//   Pass 1 (all modules in topo order): register types, functions,
-//           methods, concepts, extend methods, concept satisfaction.
-//   Pass 2 (all modules in topo order): check function/method bodies.
+// The state a program's type check accumulates across its modules: the
+// shared type tables, the program-wide registries, and every module's
+// diagnostics.
+class TcAccum:
+  types: Vector<DaoType>
+  type_info: Vector<i64>
+  sym_types: Vector<i64>
+  reg: Registry
+  diags: Vector<FileDiagnostic>
+
+// Run one file-level pass over every module in dependency order,
+// threading the accumulated state through and folding each module's
+// diagnostics in.
+fn run_program_pass(p: Program, acc: TcAccum, pass: TcPass): TcAccum
+  let a: TcAccum = acc
+  let ti: i64 = 0
+  while ti < p.graph.topo_order.length():
+    let mid: i64 = p.graph.topo_order.get(ti)
+    let sf: SourceFile = program_file_of_module(p, mid)
+    let ts: TS = ts_new(build_module_tc(p, mid), a.types, a.type_info, a.sym_types, a.reg)
+    ts = tc_file_pass(ts, pass, sf.parse_output.root)
+    let diags: Vector<FileDiagnostic> = a.diags
+    let di: i64 = 0
+    while di < ts.diags.length():
+      diags = diags.push(FileDiagnostic(sf.file_id, sf.path, ts.diags.get(di)))
+      di = di + 1
+    a = TcAccum(ts.types, ts.type_info, ts.sym_types, ts.reg, diags)
+    ti = ti + 1
+  return a
+
+// Run type checking over the full program, one pass at a time over
+// every module (TcPass, in order): identities, then — after the
+// program's aliases are resolved (tc_resolve_aliases) — every other
+// declaration and signature, then concept satisfaction, then the
+// conformance map, then program-wide derivation, then bodies.  Every type declared anywhere
+// in the program is registered before any signature names it, and every
+// derived conformance is known before any body is checked — a function
+// in app::main calling core::fmt::print finds its type in sym_types, and
+// a class in one prelude file derives through a concept in another.
 //
-// This two-pass architecture ensures every type declared anywhere in
-// the program is registered before any body is checked. A function in
-// app::main checking a call to core::fmt::print finds its type already
-// in sym_types because core::fmt went through pass1 earlier.
-//
-// Concept satisfaction in pass1 is signature-level only: it verifies
-// that every required method has a matching signature on the
-// implementing type's method set. Body correctness is pass2's job.
+// Concept satisfaction is signature-level only: every required method
+// has a matching signature on the implementing type's method set.  Body
+// correctness is the bodies pass's.
 fn program_run_typecheck(p: Program): Program
   p = program_init_typecheck(p)
-
-  // Accumulators — threaded across all modules.
-  let types: Vector<DaoType> = p.typecheck.types
-  let type_info: Vector<i64> = p.typecheck.type_info
-  let sym_types: Vector<i64> = p.typecheck.sym_types
-  let expr_types: HashMap<i64> = p.typecheck.expr_types
-  let variant_set: HashMap<i64> = HashMap<i64>::new()
   // Seed diagnostics from the resolve pass only (the pre-typecheck
   // baseline), NOT from p.diags which may already include typecheck
   // diagnostics from a prior run. This prevents diagnostic
   // duplication on reentrant calls — same guard pattern as
   // program_init_typecheck's initialized flag.
-  let all_diags: Vector<FileDiagnostic> = p.resolve.diags
-
-  // --- Program Pass 1: register declarations in topo order ---
-  let ti: i64 = 0
-  while ti < p.graph.topo_order.length():
-    let mid: i64 = p.graph.topo_order.get(ti)
-    let tc: TC = build_module_tc(p, mid)
-    let sf: SourceFile = program_file_of_module(p, mid)
-    let po: ParseOutput = sf.parse_output
-    let ts: TS = build_module_ts(tc, types, type_info, sym_types, expr_types, variant_set)
-    ts = tc_pass1(ts, po.root)
-    // Save accumulated state.
-    types = ts.types
-    type_info = ts.type_info
-    sym_types = ts.sym_types
-    expr_types = ts.expr_types
-    variant_set = ts.variant_set
-    // Merge per-module diagnostics.
-    let di: i64 = 0
-    while di < ts.diags.length():
-      all_diags = all_diags.push(FileDiagnostic(sf.file_id, sf.path, ts.diags.get(di)))
-      di = di + 1
-    ti = ti + 1
-
-  // --- Program Pass 2: check bodies in topo order ---
-  let t2i: i64 = 0
-  while t2i < p.graph.topo_order.length():
-    let mid: i64 = p.graph.topo_order.get(t2i)
-    let tc: TC = build_module_tc(p, mid)
-    let sf: SourceFile = program_file_of_module(p, mid)
-    let po: ParseOutput = sf.parse_output
-    let ts: TS = build_module_ts(tc, types, type_info, sym_types, expr_types, variant_set)
-    ts = tc_pass2(ts, po.root)
-    // Save accumulated state (types/sym_types may grow in pass2
-    // via function-body-level type inference, though rare).
-    types = ts.types
-    type_info = ts.type_info
-    sym_types = ts.sym_types
-    expr_types = ts.expr_types
-    // Merge diagnostics.
-    let di: i64 = 0
-    while di < ts.diags.length():
-      all_diags = all_diags.push(FileDiagnostic(sf.file_id, sf.path, ts.diags.get(di)))
-      di = di + 1
-    t2i = t2i + 1
-
-  let td: TypeCheckData = TypeCheckData(true, types, type_info, sym_types, expr_types)
-  return Program(p.graph, p.resolve, td, p.hir, all_diags)
+  let acc: TcAccum = TcAccum(p.typecheck.types, p.typecheck.type_info, p.typecheck.sym_types, reg_with_expr_types(registry_new(p.resolve.symbols, p.graph.modules), p.typecheck.lookup.expr_types), p.resolve.diags)
+  acc = run_program_pass(p, acc, TcPass::Shells)
+  acc = tc_resolve_aliases(p, acc)
+  acc = run_program_pass(p, acc, TcPass::Declarations)
+  acc = run_program_pass(p, acc, TcPass::Satisfaction)
+  acc = run_program_pass(p, acc, TcPass::Collect)
+  // Derivation runs once over every module's classes at program scope.
+  let idx: ClassIndex = class_index_empty()
+  let ii: i64 = 0
+  while ii < p.graph.topo_order.length():
+    let mid: i64 = p.graph.topo_order.get(ii)
+    let ts: TS = ts_new(build_module_tc(p, mid), acc.types, acc.type_info, acc.sym_types, acc.reg)
+    idx = index_file_classes(ts, program_file_of_module(p, mid).parse_output.root, idx)
+    ii = ii + 1
+  acc = TcAccum(acc.types, acc.type_info, acc.sym_types, derive_program_conformances(acc.reg, idx), acc.diags)
+  acc = run_program_pass(p, acc, TcPass::Bodies)
+  let td: TypeCheckData = TypeCheckData(true, acc.types, acc.type_info, acc.sym_types, ProgramLookup(acc.reg.expr_types, acc.reg.methods, acc.reg.index))
+  return Program(p.graph, p.resolve, td, p.hir, acc.diags)
 
 // =========================================================================
 // Section 46b: Legacy single-file typecheck adapter
@@ -2995,11 +3998,12 @@ fn typecheck(src: string): TypeCheckResult
   p = program_run_resolve(p)
   p = program_init_typecheck(p)
 
-  // Build per-module TC/TS and run both passes directly.
+  // Build per-module TC/TS and run the passes directly (one module:
+  // one sweep of each).
   let tc: TC = build_module_tc(p, to_i64(0))
   let sf: SourceFile = program_file_of_module(p, to_i64(0))
   let po: ParseOutput = sf.parse_output
-  let ts: TS = build_module_ts(tc, p.typecheck.types, p.typecheck.type_info, p.typecheck.sym_types, p.typecheck.expr_types, HashMap<i64>::new())
+  let ts: TS = ts_new(tc, p.typecheck.types, p.typecheck.type_info, p.typecheck.sym_types, reg_with_expr_types(registry_new(p.resolve.symbols, p.graph.modules), p.typecheck.lookup.expr_types))
 
   // Collect resolve diagnostics into TS.
   let rdi: i64 = 0
@@ -3007,7 +4011,16 @@ fn typecheck(src: string): TypeCheckResult
     ts.diags = ts.diags.push(p.resolve.diags.get(rdi).diag)
     rdi = rdi + 1
 
+  ts = tc_pass_shells(ts, po.root)
+  let aliased: TcAccum = tc_resolve_aliases(p, TcAccum(ts.types, ts.type_info, ts.sym_types, ts.reg, Vector<FileDiagnostic>::new()))
+  ts.types = aliased.types
+  ts.type_info = aliased.type_info
+  ts.sym_types = aliased.sym_types
+  ts.reg = aliased.reg
   ts = tc_pass1(ts, po.root)
+  ts = tc_pass_satisfaction(ts, po.root)
+  ts = tc_pass_collect(ts, po.root)
+  ts.reg = derive_program_conformances(ts.reg, index_file_classes(ts, po.root, class_index_empty()))
   ts = tc_pass2(ts, po.root)
 
-  return TypeCheckResult(ts.types, ts.type_info, ts.expr_types, ts.sym_types, ts.diags, po.nodes.length())
+  return TypeCheckResult(ts.types, ts.type_info, ts.reg.expr_types, ts.sym_types, ts.diags, po.nodes.length())

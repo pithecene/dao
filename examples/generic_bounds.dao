@@ -1,0 +1,47 @@
+module generic_bounds
+// generic_bounds.dao — generic parameter bounds.
+//
+// A bound is a conformance obligation: `T: Show` admits every type that
+// conforms to Show and makes Show's methods available on `x: T`, typed
+// through the concept's signature.  `T: Show + Twice` requires both.  A
+// call binds T from its argument and checks the bound there.
+
+concept Show:
+  fn show(self): string
+
+concept Twice:
+  fn twice(self): i32
+
+extend i32 as Show:
+  fn show(self): string -> "i32 " + self.to_string()
+
+extend i32 as Twice:
+  fn twice(self): i32 -> self * 2
+
+extend bool as Show:
+  fn show(self): string
+    if self:
+      return "bool yes"
+    return "bool no"
+
+// One bound: any Show.
+fn describe<T: Show>(x: T): string -> x.show()
+
+// Two bounds: the receiver must satisfy both.
+fn describe_twice<T: Show + Twice>(x: T): string -> x.twice().show()
+
+// A class method may be expression-bodied and carry its own bound.
+class Tally:
+  count: i32
+
+  fn total(self): i32 -> self.count + 1
+
+  fn label<T: Show>(self, x: T): string -> x.show() + " #" + self.total().to_string()
+
+fn main(): i32
+  print(describe(21))
+  print(describe(true))
+  print(describe_twice(21))
+  let t: Tally = Tally(41)
+  print(t.label(7))
+  return 0

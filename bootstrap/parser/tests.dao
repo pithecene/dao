@@ -694,7 +694,7 @@ fn main(): i32
   let yai: i64 = 0
   while yai < r49b.nodes.length():
     match r49b.nodes.get(yai):
-      Node::YieldS(v):
+      Node::YieldS(t, v):
         yield_ok = true
     yai = yai + 1
   if yield_ok:

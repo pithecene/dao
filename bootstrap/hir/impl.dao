@@ -19,9 +19,10 @@ module bootstrap::hir
 //   - Index expressions
 //   - Generics / monomorphization
 //   - Methods / extend
-//   - Mode blocks (a resource block lowers to HirResource; its domain
-//     has no HIR representation beyond the block)
-//   - Yield / generators
+//   - Execution-mode and resource domains beyond the block: `mode`
+//     blocks and `yield` are represented (HirMode, HirYield) and a
+//     resource block lowers to HirResource, but none of them lowers past
+//     HIR yet — MIR rejects each fail-closed
 
 enum class HirNode:
   // Program (D6/D7: multi-module root)
@@ -71,22 +72,36 @@ enum class HirNode:
 // Section 50: HIR state and result types
 // =========================================================================
 
-class HS:
+// The module being lowered: its syntax, source, and identity.
+class HirModule:
   nodes: Vector<Node>
   idx_data: Vector<i64>
   toks: Vector<Token>
   src: string
+  module_id: i64                 // module id (used in composite keys)
+  file_id: i64                   // file id (used in composite keys)
+
+// The HIR being built: its nodes and its index data.
+class HirArena:
+  nodes: Vector<HirNode>
+  idx: Vector<i64>
+
+class HS:
+  unit: HirModule                // the module being lowered
   symbols: Vector<Symbol>
-  types: Vector<DaoType>
-  type_info: Vector<i64>
-  expr_types: HashMap<i64>       // program-level expr_id_key(module_id, node_idx) → type_idx
-  sym_types: Vector<i64>
+  typecheck: TypeCheckData       // the program's type tables, expression types, and method dispatch
   uses_map: HashMap<i64>         // program-level uses_key(file_id, tok_idx) → sym_idx
-  hir_nodes: Vector<HirNode>
-  hir_idx: Vector<i64>
+  arena: HirArena
   diags: Vector<Diagnostic>
-  module_id: i64                 // current module id (used in composite keys)
-  file_id: i64                   // current file id (used in composite keys)
+
+// A lowering state over module `mid` of `p`, writing into `arena`.
+fn hs_new(p: Program, mid: i64, arena: HirArena): HS
+  let sf: SourceFile = program_file_of_module(p, mid)
+  let po: ParseOutput = sf.parse_output
+  return HS(HirModule(po.nodes, po.idx, po.toks, sf.source_text, mid, sf.file_id), p.resolve.symbols, p.typecheck, p.resolve.uses, arena, Vector<Diagnostic>::new())
+
+fn arena_empty(): HirArena
+  return HirArena(Vector<HirNode>::new(), Vector<i64>::new())
 
 fn hir_result_empty(): HirResult
   return HirResult(Vector<HirNode>::new(), Vector<i64>::new(), Vector<DaoType>::new(), Vector<i64>::new(), Vector<Token>::new(), "", Vector<Diagnostic>::new(), to_i64(-1))
@@ -110,8 +125,8 @@ class HirR:
 // =========================================================================
 
 fn hs_add_node(hs: HS, node: HirNode): HirR
-  let idx: i64 = hs.hir_nodes.length()
-  hs.hir_nodes = hs.hir_nodes.push(node)
+  let idx: i64 = hs.arena.nodes.length()
+  hs.arena = HirArena(hs.arena.nodes.push(node), hs.arena.idx)
   return HirR(hs, idx)
 
 fn hs_add_diag(hs: HS, span: Span, msg: string): HS
@@ -119,15 +134,15 @@ fn hs_add_diag(hs: HS, span: Span, msg: string): HS
   return hs
 
 fn hs_idx_push(hs: HS, val: i64): HS
-  hs.hir_idx = hs.hir_idx.push(val)
+  hs.arena = HirArena(hs.arena.nodes, hs.arena.idx.push(val))
   return hs
 
 fn hs_tok_name(hs: HS, tidx: i64): string
-  let tok: Token = hs.toks.get(tidx)
-  return substring(hs.src, tok.offset, tok.len)
+  let tok: Token = hs.unit.toks.get(tidx)
+  return substring(hs.unit.src, tok.offset, tok.len)
 
 fn hs_tok_span(hs: HS, tidx: i64): Span
-  let tok: Token = hs.toks.get(tidx)
+  let tok: Token = hs.unit.toks.get(tidx)
   return Span(tok.offset, tok.len)
 
 // =========================================================================
@@ -144,7 +159,7 @@ fn hir_flush_list(hs: HS, items: Vector<i64>): HirFlush
   while i < items.length():
     cur = hs_idx_push(cur, items.get(i))
     i = i + 1
-  let lp: i64 = cur.hir_idx.length()
+  let lp: i64 = cur.arena.idx.length()
   cur = hs_idx_push(cur, items.length())
   return HirFlush(cur, lp)
 
@@ -154,7 +169,7 @@ fn hir_flush_pairs(hs: HS, items: Vector<i64>, pair_count: i64): HirFlush
   while i < items.length():
     cur = hs_idx_push(cur, items.get(i))
     i = i + 1
-  let lp: i64 = cur.hir_idx.length()
+  let lp: i64 = cur.arena.idx.length()
   cur = hs_idx_push(cur, pair_count)
   return HirFlush(cur, lp)
 
@@ -189,9 +204,47 @@ fn hir_expr_type(node: HirNode): i64
       return ti
   return to_i64(-1)
 
+// The concept that provides the member a field expression names — the
+// checker records it (under the access's `:concept` key) when it typed
+// the access through a derived conformance or a type parameter's bound
+// — or -1 for a field or a class's own method.  Such a member has no
+// implementation to dispatch to until the concept's method is
+// synthesized for the receiver (derivation) or the parameter is
+// instantiated (generic inference), so lowering rejects it.
+fn hir_member_concept(hs: HS, field_node_idx: i64): i64
+  return hm_get_or(hs.typecheck.lookup.expr_types, concept_member_key(hs.unit.module_id, field_node_idx), to_i64(-1))
+
+// Whether the field expression `node_idx` (`obj.field`) names a method
+// of the receiver's type rather than a field: its type is a function
+// type and the dispatch index answers the name for that type.
+fn hir_is_method_value(hs: HS, node_idx: i64, obj: i64, field_tidx: i64): bool
+  let ti: i64 = hir_get_expr_type(hs, node_idx)
+  if ti < 0:
+    return false
+  if ti >= hs.typecheck.types.length():
+    return false
+  let is_fn: bool = false
+  match hs.typecheck.types.get(ti).kind:
+    TypeKind::TFunction:
+      is_fn = true
+  if is_fn == false:
+    return false
+  return hir_find_method_sym(hs, hs_tok_name(hs, field_tidx), hir_get_expr_type(hs, obj)) >= 0
+
+// Reject a use of a concept-provided member (see hir_member_concept)
+// with a diagnostic naming the member, its concept, and the use.
+fn hir_reject_concept_member(hs: HS, field_node_idx: i64, field_tidx: i64, use_desc: string): HirR
+  let concept_ti: i64 = hir_member_concept(hs, field_node_idx)
+  let concept_name: string = "?"
+  if concept_ti >= 0:
+    if concept_ti < hs.typecheck.types.length():
+      concept_name = hs.typecheck.types.get(concept_ti).name
+  let cur: HS = hs_add_diag(hs, hs_tok_span(hs, field_tidx), "method '" + hs_tok_name(hs, field_tidx) + "' of concept '" + concept_name + "' is provided through a derived conformance or a bound and cannot be " + use_desc + " in Tier A HIR (no implementation to dispatch to yet)")
+  return hs_add_node(cur, HirNode::HirErrorExpr(tok = field_tidx))
+
 fn hir_get_expr_type(hs: HS, ast_node_idx: i64): i64
-  let key: string = expr_id_key(hs.module_id, ast_node_idx)
-  let found: Option<i64> = hs.expr_types.get(key)
+  let key: string = expr_id_key(hs.unit.module_id, ast_node_idx)
+  let found: Option<i64> = hs.typecheck.lookup.expr_types.get(key)
   match found:
     Option::Some(ti):
       return ti
@@ -199,7 +252,7 @@ fn hir_get_expr_type(hs: HS, ast_node_idx: i64): i64
       return to_i64(-1)
 
 fn hir_lookup_use(hs: HS, tok_idx: i64): i64
-  let key: string = uses_key(hs.file_id, tok_idx)
+  let key: string = uses_key(hs.unit.file_id, tok_idx)
   let result: Option<i64> = hs.uses_map.get(key)
   match result:
     Option::Some(sym_idx):
@@ -210,38 +263,20 @@ fn hir_lookup_use(hs: HS, tok_idx: i64): i64
 fn hir_sym_type(hs: HS, sym_idx: i64): i64
   if sym_idx < 0:
     return to_i64(-1)
-  if sym_idx >= hs.sym_types.length():
+  if sym_idx >= hs.typecheck.sym_types.length():
     return to_i64(-1)
-  return hs.sym_types.get(sym_idx)
+  return hs.typecheck.sym_types.get(sym_idx)
 
 // =========================================================================
 // Section 53b: Method dispatch helpers
 // =========================================================================
 
-// Find a mangled method symbol (e.g. "Foo.bar") by scanning the
-// symbol table, respecting module visibility.  Only builtin symbols
-// (owner_module_id < 0), prelude declarations, or symbols owned by
-// the current module are visible — matching the typecheck-side module
-// scoping for extend methods (Task 26 §6.5; CONTRACT_MODULE_SYSTEM.md
-// §7.2 for the prelude).  Without this filter, HIR would desugar
-// a dot-call to the wrong module's symbol when two modules define
-// the same mangled extend method name.
-//
-// Single-file mode (hs.module_id < 0) is a legacy path used by the
-// `typecheck(src)` / `lower_to_hir(src)` adapters.  In that mode no
-// cross-module ambiguity is possible, so the visibility filter is
-// skipped.
-fn hir_find_method_sym(hs: HS, mangled: string, type_decl_node: i64): i64
-  if hs.module_id >= 0:
-    return find_method_sym_for_receiver(hs.symbols, mangled, hs.module_id, type_decl_node)
-  let i: i64 = 0
-  while i < hs.symbols.length():
-    let sym: Symbol = hs.symbols.get(i)
-    if sym.name == mangled:
-      if is_method_symbol(sym):
-        return i
-    i = i + 1
-  return to_i64(-1)
+// The method a receiver answers to, by the checker's rule (typecheck
+// find_method_sym_for_receiver): its own type's method, else an extend of
+// that very type visible from this module — so HIR desugars a dot-call
+// to the symbol the checker typed it with, never a same-named one.
+fn hir_find_method_sym(hs: HS, name: string, receiver_ti: i64): i64
+  return find_method_sym_for_receiver(hs.typecheck.lookup.methods, hs.unit.module_id, name, receiver_ti)
 
 // =========================================================================
 // Section 54: Expression lowering
@@ -250,7 +285,7 @@ fn hir_find_method_sym(hs: HS, mangled: string, type_decl_node: i64): i64
 fn lower_expr(hs: HS, node_idx: i64): HirR
   if node_idx < 0:
     return hs_add_node(hs, HirNode::HirErrorExpr(tok = to_i64(0)))
-  let node: Node = hs.nodes.get(node_idx)
+  let node: Node = hs.unit.nodes.get(node_idx)
   let ti: i64 = hir_get_expr_type(hs, node_idx)
   match node:
     Node::IntLitE(tidx):
@@ -287,7 +322,7 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
       // infer from the already-lowered HIR children's types.
       let bin_ti: i64 = ti
       if bin_ti < 0:
-        let tok: Token = rr.hs.toks.get(op_tidx)
+        let tok: Token = rr.hs.unit.toks.get(op_tidx)
         let is_cmp: bool = false
         if tk_name(tok.kind) == tk_name(TK::EqEq):
           is_cmp = true
@@ -309,7 +344,7 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
           bin_ti = 10  // bool
         else:
           // Arithmetic: extract type from left HIR child node
-          let left_hir: HirNode = rr.hs.hir_nodes.get(lr.hir)
+          let left_hir: HirNode = rr.hs.arena.nodes.get(lr.hir)
           bin_ti = hir_expr_type(left_hir)
       return hs_add_node(rr.hs, HirNode::HirBinary(op = op_tidx, left = lr.hir, right = rr.hir, typ = bin_ti))
     Node::UnaryE(op_tidx, operand):
@@ -318,6 +353,17 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
     Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp):
       return lower_call_expr(hs, node_idx, callee, args_lp, names_lp, ti)
     Node::FieldE(obj, field_tidx):
+      // A concept-provided member taken as a value has no field to read
+      // and no implementation to name (see hir_member_concept).
+      if hir_member_concept(hs, node_idx) >= 0:
+        return hir_reject_concept_member(hs, node_idx, field_tidx, "taken as a value")
+      // A method taken as a value — the access has a function type and
+      // the receiver's type answers the name — has no field to read
+      // either; a bound method value is no Tier A construct, so it is
+      // rejected rather than lowered as a field access.
+      if hir_is_method_value(hs, node_idx, obj, field_tidx):
+        let mcur: HS = hs_add_diag(hs, hs_tok_span(hs, field_tidx), "method '" + hs_tok_name(hs, field_tidx) + "' taken as a value is not lowered in Tier A HIR")
+        return hs_add_node(mcur, HirNode::HirErrorExpr(tok = field_tidx))
       let obj_r: HirR = lower_expr(hs, obj)
       return hs_add_node(obj_r.hs, HirNode::HirFieldAccess(obj = obj_r.hir, field = field_tidx, typ = ti))
     Node::PipeE(left, right):
@@ -325,8 +371,13 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
       let rr: HirR = lower_expr(lr.hs, right)
       return hs_add_node(rr.hs, HirNode::HirPipe(left = lr.hir, right = rr.hir, typ = ti))
     Node::QualNameE(seg_lp, seg_count):
+      let segs: Vector<i64> = read_list(hs.unit.idx_data, seg_lp)
+      // `Type::method` as a value names one of the type's own methods:
+      // a function reference to its symbol, like a free function's name.
+      let smsym: i64 = hir_qualified_method_sym(hs, segs)
+      if smsym >= 0:
+        return hs_add_node(hs, HirNode::HirIdent(sym = smsym, typ = hir_sym_type(hs, smsym), tok = segs.get(to_i64(1))))
       // Preserve all segment token indices in HIR idx.
-      let segs: Vector<i64> = read_list(hs.idx_data, seg_lp)
       let seg_fl: HirFlush = hir_flush_list(hs, segs)
       return hs_add_node(seg_fl.hs, HirNode::HirQualName(segs_lp = seg_fl.list_pos, seg_count = segs.length(), typ = ti))
     Node::TryE(operand):
@@ -355,7 +406,7 @@ fn variant_args_in_param_order(hs: HS, args: Vector<i64>, hir_args: Vector<i64>)
   let placed: i64 = 0
   let ai: i64 = 0
   while ai < args.length():
-    let slot: Option<i64> = hs.expr_types.get(expr_id_key(hs.module_id, args.get(ai)) + ":param")
+    let slot: Option<i64> = hs.typecheck.lookup.expr_types.get(expr_id_key(hs.unit.module_id, args.get(ai)) + ":param")
     match slot:
       Option::Some(param_index):
         if param_index >= 0 and param_index < ordered.length():
@@ -368,6 +419,55 @@ fn variant_args_in_param_order(hs: HS, args: Vector<i64>, hir_args: Vector<i64>)
     return ordered
   return hir_args
 
+// The method a two-segment qualified name `Type::method` names — the
+// type's own, by the dispatch index — or -1 when the name is something
+// else (an enum's variant, a module's member).  Any of the type's own
+// methods qualifies: a static one takes its declared parameters, and an
+// instance one takes its receiver as an explicit first argument
+// (`C::get(c)`), as the checker typed it.
+fn hir_qualified_method_sym(hs: HS, segs: Vector<i64>): i64
+  if segs.length() != 2:
+    return to_i64(-1)
+  let head_sym: i64 = hir_lookup_use(hs, segs.get(to_i64(0)))
+  if head_sym < 0:
+    return to_i64(-1)
+  // Only a type's name is a namespace (the checker rejects a value's).
+  if symbol_kind_name(hs.symbols.get(head_sym).kind) != "Type":
+    return to_i64(-1)
+  let head_ti: i64 = hir_sym_type(hs, head_sym)
+  if head_ti < 0:
+    return to_i64(-1)
+  return find_inherent_method_sym(hs.typecheck.lookup.methods, hs_tok_name(hs, segs.get(to_i64(1))), head_ti)
+
+// Emit a call of the method symbol `msym` (its type names the result):
+// the receiver, when there is one, then the arguments in order.
+fn emit_method_call(hs: HS, msym: i64, callee_tok: i64, receiver: i64, args_lp: i64, ti: i64): HirR
+  let cur: HS = hs
+  let hir_args: Vector<i64> = Vector<i64>::new()
+  if receiver >= 0:
+    let obj_r: HirR = lower_expr(cur, receiver)
+    cur = obj_r.hs
+    hir_args = hir_args.push(obj_r.hir)
+  let args: Vector<i64> = read_list(cur.unit.idx_data, args_lp)
+  let ai: i64 = 0
+  while ai < args.length():
+    let ar: HirR = lower_expr(cur, args.get(ai))
+    cur = ar.hs
+    hir_args = hir_args.push(ar.hir)
+    ai = ai + 1
+  let fl: HirFlush = hir_flush_list(cur, hir_args)
+  let meth_ti: i64 = hir_sym_type(fl.hs, msym)
+  let callee_hir: HirR = hs_add_node(fl.hs, HirNode::HirIdent(sym = msym, typ = meth_ti, tok = callee_tok))
+  // The call's type: the checker's, else the method's return type.
+  let call_ti: i64 = ti
+  if call_ti < 0:
+    if meth_ti >= 0:
+      let mt: DaoType = callee_hir.hs.typecheck.types.get(meth_ti)
+      match mt.kind:
+        TypeKind::TFunction:
+          call_ti = mt.ret_type
+  return hs_add_node(callee_hir.hs, HirNode::HirCall(callee = callee_hir.hir, args_lp = fl.list_pos, arg_count = hir_args.length(), typ = call_ti))
+
 fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i64, ti: i64): HirR
   // ---------------------------------------------------------------
   // Method call desugaring: obj.method(args) → Method(obj, args)
@@ -378,14 +478,15 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
   //      TFunction.  If it resolved as anything else (e.g. TStruct
   //      for a concrete field with the same name as a method), the
   //      callee is a field access, not a method — do NOT desugar.
-  //   3. The object type is a struct.
-  //   4. A module-visible mangled symbol `TypeName.fieldName` exists.
+  //   3. The receiver's type answers to the name in the method dispatch
+  //      index (its own method, or an extend of it visible here) — a
+  //      struct, a builtin (`extend i32 as Show`), any type.
   //
   // Gating on (2) prevents rewriting `obj.name()` to `Type.name(obj)`
   // when the class has both a field `name` and a method `name`:
   // check_field_expr prefers field lookup, so the FieldE's resolved
   // type is the field's type, not a function type.
-  let callee_node: Node = hs.nodes.get(callee)
+  let callee_node: Node = hs.unit.nodes.get(callee)
   match callee_node:
     Node::FieldE(mobj, mfield_tidx):
       // Check if the type checker resolved the FieldE as a function
@@ -394,10 +495,15 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
       let callee_ti: i64 = hir_get_expr_type(hs, callee)
       let is_method_callee: bool = false
       if callee_ti >= 0:
-        let callee_type: DaoType = hs.types.get(callee_ti)
+        let callee_type: DaoType = hs.typecheck.types.get(callee_ti)
         match callee_type.kind:
           TypeKind::TFunction:
             is_method_callee = true
+      // A member a concept provides (through a derived conformance or a
+      // bound) has no implementation to dispatch to; reject the call
+      // rather than lower the access as a callee.
+      if hir_member_concept(hs, callee) >= 0:
+        return hir_reject_concept_member(hs, callee, mfield_tidx, "called")
       let obj_ti: i64 = hir_get_expr_type(hs, mobj)
       // Use sentinel values to avoid deep nesting: if any guard fails,
       // obj_ti is set to -1 and the lookup is skipped.
@@ -405,75 +511,32 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
       if is_method_callee == false:
         method_obj_ti = to_i64(-1)
       if method_obj_ti >= 0:
-        let obj_type: DaoType = hs.types.get(method_obj_ti)
-        match obj_type.kind:
-          TypeKind::TStruct:
-            let field_name: string = substring(hs.src, hs.toks.get(mfield_tidx).offset, hs.toks.get(mfield_tidx).len)
-            let mangled: string = obj_type.name + "." + field_name
-            let msym: i64 = hir_find_method_sym(hs, mangled, obj_type.decl_node)
-            if msym < 0:
-              // No `Type.method` symbol.  When the struct has a field of
-              // this name (a function-typed field) the normal call path
-              // below calls the field's value.  Otherwise the checker
-              // typed the call through a conformance the struct derives
-              // structurally; lowering it needs the concept's default
-              // method with `self` substituted, so reject here rather
-              // than lower the field access as a callee.
-              let has_field: bool = false
-              if obj_type.info_lp >= 0:
-                if obj_type.info_lp + obj_type.info_count * 2 <= hs.type_info.length():
-                  let hfi: i64 = 0
-                  while hfi < obj_type.info_count:
-                    let hf_tidx: i64 = hs.type_info.get(obj_type.info_lp + hfi * 2)
-                    if substring(hs.src, hs.toks.get(hf_tidx).offset, hs.toks.get(hf_tidx).len) == field_name:
-                      has_field = true
-                    hfi = hfi + 1
-              if has_field == false:
-                let dcur: HS = hs_add_diag(hs, Span(to_i64(0), to_i64(1)), "method '" + field_name + "' reached through a derived conformance of '" + obj_type.name + "' is not lowered in Tier A HIR")
-                return hs_add_node(dcur, HirNode::HirErrorExpr(tok = to_i64(0)))
-            if msym >= 0:
-              // Found the method symbol.  Desugar:
-              //   CallE(FieldE(obj, method), [a1, a2])
-              //     → HirCall(HirIdent(msym), [obj, a1, a2])
-              let obj_r: HirR = lower_expr(hs, mobj)
-              let cur: HS = obj_r.hs
-              let hir_args: Vector<i64> = Vector<i64>::new()
-              hir_args = hir_args.push(obj_r.hir)  // self
-              let args: Vector<i64> = read_list(cur.idx_data, args_lp)
-              let ai: i64 = 0
-              while ai < args.length():
-                let ar: HirR = lower_expr(cur, args.get(ai))
-                cur = ar.hs
-                hir_args = hir_args.push(ar.hir)
-                ai = ai + 1
-              let fl: HirFlush = hir_flush_list(cur, hir_args)
-              let meth_ti: i64 = hir_sym_type(fl.hs, msym)
-              let callee_hir: HirR = hs_add_node(fl.hs, HirNode::HirIdent(sym = msym, typ = meth_ti, tok = mfield_tidx))
-              // Derive call result type from the method's return type.
-              let call_ti: i64 = ti
-              if call_ti < 0:
-                if meth_ti >= 0:
-                  let mt: DaoType = callee_hir.hs.types.get(meth_ti)
-                  match mt.kind:
-                    TypeKind::TFunction:
-                      call_ti = mt.ret_type
-              return hs_add_node(callee_hir.hs, HirNode::HirCall(callee = callee_hir.hir, args_lp = fl.list_pos, arg_count = hir_args.length(), typ = call_ti))
-          TypeKind::TGenericParam:
-            // The checker typed this call through a bound concept of the
-            // type parameter: the callee is the concept's requirement,
-            // resolved to a concrete method only at an instantiation
-            // (generic inference).  Reject here rather than lower the
-            // field access as a callee.
-            let gfield: string = substring(hs.src, hs.toks.get(mfield_tidx).offset, hs.toks.get(mfield_tidx).len)
-            let gcur: HS = hs_add_diag(hs, Span(to_i64(0), to_i64(1)), "method '" + gfield + "' on type parameter '" + obj_type.name + "' through its bound is not lowered in Tier A HIR (needs an instantiation)")
-            return hs_add_node(gcur, HirNode::HirErrorExpr(tok = to_i64(0)))
+        let msym: i64 = hir_find_method_sym(hs, hs_tok_name(hs, mfield_tidx), method_obj_ti)
+        // With no method for the receiver's type (and no providing
+        // concept, rejected above) the access is a field, which the
+        // normal call path below calls as a value.  A method found here
+        // takes `self` (the checker rejects a static one called through
+        // a value), so the receiver is its first argument:
+        //   CallE(FieldE(obj, method), [a1, a2])
+        //     → HirCall(HirIdent(msym), [obj, a1, a2])
+        if msym >= 0:
+          return emit_method_call(hs, msym, mfield_tidx, mobj, args_lp, ti)
+    Node::QualNameE(seg_lp, seg_count):
+      // `Type::method(...)`: one of the type's own methods, as the
+      // checker typed it (check_qualname_expr) — static, or an instance
+      // method given its receiver as the first argument.  The call names
+      // the method symbol, never a qualified name MIR cannot lower.
+      let qsegs: Vector<i64> = read_list(hs.unit.idx_data, seg_lp)
+      let smsym: i64 = hir_qualified_method_sym(hs, qsegs)
+      if smsym >= 0:
+        return emit_method_call(hs, smsym, qsegs.get(to_i64(1)), to_i64(-1), args_lp, ti)
 
   // ---------------------------------------------------------------
   // Normal call path (non-method)
   // ---------------------------------------------------------------
   let callee_r: HirR = lower_expr(hs, callee)
   let cur: HS = callee_r.hs
-  let args: Vector<i64> = read_list(cur.idx_data, args_lp)
+  let args: Vector<i64> = read_list(cur.unit.idx_data, args_lp)
   let hir_args: Vector<i64> = Vector<i64>::new()
   let ai: i64 = 0
   while ai < args.length():
@@ -492,13 +555,13 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
   if call_ti < 0:
     let callee_ti: i64 = hir_get_expr_type(fl.hs, callee)
     if callee_ti >= 0:
-      let ct: DaoType = fl.hs.types.get(callee_ti)
+      let ct: DaoType = fl.hs.typecheck.types.get(callee_ti)
       match ct.kind:
         TypeKind::TFunction:
           call_ti = ct.ret_type
     // Check if callee is an IdentE resolving to a Type symbol (struct constructor)
     if call_ti < 0:
-      let cn: Node = fl.hs.nodes.get(callee)
+      let cn: Node = fl.hs.unit.nodes.get(callee)
       match cn:
         Node::IdentE(ctidx):
           let csym: i64 = hir_lookup_use(fl.hs, ctidx)
@@ -516,7 +579,7 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
 fn lower_stmt(hs: HS, node_idx: i64): HirR
   if node_idx < 0:
     return hs_add_node(hs, HirNode::HirErrorStmt(tok = to_i64(0)))
-  let node: Node = hs.nodes.get(node_idx)
+  let node: Node = hs.unit.nodes.get(node_idx)
   match node:
     Node::LetS(name_tidx, type_node, init_node):
       return lower_let_stmt(hs, node_idx, name_tidx, type_node, init_node)
@@ -534,7 +597,7 @@ fn lower_stmt(hs: HS, node_idx: i64): HirR
     Node::ModeS(name_tidx, body_lp):
       let mode_body_fl: HirFlush = lower_body_stmts(hs, body_lp)
       return hs_add_node(mode_body_fl.hs, HirNode::HirMode(name = name_tidx, body_lp = mode_body_fl.list_pos))
-    Node::YieldS(val_node):
+    Node::YieldS(yield_tidx, val_node):
       if val_node < 0:
         return hs_add_node(hs, HirNode::HirYield(value = to_i64(-1)))
       let yr: HirR = lower_expr(hs, val_node)
@@ -623,7 +686,7 @@ fn lower_match_stmt(hs: HS, scrut_node: i64, arms_lp: i64): HirR
   // The scrut_let_r.hir node index serves as the synthetic binding ID.
   let scrut_binding: i64 = scrut_let_r.hir
 
-  let arms: Vector<i64> = read_pairs(cur.idx_data, arms_lp)
+  let arms: Vector<i64> = read_pairs(cur.unit.idx_data, arms_lp)
   // First pass: lower all arm conditions and bodies, collecting info.
   let arm_conds: Vector<i64> = Vector<i64>::new()
   let arm_bodies: Vector<i64> = Vector<i64>::new()
@@ -680,7 +743,7 @@ fn lower_match_stmt(hs: HS, scrut_node: i64, arms_lp: i64): HirR
 fn lower_body_stmts(hs: HS, list_pos: i64): HirFlush
   if list_pos < 0:
     return hir_flush_list(hs, Vector<i64>::new())
-  let stmts: Vector<i64> = read_list(hs.idx_data, list_pos)
+  let stmts: Vector<i64> = read_list(hs.unit.idx_data, list_pos)
   let cur: HS = hs
   let hir_stmts: Vector<i64> = Vector<i64>::new()
   let i: i64 = 0
@@ -706,14 +769,14 @@ fn lower_type_params(hs: HS, ast_tparams_lp: i64): HirFlush
   if ast_tparams_lp < 0:
     // No type params — return a flush with list_pos = -1
     return HirFlush(hs, to_i64(-1))
-  let tparam_nodes: Vector<i64> = read_list(hs.idx_data, ast_tparams_lp)
+  let tparam_nodes: Vector<i64> = read_list(hs.unit.idx_data, ast_tparams_lp)
   let items: Vector<i64> = Vector<i64>::new()
   let count: i64 = 0
   let i: i64 = 0
   while i < tparam_nodes.length():
     let tp_node_idx: i64 = tparam_nodes.get(i)
     if tp_node_idx >= 0:
-      let tp_node: Node = hs.nodes.get(tp_node_idx)
+      let tp_node: Node = hs.unit.nodes.get(tp_node_idx)
       match tp_node:
         Node::GenericParamT(tidx, bounds_lp):
           items = items.push(tidx)
@@ -733,22 +796,32 @@ fn hir_generic_param_type(hs: HS, tidx: i64): i64
     return to_i64(-1)
   return hir_sym_type(hs, sym_idx)
 
-fn lower_fn_decl_with_owner(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, params_lp: i64, ret_type_node: i64, body_lp: i64, class_owner_tidx: i64): HirR
+// A callable's lowered header — what every function form (block- or
+// expression-bodied, extern, a class's or an extend's method) shares:
+// its symbol, its return type (from its function type), and its type
+// parameters and (symbol, type) parameter pairs flushed into the arena.
+class FnHeader:
+  hs: HS
+  sym: i64
+  ret: i64
+  tparams_pos: i64
+  params_pos: i64
+
+fn lower_fn_header(hs: HS, decl_idx: i64, tparams_lp: i64, params_lp: i64): FnHeader
   let tp_fl: HirFlush = lower_type_params(hs, tparams_lp)
   let ret_ti: i64 = to_i64(11)
   let fn_sym: i64 = hir_find_callable_sym_by_decl(tp_fl.hs, decl_idx)
   if fn_sym >= 0:
     let fn_ti: i64 = hir_sym_type(tp_fl.hs, fn_sym)
     if fn_ti >= 0:
-      let fn_type: DaoType = tp_fl.hs.types.get(fn_ti)
+      let fn_type: DaoType = tp_fl.hs.typecheck.types.get(fn_ti)
       ret_ti = fn_type.ret_type
-  let pairs: Vector<i64> = read_pairs(tp_fl.hs.idx_data, params_lp)
+  let pairs: Vector<i64> = read_pairs(tp_fl.hs.unit.idx_data, params_lp)
   let param_items: Vector<i64> = Vector<i64>::new()
   let param_count: i64 = 0
   let pi: i64 = 0
   while pi < pairs.length():
     let p_tidx: i64 = pairs.get(pi)
-    let p_type_node: i64 = pairs.get(pi + 1)
     let p_name: string = hs_tok_name(hs, p_tidx)
     let p_sym: i64 = hir_find_param_sym(hs, decl_idx, p_name)
     let p_ti: i64 = to_i64(-1)
@@ -759,85 +832,41 @@ fn lower_fn_decl_with_owner(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i
     param_count = param_count + 1
     pi = pi + 2
   let param_fl: HirFlush = hir_flush_pairs(tp_fl.hs, param_items, param_count)
-  let body_fl: HirFlush = lower_body_stmts(param_fl.hs, body_lp)
-  return hs_add_node(body_fl.hs, HirNode::HirFunction(sym = fn_sym, tparams = tp_fl.list_pos, params = param_fl.list_pos, ret = ret_ti, body = body_fl.list_pos, is_extern = to_i64(0), class_owner = class_owner_tidx))
+  return FnHeader(param_fl.hs, fn_sym, ret_ti, tp_fl.list_pos, param_fl.list_pos)
+
+// A block-bodied function, or a method of the class or extend whose
+// name token is `class_owner_tidx` (-1 for a free function).
+fn lower_fn_decl_with_owner(hs: HS, decl_idx: i64, tparams_lp: i64, params_lp: i64, body_lp: i64, class_owner_tidx: i64): HirR
+  let hd: FnHeader = lower_fn_header(hs, decl_idx, tparams_lp, params_lp)
+  let body_fl: HirFlush = lower_body_stmts(hd.hs, body_lp)
+  return hs_add_node(body_fl.hs, HirNode::HirFunction(sym = hd.sym, tparams = hd.tparams_pos, params = hd.params_pos, ret = hd.ret, body = body_fl.list_pos, is_extern = to_i64(0), class_owner = class_owner_tidx))
 
 fn lower_fn_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, params_lp: i64, ret_type_node: i64, body_lp: i64): HirR
-  return lower_fn_decl_with_owner(hs, decl_idx, name_tidx, tparams_lp, params_lp, ret_type_node, body_lp, to_i64(-1))
+  return lower_fn_decl_with_owner(hs, decl_idx, tparams_lp, params_lp, body_lp, to_i64(-1))
 
-fn lower_expr_fn_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, params_lp: i64, ret_type_node: i64, body_expr: i64): HirR
-  // Lower type params into HIR-owned idx
-  let tp_fl: HirFlush = lower_type_params(hs, tparams_lp)
-  // Desugar expr body into block with single return
-  let ret_ti: i64 = to_i64(11)
-  let fn_sym: i64 = hir_find_callable_sym_by_decl(tp_fl.hs, decl_idx)
-  if fn_sym >= 0:
-    let fn_ti: i64 = hir_sym_type(tp_fl.hs, fn_sym)
-    if fn_ti >= 0:
-      let fn_type: DaoType = tp_fl.hs.types.get(fn_ti)
-      ret_ti = fn_type.ret_type
-  // Lower params
-  let pairs: Vector<i64> = read_pairs(tp_fl.hs.idx_data, params_lp)
-  let param_items: Vector<i64> = Vector<i64>::new()
-  let param_count: i64 = 0
-  let pi: i64 = 0
-  while pi < pairs.length():
-    let p_tidx: i64 = pairs.get(pi)
-    let p_type_node: i64 = pairs.get(pi + 1)
-    let p_name: string = hs_tok_name(hs, p_tidx)
-    let p_sym: i64 = hir_find_param_sym(hs, decl_idx, p_name)
-    let p_ti: i64 = to_i64(-1)
-    if p_sym >= 0:
-      p_ti = hir_sym_type(hs, p_sym)
-    param_items = param_items.push(p_sym)
-    param_items = param_items.push(p_ti)
-    param_count = param_count + 1
-    pi = pi + 2
-  let param_fl: HirFlush = hir_flush_pairs(tp_fl.hs, param_items, param_count)
-  // Lower body expression
-  let body_r: HirR = lower_expr(param_fl.hs, body_expr)
-  // Wrap in HirReturn
+// An expression-bodied function or method: the body is one `return`
+// of the expression.
+fn lower_expr_fn_decl_with_owner(hs: HS, decl_idx: i64, tparams_lp: i64, params_lp: i64, body_expr: i64, class_owner_tidx: i64): HirR
+  let hd: FnHeader = lower_fn_header(hs, decl_idx, tparams_lp, params_lp)
+  let body_r: HirR = lower_expr(hd.hs, body_expr)
   let ret_r: HirR = hs_add_node(body_r.hs, HirNode::HirReturn(value = body_r.hir))
-  // Flush single-statement body
   let body_stmts: Vector<i64> = Vector<i64>::new()
   body_stmts = body_stmts.push(ret_r.hir)
   let body_fl: HirFlush = hir_flush_list(ret_r.hs, body_stmts)
-  return hs_add_node(body_fl.hs, HirNode::HirFunction(sym = fn_sym, tparams = tp_fl.list_pos, params = param_fl.list_pos, ret = ret_ti, body = body_fl.list_pos, is_extern = to_i64(0), class_owner = to_i64(-1)))
+  return hs_add_node(body_fl.hs, HirNode::HirFunction(sym = hd.sym, tparams = hd.tparams_pos, params = hd.params_pos, ret = hd.ret, body = body_fl.list_pos, is_extern = to_i64(0), class_owner = class_owner_tidx))
+
+fn lower_expr_fn_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, params_lp: i64, ret_type_node: i64, body_expr: i64): HirR
+  return lower_expr_fn_decl_with_owner(hs, decl_idx, tparams_lp, params_lp, body_expr, to_i64(-1))
 
 fn lower_extern_fn_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, params_lp: i64, ret_type_node: i64): HirR
-  let tp_fl: HirFlush = lower_type_params(hs, tparams_lp)
-  let ret_ti: i64 = to_i64(11)
-  let fn_sym: i64 = hir_find_callable_sym_by_decl(tp_fl.hs, decl_idx)
-  if fn_sym >= 0:
-    let fn_ti: i64 = hir_sym_type(tp_fl.hs, fn_sym)
-    if fn_ti >= 0:
-      let fn_type: DaoType = tp_fl.hs.types.get(fn_ti)
-      ret_ti = fn_type.ret_type
-  // Lower params
-  let pairs: Vector<i64> = read_pairs(tp_fl.hs.idx_data, params_lp)
-  let param_items: Vector<i64> = Vector<i64>::new()
-  let param_count: i64 = 0
-  let pi: i64 = 0
-  while pi < pairs.length():
-    let p_tidx: i64 = pairs.get(pi)
-    let p_type_node: i64 = pairs.get(pi + 1)
-    let p_name: string = hs_tok_name(hs, p_tidx)
-    let p_sym: i64 = hir_find_param_sym(hs, decl_idx, p_name)
-    let p_ti: i64 = to_i64(-1)
-    if p_sym >= 0:
-      p_ti = hir_sym_type(hs, p_sym)
-    param_items = param_items.push(p_sym)
-    param_items = param_items.push(p_ti)
-    param_count = param_count + 1
-    pi = pi + 2
-  let param_fl: HirFlush = hir_flush_pairs(tp_fl.hs, param_items, param_count)
+  let hd: FnHeader = lower_fn_header(hs, decl_idx, tparams_lp, params_lp)
   // No body — use empty list
-  let empty_body_fl: HirFlush = hir_flush_list(param_fl.hs, Vector<i64>::new())
-  return hs_add_node(empty_body_fl.hs, HirNode::HirFunction(sym = fn_sym, tparams = tp_fl.list_pos, params = param_fl.list_pos, ret = ret_ti, body = empty_body_fl.list_pos, is_extern = to_i64(1), class_owner = to_i64(-1)))
+  let empty_body_fl: HirFlush = hir_flush_list(hd.hs, Vector<i64>::new())
+  return hs_add_node(empty_body_fl.hs, HirNode::HirFunction(sym = hd.sym, tparams = hd.tparams_pos, params = hd.params_pos, ret = hd.ret, body = empty_body_fl.list_pos, is_extern = to_i64(1), class_owner = to_i64(-1)))
 
 fn lower_class_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, fields_lp: i64, methods_lp: i64): HirR
   let tp_fl: HirFlush = lower_type_params(hs, tparams_lp)
-  let pairs: Vector<i64> = read_pairs(tp_fl.hs.idx_data, fields_lp)
+  let pairs: Vector<i64> = read_pairs(tp_fl.hs.unit.idx_data, fields_lp)
   let field_items: Vector<i64> = Vector<i64>::new()
   let field_count: i64 = 0
   let fi: i64 = 0
@@ -864,7 +893,7 @@ fn resolve_type_to_idx(hs: HS, type_node_idx: i64): i64
   let ti: i64 = hir_get_expr_type(hs, type_node_idx)
   if ti >= 0:
     return ti
-  let tn: Node = hs.nodes.get(type_node_idx)
+  let tn: Node = hs.unit.nodes.get(type_node_idx)
   match tn:
     Node::NamedT(ttidx):
       let tsym: i64 = hir_lookup_use(hs, ttidx)
@@ -901,8 +930,8 @@ fn resolve_type_to_idx(hs: HS, type_node_idx: i64): i64
       let inner_ti: i64 = resolve_type_to_idx(hs, inner)
       // Search for existing pointer type in types table
       let pti: i64 = 0
-      while pti < hs.types.length():
-        let pt: DaoType = hs.types.get(pti)
+      while pti < hs.typecheck.types.length():
+        let pt: DaoType = hs.typecheck.types.get(pti)
         match pt.kind:
           TypeKind::TPointer:
             if pt.pointee == inner_ti:
@@ -917,7 +946,7 @@ fn resolve_type_to_idx(hs: HS, type_node_idx: i64): i64
 
 fn lower_enum_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, variants_lp: i64): HirR
   let tp_fl: HirFlush = lower_type_params(hs, tparams_lp)
-  let pairs: Vector<i64> = read_pairs(tp_fl.hs.idx_data, variants_lp)
+  let pairs: Vector<i64> = read_pairs(tp_fl.hs.unit.idx_data, variants_lp)
   let var_items: Vector<i64> = Vector<i64>::new()
   let var_count: i64 = 0
   let cur: HS = tp_fl.hs
@@ -927,7 +956,7 @@ fn lower_enum_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, varia
     let ast_payload_lp: i64 = pairs.get(vi + 1)
     // The payload list is (field name token, type node) pairs; HIR keeps
     // the types in declaration order.
-    let payload_fields: Vector<i64> = read_list(cur.idx_data, ast_payload_lp)
+    let payload_fields: Vector<i64> = read_list(cur.unit.idx_data, ast_payload_lp)
     let hir_payload: Vector<i64> = Vector<i64>::new()
     let pi: i64 = 1
     while pi < payload_fields.length():
@@ -946,14 +975,14 @@ fn lower_enum_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, varia
 
 fn lower_type_alias_decl(hs: HS, decl_idx: i64, name_tidx: i64, target_type_node: i64): HirR
   // Find the type index for the alias
-  let sym_idx: i64 = hir_find_sym_by_decl(hs, decl_idx, "Type")
+  let sym_idx: i64 = hir_find_type_sym_by_decl(hs, decl_idx)
   let ti: i64 = to_i64(-1)
   if sym_idx >= 0:
     ti = hir_sym_type(hs, sym_idx)
   return hs_add_node(hs, HirNode::HirTypeAlias(name = name_tidx, typ = ti))
 
 fn lower_decl(hs: HS, decl_idx: i64): HirR
-  let node: Node = hs.nodes.get(decl_idx)
+  let node: Node = hs.unit.nodes.get(decl_idx)
   match node:
     Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_type_node, body_lp):
       return lower_fn_decl(hs, decl_idx, name_tidx, tparams_lp, params_lp, ret_type_node, body_lp)
@@ -987,55 +1016,31 @@ fn lower_decl(hs: HS, decl_idx: i64): HirR
 // lowers with a `void` return, so the lookup must know both kinds —
 // and both halves of the identity, since declaration indices are
 // file-local.
+// The declaration indexes the checker built (ProgramIndex) answer HIR's
+// symbol lookups in constant time, keyed by the module being lowered.
 fn hir_find_callable_sym_by_decl(hs: HS, decl_idx: i64): i64
-  return find_callable_sym(hs.symbols, decl_idx, hs.module_id)
+  return hm_get_or(hs.typecheck.lookup.index.callables, decl_key(hs.unit.module_id, decl_idx), to_i64(-1))
 
-// The symbol of the given kind declared at `decl_idx` in this module
-// (see `find_sym_by_decl`).
-fn hir_find_sym_by_decl(hs: HS, decl_idx: i64, kind_name: string): i64
-  let si: i64 = 0
-  while si < hs.symbols.length():
-    let sym: Symbol = hs.symbols.get(si)
-    if sym.decl_node == decl_idx:
-      if symbol_kind_name(sym.kind) == kind_name:
-        if hs.module_id < 0:
-          return si
-        if sym.owner_module_id == hs.module_id:
-          return si
-    si = si + 1
-  return to_i64(-1)
+// The type symbol (a class, enum, alias, or concept) declared at
+// `decl_idx` in the module being lowered, from the declaration index.
+fn hir_find_type_sym_by_decl(hs: HS, decl_idx: i64): i64
+  return hm_get_or(hs.typecheck.lookup.index.type_syms, decl_key(hs.unit.module_id, decl_idx), to_i64(-1))
 
 fn hir_find_param_sym(hs: HS, decl_idx: i64, param_name: string): i64
-  let si: i64 = 0
-  while si < hs.symbols.length():
-    let sym: Symbol = hs.symbols.get(si)
-    if sym.decl_node == decl_idx:
-      if symbol_kind_name(sym.kind) == "Param":
-        if sym.name == param_name:
-          return si
-    si = si + 1
-  return to_i64(-1)
+  return member_sym_of(hs.typecheck.lookup.index, hs.unit.module_id, decl_idx, "Param", param_name)
 
 fn hir_find_field_sym(hs: HS, decl_idx: i64, field_name: string): i64
-  let si: i64 = 0
-  while si < hs.symbols.length():
-    let sym: Symbol = hs.symbols.get(si)
-    if sym.decl_node == decl_idx:
-      if symbol_kind_name(sym.kind) == "Field":
-        if sym.name == field_name:
-          return si
-    si = si + 1
-  return to_i64(-1)
+  return member_sym_of(hs.typecheck.lookup.index, hs.unit.module_id, decl_idx, "Field", field_name)
 
 // =========================================================================
 // Section 58: File lowering and public API
 // =========================================================================
 
 fn lower_file(hs: HS, file_node_idx: i64): HirR
-  let node: Node = hs.nodes.get(file_node_idx)
+  let node: Node = hs.unit.nodes.get(file_node_idx)
   match node:
     Node::FileN(module_decl, imports_lp, decls_lp):
-      let decls: Vector<i64> = read_list(hs.idx_data, decls_lp)
+      let decls: Vector<i64> = read_list(hs.unit.idx_data, decls_lp)
       let cur: HS = hs
       let hir_decls: Vector<i64> = Vector<i64>::new()
       let i: i64 = 0
@@ -1045,40 +1050,48 @@ fn lower_file(hs: HS, file_node_idx: i64): HirR
         hir_decls = hir_decls.push(dr.hir)
         // Emit methods as flat top-level HirFunction nodes with
         // class_owner set to the class name token for mangled identity.
-        let decl_node: Node = hs.nodes.get(decls.get(i))
+        let decl_node: Node = hs.unit.nodes.get(decls.get(i))
         match decl_node:
           Node::ClassDeclD(cn_tidx, cn_tp, cn_fl, cn_ml):
             if cn_ml >= 0:
-              let methods: Vector<i64> = read_list(cur.idx_data, cn_ml)
+              let methods: Vector<i64> = read_list(cur.unit.idx_data, cn_ml)
               let mi: i64 = 0
               while mi < methods.length():
                 let meth_idx: i64 = methods.get(mi)
-                let meth_node: Node = cur.nodes.get(meth_idx)
+                let meth_node: Node = cur.unit.nodes.get(meth_idx)
                 match meth_node:
                   Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
-                    let mr: HirR = lower_fn_decl_with_owner(cur, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp, cn_tidx)
+                    let mr: HirR = lower_fn_decl_with_owner(cur, meth_idx, m_tparams_lp, m_params_lp, m_body_lp, cn_tidx)
                     cur = mr.hs
                     hir_decls = hir_decls.push(mr.hir)
+                  Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
+                    let mer: HirR = lower_expr_fn_decl_with_owner(cur, meth_idx, m_tparams_lp, m_params_lp, m_body_expr, cn_tidx)
+                    cur = mer.hs
+                    hir_decls = hir_decls.push(mer.hir)
                 mi = mi + 1
           Node::ExtendDeclD(ext_target, ext_cname, ext_ml):
             if ext_ml >= 0:
               // Get target type name token for owner
               let ext_owner_tidx: i64 = to_i64(-1)
               if ext_target >= 0:
-                let tnode: Node = cur.nodes.get(ext_target)
+                let tnode: Node = cur.unit.nodes.get(ext_target)
                 match tnode:
                   Node::NamedT(t_tidx):
                     ext_owner_tidx = t_tidx
-              let ext_methods: Vector<i64> = read_list(cur.idx_data, ext_ml)
+              let ext_methods: Vector<i64> = read_list(cur.unit.idx_data, ext_ml)
               let emi: i64 = 0
               while emi < ext_methods.length():
                 let emeth_idx: i64 = ext_methods.get(emi)
-                let emeth_node: Node = cur.nodes.get(emeth_idx)
+                let emeth_node: Node = cur.unit.nodes.get(emeth_idx)
                 match emeth_node:
                   Node::FnDeclD(em_name_tidx, em_tparams_lp, em_params_lp, em_ret_type, em_body_lp):
-                    let emr: HirR = lower_fn_decl_with_owner(cur, emeth_idx, em_name_tidx, em_tparams_lp, em_params_lp, em_ret_type, em_body_lp, ext_owner_tidx)
+                    let emr: HirR = lower_fn_decl_with_owner(cur, emeth_idx, em_tparams_lp, em_params_lp, em_body_lp, ext_owner_tidx)
                     cur = emr.hs
                     hir_decls = hir_decls.push(emr.hir)
+                  Node::ExprFnD(em_name_tidx, em_tparams_lp, em_params_lp, em_ret_type, em_body_expr):
+                    let emer: HirR = lower_expr_fn_decl_with_owner(cur, emeth_idx, em_tparams_lp, em_params_lp, em_body_expr, ext_owner_tidx)
+                    cur = emer.hs
+                    hir_decls = hir_decls.push(emer.hir)
                 emi = emi + 1
         i = i + 1
       let fl: HirFlush = hir_flush_list(cur, hir_decls)
@@ -1091,9 +1104,7 @@ fn lower_file(hs: HS, file_node_idx: i64): HirR
 
 // Build a per-module HS from Program state.
 fn build_module_hs(p: Program, mid: i64): HS
-  let sf: SourceFile = program_file_of_module(p, mid)
-  let po: ParseOutput = sf.parse_output
-  return HS(po.nodes, po.idx, po.toks, sf.source_text, p.resolve.symbols, p.typecheck.types, p.typecheck.type_info, p.typecheck.expr_types, p.typecheck.sym_types, p.resolve.uses, Vector<HirNode>::new(), Vector<i64>::new(), Vector<Diagnostic>::new(), mid, sf.file_id)
+  return hs_new(p, mid, arena_empty())
 
 // Lower the full program to HIR. For each module in topo order,
 // lower its file AST via `lower_file` (unchanged), extract the
@@ -1111,22 +1122,23 @@ fn program_run_hir(p: Program): Program
   let hir_nodes: Vector<HirNode> = Vector<HirNode>::new()
   let hir_idx: Vector<i64> = Vector<i64>::new()
   let module_indices: Vector<i64> = Vector<i64>::new()
-  // Seed diagnostics from the resolve baseline (the pre-typecheck/
-  // pre-HIR stable baseline), NOT from p.diags which may include
-  // prior pass diagnostics. Same pattern as program_run_typecheck.
-  let all_diags: Vector<FileDiagnostic> = p.resolve.diags
+  // Seed diagnostics from the program's so far (parse, resolve,
+  // typecheck): a construct the checker rejected stays reported.  This
+  // pass runs once per program (the guard above), so nothing is added
+  // twice.
+  let all_diags: Vector<FileDiagnostic> = p.diags
 
   let ti: i64 = 0
   while ti < p.graph.topo_order.length():
     let mid: i64 = p.graph.topo_order.get(ti)
     let sf: SourceFile = program_file_of_module(p, mid)
     let po: ParseOutput = sf.parse_output
-    let hs: HS = HS(po.nodes, po.idx, po.toks, sf.source_text, p.resolve.symbols, p.typecheck.types, p.typecheck.type_info, p.typecheck.expr_types, p.typecheck.sym_types, p.resolve.uses, hir_nodes, hir_idx, Vector<Diagnostic>::new(), mid, sf.file_id)
+    let hs: HS = hs_new(p, mid, HirArena(hir_nodes, hir_idx))
 
     let file_r: HirR = lower_file(hs, po.root)
     // Extract the HirFile's decls_lp and wrap in HirModule.
-    hir_nodes = file_r.hs.hir_nodes
-    hir_idx = file_r.hs.hir_idx
+    hir_nodes = file_r.hs.arena.nodes
+    hir_idx = file_r.hs.arena.idx
     let file_node: HirNode = hir_nodes.get(file_r.hir)
     let module_decls_lp: i64 = to_i64(-1)
     match file_node:
@@ -1156,10 +1168,10 @@ fn program_run_hir(p: Program): Program
     ti = ti + 1
 
   // Emit HirProgram root. Build a temporary HS to use hir_flush_list.
-  let tmp_hs: HS = HS(Vector<Node>::new(), Vector<i64>::new(), Vector<Token>::new(), "", Vector<Symbol>::new(), Vector<DaoType>::new(), Vector<i64>::new(), HashMap<i64>::new(), Vector<i64>::new(), HashMap<i64>::new(), hir_nodes, hir_idx, Vector<Diagnostic>::new(), to_i64(-1), to_i64(-1))
+  let tmp_hs: HS = HS(HirModule(Vector<Node>::new(), Vector<i64>::new(), Vector<Token>::new(), "", to_i64(-1), to_i64(-1)), Vector<Symbol>::new(), TypeCheckData(false, Vector<DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), program_lookup_empty()), HashMap<i64>::new(), HirArena(hir_nodes, hir_idx), Vector<Diagnostic>::new())
   let mod_fl: HirFlush = hir_flush_list(tmp_hs, module_indices)
-  hir_nodes = mod_fl.hs.hir_nodes
-  hir_idx = mod_fl.hs.hir_idx
+  hir_nodes = mod_fl.hs.arena.nodes
+  hir_idx = mod_fl.hs.arena.idx
   let prog_idx: i64 = hir_nodes.length()
   hir_nodes = hir_nodes.push(HirNode::HirProgram(module_list_lp = mod_fl.list_pos))
 
@@ -1193,7 +1205,7 @@ fn lower_to_hir(src: string): HirResult
   let mid: i64 = to_i64(0)
   let sf: SourceFile = program_file_of_module(p, mid)
   let po: ParseOutput = sf.parse_output
-  let hs: HS = HS(po.nodes, po.idx, po.toks, sf.source_text, p.resolve.symbols, p.typecheck.types, p.typecheck.type_info, p.typecheck.expr_types, p.typecheck.sym_types, p.resolve.uses, Vector<HirNode>::new(), Vector<i64>::new(), Vector<Diagnostic>::new(), mid, sf.file_id)
+  let hs: HS = hs_new(p, mid, arena_empty())
 
   // Lower
   let result: HirR = HirR(hs, to_i64(-1))
@@ -1201,7 +1213,24 @@ fn lower_to_hir(src: string): HirResult
     result = lower_file(hs, po.root)
   let final_hs: HS = result.hs
 
-  return HirResult(final_hs.hir_nodes, final_hs.hir_idx, final_hs.types, final_hs.type_info, final_hs.toks, final_hs.src, final_hs.diags, result.hir)
+  // Every diagnostic of the stages before HIR travels with the result,
+  // so a construct the checker rejected is reported, never lowered as
+  // if it were sound.
+  return HirResult(final_hs.arena.nodes, final_hs.arena.idx, final_hs.typecheck.types, final_hs.typecheck.type_info, final_hs.unit.toks, final_hs.unit.src, program_and_hir_diags(p, final_hs.diags), result.hir)
+
+// The diagnostics a single-file lowering carries on: the program's
+// (parse, resolve, typecheck) and the HIR stage's.
+fn program_and_hir_diags(p: Program, hir_diags: Vector<Diagnostic>): Vector<Diagnostic>
+  let out: Vector<Diagnostic> = Vector<Diagnostic>::new()
+  let i: i64 = 0
+  while i < p.diags.length():
+    out = out.push(p.diags.get(i).diag)
+    i = i + 1
+  let j: i64 = 0
+  while j < hir_diags.length():
+    out = out.push(hir_diags.get(j))
+    j = j + 1
+  return out
 
 // =========================================================================
 // Section 59: HIR node kind name
