@@ -29,8 +29,71 @@ fn tc_expect_diags(label: string, src: string, n: i64): bool
   print("FAIL " + label + ": expected " + i64_to_string(n) + " diagnostics, got " + i64_to_string(tc_count_diags(res)))
   return false
 
+// Typecheck `src` and report whether it is rejected (at least one
+// diagnostic), when the exact count is not the point.
+fn tc_expect_rejected(label: string, src: string): bool
+  let res: TypeCheckResult = typecheck(src)
+  if tc_count_diags(res) >= 1:
+    print("PASS " + label)
+    return true
+  print("FAIL " + label + ": expected a diagnostic, got 0")
+  return false
+
+// Typecheck `src` and report whether exactly one diagnostic is raised
+// and its message contains `needle`.
+fn tc_expect_diag_containing(label: string, src: string, needle: string): bool
+  let res: TypeCheckResult = typecheck(src)
+  if tc_count_diags(res) == 1:
+    if index_of(res.diags.get(to_i64(0)).message, needle) >= 0:
+      print("PASS " + label)
+      return true
+  print("FAIL " + label + ": expected one diagnostic containing '" + needle + "', got " + i64_to_string(tc_count_diags(res)))
+  let i: i64 = 0
+  while i < res.diags.length():
+    print("  diag: " + res.diags.get(i).message)
+    i = i + 1
+  return false
+
 fn tc_count_types(result: TypeCheckResult): i64
   return result.types.length()
+
+// A dispatch index holding one extend method of type 2 (`i32`) from the
+// prelude (symbol 0) and one from module 0 (symbol 1).
+fn test_dispatch_index(): HashMap<i64>
+  let m: HashMap<i64> = HashMap<i64>::new()
+  m = m.set(dispatch_key_extend(to_i64(2), "show", conform_everywhere()), to_i64(0))
+  m = m.set(dispatch_key_extend(to_i64(2), "show", to_i64(0)), to_i64(1))
+  return m
+
+// Resolve and typecheck a program — the library files `libs` (each
+// marked prelude or not) and a main file — and report whether main.dao
+// and report whether the file at `in_path` carries exactly `n` error
+// diagnostics and every other file none, printing them otherwise.
+fn tc_expect_program_errors(label: string, libs: Vector<SourceInput>, main_src: string, in_path: string, n: i64): bool
+  let inputs: Vector<SourceInput> = libs.push(SourceInput("main.dao", main_src, false))
+  let p: Program = program_from_graph(build_program(inputs))
+  p = program_run_resolve(p)
+  p = program_run_typecheck(p)
+  let errs: i64 = 0
+  let lib_errs: i64 = 0
+  let i: i64 = 0
+  while i < p.diags.length():
+    let fd: FileDiagnostic = p.diags.get(i)
+    if fd.diag.severity == Severity::Error:
+      if fd.path == in_path:
+        errs = errs + 1
+      else:
+        lib_errs = lib_errs + 1
+    i = i + 1
+  if errs == n and lib_errs == 0:
+    print("PASS " + label)
+    return true
+  print("FAIL " + label + ": expected " + i64_to_string(n) + " errors in " + in_path + " and none elsewhere, got " + i64_to_string(errs) + " and " + i64_to_string(lib_errs))
+  let j: i64 = 0
+  while j < p.diags.length():
+    print("  diag: " + p.diags.get(j).path + ": " + p.diags.get(j).diag.message)
+    j = j + 1
+  return false
 
 // =========================================================================
 // Section 48: Golden type checker tests
@@ -61,7 +124,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 87
+  let total: i32 = 167
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -553,16 +616,18 @@ fn main(): i32
   let d4_sf: SourceFile = program_file_of_module(d4_p1, d4_main_mid)
   let d4_po: ParseOutput = d4_sf.parse_output
   let d4_tc: TC = TC(d4_po.nodes, d4_po.idx, d4_po.toks, d4_sf.source_text, d4_p1.resolve.symbols, d4_p1.resolve.scopes, d4_p1.resolve.uses, d4_sf.file_id, d4_p1.resolve.extend_concept_bindings, d4_main_mid, d4_p1.resolve.module_exports)
-  let d4_ts: TS = TS(d4_tc, d4_p1.typecheck.types, d4_p1.typecheck.type_info, d4_p1.typecheck.sym_types, Vector<Diagnostic>::new(), to_i64(-1), to_i64(0), HashMap<i64>::new(), HashMap<i64>::new(), Conformance(HashMap<i64>::new(), Vector<i64>::new()))
+  let d4_ts: TS = ts_new(d4_tc, d4_p1.typecheck.types, d4_p1.typecheck.type_info, d4_p1.typecheck.sym_types, registry_new(d4_p1.resolve.symbols, d4_p1.graph.modules))
   // Run pass1 on math first (to register the exported function type).
   let d4_math_mid: i64 = find_module_by_name(d4_p1.graph.modules, "app::math")
   let d4_math_sf: SourceFile = program_file_of_module(d4_p1, d4_math_mid)
   let d4_math_po: ParseOutput = d4_math_sf.parse_output
   let d4_math_tc: TC = TC(d4_math_po.nodes, d4_math_po.idx, d4_math_po.toks, d4_math_sf.source_text, d4_p1.resolve.symbols, d4_p1.resolve.scopes, d4_p1.resolve.uses, d4_math_sf.file_id, d4_p1.resolve.extend_concept_bindings, d4_math_mid, d4_p1.resolve.module_exports)
-  let d4_math_ts: TS = TS(d4_math_tc, d4_p1.typecheck.types, d4_p1.typecheck.type_info, d4_p1.typecheck.sym_types, Vector<Diagnostic>::new(), to_i64(-1), to_i64(0), HashMap<i64>::new(), HashMap<i64>::new(), Conformance(HashMap<i64>::new(), Vector<i64>::new()))
+  let d4_math_ts: TS = ts_new(d4_math_tc, d4_p1.typecheck.types, d4_p1.typecheck.type_info, d4_p1.typecheck.sym_types, registry_new(d4_p1.resolve.symbols, d4_p1.graph.modules))
+  d4_math_ts = tc_pass_shells(d4_math_ts, d4_math_po.root)
   d4_math_ts = tc_pass1(d4_math_ts, d4_math_po.root)
   // Now run both passes on main using math's accumulated types/sym_types.
-  d4_ts = TS(d4_tc, d4_math_ts.types, d4_math_ts.type_info, d4_math_ts.sym_types, Vector<Diagnostic>::new(), to_i64(-1), to_i64(0), HashMap<i64>::new(), d4_math_ts.variant_set, Conformance(HashMap<i64>::new(), Vector<i64>::new()))
+  d4_ts = ts_new(d4_tc, d4_math_ts.types, d4_math_ts.type_info, d4_math_ts.sym_types, reg_with_variant_set(registry_new(d4_p1.resolve.symbols, d4_p1.graph.modules), d4_math_ts.reg.variant_set))
+  d4_ts = tc_pass_shells(d4_ts, d4_po.root)
   d4_ts = tc_pass1(d4_ts, d4_po.root)
   d4_ts = tc_pass2(d4_ts, d4_po.root)
 
@@ -598,10 +663,12 @@ fn main(): i32
   let d4_a_sf: SourceFile = program_file_of_module(d4_p2, d4_a_mid)
   let d4_a_po: ParseOutput = d4_a_sf.parse_output
   let d4_a_tc: TC = TC(d4_a_po.nodes, d4_a_po.idx, d4_a_po.toks, d4_a_sf.source_text, d4_p2.resolve.symbols, d4_p2.resolve.scopes, d4_p2.resolve.uses, d4_a_sf.file_id, d4_p2.resolve.extend_concept_bindings, d4_a_mid, d4_p2.resolve.module_exports)
-  let d4_a_ts: TS = TS(d4_a_tc, d4_p2.typecheck.types, d4_p2.typecheck.type_info, d4_p2.typecheck.sym_types, Vector<Diagnostic>::new(), to_i64(-1), to_i64(0), HashMap<i64>::new(), HashMap<i64>::new(), Conformance(HashMap<i64>::new(), Vector<i64>::new()))
+  let d4_a_ts: TS = ts_new(d4_a_tc, d4_p2.typecheck.types, d4_p2.typecheck.type_info, d4_p2.typecheck.sym_types, registry_new(d4_p2.resolve.symbols, d4_p2.graph.modules))
+  d4_a_ts = tc_pass_shells(d4_a_ts, d4_a_po.root)
   d4_a_ts = tc_pass1(d4_a_ts, d4_a_po.root)
   // Now typecheck app::b.
-  let d4_b_ts: TS = TS(d4_b_tc, d4_a_ts.types, d4_a_ts.type_info, d4_a_ts.sym_types, Vector<Diagnostic>::new(), to_i64(-1), to_i64(0), HashMap<i64>::new(), d4_a_ts.variant_set, Conformance(HashMap<i64>::new(), Vector<i64>::new()))
+  let d4_b_ts: TS = ts_new(d4_b_tc, d4_a_ts.types, d4_a_ts.type_info, d4_a_ts.sym_types, reg_with_variant_set(registry_new(d4_p2.resolve.symbols, d4_p2.graph.modules), d4_a_ts.reg.variant_set))
+  d4_b_ts = tc_pass_shells(d4_b_ts, d4_b_po.root)
   d4_b_ts = tc_pass1(d4_b_ts, d4_b_po.root)
   d4_b_ts = tc_pass2(d4_b_ts, d4_b_po.root)
 
@@ -631,14 +698,16 @@ fn main(): i32
   let d4_c_sf: SourceFile = program_file_of_module(d4_p3, d4_c_mid)
   let d4_c_po: ParseOutput = d4_c_sf.parse_output
   let d4_c_tc: TC = TC(d4_c_po.nodes, d4_c_po.idx, d4_c_po.toks, d4_c_sf.source_text, d4_p3.resolve.symbols, d4_p3.resolve.scopes, d4_p3.resolve.uses, d4_c_sf.file_id, d4_p3.resolve.extend_concept_bindings, d4_c_mid, d4_p3.resolve.module_exports)
-  let d4_c_ts: TS = TS(d4_c_tc, d4_p3.typecheck.types, d4_p3.typecheck.type_info, d4_p3.typecheck.sym_types, Vector<Diagnostic>::new(), to_i64(-1), to_i64(0), HashMap<i64>::new(), HashMap<i64>::new(), Conformance(HashMap<i64>::new(), Vector<i64>::new()))
+  let d4_c_ts: TS = ts_new(d4_c_tc, d4_p3.typecheck.types, d4_p3.typecheck.type_info, d4_p3.typecheck.sym_types, registry_new(d4_p3.resolve.symbols, d4_p3.graph.modules))
+  d4_c_ts = tc_pass_shells(d4_c_ts, d4_c_po.root)
   d4_c_ts = tc_pass1(d4_c_ts, d4_c_po.root)
   // Run pass1+pass2 on app::d with colors' variant_set.
   let d4_d_mid: i64 = find_module_by_name(d4_p3.graph.modules, "app::d")
   let d4_d_sf: SourceFile = program_file_of_module(d4_p3, d4_d_mid)
   let d4_d_po: ParseOutput = d4_d_sf.parse_output
   let d4_d_tc: TC = TC(d4_d_po.nodes, d4_d_po.idx, d4_d_po.toks, d4_d_sf.source_text, d4_p3.resolve.symbols, d4_p3.resolve.scopes, d4_p3.resolve.uses, d4_d_sf.file_id, d4_p3.resolve.extend_concept_bindings, d4_d_mid, d4_p3.resolve.module_exports)
-  let d4_d_ts: TS = TS(d4_d_tc, d4_c_ts.types, d4_c_ts.type_info, d4_c_ts.sym_types, Vector<Diagnostic>::new(), to_i64(-1), to_i64(0), HashMap<i64>::new(), d4_c_ts.variant_set, Conformance(HashMap<i64>::new(), Vector<i64>::new()))
+  let d4_d_ts: TS = ts_new(d4_d_tc, d4_c_ts.types, d4_c_ts.type_info, d4_c_ts.sym_types, reg_with_variant_set(registry_new(d4_p3.resolve.symbols, d4_p3.graph.modules), d4_c_ts.reg.variant_set))
+  d4_d_ts = tc_pass_shells(d4_d_ts, d4_d_po.root)
   d4_d_ts = tc_pass1(d4_d_ts, d4_d_po.root)
   d4_d_ts = tc_pass2(d4_d_ts, d4_d_po.root)
   let d4_3_ok: bool = false
@@ -843,12 +912,14 @@ fn main(): i32
   // fixed by PR #238 (concept bindings HashMap → triples).  This test
   // locks in the fix across the three extend-on-builtin shapes:
   //   1. Local concept + extend in same module.
-  //   2. Concept in one module, extend in another (cross-module).
+  //   2. Concept in one module, extend in another: the concept is the
+  //      prelude's, visible unqualified everywhere (an import binds
+  //      only its module name, CONTRACT_MODULE_SYSTEM.md §3, §7).
   //   3. Multiple builtins extended in one module.
   let cb_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
   cb_inputs = cb_inputs.push(SourceInput("a.dao", "module case_a\n\nconcept Showable:\n  fn show(self): string\n\nextend i32 as Showable:\n  fn show(self): string\n    return \"i32\"\n", false))
-  cb_inputs = cb_inputs.push(SourceInput("c.dao", "module case_b::concepts\nconcept Printable:\n  fn to_string(self): string\n", false))
-  cb_inputs = cb_inputs.push(SourceInput("p.dao", "module case_b::impl\nimport case_b::concepts\n\nextend i64 as Printable:\n  fn to_string(self): string\n    return \"i64\"\n", false))
+  cb_inputs = cb_inputs.push(SourceInput("stdlib/core/c.dao", "module core::concepts\nconcept Printable:\n  fn to_string(self): string\n", true))
+  cb_inputs = cb_inputs.push(SourceInput("p.dao", "module case_b::impl\n\nextend i64 as Printable:\n  fn to_string(self): string\n    return \"i64\"\n", false))
   cb_inputs = cb_inputs.push(SourceInput("m.dao", "module case_c\n\nconcept Named:\n  fn name(self): string\n\nextend i32 as Named:\n  fn name(self): string\n    return \"i32\"\n\nextend bool as Named:\n  fn name(self): string\n    return \"bool\"\n\nextend string as Named:\n  fn name(self): string\n    return \"string\"\n", false))
   let cb_pg: ProgramGraph = build_program(cb_inputs)
   let cb_p: Program = program_from_graph(cb_pg)
@@ -990,18 +1061,14 @@ fn main(): i32
   else:
     print("FAIL prelude_method_visibility")
 
-  // Test 50: a module's own method shadows a prelude method of the
-  // same mangled name whichever comes first in the symbol table.
-  let shadow_syms_a: Vector<Symbol> = Vector<Symbol>::new()
-  shadow_syms_a = shadow_syms_a.push(prelude_sym).push(module_sym)
-  let shadow_syms_b: Vector<Symbol> = Vector<Symbol>::new()
-  shadow_syms_b = shadow_syms_b.push(module_sym).push(prelude_sym)
+  // Test 50: a module's own extend of a type shadows the prelude's for
+  // that module; another module sees only the prelude's; an unknown
+  // name is none.
   let shadow_ok: bool = false
-  if find_visible_method_sym(shadow_syms_a, "i32.show", to_i64(0)) == to_i64(1):
-    if find_visible_method_sym(shadow_syms_b, "i32.show", to_i64(0)) == to_i64(0):
-      if find_visible_method_sym(shadow_syms_a, "i32.show", to_i64(1)) == to_i64(0):
-        if find_visible_method_sym(shadow_syms_a, "i32.hash", to_i64(0)) == to_i64(-1):
-          shadow_ok = true
+  if find_method_sym_for_receiver(test_dispatch_index(), to_i64(0), "show", to_i64(2)) == to_i64(1):
+    if find_method_sym_for_receiver(test_dispatch_index(), to_i64(1), "show", to_i64(2)) == to_i64(0):
+      if find_method_sym_for_receiver(test_dispatch_index(), to_i64(0), "hash", to_i64(2)) == to_i64(-1):
+        shadow_ok = true
   if shadow_ok:
     print("PASS module_method_shadows_prelude")
     pass_count = pass_count + 1
@@ -1258,6 +1325,312 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL derived_conformance_no_double_count: expected >= 1 diagnostic, got 0")
+  // A concept's own name in its method signatures means the conforming
+  // type: an extend implements `o: Eq` as `o: i32`, and through a
+  // derived conformance or a bound `o: Eq` accepts the receiver's type.
+  // Anywhere else a concept is not a type (the host's rule).
+  if tc_expect_clean("derived_signature_substitutes_concept", "derived concept Eq:\n  fn eq(self, o: Eq): bool\n\nextend i32 as Eq:\n  fn eq(self, o: i32): bool\n    return true\n\nclass P:\n  x: i32\n\nfn f(a: P, b: P): bool\n  return a.eq(b)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("extend_signature_names_concept", "concept Eq:\n  fn eq(self, o: Eq): bool\n\nextend i32 as Eq:\n  fn eq(self, o: Eq): bool\n    return true\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("concept_is_not_a_type", "concept Eq:\n  fn eq(self, o: Eq): bool\n\nfn f(a: Eq): bool\n  let b: *Eq = &a\n  return true\n"):
+    pass_count = pass_count + 1
+  // Every concept's identity is registered before any signature is
+  // resolved, so the rule holds whatever the declaration order.
+  if tc_expect_rejected("concept_is_not_a_type_declared_later", "fn f(a: Eq): bool\n  return true\n\nconcept Eq:\n  fn eq(self, o: Eq): bool\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("other_concept_in_signature_declared_later", "concept A:\n  fn f(self, o: B): bool\n\nconcept B:\n  fn g(self): bool\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("bound_signature_substitutes_concept", "concept Eq:\n  fn eq(self, o: Eq): bool\n\nfn same<T: Eq>(a: T, b: T): bool\n  return a.eq(b)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("bound_signature_substitutes_pointer_to_concept", "concept Eq:\n  fn same(self, o: *Eq): bool\n\nfn f<T: Eq>(a: T, p: *T): bool\n  return a.same(p)\n"):
+    pass_count = pass_count + 1
+  // Two bounds requiring one member: the first bound in declaration
+  // order types the access, as the host's constraint search does, so
+  // reordering the bounds changes the signature the body is checked
+  // against.
+  if tc_expect_clean("first_bound_types_shared_member", "concept A:\n  fn f(self): i32\n\nconcept B:\n  fn f(self): bool\n\nfn g<T: A + B>(x: T): i32\n  return x.f()\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("first_bound_types_shared_member_reordered", "concept A:\n  fn f(self): i32\n\nconcept B:\n  fn f(self): bool\n\nfn g<T: B + A>(x: T): i32\n  return x.f()\n"):
+    pass_count = pass_count + 1
+  // A class derives a concept through the `extend`s in scope in its own
+  // module (the host's rule, CONTRACT_MODULE_SYSTEM.md §5): an import
+  // does not bring a module's extends along, so a class in `main` does
+  // not derive through `lib`'s extend — but it does through the
+  // prelude's, which every module sees with no import, whatever the
+  // input order.  Conformance state threads across the program's
+  // modules, and a concept method is matched by its type's name, which
+  // any module can read.
+  let dc_lib: string = "module app::lib\nderived concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string\n    return \"n\"\n"
+  let dc_main: string = "module app::main\nimport app::lib\n\nclass P:\n  x: i32\n\nfn f(p: P): string\n  return p.show()\n"
+  if tc_expect_program_errors("derived_conformance_needs_visible_extend", Vector<SourceInput>::new().push(SourceInput("lib.dao", dc_lib, false)), dc_main, "main.dao", 1):
+    pass_count = pass_count + 1
+  let dc_prelude: string = "module core::show\nderived concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string\n    return \"n\"\n"
+  let dc_user: string = "module app::main\n\nclass P:\n  x: i32\n\nfn f(p: P): string\n  return p.show()\n"
+  if tc_expect_program_errors("derived_conformance_through_prelude_extend", Vector<SourceInput>::new().push(SourceInput("stdlib/core/show.dao", dc_prelude, true)), dc_user, "main.dao", 0):
+    pass_count = pass_count + 1
+  // The prelude's files see one another as one namespace: a class in
+  // one prelude file derives through a concept and extend declared in
+  // another, whichever is checked first (collection precedes derivation).
+  let dc_pre_class: string = "module core::a\n\nclass P:\n  x: i32\n"
+  let dc_pre_user: string = "module app::main\n\nfn f(p: P): string\n  return p.show()\n"
+  if tc_expect_program_errors("derived_conformance_across_prelude_files", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", dc_pre_class, true)).push(SourceInput("stdlib/core/z.dao", dc_prelude, true)), dc_pre_user, "main.dao", 0):
+    pass_count = pass_count + 1
+  // Two modules each extending one type as one concept conform it in
+  // each of them: a class in either derives.
+  let dc_show_only: string = "module core::show\nderived concept Show:\n  fn show(self): string\n"
+  let dc_lib_a: string = "module app::a\nextend i32 as Show:\n  fn show(self): string\n    return \"a\"\n\nclass PA:\n  x: i32\n\nfn fa(p: PA): string\n  return p.show()\n"
+  let dc_lib_b: string = "module app::b\nextend i32 as Show:\n  fn show(self): string\n    return \"b\"\n\nclass PB:\n  x: i32\n\nfn fb(p: PB): string\n  return p.show()\n"
+  if tc_expect_program_errors("conformance_per_module_extends", Vector<SourceInput>::new().push(SourceInput("stdlib/core/show.dao", dc_show_only, true)).push(SourceInput("a.dao", dc_lib_a, false)).push(SourceInput("b.dao", dc_lib_b, false)), "module app::main\nimport app::a\nimport app::b\n", "main.dao", 0):
+    pass_count = pass_count + 1
+  // Every derivation precedes every body: a body in an earlier prelude
+  // file dispatches through a class, concept, and extend declared in a
+  // later one; and an extend in an earlier file satisfies a concept
+  // declared in a later one (the requirement's name is read off its
+  // type, never through this file's tokens).
+  let dc_pre_body: string = "module core::a\n\nfn render(p: P): string\n  return p.show()\n"
+  let dc_pre_all: string = "module core::z\nderived concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string\n    return \"n\"\n\nclass P:\n  x: i32\n"
+  if tc_expect_program_errors("derivation_precedes_bodies", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", dc_pre_body, true)).push(SourceInput("stdlib/core/z.dao", dc_pre_all, true)), "module app::main\n", "main.dao", 0):
+    pass_count = pass_count + 1
+  let dc_pre_extend: string = "module core::a\n\nextend i32 as Show:\n  fn show(self): string\n    return \"n\"\n"
+  if tc_expect_program_errors("satisfaction_across_prelude_files", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", dc_pre_extend, true)).push(SourceInput("stdlib/core/z.dao", dc_show_only, true)), "module app::main\n", "main.dao", 0):
+    pass_count = pass_count + 1
+  // Satisfaction is checked once every module's method tables exist: an
+  // extend in an earlier prelude file is held to a concept declared in a
+  // later one.
+  let dc_pre_bad_extend: string = "module core::a\n\nextend i32 as Show:\n  fn show(self): i64\n    return 1\n"
+  if tc_expect_program_errors("satisfaction_holds_across_prelude_files", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", dc_pre_bad_extend, true)).push(SourceInput("stdlib/core/z.dao", dc_show_only, true)), "module app::main\n", "stdlib/core/a.dao", 1):
+    pass_count = pass_count + 1
+  // Another module's struct is read through its field symbols: a field
+  // access types, and a missing field is diagnosed, across the module
+  // boundary.
+  let dc_point: string = "module app::lib\n\nclass P:\n  x: i32\n"
+  if tc_expect_program_errors("foreign_field_access_typed", Vector<SourceInput>::new().push(SourceInput("lib.dao", dc_point, false)), "module app::main\nimport app::lib\n\nfn f(p: lib::P): bool\n  return p.x\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("foreign_field_missing_diagnosed", Vector<SourceInput>::new().push(SourceInput("lib.dao", dc_point, false)), "module app::main\nimport app::lib\n\nfn f(p: lib::P): i32\n  return p.y\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  // Every identity precedes every alias and signature: an alias and an
+  // enum declared in a later prelude file resolve in an earlier one's
+  // signatures, so those signatures carry their meaning.
+  let dc_alias_user: string = "module core::a\nderived concept Show:\n  fn show(self, n: Number): bool\n\nextend i32 as Show:\n  fn show(self, n: Number): bool\n    return true\n"
+  let dc_alias_decl: string = "module core::z\ntype Number = i32\n"
+  if tc_expect_program_errors("alias_across_prelude_files_types_signature", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", dc_alias_user, true)).push(SourceInput("stdlib/core/z.dao", dc_alias_decl, true)), "module app::main\n\nclass P:\n  x: i32\n\nfn f(p: P): bool\n  return p.show(true)\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  let dc_enum_user: string = "module core::a\nfn pick(c: Color): i32\n  return 0\n"
+  let dc_enum_decl: string = "module core::z\nenum Color:\n  Red\n  Blue\n"
+  if tc_expect_program_errors("enum_across_prelude_files_types_signature", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", dc_enum_user, true)).push(SourceInput("stdlib/core/z.dao", dc_enum_decl, true)), "module app::main\n\nfn f(): i32\n  return pick(1)\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  // A generic concept head is no type either.
+  if tc_expect_rejected("generic_concept_annotation_rejected", "derived concept C<T>:\n  fn f(self): bool\n\nextern fn consume(x: C<i32>): bool\n"):
+    pass_count = pass_count + 1
+  // A receiver's own method is found through the type's declaring module,
+  // which the type records: a module's `Box` shadowing the prelude's at
+  // the same declaration index answers with its own `get`.
+  let dc_pre_box: string = "module core::box\nclass Box:\n  n: i32\n  fn get(self): bool\n    return true\n"
+  let dc_user_box: string = "module app::main\nclass Box:\n  n: i32\n  fn get(self): i32\n    return 1\n\nfn f(b: Box): i32\n  return b.get()\n"
+  if tc_expect_program_errors("shadowing_class_keeps_its_own_method", Vector<SourceInput>::new().push(SourceInput("stdlib/core/box.dao", dc_pre_box, true)), dc_user_box, "main.dao", 0):
+    pass_count = pass_count + 1
+  // An extend's `self` is the type its target annotation resolves to in
+  // the extend's own module, not a same-named type elsewhere.
+  let dc_pre_ext: string = "module core::p\nconcept Show:\n  fn show(self): i32\n\nclass P:\n  x: i32\n\nextend P as Show:\n  fn show(self): i32\n    return self.x\n"
+  if tc_expect_program_errors("extend_self_is_resolved_target", Vector<SourceInput>::new().push(SourceInput("stdlib/core/p.dao", dc_pre_ext, true)), "module app::main\nclass P:\n  x: bool\n", "main.dao", 0):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("concept_in_generic_argument_rejected", "concept C:\n  fn f(self): bool\n\nclass Box<T>:\n  v: T\n\nextern fn consume(x: Box<C>): bool\n"):
+    pass_count = pass_count + 1
+  // The concept's own name applied to its parameters is its self form:
+  // `C<T>` in C's signatures means the conforming type.
+  if tc_expect_clean("applied_self_concept_substitutes", "concept C<T>:\n  fn copy(self): C<T>\n\nfn f<U: C<i32>>(x: U): U\n  return x.copy()\n"):
+    pass_count = pass_count + 1
+  // A same-named type's own method is never a candidate for another
+  // receiver, and an extend's method answers only for the type it
+  // extends: main's `P`, deriving `Show`, is not answered by the
+  // prelude's `P.show`.
+  let dc_pre_pshow: string = "module core::p\nderived concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string\n    return \"n\"\n\nclass P:\n  n: i32\n  fn show(self): bool\n    return true\n"
+  if tc_expect_program_errors("other_type_method_never_answers", Vector<SourceInput>::new().push(SourceInput("stdlib/core/p.dao", dc_pre_pshow, true)), "module app::main\nclass P:\n  x: i32\n\nfn f(p: P): string\n  return p.show()\n", "main.dao", 0):
+    pass_count = pass_count + 1
+  // The applied self form keeps its pointer wrappers: `*C<T>` is `*U`.
+  if tc_expect_clean("applied_self_pointer_kept", "concept C<T>:\n  fn same(self, o: *C<T>): bool\n\nfn f<U: C<i32>>(x: U, p: *U): bool\n  return x.same(p)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("applied_self_pointer_not_erased", "concept C<T>:\n  fn same(self, o: *C<T>): bool\n\nfn f<U: C<i32>>(x: U): bool\n  return x.same(x)\n"):
+    pass_count = pass_count + 1
+  // A qualified concept name inside a generic argument is no type.
+  if tc_expect_program_errors("qualified_concept_in_generic_argument_rejected", Vector<SourceInput>::new().push(SourceInput("lib.dao", "module app::lib\nconcept C:\n  fn f(self): bool\n", false)), "module app::main\nimport app::lib\n\nclass Box<T>:\n  v: T\n\nextern fn consume(x: Box<lib::C>): bool\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  // Satisfaction takes the target type's own methods and extends, never
+  // a same-named type's: the prelude's `P.required` does not satisfy
+  // main's `extend P as C`.
+  let dc_pre_req: string = "module core::p\nclass P:\n  n: i32\n  fn required(self): bool\n    return true\n"
+  if tc_expect_program_errors("satisfaction_uses_target_type", Vector<SourceInput>::new().push(SourceInput("stdlib/core/p.dao", dc_pre_req, true)), "module app::main\nconcept C:\n  fn required(self): bool\n\nclass P:\n  x: i32\n\nextend P as C:\n  fn other(self): bool\n    return true\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  // A parameter symbol is found in its own module: two modules' methods
+  // at one declaration index each bind their own `self`.
+  let dc_pre_get: string = "module core::box\nclass Box:\n  x: i32\n  fn get(self): i32\n    return self.x\n"
+  if tc_expect_program_errors("self_bound_per_module", Vector<SourceInput>::new().push(SourceInput("stdlib/core/box.dao", dc_pre_get, true)), "module app::main\nclass Box:\n  x: i32\n  fn get(self): bool\n    return self.x\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  // An extend's method has a receiver (the host's validate_receiver):
+  // one without `self` first is diagnosed.
+  if tc_expect_rejected("extend_method_requires_self", "concept Factory:\n  fn make(): i32\n\nextend i32 as Factory:\n  fn make(): i32\n    return 1\n"):
+    pass_count = pass_count + 1
+  // A method's own type parameter shadowing the concept's is a
+  // different parameter: `C<T>` with that `T` is not the self form.
+  if tc_expect_rejected("applied_self_shadowed_param_rejected", "concept C<T>:\n  fn copy<T>(self): C<T>\n"):
+    pass_count = pass_count + 1
+  // Expression-bodied methods of a class and of an extend are registered
+  // and their bodies checked like block-bodied ones.
+  if tc_expect_clean("expr_method_registered", "class C:\n  x: i64\n  fn get(self): i64 -> self.x\n\nfn f(c: C): i64\n  return c.get()\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("expr_method_body_checked", "class C:\n  x: i64\n  fn get(self): bool -> self.x\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("expr_extend_method_registered", "concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string -> \"n\"\n\nfn f(n: i32): string\n  return n.show()\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("expr_extend_method_body_checked", "concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string -> 1\n"):
+    pass_count = pass_count + 1
+  // The applied self form's arguments may name no concept.
+  if tc_expect_rejected("applied_self_with_concept_argument_rejected", "concept Other:\n  fn g(self): bool\n\nconcept C<T>:\n  fn f(self, x: C<Other>): bool\n"):
+    pass_count = pass_count + 1
+  // The self name inside another generic hides no other concept there,
+  // in either argument order.
+  if tc_expect_rejected("concept_beside_self_in_generic_rejected", "concept Other:\n  fn g(self): bool\n\nclass Pair<A, B>:\n  a: A\n  b: B\n\nconcept C:\n  fn f(self, x: Pair<C, Other>): bool\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("concept_before_self_in_generic_rejected", "concept Other:\n  fn g(self): bool\n\nclass Pair<A, B>:\n  a: A\n  b: B\n\nconcept C:\n  fn f(self, x: Pair<Other, C>): bool\n"):
+    pass_count = pass_count + 1
+  // The applied self form applies the concept's own type parameters, in
+  // order: any other application (a different count, a concrete
+  // argument, the parameters reordered) is rejected.
+  if tc_expect_rejected("applied_self_arity_nongeneric_rejected", "concept C:\n  fn f(self, o: C<i32>): bool\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("applied_self_arity_mismatch_rejected", "concept C<T>:\n  fn f(self, o: C<T, T>): bool\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("applied_self_concrete_argument_rejected", "concept C<T>:\n  fn copy(self): C<bool>\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("applied_self_reordered_params_rejected", "concept C<A, B>:\n  fn swap(self): C<B, A>\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("applied_self_two_params_accepted", "concept C<A, B>:\n  fn same(self, o: C<A, B>): bool\n"):
+    pass_count = pass_count + 1
+  // Alias chains resolve whatever their declaration order, within a file
+  // and across prelude files; a cycle is diagnosed.
+  if tc_expect_clean("alias_chain_forward", "type Count = Number\ntype Number = i32\n\nfn f(n: Count): Number\n  return n\n"):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("alias_chain_across_prelude_files", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", "module core::a\ntype Count = Number\n", true)).push(SourceInput("stdlib/core/z.dao", "module core::z\ntype Number = i32\n", true)), "module app::main\n\nfn f(n: Count): i32\n  return n\n", "main.dao", 0):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("alias_cycle_rejected", "type A = B\ntype B = A\n"):
+    pass_count = pass_count + 1
+  // An extend written through an alias answers for the type the alias
+  // names: dispatch matches the receiver's type, never a spelling.
+  if tc_expect_clean("extend_through_alias_dispatches", "concept Show:\n  fn show(self): string\n\nclass P:\n  x: i32\n\ntype Alias = P\n\nextend Alias as Show:\n  fn show(self): string\n    return \"p\"\n\nfn f(p: P): string\n  return p.show()\n"):
+    pass_count = pass_count + 1
+  // A requirement taking `self` is not met by a class's static method.
+  if tc_expect_rejected("static_method_does_not_satisfy_receiver_requirement", "concept C:\n  fn required(self): bool\n\nclass P:\n  x: i32\n  fn required(flag: bool): bool\n    return flag\n\nextend P as C:\n  fn other(self): bool\n    return true\n"):
+    pass_count = pass_count + 1
+  // A static requirement compares every parameter (there is no `self`
+  // to skip): a static implementation of another shape is diagnosed.
+  if tc_expect_rejected("static_requirement_compares_all_params", "concept F:\n  fn make(n: i32): bool\n\nclass P:\n  x: i32\n  fn make(n: bool): bool\n    return n\n\nextend P as F:\n  fn other(self): bool\n    return true\n"):
+    pass_count = pass_count + 1
+  // One type answers one name once: an extend through an alias of an
+  // already extended type conflicts, never silently replaces.
+  if tc_expect_rejected("extend_through_alias_conflicts", "concept C:\n  fn f(self): i32\n\nclass P:\n  x: i32\n\ntype Alias = P\n\nextend P as C:\n  fn f(self): bool\n    return true\n\nextend Alias as C:\n  fn f(self): i32\n    return 1\n"):
+    pass_count = pass_count + 1
+  // A builtin receiver has the methods an extend gave it: the call is
+  // typed by the method's signature.
+  if tc_expect_rejected("builtin_receiver_extend_method_typed", "concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string -> \"n\"\n\nfn f(n: i32): bool\n  return n.show()\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("builtin_receiver_missing_method_diagnosed", "concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string -> \"n\"\n\nfn f(n: i32): string\n  return n.shwo()\n"):
+    pass_count = pass_count + 1
+  // Two derived concepts a class conforms to that both provide a member
+  // are an ambiguity, in either declaration order: the conformances are
+  // otherwise valid (one `i32.f` satisfies both concepts' `f`), and the
+  // ambiguity is diagnosed at the access.
+  let amb_a_first: string = "derived concept A:\n  fn f(self): i32\n\nderived concept B:\n  fn f(self): i32\n  fn g(self): i32\n\nclass P:\n  x: i32\n\nextend i32 as A:\n  fn f(self): i32 -> 1\n\nextend i32 as B:\n  fn g(self): i32 -> 2\n\nfn h(p: P): i32\n  return p.f()\n"
+  let amb_b_first: string = "derived concept B:\n  fn f(self): i32\n  fn g(self): i32\n\nderived concept A:\n  fn f(self): i32\n\nclass P:\n  x: i32\n\nextend i32 as B:\n  fn g(self): i32 -> 2\n\nextend i32 as A:\n  fn f(self): i32 -> 1\n\nfn h(p: P): i32\n  return p.f()\n"
+  if tc_expect_diag_containing("ambiguous_derived_member_rejected", amb_a_first, "provided by more than one derived concept"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("ambiguous_derived_member_rejected_reversed", amb_b_first, "provided by more than one derived concept"):
+    pass_count = pass_count + 1
+  // A static method is called as `Type::m(...)`, never through a value.
+  if tc_expect_rejected("static_method_via_instance_rejected", "class C:\n  x: i32\n  fn make(): i32 -> 7\n\nfn f(c: C): i32\n  return c.make()\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("static_method_via_type_accepted", "class C:\n  x: i32\n  fn make(): i32 -> 7\n\nfn f(): i32\n  return C::make()\n"):
+    pass_count = pass_count + 1
+  // A qualified call of an instance method checks its receiver argument.
+  if tc_expect_rejected("qualified_call_checks_receiver", "class C:\n  x: i32\n  fn get(self): i32 -> self.x\n\nfn f(): i32\n  return C::get(true)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("qualified_call_with_receiver_accepted", "class C:\n  x: i32\n  fn get(self): i32 -> self.x\n\nfn f(c: C): i32\n  return C::get(c)\n"):
+    pass_count = pass_count + 1
+  // The name after `as` must name a concept in scope.
+  if tc_expect_rejected("extend_unknown_concept_rejected", "extend i32 as Missing:\n  fn show(self): string -> \"n\"\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("extend_non_concept_rejected", "class Q:\n  x: i32\n\nextend i32 as Q:\n  fn show(self): string -> \"n\"\n"):
+    pass_count = pass_count + 1
+  // Extends of distinct pointer targets declare distinct methods.
+  if tc_expect_clean("pointer_receiver_extends_distinct", "concept Show:\n  fn show(self): string\n\nextend *i32 as Show:\n  fn show(self): string -> \"a\"\n\nextend *i64 as Show:\n  fn show(self): string -> \"b\"\n"):
+    pass_count = pass_count + 1
+  // An invalid extend does not hide the one after it: both are checked.
+  if tc_expect_diags("consecutive_extends_each_checked", "concept Show:\n  fn show(self): string\n\nextend i32 as Missing:\n  fn show(self): string -> \"n\"\n\nextend i64 as Show:\n  fn other(self): string -> \"m\"\n", 2):
+    pass_count = pass_count + 1
+  // Extends of two imported, same-named types declare distinct methods.
+  if tc_expect_program_errors("qualified_receiver_extends_distinct", Vector<SourceInput>::new().push(SourceInput("a.dao", "module app::a\nclass P:\n  x: i32\n", false)).push(SourceInput("b.dao", "module app::b\nclass P:\n  x: i32\n", false)), "module app::main\nimport app::a\nimport app::b\n\nconcept Show:\n  fn show(self): string\n\nextend a::P as Show:\n  fn show(self): string -> \"a\"\n\nextend b::P as Show:\n  fn show(self): string -> \"b\"\n", "main.dao", 0):
+    pass_count = pass_count + 1
+  // A value's name is no namespace: `c::make` with `c` a parameter is
+  // diagnosed, called or taken as a value.
+  if tc_expect_rejected("value_prefix_static_call_rejected", "class C:\n  x: i32\n  fn make(): i32 -> 7\n\nfn f(c: C): i32\n  return c::make()\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("value_prefix_method_reference_rejected", "class C:\n  x: i32\n  fn make(): i32 -> 7\n\nfn f(c: C): i32\n  let g = c::make\n  return 0\n"):
+    pass_count = pass_count + 1
+  // A function or method call takes positional arguments: a named one is
+  // diagnosed, reordered or unknown alike.
+  if tc_expect_rejected("named_argument_on_function_rejected", "fn sub(a: i32, b: i32): i32 -> a - b\n\nfn f(): i32\n  return sub(b = 1, a = 2)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("named_argument_on_static_method_rejected", "class C:\n  x: i32\n  fn sub(a: i32, b: i32): i32 -> a - b\n\nfn f(): i32\n  return C::sub(nope = 1, a = 2)\n"):
+    pass_count = pass_count + 1
+  // An extend may not redefine a type's own method (dispatch would
+  // always prefer the type's), through an alias or directly.
+  if tc_expect_rejected("extend_redefining_inherent_method_rejected", "concept C:\n  fn f(self): i32\n\nclass P:\n  x: i32\n  fn f(self): i32 -> 1\n\ntype Alias = P\n\nextend Alias as C:\n  fn f(self): bool -> true\n"):
+    pass_count = pass_count + 1
+  // A class is constructed positionally: a named argument is diagnosed.
+  if tc_expect_rejected("named_argument_on_constructor_rejected", "class C:\n  x: i32\n  y: i32\n\nfn f(): i32\n  let c: C = C(y = 1, x = 2)\n  return 0\n"):
+    pass_count = pass_count + 1
+  // A qualified member the type does not have is diagnosed, called or
+  // taken as a value.
+  if tc_expect_rejected("missing_static_member_call_rejected", "class C:\n  x: i32\n\nfn f(): i32\n  let c: C = C::missing(1)\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("missing_static_member_value_rejected", "class C:\n  x: i32\n\nfn f(): i32\n  let g = C::missing\n  return 0\n"):
+    pass_count = pass_count + 1
+  // A literal argument of a variant adopts the parameter's type.
+  if tc_expect_clean("variant_literal_argument_fits", "enum class Pair:\n  Both(a: i64, b: i64)\n\nfn f(): i32\n  let p: Pair = Pair::Both(b = 2, a = 1)\n  return 0\n"):
+    pass_count = pass_count + 1
+  // A type's own method registered after an extend of it in an earlier
+  // prelude file, written through an alias, conflicts with that extend,
+  // whatever the file order: the checker's one diagnostic.
+  if tc_expect_program_errors("inherent_after_prelude_extend_conflicts", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", "module core::a\nconcept C:\n  fn f(self): i32\n\ntype Alias = P\n\nextend Alias as C:\n  fn f(self): i32 -> 2\n", true)).push(SourceInput("stdlib/core/z.dao", "module core::z\nclass P:\n  x: i32\n  fn f(self): i32 -> 1\n", true)), "module app::main\n", "stdlib/core/z.dao", 1):
+    pass_count = pass_count + 1
+  // Spelled with the type's own name, the two methods share a mangled
+  // name in the prelude's namespace: the resolver's duplicate
+  // declaration reports it, once.
+  if tc_expect_program_errors("inherent_after_prelude_extend_reported_once", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", "module core::a\nconcept C:\n  fn f(self): i32\n\nextend P as C:\n  fn f(self): i32 -> 2\n", true)).push(SourceInput("stdlib/core/z.dao", "module core::z\nclass P:\n  x: i32\n  fn f(self): i32 -> 1\n", true)), "module app::main\n", "stdlib/core/z.dao", 1):
+    pass_count = pass_count + 1
+  // A module's extend of a prelude class shares the class method's
+  // mangled name but shadows it in its own namespace, so the resolver
+  // reports nothing: the conflict is the checker's, reported in the
+  // module.
+  if tc_expect_program_errors("module_extend_of_prelude_method_conflicts", Vector<SourceInput>::new().push(SourceInput("stdlib/core/z.dao", "module core::z\nclass P:\n  x: i32\n  fn f(self): i32 -> 1\n", true)), "module app::main\nconcept C:\n  fn f(self): i32\n\nextend P as C:\n  fn f(self): i32 -> 2\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  // A concept is not a receiver type: `extend C as C` is diagnosed and
+  // records no conformance.
+  if tc_expect_rejected("extend_target_concept_rejected", "concept C:\n  fn ok(self): bool\n\nextend C as C:\n  fn ok(self): bool\n    return true\n"):
+    pass_count = pass_count + 1
+  // Concept identities precede every signature: a signature in an
+  // earlier prelude file naming a concept declared in a later one is
+  // diagnosed there.
+  let dc_pre_sig: string = "module core::a\n\nextern fn f(x: Eq): bool\n"
+  let dc_pre_concept: string = "module core::z\nconcept Eq:\n  fn eq(self, o: Eq): bool\n"
+  if tc_expect_program_errors("concept_is_not_a_type_across_prelude_files", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", dc_pre_sig, true)).push(SourceInput("stdlib/core/z.dao", dc_pre_concept, true)), "module app::main\n", "stdlib/core/a.dao", 1):
+    pass_count = pass_count + 1
+  // A class its own module also extends explicitly still derives — the
+  // derivation is the type's, visible to a consuming module's class.
+  let dc_both: string = "module app::lib\nderived concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string\n    return \"n\"\n\nclass P:\n  x: i32\n\nextend P as Show:\n  fn show(self): string\n    return \"p\"\n"
+  let dc_wrap: string = "module app::main\nimport app::lib\n\nclass W:\n  p: lib::P\n\nfn f(w: W): string\n  return w.show()\n"
+  if tc_expect_program_errors("derived_conformance_survives_local_extend", Vector<SourceInput>::new().push(SourceInput("lib.dao", dc_both, false)), dc_wrap, "main.dao", 0):
+    pass_count = pass_count + 1
   let r_unc: TypeCheckResult = typecheck("fn f<T>(x: T): string\n  return x.to_string()\n")
   if tc_count_diags(r_unc) >= 1:
     print("PASS unconstrained_param_member_rejected")

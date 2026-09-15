@@ -1,0 +1,52 @@
+module derived_concepts
+// derived_concepts.dao — a `derived concept` is conformed to
+// structurally: a class whose fields all conform to it conforms too,
+// transitively, with no `extend` of its own.  The concept's own name in
+// a signature means the conforming type.
+//
+// The checker admits a deriving class wherever the concept is required
+// (a `T: Show` bound accepts a Point).  The host cannot lower a call
+// through a derived conformance — no synthesized implementation exists
+// yet — so this example calls Show only on receivers with an explicit
+// `extend`.
+
+derived concept Show:
+  fn show(self): string
+
+extend i32 as Show:
+  fn show(self): string -> self.to_string()
+
+extend string as Show:
+  fn show(self): string -> "\"" + self + "\""
+
+// Every field conforms (both are i32), so Point derives Show.
+class Point:
+  x: i32
+  y: i32
+
+// Segment's fields conform too — its Points derive Show, its string
+// name has an explicit extend — so Segment derives Show.
+class Segment:
+  a: Point
+  b: Point
+  name: string
+
+fn describe<T: Show>(v: T): string -> v.show()
+
+// Requires Show without calling it, so a deriving class is admitted
+// here: Point structurally, Segment transitively.  With `concept Show`
+// in place of `derived concept Show` these two calls are rejected.
+fn shown<T: Show>(v: T): i32 -> 1
+
+fn main(): i32
+  print(describe(7))
+  print(describe("seven"))
+  let p: Point = Point(1, 2)
+  let s: Segment = Segment(p, Point(3, 4), "diag")
+  // The deriving values' own fields, through their explicit extends.
+  print(describe(p.x) + "," + describe(p.y))
+  print(describe(s.name))
+  // The deriving values themselves, where Show is required.
+  let admitted: i32 = shown(p) + shown(s)
+  print(admitted.to_string())
+  return 0
