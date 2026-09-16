@@ -58,15 +58,16 @@ static archive, or shared/system library.
 | `f32`     | `float`          | arg + return    |
 | `f64`     | `double`         | arg + return    |
 | `bool`    | `_Bool` (1 byte) | arg + return    |
-| `*T`      | `T*`             | arg + return    |
+| `Ptr<T>`  | `T*`             | arg + return    |
 | `void`    | `void`           | return only     |
 
 ### 4.2 Pointer semantics at the boundary
 
 - pointer values are foreign addresses — no ownership implied
 - no aliasing or lifetime safety is promised across FFI
-- dereference of foreign pointers requires `mode unsafe =>`
-- opaque pointers (`*void` equivalent) are the primary interop
+- reading, writing, or offsetting a foreign pointer (`get`, `set`,
+  `offset`) requires `mode unsafe =>`
+- opaque pointers (`Ptr<void>`, C's `void*`) are the primary interop
   mechanism for foreign aggregate data
 
 ### 4.3 Struct-by-value at the boundary
@@ -223,7 +224,8 @@ Each expansion requires updating this contract before implementation.
 - the compiler does not insert cleanup, reference counting, or
   lifetime tracking for values passed to or received from foreign
   code
-- foreign pointer dereference is an unsafe operation
+- memory access through a foreign pointer (`get`, `set`, `offset`) is
+  an unsafe operation
 - integer overflow checking is **not** applied to values received
   from foreign code (they enter Dao's value space as-is)
 
