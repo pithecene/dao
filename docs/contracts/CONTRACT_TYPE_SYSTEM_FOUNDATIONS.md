@@ -30,7 +30,7 @@ around whole-program inference as the primary organizing principle.
 The compiler semantic type layer must support, at minimum:
 
 - builtin scalar types
-- pointer types
+- pointer types (spelled `Ptr<T>`; see `ADR_RAW_POINTER_SURFACE.md`)
 - function types
 - named types
 - generic parameter types

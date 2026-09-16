@@ -103,14 +103,16 @@ never satisfied from another module.
    prefix, which `CONTRACT_RUNTIME_ABI.md` reserves for runtime hooks.
    Such a declaration in any other module is an error.
 8. Only prelude modules may declare the intrinsic family `size_of`,
-   `align_of`, `ptr_offset`, and `copy_out`: these are prelude
-   declarations whose bodies the compiler replaces -- inline IR from
-   the backend for the first three, a per-type copy out of a resource
-   domain from the monomorphizer for `copy_out`
-   (`CONTRACT_EXECUTION_CONTEXTS.md`, law 7) -- so a declaration
-   bearing one of those names in any other module is an error.  A
-   class's own `copy_out` method is not such a declaration.  Rule 4
-   does not apply to them.
+   `align_of`, and `copy_out`: these are prelude declarations whose
+   bodies the compiler replaces -- inline IR from the backend for the
+   first two, a per-type copy out of a resource domain from the
+   monomorphizer for `copy_out` (`CONTRACT_EXECUTION_CONTEXTS.md`, law
+   7) -- so a declaration bearing one of those names in any other
+   module is an error.  A class's own `copy_out` method is not such a
+   declaration.  Rule 4 does not apply to them.  The operations of
+   `Ptr<T>` (`ADR_RAW_POINTER_SURFACE.md`) are compiler-standard
+   methods, declared by no module: their lowering primitives have no
+   source name, in the prelude or anywhere else.
 
 Scope order, outermost to innermost:
 

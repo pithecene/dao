@@ -37,6 +37,10 @@ The current frozen surface assumptions are:
 - `enum` declares fieldless closed variants (classification only)
 - `enum class` declares closed structured variants with named fields
   (see `docs/contracts/ADR_ENUM_CLASS.md`)
+- `Ptr<T>` is the only pointer type; pointer operations are the
+  ordinary calls `Ptr<T>::new()`, `get`, `set`, `offset`, `cast<U>`,
+  and `is_null`, with no pointer sigils
+  (see `docs/contracts/ADR_RAW_POINTER_SURFACE.md`)
 
 Agents must not introduce alternate spellings for these without an
 explicit syntax revision task.
