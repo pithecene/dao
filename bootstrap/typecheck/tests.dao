@@ -1554,7 +1554,9 @@ fn main(): i32
   // A qualified call of an instance method checks its receiver argument.
   if tc_expect_rejected("qualified_call_checks_receiver", "class C:\n  x: i32\n  fn get(self): i32 -> self.x\n\nfn f(): i32\n  return C::get(true)\n"):
     pass_count = pass_count + 1
-  if tc_expect_clean("qualified_call_with_receiver_accepted", "class C:\n  x: i32\n  fn get(self): i32 -> self.x\n\nfn f(c: C): i32\n  return C::get(c)\n"):
+  // `::` reaches a type's statics; an instance method is reached on a
+  // value, whatever is passed for its `self`.
+  if tc_expect_diag_containing("qualified_call_of_instance_method_rejected", "class C:\n  x: i32\n  fn get(self): i32 -> self.x\n\nfn f(c: C): i32\n  return C::get(c)\n", "is an instance method"):
     pass_count = pass_count + 1
   // The name after `as` must name a concept in scope.
   if tc_expect_rejected("extend_unknown_concept_rejected", "extend i32 as Missing:\n  fn show(self): string -> \"n\"\n"):

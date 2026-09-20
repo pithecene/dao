@@ -2398,6 +2398,17 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
             is_method = true
           else:
             return ts_add_diag(r, ts_tok_span(r, mfield), "static method '" + ts_tok_name(r, mfield) + "' is called through a value; call it as " + type_name(r, get_expr_type(r, mobj)) + "::" + ts_tok_name(r, mfield) + "(...)")
+        Node::QualNameE(q_lp, q_count):
+          // A `::` path reaches a type's STATIC methods
+          // (CONTRACT_MODULE_SYSTEM.md §6: `b::T::m(...)`).  One that
+          // takes `self` is reached on a value instead, so a receiver
+          // passed as an ordinary argument is a diagnostic rather than
+          // a call that happens to type.
+          if callee_type.builtin_id == 1:
+            let q_segs: Vector<i64> = read_list(r.tc.idx_data, q_lp)
+            if q_segs.length() > 0:
+              let last_tidx: i64 = q_segs.get(q_segs.length() - 1)
+              return ts_add_diag(r, ts_tok_span(r, last_tidx), "'" + ts_tok_name(r, last_tidx) + "' is an instance method; it is reached on a value, not through '::'")
       let param_offset: i64 = 0
       let expected_args: i64 = callee_type.info_count
       if is_method:
