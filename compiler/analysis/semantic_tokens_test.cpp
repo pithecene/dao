@@ -405,9 +405,9 @@ suite<"expansion_classification"> expansion_classification = [] {
         classify_source_resolved("test.dao",
                                  "enum class Pair:\n"
                                  "    Both(a: i32, b: i32)\n"
-                                 "fn f(p: *i32, x: i32, pair: Pair): bool\n"
+                                 "fn f(p: Ptr<i32>, x: i32, pair: Pair): bool\n"
                                  "    let y: i32 = x + 1 - 2 * 3 / 4 % 5\n"
-                                 "    let q: i32 = *p\n"
+                                 "    let q: bool = p.is_null()\n"
                                  "    match pair:\n"
                                  "        Pair::Both(a, ..):\n"
                                  "            return a == x\n"
@@ -415,9 +415,19 @@ suite<"expansion_classification"> expansion_classification = [] {
     expect(count_tokens(result.tokens, "operator.arithmetic") == 5_ul);
     expect(count_tokens(result.tokens, "operator.comparison") == 5_ul);
     expect(count_tokens(result.tokens, "operator.logical") == 4_ul) << "and, or, !, or";
-    expect(count_tokens(result.tokens, "operator.address") == 2_ul)
-        << "pointer type `*i32` and deref `*p`";
+    // A pointer is an ordinary type and its operations ordinary calls:
+    // no operator of their own.
+    expect(find_token(result.tokens, "operator.address") == nullptr);
     expect(find_token(result.tokens, "operator.range") != nullptr);
+  };
+
+  "a cast's type arguments are brackets, never comparisons"_test = [] {
+    auto result = classify_source_resolved("test.dao",
+                                           "fn f(p: Ptr<i32>): bool\n"
+                                           "    let q: Ptr<Ptr<u8>> = p.cast<Ptr<u8>>()\n"
+                                           "    return q.is_null()\n");
+    expect(find_token(result.tokens, "operator.comparison") == nullptr);
+    expect(find_token_at(result, "use.function", "cast") != nullptr);
   };
 
   "member access and try are operators"_test = [] {

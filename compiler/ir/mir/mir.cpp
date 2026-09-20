@@ -18,7 +18,7 @@ auto MirInst::kind() const -> MirInstKind {
       [](const MirBinary&)        { return MirInstKind::Binary; },
       [](const MirStore&)         { return MirInstKind::Store; },
       [](const MirLoad&)          { return MirInstKind::Load; },
-      [](const MirAddrOf&)        { return MirInstKind::AddrOf; },
+      [](const MirPtrOp&)         { return MirInstKind::PtrOp; },
       [](const MirFieldAccess&)   { return MirInstKind::FieldAccess; },
       [](const MirIndexAccess&)   { return MirInstKind::IndexAccess; },
       [](const MirFnRef&)         { return MirInstKind::FnRef; },
@@ -57,7 +57,7 @@ auto mir_inst_kind_name(MirInstKind kind) -> const char* {
   case MirInstKind::Binary:         return "binary";
   case MirInstKind::Store:          return "store";
   case MirInstKind::Load:           return "load";
-  case MirInstKind::AddrOf:         return "addr_of";
+  case MirInstKind::PtrOp:          return "ptr_op";
   case MirInstKind::FieldAccess:    return "field";
   case MirInstKind::IndexAccess:    return "index";
   case MirInstKind::FnRef:          return "fn_ref";

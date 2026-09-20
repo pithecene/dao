@@ -288,6 +288,19 @@ private:
           Scope scope(depth_);
           print_expr(*node.operand);
         },
+        [&](const HirPtrOp& node) {
+          indent();
+          out_ << "PtrOp " << ptr_op_name(node.op);
+          print_type_annotation(expr.type);
+          out_ << "\n";
+          Scope scope(depth_);
+          if (node.pointer != nullptr) {
+            print_expr(*node.pointer);
+          }
+          if (node.argument != nullptr) {
+            print_expr(*node.argument);
+          }
+        },
         [&](const HirBinary& node) {
           indent();
           out_ << "Binary " << binary_op_str(node.op);

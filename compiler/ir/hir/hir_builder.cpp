@@ -584,6 +584,20 @@ auto HirBuilder::lower_expr(const Expr* expr) -> HirExpr* {
   case NodeKind::CallExpr: {
     const auto& call = expr->as<CallExpr>();
 
+    // An operation of the compiler-standard Ptr<T>, as the checker
+    // recorded it: the operation itself, never a call of a symbol.
+    if (const auto ptr_op = typed_.typed.ptr_op(expr)) {
+      HirExpr* pointer = nullptr;
+      HirExpr* argument = nullptr;
+      if (*ptr_op != PtrOp::New && call.callee->is<FieldExpr>()) {
+        pointer = lower_expr(call.callee->as<FieldExpr>().object);
+      }
+      if ((*ptr_op == PtrOp::Set || *ptr_op == PtrOp::Offset) && call.args.size() == 1) {
+        argument = lower_expr(call.args[0]);
+      }
+      return ctx_.alloc<HirExpr>(span, type, HirPtrOp{*ptr_op, pointer, argument});
+    }
+
     // Constructor call: callee must be a Type symbol whose type is a
     // struct, not any expression that happens to have struct type.
     const auto* callee_type = expr_type(call.callee);
@@ -621,14 +635,32 @@ auto HirBuilder::lower_expr(const Expr* expr) -> HirExpr* {
         for (size_t i = 0; i < enum_type->variants().size(); ++i) {
           if (enum_type->variants()[i].name == variant_field &&
               !enum_type->variants()[i].payload_types.empty()) {
+            // A payload is given by field name, in any order.  The
+            // values stay in the order they were written, so that is the
+            // order they are evaluated in, and each one carries the
+            // field it belongs to (`Both(second = b, first = a)`).
+            const auto& fields = enum_type->variants()[i].field_names;
             std::vector<HirExpr*> payload_args;
-            for (const auto* arg : call.args) {
-              payload_args.push_back(lower_expr(arg));
+            std::vector<uint32_t> payload_slots;
+            payload_args.reserve(call.args.size());
+            payload_slots.reserve(call.args.size());
+            for (size_t a = 0; a < call.args.size(); ++a) {
+              payload_args.push_back(lower_expr(call.args[a]));
+              uint32_t slot = static_cast<uint32_t>(a);
+              if (a < call.arg_names.size() && !call.arg_names[a].empty()) {
+                for (size_t f = 0; f < fields.size(); ++f) {
+                  if (fields[f] == call.arg_names[a]) {
+                    slot = static_cast<uint32_t>(f);
+                    break;
+                  }
+                }
+              }
+              payload_slots.push_back(slot);
             }
             return ctx_.alloc<HirExpr>(
                 span, type,
-                HirEnumConstruct{enum_type, static_cast<uint32_t>(i),
-                                 std::move(payload_args)});
+                HirEnumConstruct{enum_type, static_cast<uint32_t>(i), std::move(payload_args),
+                                 std::move(payload_slots)});
           }
         }
       }
@@ -655,7 +687,7 @@ auto HirBuilder::lower_expr(const Expr* expr) -> HirExpr* {
         if (method_sym == nullptr) {
           auto* obj_type = typed_.typed.expr_type(field.object);
           if (obj_type != nullptr) {
-            auto mangled = std::string(print_type(obj_type)) + "." + std::string(field.field);
+            auto mangled = print_type_name(obj_type) + "." + std::string(field.field);
             for (const auto& sym_ptr : resolve_.context.symbols()) {
               if (sym_ptr->kind == SymbolKind::Function && sym_ptr->name == mangled) {
                 method_sym = sym_ptr.get();
@@ -673,8 +705,17 @@ auto HirBuilder::lower_expr(const Expr* expr) -> HirExpr* {
           for (const auto* arg : call.args) {
             args.push_back(lower_expr(arg));
           }
+          // A method's own type arguments travel with the call, as a
+          // free function's do: `b.empty<string>()` decides `U` here and
+          // nowhere else.
+          std::vector<const Type*> method_type_args;
+          if (const auto* resolved = typed_.typed.call_type_args(expr)) {
+            method_type_args = *resolved;
+          }
           return ctx_.alloc<HirExpr>(span, type,
-                                      HirCall{callee_ref, std::move(args)});
+                                     HirCall{callee_ref, std::move(args),
+                                             std::move(method_type_args),
+                                             typed_.typed.type_args_binder(expr)});
         }
         // Concept method on a generic type parameter: no concrete
         // symbol exists because concept methods don't have resolver
@@ -705,7 +746,8 @@ auto HirBuilder::lower_expr(const Expr* expr) -> HirExpr* {
     }
     return ctx_.alloc<HirExpr>(span, type,
                                 HirCall{callee, std::move(args),
-                                        std::move(explicit_type_args)});
+                                        std::move(explicit_type_args),
+                                        typed_.typed.type_args_binder(expr)});
   }
 
   case NodeKind::PipeExpr: {

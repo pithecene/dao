@@ -1,6 +1,8 @@
 // NOLINTBEGIN(readability-magic-numbers,readability-identifier-length)
 #include "ir/mir/mir_monomorphize.h"
 
+#include "frontend/types/type_query.h"
+
 #include "frontend/ast/ast.h"
 #include "frontend/types/type_identity.h"
 
@@ -13,6 +15,7 @@
 #include <algorithm>
 #include <string>
 #include <unordered_map>
+#include <format>
 #include <unordered_set>
 #include <vector>
 
@@ -24,18 +27,61 @@ namespace {
 // Type substitution: replace TypeGenericParam with concrete types.
 // ---------------------------------------------------------------------------
 
-using TypeSubst = std::unordered_map<uint32_t, const Type*>;
+using TypeSubst = std::unordered_map<ParamKey, const Type*, ParamKeyHash>;
 
+/// Nominal instantiations this walk is building, by the generic type
+/// they come from.  A class may reach itself through a pointer
+/// (`class Node<T>: next: Ptr<Node<T>>`), so its instantiation is
+/// registered before its fields are walked and the recursive occurrence
+/// resolves to it.
+using TypePair = std::pair<const Type*, const Type*>;
+
+struct TypePairHash {
+  auto operator()(const TypePair& pair) const -> size_t {
+    const std::hash<const void*> hash;
+    return hash(pair.first) ^ (hash(pair.second) << 1U);
+  }
+};
+
+using Instantiating = std::unordered_map<const Type*, Type*>;
+
+/// What a substitution has already answered, by the type asked about:
+/// a class holding two pointers to the same inner type instantiates it
+/// once, however many paths reach it.
+using Answered = std::unordered_map<const Type*, const Type*>;
+
+auto substitute_type(const Type* type, const TypeSubst& subst, TypeContext& types,
+                     Instantiating& building, Answered& answered, GenericParamReach& reach)
+    -> const Type*;
+
+/// One substitution, and the only way in: the walk it starts owns both
+/// what it is building and what it has answered.
 auto substitute_type(const Type* type, const TypeSubst& subst,
                      TypeContext& types) -> const Type* {
+  Instantiating building;
+  Answered answered;
+  // Which types hold a parameter at all, for this walk: a nesting of
+  // classes would otherwise be walked from each level down, once per
+  // level.  The answers go with the walk, since a shell's fields are
+  // filled in as it finishes.
+  GenericParamReach reach;
+  return substitute_type(type, subst, types, building, answered, reach);
+}
+
+auto substitute_type(const Type* type, const TypeSubst& subst, TypeContext& types,
+                     Instantiating& building, Answered& answered, GenericParamReach& reach)
+    -> const Type* {
   if (type == nullptr) {
     return nullptr;
+  }
+  if (auto done = answered.find(type); done != answered.end()) {
+    return done->second;
   }
 
   switch (type->kind()) {
   case TypeKind::GenericParam: {
     const auto* gp = static_cast<const TypeGenericParam*>(type);
-    auto it = subst.find(gp->index());
+    auto it = subst.find(param_key(gp));
     if (it != subst.end()) {
       return it->second;
     }
@@ -48,13 +94,13 @@ auto substitute_type(const Type* type, const TypeSubst& subst,
     params.reserve(fn->param_types().size());
     bool changed = false;
     for (const auto* param : fn->param_types()) {
-      auto* sub = substitute_type(param, subst, types);
+      auto* sub = substitute_type(param, subst, types, building, answered, reach);
       if (sub != param) {
         changed = true;
       }
       params.push_back(sub);
     }
-    auto* ret = substitute_type(fn->return_type(), subst, types);
+    auto* ret = substitute_type(fn->return_type(), subst, types, building, answered, reach);
     if (ret != fn->return_type()) {
       changed = true;
     }
@@ -66,7 +112,7 @@ auto substitute_type(const Type* type, const TypeSubst& subst,
 
   case TypeKind::Pointer: {
     const auto* ptr = static_cast<const TypePointer*>(type);
-    auto* sub = substitute_type(ptr->pointee(), subst, types);
+    auto* sub = substitute_type(ptr->pointee(), subst, types, building, answered, reach);
     if (sub == ptr->pointee()) {
       return type;
     }
@@ -75,7 +121,7 @@ auto substitute_type(const Type* type, const TypeSubst& subst,
 
   case TypeKind::Generator: {
     const auto* gen = static_cast<const TypeGenerator*>(type);
-    auto* sub = substitute_type(gen->yield_type(), subst, types);
+    auto* sub = substitute_type(gen->yield_type(), subst, types, building, answered, reach);
     if (sub == gen->yield_type()) {
       return type;
     }
@@ -84,46 +130,65 @@ auto substitute_type(const Type* type, const TypeSubst& subst,
 
   case TypeKind::Struct: {
     const auto* st = static_cast<const TypeStruct*>(type);
-    bool changed = false;
+    auto built = building.find(type);
+    if (built != building.end()) {
+      return built->second;
+    }
+    if (!reach.mentions(type)) {
+      return type;
+    }
+    auto* shell = types.make_struct_shell(st->decl_id(), st->name());
+    building.emplace(type, shell);
     std::vector<StructField> new_fields;
     new_fields.reserve(st->fields().size());
     for (const auto& field : st->fields()) {
-      auto* sub = substitute_type(field.type, subst, types);
-      if (sub != field.type) {
-        changed = true;
-      }
-      new_fields.push_back({field.name, sub});
+      new_fields.push_back({field.name, substitute_type(field.type, subst, types, building, answered, reach)});
     }
-    if (!changed) {
-      return type;
+    // The instantiation travels with the type: a parameter no field
+    // mentions lives only there, and specialization is keyed by it.
+    std::vector<const Type*> new_args;
+    new_args.reserve(st->type_args().size());
+    for (const auto* arg : st->type_args()) {
+      new_args.push_back(substitute_type(arg, subst, types, building, answered, reach));
     }
-    return types.make_struct(st->decl_id(), st->name(),
-                             std::move(new_fields));
+    building.erase(type);
+    shell->set_fields(std::move(new_fields));
+    shell->set_type_args(std::move(new_args));
+    answered.emplace(type, shell);
+    return shell;
   }
 
   case TypeKind::Enum: {
     const auto* en = static_cast<const TypeEnum*>(type);
-    bool changed = false;
+    auto built = building.find(type);
+    if (built != building.end()) {
+      return built->second;
+    }
+    if (!reach.mentions(type)) {
+      return type;
+    }
+    auto* shell = types.make_enum_shell(en->decl_id(), en->name());
+    building.emplace(type, shell);
     std::vector<EnumVariant> new_variants;
     new_variants.reserve(en->variants().size());
     for (const auto& variant : en->variants()) {
       std::vector<const Type*> new_payload;
       new_payload.reserve(variant.payload_types.size());
       for (const auto* pt : variant.payload_types) {
-        auto* sub = substitute_type(pt, subst, types);
-        if (sub != pt) {
-          changed = true;
-        }
-        new_payload.push_back(sub);
+        new_payload.push_back(substitute_type(pt, subst, types, building, answered, reach));
       }
       new_variants.push_back({variant.name, std::move(new_payload)});
     }
-    // END DEBUG
-    if (!changed) {
-      return type;
+    std::vector<const Type*> new_args;
+    new_args.reserve(en->type_args().size());
+    for (const auto* arg : en->type_args()) {
+      new_args.push_back(substitute_type(arg, subst, types, building, answered, reach));
     }
-    return types.make_enum(en->decl_id(), en->name(),
-                           std::move(new_variants));
+    building.erase(type);
+    shell->set_variants(std::move(new_variants));
+    shell->set_type_args(std::move(new_args));
+    answered.emplace(type, shell);
+    return shell;
   }
 
   default:
@@ -140,69 +205,12 @@ auto substitute_type(const Type* type, const TypeSubst& subst,
 // `class Node { next: *Node }` where following Struct fields through
 // a Pointer pointee returns to the same Struct.  Without the visited
 // set this would stack-overflow.
-auto type_has_generic_impl(const Type* type,
-                           std::unordered_set<const Type*>& visited)
-    -> bool {
-  if (type == nullptr) {
-    return false;
-  }
-  if (!visited.insert(type).second) {
-    return false; // already walked this node; cycle — assume no generic here
-  }
-  switch (type->kind()) {
-  case TypeKind::GenericParam:
-    return true;
-  case TypeKind::Function: {
-    const auto* fn = static_cast<const TypeFunction*>(type);
-    for (const auto* param : fn->param_types()) {
-      if (type_has_generic_impl(param, visited)) {
-        return true;
-      }
-    }
-    return type_has_generic_impl(fn->return_type(), visited);
-  }
-  case TypeKind::Pointer:
-    return type_has_generic_impl(
-        static_cast<const TypePointer*>(type)->pointee(), visited);
-  case TypeKind::Generator:
-    return type_has_generic_impl(
-        static_cast<const TypeGenerator*>(type)->yield_type(), visited);
-  case TypeKind::Struct: {
-    const auto* st = static_cast<const TypeStruct*>(type);
-    for (const auto& field : st->fields()) {
-      if (type_has_generic_impl(field.type, visited)) {
-        return true;
-      }
-    }
-    return false;
-  }
-  case TypeKind::Enum: {
-    const auto* en = static_cast<const TypeEnum*>(type);
-    for (const auto& variant : en->variants()) {
-      for (const auto* pt : variant.payload_types) {
-        if (type_has_generic_impl(pt, visited)) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-  default:
-    return false;
-  }
-}
-
-auto type_has_generic(const Type* type) -> bool {
-  std::unordered_set<const Type*> visited;
-  return type_has_generic_impl(type, visited);
-}
-
 auto is_generic_function(const MirFunction* fn) -> bool {
-  if (type_has_generic(fn->return_type)) {
+  if (type_mentions_generic_param(fn->return_type)) {
     return true;
   }
   for (const auto& local : fn->locals) {
-    if (type_has_generic(local.type)) {
+    if (type_mentions_generic_param(local.type)) {
       return true;
     }
   }
@@ -242,7 +250,7 @@ private:
     // an address would number the second one as a different type.
     auto [it, inserted] = spelling_.try_emplace(type_identity_key(type), std::string{});
     if (inserted) {
-      auto base = print_type(type);
+      auto base = print_type_name(type);
       auto taken = claims_[base]++;
       it->second = taken == 0 ? base : base + "." + std::to_string(taken);
     }
@@ -279,15 +287,6 @@ struct SpecKeyHash {
     return h;
   }
 };
-
-auto identity_keys(const std::vector<const Type*>& types) -> std::vector<std::string> {
-  std::vector<std::string> keys;
-  keys.reserve(types.size());
-  for (const auto* type : types) {
-    keys.push_back(type_identity_key(type));
-  }
-  return keys;
-}
 
 /// What one monomorphization run accumulates: the specializations it
 /// has already made, and the spellings their names give type arguments.
@@ -349,7 +348,13 @@ auto clone_function(const MirFunction* src, const TypeSubst& subst,
           call->explicit_type_args = new_ta;
         }
       } else if (auto* ctor = std::get_if<MirConstruct>(&dst_inst->payload)) {
-        if (ctor->struct_type != nullptr) {
+        // The instruction's own type is what the construction produces —
+        // `Box(made)` inside `fn mapped<U>` is a `Box<U>`, while the
+        // payload carries the class as the declaration spells it.  Where
+        // they differ the instruction's is the instantiation to build.
+        if (dst_inst->type != nullptr && dst_inst->type->kind() == TypeKind::Struct) {
+          ctor->struct_type = static_cast<const TypeStruct*>(dst_inst->type);
+        } else if (ctor->struct_type != nullptr) {
           const auto* sub_st =
               substitute_type(ctor->struct_type, subst, types);
           if (sub_st != nullptr && sub_st->kind() == TypeKind::Struct) {
@@ -382,10 +387,6 @@ auto clone_function(const MirFunction* src, const TypeSubst& subst,
       } else if (auto* load = std::get_if<MirLoad>(&dst_inst->payload)) {
         if (load->place != nullptr) {
           load->place = ctx.alloc<MirPlace>(*load->place);
-        }
-      } else if (auto* addr = std::get_if<MirAddrOf>(&dst_inst->payload)) {
-        if (addr->place != nullptr) {
-          addr->place = ctx.alloc<MirPlace>(*addr->place);
         }
       }
 
@@ -471,7 +472,7 @@ void fixup_method_calls(MirFunction* fn, const MirModule& module,
 
       // Build mangled method name: "<type>.<field>".
       auto method_name =
-          print_type(obj_type) + "." + std::string(field->field);
+          print_type_name(obj_type) + "." + std::string(field->field);
       auto sym_it = fn_by_name.find(method_name);
       if (sym_it == fn_by_name.end()) {
         continue;
@@ -541,15 +542,31 @@ void fixup_method_calls(MirFunction* fn, const MirModule& module,
 
 // Recursively extract generic param bindings by matching a pattern type
 // (which may contain TypeGenericParam) against a concrete type.
-void infer_bindings_recursive(const Type* pattern, const Type* concrete,
-                              TypeSubst& subst) {
+/// Pairs the inference walk is already matching.  Both sides may reach
+/// themselves (`class Node<T>: next: Ptr<Node<T>>` instantiated), so a
+/// pair that comes back around has nothing further to say.
+using Matching = std::unordered_set<TypePair, TypePairHash>;
+
+void infer_bindings_recursive(const Type* pattern, const Type* concrete, TypeSubst& subst,
+                              Matching& matching);
+
+void infer_bindings_recursive(const Type* pattern, const Type* concrete, TypeSubst& subst) {
+  Matching matching;
+  infer_bindings_recursive(pattern, concrete, subst, matching);
+}
+
+void infer_bindings_recursive(const Type* pattern, const Type* concrete, TypeSubst& subst,
+                              Matching& matching) {
   if (pattern == nullptr || concrete == nullptr) {
+    return;
+  }
+  if (!matching.insert(TypePair{pattern, concrete}).second) {
     return;
   }
 
   if (pattern->kind() == TypeKind::GenericParam) {
     const auto* gp = static_cast<const TypeGenericParam*>(pattern);
-    subst[gp->index()] = concrete; // last-write-wins at MIR level
+    subst[param_key(gp)] = concrete; // last-write-wins at MIR level
     return;
   }
 
@@ -557,12 +574,12 @@ void infer_bindings_recursive(const Type* pattern, const Type* concrete,
       concrete->kind() == TypeKind::Pointer) {
     infer_bindings_recursive(
         static_cast<const TypePointer*>(pattern)->pointee(),
-        static_cast<const TypePointer*>(concrete)->pointee(), subst);
+        static_cast<const TypePointer*>(concrete)->pointee(), subst, matching);
   } else if (pattern->kind() == TypeKind::Generator &&
              concrete->kind() == TypeKind::Generator) {
     infer_bindings_recursive(
         static_cast<const TypeGenerator*>(pattern)->yield_type(),
-        static_cast<const TypeGenerator*>(concrete)->yield_type(), subst);
+        static_cast<const TypeGenerator*>(concrete)->yield_type(), subst, matching);
   } else if (pattern->kind() == TypeKind::Function &&
              concrete->kind() == TypeKind::Function) {
     const auto* fp = static_cast<const TypeFunction*>(pattern);
@@ -570,24 +587,36 @@ void infer_bindings_recursive(const Type* pattern, const Type* concrete,
     if (fp->param_types().size() == fc->param_types().size()) {
       for (size_t i = 0; i < fp->param_types().size(); ++i) {
         infer_bindings_recursive(fp->param_types()[i],
-                                 fc->param_types()[i], subst);
+                                 fc->param_types()[i], subst, matching);
       }
-      infer_bindings_recursive(fp->return_type(), fc->return_type(), subst);
+      infer_bindings_recursive(fp->return_type(), fc->return_type(), subst, matching);
     }
   } else if (pattern->kind() == TypeKind::Struct &&
              concrete->kind() == TypeKind::Struct) {
     const auto* sp = static_cast<const TypeStruct*>(pattern);
     const auto* sc = static_cast<const TypeStruct*>(concrete);
+    // The instantiation first: a parameter no field mentions is bound
+    // from there and nowhere else.
+    if (sp->type_args().size() == sc->type_args().size()) {
+      for (size_t i = 0; i < sp->type_args().size(); ++i) {
+        infer_bindings_recursive(sp->type_args()[i], sc->type_args()[i], subst, matching);
+      }
+    }
     if (sp->fields().size() == sc->fields().size()) {
       for (size_t i = 0; i < sp->fields().size(); ++i) {
         infer_bindings_recursive(sp->fields()[i].type,
-                                 sc->fields()[i].type, subst);
+                                 sc->fields()[i].type, subst, matching);
       }
     }
   } else if (pattern->kind() == TypeKind::Enum &&
              concrete->kind() == TypeKind::Enum) {
     const auto* ep = static_cast<const TypeEnum*>(pattern);
     const auto* ec = static_cast<const TypeEnum*>(concrete);
+    if (ep->type_args().size() == ec->type_args().size()) {
+      for (size_t i = 0; i < ep->type_args().size(); ++i) {
+        infer_bindings_recursive(ep->type_args()[i], ec->type_args()[i], subst, matching);
+      }
+    }
     if (ep->variants().size() == ec->variants().size()) {
       for (size_t vi = 0; vi < ep->variants().size(); ++vi) {
         const auto& vp = ep->variants()[vi];
@@ -595,7 +624,7 @@ void infer_bindings_recursive(const Type* pattern, const Type* concrete,
         if (vp.payload_types.size() == vc.payload_types.size()) {
           for (size_t pi = 0; pi < vp.payload_types.size(); ++pi) {
             infer_bindings_recursive(vp.payload_types[pi],
-                                     vc.payload_types[pi], subst);
+                                     vc.payload_types[pi], subst, matching);
           }
         }
       }
@@ -621,21 +650,137 @@ auto infer_substitution(const MirFunction* generic_fn,
 }
 
 // Extract ordered type args from a substitution map.
-auto subst_to_type_args(const TypeSubst& subst) -> std::vector<const Type*> {
-  if (subst.empty()) {
-    return {};
-  }
-  uint32_t max_idx = 0;
-  for (const auto& [idx, _] : subst) {
-    if (idx > max_idx) {
-      max_idx = idx;
+/// Where a declaration sits in the source, which orders two parameters
+/// at the same position — a class's before the method's inside it.  An
+/// address would order them differently on every run.
+auto declared_at(const Decl* decl) -> uint32_t {
+  return decl == nullptr ? 0U : decl->span.offset;
+}
+
+/// The bindings in a settled order: by position, then by where the
+/// declaring declaration sits, so a specialization is named and keyed
+/// the same on every run — a hash map's order is not the program's.
+auto ordered_bindings(const TypeSubst& subst)
+    -> std::vector<std::pair<ParamKey, const Type*>> {
+  std::vector<std::pair<ParamKey, const Type*>> bound(subst.begin(), subst.end());
+  std::ranges::sort(bound, [](const auto& lhs, const auto& rhs) {
+    if (lhs.first.index != rhs.first.index) {
+      return lhs.first.index < rhs.first.index;
     }
-  }
-  std::vector<const Type*> args(max_idx + 1, nullptr);
-  for (const auto& [idx, type] : subst) {
-    args[idx] = type;
+    return declared_at(lhs.first.binder) < declared_at(rhs.first.binder);
+  });
+  return bound;
+}
+
+auto subst_to_type_args(const TypeSubst& subst) -> std::vector<const Type*> {
+  std::vector<const Type*> args;
+  args.reserve(subst.size());
+  for (const auto& [key, type] : ordered_bindings(subst)) {
+    args.push_back(type);
   }
   return args;
+}
+
+/// What a specialization IS: each parameter, by the declaration that
+/// declares it, and the type it stands for.  Two calls that swap the
+/// arguments of a class's and a method's parameters are two
+/// specializations, though their argument lists read alike.
+auto subst_identity(const TypeSubst& subst) -> std::vector<std::string> {
+  std::vector<std::string> identity;
+  identity.reserve(subst.size());
+  for (const auto& [key, type] : ordered_bindings(subst)) {
+    identity.push_back(
+        std::format("{}:{}={}", declared_at(key.binder), key.index, type_identity_key(type)));
+  }
+  return identity;
+}
+
+/// The parameters a signature is written with, by position: what a
+/// call's written-out type arguments fill.  A position a signature
+/// mentions once is unambiguous; where a class's and a method's
+/// parameters share one, the declaration named by `preferred` wins,
+/// since those arguments were written for it.
+void collect_params(const Type* type, const Decl* preferred,
+                    std::unordered_map<uint32_t, const TypeGenericParam*>& found,
+                    std::unordered_set<const Type*>& seen) {
+  if (type == nullptr || !seen.insert(type).second) {
+    return;
+  }
+  switch (type->kind()) {
+  case TypeKind::GenericParam: {
+    const auto* param = static_cast<const TypeGenericParam*>(type);
+    auto [it, fresh] = found.try_emplace(param->index(), param);
+    if (!fresh && param->binder() == preferred) {
+      it->second = param;
+    }
+    break;
+  }
+  case TypeKind::Pointer:
+    collect_params(static_cast<const TypePointer*>(type)->pointee(), preferred, found, seen);
+    break;
+  case TypeKind::Generator:
+    collect_params(static_cast<const TypeGenerator*>(type)->yield_type(), preferred, found, seen);
+    break;
+  case TypeKind::Function: {
+    const auto* fn = static_cast<const TypeFunction*>(type);
+    for (const auto* param : fn->param_types()) {
+      collect_params(param, preferred, found, seen);
+    }
+    collect_params(fn->return_type(), preferred, found, seen);
+    break;
+  }
+  case TypeKind::Struct: {
+    const auto* st = static_cast<const TypeStruct*>(type);
+    for (const auto* arg : st->type_args()) {
+      collect_params(arg, preferred, found, seen);
+    }
+    for (const auto& field : st->fields()) {
+      collect_params(field.type, preferred, found, seen);
+    }
+    break;
+  }
+  case TypeKind::Enum: {
+    const auto* en = static_cast<const TypeEnum*>(type);
+    for (const auto* arg : en->type_args()) {
+      collect_params(arg, preferred, found, seen);
+    }
+    for (const auto& variant : en->variants()) {
+      for (const auto* payload : variant.payload_types) {
+        collect_params(payload, preferred, found, seen);
+      }
+    }
+    break;
+  }
+  default:
+    break;
+  }
+}
+
+/// The written-out type arguments of a call, bound to the parameters
+/// they were written for.  A declaration that declares its own
+/// parameters takes them by position, whether or not its signature
+/// mentions them — `fn width<T>(): i64 -> size_of<T>()` uses `T` in its
+/// body alone.  A method written with its class's parameters has none of
+/// its own, and the signature says which they are.
+auto explicit_substitution(const Type* signature, const Decl* declared_by,
+                           const std::vector<const Type*>& type_args) -> TypeSubst {
+  TypeSubst subst;
+  if (declared_by != nullptr) {
+    for (size_t i = 0; i < type_args.size(); ++i) {
+      subst[ParamKey{declared_by, static_cast<uint32_t>(i)}] = type_args[i];
+    }
+    return subst;
+  }
+  std::unordered_map<uint32_t, const TypeGenericParam*> params;
+  std::unordered_set<const Type*> seen;
+  collect_params(signature, declared_by, params, seen);
+  for (size_t i = 0; i < type_args.size(); ++i) {
+    auto it = params.find(static_cast<uint32_t>(i));
+    if (it != params.end()) {
+      subst[param_key(it->second)] = type_args[i];
+    }
+  }
+  return subst;
 }
 
 // ---------------------------------------------------------------------------
@@ -675,6 +820,25 @@ auto build_call_index(const MirFunction* fn) -> std::unordered_map<uint32_t, con
 // Returns true if a new specialization was created.
 // ---------------------------------------------------------------------------
 
+/// The declaration a call's written-out type arguments were written
+/// for: the callee's own, when it declares type parameters.  A method
+/// that declares none is written with its class's, and
+/// `Vector<u8>::new()` fills those — so there is no declaration to
+/// prefer and the signature's positions decide.
+auto explicit_arg_binder(const MirFnRef* fn_ref, const MirCall* call) -> const Decl* {
+  if (call != nullptr && call->type_args_binder != nullptr) {
+    return call->type_args_binder; // as the checker resolved it
+  }
+  if (fn_ref == nullptr || fn_ref->symbol == nullptr || fn_ref->symbol->decl == nullptr) {
+    return nullptr;
+  }
+  const auto* decl = fn_ref->symbol->decl_as_decl();
+  if (!decl->is<FunctionDecl>() || decl->as<FunctionDecl>().type_params.empty()) {
+    return nullptr;
+  }
+  return decl;
+}
+
 auto specialize_call_site(MirInst* inst,
                           MirFnRef* fn_ref,
                           const std::unordered_map<uint32_t, const MirCall*>& calls_by_callee,
@@ -690,7 +854,7 @@ auto specialize_call_site(MirInst* inst,
   // here; an ordinary call is left alone without a scan for its site.
   auto git = generic_fns.find(fn_ref->symbol);
   const bool is_template = git != generic_fns.end();
-  if (!is_template && !type_has_generic(inst->type)) {
+  if (!is_template && !type_mentions_generic_param(inst->type)) {
     return false;
   }
 
@@ -701,17 +865,15 @@ auto specialize_call_site(MirInst* inst,
   }
 
   if (!is_template) {
-    // Not a template: a compiler builtin (`null_ptr<T>`, `ptr_cast<T>`)
+    // Not a template: a compiler intrinsic (`size_of<T>`, `align_of<T>`)
     // has no body to specialize, but its reference is typed with the
     // builtin's generic signature.  The call's explicit type arguments
     // make that type concrete; the backend keys the builtin on its name
     // and reads the types from the call, so nothing else is needed.
     if (call_payload != nullptr && call_payload->explicit_type_args != nullptr &&
         !call_payload->explicit_type_args->empty()) {
-      std::unordered_map<uint32_t, const Type*> subst;
-      for (size_t i = 0; i < call_payload->explicit_type_args->size(); ++i) {
-        subst[static_cast<uint32_t>(i)] = (*call_payload->explicit_type_args)[i];
-      }
+      auto subst = explicit_substitution(inst->type, explicit_arg_binder(fn_ref, call_payload),
+                                         *call_payload->explicit_type_args);
       inst->type = substitute_type(inst->type, subst, types);
     }
     return false;
@@ -734,11 +896,24 @@ auto specialize_call_site(MirInst* inst,
   auto subst = infer_substitution(git->second, arg_types);
 
   // If inference failed (e.g. zero-arg builtin), use explicit type args.
-  if (subst.empty() && call_payload->explicit_type_args != nullptr &&
+  if (call_payload->explicit_type_args != nullptr &&
       !call_payload->explicit_type_args->empty()) {
-    for (size_t i = 0; i < call_payload->explicit_type_args->size(); ++i) {
-      subst[static_cast<uint32_t>(i)] =
-          (*call_payload->explicit_type_args)[i];
+    // Written-out arguments decide their positions, whatever inference
+    // made of the values.
+    for (const auto& [key, type] :
+         explicit_substitution(git->second->return_type, explicit_arg_binder(fn_ref, call_payload),
+                               *call_payload->explicit_type_args)) {
+      subst[key] = type;
+    }
+    for (const auto& local : git->second->locals) {
+      if (!local.is_param) {
+        break;
+      }
+      for (const auto& [key, type] :
+           explicit_substitution(local.type, explicit_arg_binder(fn_ref, call_payload),
+                                 *call_payload->explicit_type_args)) {
+        subst.emplace(key, type);
+      }
     }
   }
 
@@ -747,7 +922,7 @@ auto specialize_call_site(MirInst* inst,
   }
 
   auto type_args = subst_to_type_args(subst);
-  SpecKey key{git->second, identity_keys(type_args)};
+  SpecKey key{git->second, subst_identity(subst)};
 
   // Check cache.
   auto cache_it = state.cache.find(key);
@@ -1058,7 +1233,7 @@ auto expand_copy_out_calls(MirFunction* fn,
         continue;
       }
       const Type* type = inst->type;
-      if (type == nullptr || type_has_generic(type) || !owns_heap_memory(type)) {
+      if (type == nullptr || type_mentions_generic_param(type) || !owns_heap_memory(type)) {
         continue;
       }
       // A generator has no copier (its frame layout is the generator's
@@ -1223,7 +1398,7 @@ auto monomorphize(
   // templates (not in module.functions).  No scanning needed.
   //
   // The call-site pass runs at least once even when there are no
-  // templates: a reference to a compiler builtin (`null_ptr<T>`) is
+  // templates: a reference to a compiler intrinsic (`size_of<T>`) is
   // made concrete there, template or not.  The concreteness check
   // below runs regardless, to catch synthetic residue.
 
@@ -1321,7 +1496,7 @@ auto monomorphize(
     // generic function not yet monomorphized).
     for (const auto* block : fn->blocks) {
       for (const auto* inst : block->insts) {
-        if (type_has_generic(inst->type)) {
+        if (type_mentions_generic_param(inst->type)) {
           std::string fn_name = fn->symbol != nullptr
                                     ? std::string(fn->symbol->name)
                                     : std::string("<anonymous>");

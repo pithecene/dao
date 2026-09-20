@@ -19,147 +19,142 @@ File
               Identifier align_of
             TypeArgs
               i32
-    ModeBlock unsafe
-      LetStatement data
-        CallExpr
-          Callee
-            Identifier ptr_cast
-          TypeArgs
-            i32
-          Args
+    LetStatement data
+      CallExpr
+        Callee
+          FieldExpr .cast
             Identifier raw
-      Assignment
-        Target
-          UnaryExpr *
-            Identifier data
-        Value
-          IntLiteral 10
-      Assignment
-        Target
-          UnaryExpr *
-            CallExpr
-              Callee
-                Identifier ptr_offset
-              TypeArgs
-                i32
-              Args
-                Identifier data
-                IntLiteral 1
-        Value
-          IntLiteral 20
-      Assignment
-        Target
-          UnaryExpr *
-            CallExpr
-              Callee
-                Identifier ptr_offset
-              TypeArgs
-                i32
-              Args
-                Identifier data
-                IntLiteral 2
-        Value
-          IntLiteral 30
-      Assignment
-        Target
-          UnaryExpr *
-            CallExpr
-              Callee
-                Identifier ptr_offset
-              TypeArgs
-                i32
-              Args
-                Identifier data
-                IntLiteral 3
-        Value
-          IntLiteral 40
+        TypeArgs
+          i32
+    ModeBlock unsafe
       ExpressionStatement
         CallExpr
           Callee
-            Identifier print
-          Args
-            UnaryExpr *
+            FieldExpr .set
               Identifier data
+          Args
+            IntLiteral 10
       ExpressionStatement
         CallExpr
           Callee
-            Identifier print
-          Args
-            UnaryExpr *
+            FieldExpr .set
               CallExpr
                 Callee
-                  Identifier ptr_offset
-                TypeArgs
-                  i32
+                  FieldExpr .offset
+                    Identifier data
                 Args
-                  Identifier data
                   IntLiteral 1
+          Args
+            IntLiteral 20
       ExpressionStatement
         CallExpr
           Callee
-            Identifier print
-          Args
-            UnaryExpr *
+            FieldExpr .set
               CallExpr
                 Callee
-                  Identifier ptr_offset
-                TypeArgs
-                  i32
+                  FieldExpr .offset
+                    Identifier data
                 Args
-                  Identifier data
                   IntLiteral 2
+          Args
+            IntLiteral 30
+      ExpressionStatement
+        CallExpr
+          Callee
+            FieldExpr .set
+              CallExpr
+                Callee
+                  FieldExpr .offset
+                    Identifier data
+                Args
+                  IntLiteral 3
+          Args
+            IntLiteral 40
       ExpressionStatement
         CallExpr
           Callee
             Identifier print
           Args
-            UnaryExpr *
-              CallExpr
-                Callee
-                  Identifier ptr_offset
-                TypeArgs
-                  i32
-                Args
+            CallExpr
+              Callee
+                FieldExpr .get
                   Identifier data
-                  IntLiteral 3
-      LetStatement np
+      ExpressionStatement
         CallExpr
           Callee
-            Identifier null_ptr
-          TypeArgs
-            i32
-      IfStatement
-        Condition
-          BinaryExpr ==
-            Identifier np
+            Identifier print
+          Args
             CallExpr
               Callee
-                Identifier null_ptr
-              TypeArgs
-                i32
-        Then
-          ExpressionStatement
+                FieldExpr .get
+                  CallExpr
+                    Callee
+                      FieldExpr .offset
+                        Identifier data
+                    Args
+                      IntLiteral 1
+      ExpressionStatement
+        CallExpr
+          Callee
+            Identifier print
+          Args
             CallExpr
               Callee
-                Identifier print
-              Args
-                StringLiteral "null check passed"
-      IfStatement
-        Condition
-          BinaryExpr !=
-            Identifier data
+                FieldExpr .get
+                  CallExpr
+                    Callee
+                      FieldExpr .offset
+                        Identifier data
+                    Args
+                      IntLiteral 2
+      ExpressionStatement
+        CallExpr
+          Callee
+            Identifier print
+          Args
             CallExpr
               Callee
-                Identifier null_ptr
-              TypeArgs
-                i32
-        Then
-          ExpressionStatement
-            CallExpr
-              Callee
-                Identifier print
-              Args
-                StringLiteral "non-null check passed"
+                FieldExpr .get
+                  CallExpr
+                    Callee
+                      FieldExpr .offset
+                        Identifier data
+                    Args
+                      IntLiteral 3
+    LetStatement np
+      CallExpr
+        Callee
+          Identifier Ptr.new
+        TypeArgs
+          i32
+    IfStatement
+      Condition
+        CallExpr
+          Callee
+            FieldExpr .is_null
+              Identifier np
+      Then
+        ExpressionStatement
+          CallExpr
+            Callee
+              Identifier print
+            Args
+              StringLiteral "null check passed"
+    IfStatement
+      Condition
+        BinaryExpr ==
+          CallExpr
+            Callee
+              FieldExpr .is_null
+                Identifier data
+          BoolLiteral false
+      Then
+        ExpressionStatement
+          CallExpr
+            Callee
+              Identifier print
+            Args
+              StringLiteral "non-null check passed"
     ExpressionStatement
       CallExpr
         Callee

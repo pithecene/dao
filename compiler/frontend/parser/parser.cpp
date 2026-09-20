@@ -111,6 +111,10 @@ private:
     diagnostics_.push_back(Diagnostic::error(peek().span, message));
   }
 
+  void error_at(Span span, const std::string& message) {
+    diagnostics_.push_back(Diagnostic::error(span, message));
+  }
+
   // -----------------------------------------------------------------------
   // Error recovery
   // -----------------------------------------------------------------------
@@ -797,7 +801,10 @@ private:
       break;
     }
 
-    // Expression or assignment.
+    // Expression or assignment.  An error expression was reported where
+    // it was parsed (a pointer sigil among them: `*p = 42`), so the
+    // statement ends here, before the assignment-target check below
+    // could report it a second time.
     auto* expr = parse_expression();
     if (expr == nullptr || expr->kind() == NodeKind::ErrorExpr) {
       return nullptr;
@@ -806,14 +813,10 @@ private:
     // Check for assignment: expr = expr
     if (peek_kind() == TokenKind::Eq) {
       // Validate LHS is a legal assignment target.
-      bool valid_target = expr->kind() == NodeKind::Identifier ||
-                          expr->kind() == NodeKind::FieldExpr ||
-                          expr->kind() == NodeKind::IndexExpr;
-      // Dereference (*ptr) is a valid assignment target for store-through-pointer.
-      if (!valid_target && expr->kind() == NodeKind::UnaryExpr) {
-        const auto& un = expr->as<UnaryExpr>(); // NOLINT(readability-identifier-length)
-        valid_target = un.op == UnaryOp::Deref;
-      }
+      // A pointer is written with `p.set(v)`, never through an assignment.
+      const bool valid_target = expr->kind() == NodeKind::Identifier ||
+                                expr->kind() == NodeKind::FieldExpr ||
+                                expr->kind() == NodeKind::IndexExpr;
       if (!valid_target) {
         error("invalid assignment target");
       }
@@ -1250,26 +1253,25 @@ private:
   }
 
   auto parse_unary() -> Expr* {
-    if (peek_kind() == TokenKind::Bang || peek_kind() == TokenKind::Minus ||
-        peek_kind() == TokenKind::Star || peek_kind() == TokenKind::Amp) {
+    // Dao has no pointer punctuation (ADR_RAW_POINTER_SURFACE.md): a
+    // pointer is read with `p.get()` and written with `p.set(v)`, and
+    // unary `&` is no address-of.  The sigil is reported and the whole
+    // operation becomes an error expression, which the checker passes
+    // over, so the operand raises no second diagnostic.
+    if (peek_kind() == TokenKind::Star || peek_kind() == TokenKind::Amp) {
+      const auto& sigil = advance();
+      error_at(sigil.span, sigil.kind == TokenKind::Star
+                               ? "unary '*' is no Dao syntax; read a pointer with 'p.get()' "
+                                 "and write it with 'p.set(value)'"
+                               : "unary '&' is no Dao syntax; Dao has no address-of operator");
+      auto* operand = parse_unary();
+      Span span = {.offset = sigil.span.offset,
+                   .length = (operand->span.offset + operand->span.length) - sigil.span.offset};
+      return ctx_.alloc<Expr>(span, ErrorExprNode{});
+    }
+    if (peek_kind() == TokenKind::Bang || peek_kind() == TokenKind::Minus) {
       const auto& op_tok = advance();
-      UnaryOp op{};
-      switch (op_tok.kind) {
-      case TokenKind::Bang:
-        op = UnaryOp::Not;
-        break;
-      case TokenKind::Minus:
-        op = UnaryOp::Negate;
-        break;
-      case TokenKind::Star:
-        op = UnaryOp::Deref;
-        break;
-      case TokenKind::Amp:
-        op = UnaryOp::AddrOf;
-        break;
-      default:
-        break;
-      }
+      const UnaryOp op = op_tok.kind == TokenKind::Bang ? UnaryOp::Not : UnaryOp::Negate;
       auto* operand = parse_unary();
       Span span = {.offset = op_tok.span.offset,
                    .length = (operand->span.offset + operand->span.length) - op_tok.span.offset};
@@ -1409,39 +1411,38 @@ private:
                                                 expr->span.offset},
                                  IdentifierExpr{.name = mangled});
             consume(TokenKind::LParen);
-            std::vector<Expr*> args;
-            if (peek_kind() != TokenKind::RParen) {
-              args.push_back(parse_expression());
-              while (peek_kind() == TokenKind::Comma) {
-                advance();
-                args.push_back(parse_expression());
-              }
-            }
+            // Named arguments are legal here as anywhere: an
+            // `enum class` variant takes its payload by field name, and
+            // `Choice::Some<i32>(value = 1)` spells both.
+            std::vector<std::string_view> arg_names;
+            std::vector<Span> arg_name_spans;
+            auto args = parse_call_args(arg_names, arg_name_spans);
             const auto& rparen = consume(TokenKind::RParen);
             Span span = {.offset = expr->span.offset,
                          .length = (rparen.span.offset + rparen.span.length) - expr->span.offset};
             expr = ctx_.alloc<Expr>(span,
                                     CallExpr{.callee = callee,
                                              .args = std::move(args),
-                                             .type_args = std::move(type_args)});
+                                             .type_args = std::move(type_args),
+                                             .arg_names = std::move(arg_names),
+                                             .arg_name_spans = std::move(arg_name_spans),
+                                             .type_args_name_the_type = true});
             continue;
           }
-          // Commit: parse the call arguments.
+          // Commit: parse the call arguments, names and all.
           advance(); // (
-          std::vector<Expr*> args;
-          if (peek_kind() != TokenKind::RParen) {
-            args.push_back(parse_expression());
-            while (peek_kind() == TokenKind::Comma) {
-              advance();
-              args.push_back(parse_expression());
-            }
-          }
+          std::vector<std::string_view> arg_names;
+          std::vector<Span> arg_name_spans;
+          auto args = parse_call_args(arg_names, arg_name_spans);
           const auto& rparen = consume(TokenKind::RParen);
           Span span = {.offset = expr->span.offset,
                        .length = (rparen.span.offset + rparen.span.length) - expr->span.offset};
-          expr = ctx_.alloc<Expr>(
-              span,
-              CallExpr{.callee = expr, .args = std::move(args), .type_args = std::move(type_args)});
+          expr = ctx_.alloc<Expr>(span,
+                                  CallExpr{.callee = expr,
+                                           .args = std::move(args),
+                                           .type_args = std::move(type_args),
+                                           .arg_names = std::move(arg_names),
+                                           .arg_name_spans = std::move(arg_name_spans)});
           continue;
         }
         // Fall through to normal expression parsing (< as comparison).
@@ -1637,12 +1638,18 @@ private:
   // -----------------------------------------------------------------------
 
   auto parse_type() -> TypeNode* {
+    // A pointer type is the ordinary generic application `Ptr<T>`
+    // (ADR_RAW_POINTER_SURFACE.md).  `*T` is reported, and recovery
+    // reads it as `Ptr<T>`, so uses of the declaration raise no second
+    // diagnostic.
     if (peek_kind() == TokenKind::Star) {
       const auto& star = advance();
+      error_at(star.span, "'*T' is no Dao syntax; spell a pointer type 'Ptr<T>'");
       auto* pointee = parse_type();
       Span span = {.offset = star.span.offset,
                    .length = (pointee->span.offset + pointee->span.length) - star.span.offset};
-      return ctx_.alloc<TypeNode>(span, PointerType{pointee});
+      QualifiedPath path{.segments = {"Ptr"}, .span = star.span, .segment_spans = {star.span}};
+      return ctx_.alloc<TypeNode>(span, NamedType{.name = std::move(path), .type_args = {pointee}});
     }
 
     // Function type: fn(T, U, ...): R

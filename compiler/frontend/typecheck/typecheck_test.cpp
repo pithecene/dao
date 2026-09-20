@@ -772,7 +772,7 @@ suite<"typecheck_modules"> typecheck_modules = [] {
     // fields exist.  `P` puts the shell behind a pointer.
     auto checked = check_program({
         {"main.dao",
-         "module app\ntype A = B\ntype B = Box<i32>\ntype P = *Box<i32>\n"
+         "module app\ntype A = B\ntype B = Box<i32>\ntype P = Ptr<Box<i32>>\n"
          "class Box<T>:\n    v: T\n"
          "fn take(a: A, p: P): i32 -> a.v\n"
          "fn main(): i32 -> 0\n"},
@@ -925,6 +925,8 @@ suite<"typecheck_modules"> typecheck_modules = [] {
     });
     expect(has_error_containing(checked.result, "cannot contain itself by value"))
         << all_messages(checked);
+    expect(has_error_containing(checked.result, "use a pointer (Ptr<Loop>) for recursive types"))
+        << all_messages(checked);
   };
 
   "an enum holding itself by value through a class is rejected"_test = [] {
@@ -940,7 +942,7 @@ suite<"typecheck_modules"> typecheck_modules = [] {
   "an enum holding itself behind a pointer is accepted"_test = [] {
     auto checked = check_program({
         {"main.dao",
-         "module app\nenum class Chain:\n    Link(next: *Chain)\n    End\nfn main(): i32 -> 0\n"},
+         "module app\nenum class Chain:\n    Link(next: Ptr<Chain>)\n    End\nfn main(): i32 -> 0\n"},
     });
     expect(checked.result.diagnostics.empty()) << all_messages(checked);
   };
@@ -980,7 +982,7 @@ suite<"typecheck_modules"> typecheck_modules = [] {
 
   "a class holding itself behind a pointer is accepted"_test = [] {
     auto checked = check_program({
-        {"main.dao", "module app\nclass Node:\n    next: *Node\n    v: i32\nfn main(): i32 -> 0\n"},
+        {"main.dao", "module app\nclass Node:\n    next: Ptr<Node>\n    v: i32\nfn main(): i32 -> 0\n"},
     });
     expect(checked.result.diagnostics.empty()) << all_messages(checked);
   };
@@ -993,20 +995,20 @@ suite<"typecheck_modules"> typecheck_modules = [] {
         // carry the hole behind `inner`.
         constexpr std::string_view kDecls =
             "module app\nclass Base<T>:\n    v: T\nclass Inner<T>:\n    dep: IntBase\n    t: "
-            "T\nclass Outer<T>:\n    inner: *Inner<T>\n    t: T\ntype IntBase = Base<i32>\ntype "
+            "T\nclass Outer<T>:\n    inner: Ptr<Inner<T>>\n    t: T\ntype IntBase = Base<i32>\ntype "
             "IntOuter = Outer<i32>\n";
         auto bad = check_program({
             {"main.dao",
              std::string(kDecls) +
                  "fn bad(o: IntOuter): i32\n    mode unsafe =>\n        let s: string = "
-                 "(*o.inner).dep.v\n    return 0\nfn main(): i32 -> 0\n"},
+                 "o.inner.get().dep.v\n    return 0\nfn main(): i32 -> 0\n"},
         });
         expect(!bad.result.diagnostics.empty())
             << "an i32 field was bound to a string through a pointer to an incomplete copy";
         auto good = check_program({
             {"main.dao",
              std::string(kDecls) + "fn good(o: IntOuter): i32\n    mode unsafe =>\n        let s: "
-                                   "i32 = (*o.inner).dep.v\n    return 0\nfn main(): i32 -> 0\n"},
+                                   "i32 = o.inner.get().dep.v\n    return 0\nfn main(): i32 -> 0\n"},
         });
         expect(good.result.diagnostics.empty()) << all_messages(good);
       };
@@ -1405,10 +1407,10 @@ suite<"typecheck_resource_domains"> typecheck_resource_domains = [] {
     // is holding one.
     auto result = check_source("fn gen(): Generator<i32>\n"
                                "    yield 1\n"
-                               "fn f(): *Generator<i32>\n"
-                               "    let p: *Generator<i32> = null_ptr<Generator<i32>>()\n"
+                               "fn f(): Ptr<Generator<i32>>\n"
+                               "    let p: Ptr<Generator<i32>> = Ptr<Generator<i32>>::new()\n"
                                "    resource memory pool =>\n"
-                               "        p = null_ptr<Generator<i32>>()\n"
+                               "        p = Ptr<Generator<i32>>::new()\n"
                                "        return p\n"
                                "    return p\n");
     expect(is_ok(result)) << (result.diagnostics.empty() ? "" : result.diagnostics[0].message);
@@ -1562,13 +1564,13 @@ suite<"typecheck_resource_domains"> typecheck_resource_domains = [] {
 };
 
 suite<"typecheck_pointers"> typecheck_pointers = [] {
-  "address-of and deref in unsafe"_test = [] {
+  "read through a pointer in unsafe"_test = [] {
     auto result = check_source(
-        "fn ptr_test(x: i32): i32\n"
-        "    let p: *i32 = &x\n"
+        "fn ptr_test(p: Ptr<i32>): i32\n"
         "    mode unsafe =>\n"
-        "        *p\n");
-    expect(is_ok(result));
+        "        return p.get()\n"
+        "    return 0\n");
+    expect(is_ok(result)) << (result.diagnostics.empty() ? "" : result.diagnostics[0].message);
   };
 };
 
@@ -1620,19 +1622,20 @@ suite<"typecheck_negative"> typecheck_negative = [] {
     expect(has_error_containing(result, "not assignable"));
   };
 
-  "deref non-pointer"_test = [] {
+  "get on a non-pointer is no method"_test = [] {
     auto result = check_source(
         "fn bad(x: i32): i32\n"
         "    mode unsafe =>\n"
-        "        *x\n");
-    expect(has_error_containing(result, "non-pointer"));
+        "        return x.get()\n"
+        "    return 0\n");
+    expect(has_error_containing(result, "no method 'get' on type 'i32'"));
   };
 
-  "deref outside unsafe"_test = [] {
+  "read outside unsafe"_test = [] {
     auto result = check_source(
-        "fn bad(p: *i32): i32\n"
-        "    *p\n");
-    expect(has_error_containing(result, "mode unsafe"));
+        "fn bad(p: Ptr<i32>): i32\n"
+        "    return p.get()\n");
+    expect(has_error_containing(result, "Ptr.get requires 'mode unsafe =>'"));
   };
 
   "logical not on non-bool"_test = [] {
@@ -1804,7 +1807,7 @@ suite<"typecheck_negative"> typecheck_negative = [] {
 
   "extern fn with pointer is accepted"_test = [] {
     auto result = check_source(
-        "extern fn good(p: *i32): *i32\n");
+        "extern fn good(p: Ptr<i32>): Ptr<i32>\n");
     expect(is_ok(result)) << "pointer extern fn should typecheck";
   };
 
@@ -1950,6 +1953,107 @@ suite<"typecheck_construct"> typecheck_construct = [] {
         "fn bad(p: Point): Point -> p(1, 2)\n");
     expect(has_error_containing(result, "cannot call non-function"))
         << "calling a struct value should not be treated as construction";
+  };
+
+  // A name that already says what its parameters are keeps them: a
+  // construction through it neither takes new ones nor leaves them for
+  // its context.
+  "a concrete alias takes no type arguments at a construction"_test = [] {
+    auto result = check_source(
+        "class Tag<T>:\n"
+        "    value: i32\n"
+        "type IntTag = Tag<i32>\n"
+        "fn bad(): Tag<i64> -> IntTag<i64>(1)\n");
+    expect(has_error_containing(result, "already instantiated"))
+        << "a concrete alias was instantiated again";
+  };
+
+  "a construction through a concrete alias keeps its arguments"_test = [] {
+    auto result = check_source(
+        "class Cell<T>:\n"
+        "    value: Ptr<T>\n"
+        "type IntCell = Cell<i32>\n"
+        "fn bad(p: Ptr<i32>): i32\n"
+        "    let c: Cell<i64> = IntCell(p)\n"
+        "    return 0\n");
+    expect(has_error_containing(result, "is not assignable to"))
+        << "the alias's i32 was reopened and filled with i64";
+  };
+
+  // A field typed through a parameter an EARLIER field bound is that
+  // type by the time it is checked, exactly as a call's later arguments
+  // are.  `Maybe::Nothing` carries nothing to infer `T` from, so reading
+  // the field as `Maybe<T>` left the construction unsatisfiable.
+  constexpr const char* kMaybe = "enum class Maybe<T>:\n"
+                                 "    Something(value: T)\n"
+                                 "    Nothing\n";
+
+  "a field is the type an earlier field bound"_test = [kMaybe] {
+    auto result = check_source(std::string(kMaybe) +
+                               "class Bundle<T>:\n"
+                               "    first: T\n"
+                               "    second: Maybe<T>\n"
+                               "fn make(): i32\n"
+                               "    let b: Bundle<i32> = Bundle(1, Maybe::Nothing)\n"
+                               "    return b.first\n");
+    expect(is_ok(result)) << "the second field was checked against the unbound parameter";
+  };
+
+  "a field disagreeing with what an earlier field bound is reported"_test = [kMaybe] {
+    auto result = check_source(std::string(kMaybe) +
+                               "class Bundle<T>:\n"
+                               "    first: T\n"
+                               "    second: Maybe<T>\n"
+                               "fn make(): i32\n"
+                               "    let b: Bundle<i32> = Bundle(1, Maybe::Something(true))\n"
+                               "    return b.first\n");
+    expect(!is_ok(result)) << "a Maybe<bool> second field passed for a Bundle<i32>";
+  };
+
+  // The payload slots are filled by the field each value names, so a
+  // field named twice would overwrite one slot and leave another empty,
+  // and an unnamed value names no slot at all.
+  constexpr const char* kChoice = "enum class Choice<T>:\n"
+                                  "    Both(first: T, second: T)\n";
+
+  "a field given twice in a variant is reported"_test = [kChoice] {
+    auto result = check_source(std::string(kChoice) +
+                               "fn make(): i32\n"
+                               "    let c: Choice<i32> = Choice::Both(first = 1, first = 2)\n"
+                               "    return 0\n");
+    expect(has_error_containing(result, "is given twice")) << "one slot took both values";
+  };
+
+  "a variant of named fields takes no positional value"_test = [kChoice] {
+    auto result = check_source(std::string(kChoice) +
+                               "fn make(): i32\n"
+                               "    let c: Choice<i32> = Choice::Both(first = 1, 2)\n"
+                               "    return 0\n");
+    expect(!is_ok(result)) << "a value naming no field was accepted";
+  };
+
+  "named payloads bind in the order the variant declares them"_test = [kMaybe] {
+    // Named fields may be written in any order, and the one that binds
+    // the parameter is `first` wherever it stands.
+    auto result = check_source(std::string(kMaybe) +
+                               "enum class Holder<T>:\n"
+                               "    Both(first: T, second: Maybe<T>)\n"
+                               "fn make(): i32\n"
+                               "    let h: Holder<i32> = "
+                               "Holder::Both(second = Maybe::Nothing, first = 1)\n"
+                               "    return 0\n");
+    expect(is_ok(result)) << "a payload written first was read before what binds it";
+  };
+
+  "a payload is the type an earlier payload bound"_test = [kMaybe] {
+    auto result = check_source(std::string(kMaybe) +
+                               "enum class Holder<T>:\n"
+                               "    Both(first: T, second: Maybe<T>)\n"
+                               "fn make(): i32\n"
+                               "    let h: Holder<i32> = "
+                               "Holder::Both(first = 1, second = Maybe::Nothing)\n"
+                               "    return 0\n");
+    expect(is_ok(result)) << "the second payload was checked against the unbound parameter";
   };
 };
 
@@ -2789,46 +2893,773 @@ suite<"typecheck_generator"> typecheck_generator = [] {
 // Pointer operations
 // ---------------------------------------------------------------------------
 
+// The compiler-standard Ptr<T> (ADR_RAW_POINTER_SURFACE.md,
+// CONTRACT_TYPECHECKING_BASELINE.md §8).
 suite<"pointer_ops"> pointer_ops = [] {
-  "store through pointer requires unsafe"_test = [] {
-    auto result = check_source(
-        "fn f(p: *i32): void\n"
-        "    *p = 42\n");
-    expect(!result.diagnostics.empty());
-    bool found = false;
-    for (const auto& d : result.diagnostics) {
-      if (d.message.find("unsafe") != std::string::npos) found = true;
-    }
-    expect(found) << "should require mode unsafe";
+  auto first_message = [](const TypeCheckResult& result) {
+    return result.diagnostics.empty() ? std::string{} : result.diagnostics[0].message;
   };
 
-  "store through pointer in unsafe accepted"_test = [] {
+  "set requires unsafe"_test = [] {
     auto result = check_source(
-        "fn f(p: *i32): void\n"
+        "fn f(p: Ptr<i32>): void\n"
+        "    p.set(42)\n");
+    expect(has_error_containing(result, "Ptr.set requires 'mode unsafe =>'"));
+  };
+
+  "set in unsafe accepted"_test = [=] {
+    auto result = check_source(
+        "fn f(p: Ptr<i32>): void\n"
         "    mode unsafe =>\n"
-        "        *p = 42\n");
-    expect(result.diagnostics.empty());
+        "        p.set(42)\n");
+    expect(result.diagnostics.empty()) << first_message(result);
   };
 
-  "pointer equality accepted"_test = [] {
+  "offset requires unsafe and counts in i64"_test = [=] {
+    auto outside = check_source(
+        "fn f(p: Ptr<i32>): Ptr<i32>\n"
+        "    return p.offset(1)\n");
+    expect(has_error_containing(outside, "Ptr.offset requires 'mode unsafe =>'"));
+    auto inside = check_source(
+        "fn f(p: Ptr<i32>, n: i64): i32\n"
+        "    mode unsafe =>\n"
+        "        return p.offset(n).get() + p.offset(1).get()\n"
+        "    return 0\n");
+    expect(is_ok(inside)) << first_message(inside);
+  };
+
+  "new, is_null, and cast need no unsafe"_test = [=] {
     auto result = check_source(
-        "fn f(a: *i32, b: *i32): bool\n"
+        "fn f(): bool\n"
+        "    let p: Ptr<i32> = Ptr<i32>::new()\n"
+        "    let opaque: Ptr<void> = p.cast<void>()\n"
+        "    let back: Ptr<i32> = opaque.cast<i32>()\n"
+        "    return back.is_null()\n");
+    expect(result.diagnostics.empty()) << first_message(result);
+  };
+
+  "pointer equality accepted"_test = [=] {
+    auto result = check_source(
+        "fn f(a: Ptr<i32>, b: Ptr<i32>): bool\n"
         "    return a == b\n");
-    expect(result.diagnostics.empty());
+    expect(result.diagnostics.empty()) << first_message(result);
   };
 
-  "void pointer assignability"_test = [] {
+  // Assignability is exact: no implicit Ptr<T> <-> Ptr<void> conversion.
+  "typed pointer is unassignable to Ptr<void>"_test = [] {
     auto result = check_source(
-        "fn f(p: *i32): *void\n"
-        "    return p\n");
-    expect(result.diagnostics.empty());
+        "fn f(): i32\n"
+        "    let p: Ptr<i32> = Ptr<i32>::new()\n"
+        "    let q: Ptr<void> = p\n"
+        "    return 0\n");
+    expect(has_error_containing(result, "not assignable"));
   };
 
-  "void pointer not assignable to typed pointer"_test = [] {
+  "Ptr<void> is unassignable to a typed pointer"_test = [] {
     auto result = check_source(
-        "fn f(p: *void): *i32\n"
+        "fn f(p: Ptr<void>): Ptr<i32>\n"
         "    return p\n");
-    expect(!result.diagnostics.empty());
+    expect(!is_ok(result));
+  };
+
+  "cast converts explicitly"_test = [=] {
+    auto result = check_source(
+        "fn f(): i32\n"
+        "    let p: Ptr<i32> = Ptr<i32>::new()\n"
+        "    let q: Ptr<void> = p.cast<void>()\n"
+        "    return 0\n");
+    expect(result.diagnostics.empty()) << first_message(result);
+  };
+
+  // No covariance through a generic argument: Generator<T> is invariant.
+  "Generator<Ptr<i32>> is unassignable to Generator<Ptr<void>>"_test = [] {
+    auto result = check_source(
+        "fn source(): Generator<Ptr<i32>>\n"
+        "    yield Ptr<i32>::new()\n"
+        "fn consume(values: Generator<Ptr<void>>): void\n"
+        "    return\n"
+        "fn test(): void\n"
+        "    let values: Generator<Ptr<i32>> = source()\n"
+        "    consume(values)\n");
+    expect(has_error_containing(result, "not assignable"));
+  };
+
+  "a generator of opaque pointers yields a cast"_test = [=] {
+    auto result = check_source(
+        "fn g(p: Ptr<i32>): Generator<Ptr<void>>\n"
+        "    yield p.cast<void>()\n");
+    expect(result.diagnostics.empty()) << first_message(result);
+  };
+
+  "get, set, and offset are invalid on Ptr<void>"_test = [] {
+    for (auto body : {"        let x = p.get()\n", "        p.set(p)\n",
+                      "        let q = p.offset(1)\n"}) {
+      auto result = check_source(std::string("fn f(p: Ptr<void>): void\n    mode unsafe =>\n") +
+                                 body);
+      expect(has_error_containing(result, "is invalid on 'Ptr<void>'")) << body;
+    }
+  };
+
+  "cast takes exactly one type argument, the others none"_test = [] {
+    auto missing = check_source(
+        "fn f(p: Ptr<i32>): bool\n"
+        "    let q = p.cast()\n"
+        "    return q.is_null()\n");
+    expect(has_error_containing(missing, "Ptr.cast expects 1 type argument(s), got 0"));
+    auto extra = check_source(
+        "fn f(p: Ptr<i32>): bool\n"
+        "    return p.is_null<i32>()\n");
+    expect(has_error_containing(extra, "Ptr.is_null expects 0 type argument(s), got 1"));
+  };
+
+  "Ptr takes exactly one type argument"_test = [] {
+    auto result = check_source("fn f(p: Ptr<i32, i32>): i32 -> 0\n");
+    expect(has_error_containing(result, "Ptr requires exactly one type argument"));
+  };
+
+  "a Ptr operation is called, never taken as a value"_test = [] {
+    auto result = check_source(
+        "fn f(p: Ptr<i32>): i32\n"
+        "    let g = p.is_null\n"
+        "    return 0\n");
+    expect(has_error_containing(result, "'Ptr.is_null' is an operation of Ptr<T>; call it"));
+  };
+
+  "Ptr is a type, never a value"_test = [] {
+    for (auto body : {"fn bad(): i32 -> Ptr<i32>()\n", "fn bad(): i32 -> Ptr()\n"}) {
+      auto result = check_source(body);
+      expect(has_error_containing(result, "'Ptr' is a type, not a value")) << body;
+    }
+  };
+
+  "a Ptr operation takes its arguments by position"_test = [] {
+    auto result = check_source(
+        "fn f(p: Ptr<i32>): void\n"
+        "    mode unsafe =>\n"
+        "        p.set(value = 1)\n");
+    expect(has_error_containing(result, "Ptr.set takes its arguments by position"));
+  };
+
+  "a pointer has no other member"_test = [] {
+    auto result = check_source(
+        "fn f(p: Ptr<i32>): i32\n"
+        "    return p.value\n");
+    expect(has_error_containing(result, "no method 'value' on type 'Ptr<i32>'"));
+  };
+
+  "set on a recursive pointee checks without looping"_test = [=] {
+    auto result = check_source(
+        "class Node:\n"
+        "    next: Ptr<Node>\n"
+        "    v: i32\n"
+        "fn f(p: Ptr<Node>, n: Node): void\n"
+        "    mode unsafe =>\n"
+        "        p.set(n)\n");
+    expect(result.diagnostics.empty()) << first_message(result);
+  };
+
+  "set takes exactly the pointee type, a type parameter included"_test = [] {
+    auto result = check_source(
+        "fn write<T>(p: Ptr<T>, value: i32): void\n"
+        "    mode unsafe =>\n"
+        "        p.set(value)\n");
+    expect(has_error_containing(result, "argument type 'i32' is not assignable to parameter type 'T'"));
+  };
+
+  // The pointee is fixed to its last nesting level: a type parameter
+  // inside it is that one type, so `Ptr<Ptr<T>>` refuses a `Ptr<i32>`.
+  "set takes exactly the pointee type, nested type parameters included"_test = [=] {
+    auto result = check_source(
+        "fn write<T>(p: Ptr<Ptr<T>>, value: Ptr<i32>): void\n"
+        "    mode unsafe =>\n"
+        "        p.set(value)\n");
+    expect(has_error_containing(
+        result, "argument type 'Ptr<i32>' is not assignable to parameter type 'Ptr<T>'"));
+
+    auto matching = check_source(
+        "fn write<T>(p: Ptr<Ptr<T>>, value: Ptr<T>): void\n"
+        "    mode unsafe =>\n"
+        "        p.set(value)\n");
+    expect(matching.diagnostics.empty()) << first_message(matching);
+  };
+
+  // One semantic type is many objects: `Ptr<Box<i32>>` and the separate
+  // `Box<i32>` of the value are instantiated apart, and set compares
+  // what they mean.
+  "set takes an independently instantiated pointee"_test = [=] {
+    auto result = check_source(
+        "class Box<T>:\n"
+        "    value: T\n"
+        "fn f(p: Ptr<Box<i32>>, value: Box<i32>): void\n"
+        "    mode unsafe =>\n"
+        "        p.set(value)\n"
+        "        p.set(Box(1))\n");
+    expect(result.diagnostics.empty()) << first_message(result);
+
+    auto mismatch = check_source(
+        "class Box<T>:\n"
+        "    value: T\n"
+        "fn f(p: Ptr<Box<i32>>, value: Box<i64>): void\n"
+        "    mode unsafe =>\n"
+        "        p.set(value)\n");
+    expect(has_error_containing(
+        mismatch, "argument type 'Box<i64>' is not assignable to parameter type 'Box<i32>'"));
+  };
+
+  // A parameter no field mentions still tells two instantiations apart:
+  // the arguments are recorded on the type, not read back off fields.
+  "set tells instantiations apart by a parameter no field mentions"_test = [=] {
+    auto result = check_source(
+        "class Tag<T>:\n"
+        "    text: string\n"
+        "fn f(p: Ptr<Tag<i32>>, value: Tag<i32>): void\n"
+        "    mode unsafe =>\n"
+        "        p.set(value)\n");
+    expect(result.diagnostics.empty()) << first_message(result);
+
+    auto mismatch = check_source(
+        "class Tag<T>:\n"
+        "    text: string\n"
+        "fn f(p: Ptr<Tag<i32>>, value: Tag<i64>): void\n"
+        "    mode unsafe =>\n"
+        "        p.set(value)\n");
+    expect(has_error_containing(
+        mismatch, "argument type 'Tag<i64>' is not assignable to parameter type 'Tag<i32>'"));
+
+    auto returned = check_source(
+        "class Tag<T>:\n"
+        "    text: string\n"
+        "fn f(p: Ptr<Tag<i32>>): Ptr<Tag<i64>> -> p\n");
+    expect(has_error_containing(returned, "does not match return type 'Ptr<Tag<i64>>'"));
+  };
+
+  // What holds for `set` holds for every call: the instantiation is
+  // part of the type, so no call launders one into another.
+  "an ordinary call keeps instantiations apart"_test = [=] {
+    auto result = check_source(
+        "class Tag<T>:\n"
+        "    text: string\n"
+        "fn take(p: Ptr<Tag<i32>>): void\n"
+        "    return\n"
+        "fn f(wrong: Ptr<Tag<i64>>): void\n"
+        "    take(wrong)\n");
+    expect(has_error_containing(result, "argument type 'Ptr<Tag<i64>>' is not assignable to "
+                                        "parameter type 'Ptr<Tag<i32>>'"));
+
+    auto matching = check_source(
+        "class Tag<T>:\n"
+        "    text: string\n"
+        "fn take(p: Ptr<Tag<i32>>): void\n"
+        "    return\n"
+        "fn f(right: Ptr<Tag<i32>>): void\n"
+        "    take(right)\n");
+    expect(matching.diagnostics.empty()) << first_message(matching);
+  };
+
+  // Context completes what a construction could not bind, and nothing
+  // more: an argument that did bind a parameter still has to fit.
+  "context fills only the parameters a construction left open"_test = [=] {
+    auto result = check_source(
+        "class Pair<T, U>:\n"
+        "    value: T\n"
+        "fn f(): void\n"
+        "    let pair: Pair<string, i32> = Pair(1)\n");
+    expect(has_error_containing(
+        result, "initializer type 'Pair<i32, i32>' is not assignable to 'Pair<string, i32>'"));
+
+    auto filled = check_source(
+        "class Pair<T, U>:\n"
+        "    value: T\n"
+        "fn f(): void\n"
+        "    let pair: Pair<i32, string> = Pair(1)\n");
+    expect(filled.diagnostics.empty()) << first_message(filled);
+  };
+
+  // Arguments written at the construction decide the instantiation; the
+  // context does not get to disagree with them.
+  "a construction's written type arguments are what it is"_test = [=] {
+    auto result = check_source(
+        "class Tag<T>:\n"
+        "    text: string\n"
+        "fn f(): void\n"
+        "    let x: Tag<i64> = Tag<i32>(\"x\")\n"
+        "    return\n");
+    expect(has_error_containing(
+        result, "initializer type 'Tag<i32>' is not assignable to 'Tag<i64>'"));
+
+    auto agreeing = check_source(
+        "class Tag<T>:\n"
+        "    text: string\n"
+        "fn f(): void\n"
+        "    let x: Tag<i32> = Tag<i32>(\"x\")\n"
+        "    return\n");
+    expect(agreeing.diagnostics.empty()) << first_message(agreeing);
+
+    auto wrong_count = check_source(
+        "class Tag<T>:\n"
+        "    text: string\n"
+        "fn f(): void\n"
+        "    let x: Tag<i32> = Tag<i32, i64>(\"x\")\n"
+        "    return\n");
+    expect(has_error_containing(wrong_count, "'Tag' expects 1 type argument(s), got 2"));
+
+    // A field is checked against the type those arguments make it, and
+    // the mismatch is reported once.
+    auto field_mismatch = check_source(
+        "class Cell<T>:\n"
+        "    value: T\n"
+        "fn f(): void\n"
+        "    let c: Cell<i32> = Cell<i32>(\"text\")\n"
+        "    return\n");
+    expect(has_error_containing(field_mismatch,
+                                "field 'value' expects type 'i32', got 'string'"));
+    expect(field_mismatch.diagnostics.size() == 1U) << first_message(field_mismatch);
+  };
+
+  // A binding belongs to the declaration that declares the parameter,
+  // never to a position: a method's `U` and its class's `T` are both
+  // first, and one standing for the other would retype a pointer.
+  "a parameter is bound for its own declaration"_test = [=] {
+    auto returned = check_source(
+        "class Box<T>:\n"
+        "    value: Ptr<T>\n"
+        "    fn kept<U>(self, unused: U): Ptr<T> -> self.value\n"
+        "    fn bad(self): Ptr<i32> -> self.kept(0)\n");
+    expect(has_error_containing(
+        returned, "expression body type 'Ptr<T>' does not match return type 'Ptr<i32>'"));
+
+    auto piped = check_source(
+        "class Box<T>:\n"
+        "    value: T\n"
+        "    fn bad<U>(self, f: fn(U): Ptr<T>, x: U): Ptr<U> -> x |> f\n");
+    expect(has_error_containing(
+        piped, "expression body type 'Ptr<T>' does not match return type 'Ptr<U>'"));
+
+    // Inference still reaches the class's parameter through a static
+    // method written with it, without arguments written out.
+    auto inferred = check_source(
+        "class Box<T>:\n"
+        "    value: T\n"
+        "    fn make(value: T): Box<T>\n"
+        "        return Box(value)\n"
+        "fn f(): void\n"
+        "    let b: Box<i32> = Box::make(1)\n"
+        "    return\n");
+    expect(inferred.diagnostics.empty()) << first_message(inferred);
+
+    // A member call's own type arguments are resolved and counted.
+    auto member = check_source(
+        "class Box<T>:\n"
+        "    value: T\n"
+        "    fn mapped<U>(self, made: U): Box<U>\n"
+        "        return Box(made)\n"
+        "    fn same(self, other: T): Box<T>\n"
+        "        return Box(other)\n"
+        "fn f(b: Box<i32>): void\n"
+        "    let s: Box<string> = b.mapped<string>(\"x\")\n"
+        "    return\n");
+    expect(member.diagnostics.empty()) << first_message(member);
+
+    auto surplus = check_source(
+        "class Box<T>:\n"
+        "    value: T\n"
+        "    fn same(self, other: T): Box<T>\n"
+        "        return Box(other)\n"
+        "fn f(b: Box<i32>): void\n"
+        "    let t: Box<i32> = b.same<i64>(2)\n"
+        "    return\n");
+    expect(has_error_containing(surplus, "expected 0 type argument(s), got 1"));
+  };
+
+  // A call through a function value binds nothing: that signature's
+  // parameters belong to whoever wrote it, however their positions line
+  // up with the caller's own.
+  "a call through a function value binds no parameter"_test = [] {
+    auto result = check_source(
+        "class Box<T>:\n"
+        "    value: T\n"
+        "    fn bad<U>(self, f: fn(U): Ptr<T>, x: U): Ptr<U>\n"
+        "        return f(x)\n");
+    expect(has_error_containing(
+        result, "return type 'Ptr<T>' does not match function return type 'Ptr<U>'"));
+  };
+
+  // A class that reaches itself instantiates all the way through: the
+  // recursive occurrence is this instantiation, not the generic one.
+  "a class that reaches itself instantiates through the cycle"_test = [=] {
+    auto result = check_source(
+        "class Node<T>:\n"
+        "    value: T\n"
+        "    next: Ptr<Node<T>>\n"
+        "fn f(): void\n"
+        "    let n: Node<i32> = Node(1, Ptr<Node<i32>>::new())\n"
+        "    return\n");
+    expect(result.diagnostics.empty()) << first_message(result);
+
+    auto mismatch = check_source(
+        "class Node<T>:\n"
+        "    value: T\n"
+        "    next: Ptr<Node<T>>\n"
+        "fn f(): void\n"
+        "    let n: Node<i32> = Node(1, Ptr<Node<i64>>::new())\n"
+        "    return\n");
+    expect(!mismatch.diagnostics.empty()) << "a Ptr<Node<i64>> reached a Node<i32>";
+  };
+
+  // A method's own parameter sits at its own first position, as its
+  // class's does: the receiver's instantiation decides the class's and
+  // leaves the method's for the call.
+  "a generic method of a generic class keeps its own parameter"_test = [=] {
+    auto result = check_source(
+        "class Box<T>:\n"
+        "    value: T\n"
+        "    fn same(self, other: T): Box<T>\n"
+        "        return Box(other)\n"
+        "    fn mapped<U>(self, made: U): Box<U>\n"
+        "        return Box(made)\n"
+        "fn f(): void\n"
+        "    let b: Box<i32> = Box(1)\n"
+        "    let s: Box<string> = b.mapped(\"x\")\n"
+        "    let t: Box<i32> = b.same(2)\n"
+        "    return\n");
+    expect(result.diagnostics.empty()) << first_message(result);
+
+    auto mismatch = check_source(
+        "class Box<T>:\n"
+        "    value: T\n"
+        "    fn same(self, other: T): Box<T>\n"
+        "        return Box(other)\n"
+        "fn f(): void\n"
+        "    let b: Box<i32> = Box(1)\n"
+        "    let t: Box<i32> = b.same(\"text\")\n"
+        "    return\n");
+    expect(has_error_containing(mismatch,
+                                "argument type 'string' is not assignable to parameter type"));
+  };
+
+  // What the arguments before this one bound applies to it: the second
+  // argument is checked against the instantiation the first decided.
+  "an argument is checked against what the ones before it bound"_test = [=] {
+    auto result = check_source(
+        "enum class Maybe<T>:\n"
+        "    Nothing\n"
+        "    Just(value: T)\n"
+        "fn keep<T>(x: T, y: Maybe<T>): T -> x\n"
+        "fn f(): void\n"
+        "    let a: i32 = keep(1, Maybe::Nothing)\n"
+        "    return\n");
+    expect(result.diagnostics.empty()) << first_message(result);
+
+    auto mismatch = check_source(
+        "enum class Maybe<T>:\n"
+        "    Nothing\n"
+        "    Just(value: T)\n"
+        "fn keep<T>(x: T, y: Maybe<T>): T -> x\n"
+        "fn f(): void\n"
+        "    let a: i32 = keep(1, Maybe::Just(value = \"text\"))\n"
+        "    return\n");
+    expect(!mismatch.diagnostics.empty()) << "a Maybe<string> reached a Maybe<i32>";
+  };
+
+  // A name belongs to a variant's payload; anywhere else it names
+  // nothing, and a rest marker is a pattern's, not a construction's.
+  "arguments are named only where a name means something"_test = [] {
+    auto on_a_function = check_source(
+        "fn plain(a: i32, b: i32): i32 -> a\n"
+        "fn f(): i32 -> plain(b = 2, a = 1)\n");
+    expect(has_error_containing(on_a_function, "arguments are given by position"));
+
+    auto on_a_class = check_source(
+        "class Box<T>:\n"
+        "    value: T\n"
+        "fn f(): void\n"
+        "    let b: Box<i32> = Box(value = 1)\n"
+        "    return\n");
+    expect(has_error_containing(on_a_class, "takes its fields by position"));
+
+    auto rest_marker = check_source(
+        "enum class Choice<T>:\n"
+        "    Nothing\n"
+        "    Some(value: T)\n"
+        "fn f(): void\n"
+        "    let a: Choice<i32> = Choice::Some(..)\n"
+        "    return\n");
+    expect(has_error_containing(rest_marker, "'..' is no argument of a construction"));
+  };
+
+  // Where the arguments were written says whose parameters they are:
+  // on the type, they are the class's, and the method's own are still
+  // the call's to infer.
+  "arguments written on the type instantiate the type"_test = [=] {
+    auto result = check_source(
+        "class Box<T>:\n"
+        "    value: T\n"
+        "    fn zero<U>(ignored: U): Ptr<T> -> Ptr<T>::new()\n"
+        "fn f(): void\n"
+        "    let p: Ptr<i32> = Box<i32>::zero(0)\n"
+        "    return\n");
+    expect(result.diagnostics.empty()) << first_message(result);
+
+    auto mismatch = check_source(
+        "class Box<T>:\n"
+        "    value: T\n"
+        "    fn zero<U>(ignored: U): Ptr<T> -> Ptr<T>::new()\n"
+        "fn f(): void\n"
+        "    let p: Ptr<i64> = Box<i32>::zero(0)\n"
+        "    return\n");
+    expect(has_error_containing(mismatch, "'Ptr<i32>' is not assignable to 'Ptr<i64>'"));
+  };
+
+  // A variant's payload is named, and its enum's arguments may be
+  // written out beside that name.
+  "a variant construction takes written type arguments and named fields"_test = [=] {
+    auto result = check_source(
+        "enum class Choice<T>:\n"
+        "    Nothing\n"
+        "    Some(value: T)\n"
+        "fn f(): void\n"
+        "    let ok: Choice<i32> = Choice::Some<i32>(value = 1)\n"
+        "    return\n");
+    expect(result.diagnostics.empty()) << first_message(result);
+
+    auto mismatch = check_source(
+        "enum class Choice<T>:\n"
+        "    Nothing\n"
+        "    Some(value: T)\n"
+        "fn f(): void\n"
+        "    let bad: Choice<string> = Choice::Some<i32>(value = 1)\n"
+        "    return\n");
+    expect(has_error_containing(
+        mismatch, "initializer type 'Choice<i32>' is not assignable to 'Choice<string>'"));
+
+    // The count is the enum's, and the mistake is reported once.
+    auto wrong_count = check_source(
+        "enum class Choice<T>:\n"
+        "    Nothing\n"
+        "    Some(value: T)\n"
+        "fn f(): void\n"
+        "    let bad: Choice<i32> = Choice::Some<i32, i64>(value = 1)\n"
+        "    return\n");
+    expect(has_error_containing(wrong_count, "'Choice' expects 1 type argument(s), got 2"));
+    expect(wrong_count.diagnostics.size() == 1U) << first_message(wrong_count);
+  };
+
+  // A pipe is a call of its target: it binds what that call binds.
+  "a pipe into a static method binds its class's parameters"_test = [=] {
+    auto result = check_source(
+        "class Box<T>:\n"
+        "    value: T\n"
+        "    fn make(value: T): Box<T>\n"
+        "        return Box(value)\n"
+        "fn f(): void\n"
+        "    let b: Box<i32> = 1 |> Box::make\n"
+        "    return\n");
+    expect(result.diagnostics.empty()) << first_message(result);
+
+    auto mismatch = check_source(
+        "class Box<T>:\n"
+        "    value: T\n"
+        "    fn make(value: T): Box<T>\n"
+        "        return Box(value)\n"
+        "fn f(): void\n"
+        "    let b: Box<i32> = \"text\" |> Box::make\n"
+        "    return\n");
+    expect(!mismatch.diagnostics.empty()) << "a string reached a Box<i32>";
+  };
+
+  // One parameter of a class bound to another of the same class stays
+  // bound to it: filling the open one instantiates the declaration
+  // afresh rather than substituting through what is already decided.
+  "a parameter bound to a sibling parameter survives context"_test = [] {
+    auto result = check_source(
+        "class Pair<A, B>:\n"
+        "    value: Ptr<A>\n"
+        "    fn wrong(self, p: Ptr<B>): Pair<i32, i32>\n"
+        "        return Pair(p)\n");
+    expect(has_error_containing(
+        result, "return type 'Pair<B, i32>' does not match function return type 'Pair<i32, i32>'"));
+  };
+
+  // A method's signature may be written with its class's parameters; the
+  // call binds those as much as the method's own.
+  "a static method of a generic class binds its class's parameters"_test = [=] {
+    auto result = check_source(
+        "class Box<T>:\n"
+        "    value: T\n"
+        "    fn make(value: T): Box<T>\n"
+        "        return Box(value)\n"
+        "fn f(): void\n"
+        "    let b: Box<i32> = Box<i32>::make(1)\n"
+        "    return\n");
+    expect(result.diagnostics.empty()) << first_message(result);
+
+    auto mismatch = check_source(
+        "class Box<T>:\n"
+        "    value: T\n"
+        "    fn make(value: T): Box<T>\n"
+        "        return Box(value)\n"
+        "fn f(): void\n"
+        "    let b: Box<i32> = Box<i32>::make(\"text\")\n"
+        "    return\n");
+    expect(!mismatch.diagnostics.empty()) << "a string reached a Box<i32>";
+  };
+
+  // Context decides a parameter the arguments left open, never one they
+  // bound — binding `T` to the enclosing class's own `T` is a binding,
+  // and a call's result type is fixed before any context sees it.
+  "context decides only what the arguments left open"_test = [] {
+    auto bound_to_own = check_source(
+        "class Box<T>:\n"
+        "    value: T\n"
+        "    fn wrong(self): Box<i32>\n"
+        "        return Box(self.value)\n");
+    expect(has_error_containing(
+        bound_to_own, "return type 'Box<T>' does not match function return type 'Box<i32>'"));
+
+    auto returned_by_a_call = check_source(
+        "class Box<T>:\n"
+        "    value: T\n"
+        "fn read<T>(p: Ptr<Box<T>>): void\n"
+        "    mode unsafe =>\n"
+        "        let b: Box<i32> = p.get()\n"
+        "    return\n");
+    expect(has_error_containing(returned_by_a_call,
+                                "initializer type 'Box<T>' is not assignable to 'Box<i32>'"));
+  };
+
+  // Filling from context replaces the class's own parameters, never an
+  // enclosing signature's that happens to sit at the same position.
+  "context fills by declaration, not by position"_test = [] {
+    auto result = check_source(
+        "class Pair<A, B>:\n"
+        "    value: A\n"
+        "fn bad<X, Y>(y: Y): void\n"
+        "    let p: Pair<i32, i32> = Pair(y)\n"
+        "    return\n");
+    expect(has_error_containing(
+        result, "initializer type 'Pair<Y, i32>' is not assignable to 'Pair<i32, i32>'"));
+  };
+
+  // A binding in hand is fixed: a recursive call cannot rebind `T` to
+  // another type under its own signature and write through the pointer.
+  // Written out, `overwrite<i32>` takes a `Ptr<i32>`, which the
+  // enclosing `Ptr<T>` is not.
+  "an inferred binding is not reopened by a parameter of its own declaration"_test = [] {
+    auto result = check_source(
+        "fn overwrite<T>(p: Ptr<T>, value: T, again: bool): void\n"
+        "    mode unsafe =>\n"
+        "        p.set(value)\n"
+        "    if again:\n"
+        "        overwrite<i32>(p, 7, false)\n"
+        "    return\n");
+    expect(has_error_containing(
+        result, "argument type 'Ptr<T>' is not assignable to parameter type 'Ptr<i32>'"));
+
+    // Inferred rather than written out, the second argument disagrees
+    // with what the first one bound.
+    auto inferred = check_source(
+        "fn pair_up<T>(first: T, second: T): void\n"
+        "    return\n"
+        "fn f(): void\n"
+        "    pair_up(1, \"text\")\n"
+        "    return\n");
+    expect(has_error_containing(inferred, "conflicting types for generic parameter 'T'"));
+  };
+
+  // Sharing is walked once per pair: a class whose fields reach the same
+  // class twice would otherwise be expanded exponentially before the
+  // mismatch at the bottom is reported.
+  "a mismatch under heavy sharing is decided without blowing up"_test = [] {
+    std::string decls = "class L0:\n    v: i32\n";
+    for (int level = 1; level <= 30; ++level) {
+      auto prev = "L" + std::to_string(level - 1);
+      decls += "class L" + std::to_string(level) + ":\n    a: Ptr<" + prev + ">\n    b: Ptr<" +
+               prev + ">\n";
+    }
+    auto result = check_source(decls + "fn f(p: Ptr<L30>): Ptr<void> -> p\n");
+    expect(has_error_containing(result, "does not match return type 'Ptr<void>'"));
+  };
+
+  // A parameter no field mentions is still carried by the argument, so
+  // a call infers it from there.
+  "a call infers a parameter no field mentions"_test = [=] {
+    auto result = check_source(
+        "class Tag<T>:\n"
+        "    text: string\n"
+        "fn empty<T>(tag: Tag<T>): Ptr<T> -> Ptr<T>::new()\n"
+        "fn f(tag: Tag<i32>): void\n"
+        "    let p: Ptr<i32> = empty(tag)\n");
+    expect(result.diagnostics.empty()) << first_message(result);
+
+    auto mismatch = check_source(
+        "class Tag<T>:\n"
+        "    text: string\n"
+        "fn empty<T>(tag: Tag<T>): Ptr<T> -> Ptr<T>::new()\n"
+        "fn f(tag: Tag<i32>): void\n"
+        "    let p: Ptr<i64> = empty(tag)\n");
+    expect(has_error_containing(mismatch, "'Ptr<i32>' is not assignable to 'Ptr<i64>'"));
+  };
+
+  // A type parameter of the enclosing signature is fixed: a pointer
+  // reaching it would be retyped without a cast, which §8 forbids.
+  "a pointer is unassignable to a pointer to a fixed type parameter"_test = [] {
+    auto result = check_source("fn disguise<T>(p: Ptr<i32>): Ptr<T> -> p\n");
+    expect(has_error_containing(
+        result, "expression body type 'Ptr<i32>' does not match return type 'Ptr<T>'"));
+
+    auto through_binding = check_source(
+        "fn disguise<T>(p: Ptr<i32>): i32\n"
+        "    let q: Ptr<T> = p\n"
+        "    return 0\n");
+    expect(has_error_containing(through_binding, "'Ptr<i32>'"));
+  };
+
+  // The call site is where a parameter is bound: an argument still
+  // reaches `Ptr<T>` and binds T to its pointee.
+  "a call binds a pointee type parameter from its argument"_test = [=] {
+    auto result = check_source(
+        "fn write<T>(p: Ptr<T>, value: T): void\n"
+        "    mode unsafe =>\n"
+        "        p.set(value)\n"
+        "fn main(): i32\n"
+        "    let p: Ptr<i32> = Ptr<i32>::new()\n"
+        "    write(p, 7)\n"
+        "    return 0\n");
+    expect(result.diagnostics.empty()) << first_message(result);
+  };
+
+  // `p.get()()` calls what `get` returned: the inner call is the
+  // operation, the outer one an ordinary call of a function value.
+  "a function read through get is called directly"_test = [=] {
+    auto result = check_source(
+        "fn f(p: Ptr<fn(): i32>): i32\n"
+        "    mode unsafe =>\n"
+        "        return p.get()()\n"
+        "    return 0\n");
+    expect(result.diagnostics.empty()) << first_message(result);
+  };
+
+  "matching shares a class reached along two fields"_test = [=] {
+    std::string decls = "class L0:\n    v: i32\n";
+    for (int level = 1; level <= 24; ++level) {
+      auto prev = "L" + std::to_string(level - 1);
+      decls += "class L" + std::to_string(level) + ":\n    a: Ptr<" + prev + ">\n    b: Ptr<" +
+               prev + ">\n";
+    }
+    auto result = check_source(decls + "fn f(p: Ptr<L24>, value: L24): void\n"
+                                       "    mode unsafe =>\n"
+                                       "        p.set(value)\n");
+    expect(result.diagnostics.empty()) << first_message(result);
+  };
+
+  "a field of a read is no assignment target"_test = [] {
+    auto result = check_source(
+        "class P:\n"
+        "    x: i32\n"
+        "fn f(p: Ptr<P>): void\n"
+        "    mode unsafe =>\n"
+        "        p.get().x = 1\n");
+    expect(has_error_containing(result, "invalid assignment target"));
   };
 };
 
@@ -2936,6 +3767,138 @@ suite<"explicit_type_args"> explicit_type_args = [] {
       if (d.message.find("type argument") != std::string::npos) found = true;
     }
     expect(found) << "should mention type argument count";
+  };
+
+  // A method's own bounds are the call's to satisfy, and a member call
+  // is where they were once unchecked: the callee is a member
+  // expression, whose declaration is the method the receiver resolved,
+  // never a symbol standing at the callee's own offset.
+  constexpr const char* kMarkAndBox =
+      "concept Mark:\n"
+      "    fn mark(self): i32\n"
+      "class Plain:\n"
+      "    n: i32\n"
+      "class Marked:\n"
+      "    n: i32\n"
+      "    as Mark:\n"
+      "        fn mark(self): i32 -> self.n\n"
+      "class Box:\n"
+      "    n: i32\n"
+      "    fn accept<U: Mark>(self, value: U): i32 -> value.mark()\n";
+
+  "a method's bound rejects a type argument written at the call"_test = [kMarkAndBox] {
+    auto result = check_source(std::string(kMarkAndBox) +
+                               "fn main(): i32\n"
+                               "    let b: Box = Box(1)\n"
+                               "    let p: Plain = Plain(2)\n"
+                               "    return b.accept<Plain>(p)\n");
+    expect(has_error_containing(result, "does not satisfy concept"))
+        << "Plain was accepted without conforming to Mark";
+  };
+
+  "a method's bound rejects a type argument the call infers"_test = [kMarkAndBox] {
+    auto result = check_source(std::string(kMarkAndBox) +
+                               "fn main(): i32\n"
+                               "    let b: Box = Box(1)\n"
+                               "    let p: Plain = Plain(2)\n"
+                               "    return b.accept(p)\n");
+    expect(has_error_containing(result, "does not satisfy concept"))
+        << "Plain was accepted without conforming to Mark";
+  };
+
+  // Arguments written for a METHOD say what its own parameters are and
+  // leave the class's to the call: `U` is written, `T` is learned from
+  // the first argument.
+  "type arguments written for a method leave the class's to infer"_test = [] {
+    auto result = check_source(
+        "class Box<T>:\n"
+        "    item: T\n"
+        "    fn select<U>(first: T, second: U): U -> second\n"
+        "fn main(): i32\n"
+        "    let s: string = Box::select<string>(1, \"text\")\n"
+        "    return 0\n");
+    expect(is_ok(result)) << "the class's parameter was fixed by the method's type argument";
+  };
+
+  // Whichever half the written arguments bind, a parameter they were
+  // written WITH names the one type it stands for.  Reading it as a slot
+  // to fill would retype a pointer for free, which §8 forbids.
+  "a class parameter written into a method's type argument stays fixed"_test = [] {
+    auto result = check_source(
+        "class Box<T>:\n"
+        "    value: T\n"
+        "    fn identity<U>(x: U): U -> x\n"
+        "    fn bad(self, p: Ptr<i32>): Ptr<T>\n"
+        "        return Box::identity<Ptr<T>>(p)\n");
+    expect(has_error_containing(result, "is not assignable to parameter type"))
+        << "a Ptr<i32> passed for a Ptr<T> was accepted";
+  };
+
+  "a method parameter written into a class type argument stays fixed"_test = [] {
+    auto result = check_source(
+        "class Box<T>:\n"
+        "    value: T\n"
+        "    fn write<U>(p: Ptr<T>, value: T, next: U, again: bool): void\n"
+        "        if again:\n"
+        "            Box<U>::write(p, next, next, false)\n"
+        "        else:\n"
+        "            mode unsafe =>\n"
+        "                p.set(value)\n"
+        "        return\n");
+    expect(has_error_containing(result, "is not assignable to parameter type"))
+        << "a Ptr<T> passed for a Ptr<U> was accepted";
+  };
+
+  // A receiver built from the callee's OWN parameter puts that parameter
+  // through the signature, where it stands for the one in scope.  The
+  // call binds nothing there, or it would decide the parameter the
+  // enclosing signature is checked against — and retype a pointer.
+  "a receiver instantiated with the callee's parameter fixes it"_test = [] {
+    auto result = check_source(
+        "class Box<T>:\n"
+        "    value: Ptr<T>\n"
+        "    fn bad<U>(self, p: Ptr<U>, again: bool): Ptr<T>\n"
+        "        if again:\n"
+        "            let other: Box<U> = Box(p)\n"
+        "            return other.bad(self.value, false)\n"
+        "        return self.value\n");
+    expect(has_error_containing(result, "is not assignable to parameter type"))
+        << "a Ptr<T> passed for a Ptr<U> was accepted through the receiver";
+  };
+
+  "a receiver instantiated with the callee's parameter takes no type arguments"_test = [] {
+    auto result = check_source(
+        "class Box<T>:\n"
+        "    value: Ptr<T>\n"
+        "    fn bad<U>(self, p: Ptr<U>, again: bool): Ptr<T>\n"
+        "        if again:\n"
+        "            let other: Box<U> = Box(p)\n"
+        "            return other.bad<T>(self.value, false)\n"
+        "        return self.value\n");
+    expect(has_error_containing(result, "type arguments are already decided"))
+        << "the receiver's own parameter was rebound by a written type argument";
+  };
+
+  "a pipe into such a receiver's method binds nothing either"_test = [] {
+    auto result = check_source(
+        "class Box<T>:\n"
+        "    value: Ptr<T>\n"
+        "    fn bad<U>(self, p: Ptr<U>): Ptr<T>\n"
+        "        if p.is_null():\n"
+        "            return self.value\n"
+        "        let other: Box<U> = Box(p)\n"
+        "        return self.value |> other.bad\n");
+    expect(has_error_containing(result, "is not assignable to first parameter type"))
+        << "a Ptr<T> piped into a Ptr<U> parameter was accepted";
+  };
+
+  "a method's bound accepts a conforming type either way"_test = [kMarkAndBox] {
+    auto result = check_source(std::string(kMarkAndBox) +
+                               "fn main(): i32\n"
+                               "    let b: Box = Box(1)\n"
+                               "    let m: Marked = Marked(2)\n"
+                               "    return b.accept<Marked>(m) + b.accept(m)\n");
+    expect(is_ok(result)) << "a conforming type was rejected";
   };
 };
 

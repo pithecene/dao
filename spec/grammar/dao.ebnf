@@ -135,8 +135,10 @@ additive_expression :=
 multiplicative_expression :=
     unary_expression (("*" | "/" | "%") unary_expression)*
 
+# No pointer sigils: a pointer is read with `p.get()` and written with
+# `p.set(v)` (docs/contracts/ADR_RAW_POINTER_SURFACE.md).
 unary_expression :=
-      ("!" | "-" | "*" | "&") unary_expression
+      ("!" | "-") unary_expression
     | application
 
 application :=
@@ -183,13 +185,11 @@ literal :=
 
 # Types
 
+# A pointer type is the named type `Ptr<T>`; there is no pointer_type
+# production.
 type :=
-      pointer_type
-    | function_type
+      function_type
     | named_type
-
-pointer_type :=
-    "*" type
 
 function_type :=
     "fn" "(" type_list? ")" ":" type

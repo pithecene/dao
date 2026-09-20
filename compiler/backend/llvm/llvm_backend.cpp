@@ -482,6 +482,13 @@ auto LlvmBackend::lower_function(const MirFunction& fn) -> bool {
 
   // Allocate locals. Params get their alloca here too (store from arg below).
   for (const auto& local : fn.locals) {
+    // A binding has storage; `void` has none.  A generic instantiated
+    // with `void` can bind one (`let v = p.get()` on `Ptr<void>`): say so
+    // instead of handing LLVM an unsized allocation.
+    if (local.type != nullptr && local.type->kind() == TypeKind::Void) {
+      emit_diagnostic(local.span, "a binding of type 'void' has no storage");
+      return false;
+    }
     auto* local_type = types_.lower(local.type);
     if (local_type == nullptr) {
       emit_diagnostic(local.span, "cannot lower local type: " + types_.error());
@@ -577,29 +584,7 @@ auto LlvmBackend::lower_inst(const MirInst& inst,
       [&](const MirCondBr& p)      { return lower_cond_br(p, inst, state); },
       [&](const MirFieldAccess& p) { return lower_field_access(p, inst, state); },
 
-      // AddrOf — address of a place.
-      [&](const MirAddrOf& p) -> bool {
-        if (p.place == nullptr) {
-          emit_diagnostic(inst.span, "AddrOf with null place");
-          return false;
-        }
-        auto loc = state.locals.find(p.place->local.id);
-        if (loc == state.locals.end()) {
-          emit_diagnostic(inst.span, "AddrOf: unknown local");
-          return false;
-        }
-        if (!p.place->projections.empty()) {
-          auto* ptr = resolve_place(*p.place, state);
-          if (ptr == nullptr) {
-            emit_diagnostic(inst.span, "cannot resolve AddrOf projected place");
-            return false;
-          }
-          state.values[inst.result.id] = ptr;
-          return true;
-        }
-        state.values[inst.result.id] = loc->second;
-        return true;
-      },
+      [&](const MirPtrOp& p) { return lower_ptr_op(p, inst, state); },
 
       // Mode unsafe — permission semantics enforced upstream; no-op in codegen.
       [&](const MirModeEnter& p) -> bool {
@@ -839,10 +824,6 @@ auto LlvmBackend::lower_unary(const MirUnary& p, const MirInst& inst,
   case UnaryOp::Not:
     result = state.builder->CreateNot(operand, "not");
     break;
-  case UnaryOp::Deref:
-  case UnaryOp::AddrOf:
-    emit_diagnostic(inst.span, "unexpected Deref/AddrOf as unary op in MIR");
-    return false;
   }
 
   if (result != nullptr) {
@@ -1036,6 +1017,84 @@ auto LlvmBackend::lower_binary(const MirBinary& p, const MirInst& inst,
 // ---------------------------------------------------------------------------
 // Place resolution — walk projection chains to an LLVM pointer.
 // ---------------------------------------------------------------------------
+// Ptr<T> operations (ADR_RAW_POINTER_SURFACE.md).  Reads and writes are
+// load / store through a Deref projection; these are the rest, in the
+// backend's own vocabulary: the null constant, getelementptr over the
+// pointee, the identity on opaque pointers, and a compare with null.
+// ---------------------------------------------------------------------------
+
+// The LLVM type a pointee is stored as, where a pointer can address
+// one: a function value is stored as a `ptr`; `void` has no storage, so
+// null.  The checker rejects `get`, `set`, and `offset` on `Ptr<void>`;
+// a generic instantiated with `void` reaches here and is diagnosed.
+auto LlvmBackend::pointee_storage_type(const Type* pointee) -> llvm::Type* {
+  if (pointee == nullptr || pointee->kind() == TypeKind::Void) {
+    return nullptr;
+  }
+  auto* lowered = types_.lower(pointee);
+  if (lowered != nullptr && llvm::isa<llvm::FunctionType>(lowered)) {
+    return llvm::PointerType::getUnqual(module_->getContext());
+  }
+  return lowered;
+}
+
+auto LlvmBackend::lower_ptr_op(const MirPtrOp& p, const MirInst& inst, FunctionState& state)
+    -> bool {
+  auto* builder = state.builder;
+  auto* null_ptr = llvm::ConstantPointerNull::get(llvm::PointerType::getUnqual(module_->getContext()));
+  llvm::Value* result = nullptr;
+  switch (p.op) {
+  case PtrOp::New:
+    result = null_ptr;
+    break;
+  case PtrOp::Offset: {
+    if (inst.type == nullptr || inst.type->kind() != TypeKind::Pointer) {
+      emit_diagnostic(inst.span, "Ptr.offset: result is no pointer type");
+      return false;
+    }
+    auto* pointer = get_value(p.pointer, state);
+    auto* elements = get_value(p.argument, state);
+    if (pointer == nullptr || elements == nullptr) {
+      emit_diagnostic(inst.span, "Ptr.offset: operand not found");
+      return false;
+    }
+    auto* element_type =
+        pointee_storage_type(static_cast<const TypePointer*>(inst.type)->pointee());
+    if (element_type == nullptr) {
+      emit_diagnostic(inst.span, "Ptr.offset is invalid on 'Ptr<void>', which has no element size");
+      return false;
+    }
+    result = builder->CreateGEP(element_type, pointer, {elements}, "ptr.offset");
+    break;
+  }
+  case PtrOp::Cast:
+    // Opaque pointers carry no pointee: the cast is the value itself.
+    result = get_value(p.pointer, state);
+    break;
+  case PtrOp::IsNull: {
+    auto* pointer = get_value(p.pointer, state);
+    if (pointer == nullptr) {
+      emit_diagnostic(inst.span, "Ptr.is_null: operand not found");
+      return false;
+    }
+    result = builder->CreateICmpEQ(pointer, null_ptr, "ptr.is_null");
+    break;
+  }
+  case PtrOp::Get:
+  case PtrOp::Set:
+    emit_diagnostic(inst.span, "Ptr.get / Ptr.set reach the backend as load / store");
+    return false;
+  }
+  if (result == nullptr) {
+    emit_diagnostic(inst.span, "Ptr operation operand not found");
+    return false;
+  }
+  state.values[inst.result.id] = result;
+  state.value_types[inst.result.id] = inst.type;
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // Compiler builtin intrinsic lowering
 // ---------------------------------------------------------------------------
 
@@ -1079,74 +1138,41 @@ auto LlvmBackend::lower_builtin_call(
     return false;
   }
 
-  // null_ptr$T(): *T — return typed null pointer.
-  if (name == "null_ptr" || name.starts_with("null_ptr$")) {
-    auto* ptr_type = llvm::PointerType::getUnqual(ctx);
-    state.values[inst.result.id] =
-        llvm::ConstantPointerNull::get(ptr_type);
-    state.value_types[inst.result.id] = result_type;
-    return true;
-  }
-
-  // ptr_offset$T(ptr: *T, index: i64): *T — GEP with element type T.
-  if (name == "ptr_offset" || name.starts_with("ptr_offset$")) {
-    if (p.args == nullptr || p.args->size() != 2) {
-      emit_diagnostic(inst.span, "ptr_offset: expected 2 arguments");
-      return false;
-    }
-    auto* ptr_val = get_value((*p.args)[0], state);
-    auto* index_val = get_value((*p.args)[1], state);
-
-    // Get element type T: first from the result type (*T), then from
-    // the argument's value type, then from explicit type args.
-    const Type* pointee_type = nullptr;
-    if (result_type != nullptr &&
-        result_type->kind() == TypeKind::Pointer) {
-      pointee_type =
-          static_cast<const TypePointer*>(result_type)->pointee();
-    }
-    if (pointee_type == nullptr) {
-      auto arg_type_it = state.value_types.find((*p.args)[0].id);
-      if (arg_type_it != state.value_types.end() &&
-          arg_type_it->second != nullptr &&
-          arg_type_it->second->kind() == TypeKind::Pointer) {
-        pointee_type =
-            static_cast<const TypePointer*>(arg_type_it->second)->pointee();
-      }
-    }
-    if (pointee_type == nullptr && p.explicit_type_args != nullptr &&
-        !p.explicit_type_args->empty()) {
-      pointee_type = (*p.explicit_type_args)[0];
-    }
-    if (pointee_type == nullptr) {
-      emit_diagnostic(inst.span, "ptr_offset: cannot determine element type");
-      return false;
-    }
-    auto* elem_llvm_type = types_.lower(pointee_type);
-    state.values[inst.result.id] =
-        builder->CreateGEP(elem_llvm_type, ptr_val, {index_val}, "ptr.offset");
-    state.value_types[inst.result.id] = result_type;
-    return true;
-  }
-
-  // ptr_cast$T(ptr: *void): *T — no-op with opaque pointers.
-  if (name == "ptr_cast" || name.starts_with("ptr_cast$")) {
-    if (p.args == nullptr || p.args->size() != 1) {
-      emit_diagnostic(inst.span, "ptr_cast: expected 1 argument");
-      return false;
-    }
-    // With opaque pointers, this is a semantic no-op — just pass through.
-    state.values[inst.result.id] = get_value((*p.args)[0], state);
-    state.value_types[inst.result.id] = result_type;
-    return true;
-  }
-
   emit_diagnostic(inst.span,
                   "unknown builtin intrinsic: " + std::string(name));
   return false;
 }
 
 // ---------------------------------------------------------------------------
+
+// The semantic type a place denotes: its local's type followed through
+// its projections, or null where a step is unknown.
+auto LlvmBackend::place_type(const MirPlace& place, const FunctionState& state) -> const Type* {
+  auto local_type = state.local_types.find(place.local.id);
+  const Type* current = local_type != state.local_types.end() ? local_type->second : nullptr;
+  for (const auto& proj : place.projections) {
+    if (current == nullptr) {
+      return nullptr;
+    }
+    switch (proj.kind) {
+    case MirProjectionKind::Deref:
+      current = current->kind() == TypeKind::Pointer
+                    ? static_cast<const TypePointer*>(current)->pointee()
+                    : nullptr;
+      break;
+    case MirProjectionKind::Field: {
+      const auto* fields = current->kind() == TypeKind::Struct ? static_cast<const TypeStruct*>(current) : nullptr;
+      current = fields != nullptr && proj.field_index < fields->fields().size()
+                    ? fields->fields()[proj.field_index].type
+                    : nullptr;
+      break;
+    }
+    case MirProjectionKind::Index:
+      return nullptr;
+    }
+  }
+  return current;
+}
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 auto LlvmBackend::resolve_place(const MirPlace& place,
@@ -1243,6 +1269,11 @@ auto LlvmBackend::lower_store(const MirStore& p, const MirInst& inst,
   }
 
   if (!p.place->projections.empty()) {
+    if (const auto* target = place_type(*p.place, state);
+        target != nullptr && target->kind() == TypeKind::Void) {
+      emit_diagnostic(inst.span, "Ptr.set is invalid on 'Ptr<void>', which has no value");
+      return false;
+    }
     auto* ptr = resolve_place(*p.place, state);
     if (ptr == nullptr) {
       emit_diagnostic(inst.span, "cannot resolve projected store target");
@@ -1275,10 +1306,11 @@ auto LlvmBackend::lower_load(const MirLoad& p, const MirInst& inst,
       emit_diagnostic(inst.span, "cannot resolve projected load source");
       return false;
     }
-    auto* load_type = types_.lower(inst.type);
+    auto* load_type = pointee_storage_type(inst.type);
     if (load_type == nullptr) {
-      emit_diagnostic(inst.span,
-                      "cannot lower projected load type: " + types_.error());
+      emit_diagnostic(inst.span, inst.type != nullptr && inst.type->kind() == TypeKind::Void
+                                     ? "Ptr.get is invalid on 'Ptr<void>', which has no value"
+                                     : "cannot lower projected load type: " + types_.error());
       return false;
     }
     auto* val = state.builder->CreateLoad(load_type, ptr, "proj.load");
@@ -1391,7 +1423,7 @@ auto LlvmBackend::lower_fn_ref(const MirFnRef& p, const MirInst& inst,
 
 auto LlvmBackend::lower_call(const MirCall& p, const MirInst& inst,
                                FunctionState& state) -> bool {
-  // Check for compiler builtin intrinsics (size_of$T, null_ptr$T, etc.).
+  // Check for compiler builtin intrinsics (size_of$T, align_of$T).
   auto builtin_it = state.builtin_names.find(p.callee.id);
   if (builtin_it != state.builtin_names.end()) {
     return lower_builtin_call(builtin_it->second, p, inst, state);
@@ -1883,6 +1915,10 @@ auto LlvmBackend::create_generator_frame_type(const MirFunction& fn)
   fields.push_back(yield_llvm);                     // 2: yield_slot
 
   for (const auto& local : fn.locals) {
+    if (local.type != nullptr && local.type->kind() == TypeKind::Void) {
+      emit_diagnostic(local.span, "a binding of type 'void' has no storage");
+      return nullptr;
+    }
     auto* lt = types_.lower(local.type);
     if (lt == nullptr) {
       return nullptr;

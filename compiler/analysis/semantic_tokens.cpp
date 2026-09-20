@@ -151,8 +151,6 @@ auto lexical_category(TokenKind kind) -> std::string_view {
     return "operator.arithmetic";
   case TokenKind::Bang:
     return "operator.logical";
-  case TokenKind::Amp:
-    return "operator.address";
   case TokenKind::Dot:
     return "operator.member";
   case TokenKind::DotDot:
@@ -173,7 +171,9 @@ auto lexical_category(TokenKind kind) -> std::string_view {
   case TokenKind::Identifier:
     return "";
 
-  // Synthetic and error tokens are not classified.
+  // Synthetic and error tokens are not classified, nor `&`, which is no
+  // Dao operator (the parser reports it).
+  case TokenKind::Amp:
   case TokenKind::Newline:
   case TokenKind::Indent:
   case TokenKind::Dedent:
@@ -611,14 +611,9 @@ private:
     }
     case NodeKind::UnaryExpr: {
       const auto& unary = expr.as<UnaryExpr>();
-      // The operator is the expression's first character; `*`/`&` are
-      // address operators here, not arithmetic.
+      // The operator is the expression's first character.
       Span op_span{.offset = expr.span.offset, .length = 1};
       switch (unary.op) {
-      case UnaryOp::Deref:
-      case UnaryOp::AddrOf:
-        classify(op_span, "operator.address");
-        break;
       case UnaryOp::Not:
         classify(op_span, "operator.logical");
         break;
@@ -630,7 +625,15 @@ private:
     }
     case NodeKind::CallExpr: {
       const auto& call = expr.as<CallExpr>();
-      visit_expr(*call.callee);
+      // A member called with type arguments (`p.cast<u8>()`) is a
+      // function use, so its `<` opens a type-argument list.
+      if (call.callee->is<FieldExpr>() && !call.type_args.empty()) {
+        const auto& member = call.callee->as<FieldExpr>();
+        visit_expr(*member.object);
+        classify(member.field_span, "use.function");
+      } else {
+        visit_expr(*call.callee);
+      }
       for (const auto* type_arg : call.type_args) {
         visit_type(*type_arg);
       }
@@ -721,14 +724,6 @@ private:
       for (const auto* arg : named.type_args) {
         visit_type(*arg);
       }
-      break;
-    }
-    case NodeKind::PointerType: {
-      const auto& ptr = type.as<PointerType>();
-      // The leading `*` of a pointer type is an address operator, not
-      // multiplication.
-      classify(Span{.offset = type.span.offset, .length = 1}, "operator.address");
-      visit_type(*ptr.pointee);
       break;
     }
     case NodeKind::FunctionType: {

@@ -578,10 +578,6 @@ private:
                        out_ << ">";
                      }
                    },
-                   [&](const PointerType& ptr) {
-                     out_ << "*";
-                     print_type_inline(*ptr.pointee);
-                   },
                    [&](const FunctionTypeNode& ftn) {
                      out_ << "fn(";
                      for (size_t i = 0; i < ftn.param_types.size(); ++i) {

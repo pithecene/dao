@@ -120,7 +120,6 @@ inline constexpr std::array kTokenKinds{
     TokenKindSpec{"operator.logical", "operator"},
     TokenKindSpec{"operator.member", "operator"},
     TokenKindSpec{"operator.range", "operator"},
-    TokenKindSpec{"operator.address", "operator"},
     TokenKindSpec{"operator.try", "operator"},
     TokenKindSpec{"literal.bool", "literal-number"},
     TokenKindSpec{"use.type", "type"},

@@ -441,6 +441,67 @@ suite<"hir_generator"> hir_generator = [] {
   };
 };
 
+// ---------------------------------------------------------------------------
+// Enum construction by field name
+// ---------------------------------------------------------------------------
+
+suite<"hir_enum_construction"> hir_enum_construction = [] {
+  // A payload given by name lands in its field's place, whatever order
+  // the names were written in; the values are still evaluated as
+  // written.
+  "a named payload is lowered into its own field"_test = [] {
+    HirTestPipeline p(
+        "enum class Pair:\n"
+        "    Both(first: i32, second: string)\n"
+        "fn make(): Pair\n"
+        "    return Pair::Both(second = \"s\", first = 1)\n");
+    auto dump = p.dump();
+    // The values stay as written — the string first — and each carries
+    // the field it belongs to, so evaluation order is the source's.
+    auto written_first = dump.find("StringLiteral");
+    auto written_second = dump.find("IntLiteral 1");
+    expect(written_first != std::string::npos && written_second != std::string::npos) << dump;
+    expect(written_first < written_second)
+        << "the payload was reordered, which moves when its values are evaluated: " << dump;
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Ptr<T> operations (ADR_RAW_POINTER_SURFACE.md)
+// ---------------------------------------------------------------------------
+
+suite<"hir_pointer"> hir_pointer = [] {
+  "an operation lowers to HirPtrOp over its receiver"_test = [] {
+    HirTestPipeline p(
+        "fn f(p: Ptr<i32>): i32\n"
+        "    mode unsafe =>\n"
+        "        return p.get()\n"
+        "    return 0\n");
+    auto dump = p.dump();
+    expect(contains(dump, "PtrOp get : i32")) << dump;
+    expect(contains(dump, "SymbolRef p : Ptr<i32>")) << dump;
+  };
+
+  // `p.get()()` is two calls: the operation, then an ordinary call of
+  // the function it read.  The outer call is no second operation — it
+  // has no pointer receiver to lower.
+  "calling what get returned lowers one operation"_test = [] {
+    HirTestPipeline p(
+        "fn f(p: Ptr<fn(): i32>): i32\n"
+        "    mode unsafe =>\n"
+        "        return p.get()()\n"
+        "    return 0\n");
+    auto dump = p.dump();
+    expect(contains(dump, "PtrOp get : fn(): i32")) << dump;
+    expect(contains(dump, "SymbolRef p : Ptr<fn(): i32>")) << dump;
+    size_t operations = 0;
+    for (size_t at = dump.find("PtrOp"); at != std::string::npos; at = dump.find("PtrOp", at + 1)) {
+      ++operations;
+    }
+    expect(operations == 1U) << dump;
+  };
+};
+
 // NOLINTEND(readability-magic-numbers)
 
 auto main() -> int {} // NOLINT(readability-named-parameter)

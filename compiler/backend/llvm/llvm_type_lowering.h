@@ -54,7 +54,17 @@ private:
   std::string error_;
 
   // Cache for struct type lowering to break cycles.
-  std::unordered_map<const Decl*, llvm::StructType*> struct_cache_;
+  // Keyed by what a class MEANS, not by the declaration alone: one
+  // declaration gives as many lowered structs as it has instantiations,
+  // and `Box<i32>` is no `Box<string>` (see `type_identity_key`).
+  std::unordered_map<std::string, llvm::StructType*> struct_cache_;
+
+  // The struct already laid out for each (class, body), so an
+  // instantiation laid out like one already made is that one: two
+  // lowered types with the same fields are the same type, and a call
+  // passing one where the other is expected has to find them so.  The
+  // body is the key, so finding it is a lookup rather than a scan.
+  std::unordered_map<std::string, llvm::StructType*> laid_out_;
 
   auto lower_builtin(BuiltinKind kind) -> llvm::Type*;
   auto lower_struct(const TypeStruct* type) -> llvm::Type*;

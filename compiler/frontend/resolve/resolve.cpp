@@ -72,27 +72,26 @@ constexpr std::string_view kPredeclaredTypes[] = {
     "string",
     "void",
     "Generator",
+    "Ptr",
 };
 
-// Compiler builtin functions — generic functions whose bodies are
-// replaced by the LLVM backend with inline IR. These are registered
-// as predeclared function symbols so they're available without import.
+// Compiler builtin functions, registered as predeclared function symbols.
+// `Ptr.new` is the static factory `Ptr<T>::new()` of the compiler-standard
+// pointer (ADR_RAW_POINTER_SURFACE.md): the parser spells `Type::name` as
+// the identifier `Type.name`, so this is the name a `Ptr<T>::new()` call
+// resolves to.  The pointer's methods are no symbols at all; the checker
+// recognizes them by the receiver's type.
 constexpr std::string_view kBuiltinFunctions[] = {
-    "null_ptr",
-    "ptr_cast",
+    "Ptr.new",
 };
 
-// The generic intrinsic family.  `null_ptr` and `ptr_cast` are outer
-// builtins as well; the rest are prelude declarations whose bodies the
+// The generic intrinsic family: prelude declarations whose bodies the
 // backend replaces.  One list, because the resolver decides who may
-// declare them and the backend decides how they are called, and the
-// two must not drift.
+// declare them and the backend decides how they are called, and the two
+// must not drift.
 constexpr std::string_view kPreludeIntrinsics[] = {
     "size_of",
     "align_of",
-    "null_ptr",
-    "ptr_offset",
-    "ptr_cast",
 };
 
 // `copy_out` is the prelude's to declare for the same reason, but it is
@@ -868,9 +867,6 @@ private:
         }
         return result;
       }
-      if (node->is<PointerType>()) {
-        return "*" + self(node->as<PointerType>().pointee, self);
-      }
       if (node->is<FunctionTypeNode>()) {
         const auto& ftn = node->as<FunctionTypeNode>();
         std::string result = "fn(";
@@ -1353,11 +1349,6 @@ private:
       for (const auto* arg : named.type_args) {
         resolve_type(*arg, scope);
       }
-      break;
-    }
-    case NodeKind::PointerType: {
-      const auto& ptr = type.as<PointerType>();
-      resolve_type(*ptr.pointee, scope);
       break;
     }
     case NodeKind::FunctionType: {

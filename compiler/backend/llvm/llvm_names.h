@@ -26,9 +26,9 @@ auto symbol_is_extern(const Symbol& sym) -> bool;
 auto llvm_function_name(const Symbol& sym, const ModuleInfo* entry) -> std::string;
 
 /// Compiler intrinsics lowered as inline IR rather than calls: the
-/// predeclared builtin functions and the prelude's `size_of` /
-/// `align_of` / `ptr_offset` family.  A symbol owned by a non-prelude
-/// module is never an intrinsic, whatever its name.
+/// prelude's `size_of` / `align_of` family.  A symbol owned by a
+/// non-prelude module is never an intrinsic, whatever its name.  The
+/// operations of Ptr<T> are MIR instructions, no symbols at all.
 auto is_builtin_intrinsic(const Symbol& sym) -> bool;
 
 } // namespace dao

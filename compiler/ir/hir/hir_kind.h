@@ -48,6 +48,7 @@ enum class HirKind : std::uint8_t {
   Pipe,
   Try,
   Lambda,
+  PtrOp,
 };
 
 auto hir_kind_name(HirKind kind) -> const char*;

@@ -1,10 +1,10 @@
 module probe::functions
 fn add(a: i32, b: i32): i32 -> a + b
 
-fn read(ptr: *i32): i32
+fn read(ptr: Ptr<i32>): i32
     let value: i32 = 0
 
     mode unsafe =>
-        value = *ptr
+        value = ptr.get()
 
     return value

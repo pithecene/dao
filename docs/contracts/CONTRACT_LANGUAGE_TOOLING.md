@@ -114,7 +114,6 @@ Operators without a dedicated initial category:
 - `operator.logical` — `!`, `and`, `or`
 - `operator.member` — `.`
 - `operator.range` — `..`
-- `operator.address` — `&` (address-of), unary `*` (dereference), and the `*` of a pointer type; the binary `*` is `operator.arithmetic`.  Retired together with those sigils (ADR_RAW_POINTER_SURFACE.md): the kind leaves this taxonomy in the same change that stops the compiler emitting it
 - `operator.try` — `?`
 
 Literals and uses:

@@ -203,7 +203,7 @@ suite<"module_naming"> module_naming = [] {
                       .decl = nullptr,
                       .module = &entry};
     Symbol builtin{.kind = SymbolKind::Function,
-                   .name = "null_ptr",
+                   .name = "Ptr.new",
                    .decl_span = {},
                    .decl = nullptr,
                    .module = nullptr};
@@ -216,7 +216,7 @@ suite<"module_naming"> module_naming = [] {
     expect(llvm_function_name(lib_main, &entry) == "app::lib::main")
         << "main elsewhere is not main";
     expect(llvm_function_name(entry_main, &entry) == "main");
-    expect(llvm_function_name(builtin, &entry) == "null_ptr") << "no owning module: as written";
+    expect(llvm_function_name(builtin, &entry) == "Ptr.new") << "no owning module: as written";
     expect(llvm_function_name(method, &entry) == "core::x::Vec.push$i32")
         << "method and instantiation mangling kept";
   };
@@ -235,7 +235,7 @@ suite<"module_naming"> module_naming = [] {
                            .decl = nullptr,
                            .module = &prelude};
     Symbol builtin{.kind = SymbolKind::Function,
-                   .name = "ptr_cast",
+                   .name = "align_of",
                    .decl_span = {},
                    .decl = nullptr,
                    .module = nullptr};
@@ -605,7 +605,7 @@ suite<"simple_functions"> simple_functions = [] {
   };
 
   "externs differing only in pointee type are diagnosed"_test = [] {
-    // `*i32` and `*f64` both lower to LLVM's opaque `ptr`, so comparing
+    // `Ptr<i32>` and `Ptr<f64>` both lower to LLVM's opaque `ptr`, so comparing
     // lowered types calls these compatible and lets one declaration
     // answer for the other; the source signatures are what decide
     // (CONTRACT_C_ABI_INTEROP.md §5).  It takes two modules, since one
@@ -613,12 +613,12 @@ suite<"simple_functions"> simple_functions = [] {
     LlvmProgramPipeline pipe({
         {"a.dao",
          "module app::a\n"
-         "extern fn take(p: *i32): i32\n"
-         "fn use_a(p: *i32): i32 -> take(p)\n"},
+         "extern fn take(p: Ptr<i32>): i32\n"
+         "fn use_a(p: Ptr<i32>): i32 -> take(p)\n"},
         {"main.dao",
          "module app::main\n"
-         "extern fn take(p: *f64): i32\n"
-         "fn use_main(p: *f64): i32 -> take(p)\n"
+         "extern fn take(p: Ptr<f64>): i32\n"
+         "fn use_main(p: Ptr<f64>): i32 -> take(p)\n"
          "fn main(): i32\n"
          "  return 0\n"},
     });
@@ -1081,32 +1081,31 @@ suite<"field_access"> field_access = [] {
     expect(contains(ir, "store i32")) << ir;
   };
 
-  "pointer-to-struct field store (Deref -> Field)"_test = [] {
+  "Ptr.set stores the pointee through the pointer"_test = [] {
     LlvmTestPipeline pipe(
         "class Point:\n"
         "  x: i32\n"
         "  y: i32\n"
         "\n"
-        "fn setx(p: *Point): void\n"
+        "fn put(p: Ptr<Point>): void\n"
         "  mode unsafe =>\n"
-        "    (*p).x = 99\n"
+        "    p.set(Point(1, 99))\n"
         "  return\n");
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
     expect(contains(ir, "deref.ptr")) << ir;
-    expect(contains(ir, "getelementptr inbounds %dao.Point")) << ir;
-    expect(contains(ir, "store i32")) << ir;
+    expect(contains(ir, "store %dao.Point")) << ir;
   };
 
-  "pointer-to-struct field read (Deref then extractvalue)"_test = [] {
+  "Ptr.get loads the pointee, then a field reads it"_test = [] {
     LlvmTestPipeline pipe(
         "class Point:\n"
         "  x: i32\n"
         "  y: i32\n"
         "\n"
-        "fn gety(p: *Point): i32\n"
+        "fn gety(p: Ptr<Point>): i32\n"
         "  mode unsafe =>\n"
-        "    return (*p).y\n"
+        "    return p.get().y\n"
         "  return 0\n");
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
@@ -1201,19 +1200,355 @@ suite<"unsupported_constructs"> unsupported_constructs = [] {
     expect(contains(ir, "ret i32")) << ir;
   };
 
-  "address-of field via GEP"_test = [] {
+  "Ptr.offset is getelementptr over the pointee"_test = [] {
     LlvmTestPipeline pipe(
-        "class Point:\n"
-        "  x: i32\n"
-        "  y: i32\n"
-        "\n"
-        "fn addr(p: Point): *i32\n"
+        "fn second(p: Ptr<i64>): i64\n"
         "  mode unsafe =>\n"
-        "    return &p.y\n"
-        "  return &p.x\n");
+        "    return p.offset(1).get()\n"
+        "  return 0\n");
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors";
-    expect(contains(ir, "getelementptr inbounds %dao.Point")) << ir;
+    expect(contains(ir, "getelementptr i64")) << ir;
+    expect(contains(ir, "ptr.offset")) << ir;
+  };
+
+  "a pointer field of a temporary is read through a temporary"_test = [] {
+    LlvmTestPipeline pipe(
+        "class Holder:\n"
+        "  inner: Ptr<i32>\n"
+        "\n"
+        "fn make(): Holder -> Holder(Ptr<i32>::new())\n"
+        "\n"
+        "fn read(): i32\n"
+        "  mode unsafe =>\n"
+        "    return make().inner.get()\n"
+        "  return 0\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << "no backend errors: " << ir;
+    expect(contains(ir, "deref.ptr")) << ir;
+  };
+
+  "a pointer to a function value is offset and read as a ptr"_test = [] {
+    LlvmTestPipeline pipe(
+        "fn next(p: Ptr<fn(): i32>): i32\n"
+        "  mode unsafe =>\n"
+        "    let g = p.offset(1).get()\n"
+        "    return g()\n"
+        "  return 0\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << "no backend errors: " << ir;
+    expect(contains(ir, "getelementptr ptr")) << ir;
+  };
+
+  // The checker rejects get and offset on Ptr<void>; a generic
+  // instantiated with void reaches the backend, which says the same.
+  "get and offset instantiated on Ptr<void> are diagnosed"_test = [] {
+    auto said = [](const LlvmTestPipeline& pipe) {
+      std::string all;
+      for (const auto& diag : pipe.llvm_result.diagnostics) {
+        all += diag.message + " | ";
+      }
+      return all;
+    };
+    LlvmTestPipeline offset(
+        "fn at<T>(p: Ptr<T>): Ptr<T>\n"
+        "  mode unsafe =>\n"
+        "    return p.offset(1)\n"
+        "  return p\n"
+        "\n"
+        "fn main(): i32\n"
+        "  let q: Ptr<void> = at<void>(Ptr<void>::new())\n"
+        "  return 0\n");
+    expect(contains(said(offset), "Ptr.offset is invalid on 'Ptr<void>'")) << said(offset);
+    LlvmTestPipeline get(
+        "fn touch<T>(p: Ptr<T>): void\n"
+        "  mode unsafe =>\n"
+        "    p.get()\n"
+        "  return\n"
+        "\n"
+        "fn main(): i32\n"
+        "  touch<void>(Ptr<void>::new())\n"
+        "  return 0\n");
+    expect(contains(said(get), "Ptr.get is invalid on 'Ptr<void>'")) << said(get);
+    LlvmTestPipeline bound(
+        "fn keep<T>(p: Ptr<T>): void\n"
+        "  mode unsafe =>\n"
+        "    let v = p.get()\n"
+        "  return\n"
+        "\n"
+        "fn main(): i32\n"
+        "  keep<void>(Ptr<void>::new())\n"
+        "  return 0\n");
+    expect(contains(said(bound), "a binding of type 'void' has no storage")) << said(bound);
+    LlvmTestPipeline framed(
+        "fn each<T>(p: Ptr<T>): Generator<i32>\n"
+        "  mode unsafe =>\n"
+        "    let v = p.get()\n"
+        "  yield 1\n"
+        "\n"
+        "fn main(): i32\n"
+        "  let g = each<void>(Ptr<void>::new())\n"
+        "  return 0\n");
+    expect(contains(said(framed), "a binding of type 'void' has no storage")) << said(framed);
+  };
+
+  // A class's parameter and a method's own both sit at position zero,
+  // and both instantiations of the class are laid out in one program:
+  // the specialization, the struct lowering, and the construction each
+  // have to keep them apart.
+  "a generic method of a generic class lowers both instantiations"_test = [] {
+    LlvmTestPipeline pipe(
+        "class Box<T>:\n"
+        "  value: T\n"
+        "\n"
+        "  fn mapped<U>(self, made: U): Box<U>\n"
+        "    return Box(made)\n"
+        "\n"
+        "fn main(): i32\n"
+        "  let b: Box<i32> = Box(1)\n"
+        "  let s: Box<string> = b.mapped<string>(\"x\")\n"
+        "  return 0\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << "no backend errors: " << ir;
+    expect(contains(ir, "Box.mapped$i32_string")) << ir;
+  };
+
+  // Swapping what the class's parameter and the method's own stand for
+  // is another specialization, though the two argument lists read alike.
+  "swapped instantiations are two specializations"_test = [] {
+    LlvmTestPipeline pipe(
+        "class Box<T>:\n"
+        "  value: T\n"
+        "\n"
+        "  fn mapped<U>(self, made: U): Box<U>\n"
+        "    return Box(made)\n"
+        "\n"
+        "fn main(): i32\n"
+        "  let a: Box<i32> = Box(1)\n"
+        "  let b: Box<string> = Box(\"s\")\n"
+        "  let c: Box<string> = a.mapped<string>(\"x\")\n"
+        "  let d: Box<i32> = b.mapped<i32>(2)\n"
+        "  return 0\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << "no backend errors: " << ir;
+    expect(contains(ir, "Box.mapped$i32_string")) << ir;
+    expect(contains(ir, "Box.mapped$string_i32")) << ir;
+  };
+
+  // A class's parameter and its method's own are both bound, and the
+  // specialization agrees with the checked arguments and result.
+  "class and method parameters are bound apart in one call"_test = [] {
+    LlvmTestPipeline pipe(
+        "class Box<T>:\n"
+        "  value: T\n"
+        "\n"
+        "  fn select<U>(first: T, second: U): U -> second\n"
+        "\n"
+        "fn main(): i32\n"
+        "  let s: string = Box<i32>::select(0, \"text\")\n"
+        "  return 0\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << "no backend errors: " << ir;
+    expect(contains(ir, "Box.select")) << ir;
+  };
+
+  // One class holding two equal children is the same type whether they
+  // are the same object or two of them, so it is lowered once.
+  "sharing does not change a lowered type"_test = [] {
+    LlvmTestPipeline pipe(
+        "class Cell<T>:\n"
+        "  value: T\n"
+        "\n"
+        "class Pair<A, B>:\n"
+        "  left: A\n"
+        "  right: B\n"
+        "\n"
+        "fn take(p: Pair<Cell<i32>, Cell<i32>>): i32 -> p.left.value\n"
+        "\n"
+        "fn main(): i32\n"
+        "  let c: Cell<i32> = Cell(1)\n"
+        "  let both: Pair<Cell<i32>, Cell<i32>> = Pair(c, c)\n"
+        "  return take(both)\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << "no backend errors: " << ir;
+    expect(!contains(ir, "%dao.Pair.0")) << "one class was lowered as two types: " << ir;
+  };
+
+  // A graph whose every level holds two pointers to the next, cycling
+  // back from the last, is walked once per level rather than once per
+  // path: written out as a tree it would be millions of nodes.
+  "a wide cycle lowers without expanding every path"_test = [] {
+    // Deep enough that a walk taking every path — 2^22 of them — would
+    // not finish, and shallow enough that one walk per level is instant.
+    constexpr int kLevels = 22;
+    std::string source;
+    for (int level = 0; level < kLevels; ++level) {
+      source += "class L" + std::to_string(level) + ":\n";
+      source += "  a: Ptr<L" + std::to_string(level + 1) + ">\n";
+      source += "  b: Ptr<L" + std::to_string(level + 1) + ">\n";
+    }
+    source += "class L" + std::to_string(kLevels) + ":\n  next: Ptr<L0>\n  v: i32\n";
+    source +=
+        "fn main(): i32\n"
+        "  mode unsafe =>\n"
+        "    let p: Ptr<L0> = Ptr<L0>::new()\n"
+        "    let q: L0 = p.get()\n"
+        "  return 0\n";
+    LlvmTestPipeline pipe(source);
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << "no backend errors: " << ir;
+    expect(contains(ir, "%dao.L0")) << ir;
+  };
+
+  // However a recursive type was reached — built beside the value it
+  // points through, or written out — it lowers to one struct.
+  "a recursive type reached two ways lowers once"_test = [] {
+    LlvmTestPipeline pipe(
+        "class Node<T>:\n"
+        "  value: T\n"
+        "  next: Ptr<Node<T>>\n"
+        "\n"
+        "class Pair<A, B>:\n"
+        "  left: A\n"
+        "  right: B\n"
+        "\n"
+        "fn take(p: Pair<Node<i32>, Ptr<Node<i32>>>): i32 -> p.left.value\n"
+        "\n"
+        "fn main(): i32\n"
+        "  mode unsafe =>\n"
+        "    let n: Node<i32> = Node(1, Ptr<Node<i32>>::new())\n"
+        "    let both: Pair<Node<i32>, Ptr<Node<i32>>> = Pair(n, n.next)\n"
+        "    return take(both)\n"
+        "  return 0\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << "no backend errors: " << ir;
+    expect(!contains(ir, "%dao.Pair.0")) << "one class was lowered as two types: " << ir;
+  };
+
+  // A class that reaches itself is one type however it was reached: two
+  // equal recursive components lower to one struct.
+  "sharing does not change a recursive lowered type"_test = [] {
+    LlvmTestPipeline pipe(
+        "class Node<T>:\n"
+        "  value: T\n"
+        "  next: Ptr<Node<T>>\n"
+        "\n"
+        "class Pair<A, B>:\n"
+        "  left: A\n"
+        "  right: B\n"
+        "\n"
+        "fn take(p: Pair<Node<i32>, Node<i32>>): i32 -> p.left.value\n"
+        "\n"
+        "fn main(): i32\n"
+        "  mode unsafe =>\n"
+        "    let n: Node<i32> = Node(1, Ptr<Node<i32>>::new())\n"
+        "    let both: Pair<Node<i32>, Node<i32>> = Pair(n, n)\n"
+        "    return take(both)\n"
+        "  return 0\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << "no backend errors: " << ir;
+    expect(!contains(ir, "%dao.Pair.0")) << "one class was lowered as two types: " << ir;
+  };
+
+  // Arguments written on the type instantiate the class; a method's own
+  // parameter is still inferred from the values, and both survive into
+  // the specialization.
+  "arguments written on the type reach specialization as the class's"_test = [] {
+    LlvmTestPipeline pipe(
+        "class Box<T>:\n"
+        "  value: T\n"
+        "\n"
+        "  fn zero<U>(ignored: U): Ptr<T> -> Ptr<T>::new()\n"
+        "\n"
+        "fn main(): i32\n"
+        "  let p: Ptr<i32> = Box<i32>::zero(0)\n"
+        "  return 0\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << "no backend errors: " << ir;
+    expect(contains(ir, "Box.zero")) << ir;
+  };
+
+  // A parameter a signature never mentions is bound by the arguments
+  // written at the call, and the specialization follows.
+  "a parameter used only in a body still specializes"_test = [] {
+    LlvmTestPipeline pipe(
+        "fn hold<T>(): i32\n"
+        "  let p: Ptr<T> = Ptr<T>::new()\n"
+        "  return 0\n"
+        "\n"
+        "fn main(): i32\n"
+        "  return hold<i32>()\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << "no backend errors: " << ir;
+    expect(contains(ir, "hold$i32")) << ir;
+  };
+
+  // No source reaches the backend's store guard: `set` takes a value of
+  // the pointee type, and `void` has no value to pass, so the checker
+  // stops every spelling of it.  The guard is what stands between a MIR
+  // regression and an LLVM store of nothing, so it is driven by MIR: a
+  // store through a `Ptr<void>` local added to a function that lowered
+  // cleanly a moment earlier.
+  "a store through Ptr<void> is diagnosed by the backend"_test = [] {
+    LlvmTestPipeline pipe(
+        "fn main(): i32\n"
+        "  return 0\n");
+    expect(pipe.mir_result.module != nullptr) << "the fixture needs a module to add to";
+    expect(!pipe.has_errors()) << "the fixture starts from a clean pipeline: " << pipe.ir();
+
+    MirFunction* target = nullptr;
+    for (auto* fn : pipe.mir_result.module->functions) {
+      if (fn->symbol != nullptr && fn->symbol->name == "main" && !fn->blocks.empty()) {
+        target = fn;
+      }
+    }
+    expect(target != nullptr) << "no main to add the store to";
+    if (target == nullptr) {
+      return;
+    }
+
+    auto& ctx = pipe.mir_ctx;
+    const auto local = LocalId{static_cast<uint32_t>(target->locals.size())};
+    target->locals.push_back({.id = local,
+                              .symbol = nullptr,
+                              .type = pipe.types.pointer_to(pipe.types.void_type()),
+                              .span = {},
+                              .is_param = false});
+    // An id past every one the function already uses.
+    const auto value = MirValueId{900};
+    auto* constant = ctx.alloc<MirInst>();
+    constant->result = value;
+    constant->type = pipe.types.builtin(BuiltinKind::I32);
+    constant->payload = MirConstInt{.value = 1};
+    auto* place = ctx.alloc<MirPlace>();
+    place->local = local;
+    place->projections.push_back({.kind = MirProjectionKind::Deref});
+    auto* store = ctx.alloc<MirInst>();
+    store->payload = MirStore{.place = place, .value = value};
+    auto& insts = target->blocks.front()->insts;
+    insts.insert(insts.begin(), {constant, store});
+
+    llvm::LLVMContext llvm_ctx;
+    LlvmBackend backend(llvm_ctx);
+    auto result =
+        backend.lower(*pipe.mir_result.module, &pipe.program.source_map, pipe.program.entry);
+    std::string all;
+    for (const auto& diag : result.diagnostics) {
+      all += diag.message + " | ";
+    }
+    expect(contains(all, "Ptr.set is invalid on 'Ptr<void>'")) << all;
+  };
+
+  "Ptr<T>::new is null, is_null compares with it, cast is the value"_test = [] {
+    LlvmTestPipeline pipe(
+        "fn empty(): bool\n"
+        "  let p: Ptr<i32> = Ptr<i32>::new()\n"
+        "  let opaque: Ptr<void> = p.cast<void>()\n"
+        "  return opaque.is_null()\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << "no backend errors";
+    expect(contains(ir, "ptr null")) << ir;
+    expect(contains(ir, "icmp eq ptr")) << ir;
   };
 };
 

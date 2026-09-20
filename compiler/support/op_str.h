@@ -30,8 +30,6 @@ inline auto unary_op_str(UnaryOp op) -> const char* {
   switch (op) {
   case UnaryOp::Negate: return "-";
   case UnaryOp::Not:    return "!";
-  case UnaryOp::Deref:  return "*";
-  case UnaryOp::AddrOf: return "&";
   }
   return "?";
 }

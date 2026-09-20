@@ -189,12 +189,25 @@ suite<"expression_tests"> expression_tests = [] {
   };
 
   "unary operators"_test = [] {
-    auto output = parse_string("fn f(p: *i32): i32 -> *p\n");
+    auto output = parse_string("fn f(x: i32): i32 -> -x\n");
     expect(output.parse_result.diagnostics.empty());
     const auto& fn = output.parse_result.file->declarations[0]->as<FunctionDecl>();
-    const auto& deref = fn.expr_body->as<UnaryExpr>();
     expect(fn.expr_body->kind() == NodeKind::UnaryExpr);
-    expect(deref.op == UnaryOp::Deref);
+    expect(fn.expr_body->as<UnaryExpr>().op == UnaryOp::Negate);
+  };
+
+  // Dao has no pointer sigils (ADR_RAW_POINTER_SURFACE.md): unary `*` and
+  // `&` are reported once, and the operation becomes an error expression.
+  "unary pointer sigils rejected"_test = [] {
+    for (auto src : {"fn f(p: Ptr<i32>): i32 -> *p\n", "fn f(x: i32): i32 -> &x\n"}) {
+      auto output = parse_string(src);
+      const auto& diags = output.parse_result.diagnostics;
+      expect(diags.size() == 1_u) << src;
+      expect(!diags.empty() && diags.front().message.find("is no Dao syntax") != std::string::npos)
+          << src;
+      const auto& fn = output.parse_result.file->declarations[0]->as<FunctionDecl>();
+      expect(fn.expr_body->kind() == NodeKind::ErrorExpr) << src;
+    }
   };
 
   "function call"_test = [] {
@@ -320,12 +333,24 @@ suite<"mode_resource_tests"> mode_resource_tests = [] {
 };
 
 suite<"type_tests"> type_tests = [] {
-  "pointer type"_test = [] {
-    auto output = parse_string("fn f(p: *i32): i32 -> 0\n");
+  "pointer type is an ordinary generic application"_test = [] {
+    auto output = parse_string("fn f(p: Ptr<i32>): i32 -> 0\n");
     expect(output.parse_result.diagnostics.empty());
     const auto& fn = output.parse_result.file->declarations[0]->as<FunctionDecl>();
-    auto* param_type = fn.params[0].type;
-    expect(param_type->kind() == NodeKind::PointerType);
+    const auto& named = fn.params[0].type->as<NamedType>();
+    expect(named.name.segments.size() == 1_u && named.name.segments[0] == "Ptr");
+    expect(named.type_args.size() == 1_u);
+  };
+
+  "star pointer type rejected, recovered as Ptr"_test = [] {
+    auto output = parse_string("fn f(p: *i32): i32 -> 0\n");
+    const auto& diags = output.parse_result.diagnostics;
+    expect(diags.size() == 1_u);
+    expect(!diags.empty() &&
+           diags.front().message == "'*T' is no Dao syntax; spell a pointer type 'Ptr<T>'");
+    const auto& fn = output.parse_result.file->declarations[0]->as<FunctionDecl>();
+    const auto& named = fn.params[0].type->as<NamedType>();
+    expect(named.name.segments.size() == 1_u && named.name.segments[0] == "Ptr");
   };
 
   "parameterized type"_test = [] {
@@ -895,16 +920,23 @@ suite<"class_method_tests"> class_method_tests = [] {
     expect(cls.methods[0]->as<FunctionDecl>().params.empty());
   };
 
-  "store through pointer parses"_test = [] {
-    auto output = parse_string("fn f(p: *i32): void\n"
+  "store through pointer is a set call"_test = [] {
+    auto output = parse_string("fn f(p: Ptr<i32>): void\n"
                                "    mode unsafe =>\n"
-                               "        *p = 42\n");
+                               "        p.set(42)\n");
     expect(output.parse_result.diagnostics.empty());
     const auto& fn = output.parse_result.file->declarations[0]->as<FunctionDecl>();
     const auto& mode = fn.body[0]->as<ModeBlock>();
-    const auto& assign = mode.body[0]->as<Assignment>();
-    expect(assign.target->kind() == NodeKind::UnaryExpr);
-    expect(assign.target->as<UnaryExpr>().op == UnaryOp::Deref);
+    const auto& call = mode.body[0]->as<ExpressionStatement>().expr->as<CallExpr>();
+    expect(call.callee->kind() == NodeKind::FieldExpr);
+    expect(call.callee->as<FieldExpr>().field == "set");
+  };
+
+  "store through star rejected once"_test = [] {
+    auto output = parse_string("fn f(p: Ptr<i32>): void\n"
+                               "    mode unsafe =>\n"
+                               "        *p = 42\n");
+    expect(output.parse_result.diagnostics.size() == 1_u);
   };
 };
 

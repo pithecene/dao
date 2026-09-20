@@ -1,7 +1,7 @@
 File
   Module unsafe
   FunctionDecl read_ptr
-    Param ptr: *i32
+    Param ptr: Ptr<i32>
     ReturnType: i32
     LetStatement value: i32
       IntLiteral 0
@@ -10,22 +10,48 @@ File
         Target
           Identifier value
         Value
-          UnaryExpr *
-            Identifier ptr
+          CallExpr
+            Callee
+              FieldExpr .get
+                Identifier ptr
     ReturnStatement
       Identifier value
   FunctionDecl main
     ReturnType: i32
-    LetStatement x: i32
-      IntLiteral 42
+    LetStatement cell: Ptr<i32>
+      CallExpr
+        Callee
+          FieldExpr .cast
+            CallExpr
+              Callee
+                Identifier __dao_mem_alloc
+              Args
+                CallExpr
+                  Callee
+                    Identifier size_of
+                  TypeArgs
+                    i32
+                CallExpr
+                  Callee
+                    Identifier align_of
+                  TypeArgs
+                    i32
+        TypeArgs
+          i32
     ModeBlock unsafe
+      ExpressionStatement
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier cell
+          Args
+            IntLiteral 42
       LetStatement val: i32
         CallExpr
           Callee
             Identifier read_ptr
           Args
-            UnaryExpr &
-              Identifier x
+            Identifier cell
       ExpressionStatement
         CallExpr
           Callee
@@ -38,5 +64,16 @@ File
             Identifier print
           Args
             Identifier val
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier __dao_mem_free
+        Args
+          CallExpr
+            Callee
+              FieldExpr .cast
+                Identifier cell
+            TypeArgs
+              void
     ReturnStatement
       IntLiteral 0

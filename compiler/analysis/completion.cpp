@@ -4,6 +4,7 @@
 #include <map>
 
 #include "frontend/resolve/symbol.h"
+#include "frontend/types/ptr_ops.h"
 #include "frontend/types/type_printer.h"
 
 namespace dao {
@@ -126,11 +127,28 @@ auto query_dot_completions(const Type* receiver_type,
     return items;
   }
 
-  // Unwrap pointer for auto-deref: (*Point).| → Point fields.
-  const Type* base_type = receiver_type;
-  if (base_type->kind() == TypeKind::Pointer) {
-    base_type = static_cast<const TypePointer*>(base_type)->pointee();
+  // A pointer's members are the operations of the compiler-standard
+  // Ptr<T> (ADR_RAW_POINTER_SURFACE.md); it reaches no pointee member.
+  if (receiver_type->kind() == TypeKind::Pointer) {
+    const auto pointee = print_type(static_cast<const TypePointer*>(receiver_type)->pointee());
+    const auto pointer = print_type(receiver_type);
+    const std::pair<PtrOp, std::string> signatures[] = {
+        {PtrOp::Get, "fn(): " + pointee},
+        {PtrOp::Set, "fn(" + pointee + "): void"},
+        {PtrOp::Offset, "fn(i64): " + pointer},
+        {PtrOp::Cast, "fn<U>(): Ptr<U>"},
+        {PtrOp::IsNull, "fn(): bool"},
+    };
+    for (const auto& [operation, signature] : signatures) {
+      items.push_back({
+          .label = std::string(ptr_op_name(operation)),
+          .kind = "method",
+          .type = signature,
+      });
+    }
+    return items;
   }
+  const Type* base_type = receiver_type;
 
   // Struct fields.
   if (base_type->kind() == TypeKind::Struct) {

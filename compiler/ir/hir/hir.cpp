@@ -49,6 +49,7 @@ auto HirExpr::kind() const -> HirKind {
       [](const HirPipe&) { return HirKind::Pipe; },
       [](const HirTry&) { return HirKind::Try; },
       [](const HirLambda&) { return HirKind::Lambda; },
+      [](const HirPtrOp&) { return HirKind::PtrOp; },
   }, payload);
 }
 
@@ -89,6 +90,7 @@ auto hir_kind_name(HirKind kind) -> const char* {
   case HirKind::Pipe:          return "Pipe";
   case HirKind::Try:           return "Try";
   case HirKind::Lambda:        return "Lambda";
+  case HirKind::PtrOp:         return "PtrOp";
   }
   return "<unknown>";
 }

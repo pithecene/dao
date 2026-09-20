@@ -1,5 +1,9 @@
 #include "backend/llvm/llvm_type_lowering.h"
 
+#include "frontend/types/type_identity.h"
+
+#include <format>
+
 #include "frontend/types/type.h"
 
 #include <llvm/IR/DerivedTypes.h>
@@ -231,15 +235,18 @@ auto LlvmTypeLowering::lower_builtin(BuiltinKind kind) -> llvm::Type* {
 }
 
 auto LlvmTypeLowering::lower_struct(const TypeStruct* type) -> llvm::Type* {
-  // Check cache first to break potential cycles.
-  auto it = struct_cache_.find(type->decl_id());
+  // Check cache first to break potential cycles.  Two instantiations of
+  // one class are two types here, so the key is the type's meaning.
+  auto identity = type_identity_key(type);
+  auto it = struct_cache_.find(identity);
   if (it != struct_cache_.end()) {
     return it->second;
   }
 
-  // Create opaque struct first (for potential self-reference).
+  // Create opaque struct first (for potential self-reference).  LLVM
+  // numbers a repeated name, so two instantiations stay apart in the IR.
   auto* st = llvm::StructType::create(ctx_, "dao." + std::string(type->name()));
-  struct_cache_[type->decl_id()] = st;
+  struct_cache_[identity] = st;
 
   // Lower field types.
   std::vector<llvm::Type*> field_types;
@@ -253,6 +260,21 @@ auto LlvmTypeLowering::lower_struct(const TypeStruct* type) -> llvm::Type* {
   }
 
   st->setBody(field_types);
+
+  // An instantiation laid out like one already made for this class IS
+  // that one, however the two types were built; the shell just made is
+  // left behind unreferenced.  A layout is named by its class and the
+  // types it holds, so this is a lookup.
+  std::string layout = std::format("{:x}(", reinterpret_cast<uintptr_t>(type->decl_id()));
+  for (auto* field : field_types) {
+    layout += std::format("{:x},", reinterpret_cast<uintptr_t>(field));
+  }
+  layout += ')';
+  auto [made, fresh] = laid_out_.try_emplace(layout, st);
+  if (!fresh) {
+    struct_cache_[identity] = made->second;
+    return made->second;
+  }
   return st;
 }
 

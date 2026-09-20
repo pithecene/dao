@@ -63,7 +63,6 @@ auto Expr::kind() const -> NodeKind {
 auto TypeNode::kind() const -> NodeKind {
   return std::visit(overloaded{
                         [](const NamedType&) { return NodeKind::NamedType; },
-                        [](const PointerType&) { return NodeKind::PointerType; },
                         [](const FunctionTypeNode&) { return NodeKind::FunctionType; },
                     },
                     payload);
@@ -152,8 +151,6 @@ auto node_kind_name(NodeKind kind) -> const char* {
     return "QualifiedName";
   case NodeKind::NamedType:
     return "NamedType";
-  case NodeKind::PointerType:
-    return "PointerType";
   case NodeKind::FunctionType:
     return "FunctionType";
   case NodeKind::ErrorExpr:

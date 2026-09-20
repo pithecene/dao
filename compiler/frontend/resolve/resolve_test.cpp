@@ -320,15 +320,15 @@ suite<"resolve_modules"> resolve_modules = [] {
 
   "builtins_cannot_be_redeclared_anywhere"_test = [] {
     auto resolved = resolve_program({
-        {"stdlib/core/bad.dao", "module core::bad\nfn null_ptr(): i32 -> 0\n"},
+        {"stdlib/core/bad.dao", "module core::bad\nclass Ptr:\n  n: i32\n"},
         {"main.dao",
          "module app::main\nimport app::lib\nclass string:\n  n: i32\nfn main(): i32 -> 0\n"},
         {"lib.dao", "module app::lib\nclass bool:\n  n: i32\n"},
     });
     auto messages = messages_of(resolved);
     std::sort(messages.begin(), messages.end());
-    expect(messages == std::vector<std::string>{"duplicate top-level declaration 'bool'",
-                                                "duplicate top-level declaration 'null_ptr'",
+    expect(messages == std::vector<std::string>{"duplicate top-level declaration 'Ptr'",
+                                                "duplicate top-level declaration 'bool'",
                                                 "duplicate top-level declaration 'string'"})
         << joined(messages);
   };
@@ -348,7 +348,7 @@ suite<"resolve_modules"> resolve_modules = [] {
     // `size_of` and its family are prelude declarations the backend
     // answers with inline IR; shadowing a prelude name is allowed
     // (§7.6) but not when the name's meaning belongs to the compiler.
-    for (auto name : {"size_of", "align_of", "ptr_offset", "copy_out"}) {
+    for (auto name : {"size_of", "align_of", "copy_out"}) {
       auto entry = resolve_program(
           {{"main.dao",
             std::string("module app::main\nfn ") + name + "(): i32 -> 0\nfn main(): i32 -> 0\n"}});
@@ -366,6 +366,22 @@ suite<"resolve_modules"> resolve_modules = [] {
           std::vector<std::string>{std::string("duplicate top-level declaration '") + name + "'"})
           << name << " accepted in an imported module: " << joined(messages_of(imported));
     }
+  };
+
+  // Ptr<T>'s operations are compiler-standard methods, declared by no
+  // module: the old free intrinsics have no source name
+  // (CONTRACT_MODULE_SYSTEM.md §7.8), and a method has no static spelling.
+  "pointer operations have no free source name"_test = [] {
+    for (std::string name : {"null_ptr", "ptr_cast", "ptr_offset"}) {
+      auto resolved = resolve_program({{"main.dao", "module app::main\nfn main(): i32\n  let p = " +
+                                                        name + "<i32>()\n  return 0\n"}});
+      expect(messages_of(resolved) == std::vector<std::string>{"unknown name '" + name + "'"})
+          << name << ": " << joined(messages_of(resolved));
+    }
+    auto qualified = resolve_program(
+        {{"main.dao", "module app::main\nfn main(): i32\n  let p = Ptr::offset(0, 1)\n  return 0\n"}});
+    expect(messages_of(qualified) == std::vector<std::string>{"'Ptr' is not a module"})
+        << joined(messages_of(qualified));
   };
 
   "a prelude module's import cannot shadow its own declaration"_test = [] {

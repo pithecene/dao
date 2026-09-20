@@ -656,16 +656,15 @@ suite<"mir_generator"> mir_generator = [] {
 // ---------------------------------------------------------------------------
 
 suite<"mir_concreteness"> mir_concreteness = [] {
-  "compiler builtins with explicit type arguments leave no generic residue"_test = [] {
-    // null_ptr<T> and ptr_cast<T> have no template to specialize; the
-    // reference to them is typed with the builtin's generic signature
-    // and must be made concrete from the call's type arguments.
+  "pointer operations with explicit type arguments leave no generic residue"_test = [] {
+    // `Ptr<T>::new()` and `cast<U>()` have no template to specialize;
+    // their instructions carry the concrete pointer types the checker
+    // gave the calls.
     MirTestPipeline pipe("fn main(): i32\n"
-                         "    let p: *i32 = null_ptr<i32>()\n"
-                         "    mode unsafe =>\n"
-                         "        let q = ptr_cast<i32>(null_ptr<void>())\n"
-                         "        if q != null_ptr<i32>():\n"
-                         "            return 1\n"
+                         "    let p: Ptr<i32> = Ptr<i32>::new()\n"
+                         "    let q = Ptr<void>::new().cast<i32>()\n"
+                         "    if q.is_null():\n"
+                         "        return 1\n"
                          "    return 0\n");
     expect(pipe.check_result.diagnostics.empty())
         << (pipe.check_result.diagnostics.empty() ? "" : pipe.check_result.diagnostics[0].message);
@@ -680,18 +679,17 @@ suite<"mir_concreteness"> mir_concreteness = [] {
   // After monomorphization, module.functions must contain only
   // type-concrete bodies.  Generic declarations live in
   // generic_templates and are cloned+specialized on demand.
-  "a builtin whose call sits in a later block is still made concrete"_test = [] {
-    // `?` in the argument lowers into blocks: the reference to ptr_cast
-    // is emitted before them and its call in the merge block after.
+  "a pointer cast whose operand lowers into later blocks is concrete"_test = [] {
+    // `?` in the receiver lowers into blocks: the cast's operand is
+    // produced in the merge block after them.
     MirTestPipeline pipe("enum class Result<T, E>:\n"
                          "    Ok(v: T)\n"
                          "    Err(e: E)\n"
-                         "fn get(): Result<*void, i32>\n"
-                         "    let r: Result<*void, i32> = Result::Ok(v = null_ptr<void>())\n"
+                         "fn get(): Result<Ptr<void>, i32>\n"
+                         "    let r: Result<Ptr<void>, i32> = Result::Ok(v = Ptr<void>::new())\n"
                          "    return r\n"
                          "fn f(): Result<i32, i32>\n"
-                         "    mode unsafe =>\n"
-                         "        let p = ptr_cast<i32>(get()?)\n"
+                         "    let p = get()?.cast<i32>()\n"
                          "    return Result::Ok(v = 0)\n");
     expect(pipe.check_result.diagnostics.empty())
         << (pipe.check_result.diagnostics.empty() ? "" : pipe.check_result.diagnostics[0].message);
@@ -742,23 +740,40 @@ suite<"mir_concreteness"> mir_concreteness = [] {
     expect(pipe.mir_result.generic_templates.empty());
   };
 
-  // Regression: the invariant scan must not stack-overflow on
-  // recursive types like `class Node { next: *Node }` where
-  // following Struct fields through a Pointer pointee returns to
-  // the same Struct.
+  // Regression: the walks over types must not run away on a class that
+  // reaches itself — `class Node: next: Ptr<Node>` returns to the same
+  // class through the pointee.
   "concreteness check handles recursive types"_test = [] {
     MirTestPipeline pipe(
         "class Node:\n"
-        "    next: *Node\n"
+        "    next: Ptr<Node>\n"
         "    value: i32\n"
         "fn main(): i32\n"
         "    return 0\n");
-    // Should complete without stack overflow and without emitting
-    // spurious concreteness diagnostics.
+    expect(pipe.module() != nullptr) << "the fixture needs a module";
     auto mono = monomorphize(*pipe.module(), pipe.mir_ctx, pipe.types,
                              pipe.mir_result.generic_templates);
     expect(mono.diagnostics.empty())
         << "unexpected concreteness diagnostics on recursive type";
+  };
+
+  // The same, generic: an instantiation reaches itself through its own
+  // pointer field, so specialization walks a cycle on both sides — the
+  // pattern and the argument — while it infers and substitutes.
+  "specialization handles a generic class that reaches itself"_test = [] {
+    MirTestPipeline pipe(
+        "class Wrapper<T>:\n"
+        "    inner: Ptr<Wrapper<T>>\n"
+        "    tag: i64\n"
+        "fn build<T>(p: Ptr<Wrapper<T>>): Wrapper<T>\n"
+        "    return Wrapper(p, to_i64(0))\n"
+        "fn main(): i32\n"
+        "    let w: Wrapper<i32> = build<i32>(Ptr<Wrapper<i32>>::new())\n"
+        "    return 0\n");
+    expect(pipe.module() != nullptr) << "the fixture needs a module";
+    auto mono = monomorphize(*pipe.module(), pipe.mir_ctx, pipe.types,
+                             pipe.mir_result.generic_templates);
+    expect(mono.diagnostics.empty()) << "unexpected diagnostics specializing a recursive class";
   };
 
   // Concreteness check catches synthetic residue: manually inject a

@@ -110,9 +110,14 @@ private:
           out_ << "load ";
           print_place(p.place);
         },
-        [&](const MirAddrOf& p) {
-          out_ << "addr_of ";
-          print_place(p.place);
+        [&](const MirPtrOp& p) {
+          out_ << "ptr_op " << ptr_op_name(p.op);
+          if (p.pointer.valid()) {
+            out_ << " %" << p.pointer.id;
+          }
+          if (p.argument.valid()) {
+            out_ << ", %" << p.argument.id;
+          }
         },
         [&](const MirFieldAccess& p) {
           out_ << "field %" << p.object.id << "." << p.field;

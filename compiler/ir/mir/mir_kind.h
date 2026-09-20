@@ -19,7 +19,7 @@ enum class MirInstKind : std::uint8_t {
   // Memory / storage
   Store,
   Load,
-  AddrOf,
+  PtrOp,
 
   // Aggregate access (value-producing)
   FieldAccess,

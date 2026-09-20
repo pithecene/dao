@@ -1,5 +1,7 @@
 #include "frontend/types/type.h"
 #include "frontend/types/type_context.h"
+#include "frontend/types/type_identity.h"
+#include "frontend/types/type_query.h"
 #include "frontend/types/type_printer.h"
 
 #include <boost/ut.hpp>
@@ -90,7 +92,7 @@ suite<"type_pointer"> type_pointer = [] {
     TypeContext ctx;
     auto* pi32a = ctx.pointer_to(ctx.i32());
     auto* pi32b = ctx.pointer_to(ctx.i32());
-    expect(pi32a == pi32b) << "*i32 twice should yield same pointer";
+    expect(pi32a == pi32b) << "Ptr<i32> twice should yield same pointer";
   };
 
   "pointer_to different pointees are distinct"_test = [] {
@@ -270,7 +272,7 @@ suite<"type_printer"> type_printer = [] {
 
   "print pointer"_test = [] {
     TypeContext ctx;
-    expect(print_type(ctx.pointer_to(ctx.i32())) == "*i32");
+    expect(print_type(ctx.pointer_to(ctx.i32())) == "Ptr<i32>");
   };
 
   "print function"_test = [] {
@@ -319,7 +321,7 @@ suite<"type_printer"> type_printer = [] {
     TypeContext ctx;
     auto* inner = ctx.function_type({ctx.i32()}, ctx.pointer_to(ctx.f64()));
     auto* outer = ctx.pointer_to(inner);
-    expect(print_type(outer) == "*fn(i32): *f64");
+    expect(print_type(outer) == "Ptr<fn(i32): Ptr<f64>>");
   };
 
   "print null type"_test = [] { expect(print_type(nullptr) == "<null>"); };
@@ -356,6 +358,161 @@ suite<"type_utilities"> type_utilities = [] {
     expect(!builtin_kind_from_name("void").has_value()) << "void is not a builtin scalar";
     expect(!builtin_kind_from_name("int").has_value());
     expect(!builtin_kind_from_name("").has_value());
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Identity keys
+//
+// A nominal type is a fresh object per instantiation, so two walks of one
+// class can reach two objects that mean the same thing.  The key is what
+// tells them together: the lowering cache and the specialization names
+// are keyed by it, and a key that followed object identity would lower
+// and monomorphize the same type twice.
+// ---------------------------------------------------------------------------
+
+suite<"type_query"> type_query_suite = [] {
+  // The answer for a type whose walk was CUT — it reached back into one
+  // still being walked — is a "no so far", never a "no".  A shell's
+  // fields are filled in after it is made, so remembering such a no
+  // would answer for a type that had not been built yet.
+  "a no from a cut walk is not remembered"_test = [] {
+    TypeContext ctx;
+    auto* node = ctx.make_struct_shell(kDeclA, "Node");
+    node->set_fields({{"next", ctx.pointer_to(node)}});
+    GenericParamReach reach;
+    expect(!reach.mentions(ctx.pointer_to(node))) << "a cycle of plain fields holds no parameter";
+    expect(!reach.mentions(node));
+    // The class gains a field typed through a parameter, as a shell does
+    // when the walk that built it finishes.
+    node->set_fields({{"next", ctx.pointer_to(node)},
+                      {"tag", ctx.generic_param(kDeclA, "T", 0)}});
+    expect(reach.mentions(ctx.pointer_to(node))) << "a stale no was remembered for the cut walk";
+    expect(reach.mentions(node));
+  };
+
+  "a yes is remembered and answered again"_test = [] {
+    TypeContext ctx;
+    const auto* param = ctx.generic_param(kDeclA, "T", 0);
+    const auto* held = ctx.pointer_to(param);
+    GenericParamReach reach;
+    expect(reach.mentions(held));
+    expect(reach.mentions(held)) << "the answer changed when asked twice";
+    expect(!reach.mentions(ctx.pointer_to(ctx.i32())));
+  };
+
+  "forgetting drops what was answered"_test = [] {
+    TypeContext ctx;
+    auto* box = ctx.make_struct_shell(kDeclA, "Box");
+    box->set_fields({{"value", ctx.i32()}});
+    GenericParamReach reach;
+    expect(!reach.mentions(box));
+    box->set_fields({{"value", ctx.generic_param(kDeclA, "T", 0)}});
+    reach.forget();
+    expect(reach.mentions(box)) << "an answer outlived the walk that made it";
+  };
+};
+
+suite<"type_identity"> type_identity = [] {
+  /// `class Node: next: Ptr<Node>, v: i32` — a new object each call, so
+  /// two calls give two recursive types with one meaning.
+  const auto node_type = [](TypeContext& ctx, const Type* value_type) -> const TypeStruct* {
+    auto* node = ctx.make_struct_shell(kDeclA, "Node");
+    node->set_fields({{"next", ctx.pointer_to(node)}, {"v", value_type}});
+    return node;
+  };
+
+  "two separately built recursive types have one key"_test = [node_type] {
+    TypeContext ctx;
+    const auto* one = node_type(ctx, ctx.i32());
+    const auto* other = node_type(ctx, ctx.i32());
+    expect(one != other) << "nominal types are not interned";
+    expect(type_identity_key(one) == type_identity_key(other))
+        << type_identity_key(one) << " vs " << type_identity_key(other);
+  };
+
+  "a recursive type reached twice keys as one reached once"_test = [node_type] {
+    // `Pair(n, n)` and `Pair(n, m)` hold the same type either way, and
+    // the specialization they name has to be the same one.
+    TypeContext ctx;
+    const auto* one = node_type(ctx, ctx.i32());
+    const auto* other = node_type(ctx, ctx.i32());
+    const auto* shared = ctx.make_struct(kDeclB, "Pair", {{"left", one}, {"right", one}}, {one});
+    const auto* apart = ctx.make_struct(kDeclB, "Pair", {{"left", one}, {"right", other}}, {one});
+    expect(type_identity_key(shared) == type_identity_key(apart))
+        << type_identity_key(shared) << " vs " << type_identity_key(apart);
+  };
+
+  "a cycle and a cycle with a step spelled out have one key"_test = [] {
+    // `unfolded` is `node` with one turn of its loop written in front:
+    // its `next` points at `node`, whose `next` points at itself.  Both
+    // are `Node` holding a pointer to `Node`, forever, so they are one
+    // type — and one specialization, under one name.
+    TypeContext ctx;
+    auto* node = ctx.make_struct_shell(kDeclA, "Node");
+    node->set_fields({{"next", ctx.pointer_to(node)}});
+    auto* unfolded = ctx.make_struct_shell(kDeclA, "Node");
+    unfolded->set_fields({{"next", ctx.pointer_to(node)}});
+    auto* twice = ctx.make_struct_shell(kDeclA, "Node");
+    twice->set_fields({{"next", ctx.pointer_to(unfolded)}});
+    expect(type_identity_key(node) == type_identity_key(unfolded))
+        << type_identity_key(node) << " vs " << type_identity_key(unfolded);
+    expect(type_identity_key(node) == type_identity_key(twice))
+        << type_identity_key(node) << " vs " << type_identity_key(twice);
+  };
+
+  "a cycle and one that holds into another cycle key alike"_test = [] {
+    // `first` holds two pointers to itself.  `second` holds one to
+    // itself and one to `first` — a cycle of its own, reaching into
+    // another.  Both unfold to the same thing forever, so they are one
+    // type and one specialization.
+    TypeContext ctx;
+    auto* first = ctx.make_struct_shell(kDeclA, "Loop");
+    first->set_fields({{"a", ctx.pointer_to(first)}, {"b", ctx.pointer_to(first)}});
+    auto* second = ctx.make_struct_shell(kDeclA, "Loop");
+    second->set_fields({{"a", ctx.pointer_to(second)}, {"b", ctx.pointer_to(first)}});
+    expect(type_identity_key(first) == type_identity_key(second))
+        << type_identity_key(first) << " vs " << type_identity_key(second);
+  };
+
+  "recursive types differing inside keep their keys apart"_test = [node_type] {
+    TypeContext ctx;
+    const auto* holds_i32 = node_type(ctx, ctx.i32());
+    const auto* holds_i64 = node_type(ctx, ctx.i64());
+    expect(type_identity_key(holds_i32) != type_identity_key(holds_i64))
+        << "two different recursive types were given one key";
+  };
+
+  "a deep chain of pointers keys in step with its length"_test = [] {
+    // Every pointer in the chain looks alike, and each pass through the
+    // graph tells apart one level more — so a pass per level, each one
+    // re-reading every level, would be the square of the depth.  Only
+    // what holds a level that changed is looked at again, which is one
+    // node per level.  Two chains built apart still key alike.
+    TypeContext ctx;
+    constexpr int kDepth = 4000;
+    const auto chain = [&](int depth) -> const Type* {
+      const Type* type = ctx.i32();
+      for (int level = 0; level < depth; ++level) {
+        type = ctx.pointer_to(type);
+      }
+      return type;
+    };
+    const auto* deep = chain(kDepth);
+    expect(type_identity_key(deep) == type_identity_key(chain(kDepth)))
+        << "two chains of one depth keyed apart";
+    expect(type_identity_key(deep) != type_identity_key(chain(kDepth - 1)))
+        << "chains of two depths keyed alike";
+  };
+
+  "recursive types of two classes keep their keys apart"_test = [] {
+    TypeContext ctx;
+    auto* first = ctx.make_struct_shell(kDeclA, "Node");
+    first->set_fields({{"next", ctx.pointer_to(first)}});
+    auto* second = ctx.make_struct_shell(kDeclB, "Node");
+    second->set_fields({{"next", ctx.pointer_to(second)}});
+    expect(type_identity_key(first) != type_identity_key(second))
+        << "two classes shaped alike were given one key";
   };
 };
 

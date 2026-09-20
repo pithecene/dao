@@ -1,14 +1,16 @@
 module unsafe
-fn read_ptr(ptr: *i32): i32
+fn read_ptr(ptr: Ptr<i32>): i32
   let value: i32 = 0
   mode unsafe =>
-    value = *ptr
+    value = ptr.get()
   return value
 
 fn main(): i32
-  let x: i32 = 42
+  let cell: Ptr<i32> = __dao_mem_alloc(size_of<i32>(), align_of<i32>()).cast<i32>()
   mode unsafe =>
-    let val: i32 = read_ptr(&x)
+    cell.set(42)
+    let val: i32 = read_ptr(cell)
     print("read via pointer:")
     print(val)
+  __dao_mem_free(cell.cast<void>())
   return 0
