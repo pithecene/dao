@@ -261,55 +261,57 @@ fn main(): i32
   else:
     print("FAIL correct_expr_fn: expected 0 diagnostics, got " + i64_to_string(tc_count_diags(r15)))
 
-  // Test 15a: correct_addr_of — &x on an identifier
-  let src15a: string = "fn test(): i32\n  let x: i32 = 1\n  let p: *i32 = &x\n  return 0\n"
+  // Tests 15a-15d: the pointer surface (ADR_RAW_POINTER_SURFACE.md).
+  // A pointer is made by `Ptr<T>::new`, read by `get`, written by
+  // `set`, walked by `offset`, and asked `is_null`; there is no sigil
+  // to take an address with or to read through.
+  let src15a: string = "fn test(): i32\n  let p: Ptr<i32> = Ptr<i32>::new()\n  return 0\n"
   let r15a: TypeCheckResult = typecheck(src15a)
   if tc_count_diags(r15a) == 0:
-    print("PASS correct_addr_of")
+    print("PASS pointer_is_made_by_new")
     pass_count = pass_count + 1
   else:
-    print("FAIL correct_addr_of: expected 0 diagnostics, got " + i64_to_string(tc_count_diags(r15a)))
+    print("FAIL pointer_is_made_by_new: expected 0 diagnostics, got " + i64_to_string(tc_count_diags(r15a)))
 
-  // Test 15b: correct_deref — *p where p: *i32 produces i32
-  let src15b: string = "fn test(): i32\n  let x: i32 = 1\n  let p: *i32 = &x\n  let y: i32 = *p\n  return 0\n"
+  let src15b: string = "fn test(): i32\n  let p: Ptr<i32> = Ptr<i32>::new()\n  let y: i32 = p.get()\n  return 0\n"
   let r15b: TypeCheckResult = typecheck(src15b)
   if tc_count_diags(r15b) == 0:
-    print("PASS correct_deref")
+    print("PASS pointer_get_reads_the_pointee")
     pass_count = pass_count + 1
   else:
-    print("FAIL correct_deref: expected 0 diagnostics, got " + i64_to_string(tc_count_diags(r15b)))
+    print("FAIL pointer_get_reads_the_pointee: expected 0 diagnostics, got " + i64_to_string(tc_count_diags(r15b)))
 
-  // Test 15c: err_deref_non_pointer — *x where x: i32 should diagnose
-  let src15c: string = "fn test(): i32\n  let x: i32 = 1\n  let y: i32 = *x\n  return 0\n"
+  // A value of another type is no value of the pointee.
+  let src15c: string = "fn test(): i32\n  let p: Ptr<i32> = Ptr<i32>::new()\n  p.set(\"x\")\n  return 0\n"
   let r15c: TypeCheckResult = typecheck(src15c)
-  let found_deref_err: bool = false
+  let found_set_err: bool = false
   let d15c: i64 = 0
   while d15c < r15c.diags.length():
     let dd: Diagnostic = r15c.diags.get(d15c)
-    if dd.message == "cannot dereference non-pointer type i32":
-      found_deref_err = true
+    if dd.message == "Ptr.set writes i32, got string":
+      found_set_err = true
     d15c = d15c + 1
-  if found_deref_err:
-    print("PASS err_deref_non_pointer")
+  if found_set_err:
+    print("PASS pointer_set_checks_the_pointee")
     pass_count = pass_count + 1
   else:
-    print("FAIL err_deref_non_pointer: expected non-pointer deref diagnostic")
+    print("FAIL pointer_set_checks_the_pointee: expected the pointee mismatch diagnostic")
 
-  // Test 15d: err_addr_of_literal — &42 is not an lvalue
-  let src15d: string = "fn test(): i32\n  let p: *i32 = &42\n  return 0\n"
+  // A pointer has the operations the contract froze and no others.
+  let src15d: string = "fn test(): i32\n  let p: Ptr<i32> = Ptr<i32>::new()\n  let y: i32 = p.deref()\n  return 0\n"
   let r15d: TypeCheckResult = typecheck(src15d)
-  let found_lvalue_err: bool = false
+  let found_op_err: bool = false
   let d15d: i64 = 0
   while d15d < r15d.diags.length():
     let dd2: Diagnostic = r15d.diags.get(d15d)
-    if dd2.message == "cannot take address of non-lvalue":
-      found_lvalue_err = true
+    if dd2.message == "no operation 'deref' on Ptr<i32>; a pointer has get, set, offset, cast and is_null":
+      found_op_err = true
     d15d = d15d + 1
-  if found_lvalue_err:
-    print("PASS err_addr_of_literal")
+  if found_op_err:
+    print("PASS pointer_has_only_its_own_operations")
     pass_count = pass_count + 1
   else:
-    print("FAIL err_addr_of_literal: expected non-lvalue addr-of diagnostic")
+    print("FAIL pointer_has_only_its_own_operations: expected the unknown-operation diagnostic")
 
   // Test 16: err_assign_to_literal — assignment to non-lvalue
   let src16a: string = "fn test(): i32\n  42 = 1\n  return 0\n"
@@ -1333,7 +1335,7 @@ fn main(): i32
     pass_count = pass_count + 1
   if tc_expect_rejected("extend_signature_names_concept", "concept Eq:\n  fn eq(self, o: Eq): bool\n\nextend i32 as Eq:\n  fn eq(self, o: Eq): bool\n    return true\n"):
     pass_count = pass_count + 1
-  if tc_expect_rejected("concept_is_not_a_type", "concept Eq:\n  fn eq(self, o: Eq): bool\n\nfn f(a: Eq): bool\n  let b: *Eq = &a\n  return true\n"):
+  if tc_expect_rejected("concept_is_not_a_type", "concept Eq:\n  fn eq(self, o: Eq): bool\n\nfn f(a: Eq): bool\n  let b: Ptr<Eq> = Ptr<Eq>::new()\n  return true\n"):
     pass_count = pass_count + 1
   // Every concept's identity is registered before any signature is
   // resolved, so the rule holds whatever the declaration order.
@@ -1343,7 +1345,7 @@ fn main(): i32
     pass_count = pass_count + 1
   if tc_expect_clean("bound_signature_substitutes_concept", "concept Eq:\n  fn eq(self, o: Eq): bool\n\nfn same<T: Eq>(a: T, b: T): bool\n  return a.eq(b)\n"):
     pass_count = pass_count + 1
-  if tc_expect_clean("bound_signature_substitutes_pointer_to_concept", "concept Eq:\n  fn same(self, o: *Eq): bool\n\nfn f<T: Eq>(a: T, p: *T): bool\n  return a.same(p)\n"):
+  if tc_expect_clean("bound_signature_substitutes_pointer_to_concept", "concept Eq:\n  fn same(self, o: Ptr<Eq>): bool\n\nfn f<T: Eq>(a: T, p: Ptr<T>): bool\n  return a.same(p)\n"):
     pass_count = pass_count + 1
   // Two bounds requiring one member: the first bound in declaration
   // order types the access, as the host's constraint search does, so
@@ -1448,10 +1450,10 @@ fn main(): i32
   let dc_pre_pshow: string = "module core::p\nderived concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string\n    return \"n\"\n\nclass P:\n  n: i32\n  fn show(self): bool\n    return true\n"
   if tc_expect_program_errors("other_type_method_never_answers", Vector<SourceInput>::new().push(SourceInput("stdlib/core/p.dao", dc_pre_pshow, true)), "module app::main\nclass P:\n  x: i32\n\nfn f(p: P): string\n  return p.show()\n", "main.dao", 0):
     pass_count = pass_count + 1
-  // The applied self form keeps its pointer wrappers: `*C<T>` is `*U`.
-  if tc_expect_clean("applied_self_pointer_kept", "concept C<T>:\n  fn same(self, o: *C<T>): bool\n\nfn f<U: C<i32>>(x: U, p: *U): bool\n  return x.same(p)\n"):
+  // The applied self form keeps its pointer wrappers: `Ptr<C<T>>` is `Ptr<U>`.
+  if tc_expect_clean("applied_self_pointer_kept", "concept C<T>:\n  fn same(self, o: Ptr<C<T>>): bool\n\nfn f<U: C<i32>>(x: U, p: Ptr<U>): bool\n  return x.same(p)\n"):
     pass_count = pass_count + 1
-  if tc_expect_rejected("applied_self_pointer_not_erased", "concept C<T>:\n  fn same(self, o: *C<T>): bool\n\nfn f<U: C<i32>>(x: U): bool\n  return x.same(x)\n"):
+  if tc_expect_rejected("applied_self_pointer_not_erased", "concept C<T>:\n  fn same(self, o: Ptr<C<T>>): bool\n\nfn f<U: C<i32>>(x: U): bool\n  return x.same(x)\n"):
     pass_count = pass_count + 1
   // A qualified concept name inside a generic argument is no type.
   if tc_expect_program_errors("qualified_concept_in_generic_argument_rejected", Vector<SourceInput>::new().push(SourceInput("lib.dao", "module app::lib\nconcept C:\n  fn f(self): bool\n", false)), "module app::main\nimport app::lib\n\nclass Box<T>:\n  v: T\n\nextern fn consume(x: Box<lib::C>): bool\n", "main.dao", 1):
@@ -1564,7 +1566,7 @@ fn main(): i32
   if tc_expect_rejected("extend_non_concept_rejected", "class Q:\n  x: i32\n\nextend i32 as Q:\n  fn show(self): string -> \"n\"\n"):
     pass_count = pass_count + 1
   // Extends of distinct pointer targets declare distinct methods.
-  if tc_expect_clean("pointer_receiver_extends_distinct", "concept Show:\n  fn show(self): string\n\nextend *i32 as Show:\n  fn show(self): string -> \"a\"\n\nextend *i64 as Show:\n  fn show(self): string -> \"b\"\n"):
+  if tc_expect_clean("pointer_receiver_extends_distinct", "concept Show:\n  fn show(self): string\n\nextend Ptr<i32> as Show:\n  fn show(self): string -> \"a\"\n\nextend Ptr<i64> as Show:\n  fn show(self): string -> \"b\"\n"):
     pass_count = pass_count + 1
   // An invalid extend does not hide the one after it: both are checked.
   if tc_expect_diags("consecutive_extends_each_checked", "concept Show:\n  fn show(self): string\n\nextend i32 as Missing:\n  fn show(self): string -> \"n\"\n\nextend i64 as Show:\n  fn other(self): string -> \"m\"\n", 2):

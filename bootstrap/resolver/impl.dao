@@ -361,8 +361,6 @@ fn resolve_type_node(rs: RS, node_idx: i64): RS
         r = resolve_type_node(r, args.get(i))
         i = i + 1
       return r
-    Node::PointerT(inner):
-      return resolve_type_node(rs, inner)
     Node::QualNameE(seg_lp, seg_count):
       // Qualified type name (e.g. types::Point) — resolve same as expression.
       return resolve_expr(rs, node_idx)
@@ -438,6 +436,11 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
                   seg_done = true
               seg_i = seg_i + 1
           return r
+        // `Ptr` is the compiler's own pointer, declared nowhere
+        // (ADR_RAW_POINTER_SURFACE.md), so `Ptr<T>::new()` names no
+        // symbol to bind and is left for the type checker to read.
+        if name == "Ptr":
+          return rs
         let sp: Span = tok_name_span(rs, first_tidx)
         return rs_add_diag(rs, sp, "unknown name '" + name + "'")
       return rs
@@ -867,9 +870,9 @@ fn resolve_concept_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, 
   return rs_pop_scope(r)
 
 // The spelling that mangles an extend's methods (`<target>.<method>`),
-// distinct per target: a pointer target keeps its `*`, a qualified one
-// every segment (`a::P`), a generic one its head — so `extend *i32 as
-// C` and `extend *i64 as C`, or `extend a::P` and `extend b::P`,
+// distinct per target: a pointer target keeps its pointee, a qualified one
+// every segment (`a::P`), a generic one its head — so `extend Ptr<i32>
+// as C` and `extend Ptr<i64> as C`, or `extend a::P` and `extend b::P`,
 // declare different symbols.
 fn extend_target_name(rs: RS, type_node: i64): string
   if type_node < 0:
@@ -879,9 +882,16 @@ fn extend_target_name(rs: RS, type_node: i64): string
     Node::NamedT(t_tidx):
       return tok_name(rs, t_tidx)
     Node::GenericT(t_name_tidx, t_args_lp, t_arg_count):
-      return tok_name(rs, t_name_tidx)
-    Node::PointerT(inner):
-      return "*" + extend_target_name(rs, inner)
+      let head: string = tok_name(rs, t_name_tidx)
+      // A pointer keeps its pointee: `Ptr<i32>` and `Ptr<i64>` are two
+      // targets, as they were when they were written with a sigil.
+      // Every other generic target is its head, so one `extend` covers
+      // a class however it is instantiated.
+      if head == "Ptr":
+        let pargs: Vector<i64> = read_list(rs.rc.idx_data, t_args_lp)
+        if pargs.length() == 1:
+          return "Ptr<" + extend_target_name(rs, pargs.get(0)) + ">"
+      return head
     Node::QualNameE(seg_lp, seg_count):
       let segs: Vector<i64> = read_list(rs.rc.idx_data, seg_lp)
       let spelled: string = ""

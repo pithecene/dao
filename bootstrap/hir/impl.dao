@@ -872,7 +872,8 @@ fn lower_class_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, fiel
   let fl: HirFlush = hir_flush_pairs(tp_fl.hs, field_items, field_count)
   return hs_add_node(fl.hs, HirNode::HirStruct(name = name_tidx, tparams = tp_fl.list_pos, fields = fl.list_pos))
 
-// Resolve an AST type node to a type index. Handles NamedT, GenericT, PointerT.
+// Resolve an AST type node to a type index. Handles NamedT, GenericT
+// (`Ptr<T>` among them), and qualified names.
 fn resolve_type_to_idx(hs: HS, type_node_idx: i64): i64
   if type_node_idx < 0:
     return to_i64(-1)
@@ -912,20 +913,23 @@ fn resolve_type_to_idx(hs: HS, type_node_idx: i64): i64
         return 10
       if tname == "string":
         return 12
-    Node::PointerT(inner):
-      // Resolve inner, return pointer type if available
-      let inner_ti: i64 = resolve_type_to_idx(hs, inner)
-      // Search for existing pointer type in types table
-      let pti: i64 = 0
-      while pti < hs.typecheck.types.length():
-        let pt: DaoType = hs.typecheck.types.get(pti)
-        match pt.kind:
-          TypeKind::TPointer:
-            if pt.pointee == inner_ti:
-              return pti
-        pti = pti + 1
     Node::GenericT(name_tidx, args_lp, arg_count):
-      // Try resolving the base name
+      // `Ptr<T>` names the pointer the type checker registered for that
+      // pointee (ADR_RAW_POINTER_SURFACE.md); every other generic head
+      // resolves by its name.
+      if hs_tok_name(hs, name_tidx) == "Ptr":
+        let pargs: Vector<i64> = read_list(hs.unit.idx_data, args_lp)
+        if pargs.length() == 1:
+          let inner_ti: i64 = resolve_type_to_idx(hs, pargs.get(0))
+          let pti: i64 = 0
+          while pti < hs.typecheck.types.length():
+            let pt: DaoType = hs.typecheck.types.get(pti)
+            match pt.kind:
+              TypeKind::TPointer:
+                if pt.pointee == inner_ti:
+                  return pti
+            pti = pti + 1
+          return to_i64(-1)
       let tsym: i64 = hir_lookup_use(hs, name_tidx)
       if tsym >= 0:
         return hir_sym_type(hs, tsym)

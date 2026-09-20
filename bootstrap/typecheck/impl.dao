@@ -31,7 +31,6 @@ module bootstrap::typecheck
 //   - Lambda contextual typing
 //   - List literal type inference
 //   - Try operator (requires generic Option/Result)
-//   - Addr-of unary operator semantics
 //   - Index expressions
 //   - Mode blocks; resource-block domain semantics (bodies are checked)
 //   - Yield / Generator checking
@@ -588,13 +587,19 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
             return TypeR(ts2, tr.type_idx)
         gi = gi + 1
       return TypeR(ts, to_i64(-1))
-    Node::PointerT(inner):
-      let inner_r: TypeR = resolve_ast_type(ts, inner)
-      if inner_r.type_idx < 0:
-        return TypeR(inner_r.ts, to_i64(-1))
-      return find_or_add_pointer_type(inner_r.ts, inner_r.type_idx)
     Node::GenericT(name_tidx, args_lp, arg_count):
-      // A generic annotation `G<Args>` stays unresolved for now.  Typing
+      // `Ptr<T>` is the pointer surface the contract froze
+      // (ADR_RAW_POINTER_SURFACE.md), so its head is read here rather
+      // than deferred like any other generic: a pointer's pointee is
+      // what `get` reads, `set` writes, and `offset` walks.
+      if ts_tok_name(ts, name_tidx) == "Ptr":
+        let pargs: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+        if pargs.length() == 1:
+          let pointee_r: TypeR = resolve_ast_type(ts, pargs.get(0))
+          if pointee_r.type_idx < 0:
+            return TypeR(pointee_r.ts, to_i64(-1))
+          return find_or_add_pointer_type(pointee_r.ts, pointee_r.type_idx)
+      // Every other generic annotation `G<Args>` stays unresolved for now.  Typing
       // it to G's head lets a generic value flow into the per-module
       // `types` / `type_info` / token arrays under a type index a wider
       // module registered (a prelude `Vector`), overrunning a smaller
@@ -616,6 +621,22 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
     Node::ErrorT(t):
       return TypeR(ts, to_i64(-1))
   return TypeR(ts, to_i64(-1))
+
+/// The pointee of a pointer annotation (`Ptr<T>`), or -1 where the
+/// annotation names no pointer.  A pointer is a generic annotation like
+/// any other in the AST (ADR_RAW_POINTER_SURFACE.md), so the places
+/// that look THROUGH one ask here rather than each reading the head.
+fn pointer_annotation_pointee(ts: TS, node_idx: i64): i64
+  if node_idx < 0:
+    return to_i64(-1)
+  let node: Node = ts.tc.nodes.get(node_idx)
+  match node:
+    Node::GenericT(name_tidx, args_lp, arg_count):
+      if ts_tok_name(ts, name_tidx) == "Ptr":
+        let args: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+        if args.length() == 1:
+          return args.get(0)
+  return to_i64(-1)
 
 // The concept a type names — the type itself, or the pointee of a
 // pointer to one, recursively — or -1 when it names none.
@@ -640,10 +661,11 @@ fn concept_named_by(ts: TS, ti: i64): i64
 fn annotation_names_concept(ts: TS, node_idx: i64, allowed: i64): i64
   if node_idx < 0:
     return to_i64(-1)
+  let through_ptr: i64 = pointer_annotation_pointee(ts, node_idx)
+  if through_ptr >= 0:
+    return annotation_names_concept(ts, through_ptr, allowed)
   let node: Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node::PointerT(inner):
-      return annotation_names_concept(ts, inner, allowed)
     Node::NamedT(tidx):
       return concept_other_than(ts, sym_type_at(ts, lookup_use(ts, tidx)), allowed)
     Node::QualNameE(seg_lp, seg_count):
@@ -675,11 +697,10 @@ fn concept_other_than(ts: TS, ti: i64, allowed: i64): i64
 // The applied self form (see resolve_annotation) as a type: the
 // concept itself, wrapped in the annotation's pointers.
 fn resolve_applied_self(ts: TS, node_idx: i64, self_concept: i64): TypeR
-  let node: Node = ts.tc.nodes.get(node_idx)
-  match node:
-    Node::PointerT(inner):
-      let inner_r: TypeR = resolve_applied_self(ts, inner, self_concept)
-      return find_or_add_pointer_type(inner_r.ts, inner_r.type_idx)
+  let through_ptr: i64 = pointer_annotation_pointee(ts, node_idx)
+  if through_ptr >= 0:
+    let inner_r: TypeR = resolve_applied_self(ts, through_ptr, self_concept)
+    return find_or_add_pointer_type(inner_r.ts, inner_r.type_idx)
   return TypeR(ts, self_concept)
 
 // The type-parameter nodes the concept `concept_ti` declares (its
@@ -737,10 +758,11 @@ fn concept_type_param_list(ts: TS, concept_ti: i64): string
 fn applied_self_matches_params(ts: TS, node_idx: i64, concept_ti: i64): bool
   if node_idx < 0:
     return false
+  let through_ptr: i64 = pointer_annotation_pointee(ts, node_idx)
+  if through_ptr >= 0:
+    return applied_self_matches_params(ts, through_ptr, concept_ti)
   let node: Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node::PointerT(inner):
-      return applied_self_matches_params(ts, inner, concept_ti)
     Node::GenericT(name_tidx, args_lp, arg_count):
       let tparams: Vector<i64> = concept_type_params(ts, concept_ti)
       let args: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
@@ -769,10 +791,11 @@ fn applied_self_matches_params(ts: TS, node_idx: i64, concept_ti: i64): bool
 fn generic_head_concept(ts: TS, node_idx: i64): i64
   if node_idx < 0:
     return to_i64(-1)
+  let through_ptr: i64 = pointer_annotation_pointee(ts, node_idx)
+  if through_ptr >= 0:
+    return generic_head_concept(ts, through_ptr)
   let node: Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node::PointerT(inner):
-      return generic_head_concept(ts, inner)
     Node::GenericT(name_tidx, args_lp, arg_count):
       return concept_named_by(ts, sym_type_at(ts, lookup_use(ts, name_tidx)))
   return to_i64(-1)
@@ -1095,10 +1118,11 @@ fn bind_alias(p: Program, g: AliasGraph, sym_idx: i64, st: AliasBindR): AliasBin
 fn annotation_head_symbol(ts: TS, node_idx: i64): i64
   if node_idx < 0:
     return to_i64(-1)
+  let through_ptr: i64 = pointer_annotation_pointee(ts, node_idx)
+  if through_ptr >= 0:
+    return annotation_head_symbol(ts, through_ptr)
   let node: Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node::PointerT(inner):
-      return annotation_head_symbol(ts, inner)
     Node::NamedT(tidx):
       return lookup_use(ts, tidx)
     Node::GenericT(name_tidx, args_lp, arg_count):
@@ -1930,7 +1954,7 @@ fn check_expr(ts: TS, node_idx: i64): TS
     Node::UnaryE(op_tidx, operand):
       return check_unary_expr(ts, node_idx, op_tidx, operand)
     Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp):
-      return check_call_expr(ts, node_idx, callee, args_lp, names_lp)
+      return check_call_expr(ts, node_idx, callee, args_lp, targs_lp, names_lp)
     Node::FieldE(obj, field_tidx):
       return check_field_expr(ts, node_idx, obj, field_tidx)
     Node::PipeE(left, right):
@@ -2259,7 +2283,7 @@ fn check_logical_binop(ts: TS, node_idx: i64, op_tidx: i64, lt: i64, rt: i64, op
   return ts_set_expr_type(ts, node_idx, to_i64(10))
 
 // Find an existing TPointer type whose pointee matches, or create a
-// new one.  Deduping is required so that `let p: *i32 = &x` sees the
+// new one.  Deduping is required so that `let p: Ptr<i32> = Ptr<i32>::new()` sees the
 // same type index on both sides of the assignment (the type
 // annotation resolves to the canonical pointer type via
 // resolve_ast_type, and addr-of must return the same index).
@@ -2272,12 +2296,13 @@ fn find_or_add_pointer_type(ts: TS, pointee_ti: i64): TypeR
         if t.pointee == pointee_ti:
           return TypeR(ts, i)
     i = i + 1
-  let ptr_name: string = "*" + type_name(ts, pointee_ti)
+  // A pointer is named as it is written (ADR_RAW_POINTER_SURFACE.md),
+  // so a diagnostic says `Ptr<i32>` where the source said `Ptr<i32>`.
+  let ptr_name: string = "Ptr<" + type_name(ts, pointee_ti) + ">"
   return ts_add_type(ts, DaoType(TypeKind::TPointer, to_i64(-1), ptr_name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), pointee_ti))
 
-// True if the AST node is an lvalue: identifier, field access,
-// index expression, or dereferenced pointer.  Used by addr-of to
-// reject taking the address of temporaries/literals.
+// True if the AST node is an lvalue: identifier, field access, or
+// index expression — what an assignment may target.
 fn is_lvalue_expr(ts: TS, node_idx: i64): bool
   if node_idx < 0:
     return false
@@ -2320,35 +2345,152 @@ fn check_unary_expr(ts: TS, node_idx: i64, op_tidx: i64, operand: i64): TS
         r = ts_add_diag(r, sp, "'not' requires bool operand, got " + type_name(r, ot))
         return r
     return ts_set_expr_type(r, node_idx, to_i64(10))
-  if op_name_str == "Star":
-    // Dereference: *ptr where ptr: *T produces T.
-    // NOTE: Host compiler additionally requires `mode unsafe =>` for
-    // deref.  The bootstrap type checker does not yet track active
-    // modes; the unsafe-mode check is deferred to a later Tier B slice.
-    if ot >= 0:
-      let ptr_type: DaoType = r.types.get(ot)
-      match ptr_type.kind:
-        TypeKind::TPointer:
-          return ts_set_expr_type(r, node_idx, ptr_type.pointee)
-      let sp: Span = ts_tok_span(r, op_tidx)
-      r = ts_add_diag(r, sp, "cannot dereference non-pointer type " + type_name(r, ot))
-    return ts_set_expr_type(r, node_idx, to_i64(-1))
-  if op_name_str == "Amp":
-    // Address-of: &x where x: T produces *T.  Operand must be an
-    // lvalue (cannot take address of a literal or temporary).
-    if is_lvalue_expr(r, operand) == false:
-      let sp: Span = ts_tok_span(r, op_tidx)
-      r = ts_add_diag(r, sp, "cannot take address of non-lvalue")
-      return ts_set_expr_type(r, node_idx, to_i64(-1))
-    if ot >= 0:
-      let pr: TypeR = find_or_add_pointer_type(r, ot)
-      r = pr.ts
-      return ts_set_expr_type(r, node_idx, pr.type_idx)
-    return ts_set_expr_type(r, node_idx, to_i64(-1))
   return ts_set_expr_type(r, node_idx, ot)
 
-fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i64): TS
-  let r: TS = check_expr(ts, callee)
+/// The type arguments written at a call, or none: the parser leaves
+/// `targs_lp` at -1 where a call was written without them, and reading
+/// a list at -1 reads off the front of the index data.
+fn read_type_args(ts: TS, targs_lp: i64): Vector<i64>
+  if targs_lp < 0:
+    return Vector<i64>::new()
+  return read_list(ts.tc.idx_data, targs_lp)
+
+/// Whether a call names an operation of `Ptr<T>`, with its receiver
+/// checked where it has one — the receiver's type is what says so, and
+/// the call is typed from it rather than from a member lookup.
+class PtrShape:
+  ts: TS
+  names_one: bool
+
+fn ptr_call_shape(ts: TS, callee: i64): PtrShape
+  let callee_node: Node = ts.tc.nodes.get(callee)
+  match callee_node:
+    Node::FieldE(obj, field_tidx):
+      let r: TS = check_expr(ts, obj)
+      let obj_ti: i64 = get_expr_type(r, obj)
+      if obj_ti < 0:
+        return PtrShape(r, false)
+      if obj_ti >= r.types.length():
+        return PtrShape(r, false)
+      match r.types.get(obj_ti).kind:
+        TypeKind::TPointer:
+          return PtrShape(r, true)
+      return PtrShape(r, false)
+    Node::QualNameE(seg_lp, seg_count):
+      let segs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+      if segs.length() != 2:
+        return PtrShape(ts, false)
+      if ts_tok_name(ts, segs.get(0)) == "Ptr":
+        return PtrShape(ts, true)
+      return PtrShape(ts, false)
+  return PtrShape(ts, false)
+
+// The operations of the compiler-standard `Ptr<T>`
+// (ADR_RAW_POINTER_SURFACE.md): a pointer is read with `get`, written
+// with `set`, walked with `offset`, retyped with `cast<U>`, and asked
+// `is_null`.  Those are its whole surface — nothing reads or writes a
+// pointer without naming one — so they are typed here rather than
+// looked up as methods of a declared type.
+class PtrCallR:
+  ts: TS
+  handled: bool
+
+fn check_ptr_method_call(ts: TS, node_idx: i64, callee: i64, args: Vector<i64>, targs_lp: i64): PtrCallR
+  let unhandled: PtrCallR = PtrCallR(ts, false)
+  let callee_node: Node = ts.tc.nodes.get(callee)
+  match callee_node:
+    Node::FieldE(obj, field_tidx):
+      let obj_ti: i64 = get_expr_type(ts, obj)
+      if obj_ti < 0:
+        return unhandled
+      if obj_ti >= ts.types.length():
+        return unhandled
+      let obj_type: DaoType = ts.types.get(obj_ti)
+      match obj_type.kind:
+        TypeKind::TPointer:
+          let name: string = ts_tok_name(ts, field_tidx)
+          let sp: Span = ts_tok_span(ts, field_tidx)
+          let targs: Vector<i64> = read_type_args(ts, targs_lp)
+          if name == "get":
+            if args.length() != 0:
+              return PtrCallR(ts_add_diag(ts, sp, "Ptr.get takes no arguments"), true)
+            return PtrCallR(ts_set_expr_type(ts, node_idx, obj_type.pointee), true)
+          if name == "is_null":
+            if args.length() != 0:
+              return PtrCallR(ts_add_diag(ts, sp, "Ptr.is_null takes no arguments"), true)
+            return PtrCallR(ts_set_expr_type(ts, node_idx, to_i64(10)), true)
+          if name == "set":
+            if args.length() != 1:
+              return PtrCallR(ts_add_diag(ts, sp, "Ptr.set takes one argument, the value written"), true)
+            let value_ti: i64 = get_expr_type(ts, args.get(0))
+            let r_set: TS = fit_literal(ts, args.get(0), obj_type.pointee)
+            let fitted_ti: i64 = get_expr_type(r_set, args.get(0))
+            if fitted_ti >= 0:
+              if types_equal(r_set, obj_type.pointee, fitted_ti) == false:
+                return PtrCallR(ts_add_diag(r_set, sp, "Ptr.set writes " + type_name(r_set, obj_type.pointee) + ", got " + type_name(r_set, fitted_ti)), true)
+            return PtrCallR(ts_set_expr_type(r_set, node_idx, to_i64(11)), true)
+          if name == "offset":
+            if args.length() != 1:
+              return PtrCallR(ts_add_diag(ts, sp, "Ptr.offset takes one argument, how many elements to walk"), true)
+            let r_off: TS = fit_literal(ts, args.get(0), to_i64(3))
+            let count_ti: i64 = get_expr_type(r_off, args.get(0))
+            if count_ti >= 0:
+              if is_integer(r_off, count_ti) == false:
+                return PtrCallR(ts_add_diag(r_off, sp, "Ptr.offset walks a whole number of elements, got " + type_name(r_off, count_ti)), true)
+            return PtrCallR(ts_set_expr_type(r_off, node_idx, obj_ti), true)
+          if name == "cast":
+            if args.length() != 0:
+              return PtrCallR(ts_add_diag(ts, sp, "Ptr.cast takes no arguments, only the type cast to"), true)
+            if targs.length() != 1:
+              return PtrCallR(ts_add_diag(ts, sp, "Ptr.cast is written with the type cast to, as `cast<T>()`"), true)
+            let target_r: TypeR = resolve_ast_type(ts, targs.get(0))
+            if target_r.type_idx < 0:
+              return PtrCallR(target_r.ts, true)
+            let cast_r: TypeR = find_or_add_pointer_type(target_r.ts, target_r.type_idx)
+            return PtrCallR(ts_set_expr_type(cast_r.ts, node_idx, cast_r.type_idx), true)
+          return PtrCallR(ts_add_diag(ts, sp, "no operation '" + name + "' on " + type_name(ts, obj_ti) + "; a pointer has get, set, offset, cast and is_null"), true)
+      return unhandled
+    Node::QualNameE(seg_lp, seg_count):
+      // `Ptr<T>::new()`: the one way to make a pointer, and the only
+      // static of the compiler-standard pointer.
+      let segs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+      if segs.length() != 2:
+        return unhandled
+      if ts_tok_name(ts, segs.get(0)) != "Ptr":
+        return unhandled
+      let member: string = ts_tok_name(ts, segs.get(1))
+      let nsp: Span = ts_tok_span(ts, segs.get(1))
+      if member != "new":
+        return PtrCallR(ts_add_diag(ts, nsp, "no static '" + member + "' on Ptr; a pointer is made by Ptr<T>::new()"), true)
+      if args.length() != 0:
+        return PtrCallR(ts_add_diag(ts, nsp, "Ptr.new takes no arguments"), true)
+      let ntargs: Vector<i64> = read_type_args(ts, targs_lp)
+      if ntargs.length() != 1:
+        return PtrCallR(ts_add_diag(ts, nsp, "Ptr.new is written with the type pointed to, as `Ptr<T>::new()`"), true)
+      let pointee_r: TypeR = resolve_ast_type(ts, ntargs.get(0))
+      if pointee_r.type_idx < 0:
+        return PtrCallR(pointee_r.ts, true)
+      let new_r: TypeR = find_or_add_pointer_type(pointee_r.ts, pointee_r.type_idx)
+      return PtrCallR(ts_set_expr_type(new_r.ts, node_idx, new_r.type_idx), true)
+  return unhandled
+
+fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs_lp: i64, names_lp: i64): TS
+  // A pointer's operations are the compiler's own, not a declared type's
+  // methods, so a call that names one is typed here — before the callee
+  // is read as a member or a symbol, which would report `get` as a
+  // missing field and `Ptr` as an unknown name.
+  let named_ptr: PtrShape = ptr_call_shape(ts, callee)
+  let args0: Vector<i64> = read_list(named_ptr.ts.tc.idx_data, args_lp)
+  if named_ptr.names_one:
+    let rp: TS = named_ptr.ts
+    let pi: i64 = 0
+    while pi < args0.length():
+      rp = check_expr(rp, args0.get(pi))
+      pi = pi + 1
+    let ptr_call: PtrCallR = check_ptr_method_call(rp, node_idx, callee, args0, targs_lp)
+    if ptr_call.handled:
+      return ptr_call.ts
+  let r: TS = check_expr(named_ptr.ts, callee)
   let args: Vector<i64> = read_list(r.tc.idx_data, args_lp)
   let ai: i64 = 0
   while ai < args.length():
