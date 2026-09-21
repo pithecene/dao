@@ -2998,6 +2998,32 @@ fn instantiate_generic(ts: TS, head_ti: i64, args: Vector<i64>): TypeR
     ai = ai + 1
   return ts_add_type(r, DaoType(TypeKind::TStruct, head.builtin_id, spelled, head.decl_node, info_start, head.info_count, stands_for, to_i64(-1)))
 
+/// Every bound of the parameters a call decided, held to what they were
+/// decided with: a bound is a conformance obligation, and the call is
+/// the one place the obligation can be met (host
+/// `verify_concept_constraints`).  A bound the module cannot read — a
+/// concept whose type is unreadable here — is left to the program-level
+/// pass, as this module's other cross-module guards leave theirs.
+fn check_decided_bounds(ts: TS, decided: HashMap<i64>, own: Vector<i64>, span: Span): TS
+  let r: TS = ts
+  let i: i64 = 0
+  while i < own.length():
+    let param_ti: i64 = own.get(i)
+    let with_ti: i64 = hm_get_or(decided, i64_to_string(param_ti), to_i64(-1))
+    if with_ti >= 0:
+      if param_ti < r.types.length():
+        let pt: DaoType = r.types.get(param_ti)
+        if bounds_walkable(r, pt):
+          let b: i64 = 0
+          while b < pt.info_count:
+            let cti: i64 = r.type_info.get(pt.info_lp + b)
+            if cti >= 0:
+              if ts_conforms(r, with_ti, cti) == false:
+                r = ts_add_diag(r, span, "type '" + type_name(r, with_ti) + "' does not satisfy concept '" + type_name(r, cti) + "' required by generic parameter '" + pt.name + "'")
+            b = b + 1
+    i = i + 1
+  return r
+
 /// The type parameters the CALLEE declares, by type index: the only
 /// parameters a call may decide.  A parameter of the signature being
 /// checked is already the type it stands for — deciding it here would
@@ -3179,6 +3205,10 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs_lp: i
               if types_equal(r, arg_ti, expected.type_idx) == false:
                 r = ts_add_diag(r, asp, "argument type mismatch: expected " + type_name(r, expected.type_idx) + ", got " + type_name(r, arg_ti))
         ci = ci + 1
+      // A bound is a conformance obligation, and what the call decided
+      // is what has to meet it.
+      if own.ids.length() > 0:
+        r = check_decided_bounds(r, decided, own.ids, ts_node_span(r, callee))
       // The result is what the signature says of what the call decided.
       let result: TypeR = substitute_type(r, decided, callee_type.ret_type)
       return ts_set_expr_type(result.ts, node_idx, result.type_idx)

@@ -143,7 +143,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 209
+  let total: i32 = 212
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -1796,6 +1796,17 @@ fn main(): i32
   // A call decides the CALLEE's parameters; the caller's own stay the
   // types its signature promised.
   if tc_expect_rejected("call_decides_only_the_callee_parameters", "fn identity<T>(x: T): T -> x\n\nfn f<U>(u: U, n: i32): U -> identity(n)\n"):
+    pass_count = pass_count + 1
+
+  // A bound is a conformance obligation, and a call is where it is met:
+  // what the call decides must satisfy every bound the parameter
+  // declares.  A type parameter carries no conformance of its own into
+  // another signature's bound (host parity).
+  if tc_expect_clean("call_bound_satisfied", "concept Show:\n  fn show(self): string\n\nclass Shown:\n  n: i32\n\nextend Shown as Show:\n  fn show(self): string\n    return \"s\"\n\nfn need<T: Show>(x: T): string -> x.show()\n\nfn f(): string -> need(Shown(1))\n"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("call_bound_violated_rejected", "concept Show:\n  fn show(self): string\n\nclass Plain:\n  n: i32\n\nfn need<T: Show>(x: T): string -> x.show()\n\nfn f(): string -> need(Plain(1))\n", "does not satisfy concept 'Show' required by generic parameter 'T'"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("call_bound_not_forwarded_from_parameter", "concept Show:\n  fn show(self): string\n\nfn need<T: Show>(x: T): string -> x.show()\n\nfn forwarded<U: Show>(u: U): string -> need(u)\n", "does not satisfy concept 'Show' required by generic parameter 'T'"):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------
