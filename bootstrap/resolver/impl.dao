@@ -866,6 +866,34 @@ fn resolve_concept_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, 
       mi = mi + 1
   return rs_pop_scope(r)
 
+// The spelling that mangles an extend's methods (`<target>.<method>`),
+// distinct per target: a pointer target keeps its `*`, a qualified one
+// every segment (`a::P`), a generic one its head — so `extend *i32 as
+// C` and `extend *i64 as C`, or `extend a::P` and `extend b::P`,
+// declare different symbols.
+fn extend_target_name(rs: RS, type_node: i64): string
+  if type_node < 0:
+    return ""
+  let tnode: Node = rs.rc.nodes.get(type_node)
+  match tnode:
+    Node::NamedT(t_tidx):
+      return tok_name(rs, t_tidx)
+    Node::GenericT(t_name_tidx, t_args_lp, t_arg_count):
+      return tok_name(rs, t_name_tidx)
+    Node::PointerT(inner):
+      return "*" + extend_target_name(rs, inner)
+    Node::QualNameE(seg_lp, seg_count):
+      let segs: Vector<i64> = read_list(rs.rc.idx_data, seg_lp)
+      let spelled: string = ""
+      let i: i64 = 0
+      while i < segs.length():
+        if i > 0:
+          spelled = spelled + "::"
+        spelled = spelled + tok_name(rs, segs.get(i))
+        i = i + 1
+      return spelled
+  return ""
+
 fn resolve_extend_decl(rs: RS, node_idx: i64, target_type_node: i64, concept_name_tidx: i64, methods_lp: i64): RS
   let r: RS = rs
   // Resolve target type
@@ -907,7 +935,7 @@ fn resolve_decl(rs: RS, node_idx: i64): RS
       return resolve_enum_decl(rs, node_idx, name_tidx, tparams_lp, variants_lp)
     Node::TypeAliasD(name_tidx, target_type):
       return resolve_type_alias_decl(rs, node_idx, name_tidx, target_type)
-    Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp):
+    Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
       return resolve_concept_decl(rs, node_idx, name_tidx, tparams_lp, methods_lp)
     Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
       return resolve_extend_decl(rs, node_idx, target_type_node, concept_name_tidx, methods_lp)
@@ -976,21 +1004,14 @@ fn collect_top_level(rs: RS, file_node_idx: i64): RS
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Type, name, decl_idx, r.current_scope, r.owner_module_id))
             r = declare_top_level(sr.rs, name, sr.sym_idx, name_tidx)
-          Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp):
+          Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Type, name, decl_idx, r.current_scope, r.owner_module_id))
             r = declare_top_level(sr.rs, name, sr.sym_idx, name_tidx)
           Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
             // Register mangled method symbols: TargetTypeName.methodName
             if methods_lp >= 0:
-              let target_name: string = ""
-              if target_type_node >= 0:
-                let tnode: Node = r.rc.nodes.get(target_type_node)
-                match tnode:
-                  Node::NamedT(t_tidx):
-                    target_name = tok_name(r, t_tidx)
-                  Node::GenericT(t_name_tidx, t_args_lp, t_arg_count):
-                    target_name = tok_name(r, t_name_tidx)
+              let target_name: string = extend_target_name(r, target_type_node)
               let meths: Vector<i64> = read_list(r.rc.idx_data, methods_lp)
               let mi: i64 = 0
               while mi < meths.length():
@@ -1107,7 +1128,7 @@ fn build_export_table(rs: RS, file_node_idx: i64): HashMap<i64>
             name_tidx = nt
           Node::TypeAliasD(nt, tt):
             name_tidx = nt
-          Node::ConceptDeclD(nt, tp, mlp):
+          Node::ConceptDeclD(nt, tp, mlp, dv):
             name_tidx = nt
         if name_tidx >= 0:
           let name: string = tok_name(rs, name_tidx)
@@ -1351,7 +1372,7 @@ fn program_from_graph(pg: ProgramGraph): Program
     Vector<FileDiagnostic>::new(),
     ExportTables(Vector<ExportTable>::new()),
     HashMap<i64>::new())
-  let empty_tc: TypeCheckData = TypeCheckData(false, Vector<DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), HashMap<i64>::new())
+  let empty_tc: TypeCheckData = TypeCheckData(false, Vector<DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), program_lookup_empty())
   let empty_hir: HirData = HirData(false, to_i64(-1), to_i64(0), to_i64(0))
   return Program(pg, empty_resolve, empty_tc, empty_hir, Vector<FileDiagnostic>::new())
 
