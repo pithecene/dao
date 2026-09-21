@@ -89,7 +89,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 56
+  let total: i32 = 58
 
   // -----------------------------------------------------------------
   // Test 1: forward_ref — fn calls fn defined later in file; no diagnostic
@@ -1078,6 +1078,35 @@ fn main(): i32
       mj = mj + 1
 
   // -----------------------------------------------------------------
+  // Test: bounded_generic_resolves — a `<T: Concept>` bound whose concept
+  // is declared resolves with no diagnostic (previously a parse error);
+  // the bound name is resolved as a use, mirroring `extend ... as Concept`.
+  // -----------------------------------------------------------------
+  let src_gb: string = "concept Printable:\n  fn to_string(self): string\n\nfn show<T: Printable>(x: T): string\n  return \"x\"\n"
+  let r_gb: ResolveResult = resolve(src_gb)
+  let r_gb_diags: i64 = count_diags(r_gb)
+  if r_gb_diags == 0:
+    print("PASS bounded_generic_resolves")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL bounded_generic_resolves: expected 0 diagnostics, got " + i64_to_string(r_gb_diags))
+
+  // -----------------------------------------------------------------
+  // Test: unbound_concept_deferred — a bound naming an undeclared concept
+  // raises no *resolve* diagnostic: this resolver never diagnoses an
+  // unknown type name (host parity); the type checker reports a bound it
+  // finds no concept behind.  The resolve pass must also survive it.
+  // -----------------------------------------------------------------
+  let src_gu: string = "fn show<T: Nope>(x: T): T\n  return x\n"
+  let r_gu: ResolveResult = resolve(src_gu)
+  let r_gu_diags: i64 = count_diags(r_gu)
+  if r_gu_diags == 0:
+    print("PASS unbound_concept_deferred")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL unbound_concept_deferred: expected 0 diagnostics, got " + i64_to_string(r_gu_diags))
+
+  // -----------------------------------------------------------------
   // Summary
   // -----------------------------------------------------------------
 
@@ -1093,8 +1122,9 @@ fn main(): i32
   //   - Import declaration resolution
   //   - Overload resolution by arity / name mangling
   //   - Static method calls (Type::method)
-  //   - Generic type parameter constraints / where clauses (parsing and
-  //     resolution of generic params is implemented in Tier A)
+  //   - `where` clauses (generic parameter bounds `<T: A + B>` parse and
+  //     resolve — each bound name is resolved as a use where it is in
+  //     scope; conformance enforcement at instantiation is a later slice)
   //   - Concept / extend conformance validation (parsing and symbol
   //     registration is implemented; conformance checking is deferred)
   //   - Mode block scoping (a resource block's body is a block scope)

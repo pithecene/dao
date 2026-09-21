@@ -61,7 +61,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 72
+  let total: i32 = 83
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -1212,6 +1212,37 @@ fn main(): i32
     pass_count = pass_count + 1
   if tc_expect_clean("literal_fits_pipe_target_param", "fn take(x: i64): i64\n  return x\n\nfn g(): i64\n  let r: i64 = 1 |> take\n  return r\n"):
     pass_count = pass_count + 1
+
+  // Generic parameter bounds carry meaning: a bound concept's methods are
+  // available on the parameter and type the call through the concept's
+  // signature; a bound must name a concept in scope; an unconstrained
+  // parameter provides no members.
+  if tc_expect_clean("bound_method_available", "concept Printable:\n  fn to_string(self): string\n\nfn show<T: Printable>(x: T): string\n  return x.to_string()\n"):
+    pass_count = pass_count + 1
+  if tc_expect_diags("bound_unknown_concept", "fn f<T: Nope>(x: T): T\n  return x\n", 1):
+    pass_count = pass_count + 1
+  if tc_expect_diags("bound_not_a_concept", "class Point:\n  x: i64\n\nfn f<T: Point>(x: T): T\n  return x\n", 1):
+    pass_count = pass_count + 1
+  if tc_expect_diags("bound_self_reference_rejected", "fn f<T: T>(x: T): T\n  return x\n", 1):
+    pass_count = pass_count + 1
+  if tc_expect_diags("extern_bound_unknown_concept", "extern fn f<T: Nope>(x: T): T\n", 1):
+    pass_count = pass_count + 1
+  if tc_expect_diags("method_bound_unknown_concept", "class C:\n  x: i64\n  fn m<T: Nope>(self): i64\n    return 1\n", 1):
+    pass_count = pass_count + 1
+  if tc_expect_diags("concept_method_bound_unknown_concept", "concept K:\n  fn m<T: Nope>(self): i64\n", 1):
+    pass_count = pass_count + 1
+  if tc_expect_diags("expr_method_bound_unknown_concept", "class C:\n  x: i64\n  fn m<T: Nope>(self): i64 -> 1\n", 1):
+    pass_count = pass_count + 1
+  if tc_expect_diags("bound_generic_class_head_rejected", "class Box<T>:\n  v: T\n\nfn f<U: Box<i64>>(x: U): U\n  return x\n", 1):
+    pass_count = pass_count + 1
+  if tc_expect_clean("bound_generic_concept_head_accepted", "concept Iter<T>:\n  fn next(self): T\n\nfn f<U: Iter<i64>>(x: U): U\n  return x\n"):
+    pass_count = pass_count + 1
+  let r_unc: TypeCheckResult = typecheck("fn f<T>(x: T): string\n  return x.to_string()\n")
+  if tc_count_diags(r_unc) >= 1:
+    print("PASS unconstrained_param_member_rejected")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL unconstrained_param_member_rejected: expected >= 1 diagnostic, got 0")
 
   // -----------------------------------------------------------------
   // Summary

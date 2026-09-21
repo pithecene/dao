@@ -646,6 +646,24 @@ fn resolve_stmt(rs: RS, node_idx: i64): RS
 // Section 27: Declaration resolution (Pass 2)
 // =========================================================================
 
+// Resolve a type parameter's concept bounds.  Each bound is a type node
+// (`Printable`, `core::Printable`, `Iterable<U>`); resolve it exactly as
+// any other type annotation is resolved, recording a use for each name
+// that is in scope.  A bound naming nothing in scope records no use and
+// raises no diagnostic here — this resolver never diagnoses an unknown
+// type name (host parity); the type checker reports a bound it cannot
+// find a concept behind.  The bound is preserved in the AST regardless.
+fn resolve_generic_bounds(rs: RS, bounds_lp: i64): RS
+  if bounds_lp < 0:
+    return rs
+  let bounds: Vector<i64> = read_list(rs.rc.idx_data, bounds_lp)
+  let r: RS = rs
+  let i: i64 = 0
+  while i < bounds.length():
+    r = resolve_type_node(r, bounds.get(i))
+    i = i + 1
+  return r
+
 fn resolve_type_params(rs: RS, tparams_lp: i64, node_idx: i64): RS
   if tparams_lp < 0:
     return rs
@@ -656,10 +674,15 @@ fn resolve_type_params(rs: RS, tparams_lp: i64, node_idx: i64): RS
     let tp_node_idx: i64 = tparams.get(i)
     let tp_node: Node = r.rc.nodes.get(tp_node_idx)
     match tp_node:
-      Node::GenericParamT(tidx):
+      Node::GenericParamT(tidx, bounds_lp):
         let tname: string = tok_name(r, tidx)
         let sym_r: SymR = rs_add_symbol(r, Symbol(SymbolKind::GenericParam, tname, node_idx, r.current_scope, r.owner_module_id))
         r = scope_declare(sym_r.rs, tname, sym_r.sym_idx, tidx)
+        // Bind the declaring token to its symbol, so a later phase reaches
+        // a type parameter from its token directly: the type checker
+        // records the bounds on the symbol's type, and HIR reads that type.
+        r = rs_add_use(r, tidx, sym_r.sym_idx)
+        r = resolve_generic_bounds(r, bounds_lp)
     i = i + 1
   return r
 
@@ -784,6 +807,8 @@ fn resolve_class_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, fi
       match meth_node:
         Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
           r = resolve_fn_decl(r, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp)
+        Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
+          r = resolve_expr_fn_decl(r, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr)
       mi = mi + 1
 
   // Pop struct scope after methods are resolved
@@ -837,7 +862,7 @@ fn resolve_concept_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, 
         Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
           r = resolve_fn_decl(r, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp)
         Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
-          r = resolve_fn_decl(r, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, to_i64(-1))
+          r = resolve_expr_fn_decl(r, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr)
       mi = mi + 1
   return rs_pop_scope(r)
 
@@ -860,6 +885,8 @@ fn resolve_extend_decl(rs: RS, node_idx: i64, target_type_node: i64, concept_nam
       match meth_node:
         Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
           r = resolve_fn_decl(r, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp)
+        Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
+          r = resolve_expr_fn_decl(r, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr)
       mi = mi + 1
   return r
 
@@ -934,6 +961,12 @@ fn collect_top_level(rs: RS, file_node_idx: i64): RS
                     // the type's identity, not its name, dispatches it.
                     let msr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Method, mangled, meth_idx, r.current_scope, r.owner_module_id))
                     r = declare_top_level(msr.rs, mangled, msr.sym_idx, m_name_tidx)
+                  Node::ExprFnD(e_name_tidx, e_tp, e_plp, e_rt, e_body):
+                    // An expression-bodied method is a method like any other.
+                    let ename: string = tok_name(r, e_name_tidx)
+                    let emangled: string = name + "." + ename
+                    let esr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Method, emangled, meth_idx, r.current_scope, r.owner_module_id))
+                    r = declare_top_level(esr.rs, emangled, esr.sym_idx, e_name_tidx)
                 mi = mi + 1
           Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
             let name: string = tok_name(r, name_tidx)
@@ -969,6 +1002,11 @@ fn collect_top_level(rs: RS, file_node_idx: i64): RS
                     let mangled: string = target_name + "." + mname
                     let msr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, mangled, meth_idx, r.current_scope, r.owner_module_id))
                     r = declare_top_level(msr.rs, mangled, msr.sym_idx, m_name_tidx)
+                  Node::ExprFnD(e_name_tidx, e_tp, e_plp, e_rt, e_body):
+                    let ename: string = tok_name(r, e_name_tidx)
+                    let emangled: string = target_name + "." + ename
+                    let esr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, emangled, meth_idx, r.current_scope, r.owner_module_id))
+                    r = declare_top_level(esr.rs, emangled, esr.sym_idx, e_name_tidx)
                 mi = mi + 1
           Node::ErrorD(t):
             r = r
