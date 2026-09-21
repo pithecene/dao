@@ -300,7 +300,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 22
+  let total: i32 = 23
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -733,6 +733,21 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL upstream_warning_keeps_backend_ok: expected ok=true with the warning carried, got ok=" + bool_to_string(r22.ok) + " and " + i64_to_string(r22.diags.length()) + " diagnostics")
+
+  // Test 23: a generator signature has no Tier A lowering: a generator
+  // function with no `yield` still fails the backend on its return type.
+  let r23: LlvmTextResult = lower_source_to_llvm_text("fn g(): Generator<i64>\n  return\n\nfn main(): i32\n  return 0\n")
+  let saw23: bool = false
+  let d23: i64 = 0
+  while d23 < r23.diags.length():
+    if index_of(r23.diags.get(d23).message, "function return type") >= 0:
+      saw23 = true
+    d23 = d23 + 1
+  if r23.ok == false and saw23:
+    print("PASS generator_signature_rejected_by_backend")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL generator_signature_rejected_by_backend: expected ok=false with an unsupported return type diagnostic, got ok=" + bool_to_string(r23.ok) + " and " + i64_to_string(r23.diags.length()) + " diagnostics")
 
   // -----------------------------------------------------------------
   // Summary

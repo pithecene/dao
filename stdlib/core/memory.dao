@@ -3,13 +3,13 @@ module core::memory
 //
 // Authority: docs/contracts/CONTRACT_RUNTIME_ABI.md
 
-extern fn __dao_mem_alloc(size: i64, align: i64): *void
-extern fn __dao_mem_realloc(ptr: *void, old_size: i64, new_size: i64, align: i64): *void
-extern fn __dao_mem_free(ptr: *void): void
+extern fn __dao_mem_alloc(size: i64, align: i64): Ptr<void>
+extern fn __dao_mem_realloc(ptr: Ptr<void>, old_size: i64, new_size: i64, align: i64): Ptr<void>
+extern fn __dao_mem_free(ptr: Ptr<void>): void
 // Allocate in the parent of the current domain: for what must outlive
 // the current `resource memory` block (copy-out).
-extern fn __dao_mem_alloc_outer(size: i64, align: i64): *void
+extern fn __dao_mem_alloc_outer(size: i64, align: i64): Ptr<void>
 // Allocate in the domain that owns `owner`: for what a container
 // attaches to storage it already owns, so it lives as long as the
 // storage however deep the block that makes it.
-extern fn __dao_mem_alloc_owner(owner: *void, size: i64, align: i64): *void
+extern fn __dao_mem_alloc_owner(owner: Ptr<void>, size: i64, align: i64): Ptr<void>

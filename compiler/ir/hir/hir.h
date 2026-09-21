@@ -4,6 +4,7 @@
 #include "frontend/ast/ast.h"
 #include "frontend/diagnostics/source.h"
 #include "frontend/resolve/symbol.h"
+#include "frontend/types/ptr_ops.h"
 #include "frontend/types/type.h"
 #include "ir/hir/hir_kind.h"
 #include "support/variant.h"
@@ -152,6 +153,11 @@ struct HirCall {
   HirExpr* callee;
   std::vector<HirExpr*> args;
   std::vector<const Type*> explicit_type_args; // From f<i32>(x) syntax
+  /// The declaration those arguments bound, as the checker resolved it:
+  /// the class for `Box<i32>::make(1)`, the callee itself for
+  /// `f<i32>(x)` and `b.mapped<string>(x)`.  A method's `U` and its
+  /// class's `T` are both first, so this is what says whose they are.
+  const Decl* type_args_binder = nullptr;
 };
 
 struct HirConstruct {
@@ -162,7 +168,13 @@ struct HirConstruct {
 struct HirEnumConstruct {
   const TypeEnum* enum_type;
   uint32_t variant_index;
+  /// The payload values in the order they were written, so they are
+  /// evaluated in that order.
   std::vector<HirExpr*> payload_args;
+  /// Where each of those values belongs, by field position: a payload
+  /// is given by name and may be written in any order
+  /// (`Both(second = b, first = a)`).  Empty means in order already.
+  std::vector<uint32_t> payload_slots;
 };
 
 struct HirEnumDiscriminant {
@@ -200,11 +212,21 @@ struct HirLambda {
   HirExpr* body;
 };
 
+// An operation of the compiler-standard Ptr<T>.  `pointer` is the
+// receiver (null for `New`); `argument` is `Set`'s value or `Offset`'s
+// element count (null otherwise).  The expression's type is the result:
+// `Get`'s pointee, `Cast`'s `Ptr<U>`, `New`'s `Ptr<T>`.
+struct HirPtrOp {
+  PtrOp op;
+  HirExpr* pointer;
+  HirExpr* argument;
+};
+
 using HirExprPayload = std::variant<
     HirIntLiteral, HirFloatLiteral, HirStringLiteral, HirBoolLiteral,
     HirSymbolRef, HirUnary, HirBinary, HirCall, HirConstruct,
     HirEnumConstruct, HirEnumDiscriminant, HirEnumPayload,
-    HirField, HirIndex, HirPipe, HirTry, HirLambda>;
+    HirField, HirIndex, HirPipe, HirTry, HirLambda, HirPtrOp>;
 
 // ---------------------------------------------------------------------------
 // Container nodes — arena-allocated.

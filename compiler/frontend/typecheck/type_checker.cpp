@@ -3,6 +3,7 @@
 #include "frontend/module/module_graph.h"
 
 #include "frontend/typecheck/type_conversion.h"
+#include "frontend/types/type_query.h"
 #include "frontend/types/type_ownership.h"
 
 namespace dao {
@@ -60,6 +61,7 @@ auto qualified_path_text(const std::vector<std::string_view>& segments) -> std::
 auto TypeChecker::check(std::span<const FileNode* const> files) -> TypeCheckResult {
   all_decls_.clear();
   decl_module_.clear();
+  type_decls_.clear();
   for (const auto* file : files) {
     auto module_it = file_modules_.find(file);
     const auto* module = module_it == file_modules_.end() ? nullptr : module_it->second;
@@ -67,6 +69,13 @@ auto TypeChecker::check(std::span<const FileNode* const> files) -> TypeCheckResu
       all_decls_.push_back(decl);
       if (module != nullptr) {
         decl_module_.emplace(decl, module);
+      }
+      // A class or enum by the name its methods are mangled under, so a
+      // method call finds its owner without scanning every declaration.
+      if (decl->kind() == NodeKind::ClassDecl) {
+        type_decls_.emplace(TypeDeclKey{module, decl->as<ClassDecl>().name}, decl);
+      } else if (decl->kind() == NodeKind::EnumDecl) {
+        type_decls_.emplace(TypeDeclKey{module, decl->as<EnumDeclNode>().name}, decl);
       }
     }
   }
@@ -102,6 +111,12 @@ auto TypeChecker::check(std::span<const FileNode* const> files) -> TypeCheckResu
 // TypeNode -> Type* bridge
 // ---------------------------------------------------------------------------
 
+namespace {
+auto nominal_type_args(const Type* type) -> const std::vector<const Type*>&;
+auto nominal_decl(const Type* type) -> const Decl*;
+
+} // namespace
+
 auto TypeChecker::instantiate_generic(const Type* base_type, std::string_view name,
                                       const std::vector<GenericParam>& type_params,
                                       const std::vector<TypeNode*>& type_args, Span span)
@@ -124,20 +139,53 @@ auto TypeChecker::instantiate_generic(const Type* base_type, std::string_view na
                     " type argument(s), got " + std::to_string(type_args.size()));
     return nullptr;
   }
-  std::unordered_map<uint32_t, const Type*> bindings;
-  bool valid = true;
+  const auto* declaration = nominal_decl(base_type);
+  TypeBindings bindings;
+  std::vector<const Type*> resolved;
+  resolved.reserve(type_args.size());
   for (size_t i = 0; i < type_args.size(); ++i) {
     const auto* arg_type = resolve_type_node(type_args[i]);
     if (arg_type == nullptr) {
-      valid = false;
-    } else {
-      bindings[static_cast<uint32_t>(i)] = arg_type;
+      return nullptr;
     }
+    bindings[ParamKey{declaration, static_cast<uint32_t>(i)}] = arg_type;
+    resolved.push_back(arg_type);
   }
-  if (valid) {
-    return substitute_generics(base_type, bindings);
+  // `Node<T>` inside `class Node<T>` is the class itself, not a fresh
+  // instantiation: the arguments are the parameters the declaration
+  // already stands for, and building a copy here would take one whose
+  // fields are still being resolved.
+  if (nominal_type_args(base_type) == resolved) {
+    return base_type;
   }
-  return nullptr;
+  // The arguments belong to the instantiated type: a parameter no field
+  // mentions (`class Tag<T>: n: i32`) leaves the fields alone, and
+  // without the arguments `Tag<i32>` and `Tag<i64>` would be one type
+  // (CONTRACT_TYPECHECKING_BASELINE §4).
+  return with_type_args(substitute_generics(base_type, bindings), std::move(resolved));
+}
+
+/// The same nominal type, carrying the arguments it was instantiated
+/// with.  Any other type is its own instantiation and is returned as is.
+auto TypeChecker::with_type_args(const Type* type, std::vector<const Type*> args) -> const Type* {
+  if (type == nullptr || args.empty()) {
+    return type;
+  }
+  if (type->kind() == TypeKind::Struct) {
+    const auto* st = static_cast<const TypeStruct*>(type);
+    if (st->type_args() == args) {
+      return type;
+    }
+    return types_.make_struct(st->decl_id(), st->name(), st->fields(), std::move(args));
+  }
+  if (type->kind() == TypeKind::Enum) {
+    const auto* en = static_cast<const TypeEnum*>(type);
+    if (en->type_args() == args) {
+      return type;
+    }
+    return types_.make_enum(en->decl_id(), en->name(), en->variants(), std::move(args));
+  }
+  return type;
 }
 
 /// Null when a symbol of this kind may name a type; otherwise what to
@@ -198,6 +246,20 @@ auto TypeChecker::resolve_type_node(const TypeNode* node) -> const Type* {
         // string is a predeclared named type. For now, use a sentinel
         // named type with a null decl_id.
         return types_.named_type(nullptr, "string", {});
+      }
+
+      // Ptr<T> — the compiler-standard raw pointer
+      // (ADR_RAW_POINTER_SURFACE.md): an ordinary generic application.
+      if (name == "Ptr") {
+        if (named.type_args.size() != 1) {
+          error(node->span, "Ptr requires exactly one type argument");
+          return nullptr;
+        }
+        const auto* pointee = resolve_type_node(named.type_args[0]);
+        if (pointee == nullptr) {
+          return nullptr;
+        }
+        return types_.pointer_to(pointee);
       }
 
       // Generator<T> — compiler-provided coroutine type.
@@ -299,15 +361,6 @@ auto TypeChecker::resolve_type_node(const TypeNode* node) -> const Type* {
 
     error(node->span, "unknown type '" + std::string(name) + "'");
     return nullptr;
-  }
-
-  case NodeKind::PointerType: {
-    const auto& ptr = node->as<PointerType>();
-    const auto* pointee = resolve_type_node(ptr.pointee);
-    if (pointee == nullptr) {
-      return nullptr;
-    }
-    return types_.pointer_to(pointee);
   }
 
   case NodeKind::FunctionType: {
@@ -551,11 +604,8 @@ auto TypeChecker::aliases_generic_shell(const TypeNode* node) -> bool {
   if (fields_registered_ || node == nullptr) {
     return false;
   }
-  // `*Box<i32>`, `fn(Box<i32>): i32`, `Vec<Box<i32>>`: the shell may sit
-  // anywhere inside the node.
-  if (node->is<PointerType>()) {
-    return aliases_generic_shell(node->as<PointerType>().pointee);
-  }
+  // `Ptr<Box<i32>>`, `fn(Box<i32>): i32`, `Vec<Box<i32>>`: the shell may
+  // sit anywhere inside the node.
   if (node->is<FunctionTypeNode>()) {
     const auto& ftn = node->as<FunctionTypeNode>();
     return aliases_generic_shell(ftn.return_type) ||
@@ -629,8 +679,6 @@ auto TypeChecker::resolver_owns_path(const TypeNode* node) const -> bool {
     return std::ranges::any_of(named.type_args,
                                [&](const TypeNode* arg) { return resolver_owns_path(arg); });
   }
-  case NodeKind::PointerType:
-    return resolver_owns_path(node->as<PointerType>().pointee);
   case NodeKind::FunctionType: {
     const auto& ftn = node->as<FunctionTypeNode>();
     return resolver_owns_path(ftn.return_type) ||
@@ -724,6 +772,10 @@ void TypeChecker::register_type_names() {
       const auto* sym = decl_it->second;
 
       auto* shell = types_.make_struct_shell(decl, st.name);
+      // A generic class stands for itself instantiated with its own
+      // parameters, so `Vector<T>` inside the class means the type the
+      // class declares rather than some other instantiation of it.
+      shell->set_type_args(own_type_args(decl, st.type_params));
       symbol_types_[sym] = shell;
       typed_.set_decl_type(decl, shell);
       pending_classes_.push_back({&st, decl, shell});
@@ -795,7 +847,7 @@ auto TypeChecker::register_enum(const Decl* decl, const Symbol* sym, bool report
             error(variant.payload_types[i]->span,
                   "enum '" + std::string(en.name) +
                       "' cannot contain itself by value in variant '" + std::string(variant.name) +
-                      "'; use a pointer (*" + std::string(en.name) + ") for recursive types");
+                      "'; use a pointer (Ptr<" + std::string(en.name) + ">) for recursive types");
           }
         }
       }
@@ -817,7 +869,8 @@ auto TypeChecker::register_enum(const Decl* decl, const Symbol* sym, bool report
     const_cast<TypeEnum*>(existing)->set_variants(std::move(variants));
     return progress;
   }
-  const auto* enum_type = types_.make_enum(decl, en.name, std::move(variants));
+  const auto* enum_type =
+      types_.make_enum(decl, en.name, std::move(variants), own_type_args(decl, en.type_params));
   symbol_types_[sym] = enum_type;
   typed_.set_decl_type(decl, enum_type);
   for (const auto& v : enum_type->variants()) {
@@ -876,8 +929,8 @@ auto TypeChecker::register_class_fields(PendingClass& pending, bool report_failu
         error(field->type->span,
               "class '" + std::string(pending.class_decl->name) +
                   "' cannot contain itself by value in field '" + std::string(field->name) +
-                  "'; use a pointer (*" + std::string(pending.class_decl->name) +
-                  ") for recursive types");
+                  "'; use a pointer (Ptr<" + std::string(pending.class_decl->name) +
+                  ">) for recursive types");
       }
     }
     fields.push_back({field->name, field_type});
@@ -1823,7 +1876,7 @@ auto TypeChecker::place_root_symbol(const Expr* expr) const -> const Symbol* {
   case NodeKind::IndexExpr:
     return place_root_symbol(expr->as<IndexExpr>().object);
   default:
-    return nullptr; // a dereference: a pointer's target is the author's to manage
+    return nullptr; // no binding is stored to (a store through a pointer is a call)
   }
 }
 
@@ -1902,8 +1955,117 @@ void TypeChecker::check_expr_stmt(const Stmt* stmt) {
 // Expression checking
 // ---------------------------------------------------------------------------
 
+namespace {
+
+/// The nominal type's instantiation arguments, empty for anything else.
+auto nominal_type_args(const Type* type) -> const std::vector<const Type*>& {
+  static const std::vector<const Type*> kNone;
+  if (type == nullptr) {
+    return kNone;
+  }
+  if (type->kind() == TypeKind::Struct) {
+    return static_cast<const TypeStruct*>(type)->type_args();
+  }
+  if (type->kind() == TypeKind::Enum) {
+    return static_cast<const TypeEnum*>(type)->type_args();
+  }
+  return kNone;
+}
+
+/// The declaration a nominal type comes from, null for anything else.
+auto nominal_decl(const Type* type) -> const Decl* {
+  if (type == nullptr) {
+    return nullptr;
+  }
+  if (type->kind() == TypeKind::Struct) {
+    return static_cast<const TypeStruct*>(type)->decl_id();
+  }
+  if (type->kind() == TypeKind::Enum) {
+    return static_cast<const TypeEnum*>(type)->decl_id();
+  }
+  return nullptr;
+}
+
+} // namespace
+
 auto TypeChecker::check_expr(const Expr* expr) -> const Type* {
   return check_expr(expr, nullptr);
+}
+
+/// A construction whose arguments left a parameter of its own class or
+/// enum unbound, completed from the type its context asks for.  Only
+/// the unbound parameters are filled: an argument that did bind one
+/// stands, so a value of the wrong type is still reported rather than
+/// papered over.  Anything but a construction is returned unchanged — a
+/// value of an existing type is what it is, whatever it is assigned to.
+auto TypeChecker::instantiation_from_context(const Expr* expr, const Type* result,
+                                             const Type* expected) -> const Type* {
+  if (expr == nullptr || result == nullptr || expected == nullptr || result == expected) {
+    return result;
+  }
+  // A construction: a call, or a payload-less variant reached through
+  // its enum (`Option::None`).  A qualified name that denotes a value
+  // is that value's type, whatever it is assigned to.
+  if (expr->is<QualifiedName>()) {
+    const auto* sym = symbol_for_use(expr);
+    if (sym != nullptr && sym->kind != SymbolKind::Type) {
+      return result;
+    }
+  } else if (!expr->is<CallExpr>()) {
+    return result;
+  }
+  const auto* decl = nominal_decl(result);
+  if (decl == nullptr || decl != nominal_decl(expected)) {
+    return result;
+  }
+  const auto& args = nominal_type_args(result);
+  const auto& asked = nominal_type_args(expected);
+  if (args.size() != asked.size()) {
+    return result;
+  }
+  // Which parameters are open: the ones a construction's arguments left
+  // unbound, as it recorded them.  A variant reached by name
+  // (`Option::None`) records nothing because it binds nothing — every
+  // parameter of its enum is open.
+  std::vector<uint32_t> every_position;
+  const auto* open = typed_.open_type_params(expr);
+  if (open == nullptr) {
+    if (!expr->is<QualifiedName>()) {
+      return result; // a construction whose arguments bound every parameter
+    }
+    every_position.reserve(args.size());
+    for (uint32_t position = 0; position < args.size(); ++position) {
+      every_position.push_back(position);
+    }
+    open = &every_position;
+  }
+  std::vector<const Type*> filled(args.begin(), args.end());
+  bool any = false;
+  for (const auto position : *open) {
+    if (position >= filled.size() || asked[position] == nullptr) {
+      continue;
+    }
+    filled[position] = asked[position];
+    any = true;
+  }
+  if (!any) {
+    return result;
+  }
+
+  // Instantiate the declaration once from the completed arguments
+  // rather than substituting into the partly instantiated result: a
+  // bound argument may itself be a parameter of this declaration
+  // (`Pair(p)` inside `Pair<A, B>` binds `A` to `B`), and substituting
+  // would then rewrite that binding along with the open one.
+  const auto* base = typed_.decl_type(decl);
+  if (base == nullptr) {
+    return result;
+  }
+  TypeBindings instantiation;
+  for (size_t i = 0; i < filled.size(); ++i) {
+    instantiation[ParamKey{decl, static_cast<uint32_t>(i)}] = filled[i];
+  }
+  return with_type_args(substitute_generics(base, instantiation), std::move(filled));
 }
 
 auto TypeChecker::check_expr(const Expr* expr, const Type* expected) -> const Type* {
@@ -1996,34 +2158,13 @@ auto TypeChecker::check_expr(const Expr* expr, const Type* expected) -> const Ty
     break;
   }
 
-  // Coerce uninstantiated generic enum types to the expected instantiated
-  // type when the expected type is an enum with the same decl_id. This
-  // handles cases like `let x: Option<i64> = Option.None` where the
-  // variant expression has the uninstantiated generic type.
-  //
-  // Only fires when the result still contains unresolved generic params.
-  // If the result is already a concrete instantiation (e.g. Option<string>
-  // inferred from Option.Some("oops")), it is NOT overwritten — the normal
-  // is_assignable check catches mismatches.
-  if (result != nullptr && expected != nullptr && result->kind() == TypeKind::Enum &&
-      expected->kind() == TypeKind::Enum) {
-    const auto* result_enum = static_cast<const TypeEnum*>(result);
-    const auto* expected_enum = static_cast<const TypeEnum*>(expected);
-    if (result_enum->decl_id() == expected_enum->decl_id() && result_enum != expected_enum) {
-      // Check if the result enum has any unresolved generic params.
-      bool has_generic = false;
-      for (const auto& variant : result_enum->variants()) {
-        for (const auto* pt : variant.payload_types) {
-          if (pt != nullptr && pt->kind() == TypeKind::GenericParam) {
-            has_generic = true;
-          }
-        }
-      }
-      if (has_generic) {
-        result = expected;
-      }
-    }
-  }
+  // An expression whose own arguments left a parameter unbound takes
+  // the instantiation its context asks for: `let x: Option<i64> =
+  // Option::None` has nothing to infer from, and neither has `Tag("t")`
+  // where no field of `class Tag<T>` is typed by `T`.  An instantiation
+  // that did get bound is left alone — `Option::Some("oops")` is
+  // `Option<string>`, and the assignability check reports the mismatch.
+  result = instantiation_from_context(expr, result, expected);
 
   // Reject generic enum values that still have unresolved type params
   // and no expected type to coerce to. Only check value-producing
@@ -2131,6 +2272,12 @@ auto TypeChecker::check_identifier(const Expr* expr) -> const Type* {
   }
   if (sym->kind == SymbolKind::Module) {
     error(expr->span, "'" + name_text() + "' is a module, not a value");
+    return nullptr;
+  }
+  if (sym->kind == SymbolKind::Predeclared && sym->name == "Ptr") {
+    error(expr->span,
+          "'Ptr' is a type, not a value; a pointer comes from 'Ptr<T>::new()', an allocation, "
+          "or a cast");
     return nullptr;
   }
   // `b::T::m` reaches a static method (§6).  An instance method has a
@@ -2337,27 +2484,6 @@ auto TypeChecker::check_unary(const Expr* expr) -> const Type* {
     return types_.bool_type();
   }
 
-  case UnaryOp::Deref: {
-    // Dereference requires mode unsafe.
-    if (ctx_.active_modes.find("unsafe") == ctx_.active_modes.end()) {
-      error(expr->span, "dereference requires 'mode unsafe =>'");
-      return nullptr;
-    }
-    if (operand->kind() != TypeKind::Pointer) {
-      error(un.operand->span, "cannot dereference non-pointer type '" + print_type(operand) + "'");
-      return nullptr;
-    }
-    return static_cast<const TypePointer*>(operand)->pointee();
-  }
-
-  case UnaryOp::AddrOf: {
-    // Address-of requires an lvalue.
-    if (!is_lvalue(un.operand)) {
-      error(un.operand->span, "cannot take address of non-lvalue");
-      return nullptr;
-    }
-    return types_.pointer_to(operand);
-  }
   }
 
   return nullptr;
@@ -2369,24 +2495,49 @@ auto TypeChecker::check_unary(const Expr* expr) -> const Type* {
 
 void TypeChecker::infer_type_bindings(const Type* pattern,
                                       const Type* concrete,
-                                      std::unordered_map<uint32_t, const Type*>& bindings,
-                                      Span error_span) {
+                                      TypeBindings& bindings,
+                                      Span error_span, GenericBinding binding) {
+  // The class pairs matched so far belong to one outermost match: they
+  // are forgotten when a new one begins, and kept for its whole walk.
+  struct Depth {
+    uint32_t& depth;
+    explicit Depth(uint32_t& d) : depth(d) { ++depth; }
+    Depth(const Depth&) = delete;
+    auto operator=(const Depth&) -> Depth& = delete;
+    ~Depth() { --depth; }
+  };
+  if (infer_depth_ == 0) {
+    inferring_structs_.clear();
+  }
+  const Depth depth(infer_depth_);
   if (pattern == nullptr || concrete == nullptr) {
     return;
   }
 
   if (pattern->kind() == TypeKind::GenericParam) {
     const auto* gp = static_cast<const TypeGenericParam*>(pattern);
-    auto it = bindings.find(gp->index());
+    // A parameter some other declaration owns is fixed: it is no slot
+    // for this argument, whatever position it sits at.  A method's
+    // signature may be written with its class's parameters, so both
+    // that class and the method itself may be bound here.
+    const bool mine = binding.binder == nullptr ||
+                      gp->binder() == binding.binder || gp->binder() == binding.owner;
+    if (!mine) {
+      return;
+    }
+    auto it = bindings.find(ParamKey{gp->binder(), gp->index()});
     if (it != bindings.end()) {
-      // Already bound — check consistency.
+      // Already bound — check consistency.  The binding in hand is
+      // fixed: a second argument has to mean the same type, and a
+      // parameter of the same declaration is no wildcard for it, or a
+      // recursive call could rebind `T` under its own signature.
       if (it->second != concrete && !is_assignable(it->second, concrete)) {
         error(error_span,
               "conflicting types for generic parameter '" + std::string(gp->name()) + "': '" +
                   print_type(it->second) + "' vs '" + print_type(concrete) + "'");
       }
     } else {
-      bindings[gp->index()] = concrete;
+      bindings[ParamKey{gp->binder(), gp->index()}] = concrete;
     }
     return;
   }
@@ -2396,44 +2547,97 @@ void TypeChecker::infer_type_bindings(const Type* pattern,
     infer_type_bindings(static_cast<const TypePointer*>(pattern)->pointee(),
                         static_cast<const TypePointer*>(concrete)->pointee(),
                         bindings,
-                        error_span);
+                        error_span, binding);
   } else if (pattern->kind() == TypeKind::Generator && concrete->kind() == TypeKind::Generator) {
     infer_type_bindings(static_cast<const TypeGenerator*>(pattern)->yield_type(),
                         static_cast<const TypeGenerator*>(concrete)->yield_type(),
                         bindings,
-                        error_span);
+                        error_span, binding);
   } else if (pattern->kind() == TypeKind::Function && concrete->kind() == TypeKind::Function) {
     const auto* fp = static_cast<const TypeFunction*>(pattern);
     const auto* fc = static_cast<const TypeFunction*>(concrete);
     if (fp->param_types().size() == fc->param_types().size()) {
       for (size_t j = 0; j < fp->param_types().size(); ++j) {
-        infer_type_bindings(fp->param_types()[j], fc->param_types()[j], bindings, error_span);
+        infer_type_bindings(fp->param_types()[j], fc->param_types()[j], bindings, error_span, binding);
       }
-      infer_type_bindings(fp->return_type(), fc->return_type(), bindings, error_span);
+      infer_type_bindings(fp->return_type(), fc->return_type(), bindings, error_span, binding);
     }
   } else if (pattern->kind() == TypeKind::Struct && concrete->kind() == TypeKind::Struct) {
     const auto* sp = static_cast<const TypeStruct*>(pattern);
     const auto* sc = static_cast<const TypeStruct*>(concrete);
-    // Only infer bindings between instances of the same class.
-    if (sp->decl_id() == sc->decl_id() && sp->fields().size() == sc->fields().size()) {
+    // Only infer bindings between instances of the same class.  A pair
+    // of classes is matched field by field once per outermost match: a
+    // class reached again through a pointer (`next: Ptr<Node>`), or a
+    // shared class reached along two fields, yields nothing new.
+    if (sp->decl_id() == sc->decl_id() && sp->fields().size() == sc->fields().size() &&
+        inferring_structs_.insert(std::make_pair(sp, sc)).second) {
+      infer_from_type_args(sp->type_args(), sc->type_args(), bindings, error_span, binding);
       for (size_t j = 0; j < sp->fields().size(); ++j) {
-        infer_type_bindings(sp->fields()[j].type, sc->fields()[j].type, bindings, error_span);
+        infer_type_bindings(sp->fields()[j].type, sc->fields()[j].type, bindings, error_span, binding);
       }
+    }
+  } else if (pattern->kind() == TypeKind::Enum && concrete->kind() == TypeKind::Enum) {
+    const auto* ep = static_cast<const TypeEnum*>(pattern);
+    const auto* ec = static_cast<const TypeEnum*>(concrete);
+    if (ep->decl_id() == ec->decl_id()) {
+      infer_from_type_args(ep->type_args(), ec->type_args(), bindings, error_span, binding);
     }
   }
 }
 
-auto TypeChecker::substitute_generics(const Type* type,
-                                      const std::unordered_map<uint32_t, const Type*>& bindings)
+/// What the argument's instantiation says about the parameters of the
+/// pattern's.  A parameter no field or payload mentions is recorded
+/// nowhere else, so this is where it is inferred from.
+void TypeChecker::infer_from_type_args(const std::vector<const Type*>& pattern,
+                                       const std::vector<const Type*>& concrete,
+                                       TypeBindings& bindings, Span error_span,
+                                       GenericBinding binding) {
+  if (pattern.size() != concrete.size()) {
+    return;
+  }
+  for (size_t i = 0; i < pattern.size(); ++i) {
+    infer_type_bindings(pattern[i], concrete[i], bindings, error_span, binding);
+  }
+}
+
+auto TypeChecker::substitute_generics(const Type* type, const TypeBindings& bindings)
     -> const Type* {
   if (type == nullptr || bindings.empty()) {
     return type;
   }
 
+  // A type reached twice is substituted once: a class holding two
+  // pointers to the same inner type has one instantiation of it, not
+  // two, and a deep nesting of such classes would otherwise be rebuilt
+  // once per path.  The answers hold for this substitution alone, so
+  // the outermost call owns them.
+  const bool outermost = substituted_.empty() && substituting_.empty();
+  if (auto done = substituted_.find(type); done != substituted_.end()) {
+    return done->second;
+  }
+  struct Clear {
+    std::unordered_map<const Type*, const Type*>& answers;
+    GenericParamReach& reach;
+    bool mine;
+    ~Clear() {
+      if (mine) {
+        answers.clear();
+        reach.forget();
+      }
+    }
+  } clear{substituted_, mentions_param_, outermost};
+
+  const auto* substituted = substitute_generics_walk(type, bindings);
+  substituted_.emplace(type, substituted);
+  return substituted;
+}
+
+auto TypeChecker::substitute_generics_walk(const Type* type, const TypeBindings& bindings)
+    -> const Type* {
   switch (type->kind()) {
   case TypeKind::GenericParam: {
     const auto* gp = static_cast<const TypeGenericParam*>(type);
-    auto it = bindings.find(gp->index());
+    auto it = bindings.find(ParamKey{gp->binder(), gp->index()});
     return it != bindings.end() ? it->second : type;
   }
   case TypeKind::Pointer: {
@@ -2463,43 +2667,65 @@ auto TypeChecker::substitute_generics(const Type* type,
     return changed ? types_.function_type(std::move(params), ret) : type;
   }
   case TypeKind::Struct: {
-    if (!substituting_.insert(type).second) {
-      return type; // holds itself by value: no finite copy exists (rejected at its declaration)
-    }
     const auto* st = static_cast<const TypeStruct*>(type);
-    bool changed = false;
+    // A class that reaches itself (`class Node<T>: next: Ptr<Node<T>>`)
+    // is instantiated into a shell registered before its fields are
+    // walked, so the recursive occurrence resolves to this
+    // instantiation rather than leaving the generic one behind.
+    auto shell_it = substituting_.find(type);
+    if (shell_it != substituting_.end()) {
+      return shell_it->second;
+    }
+    if (!mentions_param_.mentions(type)) {
+      return type; // nothing of this type is being substituted
+    }
+    auto* shell = types_.make_struct_shell(st->decl_id(), st->name());
+    substituting_.emplace(type, shell);
     std::vector<StructField> new_fields;
     new_fields.reserve(st->fields().size());
     for (const auto& field : st->fields()) {
-      const auto* sub = substitute_generics(field.type, bindings);
-      if (sub != field.type)
-        changed = true;
-      new_fields.push_back({field.name, sub});
+      new_fields.push_back({field.name, substitute_generics(field.type, bindings)});
+    }
+    std::vector<const Type*> new_args;
+    new_args.reserve(st->type_args().size());
+    for (const auto* arg : st->type_args()) {
+      new_args.push_back(substitute_generics(arg, bindings));
     }
     substituting_.erase(type);
-    return changed ? types_.make_struct(st->decl_id(), st->name(), std::move(new_fields)) : type;
+    shell->set_fields(std::move(new_fields));
+    shell->set_type_args(std::move(new_args));
+    return shell;
   }
   case TypeKind::Enum: {
-    if (!substituting_.insert(type).second) {
-      return type; // as for a class above
-    }
     const auto* en = static_cast<const TypeEnum*>(type);
-    bool changed = false;
+    auto shell_it = substituting_.find(type);
+    if (shell_it != substituting_.end()) {
+      return shell_it->second; // as for a class above
+    }
+    if (!mentions_param_.mentions(type)) {
+      return type;
+    }
+    auto* shell = types_.make_enum_shell(en->decl_id(), en->name());
+    substituting_.emplace(type, shell);
     std::vector<EnumVariant> new_variants;
     new_variants.reserve(en->variants().size());
     for (const auto& variant : en->variants()) {
       std::vector<const Type*> new_payload;
       new_payload.reserve(variant.payload_types.size());
       for (const auto* pt : variant.payload_types) {
-        const auto* sub = substitute_generics(pt, bindings);
-        if (sub != pt)
-          changed = true;
-        new_payload.push_back(sub);
+        new_payload.push_back(substitute_generics(pt, bindings));
       }
       new_variants.push_back({variant.name, std::move(new_payload), variant.field_names});
     }
+    std::vector<const Type*> new_args;
+    new_args.reserve(en->type_args().size());
+    for (const auto* arg : en->type_args()) {
+      new_args.push_back(substitute_generics(arg, bindings));
+    }
     substituting_.erase(type);
-    return changed ? types_.make_enum(en->decl_id(), en->name(), std::move(new_variants)) : type;
+    shell->set_variants(std::move(new_variants));
+    shell->set_type_args(std::move(new_args));
+    return shell;
   }
   default:
     return type;
@@ -2531,27 +2757,48 @@ auto TypeChecker::concept_for_constraint(const TypeNode* constraint) const -> co
   return at(name_offset);
 }
 
+/// A method is named by a member expression and resolved by the
+/// receiver's type, never by a symbol at the callee's offset, so the
+/// declaration a call binds is read from where each kind of callee
+/// records it.  A call through a function value resolves to none: that
+/// signature is someone else's, and its parameters are already fixed.
+/// Whether the value a method is reached on is instantiated WITH a
+/// parameter of that method itself — `other.bad(…)` where `other` is a
+/// `Box<U>` and `U` is `bad`'s own.  The receiver's substitution then
+/// puts that parameter through the signature, where it is the one in
+/// scope: deciding it at the call would decide what the enclosing
+/// signature is checked against, and retype a pointer for free.
+auto TypeChecker::receiver_fixes(const Expr* callee, const Decl* callee_decl) -> bool {
+  if (callee_decl == nullptr || callee == nullptr || !callee->is<FieldExpr>()) {
+    return false;
+  }
+  return type_mentions_param_of(typed_.expr_type(callee->as<FieldExpr>().object), callee_decl);
+}
+
+auto TypeChecker::callee_function_decl(const Expr* callee) -> const Decl* {
+  const Decl* decl = nullptr;
+  if (callee->is<FieldExpr>()) {
+    decl = typed_.method_resolution(callee);
+  } else if (callee->is<IdentifierExpr>() || callee->is<QualifiedName>()) {
+    const auto* sym = symbol_for_use(callee);
+    if (sym != nullptr && sym->kind == SymbolKind::Function && sym->decl != nullptr) {
+      decl = sym->decl_as_decl();
+    }
+  }
+  return decl != nullptr && decl->is<FunctionDecl>() ? decl : nullptr;
+}
+
 void TypeChecker::verify_concept_constraints(
-    const Expr* callee_expr,
+    const Decl* callee_decl,
     Span error_span,
-    const std::unordered_map<uint32_t, const Type*>& bindings) {
-  if (bindings.empty() ||
-      !(callee_expr->is<IdentifierExpr>() || callee_expr->is<QualifiedName>())) {
+    const TypeBindings& bindings) {
+  if (bindings.empty() || callee_decl == nullptr) {
     return;
   }
-  const auto* callee_sym = symbol_for_use(callee_expr);
-  if (callee_sym == nullptr || callee_sym->kind != SymbolKind::Function ||
-      callee_sym->decl == nullptr) {
-    return;
-  }
-  const auto* fn_decl = callee_sym->decl_as_decl();
-  if (!fn_decl->is<FunctionDecl>()) {
-    return;
-  }
-  const auto& func = fn_decl->as<FunctionDecl>();
+  const auto& func = callee_decl->as<FunctionDecl>();
   for (const auto& gp_decl : func.type_params) {
     auto idx = static_cast<uint32_t>(&gp_decl - func.type_params.data());
-    auto binding_it = bindings.find(idx);
+    auto binding_it = bindings.find(ParamKey{callee_decl, idx});
     if (binding_it == bindings.end()) {
       continue;
     }
@@ -2576,14 +2823,60 @@ void TypeChecker::verify_concept_constraints(
 // Call expressions
 // ---------------------------------------------------------------------------
 
+/// The class or enum a called method belongs to, read from its mangled
+/// symbol name (`Box.make`) in the module that declares it; null when
+/// the callee names no method.  Its parameters are what a signature
+/// like `fn make(value: T): Box<T>` is written with.
+auto TypeChecker::enclosing_type_decl(const Expr* callee) -> const Decl* {
+  const auto* sym = symbol_for_use(callee);
+  if (sym == nullptr || sym->kind != SymbolKind::Function) {
+    return nullptr;
+  }
+  const auto dot = sym->name.find('.');
+  if (dot == std::string_view::npos) {
+    return nullptr;
+  }
+  auto it = type_decls_.find(TypeDeclKey{sym->module, sym->name.substr(0, dot)});
+  return it == type_decls_.end() ? nullptr : it->second;
+}
+
 auto TypeChecker::check_call(const Expr* expr) -> const Type* {
   const auto& call = expr->as<CallExpr>();
   // Suppress payload-check on the callee — check_call validates after.
   suppress_payload_check_ = true;
+  const auto* enclosing_callee = call_callee_;
+  call_callee_ = call.callee;
   const auto* callee_type = check_expr(call.callee);
+  call_callee_ = enclosing_callee;
   suppress_payload_check_ = false;
   if (callee_type == nullptr) {
     return nullptr;
+  }
+
+  // An operation of the compiler-standard Ptr<T>: a method the callee's
+  // field expression resolved, or the static factory `Ptr<T>::new()`,
+  // the one builtin function symbol.  HIR lowers the call to the
+  // operation, so it is recorded on the call.  Only a member expression
+  // carries a method marker: for `p.get()()` the callee is the inner
+  // call, whose own marker belongs to that call alone — inheriting it
+  // would lower the outer call as a second operation with no receiver.
+  std::optional<PtrOp> ptr_op =
+      call.callee->is<FieldExpr>() ? typed_.ptr_op(call.callee) : std::nullopt;
+  if (!ptr_op.has_value() && call.callee->is<IdentifierExpr>()) {
+    const auto* callee_sym = symbol_for_use(call.callee);
+    if (callee_sym != nullptr && callee_sym->kind == SymbolKind::Function &&
+        callee_sym->decl == nullptr) {
+      ptr_op = PtrOp::New;
+    }
+  }
+  if (ptr_op.has_value()) {
+    // Its arguments are positional: no names, no rest marker.
+    if (std::ranges::any_of(call.arg_names, [](std::string_view name) { return !name.empty(); })) {
+      error(expr->span,
+            "Ptr." + std::string(ptr_op_name(*ptr_op)) + " takes its arguments by position");
+      return nullptr;
+    }
+    typed_.set_ptr_op(expr, *ptr_op);
   }
 
   // Enum variant constructor via :: syntax: Option::Some(42) — callee is
@@ -2621,26 +2914,46 @@ auto TypeChecker::check_call(const Expr* expr) -> const Type* {
                       "' requires named fields in construction");
             return callee_type;
           }
+          // A rest marker names no field and carries no value: it
+          // destructures a pattern, and a construction is no pattern.
+          if (std::ranges::find(call.arg_names, "..") != call.arg_names.end()) {
+            error(expr->span, "'..' is no argument of a construction; give every field a value");
+            return nullptr;
+          }
           if (has_named && !variant.field_names.empty()) {
+            // Every field is given by name, and each exactly once: the
+            // values are placed in the payload by the field they name,
+            // so a field named twice would overwrite one slot and leave
+            // another with no value at all.
             arg_order.resize(call.args.size());
-            for (size_t i = 0; i < call.arg_names.size(); ++i) {
-              if (!call.arg_names[i].empty()) {
-                bool found = false;
-                for (size_t j = 0; j < variant.field_names.size(); ++j) {
-                  if (variant.field_names[j] == call.arg_names[i]) {
-                    arg_order[i] = j;
-                    found = true;
-                    break;
+            std::vector<bool> given(variant.field_names.size(), false);
+            for (size_t i = 0; i < call.arg_names.size() && i < call.args.size(); ++i) {
+              if (call.arg_names[i].empty()) {
+                error(call.args[i]->span,
+                      "variant '" + std::string(variant.name) +
+                          "' is constructed with every field named; this one is not");
+                return nullptr; // reported; an unresolved result would report it again
+              }
+              bool found = false;
+              for (size_t j = 0; j < variant.field_names.size(); ++j) {
+                if (variant.field_names[j] == call.arg_names[i]) {
+                  if (given[j]) {
+                    error(call.args[i]->span,
+                          "field '" + std::string(call.arg_names[i]) + "' of variant '" +
+                              std::string(variant.name) + "' is given twice");
+                    return nullptr;
                   }
+                  given[j] = true;
+                  arg_order[i] = j;
+                  found = true;
+                  break;
                 }
-                if (!found) {
-                  error(call.args[i]->span,
-                        "no field '" + std::string(call.arg_names[i]) +
-                            "' in variant '" + std::string(variant.name) + "'");
-                  return callee_type;
-                }
-              } else {
-                arg_order[i] = i; // positional fallback
+              }
+              if (!found) {
+                error(call.args[i]->span,
+                      "no field '" + std::string(call.arg_names[i]) +
+                          "' in variant '" + std::string(variant.name) + "'");
+                return nullptr;
               }
             }
           }
@@ -2653,27 +2966,82 @@ auto TypeChecker::check_call(const Expr* expr) -> const Type* {
                       std::to_string(call.args.size()));
             return callee_type;
           }
-          std::unordered_map<uint32_t, const Type*> type_bindings;
-          for (size_t i = 0; i < call.args.size(); ++i) {
-            size_t field_idx = (has_named && !arg_order.empty()) ? arg_order[i] : i;
-            const auto* arg_type = check_expr(call.args[i]);
-            if (arg_type != nullptr && field_idx < variant.payload_types.size() &&
-                variant.payload_types[field_idx] != nullptr) {
-              if (!is_assignable(arg_type, variant.payload_types[field_idx])) {
-                error(call.args[i]->span,
-                      "payload field type '" + print_type(arg_type) + "' is not assignable to '" +
-                          print_type(variant.payload_types[field_idx]) + "'");
+          TypeBindings type_bindings;
+
+          // Written-out arguments decide the instantiation, as they do
+          // for a class: `Choice::Some<i32>(value = x)` is a
+          // `Choice<i32>` and its payload has to be an `i32`.
+          const auto* enum_decl = enum_type->decl_id();
+          const size_t param_count = enum_decl != nullptr && enum_decl->is<EnumDeclNode>()
+                                         ? enum_decl->as<EnumDeclNode>().type_params.size()
+                                         : 0;
+          const bool written_out = !call.type_args.empty();
+          if (written_out) {
+            if (call.type_args.size() != param_count) {
+              error(expr->span, "'" + std::string(enum_type->name()) + "' expects " +
+                                    std::to_string(param_count) + " type argument(s), got " +
+                                    std::to_string(call.type_args.size()));
+              return nullptr; // reported; an unresolved result would report it again
+            }
+            std::vector<const Type*> resolved_args;
+            resolved_args.reserve(call.type_args.size());
+            for (size_t i = 0; i < call.type_args.size(); ++i) {
+              const auto* resolved = resolve_type_node(call.type_args[i]);
+              if (resolved == nullptr) {
+                return callee_type;
               }
-              infer_type_bindings(
-                  variant.payload_types[field_idx], arg_type, type_bindings, call.args[i]->span);
+              type_bindings[ParamKey{enum_decl, static_cast<uint32_t>(i)}] = resolved;
+              resolved_args.push_back(resolved);
+            }
+            typed_.set_call_type_args(expr, std::move(resolved_args));
+          }
+
+          // The payload fields are checked in the order the VARIANT
+          // declares them, whatever order they were written in: named
+          // fields may be given in any order, and what an earlier field
+          // binds is what a later one is checked against, so
+          // `Both(second = Maybe::Nothing, first = 1)` learns `T` from
+          // `first` before `second` is read as `Maybe<i32>`.
+          std::vector<size_t> declaration_order(call.args.size());
+          for (size_t i = 0; i < declaration_order.size(); ++i) {
+            declaration_order[i] = i;
+          }
+          if (has_named && !arg_order.empty()) {
+            std::ranges::sort(declaration_order,
+                              [&](size_t a, size_t b) { return arg_order[a] < arg_order[b]; });
+          }
+          for (const size_t i : declaration_order) {
+            size_t field_idx = (has_named && !arg_order.empty()) ? arg_order[i] : i;
+            if (field_idx >= variant.payload_types.size() ||
+                variant.payload_types[field_idx] == nullptr) {
+              check_expr(call.args[i]);
+              continue;
+            }
+            // Written out or bound by an earlier payload, what is decided
+            // by now applies: `Holder::Both(1, Maybe::Nothing)` checks its
+            // second payload against `Maybe<i32>`, not `Maybe<T>`.
+            const auto* payload_type =
+                substitute_generics(variant.payload_types[field_idx], type_bindings);
+            const auto* arg_type = check_expr(call.args[i], payload_type);
+            if (arg_type == nullptr) {
+              continue;
+            }
+            if (!is_assignable(arg_type, payload_type,
+                               written_out ? kFixedGenerics
+                                           : GenericBinding{enum_type->decl_id()})) {
+              error(call.args[i]->span,
+                    "payload field type '" + print_type(arg_type) + "' is not assignable to '" +
+                        print_type(payload_type) + "'");
+            }
+            if (!written_out) {
+              infer_type_bindings(variant.payload_types[field_idx], arg_type, type_bindings,
+                                  call.args[i]->span);
             }
           }
           // Clear the "needs-construction" mark set by check_expr for QualifiedName.
           pending_payload_constructions_.erase(call.callee);
-          if (!type_bindings.empty()) {
-            return substitute_generics(callee_type, type_bindings);
-          }
-          return callee_type;
+          return with_inferred_args(expr, substitute_generics(callee_type, type_bindings),
+                                    enum_type->decl_id(), type_bindings);
         }
       }
       // Variant not found — emit diagnostic.
@@ -2697,6 +3065,15 @@ auto TypeChecker::check_call(const Expr* expr) -> const Type* {
     }
   }
 
+  // A name belongs to a field: an `enum class` variant's payload is
+  // given by name (CONTRACT_SYNTAX_SURFACE, enum construction), and
+  // that construction was handled above.  Everything else takes its
+  // arguments by position, so a name here names nothing.
+  if (std::ranges::any_of(call.arg_names, [](std::string_view name) { return !name.empty(); })) {
+    error(expr->span, "arguments are given by position; a name belongs to a variant's payload");
+    return nullptr;
+  }
+
   if (callee_type->kind() != TypeKind::Function) {
     error(call.callee->span, "cannot call non-function type '" + print_type(callee_type) + "'");
     return nullptr;
@@ -2712,77 +3089,145 @@ auto TypeChecker::check_call(const Expr* expr) -> const Type* {
     return nullptr;
   }
 
-  // Detect if the callee is an extern fn (for ABI boundary enforcement).
+  // Detect if the callee is an extern fn (for ABI boundary enforcement),
+  // and note which declaration this call binds type parameters of.  A
+  // call through a function value binds none: that signature is someone
+  // else's, and its parameters are already fixed.
   bool callee_is_extern = false;
-  if (call.callee->is<IdentifierExpr>() || call.callee->is<QualifiedName>()) {
-    const auto* callee_sym = symbol_for_use(call.callee);
-    if (callee_sym != nullptr && callee_sym->kind == SymbolKind::Function &&
-        callee_sym->decl != nullptr) {
-      const auto* fn_decl = callee_sym->decl_as_decl();
-      if (fn_decl->is<FunctionDecl>()) {
-        callee_is_extern = fn_decl->as<FunctionDecl>().is_extern;
-      }
-    }
+  GenericBinding binding;
+  binding.binder = callee_function_decl(call.callee);
+  if (binding.binder != nullptr) {
+    callee_is_extern = binding.binder->as<FunctionDecl>().is_extern;
   }
+  // A method's signature may be written with its class's parameters
+  // rather than its own (`fn make(value: T): Box<T>` in `class Box<T>`),
+  // and the call binds those as much as the method's own.
+  binding.owner = enclosing_type_decl(call.callee);
 
   // Check arguments and infer generic type bindings from call site.
   // type_bindings maps generic param index → concrete type.
-  std::unordered_map<uint32_t, const Type*> type_bindings;
+  TypeBindings type_bindings;
+  // Whether a type argument written at the call was written with the
+  // parameters it does not itself bind, which fixes those for this call.
+  bool written_args_fix_the_rest = false;
+
+  const bool receiver_fixes_the_callee = receiver_fixes(call.callee, binding.binder);
+  if (receiver_fixes_the_callee && !call.type_args.empty()) {
+    // Written out, they would bind the very parameter the receiver
+    // already stands for, and the signature — return type included —
+    // would be rewritten under the enclosing one.  There is no type to
+    // write here that means anything but what the receiver says.
+    error(expr->span, "'" + std::string(binding.binder->as<FunctionDecl>().name) +
+                          "' is reached on a receiver instantiated with its own type parameter, "
+                          "so its type arguments are already decided");
+    return nullptr;
+  }
+
+  // A Ptr<T> method takes explicit type arguments only as `cast<U>()`,
+  // exactly one; the others take none.
+  if (ptr_op.has_value() && *ptr_op != PtrOp::New) {
+    const size_t expected_count = *ptr_op == PtrOp::Cast ? 1 : 0;
+    if (call.type_args.size() != expected_count) {
+      error(expr->span,
+            "Ptr." + std::string(ptr_op_name(*ptr_op)) + " expects " +
+                std::to_string(expected_count) + " type argument(s), got " +
+                std::to_string(call.type_args.size()));
+      return nullptr;
+    }
+    if (expected_count == 1) {
+      const auto* target = resolve_type_node(call.type_args[0]);
+      if (target == nullptr) {
+        return nullptr;
+      }
+      type_bindings[ParamKey{nullptr, 0}] = target;
+      typed_.set_call_type_args(expr, {target});
+    }
+  }
 
   // Populate bindings from explicit type arguments: f<i32, f64>(x).
-  if (!call.type_args.empty() &&
-      (call.callee->is<IdentifierExpr>() || call.callee->is<QualifiedName>())) {
-    const auto* callee_sym = symbol_for_use(call.callee);
-    if (callee_sym != nullptr && callee_sym->kind == SymbolKind::Function) {
-      // Determine expected type param count.
-      size_t expected_count = 0;
-      if (callee_sym->decl != nullptr) {
-        const auto* fn_decl = callee_sym->decl_as_decl();
-        if (fn_decl->is<FunctionDecl>()) {
-          expected_count = fn_decl->as<FunctionDecl>().type_params.size();
-          // For class methods (no own type params), use the enclosing
-          // class's type params when invoked via Type<Args>::method().
-          if (expected_count == 0 && callee_sym->name.find('.') != std::string_view::npos) {
-            // The enclosing class of a method symbol `T.m`.  Two modules
-            // may each declare a `T`, so the class must come from the
-            // METHOD'S OWN module, not from the first same-named
-            // declaration in the program
-            // (CONTRACT_TYPE_SYSTEM_FOUNDATIONS.md §11).
-            auto class_name = callee_sym->name.substr(0, callee_sym->name.find('.'));
-            for (const auto* file_decl : all_decls_) {
-              if (file_decl->kind() != NodeKind::ClassDecl ||
-                  file_decl->as<ClassDecl>().name != class_name) {
-                continue;
-              }
-              if (declaring_module(file_decl) != callee_sym->module) {
-                continue;
-              }
-              expected_count = file_decl->as<ClassDecl>().type_params.size();
-              break;
-            }
-          }
-        }
-      } else {
-        // Compiler builtin functions (null_ptr, ptr_cast) take 1 type param.
-        expected_count = 1;
-      }
-
-      if (call.type_args.size() != expected_count) {
-        error(expr->span,
-              "expected " + std::to_string(expected_count) + " type argument(s), got " +
-                  std::to_string(call.type_args.size()));
-      } else {
-        std::vector<const Type*> resolved_type_args;
-        for (size_t i = 0; i < call.type_args.size(); ++i) {
-          const auto* resolved = resolve_type_node(call.type_args[i]);
-          if (resolved != nullptr) {
-            type_bindings[static_cast<uint32_t>(i)] = resolved;
-            resolved_type_args.push_back(resolved);
-          }
-        }
-        typed_.set_call_type_args(expr, std::move(resolved_type_args));
-      }
+  if (ptr_op == PtrOp::New) {
+    // `Ptr<T>::new()` takes its pointee, the one parameter of the
+    // compiler's own signature for it.
+    if (call.type_args.size() != 1) {
+      error(expr->span, "Ptr.new expects 1 type argument(s), got " +
+                            std::to_string(call.type_args.size()));
+      return nullptr;
     }
+    const auto* pointee = resolve_type_node(call.type_args[0]);
+    if (pointee == nullptr) {
+      return nullptr;
+    }
+    type_bindings[ParamKey{nullptr, 0}] = pointee;
+    typed_.set_call_type_args(expr, {pointee});
+  } else if (!call.type_args.empty() && !ptr_op.has_value()) {
+    // Which declaration's parameters the arguments are for: the
+    // callee's own where it declares any, otherwise its class's — a
+    // method written with its class's parameters is instantiated by
+    // `Type<Args>::method()` and by `value.method<Args>()` alike.
+    const Decl* owner = nullptr;
+    size_t expected_count = 0;
+    const auto type_params_of = [](const Decl* decl) -> size_t {
+      if (decl == nullptr) {
+        return 0;
+      }
+      if (decl->is<FunctionDecl>()) {
+        return decl->as<FunctionDecl>().type_params.size();
+      }
+      if (decl->kind() == NodeKind::ClassDecl) {
+        return decl->as<ClassDecl>().type_params.size();
+      }
+      if (decl->kind() == NodeKind::EnumDecl) {
+        return decl->as<EnumDeclNode>().type_params.size();
+      }
+      return 0;
+    };
+    if (call.type_args_name_the_type && binding.owner != nullptr) {
+      // Written on the type — `Box<i32>::zero(0)` instantiates the
+      // class, whatever parameters the method it names declares.
+      owner = binding.owner;
+      expected_count = type_params_of(owner);
+    } else if (binding.binder != nullptr && binding.binder->is<FunctionDecl>() &&
+               !binding.binder->as<FunctionDecl>().type_params.empty()) {
+      owner = binding.binder;
+      expected_count = type_params_of(owner);
+    } else if (binding.owner != nullptr) {
+      owner = binding.owner;
+      expected_count = type_params_of(owner);
+    }
+
+    if (call.type_args.size() != expected_count) {
+      error(expr->span, "expected " + std::to_string(expected_count) + " type argument(s), got " +
+                            std::to_string(call.type_args.size()));
+      return nullptr;
+    }
+    // Whose parameters the arguments leave for the call to work out:
+    // written on the type, the method's own; written for the method, the
+    // class's.
+    const Decl* left_to_infer = call.type_args_name_the_type && binding.owner != nullptr
+                                    ? binding.binder
+                                    : binding.owner;
+    std::vector<const Type*> resolved_type_args;
+    resolved_type_args.reserve(call.type_args.size());
+    for (size_t i = 0; i < call.type_args.size(); ++i) {
+      const auto* resolved = resolve_type_node(call.type_args[i]);
+      if (resolved == nullptr) {
+        return nullptr;
+      }
+      type_bindings[ParamKey{owner, static_cast<uint32_t>(i)}] = resolved;
+      // A type argument may be written WITH the parameters that the
+      // written-out arguments do not themselves bind — the class's where
+      // they are the method's (`Box::identity<Ptr<T>>(p)`), the method's
+      // where they are the class's (`Box<U>::write(p, …)` inside
+      // `fn write<U>`).  Such a parameter names the one type it stands
+      // for, so those parameters are fixed for this call: reading one as
+      // a slot to fill would let an argument retype what was written,
+      // and §8 leaves `cast<U>` the one pointee conversion.
+      written_args_fix_the_rest =
+          written_args_fix_the_rest || type_mentions_param_of(resolved, left_to_infer);
+      resolved_type_args.push_back(resolved);
+    }
+    typed_.set_call_type_args(expr, std::move(resolved_type_args));
+    typed_.set_type_args_binder(expr, owner);
   }
 
   for (size_t i = 0; i < params.size(); ++i) {
@@ -2797,23 +3242,157 @@ auto TypeChecker::check_call(const Expr* expr) -> const Type* {
             "use a named function instead");
     }
 
-    const auto* arg_type = check_expr(call.args[i], params[i]);
-    if (arg_type == nullptr || params[i] == nullptr) {
+    // With type arguments written at the call, the parameters they
+    // bound are already the types they make them, and the value has to
+    // be of that type.  What they did NOT bind is still the call's to
+    // infer: written on the TYPE they bind its parameters and leave the
+    // method's own, written for the METHOD they bind the method's and
+    // leave the class's — `Box::select<string>(1, "text")` says what
+    // `U` is and learns `T` from its first argument.
+    const bool written_out = !call.type_args.empty();
+    const bool type_args_bound_the_type = written_out && call.type_args_name_the_type;
+    const GenericBinding remaining = written_args_fix_the_rest ? kFixedGenerics
+                                     : type_args_bound_the_type
+                                         ? GenericBinding{binding.binder}
+                                         : GenericBinding{binding.owner};
+    // Whatever is decided by now applies: the arguments written at the
+    // call, and what the arguments before this one bound.  So the second
+    // argument of `keep(1, Option::None)` is checked against
+    // `Option<i32>` rather than against `Option<T>`.
+    const auto* param_type = substitute_generics(params[i], type_bindings);
+    const auto* arg_type = check_expr(call.args[i], param_type);
+    if (arg_type == nullptr || param_type == nullptr) {
       continue;
     }
-    if (!is_assignable(arg_type, params[i])) {
+    // `set`'s parameter is the receiver's pointee, already fixed: a type
+    // parameter anywhere inside it names that one type, never a type to
+    // infer, so the value must be of exactly that type.  Every other
+    // parameter belongs to the callee's signature, which this very
+    // argument binds (CONTRACT_TYPECHECKING_BASELINE §§4, 8).
+    const auto argument_binding = ptr_op == PtrOp::Set || receiver_fixes_the_callee
+                                      ? kFixedGenerics
+                                  : written_out ? remaining
+                                                : binding;
+    if (!is_assignable(arg_type, param_type, argument_binding)) {
       error(call.args[i]->span,
             "argument type '" + print_type(arg_type) + "' is not assignable to parameter type '" +
-                print_type(params[i]) + "'");
+                print_type(param_type) + "'");
     }
-    // Infer generic bindings by structural matching.
-    infer_type_bindings(params[i], arg_type, type_bindings, call.args[i]->span);
+    // Infer generic bindings by structural matching, for the parameters
+    // this call binds.  A parameter of an enclosing signature is fixed
+    // even where it sits at the same position as the callee's, so the
+    // binder decides which ones an argument may fill.
+    // Nothing is inferred where nothing is being bound: a call through a
+    // function value takes a signature someone else wrote, and filling
+    // its parameters by position would rebind the caller's own.
+    const auto inferring = receiver_fixes_the_callee ? kFixedGenerics
+                           : written_out            ? remaining
+                                                    : binding;
+    if (inferring.binder != nullptr || inferring.owner != nullptr) {
+      infer_type_bindings(params[i], arg_type, type_bindings, call.args[i]->span, inferring);
+    }
   }
 
-  verify_concept_constraints(call.callee, expr->span, type_bindings);
+  // The bounds are the callee's own, whether it was named or selected on
+  // a receiver: `b.accept<Missing>(v)` has to satisfy `accept`'s bounds
+  // exactly as `accept(b, missing)` would.
+  verify_concept_constraints(binding.binder, expr->span, type_bindings);
 
-  // Substitute generic params in the return type.
+  // Substitute what this call bound into the return type.  The bindings
+  // are this call's own — inference above fills only the parameters it
+  // may, and the rest were written at the call (`Ptr<i32>::new()`,
+  // `Vector<u8>::new()`, whose parameters are the class's) — so they
+  // apply by position, as the signature was written.
   return substitute_generics(fn_type->return_type(), type_bindings);
+}
+
+
+/// A declaration's own parameters as types, in order: what a generic
+/// class or enum stands instantiated with inside its own body.
+auto TypeChecker::own_type_args(const Decl* decl, const std::vector<GenericParam>& type_params)
+    -> std::vector<const Type*> {
+  std::vector<const Type*> args;
+  args.reserve(type_params.size());
+  for (size_t i = 0; i < type_params.size(); ++i) {
+    args.push_back(types_.generic_param(decl, type_params[i].name, static_cast<uint32_t>(i)));
+  }
+  return args;
+}
+
+/// The instantiation a construction just inferred: the declaration's
+/// parameters in order, as far as the arguments bound them.  Without
+/// them a constructed `Box(1)` would carry no arguments while the
+/// annotation `Box<i32>` carries `i32`, and the two would differ.
+/// Whether a nominal type already stands for an instantiation: some
+/// position of it holds a type rather than the parameter declared there.
+/// An alias (`type IntCell = Cell<i32>`) is such a type, and so is
+/// anything reached through one.
+auto TypeChecker::already_instantiated(const Type* type, const Decl* decl_id) -> bool {
+  const auto& standing = nominal_type_args(type);
+  for (size_t i = 0; i < standing.size(); ++i) {
+    if (standing[i] != nullptr && !names_own_param(standing[i], decl_id, static_cast<uint32_t>(i))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// Whether a type argument is the declaration's own parameter standing
+/// at its own position — what an uninstantiated `class Cell<T>` holds,
+/// and what says the position is still to be decided.
+auto TypeChecker::names_own_param(const Type* arg, const Decl* decl_id, uint32_t position) -> bool {
+  if (arg == nullptr || arg->kind() != TypeKind::GenericParam) {
+    return false;
+  }
+  const auto* param = static_cast<const TypeGenericParam*>(arg);
+  return param->binder() == decl_id && param->index() == position;
+}
+
+auto TypeChecker::with_inferred_args(const Expr* expr, const Type* type, const Decl* decl_id,
+                                     const TypeBindings& bindings)
+    -> const Type* {
+  if (type == nullptr || decl_id == nullptr) {
+    return type;
+  }
+  const std::vector<GenericParam>* type_params = nullptr;
+  if (decl_id->is<ClassDecl>()) {
+    type_params = &decl_id->as<ClassDecl>().type_params;
+  } else if (decl_id->is<EnumDeclNode>()) {
+    type_params = &decl_id->as<EnumDeclNode>().type_params;
+  }
+  if (type_params == nullptr || type_params->empty()) {
+    return type;
+  }
+  // A parameter no argument bound keeps the declaration's own parameter
+  // and is noted as open, so its context can decide it later.  The type
+  // alone could not say which those are: a construction written inside
+  // the class binds a parameter to that same parameter.
+  // What the constructed type already stands instantiated with: a
+  // construction written through a concrete alias (`type IntCell =
+  // Cell<i32>`) is that instantiation, and nothing about it is open.
+  const auto& already = nominal_type_args(type);
+  std::vector<const Type*> args;
+  std::vector<uint32_t> open;
+  args.reserve(type_params->size());
+  for (size_t i = 0; i < type_params->size(); ++i) {
+    const auto position = static_cast<uint32_t>(i);
+    auto it = bindings.find(ParamKey{decl_id, position});
+    if (it != bindings.end()) {
+      args.push_back(it->second);
+      continue;
+    }
+    const auto* standing = position < already.size() ? already[position] : nullptr;
+    if (standing != nullptr && !names_own_param(standing, decl_id, position)) {
+      args.push_back(standing);
+      continue;
+    }
+    args.push_back(types_.generic_param(decl_id, (*type_params)[i].name, position));
+    open.push_back(position);
+  }
+  if (!open.empty() && expr != nullptr) {
+    typed_.set_open_type_params(expr, std::move(open));
+  }
+  return with_type_args(type, std::move(args));
 }
 
 // ---------------------------------------------------------------------------
@@ -2824,6 +3403,14 @@ auto TypeChecker::check_construct(const Expr* expr, const TypeStruct* struct_typ
   const auto& call = expr->as<CallExpr>();
   const auto& fields = struct_type->fields();
 
+  // A class is constructed field by field, in order: naming belongs to
+  // an `enum class` variant's payload (CONTRACT_SYNTAX_SURFACE).
+  if (std::ranges::any_of(call.arg_names, [](std::string_view name) { return !name.empty(); })) {
+    error(expr->span, "'" + std::string(struct_type->name()) +
+                          "' takes its fields by position, in declaration order");
+    return nullptr;
+  }
+
   if (call.args.size() != fields.size()) {
     error(expr->span,
           "'" + std::string(struct_type->name()) + "' expects " + std::to_string(fields.size()) +
@@ -2831,23 +3418,76 @@ auto TypeChecker::check_construct(const Expr* expr, const TypeStruct* struct_typ
     return nullptr;
   }
 
-  std::unordered_map<uint32_t, const Type*> type_bindings;
+  TypeBindings type_bindings;
+
+  // Written-out arguments bind first and are no longer open: `Tag<i32>("x")`
+  // is a `Tag<i32>` whatever its context asks for, and a field that
+  // disagrees with them is reported below.
+  const auto* class_decl = struct_type->decl_id();
+  const size_t param_count = class_decl != nullptr && class_decl->is<ClassDecl>()
+                                 ? class_decl->as<ClassDecl>().type_params.size()
+                                 : 0;
+  if (!call.type_args.empty()) {
+    // A name that already says what its parameters are takes none: `type
+    // IntTag = Tag<i32>` IS a `Tag<i32>`, so `IntTag<i64>(1)` would
+    // instantiate what is instantiated — and the fields, built for
+    // `i32`, would disagree with the arguments it advertised.
+    if (already_instantiated(struct_type, class_decl)) {
+      error(expr->span, "'" + print_type(struct_type) +
+                            "' is already instantiated and takes no type argument(s)");
+      return nullptr;
+    }
+    if (call.type_args.size() != param_count) {
+      error(expr->span, "'" + std::string(struct_type->name()) + "' expects " +
+                            std::to_string(param_count) + " type argument(s), got " +
+                            std::to_string(call.type_args.size()));
+      return nullptr;
+    }
+    std::vector<const Type*> resolved_args;
+    resolved_args.reserve(call.type_args.size());
+    for (size_t i = 0; i < call.type_args.size(); ++i) {
+      const auto* resolved = resolve_type_node(call.type_args[i]);
+      if (resolved == nullptr) {
+        return nullptr;
+      }
+      type_bindings[ParamKey{class_decl, static_cast<uint32_t>(i)}] = resolved;
+      resolved_args.push_back(resolved);
+    }
+    typed_.set_call_type_args(expr, std::move(resolved_args));
+  }
+
+  const bool written_out = !call.type_args.empty();
   for (size_t i = 0; i < fields.size(); ++i) {
-    const auto* arg_type = check_expr(call.args[i]);
-    if (arg_type != nullptr && fields[i].type != nullptr) {
-      if (!is_assignable(arg_type, fields[i].type)) {
+    // With the arguments written out, a field is already the type they
+    // make it, and the value has to be of that type; otherwise a field
+    // typed by the class's own parameter is bound here — by this
+    // argument, or by one before it.  What is decided by now applies, so
+    // the second field of `Bundle(1, Maybe::Nothing)` is checked against
+    // `Maybe<i32>` rather than against `Maybe<T>`, which nothing could
+    // satisfy.
+    const auto* field_type = substitute_generics(fields[i].type, type_bindings);
+    const auto* arg_type = check_expr(call.args[i], field_type);
+    if (arg_type != nullptr && field_type != nullptr) {
+      if (!is_assignable(arg_type, field_type,
+                         written_out ? kFixedGenerics
+                                     : GenericBinding{struct_type->decl_id()})) {
         error(call.args[i]->span,
               "field '" + std::string(fields[i].name) + "' expects type '" +
-                  print_type(fields[i].type) + "', got '" + print_type(arg_type) + "'");
+                  print_type(field_type) + "', got '" + print_type(arg_type) + "'");
       }
-      infer_type_bindings(fields[i].type, arg_type, type_bindings, call.args[i]->span);
+      if (!written_out) {
+        // With them written out there is nothing left to infer, and
+        // inferring anyway would report the same mismatch twice.
+        infer_type_bindings(fields[i].type, arg_type, type_bindings, call.args[i]->span);
+      }
     }
   }
 
-  if (!type_bindings.empty()) {
-    return substitute_generics(struct_type, type_bindings);
-  }
-  return struct_type;
+  // Even with nothing bound the construction is recorded: a class whose
+  // parameters no argument reaches (`class Tag<T>: text: string`) leaves
+  // all of them open for its context.
+  return with_inferred_args(expr, substitute_generics(struct_type, type_bindings),
+                            struct_type->decl_id(), type_bindings);
 }
 
 // ---------------------------------------------------------------------------
@@ -2881,18 +3521,36 @@ auto TypeChecker::check_pipe(const Expr* expr) -> const Type* {
   }
 
   // LHS becomes first argument — check assignability and infer generics.
-  if (!is_assignable(lhs_type, params[0])) {
+  // Named target: this pipe binds its type parameters, exactly as a
+  // call of it would.  A computed target binds none.
+  GenericBinding binding;
+  binding.binder = callee_function_decl(pipe.right);
+  if (pipe.right->is<IdentifierExpr>() || pipe.right->is<QualifiedName>()) {
+    binding.owner = enclosing_type_decl(pipe.right);
+  }
+  // A pipe into a method is that method's call: a receiver instantiated
+  // with the method's own parameter leaves the pipe nothing to bind
+  // either, or the value piped in would decide the parameter the
+  // enclosing signature is checked against.
+  const bool receiver_fixes_the_target = receiver_fixes(pipe.right, binding.binder);
+  if (receiver_fixes_the_target) {
+    binding = kFixedGenerics;
+  }
+  if (!is_assignable(lhs_type, params[0], binding)) {
     error(pipe.left->span,
           "pipe source type '" + print_type(lhs_type) +
               "' is not assignable to first parameter type '" + print_type(params[0]) + "'");
     return nullptr;
   }
 
-  // Infer generic type bindings from the pipe's first argument.
-  std::unordered_map<uint32_t, const Type*> type_bindings;
-  infer_type_bindings(params[0], lhs_type, type_bindings, pipe.left->span);
+  // Infer generic type bindings from the pipe's first argument, where
+  // this pipe has any to bind.
+  TypeBindings type_bindings;
+  if (!receiver_fixes_the_target) {
+    infer_type_bindings(params[0], lhs_type, type_bindings, pipe.left->span);
+  }
 
-  verify_concept_constraints(pipe.right, expr->span, type_bindings);
+  verify_concept_constraints(binding.binder, expr->span, type_bindings);
 
   // Substitute generic params in the return type.
   return substitute_generics(fn_type->return_type(), type_bindings);
@@ -3017,6 +3675,10 @@ auto TypeChecker::check_field(const Expr* expr) -> const Type* {
     return nullptr;
   }
 
+  if (obj_type->kind() == TypeKind::Pointer) {
+    return check_ptr_method(expr, field, static_cast<const TypePointer*>(obj_type));
+  }
+
   // Try struct field lookup first.
   if (obj_type->kind() == TypeKind::Struct) {
     const auto* st = static_cast<const TypeStruct*>(obj_type);
@@ -3069,6 +3731,62 @@ auto TypeChecker::check_field(const Expr* expr) -> const Type* {
   } else {
     error(field.field_span,
           "no method '" + std::string(field.field) + "' on type '" + print_type(obj_type) + "'");
+  }
+  return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// check_ptr_method — a member of the compiler-standard Ptr<T>
+// (ADR_RAW_POINTER_SURFACE.md, CONTRACT_TYPECHECKING_BASELINE.md §8).
+//
+// The receiver's semantic type already says this is a pointer, so the
+// member names one operation of its fixed method set, typed as a method
+// with `self` removed.  `get`, `set`, and `offset` touch memory: they
+// need `mode unsafe =>` and a sized pointee.  `cast` returns `Ptr<U>`
+// for the explicit `U` check_call binds.
+// ---------------------------------------------------------------------------
+
+auto TypeChecker::check_ptr_method(const Expr* expr, const FieldExpr& field,
+                                   const TypePointer* ptr) -> const Type* {
+  const auto operation = ptr_method_op(field.field);
+  if (!operation.has_value()) {
+    error(field.field_span,
+          "no method '" + std::string(field.field) + "' on type '" + print_type(ptr) + "'");
+    return nullptr;
+  }
+  const std::string qualified = "Ptr." + std::string(field.field);
+  if (call_callee_ != expr) {
+    error(field.field_span, "'" + qualified + "' is an operation of Ptr<T>; call it");
+    return nullptr;
+  }
+  if (ptr_op_touches_memory(*operation)) {
+    if (ctx_.active_modes.find("unsafe") == ctx_.active_modes.end()) {
+      error(field.field_span, qualified + " requires 'mode unsafe =>'");
+      return nullptr;
+    }
+    if (ptr->pointee()->kind() == TypeKind::Void) {
+      error(field.field_span,
+            qualified + " is invalid on 'Ptr<void>', which has no value or element size; "
+                        "cast it to a sized pointee first");
+      return nullptr;
+    }
+  }
+  typed_.set_ptr_op(expr, *operation);
+  const auto* pointee = ptr->pointee();
+  switch (*operation) {
+  case PtrOp::Get:
+    return types_.function_type({}, pointee);
+  case PtrOp::Set:
+    return types_.function_type({pointee}, types_.void_type());
+  case PtrOp::Offset:
+    return types_.function_type({types_.builtin(BuiltinKind::I64)}, ptr);
+  case PtrOp::Cast:
+    return types_.function_type({},
+                                types_.pointer_to(types_.generic_param(nullptr, "U", 0)));
+  case PtrOp::IsNull:
+    return types_.function_type({}, types_.bool_type());
+  case PtrOp::New:
+    break;
   }
   return nullptr;
 }
@@ -3288,8 +4006,10 @@ auto TypeChecker::lookup_method(const Type* obj_type,
       }
     }
     if (chosen != nullptr) {
-      // Build substitution from generic → concrete field types.
-      std::unordered_map<uint32_t, const Type*> bindings;
+      // What the receiver's instantiation says: its arguments first — a
+      // parameter no field mentions lives only there — then its fields.
+      TypeBindings bindings;
+      infer_from_type_args(chosen_st->type_args(), concrete_st->type_args(), bindings, Span{});
       for (size_t i = 0; i < chosen_st->fields().size() && i < concrete_st->fields().size(); ++i) {
         infer_type_bindings(
             chosen_st->fields()[i].type, concrete_st->fields()[i].type, bindings, Span{});
@@ -3300,6 +4020,10 @@ auto TypeChecker::lookup_method(const Type* obj_type,
       if (bindings.empty()) {
         return chosen->fn_type;
       }
+      // The receiver's instantiation decides the class's parameters and
+      // only those: a method's own `U` sits at its own position 0, as
+      // the class's `T` does, and substituting by position alone would
+      // bind the method's to the receiver's argument.
       return substitute_generics(chosen->fn_type, bindings);
     }
   }
@@ -3481,15 +4205,17 @@ auto TypeChecker::is_lvalue(const Expr* expr) -> bool {
   switch (expr->kind()) {
   case NodeKind::Identifier:
     return true;
+  // A field or element is a place only when what it is taken from is:
+  // `p.get().x` names a field of a copy the read produced, and writing
+  // it would store nowhere (a pointer is written with `set`).
   case NodeKind::FieldExpr:
-    return true;
+    return is_lvalue(expr->as<FieldExpr>().object);
   case NodeKind::IndexExpr:
+    return is_lvalue(expr->as<IndexExpr>().object);
+  case NodeKind::ErrorExpr:
+    // A recovery placeholder the parser already reported (a pointer
+    // sigil among them) raises no second diagnostic as a target.
     return true;
-  case NodeKind::UnaryExpr: {
-    // Dereferenced pointer is an lvalue.
-    const auto& un = expr->as<UnaryExpr>();
-    return un.op == UnaryOp::Deref;
-  }
   default:
     return false;
   }
@@ -3526,18 +4252,10 @@ auto TypeChecker::find_generic_param_index(const Symbol* sym) -> uint32_t {
 // ---------------------------------------------------------------------------
 
 auto TypeChecker::resolve_builtin_function_type(std::string_view name) -> const Type* {
-  // null_ptr<T>(): *T
-  if (name == "null_ptr") {
+  // Ptr<T>::new(): Ptr<T>, the null pointer.
+  if (name == "Ptr.new") {
     auto* generic_t = types_.generic_param(nullptr, "T", 0);
-    auto* ptr_t = types_.pointer_to(generic_t);
-    return types_.function_type({}, ptr_t);
-  }
-  // ptr_cast<T>(ptr: *void): *T
-  if (name == "ptr_cast") {
-    auto* generic_t = types_.generic_param(nullptr, "T", 0);
-    auto* ptr_t = types_.pointer_to(generic_t);
-    auto* void_ptr = types_.pointer_to(types_.void_type());
-    return types_.function_type({void_ptr}, ptr_t);
+    return types_.function_type({}, types_.pointer_to(generic_t));
   }
   return nullptr;
 }

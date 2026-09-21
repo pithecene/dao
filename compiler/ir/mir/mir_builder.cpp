@@ -1,5 +1,7 @@
 #include "ir/mir/mir_builder.h"
 
+#include "frontend/types/type_query.h"
+
 #include "frontend/module/program.h"
 #include "frontend/types/type.h"
 #include "frontend/types/type_ownership.h"
@@ -75,57 +77,6 @@ void MirBuilder::emit_terminator(Span span, MirPayload payload) {
 
 namespace {
 
-/// Check if a Dao type (or any nested type) contains TypeGenericParam.
-/// Used to detect functions on generic classes (e.g. HashMap<V>.length)
-/// whose own declaration has no type params but whose signature references
-/// the enclosing class's generic parameters.
-auto type_has_generic_param(const Type* type) -> bool {
-  if (type == nullptr) {
-    return false;
-  }
-  switch (type->kind()) {
-  case TypeKind::GenericParam:
-    return true;
-  case TypeKind::Function: {
-    const auto* fn_type = static_cast<const TypeFunction*>(type);
-    for (const auto* param : fn_type->param_types()) {
-      if (type_has_generic_param(param)) {
-        return true;
-      }
-    }
-    return type_has_generic_param(fn_type->return_type());
-  }
-  case TypeKind::Pointer:
-    return type_has_generic_param(
-        static_cast<const TypePointer*>(type)->pointee());
-  case TypeKind::Struct: {
-    const auto* str = static_cast<const TypeStruct*>(type);
-    for (const auto& field : str->fields()) {
-      if (type_has_generic_param(field.type)) {
-        return true;
-      }
-    }
-    return false;
-  }
-  case TypeKind::Enum: {
-    const auto* enm = static_cast<const TypeEnum*>(type);
-    for (const auto& variant : enm->variants()) {
-      for (const auto* payload : variant.payload_types) {
-        if (type_has_generic_param(payload)) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-  case TypeKind::Generator:
-    return type_has_generic_param(
-        static_cast<const TypeGenerator*>(type)->yield_type());
-  default:
-    return false;
-  }
-}
-
 /// A function is generic if either:
 ///  (a) its AST declaration has own type parameters (e.g. fn f<T>), or
 ///  (b) its lowered signature contains TypeGenericParam (e.g. methods
@@ -134,11 +85,11 @@ auto hir_function_is_generic(const HirFunction& fn) -> bool {
   if (fn.has_type_params) {
     return true;
   }
-  if (type_has_generic_param(fn.return_type)) {
+  if (type_mentions_generic_param(fn.return_type)) {
     return true;
   }
   for (const auto& param : fn.params) {
-    if (type_has_generic_param(param.type)) {
+    if (type_mentions_generic_param(param.type)) {
       return true;
     }
   }
@@ -529,6 +480,33 @@ void MirBuilder::lower_stmt(const HirStmt& stmt) {
 // Expression lowering — value
 // ---------------------------------------------------------------------------
 
+// The place a pointer addresses: the pointer's own place with a Deref
+// projection when it is a local or a field path rooted at one
+// (`p.get()`, `self.data.get()`), else a temporary holding the pointer
+// value (`q.offset(1).get()`, `make().inner.get()`).
+auto MirBuilder::deref_place(const HirExpr& pointer, Span span) -> MirPlace {
+  const auto rooted_at_local = [this](const HirExpr* expr) {
+    while (const auto* field = std::get_if<HirField>(&expr->payload)) {
+      expr = field->object;
+    }
+    const auto* ref = std::get_if<HirSymbolRef>(&expr->payload);
+    return ref != nullptr && symbol_to_local_.contains(ref->symbol);
+  };
+  MirPlace place;
+  if (rooted_at_local(&pointer)) {
+    place = lower_expr_place(pointer);
+  } else {
+    auto value = lower_expr_value(pointer);
+    place.local = declare_local(nullptr, pointer.type, span);
+    emit_effect(span, MirStore{ctx_.alloc<MirPlace>(place), value});
+  }
+  place.projections.push_back({.kind = MirProjectionKind::Deref,
+                               .field_name = {},
+                               .field_index = 0,
+                               .index_value = {}});
+  return place;
+}
+
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 auto MirBuilder::lower_expr_value(const HirExpr& expr) -> MirValueId {
   return std::visit(overloaded{
@@ -556,16 +534,31 @@ auto MirBuilder::lower_expr_value(const HirExpr& expr) -> MirValueId {
         return emit_value(expr, MirFnRef{ref.symbol});
       },
       [&](const HirUnary& un) -> MirValueId {
-        if (un.op == UnaryOp::AddrOf) {
-          auto place = lower_expr_place(*un.operand);
-          return emit_value(expr, MirAddrOf{ctx_.alloc<MirPlace>(place)});
-        }
-        if (un.op == UnaryOp::Deref) {
-          auto place = lower_expr_place(expr);
-          return emit_value(expr, MirLoad{ctx_.alloc<MirPlace>(place)});
-        }
         auto val = lower_expr_value(*un.operand);
         return emit_value(expr, MirUnary{un.op, val});
+      },
+      [&](const HirPtrOp& ptr_op) -> MirValueId {
+        // A read or a write goes through the pointee's place; the other
+        // operations produce a pointer or a flag from the pointer value.
+        if (ptr_op.op == PtrOp::Get) {
+          auto place = deref_place(*ptr_op.pointer, expr.span);
+          return emit_value(expr, MirLoad{ctx_.alloc<MirPlace>(place)});
+        }
+        if (ptr_op.op == PtrOp::Set) {
+          auto place = deref_place(*ptr_op.pointer, expr.span);
+          auto value = lower_expr_value(*ptr_op.argument);
+          emit_effect(expr.span, MirStore{ctx_.alloc<MirPlace>(place), value});
+          return {};
+        }
+        MirValueId pointer;
+        MirValueId argument;
+        if (ptr_op.pointer != nullptr) {
+          pointer = lower_expr_value(*ptr_op.pointer);
+        }
+        if (ptr_op.argument != nullptr) {
+          argument = lower_expr_value(*ptr_op.argument);
+        }
+        return emit_value(expr, MirPtrOp{ptr_op.op, pointer, argument});
       },
       [&](const HirBinary& bin) -> MirValueId {
         auto left = lower_expr_value(*bin.left);
@@ -583,19 +576,33 @@ auto MirBuilder::lower_expr_value(const HirExpr& expr) -> MirValueId {
           type_args = ctx_.alloc<std::vector<const Type*>>(
               call.explicit_type_args);
         }
-        return emit_value(expr, MirCall{callee_val, args, type_args});
+        return emit_value(expr, MirCall{callee_val, args, type_args, call.type_args_binder});
       },
       [&](const HirConstruct& ctor) -> MirValueId {
         auto* field_vals = ctx_.alloc<std::vector<MirValueId>>();
         for (const auto* arg : ctor.args) {
           field_vals->push_back(lower_expr_value(*arg));
         }
-        return emit_value(expr, MirConstruct{ctor.struct_type, field_vals});
+        // The expression's own type is the instantiation being built —
+        // `Box(1)` is a `Box<i32>` — while the class's type as declared
+        // still stands on its parameters.  The backend lays out what is
+        // built, so the construction carries its own type.
+        const auto* built = expr.type != nullptr && expr.type->kind() == TypeKind::Struct
+                                ? static_cast<const TypeStruct*>(expr.type)
+                                : ctor.struct_type;
+        return emit_value(expr, MirConstruct{built, field_vals});
       },
       [&](const HirEnumConstruct& ctor) -> MirValueId {
+        // Evaluated in the order they were written; placed where their
+        // fields are.
         auto* payload_vals = ctx_.alloc<std::vector<MirValueId>>();
-        for (const auto* arg : ctor.payload_args) {
-          payload_vals->push_back(lower_expr_value(*arg));
+        payload_vals->resize(ctor.payload_args.size());
+        for (size_t i = 0; i < ctor.payload_args.size(); ++i) {
+          auto value = lower_expr_value(*ctor.payload_args[i]);
+          const size_t slot = i < ctor.payload_slots.size() ? ctor.payload_slots[i] : i;
+          if (slot < payload_vals->size()) {
+            (*payload_vals)[slot] = value;
+          }
         }
         return emit_value(expr, MirEnumConstruct{
             ctor.enum_type, ctor.variant_index, payload_vals});
@@ -803,42 +810,6 @@ auto MirBuilder::lower_expr_place(const HirExpr& expr) -> MirPlace {
              .field_index = 0,
              .index_value = index_val});
         return base;
-      },
-      [&](const HirUnary& un) -> MirPlace {
-        if (un.op == UnaryOp::Deref) {
-          // Try to lower as a place first (e.g., *local_var).
-          // If that fails (e.g., *fn_call()), lower as a value,
-          // store to a temp, and create a place with Deref.
-          bool operand_is_place =
-              std::holds_alternative<HirSymbolRef>(un.operand->payload) ||
-              std::holds_alternative<HirField>(un.operand->payload) ||
-              std::holds_alternative<HirUnary>(un.operand->payload);
-          if (operand_is_place) {
-            auto base = lower_expr_place(*un.operand);
-            base.projections.push_back(
-                {.kind = MirProjectionKind::Deref,
-                 .field_name = {},
-                 .field_index = 0,
-                 .index_value = {}});
-            return base;
-          }
-          // Operand is a value expression (call, etc.) — store to temp.
-          auto val = lower_expr_value(*un.operand);
-          auto tmp_id = declare_local(nullptr, un.operand->type, expr.span);
-          auto* tmp_place = ctx_.alloc<MirPlace>();
-          tmp_place->local = tmp_id;
-          emit_effect(expr.span, MirStore{tmp_place, val});
-          MirPlace result;
-          result.local = tmp_id;
-          result.projections.push_back(
-              {.kind = MirProjectionKind::Deref,
-               .field_name = {},
-               .field_index = 0,
-               .index_value = {}});
-          return result;
-        }
-        error(expr.span, "expression is not a valid place");
-        return {};
       },
       [&](const auto& /*unused*/) -> MirPlace {
         error(expr.span, "expression is not a valid place");

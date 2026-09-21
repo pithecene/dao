@@ -89,7 +89,6 @@ enum class NodeKind : std::uint8_t {
 
   // Types
   NamedType,
-  PointerType,
   FunctionType,
 
   // Error recovery placeholders
@@ -154,8 +153,6 @@ enum class BinaryOp : std::uint8_t {
 enum class UnaryOp : std::uint8_t {
   Negate, // -
   Not,    // !
-  Deref,  // *
-  AddrOf, // &
 };
 
 // ---------------------------------------------------------------------------
@@ -417,6 +414,13 @@ struct CallExpr {
   std::vector<TypeNode*> type_args;          // Explicit type arguments: f<i32>(x)
   std::vector<std::string_view> arg_names;   // parallel to args; empty string = positional
   std::vector<Span> arg_name_spans;          // parallel to args; zero-length unless named
+  // Whether the type arguments were written on the TYPE rather than on
+  // the callee: `Box<i32>::make(1)` instantiates the class, while
+  // `b.mapped<string>(x)` and `f<i32>(x)` instantiate what they call.
+  // A method's own parameters and its class's both start at position
+  // zero, so which side they were written on is what says whose they
+  // are.
+  bool type_args_name_the_type = false;
 };
 
 struct IndexExpr {
@@ -496,16 +500,12 @@ struct NamedType {
   std::vector<TypeNode*> type_args;
 };
 
-struct PointerType {
-  TypeNode* pointee;
-};
-
 struct FunctionTypeNode {
   std::vector<TypeNode*> param_types;
   TypeNode* return_type;
 };
 
-using TypeNodePayload = std::variant<NamedType, PointerType, FunctionTypeNode>;
+using TypeNodePayload = std::variant<NamedType, FunctionTypeNode>;
 
 // ---------------------------------------------------------------------------
 // Container nodes — arena-allocated.

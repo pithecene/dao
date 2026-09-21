@@ -9,7 +9,7 @@ File
         Identifier a
         Identifier b
   FunctionDecl read
-    Param ptr: *i32
+    Param ptr: Ptr<i32>
     ReturnType: i32
     LetStatement value: i32
       IntLiteral 0
@@ -18,7 +18,9 @@ File
         Target
           Identifier value
         Value
-          UnaryExpr *
-            Identifier ptr
+          CallExpr
+            Callee
+              FieldExpr .get
+                Identifier ptr
     ReturnStatement
       Identifier value

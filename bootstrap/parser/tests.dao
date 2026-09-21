@@ -104,7 +104,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 82
+  let total: i32 = 86
 
   // -----------------------------------------------------------------
   // Expression tests
@@ -667,6 +667,42 @@ fn main(): i32
   else:
     print("FAIL resource_block_two_stmts: expected a ResourceS with a two-statement body")
 
+  // Test 49a: `mode unsafe =>` and its suite parse to a ModeS node
+  let src49a: string = "fn f(): i64\n  let n: i64 = 0\n  mode unsafe =>\n    n = 1\n  return n\n"
+  let r49a: ParseOutput = parse(src49a)
+  if expect_no_parse_errors_po("mode_block_no_err", r49a):
+    pass_count = pass_count + 1
+  let mode_ok: bool = false
+  let mai: i64 = 0
+  while mai < r49a.nodes.length():
+    match r49a.nodes.get(mai):
+      Node::ModeS(name_tidx, body_lp):
+        mode_ok = true
+    mai = mai + 1
+  if mode_ok:
+    print("PASS mode_block_is_ModeS")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL mode_block_is_ModeS: expected a ModeS node")
+
+  // Test 49b: `yield <expr>` parses to a YieldS node
+  let src49b: string = "fn g(): i64\n  yield 1\n  return 0\n"
+  let r49b: ParseOutput = parse(src49b)
+  if expect_no_parse_errors_po("yield_stmt_no_err", r49b):
+    pass_count = pass_count + 1
+  let yield_ok: bool = false
+  let yai: i64 = 0
+  while yai < r49b.nodes.length():
+    match r49b.nodes.get(yai):
+      Node::YieldS(t, v):
+        yield_ok = true
+    yai = yai + 1
+  if yield_ok:
+    print("PASS yield_stmt_is_YieldS")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL yield_stmt_is_YieldS: expected a YieldS node")
+
 
   // -----------------------------------------------------------------
   // Named call arguments
@@ -720,8 +756,6 @@ fn main(): i32
   // -----------------------------------------------------------------
   // The following syntax is explicitly deferred to Tier B:
   //   - conformance blocks (as / deny)
-  //   - mode blocks
-  //   - yield statements
   //   - function types (fn(T): R as a type)
   //   - `where` clauses (generic parameter bounds `<T: A + B>` now parse
   //     and are preserved on GenericParamT; `where` clauses stay deferred)

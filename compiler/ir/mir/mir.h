@@ -87,14 +87,22 @@ struct MirBinary { BinaryOp op; MirValueId lhs; MirValueId rhs; };
 
 struct MirStore { MirPlace* place; MirValueId value; };
 struct MirLoad  { MirPlace* place; };
-struct MirAddrOf { MirPlace* place; };
+
+// A value-producing operation of the compiler-standard Ptr<T>: `New`
+// (no operands), `Offset` (pointer, element count), `Cast` and `IsNull`
+// (pointer).  Reads and writes are MirLoad / MirStore through a Deref
+// projection.  The instruction's type is the result.
+struct MirPtrOp { PtrOp op; MirValueId pointer; MirValueId argument; };
 
 struct MirFieldAccess { MirValueId object; std::string_view field; uint32_t field_index; };
 struct MirIndexAccess { MirValueId object; MirValueId index; };
 
 struct MirFnRef { const Symbol* symbol; };
 struct MirCall  { MirValueId callee; std::vector<MirValueId>* args;
-                  std::vector<const Type*>* explicit_type_args = nullptr; };
+                  std::vector<const Type*>* explicit_type_args = nullptr;
+                  // The declaration those arguments bound: a class for
+                  // `Box<i32>::make(1)`, the callee for `f<i32>(x)`.
+                  const Decl* type_args_binder = nullptr; };
 struct MirConstruct { const TypeStruct* struct_type; std::vector<MirValueId>* field_values; };
 
 struct MirEnumConstruct { const TypeEnum* enum_type; uint32_t variant_index;
@@ -128,7 +136,7 @@ struct MirReturn { MirValueId value; bool has_value; };
 using MirPayload = std::variant<
     MirConstInt, MirConstFloat, MirConstBool, MirConstString,
     MirUnary, MirBinary,
-    MirStore, MirLoad, MirAddrOf,
+    MirStore, MirLoad, MirPtrOp,
     MirFieldAccess, MirIndexAccess,
     MirFnRef, MirCall, MirConstruct,
     MirEnumConstruct, MirEnumDiscriminant, MirEnumPayload,

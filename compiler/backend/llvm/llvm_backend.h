@@ -228,6 +228,9 @@ private:
                                FunctionState& state) -> llvm::Value*;
 
   // Compiler builtin intrinsic lowering.
+  auto pointee_storage_type(const Type* pointee) -> llvm::Type*;
+  auto place_type(const MirPlace& place, const FunctionState& state) -> const Type*;
+  auto lower_ptr_op(const MirPtrOp& p, const MirInst& inst, FunctionState& state) -> bool;
   auto lower_builtin_call(std::string_view name, const MirCall& p,
                           const MirInst& inst,
                           FunctionState& state) -> bool;

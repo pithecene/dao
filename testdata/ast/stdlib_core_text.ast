@@ -1,7 +1,7 @@
 File
   Module core::text
   ExternFunctionDecl __dao_str_from_bytes
-    Param bytes: *u8
+    Param bytes: Ptr<u8>
     Param len: i64
     ReturnType: string
   ClassDecl Builder

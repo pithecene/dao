@@ -1,0 +1,140 @@
+File
+  Module generic_bounds
+  ConceptDecl Show
+    FunctionDecl show
+      Param self
+      ReturnType: string
+  ConceptDecl Twice
+    FunctionDecl twice
+      Param self
+      ReturnType: i32
+  ExtendDecl i32 as Show
+    FunctionDecl show
+      Param self
+      ReturnType: string
+      ExprBody
+        BinaryExpr +
+          StringLiteral "i32 "
+          CallExpr
+            Callee
+              FieldExpr .to_string
+                Identifier self
+  ExtendDecl i32 as Twice
+    FunctionDecl twice
+      Param self
+      ReturnType: i32
+      ExprBody
+        BinaryExpr *
+          Identifier self
+          IntLiteral 2
+  ExtendDecl bool as Show
+    FunctionDecl show
+      Param self
+      ReturnType: string
+      IfStatement
+        Condition
+          Identifier self
+        Then
+          ReturnStatement
+            StringLiteral "bool yes"
+      ReturnStatement
+        StringLiteral "bool no"
+  FunctionDecl describe<T: Show>
+    Param x: T
+    ReturnType: string
+    ExprBody
+      CallExpr
+        Callee
+          FieldExpr .show
+            Identifier x
+  FunctionDecl describe_twice<T: Show + Twice>
+    Param x: T
+    ReturnType: string
+    ExprBody
+      CallExpr
+        Callee
+          FieldExpr .show
+            CallExpr
+              Callee
+                FieldExpr .twice
+                  Identifier x
+  ClassDecl Tally
+    Field count: i32
+    FunctionDecl total
+      Param self
+      ReturnType: i32
+      ExprBody
+        BinaryExpr +
+          FieldExpr .count
+            Identifier self
+          IntLiteral 1
+    FunctionDecl label<T: Show>
+      Param self
+      Param x: T
+      ReturnType: string
+      ExprBody
+        BinaryExpr +
+          BinaryExpr +
+            CallExpr
+              Callee
+                FieldExpr .show
+                  Identifier x
+            StringLiteral " #"
+          CallExpr
+            Callee
+              FieldExpr .to_string
+                CallExpr
+                  Callee
+                    FieldExpr .total
+                      Identifier self
+  FunctionDecl main
+    ReturnType: i32
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier describe
+            Args
+              IntLiteral 21
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier describe
+            Args
+              BoolLiteral true
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier describe_twice
+            Args
+              IntLiteral 21
+    LetStatement t: Tally
+      CallExpr
+        Callee
+          Identifier Tally
+        Args
+          IntLiteral 41
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .label
+                Identifier t
+            Args
+              IntLiteral 7
+    ReturnStatement
+      IntLiteral 0

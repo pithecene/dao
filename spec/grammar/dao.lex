@@ -45,7 +45,6 @@ Reserved punctuation/operators:
 - *
 - /
 - %
-- &
 - !
 - .
 - ,

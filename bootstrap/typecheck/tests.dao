@@ -124,7 +124,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 167
+  let total: i32 = 202
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -261,55 +261,57 @@ fn main(): i32
   else:
     print("FAIL correct_expr_fn: expected 0 diagnostics, got " + i64_to_string(tc_count_diags(r15)))
 
-  // Test 15a: correct_addr_of — &x on an identifier
-  let src15a: string = "fn test(): i32\n  let x: i32 = 1\n  let p: *i32 = &x\n  return 0\n"
+  // Tests 15a-15d: the pointer surface (ADR_RAW_POINTER_SURFACE.md).
+  // A pointer is made by `Ptr<T>::new`, read by `get`, written by
+  // `set`, walked by `offset`, and asked `is_null`; there is no sigil
+  // to take an address with or to read through.
+  let src15a: string = "fn test(): i32\n  let p: Ptr<i32> = Ptr<i32>::new()\n  return 0\n"
   let r15a: TypeCheckResult = typecheck(src15a)
   if tc_count_diags(r15a) == 0:
-    print("PASS correct_addr_of")
+    print("PASS pointer_is_made_by_new")
     pass_count = pass_count + 1
   else:
-    print("FAIL correct_addr_of: expected 0 diagnostics, got " + i64_to_string(tc_count_diags(r15a)))
+    print("FAIL pointer_is_made_by_new: expected 0 diagnostics, got " + i64_to_string(tc_count_diags(r15a)))
 
-  // Test 15b: correct_deref — *p where p: *i32 produces i32
-  let src15b: string = "fn test(): i32\n  let x: i32 = 1\n  let p: *i32 = &x\n  let y: i32 = *p\n  return 0\n"
+  let src15b: string = "fn test(): i32\n  let p: Ptr<i32> = Ptr<i32>::new()\n  mode unsafe =>\n    let y: i32 = p.get()\n  return 0\n"
   let r15b: TypeCheckResult = typecheck(src15b)
   if tc_count_diags(r15b) == 0:
-    print("PASS correct_deref")
+    print("PASS pointer_get_reads_the_pointee")
     pass_count = pass_count + 1
   else:
-    print("FAIL correct_deref: expected 0 diagnostics, got " + i64_to_string(tc_count_diags(r15b)))
+    print("FAIL pointer_get_reads_the_pointee: expected 0 diagnostics, got " + i64_to_string(tc_count_diags(r15b)))
 
-  // Test 15c: err_deref_non_pointer — *x where x: i32 should diagnose
-  let src15c: string = "fn test(): i32\n  let x: i32 = 1\n  let y: i32 = *x\n  return 0\n"
+  // A value of another type is no value of the pointee.
+  let src15c: string = "fn test(): i32\n  let p: Ptr<i32> = Ptr<i32>::new()\n  mode unsafe =>\n    p.set(\"x\")\n  return 0\n"
   let r15c: TypeCheckResult = typecheck(src15c)
-  let found_deref_err: bool = false
+  let found_set_err: bool = false
   let d15c: i64 = 0
   while d15c < r15c.diags.length():
     let dd: Diagnostic = r15c.diags.get(d15c)
-    if dd.message == "cannot dereference non-pointer type i32":
-      found_deref_err = true
+    if dd.message == "Ptr.set writes i32, got string":
+      found_set_err = true
     d15c = d15c + 1
-  if found_deref_err:
-    print("PASS err_deref_non_pointer")
+  if found_set_err:
+    print("PASS pointer_set_checks_the_pointee")
     pass_count = pass_count + 1
   else:
-    print("FAIL err_deref_non_pointer: expected non-pointer deref diagnostic")
+    print("FAIL pointer_set_checks_the_pointee: expected the pointee mismatch diagnostic")
 
-  // Test 15d: err_addr_of_literal — &42 is not an lvalue
-  let src15d: string = "fn test(): i32\n  let p: *i32 = &42\n  return 0\n"
+  // A pointer has the operations the contract froze and no others.
+  let src15d: string = "fn test(): i32\n  let p: Ptr<i32> = Ptr<i32>::new()\n  mode unsafe =>\n    let y: i32 = p.deref()\n  return 0\n"
   let r15d: TypeCheckResult = typecheck(src15d)
-  let found_lvalue_err: bool = false
+  let found_op_err: bool = false
   let d15d: i64 = 0
   while d15d < r15d.diags.length():
     let dd2: Diagnostic = r15d.diags.get(d15d)
-    if dd2.message == "cannot take address of non-lvalue":
-      found_lvalue_err = true
+    if dd2.message == "no operation 'deref' on Ptr<i32>; a pointer has get, set, offset, cast and is_null":
+      found_op_err = true
     d15d = d15d + 1
-  if found_lvalue_err:
-    print("PASS err_addr_of_literal")
+  if found_op_err:
+    print("PASS pointer_has_only_its_own_operations")
     pass_count = pass_count + 1
   else:
-    print("FAIL err_addr_of_literal: expected non-lvalue addr-of diagnostic")
+    print("FAIL pointer_has_only_its_own_operations: expected the unknown-operation diagnostic")
 
   // Test 16: err_assign_to_literal — assignment to non-lvalue
   let src16a: string = "fn test(): i32\n  42 = 1\n  return 0\n"
@@ -1333,7 +1335,7 @@ fn main(): i32
     pass_count = pass_count + 1
   if tc_expect_rejected("extend_signature_names_concept", "concept Eq:\n  fn eq(self, o: Eq): bool\n\nextend i32 as Eq:\n  fn eq(self, o: Eq): bool\n    return true\n"):
     pass_count = pass_count + 1
-  if tc_expect_rejected("concept_is_not_a_type", "concept Eq:\n  fn eq(self, o: Eq): bool\n\nfn f(a: Eq): bool\n  let b: *Eq = &a\n  return true\n"):
+  if tc_expect_rejected("concept_is_not_a_type", "concept Eq:\n  fn eq(self, o: Eq): bool\n\nfn f(a: Eq): bool\n  let b: Ptr<Eq> = Ptr<Eq>::new()\n  return true\n"):
     pass_count = pass_count + 1
   // Every concept's identity is registered before any signature is
   // resolved, so the rule holds whatever the declaration order.
@@ -1343,7 +1345,7 @@ fn main(): i32
     pass_count = pass_count + 1
   if tc_expect_clean("bound_signature_substitutes_concept", "concept Eq:\n  fn eq(self, o: Eq): bool\n\nfn same<T: Eq>(a: T, b: T): bool\n  return a.eq(b)\n"):
     pass_count = pass_count + 1
-  if tc_expect_clean("bound_signature_substitutes_pointer_to_concept", "concept Eq:\n  fn same(self, o: *Eq): bool\n\nfn f<T: Eq>(a: T, p: *T): bool\n  return a.same(p)\n"):
+  if tc_expect_clean("bound_signature_substitutes_pointer_to_concept", "concept Eq:\n  fn same(self, o: Ptr<Eq>): bool\n\nfn f<T: Eq>(a: T, p: Ptr<T>): bool\n  return a.same(p)\n"):
     pass_count = pass_count + 1
   // Two bounds requiring one member: the first bound in declaration
   // order types the access, as the host's constraint search does, so
@@ -1448,10 +1450,10 @@ fn main(): i32
   let dc_pre_pshow: string = "module core::p\nderived concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string\n    return \"n\"\n\nclass P:\n  n: i32\n  fn show(self): bool\n    return true\n"
   if tc_expect_program_errors("other_type_method_never_answers", Vector<SourceInput>::new().push(SourceInput("stdlib/core/p.dao", dc_pre_pshow, true)), "module app::main\nclass P:\n  x: i32\n\nfn f(p: P): string\n  return p.show()\n", "main.dao", 0):
     pass_count = pass_count + 1
-  // The applied self form keeps its pointer wrappers: `*C<T>` is `*U`.
-  if tc_expect_clean("applied_self_pointer_kept", "concept C<T>:\n  fn same(self, o: *C<T>): bool\n\nfn f<U: C<i32>>(x: U, p: *U): bool\n  return x.same(p)\n"):
+  // The applied self form keeps its pointer wrappers: `Ptr<C<T>>` is `Ptr<U>`.
+  if tc_expect_clean("applied_self_pointer_kept", "concept C<T>:\n  fn same(self, o: Ptr<C<T>>): bool\n\nfn f<U: C<i32>>(x: U, p: Ptr<U>): bool\n  return x.same(p)\n"):
     pass_count = pass_count + 1
-  if tc_expect_rejected("applied_self_pointer_not_erased", "concept C<T>:\n  fn same(self, o: *C<T>): bool\n\nfn f<U: C<i32>>(x: U): bool\n  return x.same(x)\n"):
+  if tc_expect_rejected("applied_self_pointer_not_erased", "concept C<T>:\n  fn same(self, o: Ptr<C<T>>): bool\n\nfn f<U: C<i32>>(x: U): bool\n  return x.same(x)\n"):
     pass_count = pass_count + 1
   // A qualified concept name inside a generic argument is no type.
   if tc_expect_program_errors("qualified_concept_in_generic_argument_rejected", Vector<SourceInput>::new().push(SourceInput("lib.dao", "module app::lib\nconcept C:\n  fn f(self): bool\n", false)), "module app::main\nimport app::lib\n\nclass Box<T>:\n  v: T\n\nextern fn consume(x: Box<lib::C>): bool\n", "main.dao", 1):
@@ -1564,7 +1566,7 @@ fn main(): i32
   if tc_expect_rejected("extend_non_concept_rejected", "class Q:\n  x: i32\n\nextend i32 as Q:\n  fn show(self): string -> \"n\"\n"):
     pass_count = pass_count + 1
   // Extends of distinct pointer targets declare distinct methods.
-  if tc_expect_clean("pointer_receiver_extends_distinct", "concept Show:\n  fn show(self): string\n\nextend *i32 as Show:\n  fn show(self): string -> \"a\"\n\nextend *i64 as Show:\n  fn show(self): string -> \"b\"\n"):
+  if tc_expect_clean("pointer_receiver_extends_distinct", "concept Show:\n  fn show(self): string\n\nextend Ptr<i32> as Show:\n  fn show(self): string -> \"a\"\n\nextend Ptr<i64> as Show:\n  fn show(self): string -> \"b\"\n"):
     pass_count = pass_count + 1
   // An invalid extend does not hide the one after it: both are checked.
   if tc_expect_diags("consecutive_extends_each_checked", "concept Show:\n  fn show(self): string\n\nextend i32 as Missing:\n  fn show(self): string -> \"n\"\n\nextend i64 as Show:\n  fn other(self): string -> \"m\"\n", 2):
@@ -1633,6 +1635,119 @@ fn main(): i32
   let dc_wrap: string = "module app::main\nimport app::lib\n\nclass W:\n  p: lib::P\n\nfn f(w: W): string\n  return w.show()\n"
   if tc_expect_program_errors("derived_conformance_survives_local_extend", Vector<SourceInput>::new().push(SourceInput("lib.dao", dc_both, false)), dc_wrap, "main.dao", 0):
     pass_count = pass_count + 1
+  // `mode` and `yield` carry their contract meaning: a dereference needs
+  // an enclosing `mode unsafe =>`; a mode the contract does not define is
+  // rejected, its body still checked; `yield`
+  // is legal only in a `Generator<T>` function, yields `T`, and never
+  // sits in a `resource memory` block; a generator returns bare.
+  if tc_expect_diag_containing("ptr_get_requires_unsafe_mode", "fn test(): i32\n  let p: Ptr<i32> = Ptr<i32>::new()\n  let y: i32 = p.get()\n  return 0\n", "Ptr.get requires 'mode unsafe =>'"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("ptr_set_requires_unsafe_mode", "fn test(): i32\n  let p: Ptr<i32> = Ptr<i32>::new()\n  p.set(1)\n  return 0\n", "Ptr.set requires 'mode unsafe =>'"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("ptr_get_in_unsafe_mode_accepted", "fn test(): i32\n  let p: Ptr<i32> = Ptr<i32>::new()\n  mode unsafe =>\n    let y: i32 = p.get()\n  return 0\n"):
+    pass_count = pass_count + 1
+  // Making a pointer and asking whether it is null touch no memory.
+  if tc_expect_clean("ptr_new_and_is_null_need_no_mode", "fn test(): i32\n  let p: Ptr<i32> = Ptr<i32>::new()\n  let n: bool = p.is_null()\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_diags("unknown_mode_rejected_body_checked", "fn f(): i64\n  mode warp =>\n    let s: string = true\n  return 0\n", 2):
+    pass_count = pass_count + 1
+  if tc_expect_clean("gpu_mode_body_checked", "fn f(): i64\n  mode gpu =>\n    return 1\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_diags("yield_outside_generator", "fn g(): i64\n  yield 1\n  return 0\n", 1):
+    pass_count = pass_count + 1
+  if tc_expect_clean("yield_in_generator", "fn g(): Generator<i32>\n  yield 1\n  return\n"):
+    pass_count = pass_count + 1
+  // A yielded literal keeps its default type (host check_yield).
+  if tc_expect_diag_containing("yield_literal_keeps_default_type", "fn g(): Generator<i64>\n  yield 1\n  return\n", "does not match Generator element type i64"):
+    pass_count = pass_count + 1
+  if tc_expect_diags("yield_type_mismatch", "fn g(): Generator<i64>\n  yield \"s\"\n  return\n", 1):
+    pass_count = pass_count + 1
+  if tc_expect_diags("return_value_in_generator", "fn g(): Generator<i64>\n  return 1\n", 1):
+    pass_count = pass_count + 1
+  if tc_expect_diags("yield_in_resource_block_rejected", "fn g(): Generator<i32>\n  resource memory pool =>\n    yield 1\n  return\n", 1):
+    pass_count = pass_count + 1
+  // `Generator<T>` is a type of its own kind: a call of a generator
+  // function has it (one element type, one generator type), it is no
+  // other type, and it takes exactly one argument, reported once.
+  if tc_expect_clean("generator_call_typed", "fn g(): Generator<i32>\n  yield 1\n  return\n\nfn h(): i32\n  let it: Generator<i32> = g()\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_call_is_no_element", "fn g(): Generator<i32>\n  yield 1\n  return\n\nfn h(): i32\n  let n: i32 = g()\n  return 0\n", "Generator<i32>"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_arity_rejected", "fn g(): Generator<i64, i64>\n  return\n", "exactly one type argument"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("bare_generator_rejected", "fn g(): Generator\n  return\n", "exactly one type argument"):
+    pass_count = pass_count + 1
+  // A parameter annotation is read again for the body: still one report.
+  if tc_expect_diag_containing("generator_parameter_arity_reported_once", "fn f(x: Generator<i64, i64>): i32\n  return 0\n", "exactly one type argument"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_unknown_element_rejected", "fn g(): Generator<Missing>\n  return\n", "unknown type 'Missing'"):
+    pass_count = pass_count + 1
+  // An alias of a generator binds after the alias its element names,
+  // whatever the declaration order, so the element type is kept.
+  if tc_expect_diag_containing("generator_alias_forward_element", "type G = Generator<Element>\ntype Element = i64\n\nfn g(): G\n  yield \"s\"\n  return\n", "does not match Generator element type i64"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_of_concept_alias_rejected", "concept C:\n  fn f(self): i32\n\ntype Bad = Generator<C>\n", "is a concept, not a type"):
+    pass_count = pass_count + 1
+  // A concept's own name inside a generator in its signature means the
+  // conforming type there too.
+  if tc_expect_clean("generator_signature_substitutes_concept", "concept Copies:\n  fn copies(self): Generator<Copies>\n\nextend i32 as Copies:\n  fn copies(self): Generator<i32>\n    yield self\n    return\n"):
+    pass_count = pass_count + 1
+  // A `yield` diagnostic points at its keyword, whatever the operand:
+  // the source is wrapped as `module test`, so `yield` sits at 26.
+  let r_ys: TypeCheckResult = typecheck("fn g(): i64\n  yield [1]\n  return 0\n")
+  let ys_at: i64 = to_i64(-1)
+  let ysi: i64 = 0
+  while ysi < r_ys.diags.length():
+    if index_of(r_ys.diags.get(ysi).message, "only valid inside a generator") >= 0:
+      ys_at = r_ys.diags.get(ysi).span.offset
+    ysi = ysi + 1
+  if ys_at == to_i64(26):
+    print("PASS yield_diagnostic_located")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL yield_diagnostic_located: expected the yield legality diagnostic at offset 26, got " + i64_to_string(ys_at))
+  if tc_expect_diag_containing("generator_alias_unknown_element_rejected", "type Bad = Generator<Missing>\n", "unknown type 'Missing'"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_pointer_unknown_element_rejected", "fn g(): Generator<Ptr<Missing>>\n  return\n", "unknown type 'Missing'"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_unknown_generic_element_rejected", "fn g(): Generator<Missing<i64>>\n  return\n", "unknown type 'Missing'"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_unknown_nested_argument_rejected", "class Box<T>:\n  v: T\n\nfn g(): Generator<Box<Missing>>\n  return\n", "unknown type 'Missing'"):
+    pass_count = pass_count + 1
+  let r_gq: TypeCheckResult = typecheck("enum E:\n  A\n\nfn g(): Generator<E::Missing>\n  return\n")
+  let gq_seen: bool = false
+  let gqi: i64 = 0
+  while gqi < r_gq.diags.length():
+    if index_of(r_gq.diags.get(gqi).message, "unknown type 'Missing'") >= 0:
+      gq_seen = true
+    gqi = gqi + 1
+  if gq_seen:
+    print("PASS generator_qualified_unknown_element_rejected")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL generator_qualified_unknown_element_rejected: expected an unknown type 'Missing' diagnostic")
+  // A generator element is an annotation in its own right: a concept
+  // nested in it is no type, in a bound alias too; in a concept's own
+  // signatures its applied self form is the conforming type, and any
+  // other application of the concept is rejected.
+  if tc_expect_diag_containing("generator_alias_nested_concept_rejected", "class Box<T>:\n  v: T\n\nconcept C:\n  fn f(self): i32\n\ntype Bad = Generator<Box<C>>\n", "is a concept, not a type"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generator_applied_self_substituted", "concept C<T>:\n  fn take(self, g: Generator<C<T>>): bool\n\nfn f<U: C<i32>>(u: U, g: Generator<U>): bool\n  return u.take(g)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("generator_applied_self_mismatch_rejected", "concept C<T>:\n  fn take(self, g: Generator<C<T>>): bool\n\nfn f<U: C<i32>>(u: U, g: Generator<i64>): bool\n  return u.take(g)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_applied_self_wrong_args_rejected", "concept C<T>:\n  fn take(self, g: Generator<C<bool>>): bool\n", "applies only its own type parameters"):
+    pass_count = pass_count + 1
+  // An expression body is a return value, which a generator function
+  // never has (CONTRACT_SYNTAX_SURFACE.md, Generator Functions).
+  if tc_expect_diag_containing("generator_expression_body_rejected", "fn forward(g: Generator<i64>): Generator<i64> -> g\n", "invalid in a generator function"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_expression_method_body_rejected", "class P:\n  x: i32\n  fn forward(self, g: Generator<i64>): Generator<i64> -> g\n", "invalid in a generator function"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_alias_cycle_rejected", "type G = Generator<G>\n", "no resolvable target"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generator_alias_cycle_through_argument_rejected", "class Box<T>:\n  v: T\n\ntype G = Generator<Box<G>>\n", "no resolvable target"):
+    pass_count = pass_count + 1
   let r_unc: TypeCheckResult = typecheck("fn f<T>(x: T): string\n  return x.to_string()\n")
   if tc_count_diags(r_unc) >= 1:
     print("PASS unconstrained_param_member_rejected")
@@ -1655,10 +1770,10 @@ fn main(): i32
   //   - Lambda contextual typing
   //   - List literal type inference
   //   - Try operator (requires generic Option/Result)
-  //   - Deref / addr-of unary operators
+  //   - Addr-of unary operator semantics
   //   - Index expressions
-  //   - Mode blocks; resource-block domain semantics (bodies are checked)
-  //   - Yield / Generator checking
+  //   - Checking rules of `mode gpu` / `mode parallel`; resource-block
+  //     domain semantics beyond `yield` legality (bodies are checked)
   //   - C ABI type validation
   //   - Structural function type comparison
   //   - For-loop element type inference from iterables

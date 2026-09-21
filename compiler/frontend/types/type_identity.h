@@ -21,8 +21,11 @@ namespace dao {
 /// types it was instantiated with, through its substituted fields.
 ///
 /// Types may refer to themselves through a pointer (`class Node: next:
-/// *Node`); a nominal type already being keyed is emitted as a
-/// back-reference rather than followed again.
+/// Ptr<Node>`), and one such type is as many objects as the walk that
+/// built it went round: a cycle, or a cycle with a step of it spelled
+/// out in front.  They hold the same thing forever, so the key reads
+/// them as one — types are told apart by what they hold, not by how
+/// many objects hold it.
 auto type_identity_key(const Type* type) -> std::string;
 
 } // namespace dao

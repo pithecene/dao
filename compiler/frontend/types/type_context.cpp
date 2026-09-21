@@ -131,18 +131,24 @@ auto TypeContext::generator_type(const Type* yield_type) -> const TypeGenerator*
 
 auto TypeContext::make_struct(const Decl* decl_id,
                               std::string_view name,
-                              std::vector<StructField> fields) -> const TypeStruct* {
-  return arena_.alloc<TypeStruct>(decl_id, name, std::move(fields));
+                              std::vector<StructField> fields,
+                              std::vector<const Type*> type_args) -> const TypeStruct* {
+  return arena_.alloc<TypeStruct>(decl_id, name, std::move(fields), std::move(type_args));
 }
 
 auto TypeContext::make_struct_shell(const Decl* decl_id, std::string_view name) -> TypeStruct* {
   return arena_.alloc<TypeStruct>(decl_id, name, std::vector<StructField>{});
 }
 
+auto TypeContext::make_enum_shell(const Decl* decl_id, std::string_view name) -> TypeEnum* {
+  return arena_.alloc<TypeEnum>(decl_id, name, std::vector<EnumVariant>{});
+}
+
 auto TypeContext::make_enum(const Decl* decl_id,
                             std::string_view name,
-                            std::vector<EnumVariant> variants) -> const TypeEnum* {
-  return arena_.alloc<TypeEnum>(decl_id, name, std::move(variants));
+                            std::vector<EnumVariant> variants,
+                            std::vector<const Type*> type_args) -> const TypeEnum* {
+  return arena_.alloc<TypeEnum>(decl_id, name, std::move(variants), std::move(type_args));
 }
 
 } // namespace dao

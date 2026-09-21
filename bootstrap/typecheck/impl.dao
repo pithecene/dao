@@ -19,22 +19,25 @@ module bootstrap::typecheck
 // module visibility, method dispatch by the receiver's type (a class's
 // own methods and extends, over a program-wide index), generic
 // parameter bounds and member access through them, contextual literal
-// typing, static factory calls.  A member a concept provides through a
+// typing, static factory calls, `mode unsafe =>` as the context a
+// dereference requires, and generators (`Generator<T>` as a type of its
+// own kind, `yield` checked against it).  A member a concept provides through a
 // derived conformance or a bound is typed here and rejected by HIR
 // until its implementation is synthesized or instantiated.
 //
 // Tier B deferrals:
 //   - Generic type inference, substitution, instantiation (TGenericParam
 //     types are registered; a generic annotation other than a concept's
-//     self form reads as unresolved; full monomorphization is deferred)
+//     self form and `Generator<T>` reads as unresolved; full
+//     monomorphization is deferred)
 //   - Concept default method bodies (unchecked, as in the host)
 //   - Lambda contextual typing
 //   - List literal type inference
 //   - Try operator (requires generic Option/Result)
-//   - Addr-of unary operator semantics
 //   - Index expressions
-//   - Mode blocks; resource-block domain semantics (bodies are checked)
-//   - Yield / Generator checking
+//   - Checking rules of `mode gpu` / `mode parallel` (their bodies are
+//     checked as blocks); resource-block domain semantics beyond `yield`
+//     legality (bodies are checked)
 //   - C ABI type validation
 //
 // The checker state is `TC` (the module's parse context) and `TS` (the
@@ -64,12 +67,16 @@ class TC:
   exports: ExportTables          // cross-module export lookup (D4)
 
 // Mutable type checker state — threaded through all operations.
-// The context of the function body being checked: what a `return` or a
-// `break` is measured against.  Entered per function body
-// (tc_enter_fn_ctx) and restored after it.
+// The context of the function body being checked: what a `return`,
+// `break`, `yield`, or dereference is measured against.  Entered per
+// function body (tc_enter_fn_ctx) and restored after it.
 class CheckCtx:
   return_type: i64      // the function's return type, -1 when unresolved
   loop_depth: i64       // enclosing loops — `break` legality
+  in_generator: i64     // 1 when the return type is a TGenerator
+  gen_elem: i64         // that generator's element type, -1 when unresolved
+  unsafe_depth: i64     // enclosing `mode unsafe =>` blocks — dereference legality
+  resource_depth: i64   // enclosing `resource memory` blocks — `yield` legality
 
 class TS:
   tc: TC
@@ -90,6 +97,7 @@ class Registry:
   conform: Conformance          // conformance state (explicit extends, derived concepts)
   methods: HashMap<i64>         // method dispatch by owner type and name (dispatch_key_*), filled by tc_bind_self
   index: ProgramIndex           // the resolved program's declaration indexes
+  generators: HashMap<i64>      // the generator type per element type index (find_or_add_generator_type)
 
 
 // The registries for a resolved program: the declaration indexes
@@ -119,7 +127,7 @@ fn registry_new(symbols: Vector<Symbol>, modules: Vector<ModuleEntry>): Registry
     if me.is_prelude:
       preludes = preludes.set(i64_to_string(me.module_id), to_i64(1))
     mi = mi + 1
-  return Registry(HashMap<i64>::new(), HashMap<i64>::new(), conformance_empty(), HashMap<i64>::new(), ProgramIndex(type_syms, callables, members, preludes))
+  return Registry(HashMap<i64>::new(), HashMap<i64>::new(), conformance_empty(), HashMap<i64>::new(), ProgramIndex(type_syms, callables, members, preludes), HashMap<i64>::new())
 
 fn conformance_empty(): Conformance
   return Conformance(HashMap<i64>::new(), Vector<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new())
@@ -130,16 +138,19 @@ fn registry_empty(): Registry
   return registry_new(Vector<Symbol>::new(), Vector<ModuleEntry>::new())
 
 fn reg_with_expr_types(rg: Registry, m: HashMap<i64>): Registry
-  return Registry(m, rg.variant_set, rg.conform, rg.methods, rg.index)
+  return Registry(m, rg.variant_set, rg.conform, rg.methods, rg.index, rg.generators)
 
 fn reg_with_variant_set(rg: Registry, m: HashMap<i64>): Registry
-  return Registry(rg.expr_types, m, rg.conform, rg.methods, rg.index)
+  return Registry(rg.expr_types, m, rg.conform, rg.methods, rg.index, rg.generators)
 
 fn reg_with_conform(rg: Registry, c: Conformance): Registry
-  return Registry(rg.expr_types, rg.variant_set, c, rg.methods, rg.index)
+  return Registry(rg.expr_types, rg.variant_set, c, rg.methods, rg.index, rg.generators)
 
 fn reg_with_methods(rg: Registry, m: HashMap<i64>): Registry
-  return Registry(rg.expr_types, rg.variant_set, rg.conform, m, rg.index)
+  return Registry(rg.expr_types, rg.variant_set, rg.conform, m, rg.index, rg.generators)
+
+fn reg_with_generators(rg: Registry, m: HashMap<i64>): Registry
+  return Registry(rg.expr_types, rg.variant_set, rg.conform, rg.methods, rg.index, m)
 
 // The "Type" symbol the declaration at `decl_idx` of the module being
 // checked introduces (a class, enum, alias, or concept), or -1 — a
@@ -163,7 +174,7 @@ fn member_sym_of(index: ProgramIndex, module_id: i64, decl_idx: i64, kind: strin
 // tables, with no diagnostics and no body context yet.  The one place a
 // TS is built field by field; every other site goes through here.
 fn ts_new(tc: TC, types: Vector<DaoType>, type_info: Vector<i64>, sym_types: Vector<i64>, reg: Registry): TS
-  return TS(tc, types, type_info, sym_types, Vector<Diagnostic>::new(), CheckCtx(to_i64(-1), to_i64(0)), reg)
+  return TS(tc, types, type_info, sym_types, Vector<Diagnostic>::new(), ctx_outside_fn(), reg)
 
 // The program's conformance state, accumulated across every module
 // before any body is checked: the conformances known — explicit
@@ -243,7 +254,17 @@ fn ts_set_sym_type(ts: TS, sym_idx: i64, type_idx: i64): TS
   return ts
 
 fn ctx_with_loop(c: CheckCtx, v: i64): CheckCtx
-  return CheckCtx(c.return_type, v)
+  return CheckCtx(c.return_type, v, c.in_generator, c.gen_elem, c.unsafe_depth, c.resource_depth)
+
+fn ctx_with_unsafe(c: CheckCtx, v: i64): CheckCtx
+  return CheckCtx(c.return_type, c.loop_depth, c.in_generator, c.gen_elem, v, c.resource_depth)
+
+fn ctx_with_resource(c: CheckCtx, v: i64): CheckCtx
+  return CheckCtx(c.return_type, c.loop_depth, c.in_generator, c.gen_elem, c.unsafe_depth, v)
+
+// The context outside any function body: no return type, no nesting.
+fn ctx_outside_fn(): CheckCtx
+  return CheckCtx(to_i64(-1), to_i64(0), to_i64(0), to_i64(-1), to_i64(0), to_i64(0))
 
 fn ts_inc_loop_depth(ts: TS): TS
   ts.ctx = ctx_with_loop(ts.ctx, ts.ctx.loop_depth + 1)
@@ -253,15 +274,29 @@ fn ts_dec_loop_depth(ts: TS): TS
   ts.ctx = ctx_with_loop(ts.ctx, ts.ctx.loop_depth - 1)
   return ts
 
-// Enter a function body: its return type from the function's type;
-// loop nesting starts at zero for the body.
+// Enter a function body: its return type from the function's type.  A
+// function whose return type is a generator (`Generator<T>`, the
+// compiler-provided coroutine type, CONTRACT_SYNTAX_SURFACE.md) is a
+// generator body: `yield` is legal, the generator's element type is what
+// a yielded value must have, and a valued `return` is invalid.  Loop,
+// mode, and resource nesting start at zero for the body.
 fn tc_enter_fn_ctx(ts: TS, fn_ti: i64): TS
   let r: TS = ts
   let ret_ti: i64 = to_i64(-1)
   if fn_ti >= 0:
-    let fn_type: DaoType = r.types.get(fn_ti)
-    ret_ti = fn_type.ret_type
-  r.ctx = CheckCtx(ret_ti, to_i64(0))
+    if fn_ti < r.types.length():
+      let fn_type: DaoType = r.types.get(fn_ti)
+      ret_ti = fn_type.ret_type
+  let in_gen: i64 = 0
+  let gen_elem: i64 = to_i64(-1)
+  if ret_ti >= 0:
+    if ret_ti < r.types.length():
+      let rt: DaoType = r.types.get(ret_ti)
+      match rt.kind:
+        TypeKind::TGenerator:
+          in_gen = 1
+          gen_elem = rt.pointee
+  r.ctx = CheckCtx(ret_ti, to_i64(0), in_gen, gen_elem, to_i64(0), to_i64(0))
   return r
 
 fn ts_push_type_info(ts: TS, val: i64): TS
@@ -309,6 +344,8 @@ fn ts_node_span(ts: TS, node_idx: i64): Span
       return Span(to_i64(0), to_i64(1))
     Node::BreakS(tidx):
       return ts_tok_span(ts, tidx)
+    Node::YieldS(yield_tidx, val_node):
+      return ts_tok_span(ts, yield_tidx)
     Node::NamedT(tidx):
       return ts_tok_span(ts, tidx)
     Node::QualNameE(seg_lp, seg_count):
@@ -474,6 +511,20 @@ fn is_void_type(ts: TS, type_idx: i64): bool
 fn types_equal(ts: TS, a: i64, b: i64): bool
   if a == b:
     return true
+  // Two generators, one of whose element type is unresolved, compare as
+  // an unresolved type does everywhere else: never a reported mismatch.
+  if a >= 0 and b >= 0 and a < ts.types.length() and b < ts.types.length():
+    let ta: DaoType = ts.types.get(a)
+    let tb: DaoType = ts.types.get(b)
+    if is_generator_kind(ta) and is_generator_kind(tb):
+      if ta.pointee < 0 or tb.pointee < 0:
+        return true
+  return false
+
+fn is_generator_kind(t: DaoType): bool
+  match t.kind:
+    TypeKind::TGenerator:
+      return true
   return false
 
 fn type_name(ts: TS, type_idx: i64): string
@@ -588,19 +639,41 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
             return TypeR(ts2, tr.type_idx)
         gi = gi + 1
       return TypeR(ts, to_i64(-1))
-    Node::PointerT(inner):
-      let inner_r: TypeR = resolve_ast_type(ts, inner)
-      if inner_r.type_idx < 0:
-        return TypeR(inner_r.ts, to_i64(-1))
-      return find_or_add_pointer_type(inner_r.ts, inner_r.type_idx)
     Node::GenericT(name_tidx, args_lp, arg_count):
-      // A generic annotation `G<Args>` stays unresolved for now.  Typing
-      // it to G's head lets a generic value flow into the per-module
-      // `types` / `type_info` / token arrays under a type index a wider
-      // module registered (a prelude `Vector`), overrunning a smaller
-      // program module's arrays across many reads.  Safe cross-module
-      // generic layout is later program-level work; until then a generic
-      // annotation reads as unresolved, as before.
+      // `Generator<T>` is the compiler-provided coroutine type
+      // (CONTRACT_SYNTAX_SURFACE.md), declared by no module: it is a type
+      // of its own kind whose element is T, so a generator function's
+      // signature, its calls, and HIR all carry it.  A malformed spelling
+      // reads as unresolved here and is diagnosed once, where the
+      // annotation is resolved (generator_spelling_diags).
+      if is_generator_head(ts, name_tidx):
+        if arg_count != 1:
+          return TypeR(ts, to_i64(-1))
+        let gargs: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+        let elem_r: TypeR = resolve_ast_type(ts, gargs.get(0))
+        let gen_r: TypeR = find_or_add_generator_type(elem_r.ts, elem_r.type_idx)
+        // Recorded under the annotation node, so HIR reads the generator
+        // type an annotation denotes (enum payloads) instead of
+        // re-resolving the spelling.
+        return TypeR(ts_set_expr_type(gen_r.ts, node_idx, gen_r.type_idx), gen_r.type_idx)
+      // `Ptr<T>` is the pointer surface the contract froze
+      // (ADR_RAW_POINTER_SURFACE.md), the other head read here rather
+      // than deferred: a pointer's pointee is what `get` reads, `set`
+      // writes, and `offset` walks.
+      if ts_tok_name(ts, name_tidx) == "Ptr":
+        let pargs: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+        if pargs.length() == 1:
+          let pointee_r: TypeR = resolve_ast_type(ts, pargs.get(0))
+          if pointee_r.type_idx < 0:
+            return TypeR(pointee_r.ts, to_i64(-1))
+          return find_or_add_pointer_type(pointee_r.ts, pointee_r.type_idx)
+      // Any other generic annotation `G<Args>` stays unresolved for now.
+      // Typing it to G's head lets a generic value flow into the
+      // per-module `types` / `type_info` / token arrays under a type index
+      // a wider module registered (a prelude `Vector`), overrunning a
+      // smaller program module's arrays across many reads.  Safe
+      // cross-module generic layout is later program-level work; until
+      // then a generic annotation reads as unresolved, as before.
       return TypeR(ts, to_i64(-1))
     Node::QualNameE(seg_lp, seg_count):
       // A qualified type (`core::Printable`): the resolver bound its last
@@ -617,8 +690,103 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
       return TypeR(ts, to_i64(-1))
   return TypeR(ts, to_i64(-1))
 
+/// The pointee of a pointer annotation (`Ptr<T>`), or -1 where the
+/// annotation names no pointer.  A pointer is a generic annotation like
+/// any other in the AST (ADR_RAW_POINTER_SURFACE.md), so the places
+/// that look THROUGH one ask here rather than each reading the head.
+fn pointer_annotation_pointee(ts: TS, node_idx: i64): i64
+  if node_idx < 0:
+    return to_i64(-1)
+  let node: Node = ts.tc.nodes.get(node_idx)
+  match node:
+    Node::GenericT(name_tidx, args_lp, arg_count):
+      if ts_tok_name(ts, name_tidx) == "Ptr":
+        let args: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+        if args.length() == 1:
+          return args.get(0)
+  return to_i64(-1)
+
+// Whether a type head token names the compiler-provided `Generator`:
+// the predeclared builtin symbol (no module may declare the name), or,
+// where no resolution ran, the bare spelling.
+fn is_generator_head(ts: TS, name_tidx: i64): bool
+  if ts_tok_name(ts, name_tidx) != "Generator":
+    return false
+  let sym: i64 = lookup_use(ts, name_tidx)
+  if sym < 0:
+    return true
+  if sym >= ts.tc.symbols.length():
+    return false
+  return symbol_kind_name(ts.tc.symbols.get(sym).kind) == "Builtin"
+
+// Diagnose a malformed `Generator` nested in an ordinary annotation's
+// spelling (through pointers and generic arguments): bare `Generator`,
+// any argument count but one, or an element naming no type at all.  A
+// generator at the top of an annotation is resolve_generator_annotation's.
+// Run where an annotation is resolved, once per annotation site, so a
+// signature re-read for its body reports nothing twice.
+fn generator_spelling_diags(ts: TS, node_idx: i64): TS
+  if node_idx < 0:
+    return ts
+  let through_ptr: i64 = pointer_annotation_pointee(ts, node_idx)
+  if through_ptr >= 0:
+    return generator_spelling_diags(ts, through_ptr)
+  let node: Node = ts.tc.nodes.get(node_idx)
+  match node:
+    Node::NamedT(tidx):
+      if is_generator_head(ts, tidx):
+        return ts_add_diag(ts, ts_tok_span(ts, tidx), "Generator requires exactly one type argument")
+    Node::GenericT(name_tidx, args_lp, arg_count):
+      let args: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+      let r: TS = ts
+      if is_generator_head(r, name_tidx):
+        if arg_count != 1:
+          return ts_add_diag(r, ts_tok_span(r, name_tidx), "Generator requires exactly one type argument")
+        let unknown_tidx: i64 = unknown_named_type(r, args.get(0))
+        if unknown_tidx >= 0:
+          return ts_add_diag(r, ts_tok_span(r, unknown_tidx), "unknown type '" + ts_tok_name(r, unknown_tidx) + "' in Generator")
+      let ai: i64 = 0
+      while ai < args.length():
+        r = generator_spelling_diags(r, args.get(ai))
+        ai = ai + 1
+      return r
+  return ts
+
+// The first name token of an annotation, through its pointers and
+// generic arguments, that names no type at all (no builtin, no symbol)
+// — a plain name or a generic head — or -1.
+fn unknown_named_type(ts: TS, node_idx: i64): i64
+  if node_idx < 0:
+    return to_i64(-1)
+  let through_ptr: i64 = pointer_annotation_pointee(ts, node_idx)
+  if through_ptr >= 0:
+    return unknown_named_type(ts, through_ptr)
+  match ts.tc.nodes.get(node_idx):
+    Node::NamedT(tidx):
+      if builtin_type_index(ts_tok_name(ts, tidx)) < 0 and lookup_use(ts, tidx) < 0:
+        return tidx
+    Node::GenericT(name_tidx, args_lp, arg_count):
+      if is_generator_head(ts, name_tidx) == false and lookup_use(ts, name_tidx) < 0:
+        return name_tidx
+      let args: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+      let ai: i64 = 0
+      while ai < args.length():
+        let in_arg: i64 = unknown_named_type(ts, args.get(ai))
+        if in_arg >= 0:
+          return in_arg
+        ai = ai + 1
+    Node::QualNameE(seg_lp, seg_count):
+      // The resolver binds a qualified type by its last segment.
+      let qsegs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+      if qsegs.length() > 0:
+        let last: i64 = qsegs.get(qsegs.length() - 1)
+        if lookup_use(ts, last) < 0:
+          return last
+  return to_i64(-1)
+
 // The concept a type names — the type itself, or the pointee of a
-// pointer to one, recursively — or -1 when it names none.
+// pointer to one or the element of a generator of one, recursively — or
+// -1 when it names none.
 fn concept_named_by(ts: TS, ti: i64): i64
   if ti < 0:
     return to_i64(-1)
@@ -630,6 +798,8 @@ fn concept_named_by(ts: TS, ti: i64): i64
       return ti
     TypeKind::TPointer:
       return concept_named_by(ts, t.pointee)
+    TypeKind::TGenerator:
+      return concept_named_by(ts, t.pointee)
   return to_i64(-1)
 
 // The first concept other than `allowed` an annotation names anywhere
@@ -640,10 +810,11 @@ fn concept_named_by(ts: TS, ti: i64): i64
 fn annotation_names_concept(ts: TS, node_idx: i64, allowed: i64): i64
   if node_idx < 0:
     return to_i64(-1)
+  let through_ptr: i64 = pointer_annotation_pointee(ts, node_idx)
+  if through_ptr >= 0:
+    return annotation_names_concept(ts, through_ptr, allowed)
   let node: Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node::PointerT(inner):
-      return annotation_names_concept(ts, inner, allowed)
     Node::NamedT(tidx):
       return concept_other_than(ts, sym_type_at(ts, lookup_use(ts, tidx)), allowed)
     Node::QualNameE(seg_lp, seg_count):
@@ -675,11 +846,10 @@ fn concept_other_than(ts: TS, ti: i64, allowed: i64): i64
 // The applied self form (see resolve_annotation) as a type: the
 // concept itself, wrapped in the annotation's pointers.
 fn resolve_applied_self(ts: TS, node_idx: i64, self_concept: i64): TypeR
-  let node: Node = ts.tc.nodes.get(node_idx)
-  match node:
-    Node::PointerT(inner):
-      let inner_r: TypeR = resolve_applied_self(ts, inner, self_concept)
-      return find_or_add_pointer_type(inner_r.ts, inner_r.type_idx)
+  let through_ptr: i64 = pointer_annotation_pointee(ts, node_idx)
+  if through_ptr >= 0:
+    let inner_r: TypeR = resolve_applied_self(ts, through_ptr, self_concept)
+    return find_or_add_pointer_type(inner_r.ts, inner_r.type_idx)
   return TypeR(ts, self_concept)
 
 // The type-parameter nodes the concept `concept_ti` declares (its
@@ -737,10 +907,11 @@ fn concept_type_param_list(ts: TS, concept_ti: i64): string
 fn applied_self_matches_params(ts: TS, node_idx: i64, concept_ti: i64): bool
   if node_idx < 0:
     return false
+  let through_ptr: i64 = pointer_annotation_pointee(ts, node_idx)
+  if through_ptr >= 0:
+    return applied_self_matches_params(ts, through_ptr, concept_ti)
   let node: Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node::PointerT(inner):
-      return applied_self_matches_params(ts, inner, concept_ti)
     Node::GenericT(name_tidx, args_lp, arg_count):
       let tparams: Vector<i64> = concept_type_params(ts, concept_ti)
       let args: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
@@ -769,10 +940,11 @@ fn applied_self_matches_params(ts: TS, node_idx: i64, concept_ti: i64): bool
 fn generic_head_concept(ts: TS, node_idx: i64): i64
   if node_idx < 0:
     return to_i64(-1)
+  let through_ptr: i64 = pointer_annotation_pointee(ts, node_idx)
+  if through_ptr >= 0:
+    return generic_head_concept(ts, through_ptr)
   let node: Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node::PointerT(inner):
-      return generic_head_concept(ts, inner)
     Node::GenericT(name_tidx, args_lp, arg_count):
       return concept_named_by(ts, sym_type_at(ts, lookup_use(ts, name_tidx)))
   return to_i64(-1)
@@ -784,7 +956,10 @@ fn generic_head_concept(ts: TS, node_idx: i64): i64
 // not stand for one.  Such an annotation is diagnosed and reads as
 // unresolved.
 fn resolve_annotation(ts: TS, node_idx: i64, self_concept: i64): TypeR
-  let tr: TypeR = resolve_ast_type(ts, node_idx)
+  if generator_under_pointers(ts, node_idx):
+    return resolve_generator_annotation(ts, node_idx, self_concept)
+  let tr0: TypeR = resolve_ast_type(ts, node_idx)
+  let tr: TypeR = TypeR(generator_spelling_diags(tr0.ts, node_idx), tr0.type_idx)
   let named: i64 = concept_named_by(tr.ts, tr.type_idx)
   if named == self_concept and named >= 0:
     return tr
@@ -814,6 +989,52 @@ fn resolve_annotation(ts: TS, node_idx: i64, self_concept: i64): TypeR
   let cname: string = type_name(tr.ts, named)
   let r: TS = ts_add_diag(tr.ts, ts_node_span(tr.ts, node_idx), "'" + cname + "' is a concept, not a type; use it as a bound (<T: " + cname + ">)")
   return TypeR(r, to_i64(-1))
+
+// Whether an annotation is a `Generator` spelling, bare or applied,
+// under any pointers.
+fn generator_under_pointers(ts: TS, node_idx: i64): bool
+  if node_idx < 0:
+    return false
+  let through_ptr: i64 = pointer_annotation_pointee(ts, node_idx)
+  if through_ptr >= 0:
+    return generator_under_pointers(ts, through_ptr)
+  match ts.tc.nodes.get(node_idx):
+    Node::NamedT(tidx):
+      return is_generator_head(ts, tidx)
+    Node::GenericT(name_tidx, args_lp, arg_count):
+      return is_generator_head(ts, name_tidx)
+  return false
+
+// A generator annotation (under any pointers), resolved element first:
+// the element is an annotation in its own right, held to every rule
+// resolve_annotation applies — a concept is no type, the applied self
+// form in a concept's own signatures, unknown names — and the generator
+// wraps what it resolved to.  An element that resolves to nothing still
+// makes a generator, so the function stays a generator body.
+fn resolve_generator_annotation(ts: TS, node_idx: i64, self_concept: i64): TypeR
+  let through_ptr: i64 = pointer_annotation_pointee(ts, node_idx)
+  if through_ptr >= 0:
+    let ir: TypeR = resolve_generator_annotation(ts, through_ptr, self_concept)
+    if ir.type_idx < 0:
+      return ir
+    return find_or_add_pointer_type(ir.ts, ir.type_idx)
+  match ts.tc.nodes.get(node_idx):
+    Node::NamedT(tidx):
+      return TypeR(ts_add_diag(ts, ts_tok_span(ts, tidx), "Generator requires exactly one type argument"), to_i64(-1))
+    Node::GenericT(name_tidx, args_lp, arg_count):
+      if arg_count != 1:
+        return TypeR(ts_add_diag(ts, ts_tok_span(ts, name_tidx), "Generator requires exactly one type argument"), to_i64(-1))
+      let elem: i64 = read_list(ts.tc.idx_data, args_lp).get(0)
+      let diags_before: i64 = ts.diags.length()
+      let er: TypeR = resolve_annotation(ts, elem, self_concept)
+      let r: TS = er.ts
+      if er.type_idx < 0 and r.diags.length() == diags_before:
+        let unknown_tidx: i64 = unknown_named_type(r, elem)
+        if unknown_tidx >= 0:
+          r = ts_add_diag(r, ts_tok_span(r, unknown_tidx), "unknown type '" + ts_tok_name(r, unknown_tidx) + "' in Generator")
+      let gr: TypeR = find_or_add_generator_type(r, er.type_idx)
+      return TypeR(ts_set_expr_type(gr.ts, node_idx, gr.type_idx), gr.type_idx)
+  return TypeR(ts, to_i64(-1))
 
 // =========================================================================
 // Section 42: Pass 1 — Register declarations
@@ -1016,7 +1237,8 @@ fn tc_bind_generic_bounds(ts: TS, tparams_lp: i64): TS
 // — is bound after that one (a depth-first walk over the program's
 // alias graph with a cycle guard), so every chain costs its length.
 // The maps: "d:<sym>" → the alias's declaration, "m:<sym>" → its module,
-// "t:<sym>" → the symbol its target's head names; `order` lists the
+// "t:<sym>" → how many symbols its target's spelling names and
+// "t:<sym>:<j>" → the j-th (annotation_symbol_refs); `order` lists the
 // alias symbols.  tc_check_aliases then diagnoses what could not bind.
 class AliasGraph:
   edges: HashMap<i64>
@@ -1043,7 +1265,12 @@ fn alias_graph_of(p: Program, acc: TcAccum): AliasGraph
                 let k: string = i64_to_string(sym_idx)
                 g.edges = g.edges.set("d:" + k, decl_idx)
                 g.edges = g.edges.set("m:" + k, mid)
-                g.edges = g.edges.set("t:" + k, annotation_head_symbol(ts, target_type))
+                let refs: Vector<i64> = annotation_symbol_refs(ts, target_type, Vector<i64>::new())
+                g.edges = g.edges.set("t:" + k, refs.length())
+                let ri: i64 = 0
+                while ri < refs.length():
+                  g.edges = g.edges.set("t:" + k + ":" + i64_to_string(ri), refs.get(ri))
+                  ri = ri + 1
                 g.order = g.order.push(sym_idx)
           i = i + 1
     ti = ti + 1
@@ -1064,17 +1291,25 @@ fn tc_resolve_aliases(p: Program, acc: TcAccum): TcAccum
     i = i + 1
   return st.acc
 
-// Bind one alias, after the alias its target names.  A cycle leaves
-// its members unbound.
+// Bind one alias, after every alias its target's spelling names.  An
+// alias naming an alias that stayed unbound — a cycle, reached through
+// pointers, generic arguments, or a generator's element — stays unbound
+// itself, and is diagnosed as such.
 fn bind_alias(p: Program, g: AliasGraph, sym_idx: i64, st: AliasBindR): AliasBindR
   let k: string = i64_to_string(sym_idx)
   if hm_get_or(st.marks, k, to_i64(0)) != 0:
     return st
   let r: AliasBindR = AliasBindR(st.acc, st.marks.set(k, to_i64(2)))
-  let target_sym: i64 = hm_get_or(g.edges, "t:" + k, to_i64(-1))
-  if target_sym >= 0:
-    if g.edges.contains("d:" + i64_to_string(target_sym)):
-      r = bind_alias(p, g, target_sym, r)
+  let target_unbound: bool = false
+  let ref_count: i64 = hm_get_or(g.edges, "t:" + k, to_i64(0))
+  let ri: i64 = 0
+  while ri < ref_count:
+    let ref_sym: i64 = hm_get_or(g.edges, "t:" + k + ":" + i64_to_string(ri), to_i64(-1))
+    if ref_sym >= 0 and g.edges.contains("d:" + i64_to_string(ref_sym)):
+      r = bind_alias(p, g, ref_sym, r)
+      if vec_i64_get(r.acc.sym_types, ref_sym) < 0:
+        target_unbound = true
+    ri = ri + 1
   let mid: i64 = hm_get_or(g.edges, "m:" + k, to_i64(-1))
   let decl_idx: i64 = hm_get_or(g.edges, "d:" + k, to_i64(-1))
   let ts: TS = ts_new(build_module_tc(p, mid), r.acc.types, r.acc.type_info, r.acc.sym_types, r.acc.reg)
@@ -1084,31 +1319,39 @@ fn bind_alias(p: Program, g: AliasGraph, sym_idx: i64, st: AliasBindR): AliasBin
       let target_r: TypeR = resolve_ast_type(ts, target_type)
       ts = target_r.ts
       let ti: i64 = to_i64(-1)
-      if target_r.type_idx >= 0 and concept_named_by(ts, target_r.type_idx) < 0:
+      if target_unbound == false and target_r.type_idx >= 0 and concept_named_by(ts, target_r.type_idx) < 0:
         ti = target_r.type_idx
       ts = ts_set_sym_type(ts, sym_idx, ti)
   let acc2: TcAccum = TcAccum(ts.types, ts.type_info, ts.sym_types, ts.reg, r.acc.diags)
   return AliasBindR(acc2, r.marks.set(k, to_i64(1)))
 
-// The symbol an annotation's head names (through pointers; a
-// qualified name by its last segment), or -1.
-fn annotation_head_symbol(ts: TS, node_idx: i64): i64
+// Every symbol an annotation's spelling names — through pointers,
+// generic heads and their arguments (a generator's element among them),
+// a qualified name by its last segment — appended to `out`.
+fn annotation_symbol_refs(ts: TS, node_idx: i64, out: Vector<i64>): Vector<i64>
   if node_idx < 0:
-    return to_i64(-1)
+    return out
+  let through_ptr: i64 = pointer_annotation_pointee(ts, node_idx)
+  if through_ptr >= 0:
+    return annotation_symbol_refs(ts, through_ptr, out)
   let node: Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node::PointerT(inner):
-      return annotation_head_symbol(ts, inner)
     Node::NamedT(tidx):
-      return lookup_use(ts, tidx)
+      return out.push(lookup_use(ts, tidx))
     Node::GenericT(name_tidx, args_lp, arg_count):
-      return lookup_use(ts, name_tidx)
+      let acc: Vector<i64> = out.push(lookup_use(ts, name_tidx))
+      let args: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+      let ai: i64 = 0
+      while ai < args.length():
+        acc = annotation_symbol_refs(ts, args.get(ai), acc)
+        ai = ai + 1
+      return acc
     Node::QualNameE(seg_lp, seg_count):
       let qsegs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
       if qsegs.length() == 0:
-        return to_i64(-1)
-      return lookup_use(ts, qsegs.get(qsegs.length() - 1))
-  return to_i64(-1)
+        return out
+      return out.push(lookup_use(ts, qsegs.get(qsegs.length() - 1)))
+  return out
 
 // An alias the walk could not bind names a concept (diagnosed as
 // such), an unknown type, or an alias cycle: never a silent unresolved
@@ -1122,11 +1365,14 @@ fn tc_check_aliases(ts: TS, decls: Vector<i64>): TS
     match node:
       Node::TypeAliasD(name_tidx, target_type):
         let sym_idx: i64 = type_sym_of_decl(r, decl_idx)
-        if sym_idx >= 0 and sym_type_at(r, sym_idx) < 0:
+        // Every alias's target is held to the annotation rules once (the
+        // walk bound it without diagnostics: a generator of an invalid
+        // element binds); one left unbound is also reported as such.
+        if sym_idx >= 0:
           let diags_before: i64 = r.diags.length()
           let target_r: TypeR = resolve_annotation(r, target_type, to_i64(-1))
           r = target_r.ts
-          if r.diags.length() == diags_before:
+          if sym_type_at(r, sym_idx) < 0 and r.diags.length() == diags_before:
             r = ts_add_diag(r, ts_node_span(r, target_type), "type alias '" + ts_tok_name(r, name_tidx) + "' has no resolvable target (an unknown type, or an alias cycle)")
     i = i + 1
   return r
@@ -1930,7 +2176,7 @@ fn check_expr(ts: TS, node_idx: i64): TS
     Node::UnaryE(op_tidx, operand):
       return check_unary_expr(ts, node_idx, op_tidx, operand)
     Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp):
-      return check_call_expr(ts, node_idx, callee, args_lp, names_lp)
+      return check_call_expr(ts, node_idx, callee, args_lp, targs_lp, names_lp)
     Node::FieldE(obj, field_tidx):
       return check_field_expr(ts, node_idx, obj, field_tidx)
     Node::PipeE(left, right):
@@ -2259,7 +2505,7 @@ fn check_logical_binop(ts: TS, node_idx: i64, op_tidx: i64, lt: i64, rt: i64, op
   return ts_set_expr_type(ts, node_idx, to_i64(10))
 
 // Find an existing TPointer type whose pointee matches, or create a
-// new one.  Deduping is required so that `let p: *i32 = &x` sees the
+// new one.  Deduping is required so that `let p: Ptr<i32> = Ptr<i32>::new()` sees the
 // same type index on both sides of the assignment (the type
 // annotation resolves to the canonical pointer type via
 // resolve_ast_type, and addr-of must return the same index).
@@ -2272,12 +2518,31 @@ fn find_or_add_pointer_type(ts: TS, pointee_ti: i64): TypeR
         if t.pointee == pointee_ti:
           return TypeR(ts, i)
     i = i + 1
-  let ptr_name: string = "*" + type_name(ts, pointee_ti)
+  // A pointer is named as it is written (ADR_RAW_POINTER_SURFACE.md),
+  // so a diagnostic says `Ptr<i32>` where the source said `Ptr<i32>`.
+  let ptr_name: string = "Ptr<" + type_name(ts, pointee_ti) + ">"
   return ts_add_type(ts, DaoType(TypeKind::TPointer, to_i64(-1), ptr_name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), pointee_ti))
 
-// True if the AST node is an lvalue: identifier, field access,
-// index expression, or dereferenced pointer.  Used by addr-of to
-// reject taking the address of temporaries/literals.
+// The generator type yielding `elem_ti`: one per element type, found in
+// constant time through the registry's generator index.  An unresolved
+// element (-1) still makes a generator, so the function stays a
+// generator body; its element compares as unknown (types_equal).
+fn find_or_add_generator_type(ts: TS, elem_ti: i64): TypeR
+  let key: string = i64_to_string(elem_ti)
+  let known: i64 = hm_get_or(ts.reg.generators, key, to_i64(-1))
+  if known >= 0:
+    return TypeR(ts, known)
+  let tr: TypeR = ts_add_type(ts, generator_type(elem_ti, "Generator<" + type_name(ts, elem_ti) + ">"))
+  let r: TS = tr.ts
+  r.reg = reg_with_generators(r.reg, r.reg.generators.set(key, tr.type_idx))
+  return TypeR(r, tr.type_idx)
+
+// A generator type: its element type in `pointee`.
+fn generator_type(elem_ti: i64, name: string): DaoType
+  return DaoType(TypeKind::TGenerator, to_i64(-1), name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), elem_ti)
+
+// True if the AST node is an lvalue: identifier, field access, or
+// index expression — what an assignment may target.
 fn is_lvalue_expr(ts: TS, node_idx: i64): bool
   if node_idx < 0:
     return false
@@ -2289,12 +2554,6 @@ fn is_lvalue_expr(ts: TS, node_idx: i64): bool
       return true
     Node::IndexE(o, i):
       return true
-    Node::UnaryE(op_tidx, operand):
-      // *ptr is an lvalue.
-      let op_tok: Token = ts.tc.toks.get(op_tidx)
-      if tk_name(op_tok.kind) == "Star":
-        return true
-      return false
   return false
 
 fn check_unary_expr(ts: TS, node_idx: i64, op_tidx: i64, operand: i64): TS
@@ -2320,35 +2579,159 @@ fn check_unary_expr(ts: TS, node_idx: i64, op_tidx: i64, operand: i64): TS
         r = ts_add_diag(r, sp, "'not' requires bool operand, got " + type_name(r, ot))
         return r
     return ts_set_expr_type(r, node_idx, to_i64(10))
-  if op_name_str == "Star":
-    // Dereference: *ptr where ptr: *T produces T.
-    // NOTE: Host compiler additionally requires `mode unsafe =>` for
-    // deref.  The bootstrap type checker does not yet track active
-    // modes; the unsafe-mode check is deferred to a later Tier B slice.
-    if ot >= 0:
-      let ptr_type: DaoType = r.types.get(ot)
-      match ptr_type.kind:
-        TypeKind::TPointer:
-          return ts_set_expr_type(r, node_idx, ptr_type.pointee)
-      let sp: Span = ts_tok_span(r, op_tidx)
-      r = ts_add_diag(r, sp, "cannot dereference non-pointer type " + type_name(r, ot))
-    return ts_set_expr_type(r, node_idx, to_i64(-1))
-  if op_name_str == "Amp":
-    // Address-of: &x where x: T produces *T.  Operand must be an
-    // lvalue (cannot take address of a literal or temporary).
-    if is_lvalue_expr(r, operand) == false:
-      let sp: Span = ts_tok_span(r, op_tidx)
-      r = ts_add_diag(r, sp, "cannot take address of non-lvalue")
-      return ts_set_expr_type(r, node_idx, to_i64(-1))
-    if ot >= 0:
-      let pr: TypeR = find_or_add_pointer_type(r, ot)
-      r = pr.ts
-      return ts_set_expr_type(r, node_idx, pr.type_idx)
-    return ts_set_expr_type(r, node_idx, to_i64(-1))
   return ts_set_expr_type(r, node_idx, ot)
 
-fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i64): TS
-  let r: TS = check_expr(ts, callee)
+/// The type arguments written at a call, or none: the parser leaves
+/// `targs_lp` at -1 where a call was written without them, and reading
+/// a list at -1 reads off the front of the index data.
+fn read_type_args(ts: TS, targs_lp: i64): Vector<i64>
+  if targs_lp < 0:
+    return Vector<i64>::new()
+  return read_list(ts.tc.idx_data, targs_lp)
+
+/// Whether a call names an operation of `Ptr<T>`, with its receiver
+/// checked where it has one — the receiver's type is what says so, and
+/// the call is typed from it rather than from a member lookup.
+class PtrShape:
+  ts: TS
+  names_one: bool
+
+fn ptr_call_shape(ts: TS, callee: i64): PtrShape
+  let callee_node: Node = ts.tc.nodes.get(callee)
+  match callee_node:
+    Node::FieldE(obj, field_tidx):
+      let r: TS = check_expr(ts, obj)
+      let obj_ti: i64 = get_expr_type(r, obj)
+      if obj_ti < 0:
+        return PtrShape(r, false)
+      if obj_ti >= r.types.length():
+        return PtrShape(r, false)
+      match r.types.get(obj_ti).kind:
+        TypeKind::TPointer:
+          return PtrShape(r, true)
+      return PtrShape(r, false)
+    Node::QualNameE(seg_lp, seg_count):
+      let segs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+      if segs.length() != 2:
+        return PtrShape(ts, false)
+      if ts_tok_name(ts, segs.get(0)) == "Ptr":
+        return PtrShape(ts, true)
+      return PtrShape(ts, false)
+  return PtrShape(ts, false)
+
+// The operations of the compiler-standard `Ptr<T>`
+// (ADR_RAW_POINTER_SURFACE.md): a pointer is read with `get`, written
+// with `set`, walked with `offset`, retyped with `cast<U>`, and asked
+// `is_null`.  Those are its whole surface — nothing reads or writes a
+// pointer without naming one — so they are typed here rather than
+// looked up as methods of a declared type.
+class PtrCallR:
+  ts: TS
+  handled: bool
+
+fn check_ptr_method_call(ts: TS, node_idx: i64, callee: i64, args: Vector<i64>, targs_lp: i64): PtrCallR
+  let unhandled: PtrCallR = PtrCallR(ts, false)
+  let callee_node: Node = ts.tc.nodes.get(callee)
+  match callee_node:
+    Node::FieldE(obj, field_tidx):
+      let obj_ti: i64 = get_expr_type(ts, obj)
+      if obj_ti < 0:
+        return unhandled
+      if obj_ti >= ts.types.length():
+        return unhandled
+      let obj_type: DaoType = ts.types.get(obj_ti)
+      match obj_type.kind:
+        TypeKind::TPointer:
+          let name: string = ts_tok_name(ts, field_tidx)
+          let sp: Span = ts_tok_span(ts, field_tidx)
+          let targs: Vector<i64> = read_type_args(ts, targs_lp)
+          // Reading, writing and walking a pointer touch memory, so
+          // each needs an enclosing `mode unsafe =>` (host
+          // `check_ptr_method`); making one, asking `is_null` and
+          // casting touch none.
+          if name == "get" or name == "set" or name == "offset":
+            if ts.ctx.unsafe_depth == 0:
+              return PtrCallR(ts_add_diag(ts, sp, "Ptr." + name + " requires 'mode unsafe =>'"), true)
+          if name == "get":
+            if args.length() != 0:
+              return PtrCallR(ts_add_diag(ts, sp, "Ptr.get takes no arguments"), true)
+            return PtrCallR(ts_set_expr_type(ts, node_idx, obj_type.pointee), true)
+          if name == "is_null":
+            if args.length() != 0:
+              return PtrCallR(ts_add_diag(ts, sp, "Ptr.is_null takes no arguments"), true)
+            return PtrCallR(ts_set_expr_type(ts, node_idx, to_i64(10)), true)
+          if name == "set":
+            if args.length() != 1:
+              return PtrCallR(ts_add_diag(ts, sp, "Ptr.set takes one argument, the value written"), true)
+            let value_ti: i64 = get_expr_type(ts, args.get(0))
+            let r_set: TS = fit_literal(ts, args.get(0), obj_type.pointee)
+            let fitted_ti: i64 = get_expr_type(r_set, args.get(0))
+            if fitted_ti >= 0:
+              if types_equal(r_set, obj_type.pointee, fitted_ti) == false:
+                return PtrCallR(ts_add_diag(r_set, sp, "Ptr.set writes " + type_name(r_set, obj_type.pointee) + ", got " + type_name(r_set, fitted_ti)), true)
+            return PtrCallR(ts_set_expr_type(r_set, node_idx, to_i64(11)), true)
+          if name == "offset":
+            if args.length() != 1:
+              return PtrCallR(ts_add_diag(ts, sp, "Ptr.offset takes one argument, how many elements to walk"), true)
+            let r_off: TS = fit_literal(ts, args.get(0), to_i64(3))
+            let count_ti: i64 = get_expr_type(r_off, args.get(0))
+            if count_ti >= 0:
+              if is_integer(r_off, count_ti) == false:
+                return PtrCallR(ts_add_diag(r_off, sp, "Ptr.offset walks a whole number of elements, got " + type_name(r_off, count_ti)), true)
+            return PtrCallR(ts_set_expr_type(r_off, node_idx, obj_ti), true)
+          if name == "cast":
+            if args.length() != 0:
+              return PtrCallR(ts_add_diag(ts, sp, "Ptr.cast takes no arguments, only the type cast to"), true)
+            if targs.length() != 1:
+              return PtrCallR(ts_add_diag(ts, sp, "Ptr.cast is written with the type cast to, as `cast<T>()`"), true)
+            let target_r: TypeR = resolve_ast_type(ts, targs.get(0))
+            if target_r.type_idx < 0:
+              return PtrCallR(target_r.ts, true)
+            let cast_r: TypeR = find_or_add_pointer_type(target_r.ts, target_r.type_idx)
+            return PtrCallR(ts_set_expr_type(cast_r.ts, node_idx, cast_r.type_idx), true)
+          return PtrCallR(ts_add_diag(ts, sp, "no operation '" + name + "' on " + type_name(ts, obj_ti) + "; a pointer has get, set, offset, cast and is_null"), true)
+      return unhandled
+    Node::QualNameE(seg_lp, seg_count):
+      // `Ptr<T>::new()`: the one way to make a pointer, and the only
+      // static of the compiler-standard pointer.
+      let segs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+      if segs.length() != 2:
+        return unhandled
+      if ts_tok_name(ts, segs.get(0)) != "Ptr":
+        return unhandled
+      let member: string = ts_tok_name(ts, segs.get(1))
+      let nsp: Span = ts_tok_span(ts, segs.get(1))
+      if member != "new":
+        return PtrCallR(ts_add_diag(ts, nsp, "no static '" + member + "' on Ptr; a pointer is made by Ptr<T>::new()"), true)
+      if args.length() != 0:
+        return PtrCallR(ts_add_diag(ts, nsp, "Ptr.new takes no arguments"), true)
+      let ntargs: Vector<i64> = read_type_args(ts, targs_lp)
+      if ntargs.length() != 1:
+        return PtrCallR(ts_add_diag(ts, nsp, "Ptr.new is written with the type pointed to, as `Ptr<T>::new()`"), true)
+      let pointee_r: TypeR = resolve_ast_type(ts, ntargs.get(0))
+      if pointee_r.type_idx < 0:
+        return PtrCallR(pointee_r.ts, true)
+      let new_r: TypeR = find_or_add_pointer_type(pointee_r.ts, pointee_r.type_idx)
+      return PtrCallR(ts_set_expr_type(new_r.ts, node_idx, new_r.type_idx), true)
+  return unhandled
+
+fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs_lp: i64, names_lp: i64): TS
+  // A pointer's operations are the compiler's own, not a declared type's
+  // methods, so a call that names one is typed here — before the callee
+  // is read as a member or a symbol, which would report `get` as a
+  // missing field and `Ptr` as an unknown name.
+  let named_ptr: PtrShape = ptr_call_shape(ts, callee)
+  let args0: Vector<i64> = read_list(named_ptr.ts.tc.idx_data, args_lp)
+  if named_ptr.names_one:
+    let rp: TS = named_ptr.ts
+    let pi: i64 = 0
+    while pi < args0.length():
+      rp = check_expr(rp, args0.get(pi))
+      pi = pi + 1
+    let ptr_call: PtrCallR = check_ptr_method_call(rp, node_idx, callee, args0, targs_lp)
+    if ptr_call.handled:
+      return ptr_call.ts
+  let r: TS = check_expr(named_ptr.ts, callee)
   let args: Vector<i64> = read_list(r.tc.idx_data, args_lp)
   let ai: i64 = 0
   while ai < args.length():
@@ -2727,7 +3110,58 @@ fn check_stmt(ts: TS, node_idx: i64): TS
     Node::WhileS(cond, body_lp):
       return check_while_stmt(ts, cond, body_lp)
     Node::ResourceS(kind_tidx, name_tidx, body_lp):
+      // A `resource memory` block is an allocation domain; its body is
+      // checked with the domain nesting recorded (a `yield` inside it is
+      // rejected — CONTRACT_EXECUTION_CONTEXTS.md, Resources §8).
+      if ts_tok_name(ts, kind_tidx) == "memory":
+        let rr: TS = ts
+        rr.ctx = ctx_with_resource(rr.ctx, rr.ctx.resource_depth + 1)
+        rr = check_body_stmts(rr, body_lp)
+        rr.ctx = ctx_with_resource(rr.ctx, rr.ctx.resource_depth - 1)
+        return rr
       return check_body_stmts(ts, body_lp)
+    Node::ModeS(name_tidx, body_lp):
+      // `mode <name> =>` enters one of the canonical modes
+      // (CONTRACT_EXECUTION_CONTEXTS.md, Modes: `unsafe`, `gpu`,
+      // `parallel`) for its body.  `unsafe` is the context a dereference
+      // requires; `gpu` and `parallel` carry no checking rule yet.  Any
+      // other name is no mode the language defines, so it is diagnosed
+      // fail-closed, and its body is still checked.
+      let mode_name: string = ts_tok_name(ts, name_tidx)
+      if mode_name == "unsafe":
+        let ru: TS = ts
+        ru.ctx = ctx_with_unsafe(ru.ctx, ru.ctx.unsafe_depth + 1)
+        ru = check_body_stmts(ru, body_lp)
+        ru.ctx = ctx_with_unsafe(ru.ctx, ru.ctx.unsafe_depth - 1)
+        return ru
+      if mode_name == "gpu" or mode_name == "parallel":
+        return check_body_stmts(ts, body_lp)
+      return check_body_stmts(ts_add_diag(ts, ts_tok_span(ts, name_tidx), "unknown mode '" + mode_name + "'"), body_lp)
+    Node::YieldS(yield_tidx, val_node):
+      // `yield` is legal only in a generator function (declared
+      // `Generator<T>`), never inside a `resource memory` block
+      // (CONTRACT_EXECUTION_CONTEXTS.md, Resources law 8), and its value
+      // must match `T` (CONTRACT_SYNTAX_SURFACE.md, Generator Functions).
+      // The value is checked with no expected type: contextual literal
+      // typing is confined to the contexts that explicitly implement it
+      // (CONTRACT_TYPECHECKING_BASELINE.md §3), and `yield` is none of
+      // them, so a literal keeps its default type.
+      let sp_y: Span = ts_node_span(ts, node_idx)
+      let ry: TS = ts
+      if val_node >= 0:
+        ry = check_expr(ry, val_node)
+      if ry.ctx.in_generator == 0:
+        return ts_add_diag(ry, sp_y, "yield is only valid inside a generator function")
+      if ry.ctx.resource_depth > 0:
+        ry = ts_add_diag(ry, sp_y, "yield within a resource memory block is invalid")
+      if val_node < 0:
+        return ry
+      if ry.ctx.gen_elem >= 0:
+        let yt: i64 = get_expr_type(ry, val_node)
+        if yt >= 0:
+          if types_equal(ry, yt, ry.ctx.gen_elem) == false:
+            ry = ts_add_diag(ry, ts_node_span(ry, val_node), "yield type " + type_name(ry, yt) + " does not match Generator element type " + type_name(ry, ry.ctx.gen_elem))
+      return ry
     Node::ForS(var_tidx, iter_node, body_lp):
       return check_for_stmt(ts, var_tidx, iter_node, body_lp)
     Node::ReturnS(val_node):
@@ -2849,6 +3283,13 @@ fn check_for_stmt(ts: TS, var_tidx: i64, iter_node: i64, body_lp: i64): TS
   return r
 
 fn check_return_stmt(ts: TS, val_node: i64): TS
+  if ts.ctx.in_generator > 0:
+    // A generator terminates with a bare `return`; it produces values
+    // with `yield`, never with `return value`.
+    if val_node < 0:
+      return ts
+    let rg: TS = check_expr(ts, val_node)
+    return ts_add_diag(rg, ts_node_span(rg, val_node), "'return value' is invalid in a generator function; use yield to produce values")
   if val_node < 0:
     if ts.ctx.return_type >= 0:
       if is_void_type(ts, ts.ctx.return_type) == false:
@@ -3035,6 +3476,12 @@ fn tc_check_expr_fn_body(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, 
 // body is the function's return, so a literal adopts the return type as
 // a `return` value does (check_return_stmt).
 fn tc_check_expr_body_value(ts: TS, body_expr: i64): TS
+  if ts.ctx.in_generator > 0:
+    // The body is the function's value, a `return value`, which is
+    // invalid in a generator function (CONTRACT_SYNTAX_SURFACE.md,
+    // Generator Functions): a generator produces values only by `yield`.
+    let rg: TS = check_expr(ts, body_expr)
+    return ts_add_diag(rg, ts_node_span(rg, body_expr), "'return value' is invalid in a generator function; use yield to produce values")
   let r: TS = check_expr(ts, body_expr)
   if r.ctx.return_type >= 0:
     r = fit_literal(r, body_expr, r.ctx.return_type)
@@ -3212,9 +3659,10 @@ fn method_type_name(ts: TS, fn_ti: i64): string
   return ""
 
 // `ti` with the concept's own type replaced by the receiver's: the type
-// itself, or the pointee of a pointer to it, recursively.  A generic
-// annotation resolves to no type in this checker (deferred by design),
-// so no other compound occurrence of the concept can appear here.
+// itself, the pointee of a pointer to it, or the element of a generator
+// of it, recursively.  Any other generic annotation resolves to no type
+// in this checker (deferred by design), so no other compound occurrence
+// of the concept can appear here.
 fn subst_self(ts: TS, ti: i64, concept_ti: i64, self_ti: i64): TypeR
   if ti < 0:
     return TypeR(ts, ti)
@@ -3229,6 +3677,11 @@ fn subst_self(ts: TS, ti: i64, concept_ti: i64, self_ti: i64): TypeR
       if inner.type_idx != t.pointee:
         return find_or_add_pointer_type(inner.ts, inner.type_idx)
       return TypeR(inner.ts, ti)
+    TypeKind::TGenerator:
+      let elem: TypeR = subst_self(ts, t.pointee, concept_ti, self_ti)
+      if elem.type_idx != t.pointee:
+        return find_or_add_generator_type(elem.ts, elem.type_idx)
+      return TypeR(elem.ts, ti)
   return TypeR(ts, ti)
 
 // The signature a concept method has for receiver type `self_ti`: the

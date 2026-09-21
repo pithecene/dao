@@ -158,7 +158,7 @@ class MirBackendInput:
 //   bool → i1, void → void, string → ptr
 //
 // Everything else (i8, i16, u8..u64, struct, enum, pointer, fn,
-// generic param, concept) is fail-closed: the caller receives
+// generic param, concept, generator) is fail-closed: the caller receives
 // LlUnsupported and must surface a diagnostic.
 
 // Returns the LlType for a MIR type index.  Returns LlUnsupported

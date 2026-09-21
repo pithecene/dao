@@ -1,33 +1,32 @@
 module raw_memory
 // raw_memory.dao — Low-level memory substrate proof of concept.
 //
-// Demonstrates: alloc, ptr_cast, ptr_offset, store through pointer,
-// deref, size_of, align_of, null_ptr, pointer equality, free.
+// Demonstrates: alloc, Ptr.cast, Ptr.offset, Ptr.set, Ptr.get,
+// size_of, align_of, Ptr<T>::new, Ptr.is_null, free.
 
 fn main(): i32
   // Allocate space for 4 i32 values.
   let raw = __dao_mem_alloc(size_of<i32>() * 4, align_of<i32>())
+  let data = raw.cast<i32>()
   mode unsafe =>
-    let data = ptr_cast<i32>(raw)
-
-    // Store values via pointer offset.
-    *data = 10
-    *ptr_offset<i32>(data, 1) = 20
-    *ptr_offset<i32>(data, 2) = 30
-    *ptr_offset<i32>(data, 3) = 40
+    // Store values through the pointer, element by element.
+    data.set(10)
+    data.offset(1).set(20)
+    data.offset(2).set(30)
+    data.offset(3).set(40)
 
     // Read them back.
-    print(*data)
-    print(*ptr_offset<i32>(data, 1))
-    print(*ptr_offset<i32>(data, 2))
-    print(*ptr_offset<i32>(data, 3))
+    print(data.get())
+    print(data.offset(1).get())
+    print(data.offset(2).get())
+    print(data.offset(3).get())
 
-    // Null pointer check.
-    let np = null_ptr<i32>()
-    if np == null_ptr<i32>():
-      print("null check passed")
-    if data != null_ptr<i32>():
-      print("non-null check passed")
+  // Null pointer check.
+  let np = Ptr<i32>::new()
+  if np.is_null():
+    print("null check passed")
+  if data.is_null() == false:
+    print("non-null check passed")
 
   __dao_mem_free(raw)
 

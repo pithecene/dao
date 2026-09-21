@@ -5,9 +5,11 @@
 #include "frontend/diagnostics/diagnostic.h"
 #include "frontend/module/program.h"
 #include "frontend/resolve/resolve.h"
+#include "frontend/typecheck/type_conversion.h"
 #include "frontend/typecheck/typed_results.h"
 #include "frontend/types/type_context.h"
 #include "frontend/types/type_printer.h"
+#include "frontend/types/type_query.h"
 
 #include <span>
 #include <string>
@@ -21,6 +23,11 @@ namespace dao {
 // ---------------------------------------------------------------------------
 // TypeCheckResult — output of the type-checking pass.
 // ---------------------------------------------------------------------------
+
+/// What a call, a construction, or a receiver decided about the type
+/// parameters in play (`ParamKey` lives with the types, since MIR keys
+/// its own substitutions the same way).
+using TypeBindings = std::unordered_map<ParamKey, const Type*, ParamKeyHash>;
 
 /// A method available on a type via concept/extend.
 struct MethodInfo {
@@ -88,6 +95,20 @@ private:
   TypeContext& types_;
   const ResolveResult& resolve_;
   std::vector<const Decl*> all_decls_; // every file's top-level declarations, load order
+
+  /// A class or enum by the module that declares it and its name — the
+  /// two halves of the name its methods are mangled under (`Box.make`).
+  struct TypeDeclKey {
+    const ModuleInfo* module;
+    std::string_view name;
+    auto operator==(const TypeDeclKey& other) const -> bool = default;
+  };
+  struct TypeDeclKeyHash {
+    auto operator()(const TypeDeclKey& key) const -> size_t {
+      return std::hash<const void*>{}(key.module) ^ (std::hash<std::string_view>{}(key.name) << 1U);
+    }
+  };
+  std::unordered_map<TypeDeclKey, const Decl*, TypeDeclKeyHash> type_decls_;
   TypedResults typed_;
   std::vector<Diagnostic> diagnostics_;
   CheckContext ctx_;
@@ -101,6 +122,22 @@ private:
   // processing match arm patterns (arity is checked separately) or when
   // the expression is the callee of a call (check_call validates after).
   bool suppress_payload_check_ = false;
+
+  // The class pairs infer_type_bindings is matching field by field, so a
+  // class that reaches itself through a pointer is walked once.
+  struct StructPairHash {
+    auto operator()(const std::pair<const TypeStruct*, const TypeStruct*>& pair) const -> size_t {
+      return std::hash<const TypeStruct*>{}(pair.first) ^
+             (std::hash<const TypeStruct*>{}(pair.second) << 1U);
+    }
+  };
+  std::unordered_set<std::pair<const TypeStruct*, const TypeStruct*>, StructPairHash>
+      inferring_structs_;
+  uint32_t infer_depth_ = 0;
+
+  // The callee of the call being checked, while it is checked: a method
+  // of the compiler-standard Ptr<T> is legal only there, called.
+  const Expr* call_callee_ = nullptr;
 
   // Symbol -> semantic type cache (populated in pass 1).
   std::unordered_map<const Symbol*, const Type*> symbol_types_;
@@ -335,9 +372,10 @@ private:
   // How deep the on-demand pull currently is; bounded (kPullDepthCap)
   // so a long chain cannot exhaust the stack.
   size_t pull_depth_ = 0;
-  // Structs and enums substitute_generics is inside of: one reached
-  // again holds itself by value, and is returned as it is.
-  std::unordered_set<const Type*> substituting_;
+  // The instantiation substitute_generics is building for each nominal
+  // type it is inside of: a class that reaches itself resolves to the
+  // instantiation rather than being walked again.
+  std::unordered_map<const Type*, Type*> substituting_;
   struct PullDepth {
     explicit PullDepth(TypeChecker& checker) : checker_(checker) {
       ++checker_.pull_depth_;
@@ -365,6 +403,17 @@ private:
   auto instantiate_generic(const Type* base_type, std::string_view name,
                            const std::vector<GenericParam>& type_params,
                            const std::vector<TypeNode*>& type_args, Span span) -> const Type*;
+  auto with_type_args(const Type* type, std::vector<const Type*> args) -> const Type*;
+  auto own_type_args(const Decl* decl, const std::vector<GenericParam>& type_params)
+      -> std::vector<const Type*>;
+  auto with_inferred_args(const Expr* expr, const Type* type, const Decl* decl_id,
+                          const TypeBindings& bindings) -> const Type*;
+  /// Whether a type argument is the declaration's own parameter at its
+  /// own position — what an instantiation has yet to decide.
+  static auto names_own_param(const Type* arg, const Decl* decl_id, uint32_t position) -> bool;
+  /// Whether a nominal type already stands for an instantiation, as a
+  /// concrete alias does, so nothing about it is left to write.
+  static auto already_instantiated(const Type* type, const Decl* decl_id) -> bool;
 
   // --- Symbol -> Type* bridge ---
 
@@ -452,6 +501,8 @@ private:
 
   auto check_expr(const Expr* expr) -> const Type*;
   auto check_expr(const Expr* expr, const Type* expected) -> const Type*;
+  auto instantiation_from_context(const Expr* expr, const Type* result,
+                                  const Type* expected) -> const Type*;
 
   auto check_identifier(const Expr* expr) -> const Type*;
   auto check_int_literal(const Expr* expr, const Type* expected) -> const Type*;
@@ -461,20 +512,43 @@ private:
   auto check_binary(const Expr* expr) -> const Type*;
   auto check_unary(const Expr* expr) -> const Type*;
   auto check_call(const Expr* expr) -> const Type*;
+  auto enclosing_type_decl(const Expr* callee) -> const Decl*;
   void infer_type_bindings(const Type* pattern,
                            const Type* concrete,
-                           std::unordered_map<uint32_t, const Type*>& bindings,
-                           Span error_span);
-  auto substitute_generics(const Type* type,
-                           const std::unordered_map<uint32_t, const Type*>& bindings)
-      -> const Type*;
-  void verify_concept_constraints(const Expr* callee_expr,
+                           TypeBindings& bindings,
+                           Span error_span, GenericBinding binding = {});
+  void infer_from_type_args(const std::vector<const Type*>& pattern,
+                            const std::vector<const Type*>& concrete,
+                            TypeBindings& bindings, Span error_span, GenericBinding binding = {});
+  /// `type` with the bound parameters replaced.  A parameter is looked
+  /// up by the declaration that declares it and its position there, so
+  /// only what these bindings actually decided is replaced.
+  auto substitute_generics(const Type* type, const TypeBindings& bindings) -> const Type*;
+  auto substitute_generics_walk(const Type* type, const TypeBindings& bindings) -> const Type*;
+
+  /// What this substitution has already answered, by the type asked
+  /// about: a shared type is built once however many paths reach it.
+  std::unordered_map<const Type*, const Type*> substituted_;
+
+  /// Which types hold a parameter at all, for the substitution asking.
+  /// A nesting of classes would otherwise be walked from each level
+  /// down, once per level.
+  GenericParamReach mentions_param_;
+  /// The function a callee resolves to — a named one, or the method a
+  /// member expression selected; null where the callee is a value.
+  auto callee_function_decl(const Expr* callee) -> const Decl*;
+  /// Whether a method is reached on a receiver instantiated with that
+  /// method's own type parameter, which leaves the call nothing to bind.
+  auto receiver_fixes(const Expr* callee, const Decl* callee_decl) -> bool;
+  void verify_concept_constraints(const Decl* callee_decl,
                                   Span error_span,
-                                  const std::unordered_map<uint32_t, const Type*>& bindings);
+                                  const TypeBindings& bindings);
   auto check_construct(const Expr* expr, const TypeStruct* struct_type) -> const Type*;
   auto check_pipe(const Expr* expr) -> const Type*;
   auto check_try(const Expr* expr) -> const Type*;
   auto check_field(const Expr* expr) -> const Type*;
+  auto check_ptr_method(const Expr* expr, const FieldExpr& field, const TypePointer* ptr)
+      -> const Type*;
   auto lookup_method(const Type* obj_type,
                      std::string_view name,
                      const Decl** resolved_decl = nullptr) -> const Type*;

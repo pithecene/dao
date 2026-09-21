@@ -110,6 +110,7 @@ private:
   // --- Expression lowering ---
   auto lower_expr_value(const HirExpr& expr) -> MirValueId;
   auto lower_expr_place(const HirExpr& expr) -> MirPlace;
+  auto deref_place(const HirExpr& pointer, Span span) -> MirPlace;
 
   // --- Emit helpers ---
   // Value-producing: sets result, type (from expr), span, emits, returns id.

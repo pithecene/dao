@@ -1,6 +1,8 @@
 #include "frontend/typecheck/type_conversion.h"
 
+#include <functional>
 #include <unordered_set>
+#include <utility>
 
 namespace dao {
 
@@ -13,127 +15,162 @@ auto is_c_abi_compatible_impl(const Type* type,
                                std::unordered_set<const Decl*>& visiting)
     -> bool;
 
+using TypePair = std::pair<const Type*, const Type*>;
+
+struct TypePairHash {
+  auto operator()(const TypePair& pair) const -> size_t {
+    const std::hash<const void*> hash;
+    return hash(pair.first) ^ (hash(pair.second) << 1U);
+  }
+};
+
+/// Pairs the walk is already deciding.  A class may reach itself
+/// (`class Node<T>: next: Ptr<Node<T>>`), so a pair that comes back
+/// around is taken to match: whether the two types differ is settled by
+/// the fields that are not the cycle.
+using Deciding = std::unordered_set<TypePair, TypePairHash>;
+
+auto binds(const Type* source, const Type* target, GenericBinding binding, Deciding& deciding) -> bool;
+
+/// One field, payload, parameter, or pointee of a pair being decided.
+auto binds_part(const Type* source, const Type* target, GenericBinding binding, Deciding& deciding)
+    -> bool {
+  if (source == target) {
+    return true;
+  }
+  return binds(source, target, binding, deciding);
+}
+
+/// Whether `source` reaches `target` while binding the parameters the
+/// call declares: the callee's own, and those of the class or enum its
+/// signature is written with.  Such a parameter takes the type across
+/// from it; every other type must mean what the target means.
+auto binds(const Type* source, const Type* target, GenericBinding binding, Deciding& deciding)
+    -> bool {
+  if (source == nullptr || target == nullptr) {
+    return source == target;
+  }
+  if (!deciding.insert(TypePair{source, target}).second) {
+    return true;
+  }
+
+  // A parameter this call declares is what the comparison binds; one
+  // declared elsewhere — an enclosing signature's own `T`, or the `T` of
+  // a class whose instantiation is already fixed — names one type, its
+  // own.  Parameters are interned by binder and position, so being that
+  // one type is being the same object, which `binds_part` settled.
+  if (target->kind() == TypeKind::GenericParam) {
+    const auto* owner = static_cast<const TypeGenericParam*>(target)->binder();
+    return owner != nullptr && (owner == binding.binder || owner == binding.owner);
+  }
+
+  if (source->kind() != target->kind()) {
+    return false;
+  }
+
+  // Composite types carry the parameters inside them, so the walk
+  // continues through each part.  Nothing here is covariant: a part
+  // that binds nothing has to mean the same type.
+  switch (target->kind()) {
+  case TypeKind::Pointer:
+    return binds_part(static_cast<const TypePointer*>(source)->pointee(),
+                      static_cast<const TypePointer*>(target)->pointee(), binding, deciding);
+  case TypeKind::Generator:
+    return binds_part(static_cast<const TypeGenerator*>(source)->yield_type(),
+                      static_cast<const TypeGenerator*>(target)->yield_type(), binding, deciding);
+  case TypeKind::Function: {
+    const auto* source_fn = static_cast<const TypeFunction*>(source);
+    const auto* target_fn = static_cast<const TypeFunction*>(target);
+    if (source_fn->param_types().size() != target_fn->param_types().size()) {
+      return false;
+    }
+    for (size_t i = 0; i < source_fn->param_types().size(); ++i) {
+      if (!binds_part(source_fn->param_types()[i], target_fn->param_types()[i], binding, deciding)) {
+        return false;
+      }
+    }
+    return binds_part(source_fn->return_type(), target_fn->return_type(), binding, deciding);
+  }
+  case TypeKind::Struct: {
+    const auto* source_struct = static_cast<const TypeStruct*>(source);
+    const auto* target_struct = static_cast<const TypeStruct*>(target);
+    // Same class, then field by field: the fields are what an
+    // instantiation differs in.
+    if (source_struct->decl_id() != target_struct->decl_id() ||
+        source_struct->name() != target_struct->name() ||
+        source_struct->fields().size() != target_struct->fields().size() ||
+        source_struct->type_args().size() != target_struct->type_args().size()) {
+      return false;
+    }
+    // The instantiation first: a parameter no field mentions lives only
+    // here, and two instantiations of one class are otherwise alike.
+    for (size_t i = 0; i < source_struct->type_args().size(); ++i) {
+      if (!binds_part(source_struct->type_args()[i], target_struct->type_args()[i], binding,
+                      deciding)) {
+        return false;
+      }
+    }
+    for (size_t i = 0; i < source_struct->fields().size(); ++i) {
+      if (!binds_part(source_struct->fields()[i].type, target_struct->fields()[i].type, binding,
+                      deciding)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  case TypeKind::Enum: {
+    const auto* source_enum = static_cast<const TypeEnum*>(source);
+    const auto* target_enum = static_cast<const TypeEnum*>(target);
+    if (source_enum->decl_id() != target_enum->decl_id() ||
+        source_enum->name() != target_enum->name() ||
+        source_enum->variants().size() != target_enum->variants().size() ||
+        source_enum->type_args().size() != target_enum->type_args().size()) {
+      return false;
+    }
+    for (size_t i = 0; i < source_enum->type_args().size(); ++i) {
+      if (!binds_part(source_enum->type_args()[i], target_enum->type_args()[i], binding, deciding)) {
+        return false;
+      }
+    }
+    for (size_t i = 0; i < source_enum->variants().size(); ++i) {
+      const auto& source_variant = source_enum->variants()[i];
+      const auto& target_variant = target_enum->variants()[i];
+      if (source_variant.payload_types.size() != target_variant.payload_types.size()) {
+        return false;
+      }
+      for (size_t j = 0; j < source_variant.payload_types.size(); ++j) {
+        if (!binds_part(source_variant.payload_types[j], target_variant.payload_types[j], binding,
+                        deciding)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+  default:
+    break;
+  }
+  return false;
+}
+
 } // namespace
 
-auto is_assignable(const Type* source, const Type* target) -> bool {
+auto is_assignable(const Type* source, const Type* target, GenericBinding binding) -> bool {
   if (source == target) {
     return true;
   }
 
-  // A generic type parameter accepts any concrete type.
-  // Concept constraint checking is handled separately in check_call.
-  if (target->kind() == TypeKind::GenericParam) {
-    return true;
-  }
-
-  // Any pointer *T is assignable to *void (opaque pointer upcast).
-  if (source->kind() == TypeKind::Pointer &&
-      target->kind() == TypeKind::Pointer) {
-    const auto* target_ptr = static_cast<const TypePointer*>(target);
-    if (target_ptr->pointee()->kind() == TypeKind::Void) {
-      return true;
-    }
-  }
-
-  // Structural recursion for composite types containing generic params.
-  if (source->kind() == target->kind()) {
-    switch (target->kind()) {
-    case TypeKind::Pointer:
-      return is_assignable(
-          static_cast<const TypePointer*>(source)->pointee(),
-          static_cast<const TypePointer*>(target)->pointee());
-    case TypeKind::Generator:
-      return is_assignable(
-          static_cast<const TypeGenerator*>(source)->yield_type(),
-          static_cast<const TypeGenerator*>(target)->yield_type());
-    case TypeKind::Function: {
-      const auto* sf = static_cast<const TypeFunction*>(source);
-      const auto* tf = static_cast<const TypeFunction*>(target);
-      if (sf->param_types().size() != tf->param_types().size()) {
-        return false;
-      }
-      for (size_t i = 0; i < sf->param_types().size(); ++i) {
-        if (!is_assignable(sf->param_types()[i], tf->param_types()[i])) {
-          return false;
-        }
-      }
-      return is_assignable(sf->return_type(), tf->return_type());
-    }
-    case TypeKind::Struct: {
-      const auto* ss = static_cast<const TypeStruct*>(source);
-      const auto* ts = static_cast<const TypeStruct*>(target);
-      // Same class: match by decl_id and exact field type equality.
-      // NOT assignability — that would allow unsound covariance
-      // (e.g., Vector<*i32> -> Vector<*void>).
-      if (ss->decl_id() != ts->decl_id() || ss->name() != ts->name()) {
-        return false;
-      }
-      if (ss->fields().size() != ts->fields().size()) {
-        return false;
-      }
-      for (size_t i = 0; i < ss->fields().size(); ++i) {
-        const auto* sf = ss->fields()[i].type;
-        const auto* tf = ts->fields()[i].type;
-        if (sf == tf) {
-          continue; // Interned identity — always matches.
-        }
-        // Allow generic param matching (needed during type checking
-        // when the same T appears in differently-instantiated structs).
-        if (sf->kind() == TypeKind::GenericParam ||
-            tf->kind() == TypeKind::GenericParam) {
-          continue;
-        }
-        // Recurse for nested structs (same decl_id check applies
-        // recursively), but NOT for pointer covariance.
-        if (sf->kind() == tf->kind() && sf->kind() == TypeKind::Struct) {
-          if (!is_assignable(sf, tf)) {
-            return false;
-          }
-          continue;
-        }
-        // All other field types: exact match only.
-        return false;
-      }
-      return true;
-    }
-    case TypeKind::Enum: {
-      const auto* se = static_cast<const TypeEnum*>(source);
-      const auto* te = static_cast<const TypeEnum*>(target);
-      // Same enum: match by decl_id.
-      if (se->decl_id() != te->decl_id() || se->name() != te->name()) {
-        return false;
-      }
-      // Check variant payload types.
-      if (se->variants().size() != te->variants().size()) {
-        return false;
-      }
-      for (size_t i = 0; i < se->variants().size(); ++i) {
-        const auto& sv = se->variants()[i];
-        const auto& tv = te->variants()[i];
-        if (sv.payload_types.size() != tv.payload_types.size()) {
-          return false;
-        }
-        for (size_t j = 0; j < sv.payload_types.size(); ++j) {
-          const auto* sp = sv.payload_types[j];
-          const auto* tp = tv.payload_types[j];
-          if (sp == tp) {
-            continue;
-          }
-          if (sp->kind() == TypeKind::GenericParam ||
-              tp->kind() == TypeKind::GenericParam) {
-            continue;
-          }
-          return false;
-        }
-      }
-      return true;
-    }
-    default:
-      break;
-    }
-  }
-
-  return false;
+  // One walk answers both: with a binder, a parameter that binder
+  // declared takes the type across from it; with none, every parameter
+  // is fixed and the walk is plain semantic equality — which is what
+  // makes `Ptr<i32>` unassignable to `Ptr<T>`
+  // (CONTRACT_TYPECHECKING_BASELINE §§4, 8).  It compares the types
+  // themselves rather than a spelling of them: one meaning is many
+  // objects, a class is not interned and substitution allocates at every
+  // occurrence, and a pair already being decided is taken to match, so a
+  // type that reaches itself terminates.
+  Deciding deciding;
+  return binds(source, target, binding, deciding);
 }
 
 auto is_numeric(const Type* type) -> bool {

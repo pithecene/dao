@@ -34,12 +34,12 @@ fn hash_index(h: i64, cap: i64): i64
 // each empty (stamp 0) or filled at a write stamp, with the count of
 // filled slots and the current stamp kept beside them.
 class HashStorage<V>:
-  keys: *string
-  vals: *V
-  stamps: *i64
+  keys: Ptr<string>
+  vals: Ptr<V>
+  stamps: Ptr<i64>
   cap: i64
-  used: *i64
-  gen: *i64
+  used: Ptr<i64>
+  gen: Ptr<i64>
 
   // `cap` empty slots and no stamp yet, in the current domain or, when
   // `outer` is set, in the enclosing one.
@@ -47,11 +47,11 @@ class HashStorage<V>:
     let key_bytes: i64 = size_of<string>() * cap
     let val_bytes: i64 = size_of<V>() * cap
     let stamp_bytes: i64 = size_of<i64>() * cap
-    let key_raw: *void = null_ptr<void>()
-    let val_raw: *void = null_ptr<void>()
-    let stamp_raw: *void = null_ptr<void>()
-    let used_raw: *void = null_ptr<void>()
-    let gen_raw: *void = null_ptr<void>()
+    let key_raw: Ptr<void> = Ptr<void>::new()
+    let val_raw: Ptr<void> = Ptr<void>::new()
+    let stamp_raw: Ptr<void> = Ptr<void>::new()
+    let used_raw: Ptr<void> = Ptr<void>::new()
+    let gen_raw: Ptr<void> = Ptr<void>::new()
     if outer:
       key_raw = __dao_mem_alloc_outer(key_bytes, align_of<string>())
       val_raw = __dao_mem_alloc_outer(val_bytes, align_of<V>())
@@ -65,16 +65,16 @@ class HashStorage<V>:
       used_raw = __dao_mem_alloc(size_of<i64>(), align_of<i64>())
       gen_raw = __dao_mem_alloc(size_of<i64>(), align_of<i64>())
     mode unsafe =>
-      let stamps: *i64 = ptr_cast<i64>(stamp_raw)
+      let stamps: Ptr<i64> = stamp_raw.cast<i64>()
       let z: i64 = 0
       while z < cap:
-        *ptr_offset(stamps, z) = to_i64(0)
+        stamps.offset(z).set(to_i64(0))
         z = z + 1
-      let used: *i64 = ptr_cast<i64>(used_raw)
-      *used = to_i64(0)
-      let gen: *i64 = ptr_cast<i64>(gen_raw)
-      *gen = to_i64(0)
-      return HashStorage(ptr_cast<string>(key_raw), ptr_cast<V>(val_raw), stamps, cap, used, gen)
+      let used: Ptr<i64> = used_raw.cast<i64>()
+      used.set(to_i64(0))
+      let gen: Ptr<i64> = gen_raw.cast<i64>()
+      gen.set(to_i64(0))
+      return HashStorage(key_raw.cast<string>(), val_raw.cast<V>(), stamps, cap, used, gen)
     panic("unreachable")
 
   // Fill the first empty slot from `key`'s bucket at the storage's next
@@ -84,16 +84,16 @@ class HashStorage<V>:
   fn fill(self, key: string, value: V): void
     mode unsafe =>
       let idx: i64 = hash_index(hash_string(key), self.cap)
-      while *ptr_offset(self.stamps, idx) != to_i64(0):
+      while self.stamps.offset(idx).get() != to_i64(0):
         idx = idx + 1
         if idx >= self.cap:
           idx = to_i64(0)
-      let stamp: i64 = *self.gen + to_i64(1)
-      *ptr_offset(self.keys, idx) = key
-      *ptr_offset(self.vals, idx) = value
-      *ptr_offset(self.stamps, idx) = stamp
-      *self.used = *self.used + to_i64(1)
-      *self.gen = stamp
+      let stamp: i64 = self.gen.get() + to_i64(1)
+      self.keys.offset(idx).set(key)
+      self.vals.offset(idx).set(value)
+      self.stamps.offset(idx).set(stamp)
+      self.used.set(self.used.get() + to_i64(1))
+      self.gen.set(stamp)
 
 class HashMap<V>:
   storage: HashStorage<V>
@@ -101,7 +101,7 @@ class HashMap<V>:
   count: i64     // keys visible at `version`
 
   fn new(): HashMap<V>
-    let none: HashStorage<V> = HashStorage(null_ptr<string>(), null_ptr<V>(), null_ptr<i64>(), to_i64(0), null_ptr<i64>(), null_ptr<i64>())
+    let none: HashStorage<V> = HashStorage(Ptr<string>::new(), Ptr<V>::new(), Ptr<i64>::new(), to_i64(0), Ptr<i64>::new(), Ptr<i64>::new())
     return HashMap(none, to_i64(0), to_i64(0))
 
   fn length(self): i64 -> self.count
@@ -119,11 +119,11 @@ class HashMap<V>:
     mode unsafe =>
       let probes: i64 = 0
       while probes < s.cap:
-        let stamp: i64 = *ptr_offset(s.stamps, idx)
+        let stamp: i64 = s.stamps.offset(idx).get()
         if stamp == to_i64(0):
           return best
         if stamp <= self.version:
-          if *ptr_offset(s.keys, idx) == key:
+          if s.keys.offset(idx).get() == key:
             if stamp > best_stamp:
               best = idx
               best_stamp = stamp
@@ -138,7 +138,7 @@ class HashMap<V>:
     if slot < to_i64(0):
       return Option::None
     mode unsafe =>
-      return Option::Some(value = *ptr_offset(self.storage.vals, slot))
+      return Option::Some(value = self.storage.vals.offset(slot).get())
     panic("unreachable")
 
   fn contains(self, key: string): bool -> self.visible_slot(key) >= to_i64(0)
@@ -158,32 +158,32 @@ class HashMap<V>:
     mode unsafe =>
       let j: i64 = 0
       while j < s.cap:
-        let stamp: i64 = *ptr_offset(s.stamps, j)
+        let stamp: i64 = s.stamps.offset(j).get()
         if stamp != to_i64(0):
           if stamp <= self.version:
-            let key: string = *ptr_offset(s.keys, j)
+            let key: string = s.keys.offset(j).get()
             let idx: i64 = hash_index(hash_string(key), cap)
             let placed: bool = false
             while placed == false:
-              let held: i64 = *ptr_offset(fresh.stamps, idx)
+              let held: i64 = fresh.stamps.offset(idx).get()
               if held == to_i64(0):
-                *ptr_offset(fresh.keys, idx) = key
-                *ptr_offset(fresh.vals, idx) = *ptr_offset(s.vals, j)
-                *ptr_offset(fresh.stamps, idx) = stamp
-                *fresh.used = *fresh.used + to_i64(1)
+                fresh.keys.offset(idx).set(key)
+                fresh.vals.offset(idx).set(s.vals.offset(j).get())
+                fresh.stamps.offset(idx).set(stamp)
+                fresh.used.set(fresh.used.get() + to_i64(1))
                 placed = true
               else:
-                if *ptr_offset(fresh.keys, idx) == key:
+                if fresh.keys.offset(idx).get() == key:
                   if stamp > held:
-                    *ptr_offset(fresh.vals, idx) = *ptr_offset(s.vals, j)
-                    *ptr_offset(fresh.stamps, idx) = stamp
+                    fresh.vals.offset(idx).set(s.vals.offset(j).get())
+                    fresh.stamps.offset(idx).set(stamp)
                   placed = true
                 else:
                   idx = idx + 1
                   if idx >= cap:
                     idx = to_i64(0)
         j = j + 1
-      *fresh.gen = self.version
+      fresh.gen.set(self.version)
       return HashMap(fresh, self.version, self.count)
     panic("unreachable")
 
@@ -198,25 +198,25 @@ class HashMap<V>:
     mode unsafe =>
       let j: i64 = 0
       while j < seen.cap:
-        if *ptr_offset(seen.stamps, j) != to_i64(0):
-          fresh.fill(copy_out_string(*ptr_offset(seen.keys, j)), copy_out<V>(*ptr_offset(seen.vals, j)))
+        if seen.stamps.offset(j).get() != to_i64(0):
+          fresh.fill(copy_out_string(seen.keys.offset(j).get()), copy_out<V>(seen.vals.offset(j).get()))
         j = j + 1
-      return HashMap(fresh, *fresh.gen, self.count)
+      return HashMap(fresh, fresh.gen.get(), self.count)
     panic("unreachable")
 
   fn set(self, key: string, value: V): HashMap<V>
     let s: HashStorage<V> = self.storage
     mode unsafe =>
       if s.cap > to_i64(0):
-        if *s.gen == self.version:
-          if (*s.used + to_i64(1)) * to_i64(4) <= s.cap * to_i64(3):
+        if s.gen.get() == self.version:
+          if (s.used.get() + to_i64(1)) * to_i64(4) <= s.cap * to_i64(3):
             // Latest value with room: a fresh slot at the next stamp.
             let known: bool = self.contains(key)
             s.fill(key, value)
             let count: i64 = self.count
             if known == false:
               count = count + to_i64(1)
-            return HashMap(s, *s.gen, count)
+            return HashMap(s, s.gen.get(), count)
     // Another value wrote after this one, or the storage is full: fresh
     // storage holding what this value sees, sized for the new entry,
     // which the latest-value path above then adds at the next stamp

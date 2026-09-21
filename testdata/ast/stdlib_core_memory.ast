@@ -3,22 +3,22 @@ File
   ExternFunctionDecl __dao_mem_alloc
     Param size: i64
     Param align: i64
-    ReturnType: *void
+    ReturnType: Ptr<void>
   ExternFunctionDecl __dao_mem_realloc
-    Param ptr: *void
+    Param ptr: Ptr<void>
     Param old_size: i64
     Param new_size: i64
     Param align: i64
-    ReturnType: *void
+    ReturnType: Ptr<void>
   ExternFunctionDecl __dao_mem_free
-    Param ptr: *void
+    Param ptr: Ptr<void>
     ReturnType: void
   ExternFunctionDecl __dao_mem_alloc_outer
     Param size: i64
     Param align: i64
-    ReturnType: *void
+    ReturnType: Ptr<void>
   ExternFunctionDecl __dao_mem_alloc_owner
-    Param owner: *void
+    Param owner: Ptr<void>
     Param size: i64
     Param align: i64
-    ReturnType: *void
+    ReturnType: Ptr<void>

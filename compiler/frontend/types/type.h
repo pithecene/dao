@@ -140,8 +140,10 @@ struct StructField {
 
 class TypeStruct : public Type {
 public:
-  TypeStruct(const Decl* decl_id, std::string_view name, std::vector<StructField> fields)
-      : Type(TypeKind::Struct), decl_id_(decl_id), name_(name), fields_(std::move(fields)) {
+  TypeStruct(const Decl* decl_id, std::string_view name, std::vector<StructField> fields,
+             std::vector<const Type*> type_args = {})
+      : Type(TypeKind::Struct), decl_id_(decl_id), name_(name), fields_(std::move(fields)),
+        type_args_(std::move(type_args)) {
   }
 
   [[nodiscard]] auto decl_id() const -> const Decl* {
@@ -154,16 +156,32 @@ public:
     return fields_;
   }
 
+  /// The types this class was instantiated with, in parameter order,
+  /// empty for a class with no parameters.  They are what tells two
+  /// instantiations apart when no field mentions the parameter
+  /// (`class Tag<T>: n: i32`), so they belong to the type itself rather
+  /// than being read back off the fields.
+  [[nodiscard]] auto type_args() const -> const std::vector<const Type*>& {
+    return type_args_;
+  }
+
   // Set or replace fields. Used during type-checker initialization to
   // support forward references: shells are registered with empty fields
   // first, then fields are resolved once all type shells exist.
   void set_fields(std::vector<StructField> fields) {
     fields_ = std::move(fields);
   }
+
+  /// Record what this type stands instantiated with, as a shell learns
+  /// its own parameters once they exist as types.
+  void set_type_args(std::vector<const Type*> type_args) {
+    type_args_ = std::move(type_args);
+  }
 private:
   const Decl* decl_id_;
   std::string_view name_;
   std::vector<StructField> fields_;
+  std::vector<const Type*> type_args_;
 };
 
 struct EnumVariant {
@@ -174,8 +192,10 @@ struct EnumVariant {
 
 class TypeEnum : public Type {
 public:
-  TypeEnum(const Decl* decl_id, std::string_view name, std::vector<EnumVariant> variants)
-      : Type(TypeKind::Enum), decl_id_(decl_id), name_(name), variants_(std::move(variants)) {
+  TypeEnum(const Decl* decl_id, std::string_view name, std::vector<EnumVariant> variants,
+           std::vector<const Type*> type_args = {})
+      : Type(TypeKind::Enum), decl_id_(decl_id), name_(name), variants_(std::move(variants)),
+        type_args_(std::move(type_args)) {
   }
 
   [[nodiscard]] auto decl_id() const -> const Decl* {
@@ -192,6 +212,12 @@ public:
     variants_ = std::move(variants);
   }
 
+  /// See `TypeStruct::set_type_args`: an instantiation records what it
+  /// stands for once its variants are known.
+  void set_type_args(std::vector<const Type*> type_args) {
+    type_args_ = std::move(type_args);
+  }
+
   [[nodiscard]] auto variants() const -> const std::vector<EnumVariant>& {
     return variants_;
   }
@@ -204,10 +230,17 @@ public:
     });
   }
 
+  /// The types this enum was instantiated with, in parameter order;
+  /// see `TypeStruct::type_args`.
+  [[nodiscard]] auto type_args() const -> const std::vector<const Type*>& {
+    return type_args_;
+  }
+
 private:
   const Decl* decl_id_;
   std::string_view name_;
   std::vector<EnumVariant> variants_;
+  std::vector<const Type*> type_args_;
 };
 
 // Generator<T> — compiler-provided coroutine type. Not user-definable.

@@ -15,6 +15,15 @@ fn mir_contains_kind(r: MirResult, kind: string): bool
     i = i + to_i64(1)
   return false
 
+// Whether any diagnostic of `r` mentions `needle`.
+fn mir_diag_mentions(r: MirResult, needle: string): bool
+  let i: i64 = 0
+  while i < r.diags.length():
+    if index_of(r.diags.get(i).message, needle) >= 0:
+      return true
+    i = i + 1
+  return false
+
 fn mir_count_kind(r: MirResult, kind: string): i64
   let n: i64 = to_i64(0)
   let i: i64 = to_i64(0)
@@ -29,7 +38,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 14
+  let total: i32 = 16
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -263,6 +272,20 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL static_method_value_lowered_in_mir: expected a function reference, no error expression, no diagnostics; got " + i64_to_string(r14.diags.length()) + " diagnostics, " + i64_to_string(mir_count_kind(r14, "MirErrorExpr")) + " error expressions")
+
+  // Tests 15–16: `mode` blocks and `yield` have no Tier A lowering; MIR
+  // rejects each with a diagnostic naming the construct.
+  if mir_diag_mentions(lower_to_mir("fn f(): i32\n  mode unsafe =>\n    return 1\n  return 0\n"), "HirMode"):
+    print("PASS mode_block_rejected_in_mir")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL mode_block_rejected_in_mir: expected a diagnostic naming HirMode")
+  let r16: MirResult = lower_to_mir("fn g(): Generator<i32>\n  yield 1\n  return\n")
+  if mir_diag_mentions(r16, "HirYield") and r16.diags.length() == 1:
+    print("PASS yield_rejected_in_mir")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL yield_rejected_in_mir: expected exactly the diagnostic naming HirYield, got " + i64_to_string(r16.diags.length()) + " diagnostics")
 
   // -----------------------------------------------------------------
   // Summary

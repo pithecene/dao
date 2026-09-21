@@ -1,0 +1,141 @@
+File
+  Module derived_concepts
+  DerivedConceptDecl Show
+    FunctionDecl show
+      Param self
+      ReturnType: string
+  ExtendDecl i32 as Show
+    FunctionDecl show
+      Param self
+      ReturnType: string
+      ExprBody
+        CallExpr
+          Callee
+            FieldExpr .to_string
+              Identifier self
+  ExtendDecl string as Show
+    FunctionDecl show
+      Param self
+      ReturnType: string
+      ExprBody
+        BinaryExpr +
+          BinaryExpr +
+            StringLiteral "\""
+            Identifier self
+          StringLiteral "\""
+  ClassDecl Point
+    Field x: i32
+    Field y: i32
+  ClassDecl Segment
+    Field a: Point
+    Field b: Point
+    Field name: string
+  FunctionDecl describe<T: Show>
+    Param v: T
+    ReturnType: string
+    ExprBody
+      CallExpr
+        Callee
+          FieldExpr .show
+            Identifier v
+  FunctionDecl shown<T: Show>
+    Param v: T
+    ReturnType: i32
+    ExprBody
+      IntLiteral 1
+  FunctionDecl main
+    ReturnType: i32
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier describe
+            Args
+              IntLiteral 7
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier describe
+            Args
+              StringLiteral "seven"
+    LetStatement p: Point
+      CallExpr
+        Callee
+          Identifier Point
+        Args
+          IntLiteral 1
+          IntLiteral 2
+    LetStatement s: Segment
+      CallExpr
+        Callee
+          Identifier Segment
+        Args
+          Identifier p
+          CallExpr
+            Callee
+              Identifier Point
+            Args
+              IntLiteral 3
+              IntLiteral 4
+          StringLiteral "diag"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            BinaryExpr +
+              CallExpr
+                Callee
+                  Identifier describe
+                Args
+                  FieldExpr .x
+                    Identifier p
+              StringLiteral ","
+            CallExpr
+              Callee
+                Identifier describe
+              Args
+                FieldExpr .y
+                  Identifier p
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier describe
+            Args
+              FieldExpr .name
+                Identifier s
+    LetStatement admitted: i32
+      BinaryExpr +
+        CallExpr
+          Callee
+            Identifier shown
+          Args
+            Identifier p
+        CallExpr
+          Callee
+            Identifier shown
+          Args
+            Identifier s
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              FieldExpr .to_string
+                Identifier admitted
+    ReturnStatement
+      IntLiteral 0

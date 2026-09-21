@@ -625,25 +625,25 @@ suite<"driver_cli"> driver_cli_suite = [] {
         scratch.file("pointers.dao",
                      "module app::pointers\n\n"
                      "fn main(): i32\n"
-                     "  let ptrs: Vector<*Generator<i32>> = Vector<*Generator<i32>>::new()\n"
+                     "  let ptrs: Vector<Ptr<Generator<i32>>> = Vector<Ptr<Generator<i32>>>::new()\n"
                      "  resource memory pool =>\n"
-                     "    ptrs = ptrs.push(null_ptr<Generator<i32>>())\n"
+                     "    ptrs = ptrs.push(Ptr<Generator<i32>>::new())\n"
                      "  return 0\n");
     auto accepted = run_daoc(scratch, {"check", pointers.string()});
     expect(accepted.exit_code == 0) << accepted.err;
 
-    // Meeting `*Generator<i32>` as a value first must not hide the same
+    // Meeting `Ptr<Generator<i32>>` as a value first must not hide the same
     // type met afterwards as a container's storage.
     auto both = scratch.file(
         "both.dao",
         "module app::both\n\n"
         "class Both:\n"
-        "  ptrs: Vector<*Generator<i32>>\n"
+        "  ptrs: Vector<Ptr<Generator<i32>>>\n"
         "  gens: Vector<Generator<i32>>\n\n"
         "fn main(): i32\n"
-        "  let b: Both = Both(Vector<*Generator<i32>>::new(), Vector<Generator<i32>>::new())\n"
+        "  let b: Both = Both(Vector<Ptr<Generator<i32>>>::new(), Vector<Generator<i32>>::new())\n"
         "  resource memory pool =>\n"
-        "    b = Both(Vector<*Generator<i32>>::new(), Vector<Generator<i32>>::new())\n"
+        "    b = Both(Vector<Ptr<Generator<i32>>>::new(), Vector<Generator<i32>>::new())\n"
         "  return 0\n");
     auto rejected = run_daoc(scratch, {"check", both.string()});
     expect(rejected.exit_code != 0) << "a class holding generators after pointers left the block";

@@ -19,9 +19,10 @@ module bootstrap::hir
 //   - Index expressions
 //   - Generics / monomorphization
 //   - Methods / extend
-//   - Mode blocks (a resource block lowers to HirResource; its domain
-//     has no HIR representation beyond the block)
-//   - Yield / generators
+//   - Execution-mode and resource domains beyond the block: `mode`
+//     blocks and `yield` are represented (HirMode, HirYield) and a
+//     resource block lowers to HirResource, but none of them lowers past
+//     HIR yet — MIR rejects each fail-closed
 
 enum class HirNode:
   // Program (D6/D7: multi-module root)
@@ -43,6 +44,10 @@ enum class HirNode:
   HirIf(cond: i64, then_lp: i64, else_lp: i64)
   HirWhile(cond: i64, body_lp: i64)
   HirResource(kind: i64, name: i64, body_lp: i64)
+  // `mode` block and `yield` carried fail-closed: preserved through HIR,
+  // rejected at MIR (Tier A) rather than silently erased.
+  HirMode(name: i64, body_lp: i64)
+  HirYield(value: i64)
   HirFor(var_name: i64, iter: i64, body_lp: i64)
   HirReturn(value: i64)
   HirBreak(tok: i64)
@@ -589,6 +594,14 @@ fn lower_stmt(hs: HS, node_idx: i64): HirR
     Node::ResourceS(kind_tidx, name_tidx, body_lp):
       let body_fl: HirFlush = lower_body_stmts(hs, body_lp)
       return hs_add_node(body_fl.hs, HirNode::HirResource(kind = kind_tidx, name = name_tidx, body_lp = body_fl.list_pos))
+    Node::ModeS(name_tidx, body_lp):
+      let mode_body_fl: HirFlush = lower_body_stmts(hs, body_lp)
+      return hs_add_node(mode_body_fl.hs, HirNode::HirMode(name = name_tidx, body_lp = mode_body_fl.list_pos))
+    Node::YieldS(yield_tidx, val_node):
+      if val_node < 0:
+        return hs_add_node(hs, HirNode::HirYield(value = to_i64(-1)))
+      let yr: HirR = lower_expr(hs, val_node)
+      return hs_add_node(yr.hs, HirNode::HirYield(value = yr.hir))
     Node::ForS(var_tidx, iter_node, body_lp):
       return lower_for_stmt(hs, var_tidx, iter_node, body_lp)
     Node::ReturnS(val_node):
@@ -872,7 +885,8 @@ fn lower_class_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, fiel
   let fl: HirFlush = hir_flush_pairs(tp_fl.hs, field_items, field_count)
   return hs_add_node(fl.hs, HirNode::HirStruct(name = name_tidx, tparams = tp_fl.list_pos, fields = fl.list_pos))
 
-// Resolve an AST type node to a type index. Handles NamedT, GenericT, PointerT.
+// Resolve an AST type node to a type index. Handles NamedT, GenericT
+// (`Ptr<T>` among them), and qualified names.
 fn resolve_type_to_idx(hs: HS, type_node_idx: i64): i64
   if type_node_idx < 0:
     return to_i64(-1)
@@ -912,20 +926,23 @@ fn resolve_type_to_idx(hs: HS, type_node_idx: i64): i64
         return 10
       if tname == "string":
         return 12
-    Node::PointerT(inner):
-      // Resolve inner, return pointer type if available
-      let inner_ti: i64 = resolve_type_to_idx(hs, inner)
-      // Search for existing pointer type in types table
-      let pti: i64 = 0
-      while pti < hs.typecheck.types.length():
-        let pt: DaoType = hs.typecheck.types.get(pti)
-        match pt.kind:
-          TypeKind::TPointer:
-            if pt.pointee == inner_ti:
-              return pti
-        pti = pti + 1
     Node::GenericT(name_tidx, args_lp, arg_count):
-      // Try resolving the base name
+      // `Ptr<T>` names the pointer the type checker registered for that
+      // pointee (ADR_RAW_POINTER_SURFACE.md); every other generic head
+      // resolves by its name.
+      if hs_tok_name(hs, name_tidx) == "Ptr":
+        let pargs: Vector<i64> = read_list(hs.unit.idx_data, args_lp)
+        if pargs.length() == 1:
+          let inner_ti: i64 = resolve_type_to_idx(hs, pargs.get(0))
+          let pti: i64 = 0
+          while pti < hs.typecheck.types.length():
+            let pt: DaoType = hs.typecheck.types.get(pti)
+            match pt.kind:
+              TypeKind::TPointer:
+                if pt.pointee == inner_ti:
+                  return pti
+            pti = pti + 1
+          return to_i64(-1)
       let tsym: i64 = hir_lookup_use(hs, name_tidx)
       if tsym >= 0:
         return hir_sym_type(hs, tsym)
@@ -1249,6 +1266,10 @@ fn hir_node_kind(node: HirNode): string
       return "HirWhile"
     HirNode::HirResource(a, b, c):
       return "HirResource"
+    HirNode::HirMode(a, b):
+      return "HirMode"
+    HirNode::HirYield(a):
+      return "HirYield"
     HirNode::HirFor(a, b, c):
       return "HirFor"
     HirNode::HirReturn(a):
@@ -1448,6 +1469,22 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
       while ri < rbody.length():
         line = line + hir_dump_node(hr, rbody.get(ri), indent + 1)
         ri = ri + 1
+      return line
+    HirNode::HirMode(name_tidx, body_lp):
+      let mode_tok: Token = hr.toks.get(name_tidx)
+      line = line + " " + substring(hr.src, mode_tok.offset, mode_tok.len) + "\n"
+      let mbody: Vector<i64> = read_list(hr.hir_idx, body_lp)
+      let mi: i64 = 0
+      while mi < mbody.length():
+        line = line + hir_dump_node(hr, mbody.get(mi), indent + 1)
+        mi = mi + 1
+      return line
+    HirNode::HirYield(val):
+      if val >= 0:
+        line = line + "\n"
+        line = line + hir_dump_node(hr, val, indent + 1)
+        return line
+      line = line + "\n"
       return line
     HirNode::HirFor(var_tidx, iter, body_lp):
       line = line + "\n"

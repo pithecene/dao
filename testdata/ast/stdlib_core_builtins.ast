@@ -12,12 +12,6 @@ File
       IntLiteral 0
     ReturnStatement
       Identifier r
-  FunctionDecl ptr_offset<T>
-    Param ptr: *T
-    Param index: i64
-    ReturnType: *T
-    ExprBody
-      Identifier ptr
   FunctionDecl copy_out<T>
     Param x: T
     ReturnType: T
