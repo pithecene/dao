@@ -39,6 +39,25 @@ fn tc_expect_rejected(label: string, src: string): bool
   print("FAIL " + label + ": expected a diagnostic, got 0")
   return false
 
+// Typecheck `src` and report whether ANY diagnostic it raises contains
+// `needle`.  A source may fail for more than one reason at once — a
+// conflicting type parameter also leaves an argument that does not fit
+// — and the reason under test is the one named here.
+fn tc_expect_some_diag_containing(label: string, src: string, needle: string): bool
+  let res: TypeCheckResult = typecheck(src)
+  let i: i64 = 0
+  while i < res.diags.length():
+    if index_of(res.diags.get(i).message, needle) >= 0:
+      print("PASS " + label)
+      return true
+    i = i + 1
+  print("FAIL " + label + ": expected a diagnostic containing '" + needle + "', got " + i64_to_string(tc_count_diags(res)))
+  let j: i64 = 0
+  while j < res.diags.length():
+    print("  diag: " + res.diags.get(j).message)
+    j = j + 1
+  return false
+
 // Typecheck `src` and report whether exactly one diagnostic is raised
 // and its message contains `needle`.
 fn tc_expect_diag_containing(label: string, src: string, needle: string): bool
@@ -124,7 +143,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 202
+  let total: i32 = 209
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -1754,6 +1773,30 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL unconstrained_param_member_rejected: expected >= 1 diagnostic, got 0")
+
+  // -----------------------------------------------------------------
+  // Generic call inference and substitution: a call decides the type
+  // parameters its callee declares, and the result is what the
+  // signature says of that answer.  A parameter of the signature doing
+  // the calling is already the type it stands for.
+  // -----------------------------------------------------------------
+  if tc_expect_clean("generic_call_infers_from_argument", "fn identity<T>(x: T): T -> x\n\nfn f(): i32\n  let n: i32 = identity(5)\n  return n\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_call_result_is_what_it_decided", "fn identity<T>(x: T): T -> x\n\nfn f(): i32\n  let s: string = identity(\"a\")\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("generic_call_conflict_rejected", "fn pair<T>(a: T, b: T): T -> a\n\nfn f(): i32\n  let x: i32 = pair(1, \"s\")\n  return 0\n", "conflicting types for generic parameter 'T'"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_annotation_is_its_instantiation", "class Box<T>:\n  value: T\n\nfn f(): i32\n  let b: Box<i32> = Box(1)\n  let v: i32 = b.value\n  return v\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_construction_decides_the_class", "class Box<T>:\n  value: T\n\nfn wrap<T>(x: T): Box<T> -> Box(x)\n\nfn f(): i32\n  let b: Box<i32> = wrap(7)\n  let v: i32 = b.value\n  return v\n"):
+    pass_count = pass_count + 1
+  // Two instantiations of one class are two types.
+  if tc_expect_rejected("generic_instantiations_of_one_class_differ", "class Box<T>:\n  value: T\n\nfn f(): i32\n  let b: Box<i32> = Box(\"s\")\n  return 0\n"):
+    pass_count = pass_count + 1
+  // A call decides the CALLEE's parameters; the caller's own stay the
+  // types its signature promised.
+  if tc_expect_rejected("call_decides_only_the_callee_parameters", "fn identity<T>(x: T): T -> x\n\nfn f<U>(u: U, n: i32): U -> identity(n)\n"):
+    pass_count = pass_count + 1
 
   // -----------------------------------------------------------------
   // Summary
