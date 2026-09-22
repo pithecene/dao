@@ -98,6 +98,7 @@ class Registry:
   methods: HashMap<i64>         // method dispatch by owner type and name (dispatch_key_*), filled by tc_bind_self
   index: ProgramIndex           // the resolved program's declaration indexes
   generators: HashMap<i64>      // the generator type per element type index (find_or_add_generator_type)
+  instantiations: HashMap<i64>  // the instantiation per head type and arguments (instantiate_generic)
 
 
 // The registries for a resolved program: the declaration indexes
@@ -127,7 +128,7 @@ fn registry_new(symbols: Vector<Symbol>, modules: Vector<ModuleEntry>): Registry
     if me.is_prelude:
       preludes = preludes.set(i64_to_string(me.module_id), to_i64(1))
     mi = mi + 1
-  return Registry(HashMap<i64>::new(), HashMap<i64>::new(), conformance_empty(), HashMap<i64>::new(), ProgramIndex(type_syms, callables, members, preludes), HashMap<i64>::new())
+  return Registry(HashMap<i64>::new(), HashMap<i64>::new(), conformance_empty(), HashMap<i64>::new(), ProgramIndex(type_syms, callables, members, preludes), HashMap<i64>::new(), HashMap<i64>::new())
 
 fn conformance_empty(): Conformance
   return Conformance(HashMap<i64>::new(), Vector<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new())
@@ -138,19 +139,22 @@ fn registry_empty(): Registry
   return registry_new(Vector<Symbol>::new(), Vector<ModuleEntry>::new())
 
 fn reg_with_expr_types(rg: Registry, m: HashMap<i64>): Registry
-  return Registry(m, rg.variant_set, rg.conform, rg.methods, rg.index, rg.generators)
+  return Registry(m, rg.variant_set, rg.conform, rg.methods, rg.index, rg.generators, rg.instantiations)
 
 fn reg_with_variant_set(rg: Registry, m: HashMap<i64>): Registry
-  return Registry(rg.expr_types, m, rg.conform, rg.methods, rg.index, rg.generators)
+  return Registry(rg.expr_types, m, rg.conform, rg.methods, rg.index, rg.generators, rg.instantiations)
 
 fn reg_with_conform(rg: Registry, c: Conformance): Registry
-  return Registry(rg.expr_types, rg.variant_set, c, rg.methods, rg.index, rg.generators)
+  return Registry(rg.expr_types, rg.variant_set, c, rg.methods, rg.index, rg.generators, rg.instantiations)
 
 fn reg_with_methods(rg: Registry, m: HashMap<i64>): Registry
-  return Registry(rg.expr_types, rg.variant_set, rg.conform, m, rg.index, rg.generators)
+  return Registry(rg.expr_types, rg.variant_set, rg.conform, m, rg.index, rg.generators, rg.instantiations)
 
 fn reg_with_generators(rg: Registry, m: HashMap<i64>): Registry
-  return Registry(rg.expr_types, rg.variant_set, rg.conform, rg.methods, rg.index, m)
+  return Registry(rg.expr_types, rg.variant_set, rg.conform, rg.methods, rg.index, m, rg.instantiations)
+
+fn reg_with_instantiations(rg: Registry, m: HashMap<i64>): Registry
+  return Registry(rg.expr_types, rg.variant_set, rg.conform, rg.methods, rg.index, rg.generators, m)
 
 // The "Type" symbol the declaration at `decl_idx` of the module being
 // checked introduces (a class, enum, alias, or concept), or -1 — a
@@ -691,7 +695,11 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
           return TypeR(r_args, to_i64(-1))
         resolved_args = resolved_args.push(arg_r.type_idx)
         ga = ga + 1
-      return instantiate_generic(r_args, head_ti, resolved_args)
+      // A bound is a conformance obligation wherever a parameter is
+      // decided, and writing `Box<i32>` decides one as surely as a call
+      // does.
+      let written: TS = check_instantiation_bounds(r_args, head_ti, resolved_args, ts_node_span(r_args, node_idx))
+      return instantiate_generic(written, head_ti, resolved_args)
     Node::QualNameE(seg_lp, seg_count):
       // A qualified type (`core::Printable`): the resolver bound its last
       // segment; read that symbol's type when it is in this module's
@@ -2866,9 +2874,13 @@ fn substitute_type(ts: TS, map: HashMap<i64>, ti: i64): TypeR
         si = si + 1
       if moved == false:
         return TypeR(r_args, ti)
+      // A rebuild this module cannot make is unresolved, never the type
+      // that was standing there: `Box<T>` after a call decided `T` is
+      // no answer, and an unresolved type reports no mismatch it cannot
+      // justify (the program-level pass owns a foreign head's layout).
       let rebuilt: TypeR = instantiate_generic(r_args, head_ti, new_args)
       if rebuilt.type_idx < 0:
-        return TypeR(rebuilt.ts, ti)
+        return TypeR(rebuilt.ts, to_i64(-1))
       return rebuilt
   return TypeR(ts, ti)
 
@@ -2929,106 +2941,35 @@ fn instantiation_name(ts: TS, head_name: string, args: Vector<i64>): string
     i = i + 1
   return spelled + ">"
 
-/// `Box<i32>`: the class with its parameters replaced by what it was
-/// instantiated with, made once per spelling — a second `Box<i32>` is
-/// the type the first made, so the two compare equal.
-///
-/// A layout this module cannot walk leaves the instantiation
-/// unresolved, as a generic annotation read before this slice: a
-/// cross-module head's fields are unknown here, and a type built from
-/// an unknown layout would report mismatches that are not there.
-fn instantiate_generic(ts: TS, head_ti: i64, args: Vector<i64>): TypeR
-  if head_ti < 0:
-    return TypeR(ts, to_i64(-1))
-  if head_ti >= ts.types.length():
-    return TypeR(ts, to_i64(-1))
-  let head: DaoType = ts.types.get(head_ti)
-  let is_struct: bool = false
-  match head.kind:
-    TypeKind::TStruct:
-      is_struct = true
-  if is_struct == false:
-    return TypeR(ts, to_i64(-1))
-  if layout_walkable(ts, head) == false:
-    return TypeR(ts, to_i64(-1))
-  let params: ParamIds = decl_param_type_ids(ts, decl_tparams_lp(ts, head.decl_node))
-  let r: TS = params.ts
-  if params.ids.length() == 0:
-    return TypeR(r, to_i64(-1))
-  if params.ids.length() != args.length():
-    return TypeR(r, to_i64(-1))
-  let spelled: string = instantiation_name(r, head.name, args)
-  // One spelling is one type: an instantiation already made for this
-  // declaration under this name IS this one.
-  let known: i64 = 0
-  while known < r.types.length():
-    let kt: DaoType = r.types.get(known)
-    match kt.kind:
-      TypeKind::TStruct:
-        if kt.decl_node == head.decl_node and kt.name == spelled:
-          return TypeR(r, known)
-    known = known + 1
-  let decided: HashMap<i64> = HashMap<i64>::new()
-  let pi: i64 = 0
-  while pi < params.ids.length():
-    decided = decided.set(i64_to_string(params.ids.get(pi)), args.get(pi))
-    pi = pi + 1
-  // The fields, with what the instantiation stands for in place of the
-  // parameters: `Box<i32>` holds an `i32` where `Box<T>` held a `T`.
-  let info_start: i64 = r.type_info.length()
-  let fi: i64 = 0
-  while fi < head.info_count:
-    let f_sym: i64 = r.type_info.get(head.info_lp + fi * 2)
-    let f_ti: i64 = r.type_info.get(head.info_lp + fi * 2 + 1)
-    let sub: TypeR = substitute_type(r, decided, f_ti)
-    r = sub.ts
-    r = ts_push_type_info(r, f_sym)
-    r = ts_push_type_info(r, sub.type_idx)
-    fi = fi + 1
-  // What the instantiation stands for, kept where the fields are: the
-  // head it came from, how many arguments it was given, and the
-  // arguments themselves.  Substitution reads them back to rebuild
-  // `Box<T>` as `Box<i32>` once a call decides `T`.
-  let stands_for: i64 = r.type_info.length()
-  r = ts_push_type_info(r, head_ti)
-  r = ts_push_type_info(r, args.length())
-  let ai: i64 = 0
-  while ai < args.length():
-    r = ts_push_type_info(r, args.get(ai))
-    ai = ai + 1
-  return ts_add_type(r, DaoType(TypeKind::TStruct, head.builtin_id, spelled, head.decl_node, info_start, head.info_count, stands_for, to_i64(-1)))
+/// Whether a nominal type was declared by the module being checked.  A
+/// declaration index means something only in the AST that holds it: two
+/// modules number their nodes from zero, so a foreign index read here
+/// would name an unrelated local declaration.
+fn declared_here(ts: TS, t: DaoType): bool
+  if t.decl_node < 0:
+    return false
+  if t.builtin_id != ts.tc.module_id:
+    return false
+  if t.decl_node >= ts.tc.nodes.length():
+    return false
+  return true
 
-/// Every bound of the parameters a call decided, held to what they were
-/// decided with: a bound is a conformance obligation, and the call is
-/// the one place the obligation can be met (host
-/// `verify_concept_constraints`).  A bound the module cannot read — a
-/// concept whose type is unreadable here — is left to the program-level
-/// pass, as this module's other cross-module guards leave theirs.
-fn check_decided_bounds(ts: TS, decided: HashMap<i64>, own: Vector<i64>, span: Span): TS
-  let r: TS = ts
+/// What an instantiation IS, as a key: the head it came from and the
+/// arguments it was given, by type index.  Spelling will not do — two
+/// functions each declaring `T` both spell `Box<T>`, and their `T`s are
+/// different parameters.
+fn instantiation_key(head_ti: i64, args: Vector<i64>): string
+  let key: string = "i" + i64_to_string(head_ti)
   let i: i64 = 0
-  while i < own.length():
-    let param_ti: i64 = own.get(i)
-    let with_ti: i64 = hm_get_or(decided, i64_to_string(param_ti), to_i64(-1))
-    if with_ti >= 0:
-      if param_ti < r.types.length():
-        let pt: DaoType = r.types.get(param_ti)
-        if bounds_walkable(r, pt):
-          let b: i64 = 0
-          while b < pt.info_count:
-            let cti: i64 = r.type_info.get(pt.info_lp + b)
-            if cti >= 0:
-              if ts_conforms(r, with_ti, cti) == false:
-                r = ts_add_diag(r, span, "type '" + type_name(r, with_ti) + "' does not satisfy concept '" + type_name(r, cti) + "' required by generic parameter '" + pt.name + "'")
-            b = b + 1
+  while i < args.length():
+    key = key + ":" + i64_to_string(args.get(i))
     i = i + 1
-  return r
+  return key
 
 /// The type parameters the CALLEE declares, by type index: the only
 /// parameters a call may decide.  A parameter of the signature being
-/// checked is already the type it stands for — deciding it here would
-/// let an argument retype what the enclosing signature promised (host
-/// `GenericBinding`).
+/// checked already stands for one type — deciding it here would let an
+/// argument retype what that signature promised (host `GenericBinding`).
 fn callee_own_params(ts: TS, callee: i64): ParamIds
   let none: Vector<i64> = Vector<i64>::new()
   let sym: i64 = callee_symbol(ts, callee)
@@ -3050,9 +2991,8 @@ fn callee_own_params(ts: TS, callee: i64): ParamIds
       return decl_param_type_ids(ts, e_tparams_lp)
   return ParamIds(ts, none)
 
-/// The symbol a callee expression names, where it names one: a plain
-/// name, a qualified path's last segment, or the method a member
-/// expression resolved to.
+/// The symbol a callee names: a plain name, a qualified path's last
+/// segment, or the method a member expression selects on its receiver.
 fn callee_symbol(ts: TS, callee: i64): i64
   if callee < 0:
     return to_i64(-1)
@@ -3064,7 +3004,137 @@ fn callee_symbol(ts: TS, callee: i64): i64
       if segs.length() == 0:
         return to_i64(-1)
       return lookup_use(ts, segs.get(segs.length() - 1))
+    Node::FieldE(obj, field_tidx):
+      // A method is found by the receiver's type, the way the access
+      // itself was typed, so a generic method decides its parameters
+      // like any other callee.
+      let obj_ti: i64 = get_expr_type(ts, obj)
+      if obj_ti < 0:
+        return to_i64(-1)
+      return find_method_sym_for_receiver(ts.reg.methods, ts.tc.module_id, ts_tok_name(ts, field_tidx), obj_ti)
   return to_i64(-1)
+
+/// Every bound of the parameters something decided, held to what they
+/// were decided with: a bound is a conformance obligation, and the
+/// place a parameter is decided is where the obligation is met (host
+/// `verify_concept_constraints`).  A bound whose concept this module
+/// cannot read is left to the program-level pass, as this module's
+/// other cross-module guards leave theirs.
+fn check_decided_bounds(ts: TS, decided: HashMap<i64>, own: Vector<i64>, span: Span): TS
+  let r: TS = ts
+  let i: i64 = 0
+  while i < own.length():
+    let param_ti: i64 = own.get(i)
+    let with_ti: i64 = hm_get_or(decided, i64_to_string(param_ti), to_i64(-1))
+    if with_ti >= 0:
+      if param_ti < r.types.length():
+        let pt: DaoType = r.types.get(param_ti)
+        if bounds_walkable(r, pt):
+          let b: i64 = 0
+          while b < pt.info_count:
+            let cti: i64 = r.type_info.get(pt.info_lp + b)
+            if cti >= 0:
+              if ts_conforms(r, with_ti, cti) == false:
+                r = ts_add_diag(r, span, "type '" + type_name(r, with_ti) + "' does not satisfy concept '" + type_name(r, cti) + "' required by generic parameter '" + pt.name + "'")
+            b = b + 1
+    i = i + 1
+  return r
+
+/// Every bound of a class's parameters, held to what an instantiation
+/// was written or inferred with.  The sites that DECIDE the parameters
+/// ask this — an annotation and a construction — since a rebuild made
+/// during substitution decides nothing new.
+fn check_instantiation_bounds(ts: TS, head_ti: i64, args: Vector<i64>, span: Span): TS
+  if head_ti < 0:
+    return ts
+  if head_ti >= ts.types.length():
+    return ts
+  let head: DaoType = ts.types.get(head_ti)
+  if declared_here(ts, head) == false:
+    return ts
+  let params: ParamIds = decl_param_type_ids(ts, decl_tparams_lp(ts, head.decl_node))
+  let r: TS = params.ts
+  if params.ids.length() != args.length():
+    return r
+  let decided: HashMap<i64> = HashMap<i64>::new()
+  let i: i64 = 0
+  while i < params.ids.length():
+    decided = decided.set(i64_to_string(params.ids.get(i)), args.get(i))
+    i = i + 1
+  return check_decided_bounds(r, decided, params.ids, span)
+
+/// `Box<i32>`: the class with its parameters replaced by what it was
+/// instantiated with, made once per head and arguments — a second
+/// `Box<i32>` is the type the first made, so the two compare equal.
+///
+/// A head this module did not declare, or whose layout it cannot walk,
+/// leaves the instantiation unresolved: a foreign declaration index
+/// names nothing here, and fields read past this module's arrays would
+/// report mismatches that are not there.
+fn instantiate_generic(ts: TS, head_ti: i64, args: Vector<i64>): TypeR
+  if head_ti < 0:
+    return TypeR(ts, to_i64(-1))
+  if head_ti >= ts.types.length():
+    return TypeR(ts, to_i64(-1))
+  let head: DaoType = ts.types.get(head_ti)
+  let is_struct: bool = false
+  match head.kind:
+    TypeKind::TStruct:
+      is_struct = true
+  if is_struct == false:
+    return TypeR(ts, to_i64(-1))
+  if declared_here(ts, head) == false:
+    return TypeR(ts, to_i64(-1))
+  if layout_walkable(ts, head) == false:
+    return TypeR(ts, to_i64(-1))
+  let key: string = instantiation_key(head_ti, args)
+  let known: i64 = hm_get_or(ts.reg.instantiations, key, to_i64(-1))
+  if known >= 0:
+    return TypeR(ts, known)
+  let params: ParamIds = decl_param_type_ids(ts, decl_tparams_lp(ts, head.decl_node))
+  let r: TS = params.ts
+  if params.ids.length() == 0:
+    return TypeR(r, to_i64(-1))
+  if params.ids.length() != args.length():
+    return TypeR(r, to_i64(-1))
+  let decided: HashMap<i64> = HashMap<i64>::new()
+  let pi: i64 = 0
+  while pi < params.ids.length():
+    decided = decided.set(i64_to_string(params.ids.get(pi)), args.get(pi))
+    pi = pi + 1
+  // The fields, with what the instantiation stands for in place of the
+  // parameters.  Substituting a field can make ANOTHER instantiation,
+  // which appends its own records, so every field is substituted before
+  // any of this one's records are written: the layout has to be one run.
+  let field_types: Vector<i64> = Vector<i64>::new()
+  let fi: i64 = 0
+  while fi < head.info_count:
+    let f_ti: i64 = r.type_info.get(head.info_lp + fi * 2 + 1)
+    let sub: TypeR = substitute_type(r, decided, f_ti)
+    r = sub.ts
+    field_types = field_types.push(sub.type_idx)
+    fi = fi + 1
+  let info_start: i64 = r.type_info.length()
+  let wf: i64 = 0
+  while wf < head.info_count:
+    r = ts_push_type_info(r, r.type_info.get(head.info_lp + wf * 2))
+    r = ts_push_type_info(r, field_types.get(wf))
+    wf = wf + 1
+  // What the instantiation stands for, kept where the fields are: the
+  // head it came from, how many arguments it was given, and the
+  // arguments themselves.  Substitution reads them back to rebuild
+  // `Box<T>` as `Box<i32>` once a call decides `T`.
+  let stands_for: i64 = r.type_info.length()
+  r = ts_push_type_info(r, head_ti)
+  r = ts_push_type_info(r, args.length())
+  let ai: i64 = 0
+  while ai < args.length():
+    r = ts_push_type_info(r, args.get(ai))
+    ai = ai + 1
+  let made: TypeR = ts_add_type(r, DaoType(TypeKind::TStruct, head.builtin_id, instantiation_name(r, head.name, args), head.decl_node, info_start, head.info_count, stands_for, to_i64(-1)))
+  let with_index: TS = made.ts
+  with_index.reg = reg_with_instantiations(with_index.reg, with_index.reg.instantiations.set(key, made.type_idx))
+  return TypeR(with_index, made.type_idx)
 
 /// Whether `param_ti` is one of the parameters this call may decide.
 fn decides_param(own: Vector<i64>, param_ti: i64): bool
@@ -3236,7 +3306,12 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs_lp: i
       // parameters are the only ones it may decide — a parameter of the
       // signature doing the constructing is already the type it stands
       // for (host `check_construct`).
-      let class_params: ParamIds = decl_param_type_ids(r, decl_tparams_lp(r, callee_type.decl_node))
+      // A class this module did not declare has no readable parameter
+      // list here: a foreign declaration index names an unrelated local
+      // node (see `declared_here`), so nothing is decided for it.
+      let class_params: ParamIds = ParamIds(r, Vector<i64>::new())
+      if declared_here(r, callee_type):
+        class_params = decl_param_type_ids(r, decl_tparams_lp(r, callee_type.decl_node))
       r = class_params.ts
       let built: HashMap<i64> = HashMap<i64>::new()
       while ci < args.length():
@@ -3275,6 +3350,7 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs_lp: i
             built_args = built_args.push(decided_arg)
           bp = bp + 1
         if all_decided:
+          r = check_decided_bounds(r, built, class_params.ids, ts_node_span(r, callee))
           let made: TypeR = instantiate_generic(r, callee_ti, built_args)
           r = made.ts
           if made.type_idx >= 0:
