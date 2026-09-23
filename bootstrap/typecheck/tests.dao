@@ -143,7 +143,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 272
+  let total: i32 = 279
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -1982,6 +1982,25 @@ fn main(): i32
     pass_count = pass_count + 1
   // An alias naming an instantiation is a type, not a bare head.
   if tc_expect_clean("alias_to_instantiation_is_a_type", "class Box<T>:\n  value: T\n\ntype IntBox = Box<i32>\n\nfn f(): i32\n  let b: IntBox = Box(7)\n  return b.value\n"):
+    pass_count = pass_count + 1
+  // Type arguments written for a callee that takes none are a wrong
+  // count, whether it is a function or a static method.
+  if tc_expect_some_diag_containing("type_arguments_on_plain_function_rejected", "fn plain(x: i32): i32 -> x\n\nfn f(): i32 -> plain<i32>(1)\n", "expected 0 type argument(s), got 1"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("type_arguments_on_plain_static_method_rejected", "class Plain:\n  n: i32\n  fn make(): Plain -> Plain(1)\n\nfn f(): Plain -> Plain::make<i32>()\n", "expected 0 type argument(s), got 1"):
+    pass_count = pass_count + 1
+  // A static method infers its class's parameters beside its own.
+  if tc_expect_clean("static_method_infers_class_parameter", "class Box<T>:\n  value: T\n  fn make(value: T): Box<T> -> Box(value)\n\nfn f(): i32\n  let b: Box<i32> = Box::make(1)\n  return b.value\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("static_method_inferred_class_parameter_is_held", "class Box<T>:\n  value: T\n  fn make(value: T): Box<T> -> Box(value)\n\nfn f(): i32\n  let b: Box<string> = Box::make(1)\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("static_method_infers_class_and_own_parameters", "class Box<T>:\n  value: T\n  fn pair<U>(a: T, b: U): U -> b\n\nfn f(): string -> Box::pair(1, \"s\")\n"):
+    pass_count = pass_count + 1
+  // Constructing through an alias to an instantiation builds that
+  // instantiation, and takes no type arguments.
+  if tc_expect_clean("construct_through_instantiated_alias", "class Box<T>:\n  value: T\n\ntype IntBox = Box<i32>\n\nfn f(): i32\n  let b: IntBox = IntBox(7)\n  return b.value\n"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("instantiated_alias_takes_no_type_arguments", "class Box<T>:\n  value: T\n\ntype IntBox = Box<i32>\n\nfn f(): i32\n  let b: IntBox = IntBox<i32>(1)\n  return 0\n", "is already instantiated and takes no type argument(s)"):
     pass_count = pass_count + 1
   // A requirement's own type parameters and an implementation's match
   // by position, whatever they are called.

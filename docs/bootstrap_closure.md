@@ -10,34 +10,34 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 95093 |
-| `CallExpr` | 32083 |
-| `Callee` | 32083 |
-| `Args` | 28519 |
-| `FieldExpr` | 23231 |
-| `BinaryExpr` | 14989 |
-| `LetStatement` | 12984 |
-| `IntLiteral` | 10966 |
-| `Value` | 10067 |
-| `Target` | 10067 |
-| `Assignment` | 10067 |
-| `Condition` | 8997 |
-| `ReturnStatement` | 7662 |
-| `Then` | 7455 |
-| `IfStatement` | 7455 |
+| `Identifier` | 95310 |
+| `CallExpr` | 32158 |
+| `Callee` | 32158 |
+| `Args` | 28570 |
+| `FieldExpr` | 23279 |
+| `BinaryExpr` | 15052 |
+| `LetStatement` | 13004 |
+| `IntLiteral` | 10997 |
+| `Value` | 10102 |
+| `Target` | 10102 |
+| `Assignment` | 10102 |
+| `Condition` | 9028 |
+| `ReturnStatement` | 7666 |
+| `Then` | 7482 |
+| `IfStatement` | 7482 |
 | `QualifiedName` | 7045 |
-| `StringLiteral` | 6711 |
+| `StringLiteral` | 6736 |
 | `Param` | 5544 |
-| `BoolLiteral` | 3361 |
+| `BoolLiteral` | 3373 |
 | `Pattern` | 3267 |
 | `Arm` | 3267 |
 | `ReturnType` | 2340 |
 | `FunctionDecl` | 2340 |
-| `WhileStatement` | 1542 |
+| `WhileStatement` | 1546 |
 | `UnaryExpr` | 1454 |
-| `Else` | 1447 |
+| `Else` | 1451 |
 | `Field` | 1370 |
-| `TypeArgs` | 1267 |
+| `TypeArgs` | 1279 |
 | `Variant` | 1223 |
 | `Scrutinee` | 929 |
 | `MatchStatement` | 929 |
@@ -233,14 +233,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 71 | 1 | 0 | 0 | 0 | 3 | 304 | 322 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 75 | 1 | 0 | 0 | 0 | 3 | 354 | 392 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 79 | 1 | 0 | 0 | 0 | 3 | 338 | 356 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 190 | 0 | 0 | 0 | 0 | 38 | 760 | 830 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 786 | 2 | 0 | 0 | 0 | 69 | 1742 | 2010 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 846 | 2 | 0 | 0 | 0 | 78 | 1777 | 2093 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 900 | 2 | 0 | 0 | 0 | 84 | 1858 | 2213 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 1008 | 3 | 0 | 0 | 0 | 84 | 2246 | 2676 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 71 | 0 | 0 | 0 | 0 | 3 | 304 | 322 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 70 | 0 | 0 | 0 | 0 | 3 | 354 | 392 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 70 | 0 | 0 | 0 | 0 | 3 | 338 | 356 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 151 | 1 | 0 | 0 | 0 | 38 | 760 | 830 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 601 | 2 | 0 | 0 | 0 | 69 | 1748 | 2016 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 853 | 2 | 0 | 0 | 0 | 78 | 1783 | 2099 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 850 | 2 | 0 | 0 | 0 | 84 | 1864 | 2219 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 991 | 2 | 0 | 0 | 0 | 84 | 2252 | 2682 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 
@@ -424,10 +424,10 @@ next.  Sites per program against the parse column above:
 | parser | 71 | 0 | 0 |
 | graph | 77 | 0 | 0 |
 | resolver | 126 | 0 | 0 |
-| typecheck | 260 | 0 | 0 |
-| hir | 231 | 4 | 0 |
-| mir | 242 | 9 | 0 |
-| llvm | 280 | 27 | 0 |
+| typecheck | 263 | 0 | 0 |
+| hir | 234 | 4 | 0 |
+| mir | 245 | 9 | 0 |
+| llvm | 283 | 27 | 0 |
 
 ### Closure surfaces: compiler implementation vs test harness
 
@@ -445,7 +445,7 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 |---|---:|---:|
 | `to_i64` | 761 | 155 |
 | `print` | 0 | 658 |
-| `new` | 274 | 98 |
+| `new` | 277 | 98 |
 | `i64_to_string` | 90 | 180 |
 | `substring` | 26 | 12 |
 | `char_at` | 23 | 0 |
@@ -461,7 +461,7 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 | `write_file` | 1 | 2 |
 | `make_warning` | 0 | 1 |
 | `str_compare` | 1 | 0 |
-| **Total** | **1201** | **1197** |
+| **Total** | **1204** | **1197** |
 
 ## 4. Reading the matrix
 

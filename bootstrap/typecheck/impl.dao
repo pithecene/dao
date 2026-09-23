@@ -3839,6 +3839,16 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
       let open: Vector<i64> = own.ids
       if fixed_by_receiver:
         open = Vector<i64>::new()
+      // A static method reached as `Box::make(1)` works out its class's
+      // parameters from the arguments too, unless they were written on
+      // the type (host: what the written arguments leave is inferred).
+      let class_open: Vector<i64> = Vector<i64>::new()
+      if is_method == false and targs.on_type == false:
+        let owner_ti: i64 = type_args_head(r, callee)
+        if owner_ti >= 0:
+          let owner: ParamIds = head_params(r, r.types.get(owner_ti))
+          r = owner.ts
+          class_open = owner.ids
       let written: Vector<i64> = read_type_args(r, targs.list_lp)
       if written.length() > 0:
         if targs.on_type:
@@ -3858,11 +3868,23 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
             if decided_mention_any(r, on_class.map, cls.ids, own.ids):
               open = Vector<i64>::new()
         else:
+          // Written for the callee: its own parameters, or — for a
+          // static method declaring none — its class's; for a callee
+          // with neither, the count is wrong (none are taken).
+          let for_callee: Vector<i64> = own.ids
+          if own.ids.length() == 0:
+            for_callee = class_open
+          let on_callee: Bound = seed_written_type_args(r, for_callee, written, decided, ts_node_span(r, callee))
+          r = on_callee.ts
+          decided = on_callee.map
           if own.ids.length() > 0:
-            let on_callee: Bound = seed_written_type_args(r, own.ids, written, decided, ts_node_span(r, callee))
-            r = on_callee.ts
-            decided = on_callee.map
             open = Vector<i64>::new()
+          else:
+            class_open = Vector<i64>::new()
+      let ci2: i64 = 0
+      while ci2 < class_open.length():
+        open = open.push(class_open.get(ci2))
+        ci2 = ci2 + 1
       while ci < args.length():
         if walk_params:
           let param_ti: i64 = r.type_info.get(callee_type.info_lp + param_offset + ci)
@@ -3914,13 +3936,20 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
       // parameters are the only ones it may decide — a parameter of the
       // signature doing the constructing is already the type it stands
       // for (host `check_construct`).
-      let class_params: ParamIds = head_params(r, callee_type)
-      r = class_params.ts
+      // An instantiation — reached through an alias, `IntBox(7)` with
+      // `type IntBox = Box<i32>` — is concrete: its fields decide
+      // nothing, and it takes no type arguments (host parity).
+      let class_params: ParamIds = ParamIds(r, Vector<i64>::new())
+      if is_generic_head(r, callee_ti):
+        class_params = head_params(r, callee_type)
+        r = class_params.ts
       let built: HashMap<i64> = HashMap<i64>::new()
       // Type arguments written at the construction (`Box<i64>(1)`)
       // decide the class's parameters, which no field may then retype.
       let open_params: Vector<i64> = class_params.ids
       let written_args: Vector<i64> = read_type_args(r, targs.list_lp)
+      if written_args.length() > 0 and callee_type.ret_type >= 0 and is_generic_head(r, callee_ti) == false:
+        return ts_add_diag(r, ts_node_span(r, callee), "'" + type_name(r, callee_ti) + "' is already instantiated and takes no type argument(s)")
       if written_args.length() > 0:
         let on_class: Bound = seed_written_type_args(r, class_params.ids, written_args, built, ts_node_span(r, callee))
         r = on_class.ts
