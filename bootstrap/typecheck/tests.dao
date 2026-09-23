@@ -143,7 +143,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 212
+  let total: i32 = 214
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -1807,6 +1807,18 @@ fn main(): i32
   if tc_expect_some_diag_containing("call_bound_violated_rejected", "concept Show:\n  fn show(self): string\n\nclass Plain:\n  n: i32\n\nfn need<T: Show>(x: T): string -> x.show()\n\nfn f(): string -> need(Plain(1))\n", "does not satisfy concept 'Show' required by generic parameter 'T'"):
     pass_count = pass_count + 1
   if tc_expect_some_diag_containing("call_bound_not_forwarded_from_parameter", "concept Show:\n  fn show(self): string\n\nfn need<T: Show>(x: T): string -> x.show()\n\nfn forwarded<U: Show>(u: U): string -> need(u)\n", "does not satisfy concept 'Show' required by generic parameter 'T'"):
+    pass_count = pass_count + 1
+  // A construction that decides only some of its class's parameters
+  // still owes the bounds of the ones it decided; the rest stay open.
+  if tc_expect_some_diag_containing("construction_bound_held_when_partly_decided", "concept Show:\n  fn show(self): string\n\nclass Plain:\n  n: i32\n\nclass Tagged<T: Show, U>:\n  value: T\n\nfn f(): i32\n  let t = Tagged(Plain(1))\n  return 0\n", "does not satisfy concept 'Show' required by generic parameter 'T'"):
+    pass_count = pass_count + 1
+  // A callee another module declares has no parameter list readable in
+  // this module's AST — its declaration index names whatever local
+  // declaration sits at that position (here a generic of its own).  Such
+  // a call decides nothing: cross-module argument typing is still
+  // deferred, so it reads as it did before a call could decide (`T`
+  // against `i32`, twice) rather than deciding anything.
+  if tc_expect_program_errors("cross_module_generic_call_stays_deferred", Vector<SourceInput>::new().push(SourceInput("stdlib/core/id.dao", "module core::id\nfn identity<T>(x: T): T -> x\n", true)), "module app::main\nfn other<Q>(q: Q, n: i32): Q -> q\nfn f(): i32\n  let n: i32 = identity(5)\n  return n\n", "main.dao", 2):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------

@@ -91,14 +91,21 @@ class TS:
 // topo order — expression types, the variant registry, conformances —
 // and two program facts indexed once from the resolved program: the
 // type-declaring symbol of every declaration, and the prelude modules.
+/// The types a program makes once and shares: a generator per element
+/// type, and an instantiation per head and arguments.  They are one
+/// value so the registry keeps saying what it is rather than growing a
+/// field per kind of type that is interned.
+class MadeTypes:
+  generators: HashMap<i64>      // by element type index (find_or_add_generator_type)
+  instantiations: HashMap<i64>  // by head type and arguments (instantiate_generic)
+
 class Registry:
   expr_types: HashMap<i64>      // keyed by expr_id_key(module_id, node_idx)
   variant_set: HashMap<i64>     // program-wide variant registry, keyed by name (see tc_pass1)
   conform: Conformance          // conformance state (explicit extends, derived concepts)
   methods: HashMap<i64>         // method dispatch by owner type and name (dispatch_key_*), filled by tc_bind_self
   index: ProgramIndex           // the resolved program's declaration indexes
-  generators: HashMap<i64>      // the generator type per element type index (find_or_add_generator_type)
-  instantiations: HashMap<i64>  // the instantiation per head type and arguments (instantiate_generic)
+  made: MadeTypes               // the types this program made once and shares (see MadeTypes)
 
 
 // The registries for a resolved program: the declaration indexes
@@ -128,7 +135,7 @@ fn registry_new(symbols: Vector<Symbol>, modules: Vector<ModuleEntry>): Registry
     if me.is_prelude:
       preludes = preludes.set(i64_to_string(me.module_id), to_i64(1))
     mi = mi + 1
-  return Registry(HashMap<i64>::new(), HashMap<i64>::new(), conformance_empty(), HashMap<i64>::new(), ProgramIndex(type_syms, callables, members, preludes), HashMap<i64>::new(), HashMap<i64>::new())
+  return Registry(HashMap<i64>::new(), HashMap<i64>::new(), conformance_empty(), HashMap<i64>::new(), ProgramIndex(type_syms, callables, members, preludes), MadeTypes(HashMap<i64>::new(), HashMap<i64>::new()))
 
 fn conformance_empty(): Conformance
   return Conformance(HashMap<i64>::new(), Vector<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new())
@@ -139,22 +146,22 @@ fn registry_empty(): Registry
   return registry_new(Vector<Symbol>::new(), Vector<ModuleEntry>::new())
 
 fn reg_with_expr_types(rg: Registry, m: HashMap<i64>): Registry
-  return Registry(m, rg.variant_set, rg.conform, rg.methods, rg.index, rg.generators, rg.instantiations)
+  return Registry(m, rg.variant_set, rg.conform, rg.methods, rg.index, rg.made)
 
 fn reg_with_variant_set(rg: Registry, m: HashMap<i64>): Registry
-  return Registry(rg.expr_types, m, rg.conform, rg.methods, rg.index, rg.generators, rg.instantiations)
+  return Registry(rg.expr_types, m, rg.conform, rg.methods, rg.index, rg.made)
 
 fn reg_with_conform(rg: Registry, c: Conformance): Registry
-  return Registry(rg.expr_types, rg.variant_set, c, rg.methods, rg.index, rg.generators, rg.instantiations)
+  return Registry(rg.expr_types, rg.variant_set, c, rg.methods, rg.index, rg.made)
 
 fn reg_with_methods(rg: Registry, m: HashMap<i64>): Registry
-  return Registry(rg.expr_types, rg.variant_set, rg.conform, m, rg.index, rg.generators, rg.instantiations)
+  return Registry(rg.expr_types, rg.variant_set, rg.conform, m, rg.index, rg.made)
 
 fn reg_with_generators(rg: Registry, m: HashMap<i64>): Registry
-  return Registry(rg.expr_types, rg.variant_set, rg.conform, rg.methods, rg.index, m, rg.instantiations)
+  return Registry(rg.expr_types, rg.variant_set, rg.conform, rg.methods, rg.index, MadeTypes(m, rg.made.instantiations))
 
 fn reg_with_instantiations(rg: Registry, m: HashMap<i64>): Registry
-  return Registry(rg.expr_types, rg.variant_set, rg.conform, rg.methods, rg.index, rg.generators, m)
+  return Registry(rg.expr_types, rg.variant_set, rg.conform, rg.methods, rg.index, MadeTypes(rg.made.generators, m))
 
 // The "Type" symbol the declaration at `decl_idx` of the module being
 // checked introduces (a class, enum, alias, or concept), or -1 — a
@@ -2554,12 +2561,12 @@ fn find_or_add_pointer_type(ts: TS, pointee_ti: i64): TypeR
 // generator body; its element compares as unknown (types_equal).
 fn find_or_add_generator_type(ts: TS, elem_ti: i64): TypeR
   let key: string = i64_to_string(elem_ti)
-  let known: i64 = hm_get_or(ts.reg.generators, key, to_i64(-1))
+  let known: i64 = hm_get_or(ts.reg.made.generators, key, to_i64(-1))
   if known >= 0:
     return TypeR(ts, known)
   let tr: TypeR = ts_add_type(ts, generator_type(elem_ti, "Generator<" + type_name(ts, elem_ti) + ">"))
   let r: TS = tr.ts
-  r.reg = reg_with_generators(r.reg, r.reg.generators.set(key, tr.type_idx))
+  r.reg = reg_with_generators(r.reg, r.reg.made.generators.set(key, tr.type_idx))
   return TypeR(r, tr.type_idx)
 
 // A generator type: its element type in `pointee`.
@@ -2977,7 +2984,14 @@ fn callee_own_params(ts: TS, callee: i64): ParamIds
     return ParamIds(ts, none)
   if sym >= ts.tc.symbols.length():
     return ParamIds(ts, none)
-  let decl_idx: i64 = ts.tc.symbols.get(sym).decl_node
+  let callee_sym: Symbol = ts.tc.symbols.get(sym)
+  // A declaration index means something only in the AST that holds it,
+  // so a callee another module declares has no parameter list readable
+  // here: its index would name an unrelated local declaration.  Such a
+  // call decides nothing, as it did before this slice.
+  if callee_sym.owner_module_id != ts.tc.module_id:
+    return ParamIds(ts, none)
+  let decl_idx: i64 = callee_sym.decl_node
   if decl_idx < 0:
     return ParamIds(ts, none)
   if decl_idx >= ts.tc.nodes.length():
@@ -3088,7 +3102,7 @@ fn instantiate_generic(ts: TS, head_ti: i64, args: Vector<i64>): TypeR
   if layout_walkable(ts, head) == false:
     return TypeR(ts, to_i64(-1))
   let key: string = instantiation_key(head_ti, args)
-  let known: i64 = hm_get_or(ts.reg.instantiations, key, to_i64(-1))
+  let known: i64 = hm_get_or(ts.reg.made.instantiations, key, to_i64(-1))
   if known >= 0:
     return TypeR(ts, known)
   let params: ParamIds = decl_param_type_ids(ts, decl_tparams_lp(ts, head.decl_node))
@@ -3133,7 +3147,7 @@ fn instantiate_generic(ts: TS, head_ti: i64, args: Vector<i64>): TypeR
     ai = ai + 1
   let made: TypeR = ts_add_type(r, DaoType(TypeKind::TStruct, head.builtin_id, instantiation_name(r, head.name, args), head.decl_node, info_start, head.info_count, stands_for, to_i64(-1)))
   let with_index: TS = made.ts
-  with_index.reg = reg_with_instantiations(with_index.reg, with_index.reg.instantiations.set(key, made.type_idx))
+  with_index.reg = reg_with_instantiations(with_index.reg, with_index.reg.made.instantiations.set(key, made.type_idx))
   return TypeR(with_index, made.type_idx)
 
 /// Whether `param_ti` is one of the parameters this call may decide.
@@ -3338,7 +3352,11 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs_lp: i
       // The construction IS the instantiation its values decided.  One
       // whose parameters nothing decided stays the class it names, as
       // a class with no parameters always is.
+      // What was decided meets its bounds whether or not everything
+      // else was: a parameter no field mentions stays open for the
+      // context, and the one that WAS decided still owes its bound.
       if class_params.ids.length() > 0:
+        r = check_decided_bounds(r, built, class_params.ids, ts_node_span(r, callee))
         let built_args: Vector<i64> = Vector<i64>::new()
         let bp: i64 = 0
         let all_decided: bool = true
@@ -3350,7 +3368,6 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs_lp: i
             built_args = built_args.push(decided_arg)
           bp = bp + 1
         if all_decided:
-          r = check_decided_bounds(r, built, class_params.ids, ts_node_span(r, callee))
           let made: TypeR = instantiate_generic(r, callee_ti, built_args)
           r = made.ts
           if made.type_idx >= 0:
