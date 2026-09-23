@@ -565,7 +565,7 @@ fn main(): i32
   // and a `Enum::Variant` match pattern lower with no diagnostics; the
   // constructor's callee is a HirQualName.
   // -----------------------------------------------------------------
-  let src24: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn area(s: Shape): i64\n  match s:\n    Shape::Circle(r):\n      return r\n    Shape::Dot:\n      return 0\n  return 0\n\nfn main(): i32\n  let c: Shape = Shape::Circle(r = 3)\n  return 0\n"
+  let src24: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn area(s: Shape): i32\n  match s:\n    Shape::Circle(r):\n      return r\n    Shape::Dot:\n      return 0\n  return 0\n\nfn main(): i32\n  let c: Shape = Shape::Circle(r = 3)\n  return 0\n"
   let r24: HirResult = lower_to_hir(src24)
   let has_qual: bool = false
   let qi: i64 = 0

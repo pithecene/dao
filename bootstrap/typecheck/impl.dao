@@ -1489,6 +1489,7 @@ fn tc_register_enum_shells(ts: TS, decls: Vector<i64>): TS
       Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
         let tr: TypeR = ts_add_type(r, DaoType(TypeKind::TEnum, r.tc.module_id, ts_tok_name(r, name_tidx), decl_idx, to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
         r = tr.ts
+        r = record_own_params(r, tr.type_idx, tparams_lp)
         let sym_idx: i64 = type_sym_of_decl(r, decl_idx)
         if sym_idx >= 0:
           r = ts_set_sym_type(r, sym_idx, tr.type_idx)
@@ -1556,6 +1557,7 @@ fn tc_fill_enum_variants(ts: TS, decls: Vector<i64>): TS
             let pname: string = ts_tok_name(r, r.type_info.get(v_offset + 2 + pi2 * 2))
             r.reg = reg_with_variant_set(r.reg, r.reg.variant_set.set(vkey + ":" + pname, pi2))
             r.reg = reg_with_variant_set(r.reg, r.reg.variant_set.set(vkey + ":" + pname + ":type", r.type_info.get(v_offset + 2 + pi2 * 2 + 1)))
+            r.reg = reg_with_variant_set(r.reg, r.reg.variant_set.set(vkey + ":#" + i64_to_string(pi2) + ":type", r.type_info.get(v_offset + 2 + pi2 * 2 + 1)))
             pi2 = pi2 + 1
           v_offset = v_offset + 2 + param_count * 2
           vr = vr + 1
@@ -1979,12 +1981,9 @@ fn dispatch_owner(types: Vector<DaoType>, type_info: Vector<i64>, receiver_ti: i
     return receiver_ti
   if receiver_ti >= types.length():
     return receiver_ti
-  let t: DaoType = types.get(receiver_ti)
-  match t.kind:
-    TypeKind::TStruct:
-      if t.ret_type >= 0:
-        if t.ret_type < type_info.length():
-          return type_info.get(t.ret_type)
+  let rec: i64 = stands_for_of(types.get(receiver_ti))
+  if rec >= 0 and rec < type_info.length():
+    return type_info.get(rec)
   return receiver_ti
 
 /// The method symbol a receiver in the module being checked answers
@@ -2457,7 +2456,7 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
       TypeKind::TEnum:
         let variant_tidx: i64 = segs.get(1)
         let variant_name: string = ts_tok_name(ts, variant_tidx)
-        let vkey: string = i64_to_string(ti) + ":" + variant_name
+        let vkey: string = variant_key(ts, ti, variant_name)
         let known: Option<i64> = ts.reg.variant_set.get(vkey)
         match known:
           Option::Some(v):
@@ -2506,6 +2505,11 @@ fn get_expr_type(ts: TS, node_idx: i64): i64
 fn fit_literal(ts: TS, node_idx: i64, expected_ti: i64): TS
   if expected_ti < 0:
     return ts
+  // An enum value whose parameters its payload did not decide —
+  // `Opt::Nothing`, `Res::Ok(value = 1)` — takes them from the context,
+  // when the context is the same enum agreeing on what was decided.
+  if fits_open_enum(ts, get_expr_type(ts, node_idx), expected_ti):
+    return ts_set_expr_type(ts, node_idx, expected_ti)
   match ts.tc.nodes.get(node_idx):
     Node::IntLitE(tidx):
       if is_integer(ts, expected_ti):
@@ -2526,6 +2530,53 @@ fn fit_literal(ts: TS, node_idx: i64, expected_ti: i64): TS
             let rf: TS = ts_set_expr_type(ts, operand, expected_ti)
             return ts_set_expr_type(rf, node_idx, expected_ti)
   return ts
+
+/// The generic enum head an enum value stands for when one of its
+/// parameters is still open — its argument there is the head's own
+/// parameter: `Opt::Nothing` (the head itself), `Res::Ok(value = 1)`
+/// (a `Res<i32, E>`); -1 for any other type.
+fn open_enum_head(ts: TS, ti: i64): i64
+  if ti < 0:
+    return to_i64(-1)
+  if ti >= ts.types.length():
+    return to_i64(-1)
+  let t: DaoType = ts.types.get(ti)
+  match t.kind:
+    TypeKind::TEnum:
+      let head_ti: i64 = record_head(ts, t)
+      if head_ti < 0:
+        return to_i64(-1)
+      let own: Vector<i64> = stands_for_args(ts, stands_for_of(ts.types.get(head_ti)))
+      let args: Vector<i64> = stands_for_args(ts, stands_for_of(t))
+      let i: i64 = 0
+      while i < own.length() and i < args.length():
+        if args.get(i) == own.get(i):
+          return head_ti
+        i = i + 1
+  return to_i64(-1)
+
+/// Whether an open enum value of type `value_ti` takes the type
+/// `expected_ti` from its context: the same head, and the arguments the
+/// value decided are the context's at the same positions.
+fn fits_open_enum(ts: TS, value_ti: i64, expected_ti: i64): bool
+  let head_ti: i64 = open_enum_head(ts, value_ti)
+  if head_ti < 0:
+    return false
+  if expected_ti >= ts.types.length():
+    return false
+  if record_head(ts, ts.types.get(expected_ti)) != head_ti:
+    return false
+  let own: Vector<i64> = stands_for_args(ts, stands_for_of(ts.types.get(head_ti)))
+  let have: Vector<i64> = stands_for_args(ts, stands_for_of(ts.types.get(value_ti)))
+  let want: Vector<i64> = stands_for_args(ts, stands_for_of(ts.types.get(expected_ti)))
+  if have.length() != want.length():
+    return false
+  let i: i64 = 0
+  while i < have.length():
+    if have.get(i) != own.get(i) and have.get(i) != want.get(i):
+      return false
+    i = i + 1
+  return true
 
 fn is_literal_node(ts: TS, node_idx: i64): bool
   match ts.tc.nodes.get(node_idx):
@@ -2923,31 +2974,21 @@ fn infer_bindings(ts: TS, map: HashMap<i64>, pattern_ti: i64, concrete_ti: i64, 
         TypeKind::TGenerator:
           return infer_bindings(ts, map, pt.pointee, ct.pointee, span, own)
       return Bound(ts, map)
-    TypeKind::TStruct:
-      // `Box<T>` against `Box<i32>` decides `T`: two instantiations of
-      // one declaration are matched argument by argument.
-      match ct.kind:
-        TypeKind::TStruct:
-          if pt.decl_node != ct.decl_node:
-            return Bound(ts, map)
-          if ct.ret_type < 0:
-            return Bound(ts, map)
-          // A head as the pattern stands for its own parameters:
-          // `Node<T>` written inside `class Node<T>` against a
-          // `Node<i32>` decides `T`.
-          let p_args: ParamIds = ParamIds(ts, stands_for_args(ts, pt.ret_type))
-          if pt.ret_type < 0:
-            p_args = head_params(ts, pt)
-          let c_args: Vector<i64> = stands_for_args(p_args.ts, ct.ret_type)
-          if p_args.ids.length() != c_args.length():
-            return Bound(p_args.ts, map)
-          let walked: Bound = Bound(p_args.ts, map)
-          let wi: i64 = 0
-          while wi < c_args.length():
-            walked = infer_bindings(walked.ts, walked.map, p_args.ids.get(wi), c_args.get(wi), span, own)
-            wi = wi + 1
-          return walked
+  // `Box<T>` against `Box<i32>`, `Opt<T>` against `Opt<i64>` decides
+  // `T`: two types standing for one head are matched argument by
+  // argument (a head stands for its own parameters).
+  let p_head: i64 = record_head(ts, pt)
+  if p_head >= 0 and p_head == record_head(ts, ct):
+    let p_args: Vector<i64> = stands_for_args(ts, stands_for_of(pt))
+    let c_args: Vector<i64> = stands_for_args(ts, stands_for_of(ct))
+    if p_args.length() != c_args.length():
       return Bound(ts, map)
+    let walked: Bound = Bound(ts, map)
+    let wi: i64 = 0
+    while wi < c_args.length():
+      walked = infer_bindings(walked.ts, walked.map, p_args.get(wi), c_args.get(wi), span, own)
+      wi = wi + 1
+    return walked
   return Bound(ts, map)
 
 /// `ti` with what the call decided in place of the parameters it
@@ -2995,65 +3036,87 @@ fn substitute_once(ts: TS, map: HashMap<i64>, ti: i64, done: HashMap<i64>): Subs
         return Subst(elem.ts, ti, elem.done.set(key, ti))
       let gen: TypeR = find_or_add_generator_type(elem.ts, elem.type_idx)
       return Subst(gen.ts, gen.type_idx, elem.done.set(key, gen.type_idx))
-    TypeKind::TStruct:
-      // An instantiation stands for a head and what it was given, so it
-      // is rebuilt from arguments the call decided: `Box<T>` becomes
-      // `Box<i32>`.  A head stands for its own parameters
-      // (record_own_params) — `Box<T>` written inside `class Box<T>` IS
-      // the head — so it is rebuilt the same way once one of them is
-      // decided; a class without parameters is itself.
-      if t.ret_type < 0:
-        return Subst(ts, ti, done)
-      if t.ret_type + 1 >= ts.type_info.length():
-        return Subst(ts, ti, done)
-      let head_ti: i64 = ts.type_info.get(t.ret_type)
-      let arg_count: i64 = ts.type_info.get(t.ret_type + 1)
-      let moved: bool = false
-      let new_args: Vector<i64> = Vector<i64>::new()
-      let r_args: Subst = Subst(ts, ti, done)
-      let si: i64 = 0
-      while si < arg_count:
-        let old_arg: i64 = r_args.ts.type_info.get(t.ret_type + 2 + si)
-        r_args = substitute_once(r_args.ts, map, old_arg, r_args.done)
-        if r_args.type_idx != old_arg:
-          moved = true
-        new_args = new_args.push(r_args.type_idx)
-        si = si + 1
-      if moved == false:
-        return Subst(r_args.ts, ti, r_args.done.set(key, ti))
-      // A rebuild this module cannot make is unresolved, never the type
-      // that was standing there: `Box<T>` after a call decided `T` is
-      // no answer, and an unresolved type reports no mismatch it cannot
-      // justify (the program-level pass owns a foreign head's layout).
-      let rebuilt: TypeR = instantiate_generic(r_args.ts, head_ti, new_args)
-      if rebuilt.type_idx < 0:
-        return Subst(rebuilt.ts, to_i64(-1), r_args.done.set(key, to_i64(-1)))
-      return Subst(rebuilt.ts, rebuilt.type_idx, r_args.done.set(key, rebuilt.type_idx))
-  return Subst(ts, ti, done)
+  // A class or enum stands for a head and what it was given, so it is
+  // rebuilt from arguments the call decided: `Box<T>` becomes
+  // `Box<i32>`, `Opt<T>` becomes `Opt<i64>`.  A head stands for its own
+  // parameters (record_own_params) — `Box<T>` written inside `class
+  // Box<T>` IS the head — so it is rebuilt the same way once one of
+  // them is decided; a type without parameters is itself.
+  let rec: i64 = stands_for_of(t)
+  if rec < 0:
+    return Subst(ts, ti, done)
+  if rec + 1 >= ts.type_info.length():
+    return Subst(ts, ti, done)
+  let head_ti: i64 = ts.type_info.get(rec)
+  let arg_count: i64 = ts.type_info.get(rec + 1)
+  let moved: bool = false
+  let new_args: Vector<i64> = Vector<i64>::new()
+  let r_args: Subst = Subst(ts, ti, done)
+  let si: i64 = 0
+  while si < arg_count:
+    let old_arg: i64 = r_args.ts.type_info.get(rec + 2 + si)
+    r_args = substitute_once(r_args.ts, map, old_arg, r_args.done)
+    if r_args.type_idx != old_arg:
+      moved = true
+    new_args = new_args.push(r_args.type_idx)
+    si = si + 1
+  if moved == false:
+    return Subst(r_args.ts, ti, r_args.done.set(key, ti))
+  // A rebuild that cannot be made is unresolved, never the type that
+  // was standing there: `Box<T>` after a call decided `T` is no answer,
+  // and an unresolved type reports no mismatch it cannot justify.
+  let rebuilt: TypeR = instantiate_generic(r_args.ts, head_ti, new_args)
+  if rebuilt.type_idx < 0:
+    return Subst(rebuilt.ts, to_i64(-1), r_args.done.set(key, to_i64(-1)))
+  return Subst(rebuilt.ts, rebuilt.type_idx, r_args.done.set(key, rebuilt.type_idx))
 
-/// Whether `ti` is a generic class head itself — standing for its own
-/// parameters — rather than an instantiation of one (which an alias
-/// such as `type IntBox = Box<i32>` names).
+/// The stands-for record a nominal type carries (write_stands_for) —
+/// a class's or an enum's, head or instantiation — or -1 for any other
+/// type, or a nominal type standing for nothing.
+fn stands_for_of(t: DaoType): i64
+  match t.kind:
+    TypeKind::TStruct:
+      return t.ret_type
+    TypeKind::TEnum:
+      return t.ret_type
+  return to_i64(-1)
+
+/// The head a nominal type's record names: itself for a head, the head
+/// it was made from for an instantiation; -1 for a type with no record.
+fn record_head(ts: TS, t: DaoType): i64
+  let rec: i64 = stands_for_of(t)
+  if rec < 0:
+    return to_i64(-1)
+  if rec >= ts.type_info.length():
+    return to_i64(-1)
+  return ts.type_info.get(rec)
+
+/// The registry key of a variant of the enum at `enum_ti`: variants are
+/// registered on the enum's head, so an instantiation — reached through
+/// an alias, `IntOpt::Nothing` — finds its head's.
+fn variant_key(ts: TS, enum_ti: i64, variant_name: string): string
+  let head_ti: i64 = enum_ti
+  if enum_ti >= 0 and enum_ti < ts.types.length():
+    let recorded: i64 = record_head(ts, ts.types.get(enum_ti))
+    if recorded >= 0:
+      head_ti = recorded
+  return i64_to_string(head_ti) + ":" + variant_name
+
+/// Whether `ti` is a generic class or enum head itself — standing for
+/// its own parameters — rather than an instantiation of one (which an
+/// alias such as `type IntBox = Box<i32>` names).
 fn is_generic_head(ts: TS, ti: i64): bool
   if ti < 0:
     return false
   if ti >= ts.types.length():
     return false
-  let t: DaoType = ts.types.get(ti)
-  match t.kind:
-    TypeKind::TStruct:
-      if t.ret_type >= 0 and t.ret_type < ts.type_info.length():
-        return ts.type_info.get(t.ret_type) == ti
-  return false
+  return record_head(ts, ts.types.get(ti)) == ti
 
 /// The parameters a class head stands for, by type index, from the
 /// record its type carries (record_own_params) — readable from any
 /// module; none for a class without parameters.
 fn head_params(ts: TS, head: DaoType): ParamIds
-  match head.kind:
-    TypeKind::TStruct:
-      return ParamIds(ts, stands_for_args(ts, head.ret_type))
-  return ParamIds(ts, Vector<i64>::new())
+  return ParamIds(ts, stands_for_args(ts, stands_for_of(head)))
 
 /// The type parameters a declaration declares, by the type index its
 /// own body mentions each one by, in order.  A parameter the resolver
@@ -3123,11 +3186,9 @@ fn spell_type(ts: TS, ti: i64, budget: i64): string
       return "Ptr<" + spell_type(ts, t.pointee, budget - 1) + ">"
     TypeKind::TGenerator:
       return "Generator<" + spell_type(ts, t.pointee, budget - 1) + ">"
-    TypeKind::TStruct:
-      if t.ret_type >= 0:
-        let head_ti: i64 = ts.type_info.get(t.ret_type)
-        if head_ti != ti:
-          return ts.types.get(head_ti).name + "<" + spell_args(ts, stands_for_args(ts, t.ret_type), budget - 1) + ">"
+  let head_ti: i64 = record_head(ts, t)
+  if head_ti >= 0 and head_ti != ti:
+    return ts.types.get(head_ti).name + "<" + spell_args(ts, stands_for_args(ts, stands_for_of(t)), budget - 1) + ">"
   return t.name
 
 /// `args` spelled to `budget` levels each, comma-separated.
@@ -3188,6 +3249,8 @@ fn record_own_params(ts: TS, ti: i64, tparams_lp: i64): TS
   match t.kind:
     TypeKind::TStruct:
       t.ret_type = record.type_idx
+    TypeKind::TEnum:
+      t.ret_type = record.type_idx
     TypeKind::TFunction:
       t.pointee = record.type_idx
   r.types = r.types.set(ti, t)
@@ -3240,12 +3303,11 @@ fn type_nesting(ts: TS, ti: i64): Nesting
       let element: Nesting = type_nesting(r, t.pointee)
       r = element.ts
       depth = element.depth + 1
-    TypeKind::TStruct:
-      if t.ret_type >= 0:
-        if r.type_info.get(t.ret_type) != ti:
-          let deepest: Nesting = args_nesting(r, stands_for_args(r, t.ret_type))
-          r = deepest.ts
-          depth = deepest.depth + 1
+  let head_ti: i64 = record_head(r, t)
+  if head_ti >= 0 and head_ti != ti:
+    let deepest: Nesting = args_nesting(r, stands_for_args(r, stands_for_of(t)))
+    r = deepest.ts
+    depth = deepest.depth + 1
   let made: MadeTypes = r.reg.made
   made.nesting = made.nesting.set(key, depth)
   r.reg = reg_with_made(r.reg, made)
@@ -3361,16 +3423,12 @@ fn receiver_fixes(ts: TS, callee: i64, own: Vector<i64>): bool
       let obj_ti: i64 = get_expr_type(ts, obj)
       if obj_ti < 0:
         return false
-      let t: DaoType = ts.types.get(obj_ti)
-      match t.kind:
-        TypeKind::TStruct:
-          if t.ret_type >= 0:
-            let args: Vector<i64> = stands_for_args(ts, t.ret_type)
-            let i: i64 = 0
-            while i < args.length():
-              if type_mentions_any(ts, args.get(i), own):
-                return true
-              i = i + 1
+      let args: Vector<i64> = stands_for_args(ts, stands_for_of(ts.types.get(obj_ti)))
+      let i: i64 = 0
+      while i < args.length():
+        if type_mentions_any(ts, args.get(i), own):
+          return true
+        i = i + 1
   return false
 
 /// Whether `ti` is, or holds at any depth, one of `params`.  A type
@@ -3413,15 +3471,13 @@ fn mention_search(ts: TS, ti: i64, params: Vector<i64>, so_far: Mention): Mentio
       return mention_search(ts, t.pointee, params, m)
     TypeKind::TGenerator:
       return mention_search(ts, t.pointee, params, m)
-    TypeKind::TStruct:
-      if t.ret_type >= 0:
-        let args: Vector<i64> = stands_for_args(ts, t.ret_type)
-        let i: i64 = 0
-        while i < args.length():
-          m = mention_search(ts, args.get(i), params, m)
-          if m.found:
-            return m
-          i = i + 1
+  let args: Vector<i64> = stands_for_args(ts, stands_for_of(t))
+  let i: i64 = 0
+  while i < args.length():
+    m = mention_search(ts, args.get(i), params, m)
+    if m.found:
+      return m
+    i = i + 1
   return m
 
 /// The parameters an instantiation stands for, each mapped to the
@@ -3432,10 +3488,7 @@ fn instantiation_decided(ts: TS, ti: i64, into: HashMap<i64>): Bound
   if ti >= ts.types.length():
     return Bound(ts, into)
   let t: DaoType = ts.types.get(ti)
-  let stands_for: i64 = to_i64(-1)
-  match t.kind:
-    TypeKind::TStruct:
-      stands_for = t.ret_type
+  let stands_for: i64 = stands_for_of(t)
   if stands_for < 0:
     return Bound(ts, into)
   if stands_for + 1 >= ts.type_info.length():
@@ -3536,11 +3589,7 @@ fn instantiate_generic(ts: TS, head_ti: i64, args: Vector<i64>): TypeR
   if head_ti >= ts.types.length():
     return TypeR(ts, to_i64(-1))
   let head: DaoType = ts.types.get(head_ti)
-  let is_struct: bool = false
-  match head.kind:
-    TypeKind::TStruct:
-      is_struct = true
-  if is_struct == false:
+  if stands_for_of(head) < 0:
     return TypeR(ts, to_i64(-1))
   let params: ParamIds = head_params(ts, head)
   let r: TS = params.ts
@@ -3577,10 +3626,10 @@ fn instantiate_generic(ts: TS, head_ti: i64, args: Vector<i64>): TypeR
     return TypeR(r, to_i64(-1))
   let record: TypeR = write_stands_for(r, head_ti, args)
   r = record.ts
-  let shell: TypeR = ts_add_type(r, DaoType(TypeKind::TStruct, head.builtin_id, instantiation_name(r, head.name, args), head.decl_node, to_i64(-1), to_i64(0), record.type_idx, to_i64(-1)))
+  let shell: TypeR = ts_add_type(r, DaoType(head.kind, head.builtin_id, instantiation_name(r, head.name, args), head.decl_node, to_i64(-1), to_i64(0), record.type_idx, to_i64(-1)))
   r = shell.ts
   r.reg = reg_add_instantiation(r.reg, key, shell.type_idx)
-  if layout_walkable(r, head):
+  if layout_ready(r, head):
     return TypeR(materialize(r, shell.type_idx), shell.type_idx)
   let made: MadeTypes = r.reg.made
   made.pending = made.pending.push(shell.type_idx)
@@ -3600,7 +3649,7 @@ fn materialize(ts: TS, inst_ti: i64): TS
     return ts
   let head_ti: i64 = ts.type_info.get(t.ret_type)
   let head: DaoType = ts.types.get(head_ti)
-  if layout_walkable(ts, head) == false:
+  if layout_ready(ts, head) == false:
     return ts
   let args: Vector<i64> = stands_for_args(ts, t.ret_type)
   let params: ParamIds = head_params(ts, head)
@@ -3614,6 +3663,11 @@ fn materialize(ts: TS, inst_ti: i64): TS
   r = deepest.ts
   let outer: Vector<i64> = r.reg.made.in_progress
   r.reg = reg_with_in_progress(r.reg, outer.push(head_ti).push(deepest.depth))
+  match head.kind:
+    TypeKind::TEnum:
+      let with_variants: TS = materialize_variants(r, inst_ti, head, decided)
+      with_variants.reg = reg_with_in_progress(with_variants.reg, outer)
+      return with_variants
   let field_types: Vector<i64> = Vector<i64>::new()
   let fi: i64 = 0
   while fi < head.info_count:
@@ -3633,6 +3687,46 @@ fn materialize(ts: TS, inst_ti: i64): TS
   made.info_count = head.info_count
   r.types = r.types.set(inst_ti, made)
   return derive_instantiation(r, inst_ti)
+
+/// Whether a head's layout is written: a class's fields, or an enum's
+/// variant table (written as one run by tc_fill_enum_variants).
+fn layout_ready(ts: TS, head: DaoType): bool
+  match head.kind:
+    TypeKind::TEnum:
+      return head.info_lp >= 0 and head.info_lp < ts.type_info.length()
+  return layout_walkable(ts, head)
+
+/// An enum instantiation's variant table: the head's, variant by
+/// variant — name, payload count, then each payload's name and type —
+/// with the arguments in place of the parameters in every payload
+/// type.  Every payload type is substituted before the table is
+/// written, so it is one run however many instantiations substitution
+/// makes.  `decided` maps the head's parameters to the arguments.
+fn materialize_variants(ts: TS, inst_ti: i64, head: DaoType, decided: HashMap<i64>): TS
+  let r: TS = ts
+  let records: Vector<i64> = Vector<i64>::new()
+  let pos: i64 = head.info_lp
+  let v: i64 = 0
+  while v < head.info_count:
+    records = records.push(r.type_info.get(pos))
+    let payload_count: i64 = r.type_info.get(pos + 1)
+    records = records.push(payload_count)
+    let pj: i64 = 0
+    while pj < payload_count:
+      records = records.push(r.type_info.get(pos + 2 + pj * 2))
+      let sub: TypeR = substitute_type(r, decided, r.type_info.get(pos + 3 + pj * 2))
+      r = sub.ts
+      records = records.push(sub.type_idx)
+      pj = pj + 1
+    pos = pos + 2 + payload_count * 2
+    v = v + 1
+  let info_start: i64 = r.type_info.length()
+  r = ts_push_info_run(r, records)
+  let made: DaoType = r.types.get(inst_ti)
+  made.info_lp = info_start
+  made.info_count = head.info_count
+  r.types = r.types.set(inst_ti, made)
+  return r
 
 /// The layouts of the instantiations made before their head's layout
 /// was written (`MadeTypes.pending`), once every layout of a module is:
@@ -3985,13 +4079,7 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
       // (`verify_concept_constraints`, on the callee's declaration), and
       // a class's constructor declares none.
       if class_params.ids.length() > 0:
-        let built_args: Vector<i64> = Vector<i64>::new()
-        let bp: i64 = 0
-        while bp < class_params.ids.length():
-          let class_param: i64 = class_params.ids.get(bp)
-          built_args = built_args.push(hm_get_or(built, i64_to_string(class_param), class_param))
-          bp = bp + 1
-        let made: TypeR = instantiate_generic(r, callee_ti, built_args)
+        let made: TypeR = instantiate_generic(r, callee_ti, decided_or_own(built, class_params.ids))
         r = made.ts
         if made.type_idx >= 0:
           return ts_set_expr_type(r, node_idx, made.type_idx)
@@ -4010,7 +4098,7 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
             variant_name = ts_tok_name(r, vsegs.get(vsegs.length() - 1))
       if variant_name != "":
         let names: Vector<i64> = read_list(r.tc.idx_data, names_lp)
-        return check_variant_construction(r, node_idx, callee, callee_ti, variant_name, args, names)
+        return check_variant_construction(r, node_idx, callee, callee_ti, VariantCall(variant_name, args, names, targs))
       return ts_set_expr_type(r, node_idx, callee_ti)
   return r
 
@@ -4020,10 +4108,22 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
 // with a value of the parameter's type.  Each named argument's
 // parameter index is recorded in expr_types under `<expr key>:param`,
 // which HIR reads to lower the arguments in declaration order.
-fn check_variant_construction(ts: TS, node_idx: i64, callee: i64, enum_ti: i64, variant_name: string, args: Vector<i64>, names: Vector<i64>): TS
+/// A variant construction as written: the variant's name, its payload
+/// values and the names they are given, and the type arguments written
+/// with it.
+class VariantCall:
+  variant_name: string
+  args: Vector<i64>
+  names: Vector<i64>
+  targs: WrittenTypeArgs
+
+fn check_variant_construction(ts: TS, node_idx: i64, callee: i64, enum_ti: i64, vc: VariantCall): TS
   let r: TS = ts
   let sp: Span = ts_node_span(r, callee)
-  let vkey: string = i64_to_string(enum_ti) + ":" + variant_name
+  let variant_name: string = vc.variant_name
+  let args: Vector<i64> = vc.args
+  let names: Vector<i64> = vc.names
+  let vkey: string = variant_key(r, enum_ti, variant_name)
   let registered: Option<i64> = r.reg.variant_set.get(vkey)
   let param_count: i64 = to_i64(-1)
   match registered:
@@ -4034,6 +4134,13 @@ fn check_variant_construction(ts: TS, node_idx: i64, callee: i64, enum_ti: i64, 
       return r
   if param_count == to_i64(0):
     return ts_add_diag(r, sp, "variant '" + variant_name + "' has no parameters; write it without parentheses")
+  // Every payload value is named, once, after a parameter of the
+  // variant; each is placed at its parameter's position.
+  let at_param: Vector<i64> = Vector<i64>::new()
+  let pz: i64 = 0
+  while pz < param_count:
+    at_param = at_param.push(to_i64(-1))
+    pz = pz + 1
   let ai: i64 = 0
   while ai < args.length():
     let name_tidx: i64 = names.get(ai)
@@ -4041,41 +4148,81 @@ fn check_variant_construction(ts: TS, node_idx: i64, callee: i64, enum_ti: i64, 
       let asp: Span = ts_node_span(r, args.get(ai))
       return ts_add_diag(r, asp, "variant '" + variant_name + "' is constructed by parameter name: " + variant_name + "(name = value)")
     let arg_name: string = ts_tok_name(r, name_tidx)
-    let pkey: string = vkey + ":" + arg_name
-    let param: Option<i64> = r.reg.variant_set.get(pkey)
-    match param:
-      Option::Some(param_index):
-        let aj: i64 = 0
-        while aj < ai:
-          if names.get(aj) >= 0:
-            if ts_tok_name(r, names.get(aj)) == arg_name:
-              let dsp: Span = ts_tok_span(r, name_tidx)
-              return ts_add_diag(r, dsp, "parameter '" + arg_name + "' of variant '" + variant_name + "' is given twice")
-          aj = aj + 1
-        let param_ti: i64 = to_i64(-1)
-        let ptype: Option<i64> = r.reg.variant_set.get(pkey + ":type")
-        match ptype:
-          Option::Some(t):
-            param_ti = t
-          Option::None:
-            param_ti = to_i64(-1)
-        // A literal argument adopts the parameter's concrete type, as a
-        // call argument does (host).
-        r = fit_literal(r, args.get(ai), param_ti)
-        let arg_ti: i64 = get_expr_type(r, args.get(ai))
-        if arg_ti >= 0:
-          if param_ti >= 0:
-            if types_equal(r, arg_ti, param_ti) == false:
-              let vsp: Span = ts_node_span(r, args.get(ai))
-              r = ts_add_diag(r, vsp, "parameter '" + arg_name + "' of variant '" + variant_name + "' has type " + type_name(r, param_ti) + ", got " + type_name(r, arg_ti))
-        r.reg = reg_with_expr_types(r.reg, r.reg.expr_types.set(expr_id_key(r.tc.module_id, args.get(ai)) + ":param", param_index))
-      Option::None:
-        let nsp: Span = ts_tok_span(r, name_tidx)
-        return ts_add_diag(r, nsp, "variant '" + variant_name + "' has no parameter '" + arg_name + "'")
+    let param_index: i64 = hm_get_or(r.reg.variant_set, vkey + ":" + arg_name, to_i64(-1))
+    if param_index < 0:
+      return ts_add_diag(r, ts_tok_span(r, name_tidx), "variant '" + variant_name + "' has no parameter '" + arg_name + "'")
+    if at_param.get(param_index) >= 0:
+      return ts_add_diag(r, ts_tok_span(r, name_tidx), "parameter '" + arg_name + "' of variant '" + variant_name + "' is given twice")
+    at_param = at_param.set(param_index, ai)
+    r.reg = reg_with_expr_types(r.reg, r.reg.expr_types.set(expr_id_key(r.tc.module_id, args.get(ai)) + ":param", param_index))
     ai = ai + 1
   if args.length() != param_count:
     return ts_add_diag(r, sp, "variant '" + variant_name + "' takes " + i64_to_string(param_count) + " parameter(s), got " + i64_to_string(args.length()))
-  return ts_set_expr_type(r, node_idx, enum_ti)
+  // A generic enum's head decides its parameters here: from type
+  // arguments written after the variant (`Opt::Some<i64>(…)`), which
+  // no payload may then retype, else from the payload values in the
+  // variant's declaration order — `Opt::Some(value = 5)` is an
+  // `Opt<i32>`, a literal keeping its default type (host).  An enum
+  // reached as an instantiation (`IntOpt = Opt<i32>`) is concrete: its
+  // payloads are its arguments' types.
+  let own: ParamIds = ParamIds(r, Vector<i64>::new())
+  let decided: HashMap<i64> = HashMap<i64>::new()
+  if is_generic_head(r, enum_ti):
+    own = head_params(r, r.types.get(enum_ti))
+    r = own.ts
+  else:
+    let concrete: Bound = instantiation_decided(r, enum_ti, decided)
+    r = concrete.ts
+    decided = concrete.map
+  let written: Vector<i64> = read_type_args(r, vc.targs.list_lp)
+  if written.length() > 0 and vc.targs.on_type:
+    return ts_add_diag(r, sp, "the type arguments of a variant are written after it: " + r.types.get(enum_ti).name + "::" + variant_name + "<…>(…)")
+  let open: Vector<i64> = own.ids
+  if written.length() > 0:
+    if written.length() != own.ids.length():
+      return ts_add_diag(r, sp, "'" + r.types.get(enum_ti).name + "' expects " + i64_to_string(own.ids.length()) + " type argument(s), got " + i64_to_string(written.length()))
+    let seeded: Bound = seed_written_type_args(r, own.ids, written, decided, sp)
+    r = seeded.ts
+    decided = seeded.map
+    open = Vector<i64>::new()
+  let pi: i64 = 0
+  while pi < param_count:
+    let arg: i64 = args.get(at_param.get(pi))
+    let param_ti: i64 = hm_get_or(r.reg.variant_set, vkey + ":#" + i64_to_string(pi) + ":type", to_i64(-1))
+    // A literal argument adopts the parameter's concrete type, as a
+    // call argument does (host).
+    let so_far: TypeR = substitute_type(r, decided, param_ti)
+    r = so_far.ts
+    r = fit_literal(r, arg, so_far.type_idx)
+    let arg_ti: i64 = get_expr_type(r, arg)
+    if arg_ti >= 0 and param_ti >= 0:
+      let vsp: Span = ts_node_span(r, arg)
+      if open.length() > 0:
+        let bound: Bound = infer_bindings(r, decided, param_ti, arg_ti, vsp, open)
+        r = bound.ts
+        decided = bound.map
+      let expected: TypeR = substitute_type(r, decided, param_ti)
+      r = expected.ts
+      if types_equal(r, arg_ti, expected.type_idx) == false:
+        r = ts_add_diag(r, vsp, "parameter '" + ts_tok_name(r, names.get(at_param.get(pi))) + "' of variant '" + variant_name + "' has type " + type_name(r, expected.type_idx) + ", got " + type_name(r, arg_ti))
+    pi = pi + 1
+  if own.ids.length() == 0:
+    return ts_set_expr_type(r, node_idx, enum_ti)
+  let made: TypeR = instantiate_generic(r, enum_ti, decided_or_own(decided, own.ids))
+  if made.type_idx < 0:
+    return ts_set_expr_type(made.ts, node_idx, enum_ti)
+  return ts_set_expr_type(made.ts, node_idx, made.type_idx)
+
+/// `params` with what `decided` holds for each in its place, and the
+/// parameter itself where nothing was decided.
+fn decided_or_own(decided: HashMap<i64>, params: Vector<i64>): Vector<i64>
+  let out: Vector<i64> = Vector<i64>::new()
+  let i: i64 = 0
+  while i < params.length():
+    let param_ti: i64 = params.get(i)
+    out = out.push(hm_get_or(decided, i64_to_string(param_ti), param_ti))
+    i = i + 1
+  return out
 
 fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
   let r: TS = check_expr(ts, obj)
@@ -4330,6 +4477,10 @@ fn check_let_stmt(ts: TS, node_idx: i64, name_tidx: i64, type_node: i64, init_no
     if annot_ti >= 0:
       r = fit_literal(r, init_node, annot_ti)
     let init_ti: i64 = get_expr_type(r, init_node)
+    // With no annotation, an enum value whose parameters are open has
+    // no type to take (host).
+    if annot_ti < 0 and open_enum_head(r, init_ti) >= 0:
+      return ts_add_diag(r, ts_node_span(r, init_node), "cannot infer type argument(s) for generic enum '" + r.types.get(open_enum_head(r, init_ti)).name + "'; provide an explicit type annotation")
     if annot_ti >= 0:
       if init_ti >= 0:
         if types_equal(r, annot_ti, init_ti) == false:
@@ -4469,7 +4620,7 @@ fn check_pattern(ts: TS, pat_node: i64): TS
           if segs.length() >= 2:
             variant_name = ts_tok_name(r, segs.get(segs.length() - 1))
       if variant_name != "":
-        let registered: Option<i64> = r.reg.variant_set.get(i64_to_string(callee_ti) + ":" + variant_name)
+        let registered: Option<i64> = r.reg.variant_set.get(variant_key(r, callee_ti, variant_name))
         match registered:
           Option::Some(param_count):
             let sp: Span = ts_node_span(r, callee)
@@ -4507,7 +4658,7 @@ fn check_pattern(ts: TS, pat_node: i64): TS
         let segs: Vector<i64> = read_list(r.tc.idx_data, seg_lp)
         if segs.length() >= 2:
           let bare_name: string = ts_tok_name(r, segs.get(segs.length() - 1))
-          let bare: Option<i64> = r.reg.variant_set.get(i64_to_string(pat_ti) + ":" + bare_name)
+          let bare: Option<i64> = r.reg.variant_set.get(variant_key(r, pat_ti, bare_name))
           match bare:
             Option::Some(param_count):
               if param_count > to_i64(0):
@@ -4517,6 +4668,42 @@ fn check_pattern(ts: TS, pat_node: i64): TS
               return r
       return r
   return check_expr(ts, pat_node)
+
+/// The names a variant pattern binds, each typed as its payload is for
+/// the scrutinee: `Opt::Some(v)` against an `Opt<i64>` binds `v: i64`,
+/// `Shape::Circle(r)` binds `r` as `Circle`'s payload (host).  The
+/// payload types are the head's, with the scrutinee's arguments in
+/// place of its parameters.
+fn type_arm_bindings(ts: TS, pat_node: i64, scrut_ti: i64): TS
+  match ts.tc.nodes.get(pat_node):
+    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
+      let head_ti: i64 = get_expr_type(ts, callee)
+      if head_ti < 0:
+        return ts
+      let variant_name: string = ""
+      match ts.tc.nodes.get(callee):
+        Node::QualNameE(seg_lp, seg_count):
+          let segs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+          if segs.length() >= 2:
+            variant_name = ts_tok_name(ts, segs.get(segs.length() - 1))
+      if variant_name == "":
+        return ts
+      let decided: Bound = instantiation_decided(ts, scrut_ti, HashMap<i64>::new())
+      let r: TS = decided.ts
+      let vkey: string = variant_key(r, head_ti, variant_name)
+      let bindings: Vector<i64> = read_list(r.tc.idx_data, args_lp)
+      let bi: i64 = 0
+      while bi < bindings.length():
+        let payload_ti: i64 = hm_get_or(r.reg.variant_set, vkey + ":#" + i64_to_string(bi) + ":type", to_i64(-1))
+        let sym: i64 = member_sym_of(r.reg.index, r.tc.module_id, bindings.get(bi), "Local", "")
+        if payload_ti >= 0 and sym >= 0:
+          let as_scrutinee: TypeR = substitute_type(r, decided.map, payload_ti)
+          r = as_scrutinee.ts
+          if as_scrutinee.type_idx >= 0:
+            r = ts_set_sym_type(r, sym, as_scrutinee.type_idx)
+        bi = bi + 1
+      return r
+  return ts
 
 fn check_match_stmt(ts: TS, scrut_node: i64, arms_lp: i64): TS
   let r: TS = check_expr(ts, scrut_node)
@@ -4537,6 +4724,8 @@ fn check_match_stmt(ts: TS, scrut_node: i64, arms_lp: i64): TS
         if types_equal(r, scrut_ti, pat_ti) == false:
           let sp: Span = ts_node_span(r, pat_node)
           r = ts_add_diag(r, sp, "match arm pattern type " + type_name(r, pat_ti) + " does not match scrutinee type " + type_name(r, scrut_ti))
+        else:
+          r = type_arm_bindings(r, pat_node, scrut_ti)
     r = check_body_stmts(r, body_lp2)
     i = i + 2
   return r

@@ -10,39 +10,39 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 95310 |
-| `CallExpr` | 32158 |
-| `Callee` | 32158 |
-| `Args` | 28570 |
-| `FieldExpr` | 23279 |
-| `BinaryExpr` | 15052 |
-| `LetStatement` | 13004 |
-| `IntLiteral` | 10997 |
-| `Value` | 10102 |
-| `Target` | 10102 |
-| `Assignment` | 10102 |
-| `Condition` | 9028 |
-| `ReturnStatement` | 7666 |
-| `Then` | 7482 |
-| `IfStatement` | 7482 |
-| `QualifiedName` | 7045 |
-| `StringLiteral` | 6736 |
-| `Param` | 5544 |
-| `BoolLiteral` | 3373 |
-| `Pattern` | 3267 |
-| `Arm` | 3267 |
-| `ReturnType` | 2340 |
-| `FunctionDecl` | 2340 |
-| `WhileStatement` | 1546 |
-| `UnaryExpr` | 1454 |
-| `Else` | 1451 |
-| `Field` | 1370 |
-| `TypeArgs` | 1279 |
+| `Identifier` | 96955 |
+| `CallExpr` | 32753 |
+| `Callee` | 32753 |
+| `Args` | 29061 |
+| `FieldExpr` | 23711 |
+| `BinaryExpr` | 15403 |
+| `LetStatement` | 13188 |
+| `IntLiteral` | 11228 |
+| `Value` | 10273 |
+| `Target` | 10273 |
+| `Assignment` | 10273 |
+| `Condition` | 9163 |
+| `ReturnStatement` | 7774 |
+| `Then` | 7593 |
+| `IfStatement` | 7593 |
+| `QualifiedName` | 7009 |
+| `StringLiteral` | 6874 |
+| `Param` | 5624 |
+| `BoolLiteral` | 3381 |
+| `Pattern` | 3235 |
+| `Arm` | 3235 |
+| `ReturnType` | 2376 |
+| `FunctionDecl` | 2376 |
+| `WhileStatement` | 1570 |
+| `UnaryExpr` | 1486 |
+| `Else` | 1459 |
+| `Field` | 1386 |
+| `TypeArgs` | 1299 |
 | `Variant` | 1223 |
-| `Scrutinee` | 929 |
-| `MatchStatement` | 929 |
+| `Scrutinee` | 917 |
+| `MatchStatement` | 917 |
 | `ExpressionStatement` | 678 |
-| `ClassDecl` | 349 |
+| `ClassDecl` | 353 |
 | `BreakStatement` | 64 |
 | `ResourceBlock` | 40 |
 | `EnumDecl` | 31 |
@@ -233,14 +233,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 71 | 0 | 0 | 0 | 0 | 3 | 304 | 322 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 70 | 0 | 0 | 0 | 0 | 3 | 354 | 392 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 70 | 0 | 0 | 0 | 0 | 3 | 338 | 356 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 151 | 1 | 0 | 0 | 0 | 38 | 760 | 830 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 601 | 2 | 0 | 0 | 0 | 69 | 1748 | 2016 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 853 | 2 | 0 | 0 | 0 | 78 | 1783 | 2099 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 850 | 2 | 0 | 0 | 0 | 84 | 1864 | 2219 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 991 | 2 | 0 | 0 | 0 | 84 | 2252 | 2682 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 77 | 0 | 0 | 0 | 0 | 0 | 304 | 322 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 78 | 0 | 0 | 0 | 0 | 0 | 354 | 392 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 78 | 0 | 0 | 0 | 0 | 0 | 338 | 356 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 191 | 1 | 0 | 0 | 0 | 0 | 760 | 830 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 927 | 2 | 0 | 0 | 0 | 0 | 1792 | 2063 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 1050 | 2 | 0 | 0 | 0 | 0 | 1827 | 2146 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 1016 | 2 | 0 | 0 | 0 | 0 | 1908 | 2266 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 1248 | 2 | 0 | 0 | 0 | 0 | 2296 | 2729 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 
@@ -250,8 +250,6 @@ named, not inferred.
 
 **lexer**
 
-- `typecheck` ×2: match arm pattern type Option does not match scrutinee type void
-- `typecheck` ×1: unknown type in annotation
 - `hir` ×22: unknown name 'char_at'
 - `hir` ×11: unknown name 'Vector'
 - `hir` ×6: unknown name 'Span'
@@ -265,8 +263,6 @@ named, not inferred.
 
 **parser**
 
-- `typecheck` ×2: match arm pattern type Option does not match scrutinee type void
-- `typecheck` ×1: unknown type in annotation
 - `hir` ×22: unknown name 'char_at'
 - `hir` ×11: unknown name 'Vector'
 - `hir` ×6: unknown name 'Span'
@@ -280,8 +276,6 @@ named, not inferred.
 
 **graph**
 
-- `typecheck` ×2: match arm pattern type Option does not match scrutinee type void
-- `typecheck` ×1: unknown type in annotation
 - `hir` ×22: unknown name 'char_at'
 - `hir` ×11: unknown name 'Vector'
 - `hir` ×6: unknown name 'Span'
@@ -295,8 +289,6 @@ named, not inferred.
 
 **resolver**
 
-- `typecheck` ×27: match arm pattern type Option does not match scrutinee type void
-- `typecheck` ×11: unknown type in annotation
 - `hir` ×22: unknown name 'char_at'
 - `hir` ×11: unknown name 'Vector'
 - `hir` ×6: unknown name 'Span'
@@ -310,8 +302,6 @@ named, not inferred.
 
 **typecheck**
 
-- `typecheck` ×34: match arm pattern type Option does not match scrutinee type void
-- `typecheck` ×16: unknown type in annotation
 - `hir` ×22: unknown name 'char_at'
 - `hir` ×11: unknown name 'Vector'
 - `hir` ×6: unknown name 'Span'
@@ -325,8 +315,6 @@ named, not inferred.
 
 **hir**
 
-- `typecheck` ×34: match arm pattern type Option does not match scrutinee type void
-- `typecheck` ×16: unknown type in annotation
 - `hir` ×22: unknown name 'char_at'
 - `hir` ×11: unknown name 'Vector'
 - `hir` ×6: unknown name 'Span'
@@ -340,8 +328,6 @@ named, not inferred.
 
 **mir**
 
-- `typecheck` ×34: match arm pattern type Option does not match scrutinee type void
-- `typecheck` ×16: unknown type in annotation
 - `hir` ×22: unknown name 'char_at'
 - `hir` ×11: unknown name 'Vector'
 - `hir` ×6: unknown name 'Span'
@@ -355,8 +341,6 @@ named, not inferred.
 
 **llvm**
 
-- `typecheck` ×34: match arm pattern type Option does not match scrutinee type void
-- `typecheck` ×16: unknown type in annotation
 - `hir` ×22: unknown name 'char_at'
 - `hir` ×11: unknown name 'Vector'
 - `hir` ×6: unknown name 'Span'
@@ -388,12 +372,12 @@ diagnostics per stage, and the first.
 | `stdlib/core/convert.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/diagnostic.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/equatable.dao` | 0 | 0 | 0 | — |
-| `stdlib/core/hashmap.dao` | 10 | 0 | 13 | expected expression |
+| `stdlib/core/hashmap.dao` | 10 | 0 | 10 | expected expression |
 | `stdlib/core/math.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/memory.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/numeric.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/option.dao` | 0 | 0 | 0 | — |
-| `stdlib/core/overflow.dao` | 0 | 0 | 46 | return type mismatch: expected void, got Option |
+| `stdlib/core/overflow.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/panic.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/printable.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/range.dao` | 0 | 2 | 0 | duplicate declaration 'range' |
@@ -424,10 +408,10 @@ next.  Sites per program against the parse column above:
 | parser | 71 | 0 | 0 |
 | graph | 77 | 0 | 0 |
 | resolver | 126 | 0 | 0 |
-| typecheck | 263 | 0 | 0 |
-| hir | 234 | 4 | 0 |
-| mir | 245 | 9 | 0 |
-| llvm | 283 | 27 | 0 |
+| typecheck | 269 | 0 | 0 |
+| hir | 239 | 4 | 0 |
+| mir | 250 | 9 | 0 |
+| llvm | 288 | 27 | 0 |
 
 ### Closure surfaces: compiler implementation vs test harness
 
@@ -443,10 +427,10 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 
 | Prelude function | Compiler | Harness |
 |---|---:|---:|
-| `to_i64` | 761 | 155 |
+| `to_i64` | 769 | 155 |
 | `print` | 0 | 658 |
-| `new` | 277 | 98 |
-| `i64_to_string` | 90 | 180 |
+| `new` | 282 | 98 |
+| `i64_to_string` | 92 | 180 |
 | `substring` | 26 | 12 |
 | `char_at` | 23 | 0 |
 | `read_file` | 0 | 19 |
@@ -461,7 +445,7 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 | `write_file` | 1 | 2 |
 | `make_warning` | 0 | 1 |
 | `str_compare` | 1 | 0 |
-| **Total** | **1204** | **1197** |
+| **Total** | **1219** | **1197** |
 
 ## 4. Reading the matrix
 
