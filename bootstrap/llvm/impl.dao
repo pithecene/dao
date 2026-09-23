@@ -257,6 +257,32 @@ class LlStructDef:
 // Return the LLVM type text for a MIR type_idx, including struct
 // names.  For primitives, delegates to ll_type_text.  For structs,
 // returns "%struct.Name".
+// The LLVM name of the struct type for the Dao type at `type_idx`: an
+// unquoted identifier keeps letters, digits, `_`, `.` and `$`; an
+// instantiation's spelling (`Tag<i32>`) has more, and LLVM takes any
+// name in quotes.  Two instantiations can spell alike (`Tag<T>` under
+// two binders), so a quoted name ends in the type's index, its identity.
+fn bs_struct_name(name: string, type_idx: i64): string
+  let plain: bool = true
+  let i: i64 = 0
+  while i < length(name):
+    let c: i32 = char_at(name, i)
+    let ok: bool = false
+    if c >= 48 and c <= 57:
+      ok = true
+    if c >= 65 and c <= 90:
+      ok = true
+    if c >= 97 and c <= 122:
+      ok = true
+    if c == 95 or c == 46 or c == 36:
+      ok = true
+    if ok == false:
+      plain = false
+    i = i + 1
+  if plain:
+    return "%struct." + name
+  return "%\"struct." + name + "#" + i64_to_string(type_idx) + "\""
+
 fn bs_type_text(types: Vector<DaoType>, type_idx: i64): string
   if type_idx < 0:
     return "void"
@@ -265,7 +291,7 @@ fn bs_type_text(types: Vector<DaoType>, type_idx: i64): string
   let t: DaoType = types.get(type_idx)
   match t.kind:
     TypeKind::TStruct:
-      return "%struct." + t.name
+      return bs_struct_name(t.name, type_idx)
   return ll_type_text(ll_type_from_mir(types, type_idx))
 
 // =========================================================================
@@ -555,7 +581,7 @@ fn bs_ensure_struct_def(bs: BS, type_idx: i64): BS
   // registration sees this type as already present and doesn't
   // recurse back into it.
   let t: DaoType = bs.types.get(type_idx)
-  let ll_name: string = "%struct." + t.name
+  let ll_name: string = bs_struct_name(t.name, type_idx)
   let slot_idx: i64 = bs.struct_defs.length()
   bs.struct_defs = bs.struct_defs.push(LlStructDef(t.name, ll_name, Vector<string>::new(), type_idx))
   // Walk the struct's field type pairs.  For every field whose

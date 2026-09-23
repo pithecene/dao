@@ -39,6 +39,25 @@ fn tc_expect_rejected(label: string, src: string): bool
   print("FAIL " + label + ": expected a diagnostic, got 0")
   return false
 
+// Typecheck `src` and report whether ANY diagnostic it raises contains
+// `needle`.  A source may fail for more than one reason at once — a
+// conflicting type parameter also leaves an argument that does not fit
+// — and the reason under test is the one named here.
+fn tc_expect_some_diag_containing(label: string, src: string, needle: string): bool
+  let res: TypeCheckResult = typecheck(src)
+  let i: i64 = 0
+  while i < res.diags.length():
+    if index_of(res.diags.get(i).message, needle) >= 0:
+      print("PASS " + label)
+      return true
+    i = i + 1
+  print("FAIL " + label + ": expected a diagnostic containing '" + needle + "', got " + i64_to_string(tc_count_diags(res)))
+  let j: i64 = 0
+  while j < res.diags.length():
+    print("  diag: " + res.diags.get(j).message)
+    j = j + 1
+  return false
+
 // Typecheck `src` and report whether exactly one diagnostic is raised
 // and its message contains `needle`.
 fn tc_expect_diag_containing(label: string, src: string, needle: string): bool
@@ -124,7 +143,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 202
+  let total: i32 = 272
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -1067,9 +1086,9 @@ fn main(): i32
   // that module; another module sees only the prelude's; an unknown
   // name is none.
   let shadow_ok: bool = false
-  if find_method_sym_for_receiver(test_dispatch_index(), to_i64(0), "show", to_i64(2)) == to_i64(1):
-    if find_method_sym_for_receiver(test_dispatch_index(), to_i64(1), "show", to_i64(2)) == to_i64(0):
-      if find_method_sym_for_receiver(test_dispatch_index(), to_i64(0), "hash", to_i64(2)) == to_i64(-1):
+  if find_method_sym_for_receiver(test_dispatch_index(), to_i64(0), "show", to_i64(2), to_i64(2)) == to_i64(1):
+    if find_method_sym_for_receiver(test_dispatch_index(), to_i64(1), "show", to_i64(2), to_i64(2)) == to_i64(0):
+      if find_method_sym_for_receiver(test_dispatch_index(), to_i64(0), "hash", to_i64(2), to_i64(2)) == to_i64(-1):
         shadow_ok = true
   if shadow_ok:
     print("PASS module_method_shadows_prelude")
@@ -1754,6 +1773,233 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL unconstrained_param_member_rejected: expected >= 1 diagnostic, got 0")
+
+  // -----------------------------------------------------------------
+  // Generic call inference and substitution: a call decides the type
+  // parameters its callee declares, and the result is what the
+  // signature says of that answer.  A parameter of the signature doing
+  // the calling is already the type it stands for.
+  // -----------------------------------------------------------------
+  if tc_expect_clean("generic_call_infers_from_argument", "fn identity<T>(x: T): T -> x\n\nfn f(): i32\n  let n: i32 = identity(5)\n  return n\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_call_result_is_what_it_decided", "fn identity<T>(x: T): T -> x\n\nfn f(): i32\n  let s: string = identity(\"a\")\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("generic_call_conflict_rejected", "fn pair<T>(a: T, b: T): T -> a\n\nfn f(): i32\n  let x: i32 = pair(1, \"s\")\n  return 0\n", "conflicting types for generic parameter 'T'"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_annotation_is_its_instantiation", "class Box<T>:\n  value: T\n\nfn f(): i32\n  let b: Box<i32> = Box(1)\n  let v: i32 = b.value\n  return v\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_construction_decides_the_class", "class Box<T>:\n  value: T\n\nfn wrap<T>(x: T): Box<T> -> Box(x)\n\nfn f(): i32\n  let b: Box<i32> = wrap(7)\n  let v: i32 = b.value\n  return v\n"):
+    pass_count = pass_count + 1
+  // Two instantiations of one class are two types.
+  if tc_expect_rejected("generic_instantiations_of_one_class_differ", "class Box<T>:\n  value: T\n\nfn f(): i32\n  let b: Box<i32> = Box(\"s\")\n  return 0\n"):
+    pass_count = pass_count + 1
+  // A call decides the CALLEE's parameters; the caller's own stay the
+  // types its signature promised.
+  if tc_expect_rejected("call_decides_only_the_callee_parameters", "fn identity<T>(x: T): T -> x\n\nfn f<U>(u: U, n: i32): U -> identity(n)\n"):
+    pass_count = pass_count + 1
+
+  // A bound is a conformance obligation, and a call is where it is met:
+  // what the call decides must satisfy every bound the parameter
+  // declares.  A type parameter carries no conformance of its own into
+  // another signature's bound (host parity).
+  if tc_expect_clean("call_bound_satisfied", "concept Show:\n  fn show(self): string\n\nclass Shown:\n  n: i32\n\nextend Shown as Show:\n  fn show(self): string\n    return \"s\"\n\nfn need<T: Show>(x: T): string -> x.show()\n\nfn f(): string -> need(Shown(1))\n"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("call_bound_violated_rejected", "concept Show:\n  fn show(self): string\n\nclass Plain:\n  n: i32\n\nfn need<T: Show>(x: T): string -> x.show()\n\nfn f(): string -> need(Plain(1))\n", "does not satisfy concept 'Show' required by generic parameter 'T'"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("call_bound_not_forwarded_from_parameter", "concept Show:\n  fn show(self): string\n\nfn need<T: Show>(x: T): string -> x.show()\n\nfn forwarded<U: Show>(u: U): string -> need(u)\n", "does not satisfy concept 'Show' required by generic parameter 'T'"):
+    pass_count = pass_count + 1
+  // A construction is held to no bound (host parity: only a call of a
+  // function decides parameters that owe one), whatever it decided.
+  if tc_expect_clean("construction_owes_no_bound", "concept Show:\n  fn show(self): string\n\nclass Plain:\n  n: i32\n\nclass Tagged<T: Show, U>:\n  value: T\n\nfn f(): i32\n  let t = Tagged(Plain(1))\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("bounded_class_reconstructs_its_own_value", "concept Show:\n  fn show(self): string\n\nclass Box<T: Show>:\n  value: T\n  fn again(self): i32\n    let b: Box<T> = Box(self.value)\n    return 0\n"):
+    pass_count = pass_count + 1
+  // A callee another module declares decides its parameters as a local
+  // one does: they are read from its type's record, never from an AST
+  // — a local generic at the same declaration index is not consulted.
+  if tc_expect_program_errors("cross_module_generic_call_decides", Vector<SourceInput>::new().push(SourceInput("stdlib/core/id.dao", "module core::id\nfn identity<T>(x: T): T -> x\n", true)), "module app::main\nfn other<Q>(q: Q, n: i32): Q -> q\nfn f(): i32\n  let n: i32 = identity(5)\n  return n\n", "main.dao", 0):
+    pass_count = pass_count + 1
+  // A generic head another module declares is instantiated, decided,
+  // dispatched on, and held to its bounds from this one.
+  if tc_expect_program_errors("cross_module_generic_annotation_is_its_instantiation", Vector<SourceInput>::new().push(SourceInput("stdlib/core/box.dao", "module core::box\nclass Box<T>:\n  value: T\n  fn get(self): T\n    return self.value\n  fn make(v: T): Box<T> -> Box(v)\n", true)), "module app::main\nfn f(): i32\n  let b: Box<i32> = Box(1)\n  let m: Box<i32> = Box<i32>::make(2)\n  let v: i32 = b.get()\n  return v + m.value\n", "main.dao", 0):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("cross_module_generic_annotation_argument_is_held", Vector<SourceInput>::new().push(SourceInput("stdlib/core/box.dao", "module core::box\nclass Box<T>:\n  value: T\n", true)), "module app::main\nfn f(): i32\n  let b: Box<i32> = Box(\"s\")\n  return 0\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("cross_module_call_bound_held", Vector<SourceInput>::new().push(SourceInput("stdlib/core/show.dao", "module core::show\nconcept Show:\n  fn show(self): string\n\nfn need<T: Show>(x: T): string -> x.show()\n", true)), "module app::main\nclass Plain:\n  n: i32\n\nfn f(): string -> need(Plain(1))\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  // Prelude file order changes nothing: a callee's bounds and a head's
+  // layout declared in a later file hold for an earlier one.
+  if tc_expect_program_errors("bound_of_a_later_prelude_file_is_held", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", "module core::a\nconcept Show:\n  fn show(self): string\n\nclass Plain:\n  n: i32\n\nfn call_early(): string -> need(Plain(1))\n", true)).push(SourceInput("stdlib/core/z.dao", "module core::z\nfn need<T: Show>(x: T): string -> x.show()\n", true)), "module app::main\n", "stdlib/core/a.dao", 1):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("layout_of_a_later_prelude_file_is_filled", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", "module core::a\nclass Holder:\n  box: Box<i32>\n\nfn peek(h: Holder): i32 -> h.box.missing\n", true)).push(SourceInput("stdlib/core/z.dao", "module core::z\nclass Box<T>:\n  value: T\n", true)), "module app::main\n", "stdlib/core/a.dao", 1):
+    pass_count = pass_count + 1
+  // An instantiation derives as seen from its head's module: an
+  // app-local extend of `i32` is invisible to the prelude's `Box`, so
+  // `Box<i32>` does not derive through it; a prelude extend, visible
+  // everywhere, lets it.
+  if tc_expect_program_errors("cross_module_instantiation_derives_from_its_head_module", Vector<SourceInput>::new().push(SourceInput("stdlib/core/box.dao", "module core::box\nderived concept Show:\n  fn show(self): string\n\nclass Box<T>:\n  value: T\n", true)), "module app::main\nextend i32 as Show:\n  fn show(self): string -> \"i\"\n\nfn f(): string\n  let b: Box<i32> = Box(1)\n  return b.show()\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("cross_module_instantiation_derives_through_prelude_extend", Vector<SourceInput>::new().push(SourceInput("stdlib/core/box.dao", "module core::box\nderived concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string -> \"i\"\n\nclass Box<T>:\n  value: T\n", true)), "module app::main\nfn f(): string\n  let b: Box<i32> = Box(1)\n  return b.show()\n", "main.dao", 0):
+    pass_count = pass_count + 1
+  // A method on a receiver instantiated from another module's head is
+  // read with what the receiver stands for: `get(self): T` on the
+  // prelude's `Box<i32>` is an `i32`.
+  if tc_expect_program_errors("cross_module_receiver_call_decides", Vector<SourceInput>::new().push(SourceInput("stdlib/core/box.dao", "module core::box\nclass Box<T>:\n  value: T\n  fn get(self): T\n    return self.value\n\nclass Holder:\n  box: Box<i32>\n", true)), "module app::main\nfn f(h: Holder): i32 -> h.box.get()\n", "main.dao", 0):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("cross_module_receiver_call_result_is_held", Vector<SourceInput>::new().push(SourceInput("stdlib/core/box.dao", "module core::box\nclass Box<T>:\n  value: T\n  fn get(self): T\n    return self.value\n\nclass Holder:\n  box: Box<i32>\n", true)), "module app::main\nfn f(h: Holder): string -> h.box.get()\n", "main.dao", 1):
+    pass_count = pass_count + 1
+
+  // A layout is one run: an annotation that makes an instantiation
+  // appends records of its own, and the enclosing signature, class,
+  // or enum is written only after every annotation in it resolved.
+  if tc_expect_clean("generic_annotation_keeps_enclosing_signature", "class Box<T>:\n  value: T\n\nfn both(a: Box<i32>, b: Box<i32>): i32\n  return a.value + b.value\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_annotation_keeps_enclosing_fields", "class Box<T>:\n  value: T\n\nclass Holder:\n  box: Box<i32>\n  n: i32\n\nfn f(h: Holder): i32 -> h.n + h.box.value\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_annotation_keeps_enclosing_variants", "class Box<T>:\n  value: T\n\nenum class E:\n  A(b: Box<i32>)\n  B(n: i32)\n\nfn f(): E -> E::B(n = 1)\n"):
+    pass_count = pass_count + 1
+  // A bound holds whether the callee is declared before the call or
+  // after it.
+  if tc_expect_some_diag_containing("forward_call_bound_violated_rejected", "concept Show:\n  fn show(self): string\n\nclass Plain:\n  n: i32\n\nfn f(): string -> need(Plain(1))\n\nfn need<T: Show>(x: T): string -> x.show()\n", "does not satisfy concept 'Show' required by generic parameter 'T'"):
+    pass_count = pass_count + 1
+  // Type arguments written at a call decide the callee's parameters,
+  // and no argument may retype what was written.
+  if tc_expect_clean("explicit_type_argument_accepted", "fn identity<T>(x: T): T -> x\n\nfn f(): string -> identity<string>(\"a\")\n"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("explicit_type_argument_is_fixed", "fn identity<T>(x: T): T -> x\n\nfn f(): i32\n  let s: string = identity<string>(1)\n  return 0\n", "argument type mismatch: expected string, got i32"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("explicit_type_argument_count_rejected", "fn identity<T>(x: T): T -> x\n\nfn f(): i32 -> identity<string, i32>(1)\n", "expected 1 type argument(s), got 2"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("explicit_constructor_type_argument", "class Box<T>:\n  value: T\n\nfn f(): i64\n  let b: Box<i64> = Box<i64>(1)\n  return b.value\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("explicit_constructor_type_argument_is_fixed", "class Box<T>:\n  value: T\n\nfn f(): i32\n  let b: Box<i32> = Box<i64>(1)\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("static_call_type_arguments_decide_the_class", "class Box<T>:\n  value: T\n  fn zero(v: T): Box<T> -> Box(v)\n\nfn f(): i32\n  let b: Box<i32> = Box<i32>::zero(0)\n  return b.value\n"):
+    pass_count = pass_count + 1
+  // An instantiation has its class's methods, with the class's
+  // parameters standing for what the receiver was instantiated with;
+  // `Box<T>` inside `class Box<T>` is the class itself.
+  if tc_expect_clean("instantiation_keeps_class_methods", "class Box<T>:\n  value: T\n  fn get(self): T\n    return self.value\n  fn size(self): i32 -> 1\n  fn again(self): i32 -> Box(self.value).size()\n\nfn f(): i32\n  let b: Box<i32> = Box(7)\n  let v: i32 = b.get()\n  return v + b.size()\n"):
+    pass_count = pass_count + 1
+  // A construction that decides some parameters is its own
+  // instantiation, the open ones kept as themselves.
+  if tc_expect_rejected("partial_construction_is_its_own_instantiation", "class Tagged<T, U>:\n  value: T\n\nfn f(): i32\n  let a = Tagged(1)\n  let b = Tagged(\"s\")\n  a = b\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("partial_construction_field_is_decided", "class Tagged<T, U>:\n  value: T\n\nfn f(): i32\n  let a = Tagged(1)\n  let v: i32 = a.value\n  return v\n"):
+    pass_count = pass_count + 1
+  // A recursive head instantiates: `Node<i32>` is indexed before its
+  // `Ptr<Node<T>>` field asks for it.
+  if tc_expect_clean("recursive_head_instantiates", "class Node<T>:\n  value: T\n  next: Ptr<Node<T>>\n\nfn f(n: Node<i32>): i32 -> n.value\n"):
+    pass_count = pass_count + 1
+  // A field, or a variant payload, typed with an instantiation of a
+  // class declared further down is filled once that layout exists.
+  if tc_expect_clean("field_instantiates_a_later_class", "class Holder<T>:\n  box: Box<T>\n\nclass Box<T>:\n  value: T\n\nfn f(): i32\n  let h: Holder<i32> = Holder(Box(1))\n  return h.box.value\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("payload_instantiates_a_later_class", "enum class E:\n  A(b: Box<i32>)\n  B(n: i32)\n\nclass Box<T>:\n  value: T\n\nfn f(): E -> E::A(b = Box(1))\n"):
+    pass_count = pass_count + 1
+  // An extend written for one instantiation answers for it.
+  if tc_expect_clean("extend_of_an_instantiation_dispatches", "concept Show:\n  fn show(self): string\n\nclass Box<T>:\n  value: T\n\nextend Box<i32> as Show:\n  fn show(self): string -> \"b\"\n\nfn f(): string\n  let b: Box<i32> = Box(1)\n  return b.show()\n"):
+    pass_count = pass_count + 1
+  // A static generic method reached as `Type::method` decides its own
+  // parameters, from arguments or from type arguments written for it.
+  if tc_expect_clean("static_generic_method_decides_from_argument", "class Factory:\n  n: i32\n  fn identity<T>(x: T): T -> x\n\nfn f(): i32\n  let v: i32 = Factory::identity(1)\n  return v\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("static_generic_method_takes_written_type_argument", "class Factory:\n  n: i32\n  fn identity<T>(x: T): T -> x\n\nfn f(): string -> Factory::identity<string>(\"a\")\n"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("static_generic_method_written_type_argument_is_fixed", "class Factory:\n  n: i32\n  fn identity<T>(x: T): T -> x\n\nfn f(): i32\n  let s: string = Factory::identity<string>(1)\n  return 0\n", "argument type mismatch: expected string, got i32"):
+    pass_count = pass_count + 1
+  // An annotation writes a type and owes no bound (host parity: only
+  // a call or a construction decides a parameter by a value).
+  if tc_expect_clean("annotation_argument_owes_no_bound", "concept Show:\n  fn show(self): string\n\nclass Plain:\n  n: i32\n\nclass Box<T: Show>:\n  value: T\n\nclass Holder:\n  box: Box<Plain>\n\nfn take(b: Box<Plain>): i32 -> 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("annotation_argument_may_be_a_bounded_parameter", "concept Show:\n  fn show(self): string\n\nclass Box<T: Show>:\n  value: T\n\nfn f<U: Show>(b: Box<U>): i32 -> 0\n"):
+    pass_count = pass_count + 1
+  // Where `<..>` was written decides whose parameters it names: on the
+  // type, the class's; for the method, its own.
+  if tc_expect_some_diag_containing("type_arguments_for_the_method_are_the_methods", "class Box<T>:\n  value: T\n  fn identity<U>(x: U): U -> x\n\nfn f(): i32\n  let s: string = Box::identity<i32>(\"text\")\n  return 0\n", "argument type mismatch: expected i32, got string"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("type_arguments_on_the_type_leave_the_methods_open", "class Box<T>:\n  value: T\n  fn identity<U>(x: U): U -> x\n\nfn f(): string -> Box<i32>::identity(\"a\")\n"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("type_arguments_on_a_plain_type_rejected", "class Factory:\n  n: i32\n  fn make(): i32 -> 1\n\nfn f(): i32 -> Factory<i32>::make()\n", "expected 0 type argument(s), got 1"):
+    pass_count = pass_count + 1
+  // An instantiation made before its head's layout is written gets its
+  // layout once the head's is, whole.
+  if tc_expect_clean("field_instantiates_a_later_head", "class Outer:\n  mid: Middle<i32>\n\nclass Middle<T>:\n  inner: Inner<T>\n\nclass Inner<T>:\n  value: T\n\nfn f(o: Outer): i32 -> o.mid.inner.value\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("later_head_instantiation_is_complete", "class Outer:\n  mid: Middle<i32>\n\nclass Middle<T>:\n  inner: Inner<T>\n\nclass Inner<T>:\n  value: T\n\nfn g(m: Middle<i32>): i32 -> m.inner.missing\n"):
+    pass_count = pass_count + 1
+  // An instantiation derives what its fields allow.
+  if tc_expect_clean("instantiation_derives_conformance", "derived concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string -> \"i\"\n\nclass Tag<T>:\n  n: i32\n\nfn f(): string -> Tag<i32>(1).show()\n"):
+    pass_count = pass_count + 1
+  // A head as a pattern decides its parameters from an instantiation.
+  if tc_expect_clean("head_pattern_decides_from_instantiation", "class Node<T>:\n  next: Ptr<Node<T>>\n  value: T\n\nfn f(): i32\n  let n: Node<i32> = Node(Ptr<Node<i32>>::new(), 1)\n  return n.value\n"):
+    pass_count = pass_count + 1
+  // Whichever way round the classes are declared, an instantiation's
+  // layout is the head's whole layout, and a chain of them fills.
+  if tc_expect_rejected("head_declared_first_instantiates_complete", "class Middle<T>:\n  inner: Inner<T>\n\nclass Outer:\n  mid: Middle<i32>\n\nclass Inner<T>:\n  value: T\n\nfn g(m: Middle<i32>): i32 -> m.inner.missing\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("head_declared_first_fills", "class Middle<T>:\n  inner: Inner<T>\n\nclass Outer:\n  mid: Middle<i32>\n\nclass Inner<T>:\n  value: T\n\nfn f(o: Outer): i32 -> o.mid.inner.value\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("declaration_chain_fills", "class A:\n  b: B<i32>\n\nclass B<T>:\n  c: C<T>\n\nclass C<T>:\n  d: D<T>\n\nclass D<T>:\n  value: T\n\nfn f(a: A): i32 -> a.b.c.d.value\n"):
+    pass_count = pass_count + 1
+  // `Node<T>` inside `class Node<T>` is the class before its layout is
+  // written, so the field is typed and read through.
+  if tc_expect_some_diag_containing("self_reference_is_typed_while_filling", "class Node<T>:\n  next: Ptr<Node<T>>\n  value: T\n\nfn f(n: Node<i32>): string\n  mode unsafe =>\n    let s: string = n.next.get().value\n  return \"\"\n", "cannot assign i32 to string"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("self_reference_reads_through", "class Node<T>:\n  next: Ptr<Node<T>>\n  value: T\n\nfn f(n: Node<i32>): i32\n  mode unsafe =>\n    let v: i32 = n.next.get().value\n  return 0\n"):
+    pass_count = pass_count + 1
+  // A class's own method meets a requirement on an instantiated target
+  // with the target's arguments in place: `get(self): T` on `Box<i32>`.
+  if tc_expect_clean("inherent_method_satisfies_for_instantiated_target", "concept Show:\n  fn get(self): i32\n  fn show(self): string\n\nclass Box<T>:\n  value: T\n  fn get(self): T\n    return self.value\n\nextend Box<i32> as Show:\n  fn show(self): string -> \"b\"\n"):
+    pass_count = pass_count + 1
+  // `Ptr<Node<i32>>` inside `class Node<T>` gets its layout once Node's
+  // is written, and reads the field through.
+  if tc_expect_some_diag_containing("self_specialization_is_typed", "class Node<T>:\n  next: Ptr<Node<i32>>\n  value: T\n\nfn f(): i32\n  let n: Node<string> = Node(Ptr<Node<string>>::new(), \"s\")\n  return 0\n", "field type mismatch: expected Ptr<Node<i32>>, got Ptr<Node<string>>"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("self_specialization_reads_through", "class Node<T>:\n  next: Ptr<Node<i32>>\n  value: T\n\nfn f(): i32\n  let n: Node<string> = Node(Ptr<Node<i32>>::new(), \"s\")\n  return 0\n"):
+    pass_count = pass_count + 1
+  // A recursion through a type argument is not expanded — one field or
+  // two, which would expand exponentially — and the rest of the class
+  // is typed.
+  if tc_expect_clean("polymorphic_recursion_is_not_expanded", "class Node<T>:\n  next: Ptr<Node<Ptr<T>>>\n  value: T\n\nfn f(n: Node<i32>): i32 -> n.value\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("two_recursive_fields_are_not_expanded", "class Node<T>:\n  left: Ptr<Node<Ptr<T>>>\n  right: Ptr<Node<Generator<T>>>\n  value: T\n\nfn f(n: Node<i32>): i32 -> n.value\n"):
+    pass_count = pass_count + 1
+  // Classes that instantiate each other are both filled, and a
+  // construction is checked against every field.
+  if tc_expect_some_diag_containing("mutually_recursive_classes_are_filled", "class A<T>:\n  value: T\n  b: Ptr<B<T>>\n\nclass B<T>:\n  a: Ptr<A<T>>\n\nfn f(): i32\n  let a: A<i32> = A(42, 123)\n  return 0\n", "field type mismatch: expected Ptr<B<i32>>, got i32"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("mutually_recursive_classes_construct", "class A<T>:\n  value: T\n  b: Ptr<B<T>>\n\nclass B<T>:\n  a: Ptr<A<T>>\n\nfn f(): i32\n  let a: A<i32> = A(42, Ptr<B<i32>>::new())\n  return a.value\n"):
+    pass_count = pass_count + 1
+  // A concept's own name as an instantiation's argument in its
+  // signatures means the conforming type, like the bare name.
+  if tc_expect_clean("concept_self_inside_instantiation_argument", "concept Wrap:\n  fn wrap(self, x: Box<Wrap>): Box<Wrap>\n\nclass Box<T>:\n  value: T\n\nclass Item:\n  n: i32\n\nextend Item as Wrap:\n  fn wrap(self, x: Box<Item>): Box<Item> -> x\n"):
+    pass_count = pass_count + 1
+  // A generic class written bare names no type — reported where the
+  // signature is read and again where the body declares the parameter,
+  // twice, as the host reports it.
+  if tc_expect_diags("bare_generic_head_is_no_type", "class Node<T>:\n  value: T\n\nfn f(n: Node): i32 -> 0\n", 2):
+    pass_count = pass_count + 1
+  // An alias naming an instantiation is a type, not a bare head.
+  if tc_expect_clean("alias_to_instantiation_is_a_type", "class Box<T>:\n  value: T\n\ntype IntBox = Box<i32>\n\nfn f(): i32\n  let b: IntBox = Box(7)\n  return b.value\n"):
+    pass_count = pass_count + 1
+  // A requirement's own type parameters and an implementation's match
+  // by position, whatever they are called.
+  if tc_expect_clean("concept_method_own_parameters_match_by_position", "concept Wrap:\n  fn use<U>(self, x: Box<U>): i32\n\nclass Box<T>:\n  value: T\n\nclass Item:\n  n: i32\n\nextend Item as Wrap:\n  fn use<V>(self, x: Box<V>): i32 -> 1\n"):
+    pass_count = pass_count + 1
+  // A chain of constructions sharing its types at every level is read
+  // in linear work and space: forty levels, each spelled in a few
+  // tokens, and a generic method call on the deepest.
+  if tc_expect_clean("construction_chain_is_linear", "class Pair<A, B>:\n  a: A\n  b: B\n  fn ping<U>(self, x: U): U -> x\n\nfn f(): i32\n  let v0: i32 = 1\n  let v1 = Pair(v0, v0)\n  let v2 = Pair(v1, v1)\n  let v3 = Pair(v2, v2)\n  let v4 = Pair(v3, v3)\n  let v5 = Pair(v4, v4)\n  let v6 = Pair(v5, v5)\n  let v7 = Pair(v6, v6)\n  let v8 = Pair(v7, v7)\n  let v9 = Pair(v8, v8)\n  let v10 = Pair(v9, v9)\n  let v11 = Pair(v10, v10)\n  let v12 = Pair(v11, v11)\n  let v13 = Pair(v12, v12)\n  let v14 = Pair(v13, v13)\n  let v15 = Pair(v14, v14)\n  let v16 = Pair(v15, v15)\n  let v17 = Pair(v16, v16)\n  let v18 = Pair(v17, v17)\n  let v19 = Pair(v18, v18)\n  let v20 = Pair(v19, v19)\n  let v21 = Pair(v20, v20)\n  let v22 = Pair(v21, v21)\n  let v23 = Pair(v22, v22)\n  let v24 = Pair(v23, v23)\n  let v25 = Pair(v24, v24)\n  let v26 = Pair(v25, v25)\n  let v27 = Pair(v26, v26)\n  let v28 = Pair(v27, v27)\n  let v29 = Pair(v28, v28)\n  let v30 = Pair(v29, v29)\n  let v31 = Pair(v30, v30)\n  let v32 = Pair(v31, v31)\n  let v33 = Pair(v32, v32)\n  let v34 = Pair(v33, v33)\n  let v35 = Pair(v34, v34)\n  let v36 = Pair(v35, v35)\n  let v37 = Pair(v36, v36)\n  let v38 = Pair(v37, v37)\n  let v39 = Pair(v38, v38)\n  let v40 = Pair(v39, v39)\n  let p: i32 = v40.ping(1)\n  return p\n"):
+    pass_count = pass_count + 1
+  // A receiver instantiated with the method's own parameter fixes it:
+  // `other: Box<U>` inside `fn bad<U>` decides `U`, and no argument may.
+  if tc_expect_some_diag_containing("receiver_fixes_the_methods_own_parameter", "class Box<T>:\n  value: Ptr<T>\n  fn bad<U>(self, p: Ptr<U>, again: bool): void\n    let other: Box<U> = Box(p)\n    if again:\n      other.bad(self.value, false)\n", "argument type mismatch: expected Ptr<U>, got Ptr<T>"):
+    pass_count = pass_count + 1
+  // Class arguments written with the method's own parameter
+  // (`Box<U>::write(…)` inside `fn write<U>`) fix it too.
+  if tc_expect_some_diag_containing("written_class_argument_fixes_the_methods_parameter", "class Box<T>:\n  value: Ptr<T>\n  fn write<U>(p: Ptr<U>, again: bool): void\n    if again:\n      Box<U>::write(Ptr<T>::new(), false)\n", "argument type mismatch: expected Ptr<U>, got Ptr<T>"):
+    pass_count = pass_count + 1
 
   // -----------------------------------------------------------------
   // Summary

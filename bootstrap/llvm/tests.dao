@@ -300,7 +300,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 23
+  let total: i32 = 24
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -748,6 +748,24 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL generator_signature_rejected_by_backend: expected ok=false with an unsupported return type diagnostic, got ok=" + bool_to_string(r23.ok) + " and " + i64_to_string(r23.diags.length()) + " diagnostics")
+
+  // Test 24: an instantiation's struct is named as it is spelled and
+  // by its identity, in quotes, since `<` is no unquoted LLVM
+  // identifier character.
+  let src24: string = "class Tag<T>:\n  n: i32\n\nfn main(): i32\n  let t: Tag<i32> = Tag<i32>(1)\n  return t.n\n"
+  let r24: LlvmTextResult = lower_source_to_llvm_text(src24)
+  write_failures = write_failures + emit_ir("instantiated_struct_name", r24, 1)
+  if r24.ok:
+    if check_contains(r24, "%\"struct.Tag<i32>#", "instantiated_struct_name"):
+      if check_contains(r24, "\" = type { i32 }", "instantiated_struct_name"):
+        print("PASS instantiated_struct_name")
+        pass_count = pass_count + 1
+  else:
+    print("FAIL instantiated_struct_name: backend not ok")
+    let d24: i64 = 0
+    while d24 < r24.diags.length():
+      print("  diag: " + r24.diags.get(d24).message)
+      d24 = d24 + 1
 
   // -----------------------------------------------------------------
   // Summary

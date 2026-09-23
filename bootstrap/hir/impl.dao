@@ -276,7 +276,8 @@ fn hir_sym_type(hs: HS, sym_idx: i64): i64
 // that very type visible from this module — so HIR desugars a dot-call
 // to the symbol the checker typed it with, never a same-named one.
 fn hir_find_method_sym(hs: HS, name: string, receiver_ti: i64): i64
-  return find_method_sym_for_receiver(hs.typecheck.lookup.methods, hs.unit.module_id, name, receiver_ti)
+  let owner_ti: i64 = dispatch_owner(hs.typecheck.types, hs.typecheck.type_info, receiver_ti)
+  return find_method_sym_for_receiver(hs.typecheck.lookup.methods, hs.unit.module_id, name, receiver_ti, owner_ti)
 
 // =========================================================================
 // Section 54: Expression lowering
@@ -350,7 +351,7 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
     Node::UnaryE(op_tidx, operand):
       let or2: HirR = lower_expr(hs, operand)
       return hs_add_node(or2.hs, HirNode::HirUnary(op = op_tidx, operand = or2.hir, typ = ti))
-    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp):
+    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
       return lower_call_expr(hs, node_idx, callee, args_lp, names_lp, ti)
     Node::FieldE(obj, field_tidx):
       // A concept-provided member taken as a value has no field to read

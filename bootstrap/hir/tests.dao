@@ -25,7 +25,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 36
+  let total: i32 = 37
 
   // Test 1: simple_fn
   let src1: string = "fn add(a: i32, b: i32): i32\n  return a + b\n"
@@ -801,6 +801,28 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL generator_payload_type_in_hir: expected payload type Generator<i64>, got '" + payload36 + "'")
+
+  // Test 37: an enum payload annotated `Box<i32>` carries the checker's
+  // instantiation into HIR, not the head it was made from.
+  let r37: HirResult = lower_to_hir("class Box<T>:\n  value: T\n\nenum class E:\n  Item(b: Box<i32>)\n\nfn main(): i32\n  return 0\n")
+  let payload37: string = ""
+  let i37: i64 = 0
+  while i37 < hir_count_nodes(r37):
+    match r37.hir_nodes.get(i37):
+      HirNode::HirEnum(en, etp, variants_lp):
+        let vpairs37: Vector<i64> = read_pairs(r37.hir_idx, variants_lp)
+        if vpairs37.length() >= 2:
+          let ptys37: Vector<i64> = read_list(r37.hir_idx, vpairs37.get(1))
+          if ptys37.length() == 1:
+            let pt37: i64 = ptys37.get(0)
+            if pt37 >= 0 and pt37 < r37.types.length():
+              payload37 = r37.types.get(pt37).name
+    i37 = i37 + 1
+  if payload37 == "Box<i32>":
+    print("PASS instantiated_payload_type_in_hir")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL instantiated_payload_type_in_hir: expected payload type Box<i32>, got '" + payload37 + "'")
 
   // -----------------------------------------------------------------
   // Summary
