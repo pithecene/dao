@@ -205,8 +205,11 @@ fn scope_declare(rs: RS, name: string, sym_idx: i64, decl_tidx: i64): RS
 // its symbol is named `g$2` — the host's name for it, and so its
 // backend name.  The first keeps the plain name, which a use that is
 // not a call reaches.  The same name at the same arity, or beside a
-// declaration that is not a function, is a duplicate.
-fn declare_function(rs: RS, name: string, arity: i64, sym_idx: i64, decl_tidx: i64): RS
+// declaration that is not a function, is a duplicate — and so is any
+// set with an `extern fn` in it, whose C symbol is its exact name
+// (CONTRACT_C_ABI_INTEROP; the host rejects it).  `name/extern`
+// marks an extern's name in its scope.
+fn declare_function(rs: RS, name: string, arity: i64, is_extern: bool, sym_idx: i64, decl_tidx: i64): RS
   let scope: Scope = rs.scopes.get(rs.current_scope)
   let arity_key: string = name + "/" + i64_to_string(arity)
   let existing: i64 = hm_get_or(scope.decls, name, to_i64(-1))
@@ -214,12 +217,15 @@ fn declare_function(rs: RS, name: string, arity: i64, sym_idx: i64, decl_tidx: i
     let r: RS = declare_top_level(rs, name, sym_idx, decl_tidx)
     let declared: Scope = r.scopes.get(r.current_scope)
     declared.decls = declared.decls.set(arity_key, sym_idx)
+    if is_extern:
+      declared.decls = declared.decls.set(name + "/extern", sym_idx)
     return rs_update_scope(r, r.current_scope, declared)
   let is_function: bool = false
   match rs.symbols.get(existing).kind:
     SymbolKind::Function:
       is_function = true
-  if is_function == false or scope.decls.contains(arity_key):
+  let extern_in_set: bool = is_extern or scope.decls.contains(name + "/extern")
+  if is_function == false or extern_in_set or scope.decls.contains(arity_key):
     return rs_add_diag(rs, decl_span(rs, decl_tidx), "duplicate declaration '" + name + "'")
   let r: RS = rs
   let overload: Symbol = r.symbols.get(sym_idx)
@@ -241,6 +247,30 @@ fn scope_lookup_call(rs: RS, name: string, arity: i64): i64
       return hm_get_or(scope.decls, name + "/" + i64_to_string(arity), plain)
     sid = scope.parent
   return to_i64(-1)
+
+// A call of `module::name` with `arity` arguments names that module's
+// overload of that arity, where it has one: the use recorded for the
+// name's segment is replaced by it.
+fn pick_qualified_overload(rs: RS, callee: i64, arity: i64): RS
+  match rs.rc.nodes.get(callee):
+    Node::QualNameE(seg_lp, seg_count):
+      let segs: Vector<i64> = read_list(rs.rc.idx_data, seg_lp)
+      if segs.length() != 2:
+        return rs
+      let head: i64 = scope_lookup(rs, tok_name(rs, segs.get(0)))
+      if head < 0:
+        return rs
+      let head_sym: Symbol = rs.symbols.get(head)
+      if symbol_kind_name(head_sym.kind) != symbol_kind_name(SymbolKind::Module):
+        return rs
+      let target_mid: i64 = head_sym.decl_node
+      if target_mid < 0 or target_mid >= rs.rc.exports.tables.length():
+        return rs
+      let table: ExportTable = rs.rc.exports.tables.get(target_mid)
+      let overload: i64 = hm_get_or(table.entries, tok_name(rs, segs.get(1)) + "/" + i64_to_string(arity), to_i64(-1))
+      if overload >= 0:
+        return rs_add_use(rs, segs.get(1), overload)
+  return rs
 
 fn scope_lookup(rs: RS, name: string): i64
   let sid: i64 = rs.current_scope
@@ -508,6 +538,7 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
             r = rs_add_use(rs, ctidx, by_arity)
       if by_arity < 0:
         r = resolve_expr(rs, callee)
+        r = pick_qualified_overload(r, callee, arg_count)
       let args: Vector<i64> = read_list(r.rc.idx_data, args_lp)
       let i: i64 = 0
       while i < args.length():
@@ -531,7 +562,14 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
       // Resolve the object expression; field name needs type info (Tier B)
       return resolve_expr(rs, obj)
     Node::PipeE(left, right):
+      // `x |> g` calls `g` with one argument, so an overloaded `g` is
+      // its one-argument overload (host).
       let r: RS = resolve_expr(rs, left)
+      match r.rc.nodes.get(right):
+        Node::IdentE(ptidx):
+          let piped: i64 = scope_lookup_call(r, tok_name(r, ptidx), to_i64(1))
+          if piped >= 0:
+            return rs_add_use(r, ptidx, piped)
       return resolve_expr(r, right)
     Node::TryE(operand):
       return resolve_expr(rs, operand)
@@ -1035,15 +1073,15 @@ fn collect_top_level(rs: RS, file_node_idx: i64): RS
           Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_type, body_lp):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, name, decl_idx, r.current_scope, r.owner_module_id))
-            r = declare_function(sr.rs, name, read_pairs(r.rc.idx_data, params_lp).length() / 2, sr.sym_idx, name_tidx)
+            r = declare_function(sr.rs, name, read_pairs(r.rc.idx_data, params_lp).length() / 2, false, sr.sym_idx, name_tidx)
           Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_type, body_expr):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, name, decl_idx, r.current_scope, r.owner_module_id))
-            r = declare_function(sr.rs, name, read_pairs(r.rc.idx_data, params_lp).length() / 2, sr.sym_idx, name_tidx)
+            r = declare_function(sr.rs, name, read_pairs(r.rc.idx_data, params_lp).length() / 2, false, sr.sym_idx, name_tidx)
           Node::ExternFnD(name_tidx, tparams_lp, params_lp, ret_type):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, name, decl_idx, r.current_scope, r.owner_module_id))
-            r = declare_function(sr.rs, name, read_pairs(r.rc.idx_data, params_lp).length() / 2, sr.sym_idx, name_tidx)
+            r = declare_function(sr.rs, name, read_pairs(r.rc.idx_data, params_lp).length() / 2, true, sr.sym_idx, name_tidx)
           Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Type, name, decl_idx, r.current_scope, r.owner_module_id))
@@ -1207,10 +1245,30 @@ fn build_export_table(rs: RS, file_node_idx: i64): HashMap<i64>
         if name_tidx >= 0:
           let name: string = tok_name(rs, name_tidx)
           let scope: Scope = rs.scopes.get(rs.current_scope)
-          let found: Option<i64> = scope.decls.get(name)
-          match found:
-            Option::Some(sym_idx):
-              exports = exports.set(name, sym_idx)
+          // A function is exported as the overload this module declared
+          // (its arity key), never as whatever the name reaches in a
+          // scope other modules share — the prelude's; the plain name
+          // is the module's own first overload.
+          let fn_arity: i64 = to_i64(-1)
+          match decl_node:
+            Node::FnDeclD(fnt, ftp, fplp, frt, fblp):
+              fn_arity = read_pairs(rs.rc.idx_data, fplp).length() / 2
+            Node::ExprFnD(ent, etp, eplp, ert, ebe):
+              fn_arity = read_pairs(rs.rc.idx_data, eplp).length() / 2
+            Node::ExternFnD(xnt, xtp, xplp, xrt):
+              fn_arity = read_pairs(rs.rc.idx_data, xplp).length() / 2
+          if fn_arity >= 0:
+            let arity_key: string = name + "/" + i64_to_string(fn_arity)
+            let own: i64 = hm_get_or(scope.decls, arity_key, to_i64(-1))
+            if own >= 0:
+              exports = exports.set(arity_key, own)
+              if exports.contains(name) == false:
+                exports = exports.set(name, own)
+          else:
+            let found: Option<i64> = scope.decls.get(name)
+            match found:
+              Option::Some(sym_idx):
+                exports = exports.set(name, sym_idx)
         i = i + 1
   return exports
 

@@ -143,7 +143,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 337
+  let total: i32 = 343
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -2152,6 +2152,22 @@ fn main(): i32
   // A prelude's overloads are overloads from every module: `range(3)`
   // and `range(1, 3)` each name their own.
   if tc_expect_program_errors("prelude_arity_overloads", Vector<SourceInput>::new().push(SourceInput("stdlib/core/range.dao", "module core::range\nfn range(n: i32): Generator<i32>\n  let i: i32 = 0\n  while i < n:\n    yield i\n    i = i + 1\n  return\n\nfn range(start: i32, end: i32): Generator<i32>\n  let i: i32 = start\n  while i < end:\n    yield i\n    i = i + 1\n  return\n", true)), "module app::main\nfn f(): i32\n  for i in range(3):\n    let x: i32 = i\n  for j in range(1, 3):\n    let y: i32 = j\n  return 0\n", "main.dao", 0):
+    pass_count = pass_count + 1
+
+  // An overload set is a module's own, reached qualified by arity; an
+  // extern never overloads; a pipeline target is called with one
+  // argument (host).
+  if tc_expect_rejected("extern_overload_is_a_duplicate", "extern fn g(a: i32): i32\nextern fn g(a: i32, b: i32): i32\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("function_beside_extern_is_a_duplicate", "extern fn g(a: i32): i32\nfn g(a: i32, b: i32): i32 -> a\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("extern_beside_function_is_a_duplicate", "fn g(a: i32): i32 -> a\nextern fn g(a: i32, b: i32): i32\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("pipeline_target_is_the_one_argument_overload", "fn g(a: i32, b: i32): bool -> true\nfn g(a: i32): i32 -> a\n\nfn f(): i32 -> 1 |> g\n"):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("qualified_call_names_the_overload_of_its_arity", Vector<SourceInput>::new().push(SourceInput("lib.dao", "module lib::m\nfn g(a: i32): i32 -> a\nfn g(a: i32, b: i32): i32 -> a + b\n", false)), "module app::main\nimport lib::m\n\nfn f(): i32 -> m::g(1) + m::g(1, 2)\n", "main.dao", 0):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("prelude_overload_export_is_its_own_module", Vector<SourceInput>::new().push(SourceInput("stdlib/core/one.dao", "module core::one\nfn g(a: i32): i32 -> a\n", true)).push(SourceInput("stdlib/core/two.dao", "module core::two\nfn g(a: i32, b: i32): i32 -> a + b\n", true)), "module app::main\nimport core::two\n\nfn f(): i32 -> two::g(1)\n", "main.dao", 1):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------

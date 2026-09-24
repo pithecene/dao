@@ -10,37 +10,37 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 97849 |
-| `CallExpr` | 33085 |
-| `Callee` | 33085 |
-| `Args` | 29363 |
-| `FieldExpr` | 24013 |
-| `BinaryExpr` | 15611 |
-| `LetStatement` | 13261 |
-| `IntLiteral` | 11345 |
-| `Value` | 10355 |
-| `Target` | 10355 |
-| `Assignment` | 10355 |
-| `Condition` | 9250 |
-| `ReturnStatement` | 7851 |
-| `Then` | 7674 |
-| `IfStatement` | 7674 |
-| `QualifiedName` | 7057 |
-| `StringLiteral` | 7006 |
-| `Param` | 5700 |
-| `BoolLiteral` | 3439 |
-| `Pattern` | 3275 |
-| `Arm` | 3275 |
-| `ReturnType` | 2402 |
-| `FunctionDecl` | 2402 |
+| `Identifier` | 98417 |
+| `CallExpr` | 33306 |
+| `Callee` | 33306 |
+| `Args` | 29557 |
+| `FieldExpr` | 24235 |
+| `BinaryExpr` | 15735 |
+| `LetStatement` | 13316 |
+| `IntLiteral` | 11450 |
+| `Value` | 10404 |
+| `Target` | 10404 |
+| `Assignment` | 10404 |
+| `Condition` | 9314 |
+| `ReturnStatement` | 7886 |
+| `Then` | 7738 |
+| `IfStatement` | 7738 |
+| `QualifiedName` | 7087 |
+| `StringLiteral` | 7046 |
+| `Param` | 5720 |
+| `BoolLiteral` | 3462 |
+| `Pattern` | 3300 |
+| `Arm` | 3300 |
+| `ReturnType` | 2407 |
+| `FunctionDecl` | 2407 |
 | `WhileStatement` | 1576 |
-| `UnaryExpr` | 1514 |
-| `Else` | 1463 |
+| `UnaryExpr` | 1529 |
+| `Else` | 1468 |
 | `Field` | 1386 |
-| `TypeArgs` | 1300 |
+| `TypeArgs` | 1302 |
 | `Variant` | 1223 |
-| `Scrutinee` | 945 |
-| `MatchStatement` | 945 |
+| `Scrutinee` | 960 |
+| `MatchStatement` | 960 |
 | `ExpressionStatement` | 686 |
 | `ClassDecl` | 353 |
 | `BreakStatement` | 64 |
@@ -233,14 +233,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 77 | 1 | 0 | 0 | 0 | 0 | 309 | 329 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 81 | 1 | 0 | 0 | 0 | 0 | 361 | 403 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 81 | 1 | 0 | 0 | 0 | 0 | 343 | 363 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 212 | 1 | 0 | 0 | 0 | 0 | 781 | 859 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 839 | 2 | 0 | 0 | 0 | 0 | 1809 | 2088 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 992 | 2 | 0 | 0 | 0 | 0 | 1843 | 2170 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 966 | 2 | 0 | 0 | 0 | 0 | 1924 | 2290 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 1091 | 2 | 0 | 0 | 0 | 0 | 2314 | 2755 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 85 | 1 | 0 | 0 | 0 | 0 | 309 | 329 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 87 | 1 | 0 | 0 | 0 | 0 | 361 | 403 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 91 | 1 | 0 | 0 | 0 | 0 | 343 | 363 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 216 | 0 | 0 | 0 | 0 | 0 | 795 | 877 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 1044 | 2 | 0 | 0 | 0 | 0 | 1826 | 2109 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 1315 | 3 | 0 | 0 | 0 | 0 | 1858 | 2189 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 1189 | 3 | 0 | 0 | 0 | 0 | 1939 | 2309 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 1343 | 3 | 0 | 0 | 0 | 0 | 2329 | 2774 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 
@@ -408,7 +408,7 @@ next.  Sites per program against the parse column above:
 | parser | 71 | 0 | 0 |
 | graph | 77 | 0 | 0 |
 | resolver | 126 | 0 | 0 |
-| typecheck | 271 | 0 | 0 |
+| typecheck | 273 | 0 | 0 |
 | hir | 239 | 4 | 0 |
 | mir | 250 | 9 | 0 |
 | llvm | 288 | 27 | 0 |
@@ -427,10 +427,10 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 
 | Prelude function | Compiler | Harness |
 |---|---:|---:|
-| `to_i64` | 775 | 155 |
+| `to_i64` | 779 | 155 |
 | `print` | 0 | 666 |
-| `new` | 282 | 99 |
-| `i64_to_string` | 96 | 182 |
+| `new` | 282 | 101 |
+| `i64_to_string` | 98 | 182 |
 | `substring` | 26 | 12 |
 | `char_at` | 23 | 0 |
 | `read_file` | 0 | 19 |
@@ -445,7 +445,7 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 | `write_file` | 1 | 2 |
 | `make_warning` | 0 | 1 |
 | `str_compare` | 1 | 0 |
-| **Total** | **1229** | **1208** |
+| **Total** | **1235** | **1210** |
 
 ## 4. Reading the matrix
 
