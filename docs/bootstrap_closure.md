@@ -10,38 +10,38 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 96955 |
-| `CallExpr` | 32753 |
-| `Callee` | 32753 |
-| `Args` | 29061 |
-| `FieldExpr` | 23711 |
-| `BinaryExpr` | 15403 |
-| `LetStatement` | 13188 |
-| `IntLiteral` | 11228 |
-| `Value` | 10273 |
-| `Target` | 10273 |
-| `Assignment` | 10273 |
-| `Condition` | 9163 |
-| `ReturnStatement` | 7774 |
-| `Then` | 7593 |
-| `IfStatement` | 7593 |
-| `QualifiedName` | 7009 |
-| `StringLiteral` | 6874 |
+| `Identifier` | 96997 |
+| `CallExpr` | 32768 |
+| `Callee` | 32768 |
+| `Args` | 29075 |
+| `FieldExpr` | 23723 |
+| `BinaryExpr` | 15418 |
+| `LetStatement` | 13191 |
+| `IntLiteral` | 11240 |
+| `Value` | 10283 |
+| `Target` | 10283 |
+| `Assignment` | 10283 |
+| `Condition` | 9173 |
+| `ReturnStatement` | 7782 |
+| `Then` | 7603 |
+| `IfStatement` | 7603 |
+| `QualifiedName` | 7019 |
+| `StringLiteral` | 6897 |
 | `Param` | 5624 |
-| `BoolLiteral` | 3381 |
-| `Pattern` | 3235 |
-| `Arm` | 3235 |
+| `BoolLiteral` | 3391 |
+| `Pattern` | 3245 |
+| `Arm` | 3245 |
 | `ReturnType` | 2376 |
 | `FunctionDecl` | 2376 |
 | `WhileStatement` | 1570 |
 | `UnaryExpr` | 1486 |
-| `Else` | 1459 |
+| `Else` | 1460 |
 | `Field` | 1386 |
 | `TypeArgs` | 1299 |
 | `Variant` | 1223 |
-| `Scrutinee` | 917 |
-| `MatchStatement` | 917 |
-| `ExpressionStatement` | 678 |
+| `Scrutinee` | 919 |
+| `MatchStatement` | 919 |
+| `ExpressionStatement` | 680 |
 | `ClassDecl` | 353 |
 | `BreakStatement` | 64 |
 | `ResourceBlock` | 40 |
@@ -233,14 +233,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 77 | 0 | 0 | 0 | 0 | 0 | 304 | 322 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 78 | 0 | 0 | 0 | 0 | 0 | 354 | 392 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 78 | 0 | 0 | 0 | 0 | 0 | 338 | 356 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 191 | 1 | 0 | 0 | 0 | 0 | 760 | 830 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 927 | 2 | 0 | 0 | 0 | 0 | 1792 | 2063 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 1050 | 2 | 0 | 0 | 0 | 0 | 1827 | 2146 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 1016 | 2 | 0 | 0 | 0 | 0 | 1908 | 2266 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 1248 | 2 | 0 | 0 | 0 | 0 | 2296 | 2729 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 83 | 1 | 0 | 0 | 0 | 0 | 304 | 322 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 86 | 1 | 0 | 0 | 0 | 0 | 356 | 396 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 92 | 1 | 0 | 0 | 0 | 0 | 338 | 356 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 165 | 0 | 0 | 0 | 0 | 0 | 760 | 830 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 871 | 2 | 0 | 0 | 0 | 0 | 1792 | 2063 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 1016 | 2 | 0 | 0 | 0 | 0 | 1827 | 2146 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 949 | 2 | 0 | 0 | 0 | 0 | 1908 | 2266 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 1139 | 3 | 0 | 0 | 0 | 0 | 2296 | 2729 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 
@@ -372,7 +372,7 @@ diagnostics per stage, and the first.
 | `stdlib/core/convert.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/diagnostic.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/equatable.dao` | 0 | 0 | 0 | — |
-| `stdlib/core/hashmap.dao` | 10 | 0 | 10 | expected expression |
+| `stdlib/core/hashmap.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/math.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/memory.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/numeric.dao` | 0 | 0 | 0 | — |
@@ -386,7 +386,7 @@ diagnostics per stage, and the first.
 | `stdlib/core/string.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/text.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/to_string.dao` | 0 | 0 | 0 | — |
-| `stdlib/core/vector.dao` | 25 | 1 | 26 | expected expression |
+| `stdlib/core/vector.dao` | 0 | 0 | 0 | — |
 | `stdlib/io/file.dao` | 0 | 0 | 0 | — |
 
 ### Parse-stage attribution
@@ -408,7 +408,7 @@ next.  Sites per program against the parse column above:
 | parser | 71 | 0 | 0 |
 | graph | 77 | 0 | 0 |
 | resolver | 126 | 0 | 0 |
-| typecheck | 269 | 0 | 0 |
+| typecheck | 270 | 0 | 0 |
 | hir | 239 | 4 | 0 |
 | mir | 250 | 9 | 0 |
 | llvm | 288 | 27 | 0 |
@@ -428,7 +428,7 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 | Prelude function | Compiler | Harness |
 |---|---:|---:|
 | `to_i64` | 769 | 155 |
-| `print` | 0 | 658 |
+| `print` | 0 | 660 |
 | `new` | 282 | 98 |
 | `i64_to_string` | 92 | 180 |
 | `substring` | 26 | 12 |
@@ -445,7 +445,7 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 | `write_file` | 1 | 2 |
 | `make_warning` | 0 | 1 |
 | `str_compare` | 1 | 0 |
-| **Total** | **1219** | **1197** |
+| **Total** | **1219** | **1199** |
 
 ## 4. Reading the matrix
 

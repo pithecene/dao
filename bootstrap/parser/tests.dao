@@ -104,7 +104,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 86
+  let total: i32 = 88
 
   // -----------------------------------------------------------------
   // Expression tests
@@ -180,6 +180,26 @@ fn main(): i32
       pass_count = pass_count + 1
     else:
       print("FAIL nested_call_arg_count: outer call should have 2 args")
+
+  // Test 10a2: type arguments after a member are a call's, written for
+  // the method (`raw.cast<i64>()`); a `<` not closing onto a call stays
+  // a comparison (`p.x < y`).
+  let r10m: PR = parse_expr_str("raw.cast<i64>()")
+  let member_targs: bool = false
+  if r10m.node >= 0:
+    match r10m.ps.nodes.get(r10m.node):
+      Node::CallE(callee, list_pos, arg_count, targs_lp, names_lp, targs_on_type):
+        match r10m.ps.nodes.get(callee):
+          Node::FieldE(obj, field):
+            member_targs = targs_lp >= 0 and targs_on_type == false and r10m.ps.diags.length() == 0
+  if member_targs:
+    print("PASS member_call_type_arguments")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL member_call_type_arguments: expected a call on a member carrying its type arguments")
+  let r10c: PR = parse_expr_str("p.x < y")
+  if expect_node_kind("member_less_than_stays_a_comparison", r10c, r10c.node, "BinaryE"):
+    pass_count = pass_count + 1
 
   // Test 10b: Nested list literal — regression for list idx interleaving.
   let r10b: PR = parse_expr_str("[f(1), 2]")

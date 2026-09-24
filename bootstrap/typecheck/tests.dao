@@ -143,7 +143,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 318
+  let total: i32 = 331
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -2105,6 +2105,37 @@ fn main(): i32
   if tc_expect_rejected("alias_to_instantiated_enum_payload_is_held", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\ntype IntOpt = Opt<i32>\n\nfn f(): IntOpt -> IntOpt::Some(value = \"s\")\n"):
     pass_count = pass_count + 1
   if tc_expect_clean("alias_to_instantiated_enum_pattern", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\ntype IntOpt = Opt<i32>\n\nfn f(o: IntOpt): i32\n  match o:\n    IntOpt::Some(v):\n      return v\n    IntOpt::Nothing:\n      return 0\n  return 0\n"):
+    pass_count = pass_count + 1
+
+  // Type arguments written after a member are the method's own
+  // (host): they fix its parameters, are counted, and `<` that closes
+  // onto no call is still a comparison.
+  if tc_expect_clean("member_type_argument_decides", "class Box<T>:\n  value: T\n  fn map<U>(self, u: U): U -> u\n  fn get(self): T -> self.value\n\nfn f(b: Box<i32>): string -> b.map<string>(\"s\")\n"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("member_type_argument_is_fixed", "class Box<T>:\n  value: T\n  fn map<U>(self, u: U): U -> u\n  fn get(self): T -> self.value\n\nfn f(b: Box<i32>): string -> b.map<string>(1)\n", "argument type mismatch: expected string, got i32"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("member_type_argument_count_rejected", "class Box<T>:\n  value: T\n  fn map<U>(self, u: U): U -> u\n  fn get(self): T -> self.value\n\nfn f(b: Box<i32>): string -> b.map<string, i32>(\"s\")\n", "expected 1 type argument(s), got 2"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("member_type_argument_on_plain_method_rejected", "class Box<T>:\n  value: T\n  fn map<U>(self, u: U): U -> u\n  fn get(self): T -> self.value\n\nfn f(b: Box<i32>): i32 -> b.get<i32>()\n", "expected 0 type argument(s), got 1"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("member_type_argument_through_a_field", "class Box<T>:\n  value: T\n  fn map<U>(self, u: U): U -> u\n  fn get(self): T -> self.value\n\nclass H:\n  b: Box<i32>\n\nfn f(h: H): i64 -> h.b.map<i64>(1)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("member_less_than_is_a_comparison", "class P:\n  x: i32\n\nfn f(p: P, y: i32, z: i32): bool -> p.x < y and y > z\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("pointer_cast_after_a_member", "fn f(): i32\n  let raw: Ptr<void> = Ptr<i64>::new().cast<void>()\n  mode unsafe =>\n    let p: Ptr<i64> = raw.cast<i64>()\n  return 0\n"):
+    pass_count = pass_count + 1
+
+  if tc_expect_rejected("member_type_arguments_then_path_is_no_call", "class Box<T>:\n  value: T\n\nfn f(): i32\n  let b = missing.member<i32>::Box(1)\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("pointer_is_null_takes_no_type_argument", "fn f(p: Ptr<i32>): bool\n  mode unsafe =>\n    let n: bool = p.is_null<i64>()\n  return false\n", "Ptr.is_null expects 0 type argument(s), got 1"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("pointer_get_takes_no_type_argument", "fn f(p: Ptr<i32>): i32\n  mode unsafe =>\n    let v: i32 = p.get<i32>()\n  return 0\n", "Ptr.get expects 0 type argument(s), got 1"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("pointer_offset_takes_no_type_argument", "fn f(p: Ptr<i32>): i32\n  mode unsafe =>\n    let q: Ptr<i32> = p.offset<i32>(1)\n  return 0\n", "Ptr.offset expects 0 type argument(s), got 1"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("receiver_fixed_parameter_takes_no_type_argument", "class Box<T>:\n  value: Ptr<T>\n  fn bad<U>(self, p: Ptr<U>, again: bool): void\n    let other: Box<U> = Box(p)\n    if again:\n      other.bad<T>(self.value, false)\n", "so its type arguments are already decided"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("receiver_fixed_parameter_takes_no_type_argument_even_itself", "class Box<T>:\n  value: Ptr<T>\n  fn bad<U>(self, p: Ptr<U>, again: bool): void\n    let other: Box<U> = Box(p)\n    if again:\n      other.bad<U>(p, false)\n", "so its type arguments are already decided"):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------
