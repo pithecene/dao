@@ -199,6 +199,49 @@ fn scope_declare(rs: RS, name: string, sym_idx: i64, decl_tidx: i64): RS
       return rs_update_scope(rs, rs.current_scope, scope)
   return rs
 
+// A top-level function is declared by its name and by its name and
+// arity (`g/2`).  A second function of the same name and a different
+// arity is an overload (host): it is found through its arity key, and
+// its symbol is named `g$2` — the host's name for it, and so its
+// backend name.  The first keeps the plain name, which a use that is
+// not a call reaches.  The same name at the same arity, or beside a
+// declaration that is not a function, is a duplicate.
+fn declare_function(rs: RS, name: string, arity: i64, sym_idx: i64, decl_tidx: i64): RS
+  let scope: Scope = rs.scopes.get(rs.current_scope)
+  let arity_key: string = name + "/" + i64_to_string(arity)
+  let existing: i64 = hm_get_or(scope.decls, name, to_i64(-1))
+  if existing < 0:
+    let r: RS = declare_top_level(rs, name, sym_idx, decl_tidx)
+    let declared: Scope = r.scopes.get(r.current_scope)
+    declared.decls = declared.decls.set(arity_key, sym_idx)
+    return rs_update_scope(r, r.current_scope, declared)
+  let is_function: bool = false
+  match rs.symbols.get(existing).kind:
+    SymbolKind::Function:
+      is_function = true
+  if is_function == false or scope.decls.contains(arity_key):
+    return rs_add_diag(rs, decl_span(rs, decl_tidx), "duplicate declaration '" + name + "'")
+  let r: RS = rs
+  let overload: Symbol = r.symbols.get(sym_idx)
+  overload.name = name + "$" + i64_to_string(arity)
+  r.symbols = r.symbols.set(sym_idx, overload)
+  scope.decls = scope.decls.set(arity_key, sym_idx)
+  return rs_update_scope(r, r.current_scope, scope)
+
+// The symbol a call of `name` with `arity` arguments names: in the
+// innermost scope declaring `name` at all, its overload of that arity
+// if it has one, else what `name` names there — so a local shadowing
+// a function still wins.
+fn scope_lookup_call(rs: RS, name: string, arity: i64): i64
+  let sid: i64 = rs.current_scope
+  while sid >= 0:
+    let scope: Scope = rs.scopes.get(sid)
+    let plain: i64 = hm_get_or(scope.decls, name, to_i64(-1))
+    if plain >= 0:
+      return hm_get_or(scope.decls, name + "/" + i64_to_string(arity), plain)
+    sid = scope.parent
+  return to_i64(-1)
+
 fn scope_lookup(rs: RS, name: string): i64
   let sid: i64 = rs.current_scope
   while sid >= 0:
@@ -454,7 +497,17 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
     Node::UnaryE(op_tidx, operand):
       return resolve_expr(rs, operand)
     Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
-      let r: RS = resolve_expr(rs, callee)
+      // A call of a plain name is resolved by its argument count too,
+      // so an overload is chosen by arity (scope_lookup_call).
+      let r: RS = rs
+      let by_arity: i64 = to_i64(-1)
+      match rs.rc.nodes.get(callee):
+        Node::IdentE(ctidx):
+          by_arity = scope_lookup_call(rs, tok_name(rs, ctidx), arg_count)
+          if by_arity >= 0:
+            r = rs_add_use(rs, ctidx, by_arity)
+      if by_arity < 0:
+        r = resolve_expr(rs, callee)
       let args: Vector<i64> = read_list(r.rc.idx_data, args_lp)
       let i: i64 = 0
       while i < args.length():
@@ -982,15 +1035,15 @@ fn collect_top_level(rs: RS, file_node_idx: i64): RS
           Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_type, body_lp):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, name, decl_idx, r.current_scope, r.owner_module_id))
-            r = declare_top_level(sr.rs, name, sr.sym_idx, name_tidx)
+            r = declare_function(sr.rs, name, read_pairs(r.rc.idx_data, params_lp).length() / 2, sr.sym_idx, name_tidx)
           Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_type, body_expr):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, name, decl_idx, r.current_scope, r.owner_module_id))
-            r = declare_top_level(sr.rs, name, sr.sym_idx, name_tidx)
+            r = declare_function(sr.rs, name, read_pairs(r.rc.idx_data, params_lp).length() / 2, sr.sym_idx, name_tidx)
           Node::ExternFnD(name_tidx, tparams_lp, params_lp, ret_type):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, name, decl_idx, r.current_scope, r.owner_module_id))
-            r = declare_top_level(sr.rs, name, sr.sym_idx, name_tidx)
+            r = declare_function(sr.rs, name, read_pairs(r.rc.idx_data, params_lp).length() / 2, sr.sym_idx, name_tidx)
           Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Type, name, decl_idx, r.current_scope, r.owner_module_id))

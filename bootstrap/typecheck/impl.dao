@@ -5265,15 +5265,6 @@ fn derive_class(reg: Registry, idx: ClassIndex, k: i64, dcti: i64, queue: Vector
     return DeriveStep(reg, queue)
   return DeriveStep(reg_record_conformance(reg, sti, dcti, conform_everywhere()), queue.push(sti))
 
-fn hm_get_or(m: HashMap<i64>, key: string, dflt: i64): i64
-  let found: Option<i64> = m.get(key)
-  match found:
-    Option::Some(v):
-      return v
-    Option::None:
-      return dflt
-  return dflt
-
 // The conformance-collection pass over a file (tc_collect_conformances).
 fn tc_pass_collect(ts: TS, file_node_idx: i64): TS
   let file_node: Node = ts.tc.nodes.get(file_node_idx)

@@ -300,7 +300,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 24
+  let total: i32 = 25
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -766,6 +766,17 @@ fn main(): i32
     while d24 < r24.diags.length():
       print("  diag: " + r24.diags.get(d24).message)
       d24 = d24 + 1
+
+  // Test 25: overloads by arity are two functions, the later named with
+  // its arity (the host's `g$2`), and the program runs.
+  let r25: LlvmTextResult = lower_source_to_llvm_text("fn g(n: i32): i32 -> n\nfn g(a: i32, b: i32): i32 -> a + b\n\nfn main(): i32 -> g(1) + g(1, 2) - 4\n")
+  write_failures = write_failures + emit_ir("arity_overloads", r25, 0)
+  if r25.ok:
+    if check_contains(r25, "@g$2(", "arity_overloads"):
+      print("PASS arity_overloads")
+      pass_count = pass_count + 1
+  else:
+    print("FAIL arity_overloads: backend not ok")
 
   // -----------------------------------------------------------------
   // Summary

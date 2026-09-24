@@ -143,7 +143,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 331
+  let total: i32 = 337
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -2136,6 +2136,22 @@ fn main(): i32
   if tc_expect_some_diag_containing("receiver_fixed_parameter_takes_no_type_argument", "class Box<T>:\n  value: Ptr<T>\n  fn bad<U>(self, p: Ptr<U>, again: bool): void\n    let other: Box<U> = Box(p)\n    if again:\n      other.bad<T>(self.value, false)\n", "so its type arguments are already decided"):
     pass_count = pass_count + 1
   if tc_expect_some_diag_containing("receiver_fixed_parameter_takes_no_type_argument_even_itself", "class Box<T>:\n  value: Ptr<T>\n  fn bad<U>(self, p: Ptr<U>, again: bool): void\n    let other: Box<U> = Box(p)\n    if again:\n      other.bad<U>(p, false)\n", "so its type arguments are already decided"):
+    pass_count = pass_count + 1
+  // Overloads by arity (host): a call types against the overload of
+  // its argument count; with none of that count, against the first.
+  if tc_expect_clean("arity_overload_calls_type", "fn g(n: i32): i32 -> n\nfn g(a: i32, b: i32): i32 -> a + b\n\nfn f(): i32 -> g(1) + g(1, 2)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("arity_overload_with_no_match_rejected", "fn g(n: i32): i32 -> n\nfn g(a: i32, b: i32): i32 -> a + b\n\nfn f(): i32 -> g(1, 2, 3)\n", "arity mismatch"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("arity_overload_argument_types_held", "fn g(n: i32): i32 -> n\nfn g(a: i32, b: string): i32 -> a\n\nfn f(): i32 -> g(1, 2)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_arity_overloads", "fn g<T>(x: T): T -> x\nfn g<T>(x: T, y: T): T -> y\n\nfn f(): i32 -> g(1, 2)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("local_shadows_an_overloaded_function", "fn g(n: i32): i32 -> n\nfn g(a: i32, b: i32): i32 -> a + b\n\nfn f(g: i32): i32 -> g\n"):
+    pass_count = pass_count + 1
+  // A prelude's overloads are overloads from every module: `range(3)`
+  // and `range(1, 3)` each name their own.
+  if tc_expect_program_errors("prelude_arity_overloads", Vector<SourceInput>::new().push(SourceInput("stdlib/core/range.dao", "module core::range\nfn range(n: i32): Generator<i32>\n  let i: i32 = 0\n  while i < n:\n    yield i\n    i = i + 1\n  return\n\nfn range(start: i32, end: i32): Generator<i32>\n  let i: i32 = start\n  while i < end:\n    yield i\n    i = i + 1\n  return\n", true)), "module app::main\nfn f(): i32\n  for i in range(3):\n    let x: i32 = i\n  for j in range(1, 3):\n    let y: i32 = j\n  return 0\n", "main.dao", 0):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------

@@ -960,6 +960,16 @@ fn flush_list(ps: PS, items: Vector<i64>): FlushResult
 
 // The items of the list `flush_list` wrote at `lp`: its count sits at
 // `lp`, the items just before it.
+// The value `m` holds under `key`, or `dflt` where it holds none.
+fn hm_get_or(m: HashMap<i64>, key: string, dflt: i64): i64
+  let found: Option<i64> = m.get(key)
+  match found:
+    Option::Some(v):
+      return v
+    Option::None:
+      return dflt
+  return dflt
+
 fn read_list(idx_data: Vector<i64>, lp: i64): Vector<i64>
   let count: i64 = idx_data.get(lp)
   let result: Vector<i64> = Vector<i64>::new()
