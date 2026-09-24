@@ -856,24 +856,40 @@ Task 41 (prior work at tag `task41-genbounds-prior-work`).
 
 ### Task 41 — Bootstrap Semantic Frontend Closure
 
-Status: **spec** — `docs/task_specs/TASK_41_BOOTSTRAP_FRONTEND_CLOSURE.md`.
+Status: **complete** — `docs/task_specs/TASK_41_BOOTSTRAP_FRONTEND_CLOSURE.md`.
 Authorized after Task 40.
 
 **Objective**: bring the real compiler corpus and the prelude it needs
 through resolve → typecheck → HIR with the host's semantics, one
 measured slice at a time — a construct is given its real meaning or
-rejected explicitly, never parsed and ignored.  The merged-main audit
-shows the compiler-path resolve closed (the resolve column is
-harness-only `print`, per Task 40's closure surfaces) and the typecheck
-column as the real frontier: integer-literal width (`i64 vs i32`),
-generic static-factory calls (`constructor arity mismatch`), and
-qualified/generic annotation typing.  The vertical also owns generic
-bounds with meaning, `derived concept`, constrained method
-availability, generic call inference, and `mode unsafe`/`yield` at the
-frontend (lowering deferred, never erased).  Slice 1 is contextual
-integer-literal typing (host parity); later slices follow the audit.
-Not chased: the harness `print` requirement; program MIR/backend
-(Tasks 42–45); real modules (Task 46).
+rejected explicitly, never parsed and ignored.
+
+**Outcome** (`docs/bootstrap_closure.md`): every compiler program and
+every prelude file reads zero diagnostics through lex, parse, resolve,
+typecheck and HIR, HIR measured through the program pipeline with the
+prelude.  Delivered in slices, each measured by the audit:
+
+- 1 contextual integer-literal typing; 2 static / factory method calls;
+  4 generic parameter bounds with meaning; 5 `derived concept` with
+  structural conformance; 8 `mode` blocks and `yield`, carried into HIR
+  fail-closed.
+- 7 (with 3) a call decides its callee's parameters, and a generic type
+  is its instantiation — structural `(head, arguments)` records read
+  from any module, layouts following their heads.
+- 9 generic enums, and typed match bindings; 10 type arguments after a
+  member (`raw.cast<T>()`); 11 function overloading by arity.
+- 12 the audit lowers the program to HIR with the prelude; 13 a call
+  through a type parameter's bound is carried into HIR as the host
+  carries it.
+
+**Handed on**: the first stage with diagnostics is `mir`, still measured
+by the single-source adapter without the prelude — a program-level MIR
+driver, and the monomorphization that names a call through a bound
+(which MIR now rejects fail-closed), are Tasks 42–45.  Not chased: the
+harness `print` requirement; method overloads; host false positives the
+audit's host sweep found (a field mismatch printed with identical types,
+a missing field through a chained instantiation, `obj.m<T>::x`
+accepted), which the bootstrap does not follow.
 
 ### Task 14 — Numeric Type Expansion
 
