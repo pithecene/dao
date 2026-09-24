@@ -143,7 +143,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 279
+  let total: i32 = 318
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -2018,6 +2018,93 @@ fn main(): i32
   // Class arguments written with the method's own parameter
   // (`Box<U>::write(…)` inside `fn write<U>`) fix it too.
   if tc_expect_some_diag_containing("written_class_argument_fixes_the_methods_parameter", "class Box<T>:\n  value: Ptr<T>\n  fn write<U>(p: Ptr<U>, again: bool): void\n    if again:\n      Box<U>::write(Ptr<T>::new(), false)\n", "argument type mismatch: expected Ptr<U>, got Ptr<T>"):
+    pass_count = pass_count + 1
+
+  // -----------------------------------------------------------------
+  // A generic enum is its instantiation, as a generic class is: an
+  // annotation names it, a construction decides it from the payload, a
+  // payload-less variant takes it from context, and a match binding is
+  // the payload's type for the scrutinee.  Every verdict below is the
+  // host's (`daoc check`).
+  // -----------------------------------------------------------------
+  if tc_expect_clean("generic_enum_annotation_and_binding", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn f(o: Opt<i64>): i64\n  match o:\n    Opt::Some(v):\n      return v\n    Opt::Nothing:\n      return 0\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("generic_enum_binding_type_is_held", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn f(o: Opt<i64>): string\n  match o:\n    Opt::Some(v):\n      return v\n    Opt::Nothing:\n      return \"\"\n  return \"\"\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_enum_construction_decides", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn f(): Opt<i32>\n  return Opt::Some(value = 5)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("generic_enum_construction_decided_is_held", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn f(): Opt<string>\n  return Opt::Some(value = 5)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("generic_enum_literal_keeps_its_default", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn f(): Opt<i64>\n  return Opt::Some(value = 1)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_enum_open_variant_takes_return_context", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn f(): Opt<i32>\n  return Opt::Nothing\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_enum_open_variant_takes_annotation", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn f(): i32\n  let n: Opt<i32> = Opt::Nothing\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_enum_open_variant_takes_argument_context", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn take(o: Opt<i32>): i32 -> 0\n\nfn f(): i32 -> take(Opt::Nothing)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_enum_open_variant_takes_assignment_context", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn f(): i32\n  let o: Opt<i32> = Opt::Some(value = 1)\n  o = Opt::Nothing\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("generic_enum_open_variant_without_context_rejected", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn f(): i32\n  let n = Opt::Nothing\n  return 0\n", "cannot infer type argument(s) for generic enum 'Opt'"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_enum_decided_construction_needs_no_annotation", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn f(): i32\n  let n = Opt::Some(value = 1)\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("generic_enum_partly_decided_without_context_rejected", "enum class Res<T, E>:\n  Ok(value: T)\n  Err(error: E)\n\nfn f(): i32\n  let r = Res::Ok(value = 1)\n  return 0\n", "cannot infer type argument(s) for generic enum 'Res'"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_enum_partly_decided_takes_context", "enum class Res<T, E>:\n  Ok(value: T)\n  Err(error: E)\n\nfn f(): i32\n  let r: Res<i32, string> = Res::Ok(value = 1)\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("generic_enum_partly_decided_context_disagrees", "enum class Res<T, E>:\n  Ok(value: T)\n  Err(error: E)\n\nfn f(): i32\n  let r: Res<string, string> = Res::Ok(value = 1)\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("generic_enum_generic_call_result_is_held", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn wrap<T>(x: T): Opt<T> -> Opt::Some(value = x)\n\nfn f(): i64\n  match wrap(3):\n    Opt::Some(v):\n      return v\n    Opt::Nothing:\n      return 0\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("generic_enum_instantiations_differ", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn f(a: Opt<i32>): Opt<string> -> a\n"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("generic_enum_bare_head_is_no_type", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn f(o: Opt): i32 -> 0\n", "generic type 'Opt' requires 1 type argument(s)"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_enum_two_parameters", "enum class Res<T, E>:\n  Ok(value: T)\n  Err(error: E)\n\nfn f(r: Res<i32, string>): i32\n  match r:\n    Res::Ok(v):\n      return v\n    Res::Err(e):\n      return 0\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("generic_enum_second_parameter_binding_is_held", "enum class Res<T, E>:\n  Ok(value: T)\n  Err(error: E)\n\nfn f(r: Res<i32, string>): i32\n  match r:\n    Res::Ok(v):\n      return v\n    Res::Err(e):\n      return e\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("generic_enum_pattern_of_another_enum", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nenum class Two:\n  X\n\nfn f(o: Opt<i32>): i32\n  match o:\n    Two::X:\n      return 0\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("plain_enum_binding_is_typed", "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn f(s: Shape): string\n  match s:\n    Shape::Circle(r):\n      return r\n    Shape::Dot:\n      return \"\"\n  return \"\"\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_enum_nested", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn f(o: Opt<Opt<i32>>): i32\n  match o:\n    Opt::Some(inner):\n      match inner:\n        Opt::Some(v):\n          return v\n        Opt::Nothing:\n          return 0\n    Opt::Nothing:\n      return 0\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_enum_decides_a_generic_call", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn unwrap_or<T>(o: Opt<T>, d: T): T\n  match o:\n    Opt::Some(v):\n      return v\n    Opt::Nothing:\n      return d\n  return d\n\nfn f(o: Opt<i32>): i32 -> unwrap_or(o, 0)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("generic_enum_decided_call_conflict", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn unwrap_or<T>(o: Opt<T>, d: T): T -> d\n\nfn f(o: Opt<i32>): string -> unwrap_or(o, \"s\")\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("generic_enum_binding_used_as_its_type", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn f(o: Opt<string>): i32\n  match o:\n    Opt::Some(v):\n      let n: i32 = v\n      return n\n    Opt::Nothing:\n      return 0\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_enum_payload_is_a_generic_class", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nclass Box<T>:\n  value: T\n\nfn f(o: Opt<Box<i32>>): i32\n  match o:\n    Opt::Some(b):\n      return b.value\n    Opt::Nothing:\n      return 0\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_enum_recursive_through_pointer", "enum class List<T>:\n  Cons(head: T, tail: Ptr<List<T>>)\n  Empty\n\nfn f(l: List<i32>): i32\n  match l:\n    List::Cons(h, t):\n      return h\n    List::Empty:\n      return 0\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_enum_in_a_class_field", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nclass Holder:\n  o: Opt<i32>\n\nfn f(h: Holder): i32\n  match h.o:\n    Opt::Some(v):\n      return v\n    Opt::Nothing:\n      return 0\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("generic_enum_recursion_through_argument_is_not_expanded", "enum class Deep<T>:\n  More(next: Ptr<Deep<Ptr<T>>>)\n  Stop(value: T)\n\nfn f(d: Deep<i32>): i32\n  match d:\n    Deep::Stop(v):\n      return v\n    Deep::More(n):\n      return 0\n  return 0\n"):
+    pass_count = pass_count + 1
+
+  if tc_expect_rejected("variant_written_type_argument_is_fixed", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn f(): Opt<i32> -> Opt::Some<string>(value = 1)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("variant_written_type_argument_fits_a_literal", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn f(): Opt<i64> -> Opt::Some<i64>(value = 1)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("variant_written_type_argument_count_rejected", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn f(): Opt<i64> -> Opt::Some<i64, i32>(value = 1)\n", "'Opt' expects 1 type argument(s), got 2"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("variant_type_arguments_on_the_enum_rejected", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\nfn f(): Opt<i64> -> Opt<i64>::Some(value = 1)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("named_payloads_decide_in_declaration_order", "enum class Pair<T>:\n  Both(first: T, second: T)\n\nfn f(x: i64): Pair<i64> -> Pair::Both(second = 1, first = x)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("named_payloads_first_declared_decides", "enum class Pair<T>:\n  Both(first: T, second: T)\n\nfn f(x: i64): Pair<i64> -> Pair::Both(first = 1, second = x)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("alias_to_instantiated_enum_bare_variant", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\ntype IntOpt = Opt<i32>\n\nfn f(): IntOpt -> IntOpt::Nothing\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("alias_to_instantiated_enum_construction", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\ntype IntOpt = Opt<i32>\n\nfn f(): IntOpt -> IntOpt::Some(value = 1)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_rejected("alias_to_instantiated_enum_payload_is_held", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\ntype IntOpt = Opt<i32>\n\nfn f(): IntOpt -> IntOpt::Some(value = \"s\")\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("alias_to_instantiated_enum_pattern", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\ntype IntOpt = Opt<i32>\n\nfn f(o: IntOpt): i32\n  match o:\n    IntOpt::Some(v):\n      return v\n    IntOpt::Nothing:\n      return 0\n  return 0\n"):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------
