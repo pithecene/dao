@@ -779,7 +779,9 @@ enum class Node:
   QualNameE(seg_lp: i64, seg_count: i64)
   BinaryE(op: i64, left: i64, right: i64)
   UnaryE(op: i64, operand: i64)
-  CallE(callee: i64, args_lp: i64, arg_count: i64, targs_lp: i64, names_lp: i64)
+  // `targs_on_type`: the type arguments were written on the type
+  // (`Box<i32>::zero(0)`) rather than for the callee (`f<i32>(x)`).
+  CallE(callee: i64, args_lp: i64, arg_count: i64, targs_lp: i64, names_lp: i64, targs_on_type: bool)
   IndexE(obj: i64, idx: i64)
   FieldE(obj: i64, field: i64)
   PipeE(left: i64, right: i64)
@@ -1340,9 +1342,10 @@ fn parse_call_arg(pc: PC, ps: PS): CallArg
   return CallArg(expr.ps, expr.node, to_i64(-1))
 
 // The call `(args)` on `callee` at `ps`, carrying the type arguments the
-// callee was read with (`targs_lp` -1 for none).  The argument names
+// callee was read with (`targs_lp` -1 for none) and whether they were
+// written on the type (`Type<..>::member(args)`).  The argument names
 // are a list beside the arguments, one entry each.
-fn parse_call_suffix(pc: PC, ps: PS, callee: i64, targs_lp: i64): PR
+fn parse_call_suffix(pc: PC, ps: PS, callee: i64, targs_lp: i64, targs_on_type: bool): PR
   let inner: PS = expect(pc, ps, TK::LParen)
   let call_args: Vector<i64> = Vector<i64>::new()
   let arg_names: Vector<i64> = Vector<i64>::new()
@@ -1368,7 +1371,7 @@ fn parse_call_suffix(pc: PC, ps: PS, callee: i64, targs_lp: i64): PR
   let call_fl: FlushResult = flush_list(inner, call_args)
   let names_fl: FlushResult = flush_list(call_fl.ps, arg_names)
   inner = expect(pc, names_fl.ps, TK::RParen)
-  return ps_add_node(inner, Node::CallE(callee = callee, args_lp = call_fl.list_pos, arg_count = call_args.length(), targs_lp = targs_lp, names_lp = names_fl.list_pos))
+  return ps_add_node(inner, Node::CallE(callee = callee, args_lp = call_fl.list_pos, arg_count = call_args.length(), targs_lp = targs_lp, names_lp = names_fl.list_pos, targs_on_type = targs_on_type))
 
 // Postfix expressions: call (with call-site type arguments), field, index, try
 fn parse_postfix(pc: PC, ps: PS): PR
@@ -1388,6 +1391,7 @@ fn parse_postfix(pc: PC, ps: PS): PR
         targs = try_call_type_args(pc, cur_ps)
     if targs.ok:
       let after: PS = targs.ps
+      let on_type: bool = false
       if tk_name(peek_kind(pc, after)) == tk_name(TK::ColonColon):
         let ps_m: PS = ps_advance(pc, after)
         let member_tidx: i64 = ps_m.pos
@@ -1395,14 +1399,15 @@ fn parse_postfix(pc: PC, ps: PS): PR
         let qual_r: PR = extend_qual_name(ps_m, cur_node, member_tidx)
         after = qual_r.ps
         cur_node = qual_r.node
-      let typed_call: PR = parse_call_suffix(pc, after, cur_node, targs.list_pos)
+        on_type = true
+      let typed_call: PR = parse_call_suffix(pc, after, cur_node, targs.list_pos, on_type)
       cur_ps = typed_call.ps
       cur_node = typed_call.node
 
     // Call: expr(args)
     else:
       if tk_name(k) == tk_name(TK::LParen):
-        let call_r: PR = parse_call_suffix(pc, cur_ps, cur_node, to_i64(-1))
+        let call_r: PR = parse_call_suffix(pc, cur_ps, cur_node, to_i64(-1), false)
         cur_ps = call_r.ps
         cur_node = call_r.node
 
@@ -2605,7 +2610,7 @@ fn node_kind_name(n: Node): string
       return "BinaryE"
     Node::UnaryE(a, b):
       return "UnaryE"
-    Node::CallE(a, b, c, d, e):
+    Node::CallE(a, b, c, d, e, f):
       return "CallE"
     Node::IndexE(a, b):
       return "IndexE"
@@ -2795,8 +2800,8 @@ class DaoType:
   decl_node: i64
   info_lp: i64
   info_count: i64
-  ret_type: i64
-  pointee: i64      // a pointer type's pointee, a generator's element type; else -1
+  ret_type: i64     // a function type's result; a struct's stands-for record (typecheck write_stands_for): a head's own parameters, an instantiation's head and arguments; else -1
+  pointee: i64      // a pointer type's pointee, a generator's element type; a function type's stands-for record (its own type parameters); else -1
 
 // --- Task 27: Program-level pass payloads ---
 //

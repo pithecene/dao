@@ -10,43 +10,43 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 72909 |
-| `CallExpr` | 24237 |
-| `Callee` | 24237 |
-| `Args` | 21747 |
-| `FieldExpr` | 16280 |
-| `BinaryExpr` | 11234 |
-| `LetStatement` | 10619 |
-| `Value` | 8369 |
-| `Target` | 8369 |
-| `Assignment` | 8369 |
-| `IntLiteral` | 8217 |
-| `Condition` | 6895 |
-| `QualifiedName` | 6254 |
-| `Then` | 5612 |
-| `IfStatement` | 5612 |
-| `ReturnStatement` | 5590 |
-| `StringLiteral` | 4978 |
-| `Param` | 3862 |
-| `BoolLiteral` | 2693 |
-| `Pattern` | 2676 |
-| `Arm` | 2676 |
-| `ReturnType` | 1662 |
-| `FunctionDecl` | 1662 |
-| `Else` | 1317 |
-| `WhileStatement` | 1283 |
-| `Variant` | 1181 |
-| `Field` | 1090 |
-| `UnaryExpr` | 1048 |
-| `TypeArgs` | 999 |
-| `Scrutinee` | 645 |
-| `MatchStatement` | 645 |
-| `ExpressionStatement` | 563 |
-| `ClassDecl` | 256 |
+| `Identifier` | 95310 |
+| `CallExpr` | 32158 |
+| `Callee` | 32158 |
+| `Args` | 28570 |
+| `FieldExpr` | 23279 |
+| `BinaryExpr` | 15052 |
+| `LetStatement` | 13004 |
+| `IntLiteral` | 10997 |
+| `Value` | 10102 |
+| `Target` | 10102 |
+| `Assignment` | 10102 |
+| `Condition` | 9028 |
+| `ReturnStatement` | 7666 |
+| `Then` | 7482 |
+| `IfStatement` | 7482 |
+| `QualifiedName` | 7045 |
+| `StringLiteral` | 6736 |
+| `Param` | 5544 |
+| `BoolLiteral` | 3373 |
+| `Pattern` | 3267 |
+| `Arm` | 3267 |
+| `ReturnType` | 2340 |
+| `FunctionDecl` | 2340 |
+| `WhileStatement` | 1546 |
+| `UnaryExpr` | 1454 |
+| `Else` | 1451 |
+| `Field` | 1370 |
+| `TypeArgs` | 1279 |
+| `Variant` | 1223 |
+| `Scrutinee` | 929 |
+| `MatchStatement` | 929 |
+| `ExpressionStatement` | 678 |
+| `ClassDecl` | 349 |
 | `BreakStatement` | 64 |
-| `ResourceBlock` | 42 |
-| `EnumDecl` | 27 |
-| `ExprBody` | 19 |
+| `ResourceBlock` | 40 |
+| `EnumDecl` | 31 |
+| `ExprBody` | 27 |
 | `EnumClassDecl` | 14 |
 | `Module` | 8 |
 | `File` | 8 |
@@ -212,7 +212,6 @@ bootstrap must compile for itself.
 | `core::convert::f32_to_f64` | 1 |
 | `size_of` (intrinsic; inlined by the host) | 47 |
 | `align_of` (intrinsic; inlined by the host) | 47 |
-| `ptr_offset` (intrinsic; inlined by the host) | 23 |
 
 The intrinsic family is counted from the MIR (distinct specializations
 of each), since the host lowers every specialization inline and emits no
@@ -234,14 +233,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 58 | 0 | 0 | 0 | 154 | 455 | 0 | 18 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 67 | 1 | 0 | 0 | 269 | 385 | 0 | 35 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 61 | 1 | 0 | 0 | 163 | 425 | 0 | 18 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 134 | 1 | 0 | 0 | 605 | 712 | 0 | 67 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 245 | 1 | 0 | 0 | 1031 | 1151 | 0 | 150 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 337 | 1 | 0 | 0 | 1479 | 1340 | 0 | 188 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 348 | 1 | 0 | 0 | 1626 | 1305 | 0 | 238 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 453 | 2 | 0 | 0 | 1860 | 1382 | 0 | 309 | — | resolve: unknown name 't'; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 71 | 0 | 0 | 0 | 0 | 3 | 304 | 322 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 70 | 0 | 0 | 0 | 0 | 3 | 354 | 392 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 70 | 0 | 0 | 0 | 0 | 3 | 338 | 356 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 151 | 1 | 0 | 0 | 0 | 38 | 760 | 830 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 601 | 2 | 0 | 0 | 0 | 69 | 1748 | 2016 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 853 | 2 | 0 | 0 | 0 | 78 | 1783 | 2099 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 850 | 2 | 0 | 0 | 0 | 84 | 1864 | 2219 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 991 | 2 | 0 | 0 | 0 | 84 | 2252 | 2682 | — | typecheck: unknown type in annotation; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 
@@ -251,131 +250,123 @@ named, not inferred.
 
 **lexer**
 
-- `resolve` ×14: unknown name 'a'
-- `resolve` ×12: unknown name 't'
-- `resolve` ×12: unknown name 'b'
-- `resolve` ×5: unknown name 'c'
-- `resolve` ×3: unknown name 'lp'
-- `typecheck` ×28: type mismatch in '+': i64 vs i32
-- `typecheck` ×8: type mismatch: cannot assign i32 to i64
-- `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
-- `typecheck` ×4: unknown type in annotation
-- `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `mir` ×9: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
-- `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
-- `mir` ×1: unsupported assignment target
+- `typecheck` ×2: match arm pattern type Option does not match scrutinee type void
+- `typecheck` ×1: unknown type in annotation
+- `hir` ×22: unknown name 'char_at'
+- `hir` ×11: unknown name 'Vector'
+- `hir` ×6: unknown name 'Span'
+- `hir` ×6: unknown name 'make_error'
+- `hir` ×3: unknown name 'to_i64'
+- `mir` ×22: unknown name 'char_at'
+- `mir` ×11: unknown name 'Vector'
+- `mir` ×6: unknown name 'Span'
+- `mir` ×6: unknown name 'make_error'
+- `mir` ×3: unknown name 'to_i64'
 
 **parser**
 
-- `resolve` ×14: unknown name 'a'
-- `resolve` ×12: unknown name 't'
-- `resolve` ×12: unknown name 'b'
-- `resolve` ×5: unknown name 'c'
-- `resolve` ×3: unknown name 'lp'
-- `typecheck` ×28: type mismatch in '+': i64 vs i32
-- `typecheck` ×8: type mismatch: cannot assign i32 to i64
-- `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
-- `typecheck` ×4: unknown type in annotation
-- `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `mir` ×26: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
-- `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
-- `mir` ×1: unsupported assignment target
+- `typecheck` ×2: match arm pattern type Option does not match scrutinee type void
+- `typecheck` ×1: unknown type in annotation
+- `hir` ×22: unknown name 'char_at'
+- `hir` ×11: unknown name 'Vector'
+- `hir` ×6: unknown name 'Span'
+- `hir` ×6: unknown name 'make_error'
+- `hir` ×3: unknown name 'to_i64'
+- `mir` ×22: unknown name 'char_at'
+- `mir` ×11: unknown name 'Vector'
+- `mir` ×6: unknown name 'Span'
+- `mir` ×6: unknown name 'make_error'
+- `mir` ×3: unknown name 'to_i64'
 
 **graph**
 
-- `resolve` ×14: unknown name 'a'
-- `resolve` ×12: unknown name 't'
-- `resolve` ×12: unknown name 'b'
-- `resolve` ×5: unknown name 'c'
-- `resolve` ×3: unknown name 'lp'
-- `typecheck` ×28: type mismatch in '+': i64 vs i32
-- `typecheck` ×8: type mismatch: cannot assign i32 to i64
-- `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
-- `typecheck` ×4: unknown type in annotation
-- `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `mir` ×9: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
-- `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
-- `mir` ×1: unsupported assignment target
+- `typecheck` ×2: match arm pattern type Option does not match scrutinee type void
+- `typecheck` ×1: unknown type in annotation
+- `hir` ×22: unknown name 'char_at'
+- `hir` ×11: unknown name 'Vector'
+- `hir` ×6: unknown name 'Span'
+- `hir` ×6: unknown name 'make_error'
+- `hir` ×3: unknown name 'to_i64'
+- `mir` ×22: unknown name 'char_at'
+- `mir` ×11: unknown name 'Vector'
+- `mir` ×6: unknown name 'Span'
+- `mir` ×6: unknown name 'make_error'
+- `mir` ×3: unknown name 'to_i64'
 
 **resolver**
 
-- `resolve` ×14: unknown name 'a'
-- `resolve` ×12: unknown name 't'
-- `resolve` ×12: unknown name 'b'
-- `resolve` ×5: unknown name 'c'
-- `resolve` ×3: unknown name 'lp'
-- `typecheck` ×28: type mismatch in '+': i64 vs i32
-- `typecheck` ×8: type mismatch: cannot assign i32 to i64
-- `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
-- `typecheck` ×4: unknown type in annotation
-- `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
-- `mir` ×9: unsupported assignment target
-- `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
+- `typecheck` ×27: match arm pattern type Option does not match scrutinee type void
+- `typecheck` ×11: unknown type in annotation
+- `hir` ×22: unknown name 'char_at'
+- `hir` ×11: unknown name 'Vector'
+- `hir` ×6: unknown name 'Span'
+- `hir` ×6: unknown name 'make_error'
+- `hir` ×3: unknown name 'to_i64'
+- `mir` ×22: unknown name 'char_at'
+- `mir` ×11: unknown name 'Vector'
+- `mir` ×6: unknown name 'Span'
+- `mir` ×6: unknown name 'make_error'
+- `mir` ×3: unknown name 'to_i64'
 
 **typecheck**
 
-- `resolve` ×14: unknown name 'a'
-- `resolve` ×12: unknown name 't'
-- `resolve` ×12: unknown name 'b'
-- `resolve` ×5: unknown name 'c'
-- `resolve` ×3: unknown name 'lp'
-- `typecheck` ×28: type mismatch in '+': i64 vs i32
-- `typecheck` ×8: type mismatch: cannot assign i32 to i64
-- `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
-- `typecheck` ×4: unknown type in annotation
-- `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
-- `mir` ×9: unsupported assignment target
-- `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
+- `typecheck` ×34: match arm pattern type Option does not match scrutinee type void
+- `typecheck` ×16: unknown type in annotation
+- `hir` ×22: unknown name 'char_at'
+- `hir` ×11: unknown name 'Vector'
+- `hir` ×6: unknown name 'Span'
+- `hir` ×6: unknown name 'make_error'
+- `hir` ×3: unknown name 'to_i64'
+- `mir` ×22: unknown name 'char_at'
+- `mir` ×11: unknown name 'Vector'
+- `mir` ×6: unknown name 'Span'
+- `mir` ×6: unknown name 'make_error'
+- `mir` ×3: unknown name 'to_i64'
 
 **hir**
 
-- `resolve` ×14: unknown name 'a'
-- `resolve` ×12: unknown name 't'
-- `resolve` ×12: unknown name 'b'
-- `resolve` ×5: unknown name 'c'
-- `resolve` ×3: unknown name 'lp'
-- `typecheck` ×28: type mismatch in '+': i64 vs i32
-- `typecheck` ×8: type mismatch: cannot assign i32 to i64
-- `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
-- `typecheck` ×4: unknown type in annotation
-- `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
-- `mir` ×9: unsupported assignment target
-- `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
+- `typecheck` ×34: match arm pattern type Option does not match scrutinee type void
+- `typecheck` ×16: unknown type in annotation
+- `hir` ×22: unknown name 'char_at'
+- `hir` ×11: unknown name 'Vector'
+- `hir` ×6: unknown name 'Span'
+- `hir` ×6: unknown name 'make_error'
+- `hir` ×3: unknown name 'to_i64'
+- `mir` ×22: unknown name 'char_at'
+- `mir` ×11: unknown name 'Vector'
+- `mir` ×6: unknown name 'Span'
+- `mir` ×6: unknown name 'make_error'
+- `mir` ×3: unknown name 'to_i64'
 
 **mir**
 
-- `resolve` ×14: unknown name 'a'
-- `resolve` ×12: unknown name 't'
-- `resolve` ×12: unknown name 'b'
-- `resolve` ×5: unknown name 'c'
-- `resolve` ×3: unknown name 'lp'
-- `typecheck` ×28: type mismatch in '+': i64 vs i32
-- `typecheck` ×8: type mismatch: cannot assign i32 to i64
-- `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
-- `typecheck` ×4: unknown type in annotation
-- `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
-- `mir` ×9: unsupported assignment target
-- `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
+- `typecheck` ×34: match arm pattern type Option does not match scrutinee type void
+- `typecheck` ×16: unknown type in annotation
+- `hir` ×22: unknown name 'char_at'
+- `hir` ×11: unknown name 'Vector'
+- `hir` ×6: unknown name 'Span'
+- `hir` ×6: unknown name 'make_error'
+- `hir` ×3: unknown name 'to_i64'
+- `mir` ×22: unknown name 'char_at'
+- `mir` ×11: unknown name 'Vector'
+- `mir` ×6: unknown name 'Span'
+- `mir` ×6: unknown name 'make_error'
+- `mir` ×3: unknown name 'to_i64'
 
 **llvm**
 
-- `resolve` ×14: unknown name 'a'
-- `resolve` ×12: unknown name 't'
-- `resolve` ×12: unknown name 'b'
-- `resolve` ×5: unknown name 'c'
-- `resolve` ×3: unknown name 'lp'
-- `typecheck` ×28: type mismatch in '+': i64 vs i32
-- `typecheck` ×8: type mismatch: cannot assign i32 to i64
-- `typecheck` ×6: constructor arity mismatch: expected 7 fields, got 0
-- `typecheck` ×4: unknown type in annotation
-- `typecheck` ×3: type mismatch in '==': i64 vs i32
-- `mir` ×33: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
-- `mir` ×9: unsupported assignment target
-- `mir` ×8: unsupported statement kind in Tier A MIR lowering: HirBreak
+- `typecheck` ×34: match arm pattern type Option does not match scrutinee type void
+- `typecheck` ×16: unknown type in annotation
+- `hir` ×22: unknown name 'char_at'
+- `hir` ×11: unknown name 'Vector'
+- `hir` ×6: unknown name 'Span'
+- `hir` ×6: unknown name 'make_error'
+- `hir` ×3: unknown name 'to_i64'
+- `mir` ×22: unknown name 'char_at'
+- `mir` ×11: unknown name 'Vector'
+- `mir` ×6: unknown name 'Span'
+- `mir` ×6: unknown name 'make_error'
+- `mir` ×3: unknown name 'to_i64'
 
 ### The prelude through the bootstrap
 
@@ -392,26 +383,26 @@ diagnostics per stage, and the first.
 
 | File | parse | resolve | typecheck | First diagnostic |
 |---|---|---|---|---|
-| `stdlib/core/builtins.dao` | 0 | 0 | 2 | type mismatch: cannot assign i32 to i64 |
-| `stdlib/core/comparable.dao` | 1 | 0 | 0 | expected declaration (fn, extern, class, enum, type, concept, or extend) |
+| `stdlib/core/builtins.dao` | 0 | 0 | 0 | — |
+| `stdlib/core/comparable.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/convert.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/diagnostic.dao` | 0 | 0 | 0 | — |
-| `stdlib/core/equatable.dao` | 1 | 0 | 12 | expected declaration (fn, extern, class, enum, type, concept, or extend) |
-| `stdlib/core/hashmap.dao` | 122 | 23 | 47 | expected expression |
-| `stdlib/core/math.dao` | 118 | 0 | 0 | expected Gt, got Colon |
+| `stdlib/core/equatable.dao` | 0 | 0 | 0 | — |
+| `stdlib/core/hashmap.dao` | 10 | 0 | 13 | expected expression |
+| `stdlib/core/math.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/memory.dao` | 0 | 0 | 0 | — |
-| `stdlib/core/numeric.dao` | 0 | 0 | 10 | extend method 'less_than' param 1 has type i8, concept requires <unresolved> |
+| `stdlib/core/numeric.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/option.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/overflow.dao` | 0 | 0 | 46 | return type mismatch: expected void, got Option |
 | `stdlib/core/panic.dao` | 0 | 0 | 0 | — |
-| `stdlib/core/printable.dao` | 24 | 0 | 12 | expected declaration (fn, extern, class, enum, type, concept, or extend) |
-| `stdlib/core/range.dao` | 4 | 2 | 0 | expected expression |
+| `stdlib/core/printable.dao` | 0 | 0 | 0 | — |
+| `stdlib/core/range.dao` | 0 | 2 | 0 | duplicate declaration 'range' |
 | `stdlib/core/result.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/span.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/string.dao` | 0 | 0 | 0 | — |
-| `stdlib/core/text.dao` | 0 | 0 | 5 | constructor arity mismatch: expected 7 fields, got 0 |
+| `stdlib/core/text.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/to_string.dao` | 0 | 0 | 0 | — |
-| `stdlib/core/vector.dao` | 91 | 35 | 71 | expected expression |
+| `stdlib/core/vector.dao` | 25 | 1 | 26 | expected expression |
 | `stdlib/io/file.dao` | 0 | 0 | 0 | — |
 
 ### Parse-stage attribution
@@ -429,14 +420,48 @@ next.  Sites per program against the parse column above:
 
 | Program | `Type<Args>::` sites | `resource` blocks | parse diagnostics |
 |---|---|---|---|
-| lexer | 57 | 0 | 0 |
-| parser | 62 | 0 | 0 |
-| graph | 68 | 0 | 0 |
-| resolver | 114 | 0 | 0 |
-| typecheck | 148 | 0 | 0 |
-| hir | 161 | 4 | 0 |
-| mir | 177 | 10 | 0 |
-| llvm | 215 | 28 | 0 |
+| lexer | 66 | 0 | 0 |
+| parser | 71 | 0 | 0 |
+| graph | 77 | 0 | 0 |
+| resolver | 126 | 0 | 0 |
+| typecheck | 263 | 0 | 0 |
+| hir | 234 | 4 | 0 |
+| mir | 245 | 9 | 0 |
+| llvm | 283 | 27 | 0 |
+
+### Closure surfaces: compiler implementation vs test harness
+
+Prelude call sites the corpus makes, split by the physical file
+boundary Task 40 established: `impl.dao` and `base.dao` (the
+compiler the Stage-2 crossing runs) against `tests.dao` (the
+bootstrap test harness).  Measurement only -- it selects no task and
+changes no column above.  String fixtures and comments are stripped
+before counting.  It exists so a compiler requirement is not
+confused with a reporting convenience.  A function with zero compiler
+call sites is needed only by the test harness (fixtures, validation,
+or reporting), not by the compiler the Stage-2 crossing runs.
+
+| Prelude function | Compiler | Harness |
+|---|---:|---:|
+| `to_i64` | 761 | 155 |
+| `print` | 0 | 658 |
+| `new` | 277 | 98 |
+| `i64_to_string` | 90 | 180 |
+| `substring` | 26 | 12 |
+| `char_at` | 23 | 0 |
+| `read_file` | 0 | 19 |
+| `length` | 6 | 11 |
+| `make_error` | 16 | 0 |
+| `index_of` | 0 | 16 |
+| `file_exists` | 0 | 16 |
+| `i32_to_string` | 0 | 15 |
+| `eprint` | 0 | 11 |
+| `starts_with` | 3 | 0 |
+| `bool_to_string` | 0 | 3 |
+| `write_file` | 1 | 2 |
+| `make_warning` | 0 | 1 |
+| `str_compare` | 1 | 0 |
+| **Total** | **1204** | **1197** |
 
 ## 4. Reading the matrix
 

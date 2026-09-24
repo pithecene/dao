@@ -453,7 +453,7 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
       return resolve_expr(r, right)
     Node::UnaryE(op_tidx, operand):
       return resolve_expr(rs, operand)
-    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp):
+    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
       let r: RS = resolve_expr(rs, callee)
       let args: Vector<i64> = read_list(r.rc.idx_data, args_lp)
       let i: i64 = 0
@@ -554,7 +554,7 @@ fn resolve_match_arm(rs: RS, pat_node: i64, body_lp: i64): RS
   let r: RS = rs
   let binders_lp: i64 = to_i64(-1)
   match r.rc.nodes.get(pat_node):
-    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp):
+    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
       // Only a variant reached with `::` takes a value apart, so
       // `Box(x):` is an ordinary call whose `x` is a use.
       match r.rc.nodes.get(callee):
