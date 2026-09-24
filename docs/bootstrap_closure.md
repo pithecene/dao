@@ -10,38 +10,38 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 96997 |
-| `CallExpr` | 32768 |
-| `Callee` | 32768 |
-| `Args` | 29075 |
-| `FieldExpr` | 23723 |
-| `BinaryExpr` | 15418 |
-| `LetStatement` | 13191 |
-| `IntLiteral` | 11240 |
-| `Value` | 10283 |
-| `Target` | 10283 |
-| `Assignment` | 10283 |
-| `Condition` | 9173 |
-| `ReturnStatement` | 7782 |
-| `Then` | 7603 |
-| `IfStatement` | 7603 |
-| `QualifiedName` | 7019 |
-| `StringLiteral` | 6897 |
-| `Param` | 5624 |
-| `BoolLiteral` | 3391 |
-| `Pattern` | 3245 |
-| `Arm` | 3245 |
-| `ReturnType` | 2376 |
-| `FunctionDecl` | 2376 |
-| `WhileStatement` | 1570 |
-| `UnaryExpr` | 1486 |
-| `Else` | 1460 |
+| `Identifier` | 98417 |
+| `CallExpr` | 33306 |
+| `Callee` | 33306 |
+| `Args` | 29557 |
+| `FieldExpr` | 24235 |
+| `BinaryExpr` | 15735 |
+| `LetStatement` | 13316 |
+| `IntLiteral` | 11450 |
+| `Value` | 10404 |
+| `Target` | 10404 |
+| `Assignment` | 10404 |
+| `Condition` | 9314 |
+| `ReturnStatement` | 7886 |
+| `Then` | 7738 |
+| `IfStatement` | 7738 |
+| `QualifiedName` | 7087 |
+| `StringLiteral` | 7046 |
+| `Param` | 5720 |
+| `BoolLiteral` | 3462 |
+| `Pattern` | 3300 |
+| `Arm` | 3300 |
+| `ReturnType` | 2407 |
+| `FunctionDecl` | 2407 |
+| `WhileStatement` | 1576 |
+| `UnaryExpr` | 1529 |
+| `Else` | 1468 |
 | `Field` | 1386 |
-| `TypeArgs` | 1299 |
+| `TypeArgs` | 1302 |
 | `Variant` | 1223 |
-| `Scrutinee` | 919 |
-| `MatchStatement` | 919 |
-| `ExpressionStatement` | 680 |
+| `Scrutinee` | 960 |
+| `MatchStatement` | 960 |
+| `ExpressionStatement` | 686 |
 | `ClassDecl` | 353 |
 | `BreakStatement` | 64 |
 | `ResourceBlock` | 40 |
@@ -66,8 +66,8 @@ bootstrap must compile for itself.
 | `core::vector::Vector.get` | 23 |
 | `core::vector::vec_log_values_new` | 23 |
 | `core::vector::Vector.copy_out` | 21 |
-| `core::vector::Vector.set` | 6 |
-| `core::vector::Vector.log_overwrite` | 6 |
+| `core::vector::Vector.set` | 7 |
+| `core::vector::Vector.log_overwrite` | 7 |
 | `core::range::range` | 5 |
 | `core::builtins::copy_out` | 5 |
 | `core::vector::Vector.snapshot` | 1 |
@@ -233,14 +233,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 83 | 1 | 0 | 0 | 0 | 0 | 304 | 322 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 86 | 1 | 0 | 0 | 0 | 0 | 356 | 396 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 92 | 1 | 0 | 0 | 0 | 0 | 338 | 356 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 165 | 0 | 0 | 0 | 0 | 0 | 760 | 830 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 871 | 2 | 0 | 0 | 0 | 0 | 1792 | 2063 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 1016 | 2 | 0 | 0 | 0 | 0 | 1827 | 2146 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 949 | 2 | 0 | 0 | 0 | 0 | 1908 | 2266 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 1139 | 3 | 0 | 0 | 0 | 0 | 2296 | 2729 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 85 | 1 | 0 | 0 | 0 | 0 | 309 | 329 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 87 | 1 | 0 | 0 | 0 | 0 | 361 | 403 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 91 | 1 | 0 | 0 | 0 | 0 | 343 | 363 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 216 | 0 | 0 | 0 | 0 | 0 | 795 | 877 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 1044 | 2 | 0 | 0 | 0 | 0 | 1826 | 2109 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 1315 | 3 | 0 | 0 | 0 | 0 | 1858 | 2189 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 1189 | 3 | 0 | 0 | 0 | 0 | 1939 | 2309 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 1343 | 3 | 0 | 0 | 0 | 0 | 2329 | 2774 | — | hir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 
@@ -251,12 +251,12 @@ named, not inferred.
 **lexer**
 
 - `hir` ×22: unknown name 'char_at'
-- `hir` ×11: unknown name 'Vector'
+- `hir` ×10: unknown name 'Vector'
 - `hir` ×6: unknown name 'Span'
 - `hir` ×6: unknown name 'make_error'
 - `hir` ×3: unknown name 'to_i64'
 - `mir` ×22: unknown name 'char_at'
-- `mir` ×11: unknown name 'Vector'
+- `mir` ×10: unknown name 'Vector'
 - `mir` ×6: unknown name 'Span'
 - `mir` ×6: unknown name 'make_error'
 - `mir` ×3: unknown name 'to_i64'
@@ -264,12 +264,12 @@ named, not inferred.
 **parser**
 
 - `hir` ×22: unknown name 'char_at'
-- `hir` ×11: unknown name 'Vector'
+- `hir` ×10: unknown name 'Vector'
 - `hir` ×6: unknown name 'Span'
 - `hir` ×6: unknown name 'make_error'
 - `hir` ×3: unknown name 'to_i64'
 - `mir` ×22: unknown name 'char_at'
-- `mir` ×11: unknown name 'Vector'
+- `mir` ×10: unknown name 'Vector'
 - `mir` ×6: unknown name 'Span'
 - `mir` ×6: unknown name 'make_error'
 - `mir` ×3: unknown name 'to_i64'
@@ -277,12 +277,12 @@ named, not inferred.
 **graph**
 
 - `hir` ×22: unknown name 'char_at'
-- `hir` ×11: unknown name 'Vector'
+- `hir` ×10: unknown name 'Vector'
 - `hir` ×6: unknown name 'Span'
 - `hir` ×6: unknown name 'make_error'
 - `hir` ×3: unknown name 'to_i64'
 - `mir` ×22: unknown name 'char_at'
-- `mir` ×11: unknown name 'Vector'
+- `mir` ×10: unknown name 'Vector'
 - `mir` ×6: unknown name 'Span'
 - `mir` ×6: unknown name 'make_error'
 - `mir` ×3: unknown name 'to_i64'
@@ -290,12 +290,12 @@ named, not inferred.
 **resolver**
 
 - `hir` ×22: unknown name 'char_at'
-- `hir` ×11: unknown name 'Vector'
+- `hir` ×10: unknown name 'Vector'
 - `hir` ×6: unknown name 'Span'
 - `hir` ×6: unknown name 'make_error'
 - `hir` ×3: unknown name 'to_i64'
 - `mir` ×22: unknown name 'char_at'
-- `mir` ×11: unknown name 'Vector'
+- `mir` ×10: unknown name 'Vector'
 - `mir` ×6: unknown name 'Span'
 - `mir` ×6: unknown name 'make_error'
 - `mir` ×3: unknown name 'to_i64'
@@ -303,12 +303,12 @@ named, not inferred.
 **typecheck**
 
 - `hir` ×22: unknown name 'char_at'
-- `hir` ×11: unknown name 'Vector'
+- `hir` ×10: unknown name 'Vector'
 - `hir` ×6: unknown name 'Span'
 - `hir` ×6: unknown name 'make_error'
 - `hir` ×3: unknown name 'to_i64'
 - `mir` ×22: unknown name 'char_at'
-- `mir` ×11: unknown name 'Vector'
+- `mir` ×10: unknown name 'Vector'
 - `mir` ×6: unknown name 'Span'
 - `mir` ×6: unknown name 'make_error'
 - `mir` ×3: unknown name 'to_i64'
@@ -316,12 +316,12 @@ named, not inferred.
 **hir**
 
 - `hir` ×22: unknown name 'char_at'
-- `hir` ×11: unknown name 'Vector'
+- `hir` ×10: unknown name 'Vector'
 - `hir` ×6: unknown name 'Span'
 - `hir` ×6: unknown name 'make_error'
 - `hir` ×3: unknown name 'to_i64'
 - `mir` ×22: unknown name 'char_at'
-- `mir` ×11: unknown name 'Vector'
+- `mir` ×10: unknown name 'Vector'
 - `mir` ×6: unknown name 'Span'
 - `mir` ×6: unknown name 'make_error'
 - `mir` ×3: unknown name 'to_i64'
@@ -329,12 +329,12 @@ named, not inferred.
 **mir**
 
 - `hir` ×22: unknown name 'char_at'
-- `hir` ×11: unknown name 'Vector'
+- `hir` ×10: unknown name 'Vector'
 - `hir` ×6: unknown name 'Span'
 - `hir` ×6: unknown name 'make_error'
 - `hir` ×3: unknown name 'to_i64'
 - `mir` ×22: unknown name 'char_at'
-- `mir` ×11: unknown name 'Vector'
+- `mir` ×10: unknown name 'Vector'
 - `mir` ×6: unknown name 'Span'
 - `mir` ×6: unknown name 'make_error'
 - `mir` ×3: unknown name 'to_i64'
@@ -342,12 +342,12 @@ named, not inferred.
 **llvm**
 
 - `hir` ×22: unknown name 'char_at'
-- `hir` ×11: unknown name 'Vector'
+- `hir` ×10: unknown name 'Vector'
 - `hir` ×6: unknown name 'Span'
 - `hir` ×6: unknown name 'make_error'
 - `hir` ×3: unknown name 'to_i64'
 - `mir` ×22: unknown name 'char_at'
-- `mir` ×11: unknown name 'Vector'
+- `mir` ×10: unknown name 'Vector'
 - `mir` ×6: unknown name 'Span'
 - `mir` ×6: unknown name 'make_error'
 - `mir` ×3: unknown name 'to_i64'
@@ -380,7 +380,7 @@ diagnostics per stage, and the first.
 | `stdlib/core/overflow.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/panic.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/printable.dao` | 0 | 0 | 0 | — |
-| `stdlib/core/range.dao` | 0 | 2 | 0 | duplicate declaration 'range' |
+| `stdlib/core/range.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/result.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/span.dao` | 0 | 0 | 0 | — |
 | `stdlib/core/string.dao` | 0 | 0 | 0 | — |
@@ -408,7 +408,7 @@ next.  Sites per program against the parse column above:
 | parser | 71 | 0 | 0 |
 | graph | 77 | 0 | 0 |
 | resolver | 126 | 0 | 0 |
-| typecheck | 270 | 0 | 0 |
+| typecheck | 273 | 0 | 0 |
 | hir | 239 | 4 | 0 |
 | mir | 250 | 9 | 0 |
 | llvm | 288 | 27 | 0 |
@@ -427,10 +427,10 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 
 | Prelude function | Compiler | Harness |
 |---|---:|---:|
-| `to_i64` | 769 | 155 |
-| `print` | 0 | 660 |
-| `new` | 282 | 98 |
-| `i64_to_string` | 92 | 180 |
+| `to_i64` | 779 | 155 |
+| `print` | 0 | 666 |
+| `new` | 282 | 101 |
+| `i64_to_string` | 98 | 182 |
 | `substring` | 26 | 12 |
 | `char_at` | 23 | 0 |
 | `read_file` | 0 | 19 |
@@ -445,7 +445,7 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 | `write_file` | 1 | 2 |
 | `make_warning` | 0 | 1 |
 | `str_compare` | 1 | 0 |
-| **Total** | **1219** | **1199** |
+| **Total** | **1235** | **1210** |
 
 ## 4. Reading the matrix
 

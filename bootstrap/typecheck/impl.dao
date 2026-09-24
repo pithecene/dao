@@ -2430,8 +2430,11 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
               return ts_add_diag(ts, sp, "associated items on imported types are not supported in this release (Task 28)")
       let sp: Span = ts_tok_span(ts, segs.get(2))
       return ts_add_diag(ts, sp, "nested module access not supported in this release")
-    // Two-segment: mod::name
-    let exported_sym: i64 = tc_export_lookup(ts, target_mid, second_name)
+    // Two-segment: mod::name — the symbol the resolver chose for the
+    // name (an overload of a call's arity), else the plain export.
+    let exported_sym: i64 = lookup_use(ts, second_tidx)
+    if exported_sym < 0:
+      exported_sym = tc_export_lookup(ts, target_mid, second_name)
     if exported_sym < 0:
       let mod_name: string = ts_tok_name(ts, first_tidx)
       let sp: Span = ts_tok_span(ts, second_tidx)
@@ -3857,7 +3860,9 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
             if symbol_kind_name(csym_obj.kind) == "Module":
               if csegs.length() >= 2:
                 let fn_name: string = ts_tok_name(r, csegs.get(1))
-                let exp_sym: i64 = tc_export_lookup(r, csym_obj.decl_node, fn_name)
+                let exp_sym: i64 = lookup_use(r, csegs.get(1))
+                if exp_sym < 0:
+                  exp_sym = tc_export_lookup(r, csym_obj.decl_node, fn_name)
                 if exp_sym >= 0:
                   callee_ti = sym_type_at(r, exp_sym)
             else:
@@ -5264,15 +5269,6 @@ fn derive_class(reg: Registry, idx: ClassIndex, k: i64, dcti: i64, queue: Vector
   if reg.conform.known.contains(conform_key(sti, dcti, conform_everywhere())):
     return DeriveStep(reg, queue)
   return DeriveStep(reg_record_conformance(reg, sti, dcti, conform_everywhere()), queue.push(sti))
-
-fn hm_get_or(m: HashMap<i64>, key: string, dflt: i64): i64
-  let found: Option<i64> = m.get(key)
-  match found:
-    Option::Some(v):
-      return v
-    Option::None:
-      return dflt
-  return dflt
 
 // The conformance-collection pass over a file (tc_collect_conformances).
 fn tc_pass_collect(ts: TS, file_node_idx: i64): TS

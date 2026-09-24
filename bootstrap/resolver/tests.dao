@@ -89,7 +89,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 62
+  let total: i32 = 64
 
   // -----------------------------------------------------------------
   // Test 1: forward_ref — fn calls fn defined later in file; no diagnostic
@@ -298,6 +298,33 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL type_pos_rejects_local: local T used " + i64_to_string(local_type_uses) + " times (type position should not resolve)")
+
+  // -----------------------------------------------------------------
+  // Functions of one name and different arities are overloads (host):
+  // no diagnostic, a call names the overload of its argument count, and
+  // a later overload is named `g$2`.  The same arity is a duplicate.
+  // -----------------------------------------------------------------
+  let r_ovl: ResolveResult = resolve("fn g(n: i32): i32 -> n\nfn g(a: i32, b: i32): i32 -> a + b\n\nfn f(): i32 -> g(1) + g(1, 2)\n")
+  let ovl_first: bool = false
+  let ovl_second: bool = false
+  let so: i64 = 0
+  while so < r_ovl.symbols.length():
+    if r_ovl.symbols.get(so).name == "g":
+      ovl_first = true
+    if r_ovl.symbols.get(so).name == "g$2":
+      ovl_second = true
+    so = so + 1
+  if count_diags(r_ovl) == 0 and ovl_first and ovl_second:
+    print("PASS arity_overloads_declare")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL arity_overloads_declare: expected no diagnostics and symbols g, g$2; got " + i64_to_string(count_diags(r_ovl)) + " diagnostic(s)")
+  let r_same: ResolveResult = resolve("fn g(n: i32): i32 -> n\nfn g(s: string): i32 -> 0\n")
+  if count_diags(r_same) == 1:
+    print("PASS same_arity_is_a_duplicate")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL same_arity_is_a_duplicate: expected 1 diagnostic, got " + i64_to_string(count_diags(r_same)))
 
   // -----------------------------------------------------------------
   // Test 16: dup_decl_span — duplicate declaration diagnostic should have valid span
