@@ -158,6 +158,38 @@ fn closure_prelude_inputs(): Vector<SourceInput>
 // Each pass's list begins with what it was handed, so a pass's own
 // diagnostics are the tail past that baseline -- counted, reported,
 // and used for the first diagnostic.
+// A compiler program resolved and type-checked with the prelude, and
+// the resolve and typecheck columns it reports.
+class ProbedProgram:
+  program: Program
+  cols: string
+
+// The program pipeline, with the prelude, through typecheck: the columns
+// count the compiler program's own diagnostics, by path.  Each stage runs
+// in its own domain: its scratch is reclaimed at the exit and the result
+// is copied out.  `report` is false where a later stage only needs the
+// checked program: resolve and typecheck report in their own probe, once.
+fn closure_program_checked(name: string, path: string, src: string, report: bool): ProbedProgram
+  let inputs: Vector<SourceInput> = closure_prelude_inputs()
+  inputs = inputs.push(SourceInput(path, wrap_test_module(src), false))
+  let pg: ProgramGraph = program_graph_empty()
+  resource memory graph =>
+    pg = build_program(inputs)
+  let p: Program = program_from_graph(pg)
+  resource memory resolve =>
+    p = program_run_resolve(p)
+  resource memory typecheck =>
+    p = program_run_typecheck(p)
+  if report == false:
+    return ProbedProgram(p, "")
+  let carried_into_resolve: i64 = pg.diags.length()
+  closure_report_file_diags(name, "resolve", p.resolve.diags, carried_into_resolve, to_i64(50), path)
+  let cols: string = closure_stage_file_column(name, "resolve", p.resolve.diags, carried_into_resolve, path)
+  let carried_into_typecheck: i64 = p.resolve.diags.length()
+  closure_report_file_diags(name, "typecheck", p.diags, carried_into_typecheck, to_i64(50), path)
+  cols = cols + closure_stage_file_column(name, "typecheck", p.diags, carried_into_typecheck, path)
+  return ProbedProgram(p, cols)
+
 fn closure_probe_stage(name: string, path: string, stage: string): string
   if file_exists(path) == false:
     return name + "\tmissing=" + path + "\n"
@@ -177,31 +209,19 @@ fn closure_probe_stage(name: string, path: string, stage: string): string
     closure_report_diags_from(name, "parse", parsed.diags, lex_n, to_i64(50))
     cols = cols + closure_stage_column(name, "parse", parsed.diags, lex_n)
   if stage == "typecheck":
-    // The program pipeline, with the prelude: the columns count the
-    // compiler program's own diagnostics, by path.
-    let inputs: Vector<SourceInput> = closure_prelude_inputs()
-    inputs = inputs.push(SourceInput(path, wrap_test_module(src), false))
-    let pg: ProgramGraph = program_graph_empty()
-    resource memory graph =>
-      pg = build_program(inputs)
-    let p: Program = program_from_graph(pg)
-    // Each stage in its own domain: its scratch is reclaimed at the exit and the result is copied out.
-    resource memory resolve =>
-      p = program_run_resolve(p)
-    let carried_into_resolve: i64 = pg.diags.length()
-    closure_report_file_diags(name, "resolve", p.resolve.diags, carried_into_resolve, to_i64(50), path)
-    cols = cols + closure_stage_file_column(name, "resolve", p.resolve.diags, carried_into_resolve, path)
-    resource memory typecheck =>
-      p = program_run_typecheck(p)
-    let carried_into_typecheck: i64 = p.resolve.diags.length()
-    closure_report_file_diags(name, "typecheck", p.diags, carried_into_typecheck, to_i64(50), path)
-    cols = cols + closure_stage_file_column(name, "typecheck", p.diags, carried_into_typecheck, path)
+    let checked: ProbedProgram = closure_program_checked(name, path, src, true)
+    cols = cols + checked.cols
   if stage == "hir":
-    let hir: HirResult = hir_result_empty()
+    // HIR lowers the program the checker typed, prelude included, as
+    // typecheck does; the column counts what lowering adds for the
+    // compiler program's own file, by path.
+    let checked: ProbedProgram = closure_program_checked(name, path, src, false)
+    let p: Program = checked.program
+    let carried_into_hir: i64 = p.diags.length()
     resource memory hir =>
-      hir = lower_to_hir(src)
-    closure_report_diags(name, "hir", hir.diags, to_i64(50))
-    cols = cols + closure_stage_column(name, "hir", hir.diags, to_i64(0))
+      p = program_run_hir(p)
+    closure_report_file_diags(name, "hir", p.diags, carried_into_hir, to_i64(50), path)
+    cols = cols + closure_stage_file_column(name, "hir", p.diags, carried_into_hir, path)
   if stage == "mir":
     let mir: MirResult = mir_result_empty()
     resource memory mir =>
@@ -267,6 +287,17 @@ fn closure_probe_prelude(): string
     let path: string = inputs.get(i).path
     let typed: DiagTally = closure_tally_by_path(p.diags, carried_into_typecheck, path)
     eprint("probe: prelude typecheck\t" + path + "\t" + i64_to_string(typed.count) + "\t" + typed.first)
+    i = i + to_i64(1)
+  // The prelude lowered to HIR, as a program's is: what lowering adds,
+  // per file.
+  let carried_into_hir: i64 = p.diags.length()
+  resource memory hir =>
+    p = program_run_hir(p)
+  i = to_i64(0)
+  while i < inputs.length():
+    let path: string = inputs.get(i).path
+    let lowered: DiagTally = closure_tally_by_path(p.diags, carried_into_hir, path)
+    eprint("probe: prelude hir\t" + path + "\t" + i64_to_string(lowered.count) + "\t" + lowered.first)
     i = i + to_i64(1)
   return "prelude\tfiles=" + i64_to_string(inputs.length()) + "\n"
 
