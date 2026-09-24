@@ -469,6 +469,35 @@ fn emit_method_call(hs: HS, msym: i64, callee_tok: i64, receiver: i64, args_lp: 
           call_ti = mt.ret_type
   return hs_add_node(callee_hir.hs, HirNode::HirCall(callee = callee_hir.hir, args_lp = fl.list_pos, arg_count = hir_args.length(), typ = call_ti))
 
+// Whether the expression's type is a type parameter.
+fn hir_is_type_param(hs: HS, node_idx: i64): bool
+  let ti: i64 = hir_get_expr_type(hs, node_idx)
+  if ti < 0 or ti >= hs.typecheck.types.length():
+    return false
+  match hs.typecheck.types.get(ti).kind:
+    TypeKind::TGenericParam:
+      return true
+  return false
+
+// `x.to_string()` with `T: Printable`: a call whose callee is the
+// member access on the parameter, typed by the concept's signature
+// (host).  The arguments follow the receiver's access, not the receiver
+// itself.
+fn lower_bound_call(hs: HS, callee: i64, obj: i64, field_tidx: i64, args_lp: i64, callee_ti: i64, ti: i64): HirR
+  let obj_r: HirR = lower_expr(hs, obj)
+  let access_r: HirR = hs_add_node(obj_r.hs, HirNode::HirFieldAccess(obj = obj_r.hir, field = field_tidx, typ = callee_ti))
+  let cur: HS = access_r.hs
+  let hir_args: Vector<i64> = Vector<i64>::new()
+  let args: Vector<i64> = read_list(cur.unit.idx_data, args_lp)
+  let ai: i64 = 0
+  while ai < args.length():
+    let ar: HirR = lower_expr(cur, args.get(ai))
+    cur = ar.hs
+    hir_args = hir_args.push(ar.hir)
+    ai = ai + 1
+  let fl: HirFlush = hir_flush_list(cur, hir_args)
+  return hs_add_node(fl.hs, HirNode::HirCall(callee = access_r.hir, args_lp = fl.list_pos, arg_count = hir_args.length(), typ = ti))
+
 fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i64, ti: i64): HirR
   // ---------------------------------------------------------------
   // Method call desugaring: obj.method(args) → Method(obj, args)
@@ -500,10 +529,15 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
         match callee_type.kind:
           TypeKind::TFunction:
             is_method_callee = true
-      // A member a concept provides (through a derived conformance or a
-      // bound) has no implementation to dispatch to; reject the call
-      // rather than lower the access as a callee.
+      // A member a concept provides through a type parameter's bound is
+      // called on the parameter: the host carries the call with the
+      // member access as its callee, and an instantiation resolves it
+      // (monomorphization, Tasks 42–45), so MIR rejects it fail-closed
+      // (lower_bound_call).  One provided through a derived conformance
+      // has no implementation to dispatch to at all, and is rejected.
       if hir_member_concept(hs, callee) >= 0:
+        if hir_is_type_param(hs, mobj):
+          return lower_bound_call(hs, callee, mobj, mfield_tidx, args_lp, callee_ti, ti)
         return hir_reject_concept_member(hs, callee, mfield_tidx, "called")
       let obj_ti: i64 = hir_get_expr_type(hs, mobj)
       // Use sentinel values to avoid deep nesting: if any guard fails,

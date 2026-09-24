@@ -402,6 +402,16 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       let operand_r: ExprR = lower_expr_value(br, operand)
       return br_emit_value(operand_r.br, MirNode::MirUnary(op_tok = op_tok, operand = operand_r.value, type_idx = type_idx))
     HirNode::HirCall(callee, args_lp, arg_count, type_idx):
+      // A call on a member access is a call through a type parameter's
+      // bound (lower_bound_call): which function it calls is decided by
+      // an instantiation, and Tier A MIR has none (monomorphization,
+      // Tasks 42–45), so it is rejected rather than lowered as a field.
+      match br.ms.hir_nodes.get(callee):
+        HirNode::HirFieldAccess(bound_obj, bound_field, bound_ti):
+          if mir_is_type_param(br.ms, ms_get_hir_type(br.ms, br.ms.hir_nodes.get(bound_obj))):
+            br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)),
+              "unsupported in Tier A MIR lowering: a call through a type parameter's bound (HirCall on HirFieldAccess) needs an instantiation to name its function")
+            return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
       let callee_r: ExprR = lower_expr_value(br, callee)
       let cur_br: BlockR = callee_r.br
       let args: Vector<i64> = read_hir_list(cur_br.ms.hir_idx, args_lp)
@@ -422,7 +432,24 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       let obj_ti: i64 = ms_get_hir_type(obj_r.br.ms, obj_hir)
       let fidx: i64 = mir_resolve_field_index(obj_r.br.ms, obj_ti, field_tok)
       return br_emit_value(obj_r.br, MirNode::MirFieldAccess(obj = obj_r.value, field_tok = field_tok, field_index = fidx, type_idx = type_idx))
+    HirNode::HirErrorExpr(err_tok):
+      // HIR reported this expression already.
+      return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
+  // An expression kind with no Tier A lowering is reported, as an
+  // unsupported statement is: its subexpressions are not lowered, so a
+  // failure inside them (a call through a bound) must not vanish with it.
+  br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)),
+    "unsupported expression kind in Tier A MIR lowering: " + hir_node_kind(node))
   return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
+
+// Whether a type index names a type parameter.
+fn mir_is_type_param(ms: MS, ti: i64): bool
+  if ti < 0 or ti >= ms.types.length():
+    return false
+  match ms.types.get(ti).kind:
+    TypeKind::TGenericParam:
+      return true
+  return false
 
 // Parse an i64 literal (base 10, optional leading minus).
 fn parse_i64_literal(lex: string): i64

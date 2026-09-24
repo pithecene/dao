@@ -38,7 +38,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 16
+  let total: i32 = 18
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -289,6 +289,23 @@ fn main(): i32
 
   // -----------------------------------------------------------------
   // Summary
+  // Test 17: a call through a type parameter's bound has no function
+  // until an instantiation names one; MIR rejects it, naming the shape.
+  let r17: MirResult = lower_to_mir("concept Printable:\n  fn to_string(self): string\n\nfn show<T: Printable>(x: T): string\n  return x.to_string()\n")
+  if mir_diag_mentions(r17, "through a type parameter's bound"):
+    print("PASS bound_call_rejected_in_mir")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL bound_call_rejected_in_mir: expected a diagnostic naming a call through a bound")
+  // Test 18: an expression kind with no Tier A lowering is reported, so
+  // a call through a bound beneath it does not vanish with it.
+  let r18: MirResult = lower_to_mir("concept Printable:\n  fn to_string(self): string\n\nfn identity(s: string): string -> s\n\nfn show<T: Printable>(x: T): string\n  return x.to_string() |> identity\n")
+  if r18.diags.length() >= 1:
+    print("PASS unsupported_expression_kind_reported_in_mir")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL unsupported_expression_kind_reported_in_mir: expected a diagnostic, got 0")
+
   // -----------------------------------------------------------------
   print("")
   print(i32_to_string(pass_count) + " / " + i32_to_string(total) + " tests passed")
