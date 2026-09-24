@@ -10,38 +10,38 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 98455 |
-| `CallExpr` | 33317 |
-| `Callee` | 33317 |
-| `Args` | 29566 |
-| `FieldExpr` | 24247 |
-| `BinaryExpr` | 15742 |
-| `LetStatement` | 13323 |
-| `IntLiteral` | 11451 |
-| `Value` | 10407 |
-| `Target` | 10407 |
-| `Assignment` | 10407 |
-| `Condition` | 9315 |
-| `ReturnStatement` | 7887 |
-| `Then` | 7738 |
-| `IfStatement` | 7738 |
-| `QualifiedName` | 7087 |
-| `StringLiteral` | 7049 |
-| `Param` | 5723 |
-| `BoolLiteral` | 3462 |
-| `Pattern` | 3300 |
-| `Arm` | 3300 |
-| `ReturnType` | 2408 |
-| `FunctionDecl` | 2408 |
-| `WhileStatement` | 1577 |
+| `Identifier` | 98714 |
+| `CallExpr` | 33427 |
+| `Callee` | 33427 |
+| `Args` | 29661 |
+| `FieldExpr` | 24348 |
+| `BinaryExpr` | 15774 |
+| `LetStatement` | 13354 |
+| `IntLiteral` | 11479 |
+| `Value` | 10424 |
+| `Target` | 10424 |
+| `Assignment` | 10424 |
+| `Condition` | 9333 |
+| `ReturnStatement` | 7913 |
+| `Then` | 7752 |
+| `IfStatement` | 7752 |
+| `QualifiedName` | 7107 |
+| `StringLiteral` | 7062 |
+| `Param` | 5755 |
+| `BoolLiteral` | 3482 |
+| `Pattern` | 3310 |
+| `Arm` | 3310 |
+| `ReturnType` | 2416 |
+| `FunctionDecl` | 2416 |
+| `WhileStatement` | 1581 |
 | `UnaryExpr` | 1529 |
-| `Else` | 1468 |
+| `Else` | 1470 |
 | `Field` | 1388 |
-| `TypeArgs` | 1302 |
+| `TypeArgs` | 1305 |
 | `Variant` | 1223 |
-| `Scrutinee` | 960 |
-| `MatchStatement` | 960 |
-| `ExpressionStatement` | 687 |
+| `Scrutinee` | 968 |
+| `MatchStatement` | 968 |
+| `ExpressionStatement` | 691 |
 | `ClassDecl` | 354 |
 | `BreakStatement` | 64 |
 | `ResourceBlock` | 41 |
@@ -233,14 +233,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 82 | 0 | 0 | 0 | 0 | 0 | 0 | 329 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 88 | 0 | 0 | 0 | 0 | 0 | 0 | 403 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 93 | 0 | 0 | 0 | 0 | 0 | 0 | 363 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 210 | 1 | 0 | 0 | 0 | 0 | 0 | 877 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 768 | 2 | 0 | 0 | 0 | 0 | 0 | 2109 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 1143 | 2 | 0 | 0 | 0 | 0 | 0 | 2189 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 1076 | 2 | 0 | 0 | 0 | 0 | 0 | 2309 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 1065 | 3 | 0 | 0 | 0 | 0 | 0 | 2780 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 82 | 1 | 0 | 0 | 0 | 0 | 0 | 984 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 89 | 1 | 0 | 0 | 0 | 0 | 0 | 996 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 91 | 1 | 0 | 0 | 0 | 0 | 0 | 943 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 207 | 0 | 0 | 0 | 0 | 0 | 0 | 1694 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 919 | 2 | 0 | 0 | 0 | 0 | 0 | 3305 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 1247 | 2 | 0 | 0 | 0 | 0 | 0 | 3605 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 1153 | 2 | 0 | 0 | 0 | 0 | 0 | 3816 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 1406 | 3 | 0 | 0 | 0 | 0 | 0 | 4432 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 
@@ -335,13 +335,13 @@ diagnostics per stage, and the first.
 | `stdlib/core/diagnostic.dao` | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/equatable.dao` | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/hashmap.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/math.dao` | 0 | 0 | 0 | 4 | method 'less_than' of concept 'Numeric' is provided through a derived conformance or a bound and cannot be called in Tier A HIR (no implementation to dispatch to yet) |
+| `stdlib/core/math.dao` | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/memory.dao` | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/numeric.dao` | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/option.dao` | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/overflow.dao` | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/panic.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/printable.dao` | 0 | 0 | 0 | 1 | method 'to_string' of concept 'Printable' is provided through a derived conformance or a bound and cannot be called in Tier A HIR (no implementation to dispatch to yet) |
+| `stdlib/core/printable.dao` | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/range.dao` | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/result.dao` | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/span.dao` | 0 | 0 | 0 | 0 | — |
@@ -371,9 +371,9 @@ next.  Sites per program against the parse column above:
 | graph | 77 | 0 | 0 |
 | resolver | 126 | 0 | 0 |
 | typecheck | 273 | 0 | 0 |
-| hir | 239 | 4 | 0 |
-| mir | 250 | 9 | 0 |
-| llvm | 288 | 28 | 0 |
+| hir | 240 | 4 | 0 |
+| mir | 251 | 9 | 0 |
+| llvm | 289 | 28 | 0 |
 
 ### Closure surfaces: compiler implementation vs test harness
 
@@ -389,10 +389,10 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 
 | Prelude function | Compiler | Harness |
 |---|---:|---:|
-| `to_i64` | 779 | 156 |
-| `print` | 0 | 666 |
-| `new` | 282 | 101 |
-| `i64_to_string` | 98 | 183 |
+| `to_i64` | 785 | 156 |
+| `print` | 0 | 670 |
+| `new` | 283 | 101 |
+| `i64_to_string` | 98 | 184 |
 | `substring` | 26 | 12 |
 | `char_at` | 23 | 0 |
 | `read_file` | 0 | 19 |
@@ -407,7 +407,7 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 | `write_file` | 1 | 2 |
 | `make_warning` | 0 | 1 |
 | `str_compare` | 1 | 0 |
-| **Total** | **1235** | **1213** |
+| **Total** | **1242** | **1218** |
 
 ## 4. Reading the matrix
 

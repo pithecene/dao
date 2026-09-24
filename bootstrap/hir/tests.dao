@@ -616,15 +616,24 @@ fn main(): i32
   else:
     print("FAIL derived_dispatch_rejected_in_hir: expected a diagnostic, got 0")
 
-  // Test 27: a call typed through a type parameter's bound is rejected
-  // at HIR until an instantiation resolves it.
+  // Test 27: a call typed through a type parameter's bound is carried
+  // into HIR as the host carries it — a call whose callee is the member
+  // access — for an instantiation to resolve (MIR rejects it until then).
   let src27b: string = "concept Printable:\n  fn to_string(self): string\n\nfn show<T: Printable>(x: T): string\n  return x.to_string()\n"
   let r27b: HirResult = lower_to_hir(src27b)
-  if hir_count_diags(r27b) >= 1:
-    print("PASS bound_dispatch_rejected_in_hir")
+  let bound_call_carried: bool = false
+  let i27b: i64 = 0
+  while i27b < hir_count_nodes(r27b):
+    match r27b.hir_nodes.get(i27b):
+      HirNode::HirCall(c27, a27, n27, t27):
+        if hir_get_kind_at(r27b, c27) == "HirFieldAccess":
+          bound_call_carried = true
+    i27b = i27b + 1
+  if hir_count_diags(r27b) == 0 and bound_call_carried:
+    print("PASS bound_dispatch_carried_in_hir")
     pass_count = pass_count + 1
   else:
-    print("FAIL bound_dispatch_rejected_in_hir: expected a diagnostic, got 0")
+    print("FAIL bound_dispatch_carried_in_hir: expected a call on a member access and no diagnostics, got " + i64_to_string(hir_count_diags(r27b)))
 
   // Test 28: a concept-provided method taken as a value (not called) is
   // rejected too — there is no field to read and no implementation to
