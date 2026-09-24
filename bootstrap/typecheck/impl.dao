@@ -2854,6 +2854,10 @@ fn check_ptr_method_call(ts: TS, node_idx: i64, callee: i64, args: Vector<i64>, 
           // each needs an enclosing `mode unsafe =>` (host
           // `check_ptr_method`); making one, asking `is_null` and
           // casting touch none.
+          // Only `cast` is written with a type (host).
+          if name == "get" or name == "set" or name == "offset" or name == "is_null":
+            if targs.length() != 0:
+              return PtrCallR(ts_add_diag(ts, sp, "Ptr." + name + " expects 0 type argument(s), got " + i64_to_string(targs.length())), true)
           if name == "get" or name == "set" or name == "offset":
             if ts.ctx.unsafe_depth == 0:
               return PtrCallR(ts_add_diag(ts, sp, "Ptr." + name + " requires 'mode unsafe =>'"), true)
@@ -3431,6 +3435,14 @@ fn receiver_fixes(ts: TS, callee: i64, own: Vector<i64>): bool
         i = i + 1
   return false
 
+/// The member a dot-call names, for a diagnostic; "" for any other
+/// callee.
+fn member_name(ts: TS, callee: i64): string
+  match ts.tc.nodes.get(callee):
+    Node::FieldE(obj, field_tidx):
+      return ts_tok_name(ts, field_tidx)
+  return ""
+
 /// Whether `ti` is, or holds at any depth, one of `params`.  A type
 /// graph shares its parts (a chain of constructions repeats each level
 /// twice), so each type is searched once (`Mention.seen`).
@@ -3944,6 +3956,10 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
           r = owner.ts
           class_open = owner.ids
       let written: Vector<i64> = read_type_args(r, targs.list_lp)
+      // A receiver that fixes the method's own parameter leaves nothing
+      // for written type arguments to decide (host).
+      if written.length() > 0 and fixed_by_receiver:
+        return ts_add_diag(r, ts_node_span(r, callee), "'" + member_name(r, callee) + "' is reached on a receiver instantiated with its own type parameter, so its type arguments are already decided")
       if written.length() > 0:
         if targs.on_type:
           // Written on the type (`Box<i32>::zero(0)`): the class's

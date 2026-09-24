@@ -1302,13 +1302,24 @@ fn try_call_type_args(pc: PC, ps: PS): TypeArgsResult
   let fl: FlushResult = flush_list(cur, collected)
   return TypeArgsResult(fl.ps, fl.list_pos, collected.length(), true)
 
-// Whether `node` is a name that type arguments may follow: an identifier
-// or a qualified name.
+// Whether `node` is a member access, `obj.field`.
+fn is_member(ps: PS, node: i64): bool
+  match ps.nodes.get(node):
+    Node::FieldE(obj, field):
+      return true
+  return false
+
+// Whether `node` is a callee type arguments may follow: an identifier,
+// a qualified name, or a member (`raw.cast<i64>()`, `b.map<string>(…)`).
+// `<` after one is a comparison unless a type list, `>`, and a call
+// follow (try_call_type_args), so `p.x < y` stays one.
 fn names_callee(ps: PS, node: i64): bool
   match ps.nodes.get(node):
     Node::IdentE(t):
       return true
     Node::QualNameE(lp, n):
+      return true
+    Node::FieldE(obj, field):
       return true
   return false
 
@@ -1389,6 +1400,11 @@ fn parse_postfix(pc: PC, ps: PS): PR
     if tk_name(k) == tk_name(TK::Lt):
       if names_callee(cur_ps, cur_node):
         targs = try_call_type_args(pc, cur_ps)
+        // A member's type arguments are its call's: `obj.m<T>::x`
+        // names nothing, so there the `<` is a comparison.
+        if targs.ok and is_member(cur_ps, cur_node):
+          if tk_name(peek_kind(pc, targs.ps)) == tk_name(TK::ColonColon):
+            targs = TypeArgsResult(cur_ps, to_i64(-1), to_i64(0), false)
     if targs.ok:
       let after: PS = targs.ps
       let on_type: bool = false
