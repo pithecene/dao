@@ -457,9 +457,21 @@ fn lower_variant_value(hs: HS, variant: i64, args_lp: i64, hir_args: Vector<i64>
   let fl: HirFlush = hir_flush_pairs(hs, pairs, hir_args.length())
   return hs_add_node(fl.hs, HirNode::HirEnumConstruct(variant = variant, payload_lp = fl.list_pos, payload_count = hir_args.length(), typ = ti))
 
-// Whether a call's callee names a class — `P(1, 2)`, `Box<i32>(3)` —
-// so the call builds a value of it.
+// Whether a call's callee names a class — `P(1, 2)`, `Box<i32>(3)`,
+// `lib::P(1)` — so the call builds a value of it: the callee names a
+// type, and the call is typed as a class.
 fn hir_callee_is_class(hs: HS, callee: i64, call_ti: i64): bool
+  if call_ti < 0 or call_ti >= hs.typecheck.types.length():
+    return false
+  match hs.typecheck.types.get(call_ti).kind:
+    TypeKind::TStruct:
+      return hir_names_type(hs, callee)
+  return false
+
+// Whether a callee expression names a type: a name resolving to a type,
+// or `module::Type` — which the checker types as the type itself (a
+// module's function it types as a function).
+fn hir_names_type(hs: HS, callee: i64): bool
   match hs.unit.nodes.get(callee):
     Node::IdentE(ctidx):
       let csym: i64 = hir_lookup_use(hs, ctidx)
@@ -467,10 +479,13 @@ fn hir_callee_is_class(hs: HS, callee: i64, call_ti: i64): bool
         return false
       match hs.symbols.get(csym).kind:
         SymbolKind::Type:
-          if call_ti >= 0 and call_ti < hs.typecheck.types.length():
-            match hs.typecheck.types.get(call_ti).kind:
-              TypeKind::TStruct:
-                return true
+          return true
+    Node::QualNameE(seg_lp, seg_count):
+      let callee_ti: i64 = hir_get_expr_type(hs, callee)
+      if callee_ti >= 0 and callee_ti < hs.typecheck.types.length():
+        match hs.typecheck.types.get(callee_ti).kind:
+          TypeKind::TStruct:
+            return true
   return false
 
 // The method a two-segment qualified name `Type::method` names — the
@@ -622,8 +637,17 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
   // ---------------------------------------------------------------
   // Normal call path (non-method)
   // ---------------------------------------------------------------
-  let callee_r: HirR = lower_expr(hs, callee)
-  let cur: HS = callee_r.hs
+  // A variant's construction, and a class's: the host's EnumConstruct
+  // and Construct, never a call of a type.  Decided before the callee is
+  // lowered — a callee naming a type or a variant is no value to lower.
+  let call_variant: i64 = hir_named_variant(hs, callee)
+  let constructs_class: bool = hir_callee_is_class(hs, callee, ti)
+  let cur: HS = hs
+  let callee_hir: i64 = to_i64(-1)
+  if call_variant < 0 and constructs_class == false:
+    let callee_r: HirR = lower_expr(hs, callee)
+    cur = callee_r.hs
+    callee_hir = callee_r.hir
   let args: Vector<i64> = read_list(cur.unit.idx_data, args_lp)
   let hir_args: Vector<i64> = Vector<i64>::new()
   let ai: i64 = 0
@@ -632,12 +656,9 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
     cur = ar.hs
     hir_args = hir_args.push(ar.hir)
     ai = ai + 1
-  // A variant's construction, and a class's: the host's EnumConstruct
-  // and Construct, never a call of a type.
-  let call_variant: i64 = hir_named_variant(cur, callee)
   if call_variant >= 0:
     return lower_variant_value(cur, call_variant, args_lp, hir_args, ti)
-  if hir_callee_is_class(cur, callee, ti):
+  if constructs_class:
     let cfl: HirFlush = hir_flush_list(cur, hir_args)
     return hs_add_node(cfl.hs, HirNode::HirConstruct(args_lp = cfl.list_pos, arg_count = hir_args.length(), typ = ti))
   let fl: HirFlush = hir_flush_list(cur, hir_args)
@@ -663,7 +684,7 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
             match sym.kind:
               SymbolKind::Type:
                 call_ti = hir_sym_type(fl.hs, csym)
-  return hs_add_node(fl.hs, HirNode::HirCall(callee = callee_r.hir, args_lp = fl.list_pos, arg_count = args.length(), typ = call_ti))
+  return hs_add_node(fl.hs, HirNode::HirCall(callee = callee_hir, args_lp = fl.list_pos, arg_count = args.length(), typ = call_ti))
 
 // =========================================================================
 // Section 55: Statement lowering

@@ -811,6 +811,8 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
     // ---------- constants (inlined as operand text) ----------
     MirNode::MirConstInt(value, type_idx):
       let ty: LlType = ll_type_from_mir(bs.types, type_idx)
+      // An enum's tag is an integer of a type this backend does not lower.
+      bs = bs_check_supported_type(bs, ty, "integer constant")
       bs = bs_set_value(bs, mir_node_idx, i64_to_string(value), ll_type_text(ty))
       return LowerStepR(bs, insts)
     MirNode::MirConstBool(value, type_idx):

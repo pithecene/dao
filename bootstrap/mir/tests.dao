@@ -88,7 +88,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 24
+  let total: i32 = 25
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -457,6 +457,17 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL construction_lowers_to_construct: got payload '" + placed24 + "', " + i64_to_string(mir_count_kind(r24, "MirConstruct")) + " constructs, " + i64_to_string(r24.diags.length()) + " diagnostics")
+  // Test 24b: a class named through its module, `lib::P(1)`, constructs
+  // too (host: `construct P(%0)`).
+  let in24b: Vector<SourceInput> = Vector<SourceInput>::new()
+  in24b = in24b.push(SourceInput("lib.dao", "module probe::lib\n\nclass P:\n  x: i32\n", false))
+  in24b = in24b.push(SourceInput("main.dao", "module probe::main\n\nimport probe::lib\n\nfn main(): i32\n  let p: lib::P = lib::P(1)\n  return p.x\n", false))
+  let r24b: MirResult = mir_of_program(in24b).mir
+  if r24b.diags.length() == 0 and mir_count_kind(r24b, "MirConstruct") == 1 and mir_count_kind(r24b, "MirCall") == 0:
+    print("PASS qualified_class_constructs")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL qualified_class_constructs: got " + i64_to_string(mir_count_kind(r24b, "MirConstruct")) + " constructs, " + i64_to_string(r24b.diags.length()) + " diagnostics")
 
   // -----------------------------------------------------------------
   print("")
