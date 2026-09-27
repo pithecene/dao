@@ -801,24 +801,6 @@ fn bs_lower_struct_ctor(bs: BS, insts: Vector<LlInst>, type_idx: i64, arg_list_l
   insts = insts.push(load_inst)
   return StructCtorR(bs, insts, load_name, struct_ty_text)
 
-// Classify a MirCall's callee as a struct constructor (the callee
-// is a MirFnRef to a SymbolKind::Type symbol).  Returns true iff
-// the call should be lowered via bs_lower_struct_ctor rather than
-// the normal `call` instruction.
-fn bs_call_is_struct_ctor(bs: BS, callee_mir_idx: i64): bool
-  let callee_node: MirNode = bs.mir_nodes.get(callee_mir_idx)
-  match callee_node:
-    MirNode::MirFnRef(callee_sym, callee_ti):
-      if callee_sym < 0:
-        return false
-      if callee_sym >= bs.symbols.length():
-        return false
-      let sym: Symbol = bs.symbols.get(callee_sym)
-      match sym.kind:
-        SymbolKind::Type:
-          return true
-  return false
-
 class LowerStepR:
   bs: BS
   insts: Vector<LlInst>
@@ -994,17 +976,14 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       bs = bs_set_value(bs, mir_node_idx, name, "ptr")
       return LowerStepR(bs, insts)
 
-    MirNode::MirCall(callee, arg_list_lp, arg_count, type_idx):
-      // Struct constructor calls route to a dedicated aggregate
-      // helper rather than the normal `call` path.
-      if bs_call_is_struct_ctor(bs, callee):
-        let cr: StructCtorR = bs_lower_struct_ctor(bs, insts, type_idx, arg_list_lp)
-        bs = cr.bs
-        insts = cr.insts
-        bs = bs_set_value(bs, mir_node_idx, cr.value_name, cr.ty_text)
-        return LowerStepR(bs, insts)
+    MirNode::MirConstruct(arg_list_lp, arg_count, type_idx):
+      let cr: StructCtorR = bs_lower_struct_ctor(bs, insts, type_idx, arg_list_lp)
+      bs = cr.bs
+      insts = cr.insts
+      bs = bs_set_value(bs, mir_node_idx, cr.value_name, cr.ty_text)
+      return LowerStepR(bs, insts)
 
-      // Normal function call.
+    MirNode::MirCall(callee, arg_list_lp, arg_count, type_idx):
       let callee_text: string = bs_get_value_text(bs, callee)
       if callee_text == "":
         bs = bs_error(bs, "bootstrap llvm backend: MirCall callee has no mangled name (expected MirFnRef)")
@@ -1112,6 +1091,9 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
         "")
       insts = insts.push(inst)
       return LowerStepR(bs, insts)
+  // An instruction with no lowering here fails the module rather than
+  // vanishing from it.
+  bs = bs_error(bs, "bootstrap llvm backend: unsupported MIR instruction " + mir_node_kind(node))
   return LowerStepR(bs, insts)
 
 // =========================================================================
