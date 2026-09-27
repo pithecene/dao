@@ -718,7 +718,11 @@ fn lower_function(ms: MS, hir_fn_idx: i64): MirR
       if is_extern_i > 0:
         let extern_local_fl: MirFlush = mir_flush_list(ms, ms.locals)
         ms = extern_local_fl.ms
-        ms.mir_nodes = ms.mir_nodes.set(fn_idx, MirNode::MirFunction(sym = fn_sym, ret_type = ret_ti, param_count = param_count, local_list_lp = extern_local_fl.list_pos, local_count = ms.locals.length(), block_list_lp = to_i64(0), block_count = to_i64(0), is_extern = is_extern_i))
+        // …and an empty block list of its own, so a reader walking the
+        // blocks reads none rather than following a stray offset.
+        let no_blocks: MirFlush = mir_flush_list(ms, Vector<i64>::new())
+        ms = no_blocks.ms
+        ms.mir_nodes = ms.mir_nodes.set(fn_idx, MirNode::MirFunction(sym = fn_sym, ret_type = ret_ti, param_count = param_count, local_list_lp = extern_local_fl.list_pos, local_count = ms.locals.length(), block_list_lp = no_blocks.list_pos, block_count = to_i64(0), is_extern = is_extern_i))
         return MirR(ms, fn_idx)
 
       // Create the entry block and lower the body into it.  Control

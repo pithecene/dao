@@ -349,7 +349,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 26
+  let total: i32 = 27
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -836,6 +836,14 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL generic_call_needs_instantiation: expected the backend to fail naming 'id'; got " + diags_text(r26.diags))
+  // An extern beside a template: the backend's scan for template
+  // references reads the extern's (empty) block list, not a stray offset.
+  let r26b: LlvmTextResult = lower_source_to_llvm_text("extern fn ext(x: i32): i32\n\nfn id<T>(x: T): T -> x\n\nfn main(): i32 -> 0\n")
+  if r26b.ok:
+    print("PASS extern_beside_template")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL extern_beside_template: " + diags_text(r26b.diags))
 
   // -----------------------------------------------------------------
   // Summary
