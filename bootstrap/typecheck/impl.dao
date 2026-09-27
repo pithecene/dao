@@ -1552,6 +1552,7 @@ fn tc_fill_enum_variants(ts: TS, decls: Vector<i64>): TS
           let vkey: string = i64_to_string(enum_ti) + ":" + vname
           let param_count: i64 = r.type_info.get(v_offset + 1)
           r.reg = reg_with_variant_set(r.reg, r.reg.variant_set.set(vkey, param_count))
+          r.reg = reg_with_variant_set(r.reg, r.reg.variant_set.set(variant_index_entry(vkey), vr))
           let pi2: i64 = 0
           while pi2 < param_count:
             let pname: string = ts_tok_name(r, r.type_info.get(v_offset + 2 + pi2 * 2))
@@ -2421,7 +2422,7 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
               let vcheck: Option<i64> = ts.reg.variant_set.get(vcheck_key)
               match vcheck:
                 Option::Some(v):
-                  return ts_set_expr_type(ts, node_idx, exp_ti)
+                  return ts_set_expr_type(record_variant_index(ts, node_idx, vcheck_key), node_idx, exp_ti)
                 Option::None:
                   let vsp: Span = ts_tok_span(ts, variant_tidx)
                   return ts_add_diag(ts, vsp, "'" + variant_name + "' is not a variant of enum '" + second_name + "'")
@@ -2463,7 +2464,7 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
         let known: Option<i64> = ts.reg.variant_set.get(vkey)
         match known:
           Option::Some(v):
-            return ts_set_expr_type(ts, node_idx, ti)
+            return ts_set_expr_type(record_variant_index(ts, node_idx, vkey), node_idx, ti)
           Option::None:
             let vsp: Span = ts_tok_span(ts, variant_tidx)
             return ts_add_diag(ts, vsp, "'" + variant_name + "' is not a variant of enum '" + head_type.name + "'")
@@ -5076,6 +5077,27 @@ fn ts_set_concept_member(ts: TS, node_idx: i64, fn_ti: i64, concept_ti: i64, sel
 
 // The expression-table key under which a member access records the
 // concept that provides it (see ts_set_concept_member).
+// The key under which the checker records the declaration index of the
+// variant an `Enum::Variant` name (node `node_idx`) denotes, so a later
+// pass reads which variant it is without the declaring module's tokens.
+fn variant_index_key(module_id: i64, node_idx: i64): string
+  return expr_id_key(module_id, node_idx) + ":variant"
+
+// The registry entry holding a variant's declaration index.  Its
+// parameters are entered by name under `vkey:<name>`; `#` is no name's
+// first character, so no parameter's entry collides with it.
+fn variant_index_entry(vkey: string): string
+  return vkey + ":#index"
+
+// Record the declaration index of the variant registered under `vkey`
+// for the name at `node_idx`.
+fn record_variant_index(ts: TS, node_idx: i64, vkey: string): TS
+  let index: i64 = hm_get_or(ts.reg.variant_set, variant_index_entry(vkey), to_i64(-1))
+  if index < 0:
+    return ts
+  ts.reg = reg_with_expr_types(ts.reg, ts.reg.expr_types.set(variant_index_key(ts.tc.module_id, node_idx), index))
+  return ts
+
 fn concept_member_key(module_id: i64, node_idx: i64): string
   return expr_id_key(module_id, node_idx) + ":concept"
 
