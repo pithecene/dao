@@ -88,7 +88,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 25
+  let total: i32 = 27
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -468,6 +468,38 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL qualified_class_constructs: got " + i64_to_string(mir_count_kind(r24b, "MirConstruct")) + " constructs, " + i64_to_string(r24b.diags.length()) + " diagnostics")
+
+  // Test 25: an assignment to a field stores to a place, as the host's
+  // does (`daoc mir`): `store _0.a`, `store _0.inner.v`, and in a
+  // method `store _0.a` on `self`.
+  let r25: MirResult = lower_to_mir("class In:\n  v: i32\n\nclass Out:\n  a: i32\n  inner: In\n\n  fn bump(self): i32\n    self.a = self.a + 1\n    return self.a\n\nfn main(): i32\n  let o: Out = Out(1, In(2))\n  o.a = 5\n  o.inner.v = 7\n  return o.a\n")
+  let paths25: string = ""
+  let ni25: i64 = 0
+  while ni25 < r25.mir_nodes.length():
+    match r25.mir_nodes.get(ni25):
+      MirNode::MirStore(local_idx, path_lp, path_count, value):
+        if path_count > 0:
+          let p25: Vector<i64> = read_hir_list(r25.mir_idx, path_lp)
+          paths25 = paths25 + "_" + i64_to_string(local_idx)
+          let pi25: i64 = 0
+          while pi25 < p25.length():
+            paths25 = paths25 + "." + i64_to_string(p25.get(pi25))
+            pi25 = pi25 + 1
+          paths25 = paths25 + ";"
+    ni25 = ni25 + 1
+  if r25.diags.length() == 0 and paths25 == "_0.0;_0.0;_0.1.0;":
+    print("PASS field_assignment_stores_to_place")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL field_assignment_stores_to_place: got '" + paths25 + "', " + i64_to_string(r25.diags.length()) + " diagnostics")
+
+  // Test 26: `break` branches to the innermost loop's exit block.
+  let r26: MirResult = lower_to_mir("fn main(): i32\n  let n: i32 = 0\n  while true:\n    if n > 3:\n      break\n    n = n + 1\n  return n\n")
+  if r26.diags.length() == 0 and mir_count_kind(r26, "MirBr") >= 3:
+    print("PASS break_branches_to_loop_exit")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL break_branches_to_loop_exit: got " + i64_to_string(r26.diags.length()) + " diagnostics, " + i64_to_string(mir_count_kind(r26, "MirBr")) + " branches")
 
   // -----------------------------------------------------------------
   print("")
