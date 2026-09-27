@@ -952,7 +952,7 @@ on all eight.  Delivered in slices, each checked against `daoc mir`:
 
 ### Task 44 — Bootstrap Program LLVM
 
-Status: **in progress** — `docs/task_specs/TASK_44_BOOTSTRAP_PROGRAM_LLVM.md`.
+Status: **complete** — `docs/task_specs/TASK_44_BOOTSTRAP_PROGRAM_LLVM.md`.
 Authorized after Task 43.
 
 **Objective**: lower the concrete program — every module, the prelude
@@ -960,6 +960,24 @@ included — to textual LLVM IR with the host backend's meaning, and link
 and run it: each compiler program, compiled by the bootstrap, passes its
 own suite, the audit measuring the `llvm` stage through the program
 pipeline and running what it emits.
+
+**Outcome** (`docs/bootstrap_closure.md`): every compiler program reads
+zero diagnostics through every stage, `llvm` included, and — compiled
+by the bootstrap, linked with the runtime — passes its whole suite
+(lexer 105 through llvm 46).  Delivered in slices, each checked against
+`daoc llvm-ir` and `validate_ir.sh`:
+
+- 1 the program driver, per-function tables keyed; 2 the host's type
+  universe and layouts; 3 values, places, enums, pointers, intrinsics,
+  regions; 4 checked, unsigned and string operators; 5 generators;
+  6 the audit links and runs what the bootstrap emits.
+- 7 an exhaustive match's fall-through is dead code; 8 the host's names,
+  extern signature agreement, construction by `insertvalue`, the types
+  a pointer or a yield reaches.
+
+**Handed on**: the self-compiling driver and the Stage-2 / Stage-3
+crossing (Task 45).  Not chased: the host's C ABI coercion of classes
+passed to externs by value (refused; the corpus passes none).
 
 ### Task 14 — Numeric Type Expansion
 
