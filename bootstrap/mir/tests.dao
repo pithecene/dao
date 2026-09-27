@@ -88,7 +88,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 23
+  let total: i32 = 25
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -434,6 +434,40 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL match_lowers_to_discriminant_and_payload: got " + i64_to_string(mir_count_kind(r23, "MirEnumDiscriminant")) + " discriminants, " + i64_to_string(mir_count_kind(r23, "MirEnumPayload")) + " payloads, " + i64_to_string(mir_count_kind(r23, "MirLocal")) + " locals, " + i64_to_string(r23.diags.length()) + " diagnostics")
+
+  // Test 24: construction lowers as the host's does (`daoc mir`):
+  // `construct P(%0, %1)`, and a variant's payload evaluated in source
+  // order (h = 2 first) and placed in declaration order (w, h).
+  let r24: MirResult = lower_to_mir("class P:\n  x: i32\n  y: i64\n\nenum class Shape:\n  Rect(w: i32, h: i32)\n  Empty\n\nfn main(): i32\n  let p: P = P(1, 2)\n  let s: Shape = Shape::Rect(h = 2, w = 1)\n  return 0\n")
+  let placed24: string = ""
+  let ni24: i64 = 0
+  while ni24 < r24.mir_nodes.length():
+    match r24.mir_nodes.get(ni24):
+      MirNode::MirEnumConstruct(variant, arg_list_lp, arg_count, ti):
+        let a24: Vector<i64> = read_hir_list(r24.mir_idx, arg_list_lp)
+        let ai24: i64 = 0
+        while ai24 < a24.length():
+          match r24.mir_nodes.get(a24.get(ai24)):
+            MirNode::MirConstInt(value, cti):
+              placed24 = placed24 + i64_to_string(value) + ";"
+          ai24 = ai24 + 1
+    ni24 = ni24 + 1
+  if r24.diags.length() == 0 and mir_count_kind(r24, "MirConstruct") == 1 and placed24 == "1;2;" and mir_count_kind(r24, "MirCall") == 0:
+    print("PASS construction_lowers_to_construct")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL construction_lowers_to_construct: got payload '" + placed24 + "', " + i64_to_string(mir_count_kind(r24, "MirConstruct")) + " constructs, " + i64_to_string(r24.diags.length()) + " diagnostics")
+  // Test 24b: a class named through its module, `lib::P(1)`, constructs
+  // too (host: `construct P(%0)`).
+  let in24b: Vector<SourceInput> = Vector<SourceInput>::new()
+  in24b = in24b.push(SourceInput("lib.dao", "module probe::lib\n\nclass P:\n  x: i32\n", false))
+  in24b = in24b.push(SourceInput("main.dao", "module probe::main\n\nimport probe::lib\n\nfn main(): i32\n  let p: lib::P = lib::P(1)\n  return p.x\n", false))
+  let r24b: MirResult = mir_of_program(in24b).mir
+  if r24b.diags.length() == 0 and mir_count_kind(r24b, "MirConstruct") == 1 and mir_count_kind(r24b, "MirCall") == 0:
+    print("PASS qualified_class_constructs")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL qualified_class_constructs: got " + i64_to_string(mir_count_kind(r24b, "MirConstruct")) + " constructs, " + i64_to_string(r24b.diags.length()) + " diagnostics")
 
   // -----------------------------------------------------------------
   print("")

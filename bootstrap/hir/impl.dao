@@ -72,6 +72,13 @@ enum class HirNode:
   // HirEnumDiscriminant / HirEnumPayload).
   HirEnumDiscriminant(value: i64, typ: i64)
   HirEnumPayload(value: i64, variant: i64, field: i64, typ: i64)
+  // A class value built from its fields, in declaration order (the
+  // host's HirConstruct), and a payload-bearing enum's value of its
+  // `variant`-th variant (HirEnumConstruct): the payload is
+  // (argument, field index) pairs in source order — evaluated in that
+  // order, placed by field index.
+  HirConstruct(args_lp: i64, arg_count: i64, typ: i64)
+  HirEnumConstruct(variant: i64, payload_lp: i64, payload_count: i64, typ: i64)
   HirErrorExpr(tok: i64)
 
 // =========================================================================
@@ -211,6 +218,10 @@ fn hir_expr_type(node: HirNode): i64
     HirNode::HirEnumDiscriminant(v, ti):
       return ti
     HirNode::HirEnumPayload(v, vi, fi, ti):
+      return ti
+    HirNode::HirConstruct(a, n, ti):
+      return ti
+    HirNode::HirEnumConstruct(v, p, n, ti):
       return ti
   return to_i64(-1)
 
@@ -386,6 +397,11 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
       let rr: HirR = lower_expr(lr.hs, right)
       return hs_add_node(rr.hs, HirNode::HirPipe(left = lr.hir, right = rr.hir, typ = ti))
     Node::QualNameE(seg_lp, seg_count):
+      // `Enum::Variant` as a value: a classification enum's is its
+      // index; a payload-bearing enum's a construction with no payload.
+      let named_variant: i64 = hir_named_variant(hs, node_idx)
+      if named_variant >= 0:
+        return lower_variant_value(hs, named_variant, to_i64(-1), Vector<i64>::new(), ti)
       let segs: Vector<i64> = read_list(hs.unit.idx_data, seg_lp)
       // `Type::method` as a value names one of the type's own methods:
       // a function reference to its symbol, like a free function's name.
@@ -412,27 +428,65 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
       return hs_add_node(hs, HirNode::HirErrorExpr(tok = to_i64(0)))
   return hs_add_node(hs, HirNode::HirErrorExpr(tok = to_i64(0)))
 
-// `hir_args` in the declaration order of the variant's parameters when
-// the arguments were given by name: the type checker recorded each named
-// argument's parameter index under `<expr key>:param`.  Unchanged when
-// the arguments are positional.
-fn variant_args_in_param_order(hs: HS, args: Vector<i64>, hir_args: Vector<i64>): Vector<i64>
-  let ordered: Vector<i64> = hir_args
-  let placed: i64 = 0
+// The declaration index of the variant the name at `node_idx` denotes,
+// as the checker recorded it; -1 when it names no variant.
+fn hir_named_variant(hs: HS, node_idx: i64): i64
+  return hm_get_or(hs.typecheck.lookup.expr_types, variant_index_key(hs.unit.module_id, node_idx), to_i64(-1))
+
+// The value of variant `variant` of the enum `ti`, its payload the
+// lowered `hir_args` of the AST arguments `args`: a classification
+// enum's value is the variant's index; a payload-bearing enum's is a
+// construction whose payload pairs each argument, in source order, with
+// the field it fills — its declaration position, by name when the
+// checker recorded one (`<arg key>:param`), else by position.
+fn lower_variant_value(hs: HS, variant: i64, args_lp: i64, hir_args: Vector<i64>, ti: i64): HirR
+  if hir_enum_has_payload(hs, ti) == false:
+    return hs_add_node(hs, HirNode::HirIntLit(value = variant, typ = ti))
+  let args: Vector<i64> = Vector<i64>::new()
+  if args_lp >= 0:
+    args = read_list(hs.unit.idx_data, args_lp)
+  let pairs: Vector<i64> = Vector<i64>::new()
   let ai: i64 = 0
-  while ai < args.length():
-    let slot: Option<i64> = hs.typecheck.lookup.expr_types.get(expr_id_key(hs.unit.module_id, args.get(ai)) + ":param")
-    match slot:
-      Option::Some(param_index):
-        if param_index >= 0 and param_index < ordered.length():
-          ordered = ordered.set(param_index, hir_args.get(ai))
-          placed = placed + 1
-      Option::None:
-        placed = placed
+  while ai < hir_args.length():
+    let field: i64 = ai
+    if ai < args.length():
+      field = hm_get_or(hs.typecheck.lookup.expr_types, expr_id_key(hs.unit.module_id, args.get(ai)) + ":param", ai)
+    pairs = pairs.push(hir_args.get(ai))
+    pairs = pairs.push(field)
     ai = ai + 1
-  if placed == hir_args.length():
-    return ordered
-  return hir_args
+  let fl: HirFlush = hir_flush_pairs(hs, pairs, hir_args.length())
+  return hs_add_node(fl.hs, HirNode::HirEnumConstruct(variant = variant, payload_lp = fl.list_pos, payload_count = hir_args.length(), typ = ti))
+
+// Whether a call's callee names a class — `P(1, 2)`, `Box<i32>(3)`,
+// `lib::P(1)` — so the call builds a value of it: the callee names a
+// type, and the call is typed as a class.
+fn hir_callee_is_class(hs: HS, callee: i64, call_ti: i64): bool
+  if call_ti < 0 or call_ti >= hs.typecheck.types.length():
+    return false
+  match hs.typecheck.types.get(call_ti).kind:
+    TypeKind::TStruct:
+      return hir_names_type(hs, callee)
+  return false
+
+// Whether a callee expression names a type: a name resolving to a type,
+// or `module::Type` — which the checker types as the type itself (a
+// module's function it types as a function).
+fn hir_names_type(hs: HS, callee: i64): bool
+  match hs.unit.nodes.get(callee):
+    Node::IdentE(ctidx):
+      let csym: i64 = hir_lookup_use(hs, ctidx)
+      if csym < 0:
+        return false
+      match hs.symbols.get(csym).kind:
+        SymbolKind::Type:
+          return true
+    Node::QualNameE(seg_lp, seg_count):
+      let callee_ti: i64 = hir_get_expr_type(hs, callee)
+      if callee_ti >= 0 and callee_ti < hs.typecheck.types.length():
+        match hs.typecheck.types.get(callee_ti).kind:
+          TypeKind::TStruct:
+            return true
+  return false
 
 // The method a two-segment qualified name `Type::method` names — the
 // type's own, by the dispatch index — or -1 when the name is something
@@ -583,8 +637,17 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
   // ---------------------------------------------------------------
   // Normal call path (non-method)
   // ---------------------------------------------------------------
-  let callee_r: HirR = lower_expr(hs, callee)
-  let cur: HS = callee_r.hs
+  // A variant's construction, and a class's: the host's EnumConstruct
+  // and Construct, never a call of a type.  Decided before the callee is
+  // lowered — a callee naming a type or a variant is no value to lower.
+  let call_variant: i64 = hir_named_variant(hs, callee)
+  let constructs_class: bool = hir_callee_is_class(hs, callee, ti)
+  let cur: HS = hs
+  let callee_hir: i64 = to_i64(-1)
+  if call_variant < 0 and constructs_class == false:
+    let callee_r: HirR = lower_expr(hs, callee)
+    cur = callee_r.hs
+    callee_hir = callee_r.hir
   let args: Vector<i64> = read_list(cur.unit.idx_data, args_lp)
   let hir_args: Vector<i64> = Vector<i64>::new()
   let ai: i64 = 0
@@ -593,9 +656,11 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
     cur = ar.hs
     hir_args = hir_args.push(ar.hir)
     ai = ai + 1
-  // A variant constructed by parameter name: HirCall takes the payload
-  // in declaration order.
-  hir_args = variant_args_in_param_order(cur, args, hir_args)
+  if call_variant >= 0:
+    return lower_variant_value(cur, call_variant, args_lp, hir_args, ti)
+  if constructs_class:
+    let cfl: HirFlush = hir_flush_list(cur, hir_args)
+    return hs_add_node(cfl.hs, HirNode::HirConstruct(args_lp = cfl.list_pos, arg_count = hir_args.length(), typ = ti))
   let fl: HirFlush = hir_flush_list(cur, hir_args)
   // Fallback: if typechecker didn't record type (value-corruption),
   // infer from callee — if it's a function, use return type;
@@ -619,7 +684,7 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
             match sym.kind:
               SymbolKind::Type:
                 call_ti = hir_sym_type(fl.hs, csym)
-  return hs_add_node(fl.hs, HirNode::HirCall(callee = callee_r.hir, args_lp = fl.list_pos, arg_count = args.length(), typ = call_ti))
+  return hs_add_node(fl.hs, HirNode::HirCall(callee = callee_hir, args_lp = fl.list_pos, arg_count = args.length(), typ = call_ti))
 
 // =========================================================================
 // Section 55: Statement lowering
@@ -1529,6 +1594,10 @@ fn hir_node_kind(node: HirNode): string
       return "HirEnumDiscriminant"
     HirNode::HirEnumPayload(a, b, c, d):
       return "HirEnumPayload"
+    HirNode::HirConstruct(a, b, c):
+      return "HirConstruct"
+    HirNode::HirEnumConstruct(a, b, c, d):
+      return "HirEnumConstruct"
     HirNode::HirErrorExpr(a):
       return "HirErrorExpr"
   return "Unknown"
@@ -1791,6 +1860,22 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
     HirNode::HirEnumPayload(value, variant, field, ti2):
       line = line + " variant=" + i64_to_string(variant) + " field=" + i64_to_string(field) + " : " + hir_type_label(hr, ti2) + "\n"
       line = line + hir_dump_node(hr, value, indent + 1)
+      return line
+    HirNode::HirConstruct(args_lp, arg_count, ti2):
+      line = line + " : " + hir_type_label(hr, ti2) + "\n"
+      let cargs: Vector<i64> = read_list(hr.hir_idx, args_lp)
+      let ci: i64 = 0
+      while ci < cargs.length():
+        line = line + hir_dump_node(hr, cargs.get(ci), indent + 1)
+        ci = ci + 1
+      return line
+    HirNode::HirEnumConstruct(variant, payload_lp, payload_count, ti2):
+      line = line + " variant=" + i64_to_string(variant) + " : " + hir_type_label(hr, ti2) + "\n"
+      let pairs: Vector<i64> = read_pairs(hr.hir_idx, payload_lp)
+      let pi2: i64 = 0
+      while pi2 < pairs.length():
+        line = line + hir_dump_node(hr, pairs.get(pi2), indent + 1)
+        pi2 = pi2 + 2
       return line
     HirNode::HirErrorExpr(d):
       line = line + "\n"

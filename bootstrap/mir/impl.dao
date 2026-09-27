@@ -89,6 +89,12 @@ enum class MirNode:
   MirEnumDiscriminant(value: i64, type_idx: i64)
   MirEnumPayload(value: i64, variant: i64, field: i64, type_idx: i64)
 
+  // A class value from its field values, in declaration order, and a
+  // payload-bearing enum's value of variant `variant` from its payload
+  // values, in declaration order (the host's construct / enum_construct).
+  MirConstruct(arg_list_lp: i64, arg_count: i64, type_idx: i64)
+  MirEnumConstruct(variant: i64, arg_list_lp: i64, arg_count: i64, type_idx: i64)
+
   // Field access on a struct value: obj is a value, field_tok is the name.
   // field_index is resolved at lowering time (−1 if deferred).
   MirFieldAccess(obj: i64, field_tok: i64, field_index: i64, type_idx: i64)
@@ -216,6 +222,10 @@ fn ms_get_hir_type(ms: MS, hir_node: HirNode): i64
     HirNode::HirEnumDiscriminant(v, ti):
       return ti
     HirNode::HirEnumPayload(v, vi, fi, ti):
+      return ti
+    HirNode::HirConstruct(a, n, ti):
+      return ti
+    HirNode::HirEnumConstruct(v, p, n, ti):
       return ti
   return to_i64(-1)
 
@@ -395,6 +405,30 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
     HirNode::HirEnumPayload(value, variant, field, type_idx):
       let payload_of: ExprR = lower_expr_value(br, value)
       return br_emit_value(payload_of.br, MirNode::MirEnumPayload(value = payload_of.value, variant = variant, field = field, type_idx = type_idx))
+    HirNode::HirConstruct(args_lp, arg_count, type_idx):
+      let fields: ExprValues = lower_expr_values(br, read_hir_list(br.ms.hir_idx, args_lp))
+      let cfl: MirFlush = mir_flush_list(fields.br.ms, fields.values)
+      fields.br.ms = cfl.ms
+      return br_emit_value(fields.br, MirNode::MirConstruct(arg_list_lp = cfl.list_pos, arg_count = arg_count, type_idx = type_idx))
+    HirNode::HirEnumConstruct(variant, payload_lp, payload_count, type_idx):
+      // Evaluated in source order, placed in declaration order.
+      let pairs: Vector<i64> = read_pairs(br.ms.hir_idx, payload_lp)
+      let exprs: Vector<i64> = Vector<i64>::new()
+      let pi: i64 = to_i64(0)
+      while pi < pairs.length():
+        exprs = exprs.push(pairs.get(pi))
+        pi = pi + to_i64(2)
+      let payload: ExprValues = lower_expr_values(br, exprs)
+      let placed: Vector<i64> = payload.values
+      let fi: i64 = to_i64(0)
+      while fi < payload.values.length():
+        let field: i64 = pairs.get(fi * to_i64(2) + to_i64(1))
+        if field >= 0 and field < placed.length():
+          placed = placed.set(field, payload.values.get(fi))
+        fi = fi + to_i64(1)
+      let efl: MirFlush = mir_flush_list(payload.br.ms, placed)
+      payload.br.ms = efl.ms
+      return br_emit_value(payload.br, MirNode::MirEnumConstruct(variant = variant, arg_list_lp = efl.list_pos, arg_count = payload_count, type_idx = type_idx))
     HirNode::HirBoolLit(tok, type_idx):
       if tok < to_i64(0) or tok >= br.ms.toks.length():
         br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)")
@@ -436,16 +470,9 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
               "unsupported in Tier A MIR lowering: a call through a type parameter's bound (HirCall on HirFieldAccess) needs an instantiation to name its function")
             return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
       let callee_r: ExprR = lower_expr_value(br, callee)
-      let cur_br: BlockR = callee_r.br
-      let args: Vector<i64> = read_hir_list(cur_br.ms.hir_idx, args_lp)
-      let arg_vals: Vector<i64> = Vector<i64>::new()
-      let ai: i64 = to_i64(0)
-      while ai < args.length():
-        let arg_r: ExprR = lower_expr_value(cur_br, args.get(ai))
-        cur_br = arg_r.br
-        arg_vals = arg_vals.push(arg_r.value)
-        ai = ai + to_i64(1)
-      let fl: MirFlush = mir_flush_list(cur_br.ms, arg_vals)
+      let call_args: ExprValues = lower_expr_values(callee_r.br, read_hir_list(callee_r.br.ms.hir_idx, args_lp))
+      let cur_br: BlockR = call_args.br
+      let fl: MirFlush = mir_flush_list(cur_br.ms, call_args.values)
       cur_br.ms = fl.ms
       return br_emit_value(cur_br, MirNode::MirCall(callee = callee_r.value, arg_list_lp = fl.list_pos, arg_count = arg_count, type_idx = type_idx))
     HirNode::HirFieldAccess(obj, field_tok, type_idx):
@@ -464,6 +491,22 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
   br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)),
     "unsupported expression kind in Tier A MIR lowering: " + hir_node_kind(node))
   return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
+
+// Expressions lowered in order: the block after them and their values.
+class ExprValues:
+  br: BlockR
+  values: Vector<i64>
+
+fn lower_expr_values(br: BlockR, exprs: Vector<i64>): ExprValues
+  let cur: BlockR = br
+  let values: Vector<i64> = Vector<i64>::new()
+  let i: i64 = to_i64(0)
+  while i < exprs.length():
+    let r: ExprR = lower_expr_value(cur, exprs.get(i))
+    cur = r.br
+    values = values.push(r.value)
+    i = i + to_i64(1)
+  return ExprValues(cur, values)
 
 // Whether a type index names a type parameter.
 fn mir_is_type_param(ms: MS, ti: i64): bool
@@ -1004,6 +1047,10 @@ fn mir_node_kind(n: MirNode): string
       return "MirEnumDiscriminant"
     MirNode::MirEnumPayload(a, b, c, d):
       return "MirEnumPayload"
+    MirNode::MirConstruct(a, b, c):
+      return "MirConstruct"
+    MirNode::MirEnumConstruct(a, b, c, d):
+      return "MirEnumConstruct"
     MirNode::MirFieldAccess(a, b, c, d):
       return "MirFieldAccess"
     MirNode::MirFnRef(a, b):
