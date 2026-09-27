@@ -896,7 +896,10 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
 
     // ---------- binary / unary ----------
     MirNode::MirBinary(op_tok, lhs, rhs, type_idx):
-      let tk: Token = bs.toks.get(op_tok)
+      // A comparison `match` synthesized has no source token: it is `==`.
+      let tk: Token = Token(TK::EqEq, to_i64(0), to_i64(0))
+      if op_tok != synthesized_equality_op():
+        tk = bs.toks.get(op_tok)
       let lhs_text: string = bs_get_value_text(bs, lhs)
       let rhs_text: string = bs_get_value_text(bs, rhs)
       // Operand type comes from the LHS (MIR ensures lhs/rhs agree).

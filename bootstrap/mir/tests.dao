@@ -88,7 +88,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 22
+  let total: i32 = 23
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -424,6 +424,16 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL mir_diagnostic_on_its_module_file: expected one diagnostic naming HirBreak on main.dao, got " + i64_to_string(d22.length()))
+
+  // Test 23: a match on a payload-bearing enum lowers as the host's does
+  // (`daoc mir`): the scrutinee stored to a local, enum_discriminant
+  // compared per arm, enum_payload stored to each binding.
+  let r23: MirResult = lower_to_mir("enum class Shape:\n  Circle(r: i32)\n  Empty\n\nfn s(x: Shape): i32\n  match x:\n    Shape::Empty:\n      return 0\n    Shape::Circle(r):\n      return r\n  return 9\n")
+  if r23.diags.length() == 0 and mir_count_kind(r23, "MirEnumDiscriminant") == 2 and mir_count_kind(r23, "MirEnumPayload") == 1 and mir_count_kind(r23, "MirFnRef") == 0 and mir_count_kind(r23, "MirLocal") == 3:
+    print("PASS match_lowers_to_discriminant_and_payload")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL match_lowers_to_discriminant_and_payload: got " + i64_to_string(mir_count_kind(r23, "MirEnumDiscriminant")) + " discriminants, " + i64_to_string(mir_count_kind(r23, "MirEnumPayload")) + " payloads, " + i64_to_string(mir_count_kind(r23, "MirLocal")) + " locals, " + i64_to_string(r23.diags.length()) + " diagnostics")
 
   // -----------------------------------------------------------------
   print("")

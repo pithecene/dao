@@ -55,7 +55,7 @@ enum class HirNode:
   HirErrorStmt(tok: i64)
 
   // Expressions
-  HirIntLit(tok: i64, typ: i64)
+  HirIntLit(value: i64, typ: i64)
   HirFloatLit(tok: i64, typ: i64)
   HirStringLit(tok: i64, typ: i64)
   HirBoolLit(tok: i64, typ: i64)
@@ -66,6 +66,12 @@ enum class HirNode:
   HirFieldAccess(obj: i64, field: i64, typ: i64)
   HirPipe(left: i64, right: i64, typ: i64)
   HirQualName(segs_lp: i64, seg_count: i64, typ: i64)
+  // The declaration index of the variant an enum value holds, and the
+  // `field`-th payload value of its `variant`-th variant: what `match`
+  // lowers a payload-bearing enum's arms to (the host's
+  // HirEnumDiscriminant / HirEnumPayload).
+  HirEnumDiscriminant(value: i64, typ: i64)
+  HirEnumPayload(value: i64, variant: i64, field: i64, typ: i64)
   HirErrorExpr(tok: i64)
 
 // =========================================================================
@@ -202,6 +208,10 @@ fn hir_expr_type(node: HirNode): i64
       return ti
     HirNode::HirQualName(t, n, ti):
       return ti
+    HirNode::HirEnumDiscriminant(v, ti):
+      return ti
+    HirNode::HirEnumPayload(v, vi, fi, ti):
+      return ti
   return to_i64(-1)
 
 // The concept that provides the member a field expression names — the
@@ -293,7 +303,7 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
       let int_ti: i64 = ti
       if int_ti < 0:
         int_ti = 2  // default i32
-      return hs_add_node(hs, HirNode::HirIntLit(tok = tidx, typ = int_ti))
+      return hs_add_node(hs, HirNode::HirIntLit(value = parse_i64_literal(hs_tok_name(hs, tidx)), typ = int_ti))
     Node::FloatLitE(tidx):
       let float_ti: i64 = ti
       if float_ti < 0:
@@ -644,7 +654,10 @@ fn lower_stmt(hs: HS, node_idx: i64): HirR
     Node::BreakS(tidx):
       return hs_add_node(hs, HirNode::HirBreak(tok = to_i64(0)))
     Node::MatchS(scrut_node, arms_lp):
-      return lower_match_stmt(hs, scrut_node, arms_lp)
+      // A match is two statements; it lowers into its statement list
+      // (lower_stmts_into), never alone.
+      let lone: HS = hs_add_diag(hs, Span(to_i64(0), to_i64(1)), "match lowered outside a statement list")
+      return hs_add_node(lone, HirNode::HirErrorStmt(tok = to_i64(0)))
     Node::ExprStmtS(expr_node):
       let er: HirR = lower_expr(hs, expr_node)
       return hs_add_node(er.hs, HirNode::HirExprStmt(expr = er.hir))
@@ -702,60 +715,124 @@ fn lower_return_stmt(hs: HS, val_node: i64): HirR
   let vr: HirR = lower_expr(hs, val_node)
   return hs_add_node(vr.hs, HirNode::HirReturn(value = vr.hir))
 
-fn lower_match_stmt(hs: HS, scrut_node: i64, arms_lp: i64): HirR
-  // Desugar match into chained if/else-if:
-  // let _scrut = <scrutinee>
-  // if _scrut == pat0: body0
-  // else if _scrut == pat1: body1
-  // else if _scrut == pat2: body2
+// Parse an i64 literal (base 10, optional leading minus).
+fn parse_i64_literal(lex: string): i64
+  let lex_len: i64 = length(lex)
+  let neg: bool = false
+  let start: i64 = 0
+  if lex_len > to_i64(0):
+    if substring(lex, to_i64(0), to_i64(1)) == "-":
+      neg = true
+      start = to_i64(1)
+  let v: i64 = to_i64(0)
+  let i: i64 = start
+  while i < lex_len:
+    let ch: string = substring(lex, i, to_i64(1))
+    let d: i64 = char_to_digit(ch)
+    if d >= 0:
+      v = v * to_i64(10) + d
+    i = i + to_i64(1)
+  if neg:
+    v = to_i64(0) - v
+  return v
+
+fn char_to_digit(ch: string): i64
+  if ch == "0":
+    return to_i64(0)
+  if ch == "1":
+    return to_i64(1)
+  if ch == "2":
+    return to_i64(2)
+  if ch == "3":
+    return to_i64(3)
+  if ch == "4":
+    return to_i64(4)
+  if ch == "5":
+    return to_i64(5)
+  if ch == "6":
+    return to_i64(6)
+  if ch == "7":
+    return to_i64(7)
+  if ch == "8":
+    return to_i64(8)
+  if ch == "9":
+    return to_i64(9)
+  return to_i64(-1)
+
+// The operator a comparison `match` lowering synthesizes carries: `==`,
+// with no source token behind it.
+fn synthesized_equality_op(): i64
+  return to_i64(-1)
+
+// The symbol of a local a lowering synthesizes — `match`'s scrutinee —
+// named by the HirLet that declares it: negative, below -1, so it is
+// never a resolver symbol and never "no symbol".
+fn synthetic_local_sym(let_node: i64): i64
+  return to_i64(-2) - let_node
+
+// Statements lowered into a list: the state after them, and the list
+// grown by them.
+class HirStmts:
+  hs: HS
+  stmts: Vector<i64>
+
+// Lower a `match` into `out` as the host does (lower_match_into): a
+// `let` of the scrutinee, then an `if` chain with one arm per test.  A
+// payload-bearing enum is tested on its discriminant against each arm's
+// variant index, the arm binding a `let` per payload value; any other
+// scrutinee (a classification enum, an integer) against the pattern's
+// value, a variant's being its index.
+fn lower_match_into(hs: HS, scrut_node: i64, arms_lp: i64, out: Vector<i64>): HirStmts
   let scrut_r: HirR = lower_expr(hs, scrut_node)
   let cur: HS = scrut_r.hs
   let scrut_ti: i64 = hir_get_expr_type(cur, scrut_node)
-  // Create a synthetic symbol for the scrutinee temporary.
-  // Use a negative decl_node to mark it as compiler-generated.
-  let scrut_sym_idx: i64 = cur.symbols.length()
-  // We can't add to hs.symbols (it's from the resolver, immutable in HS).
-  // Instead, use the HirLet node index itself as the synthetic sym reference.
-  let scrut_let_r: HirR = hs_add_node(cur, HirNode::HirLet(sym = to_i64(-1), typ = scrut_ti, init = scrut_r.hir))
+  let scrut_sym: i64 = synthetic_local_sym(cur.arena.nodes.length())
+  let scrut_let_r: HirR = hs_add_node(cur, HirNode::HirLet(sym = scrut_sym, typ = scrut_ti, init = scrut_r.hir))
   cur = scrut_let_r.hs
-  // The scrut_let_r.hir node index serves as the synthetic binding ID.
-  let scrut_binding: i64 = scrut_let_r.hir
+  let tagged: bool = hir_enum_has_payload(cur, scrut_ti)
 
   let arms: Vector<i64> = read_pairs(cur.unit.idx_data, arms_lp)
-  // First pass: lower all arm conditions and bodies, collecting info.
   let arm_conds: Vector<i64> = Vector<i64>::new()
   let arm_bodies: Vector<i64> = Vector<i64>::new()
   let i: i64 = 0
   while i < arms.length():
     let pat_node: i64 = arms.get(i)
-    let body_lp2: i64 = arms.get(i + 1)
-    // Lower pattern
-    let pat_r: HirR = lower_expr(cur, pat_node)
-    cur = pat_r.hs
-    // Lower body
-    let body_fl: HirFlush = lower_body_stmts(cur, body_lp2)
-    cur = body_fl.hs
-    // Create condition: scrut == pattern
-    // Use scrut_binding (the HirLet node index) as sym_idx so downstream
-    // passes can identify which binding this references.
-    let scrut_ref_r: HirR = hs_add_node(cur, HirNode::HirIdent(sym = scrut_binding, typ = scrut_ti, tok = to_i64(-1)))
-    cur = scrut_ref_r.hs
-    let cond_r: HirR = hs_add_node(cur, HirNode::HirBinary(op = to_i64(-1), left = scrut_ref_r.hir, right = pat_r.hir, typ = to_i64(10)))
+    let variant: i64 = hir_pattern_variant(cur, pat_node)
+    let scrut_ref: HirR = hs_add_node(cur, HirNode::HirIdent(sym = scrut_sym, typ = scrut_ti, tok = to_i64(-1)))
+    cur = scrut_ref.hs
+    let tested: i64 = scrut_ref.hir
+    if tagged:
+      let disc_r: HirR = hs_add_node(cur, HirNode::HirEnumDiscriminant(value = scrut_ref.hir, typ = scrut_ti))
+      cur = disc_r.hs
+      tested = disc_r.hir
+    let pattern: i64 = to_i64(-1)
+    if variant >= 0:
+      let tag_r: HirR = hs_add_node(cur, HirNode::HirIntLit(value = variant, typ = scrut_ti))
+      cur = tag_r.hs
+      pattern = tag_r.hir
+    else:
+      let pat_r: HirR = lower_expr(cur, pat_node)
+      cur = pat_r.hs
+      pattern = pat_r.hir
+    let cond_r: HirR = hs_add_node(cur, HirNode::HirBinary(op = synthesized_equality_op(), left = tested, right = pattern, typ = to_i64(10)))
     cur = cond_r.hs
+    // Each binding a `let` of its payload value, ahead of the body.
+    let bound: HirStmts = HirStmts(cur, Vector<i64>::new())
+    if tagged and variant >= 0:
+      bound = lower_arm_bindings(cur, pat_node, scrut_sym, scrut_ti, variant)
+    let body: HirStmts = lower_stmts_into(bound.hs, arms.get(i + 1), bound.stmts)
+    let body_fl: HirFlush = hir_flush_list(body.hs, body.stmts)
+    cur = body_fl.hs
     arm_conds = arm_conds.push(cond_r.hir)
     arm_bodies = arm_bodies.push(body_fl.list_pos)
     i = i + 2
 
-  // Build if/else chain from last arm to first.
-  // Last arm: if(cond_N, body_N, -1)
-  // N-1: if(cond_N-1, body_N-1, [last_if])
-  // ...
+  // The chain, from the last arm to the first.
   let chain_hir: i64 = to_i64(-1)
   let ai: i64 = arm_conds.length() - 1
   while ai >= 0:
     let else_lp: i64 = to_i64(-1)
     if chain_hir >= 0:
-      // Wrap previous if in a single-element list for the else branch
       let else_items: Vector<i64> = Vector<i64>::new()
       else_items = else_items.push(chain_hir)
       let else_fl: HirFlush = hir_flush_list(cur, else_items)
@@ -766,28 +843,92 @@ fn lower_match_stmt(hs: HS, scrut_node: i64, arms_lp: i64): HirR
     chain_hir = if_r.hir
     ai = ai - 1
 
-  // Wrap scrut_let + chained if into a block
-  let block_items: Vector<i64> = Vector<i64>::new()
-  block_items = block_items.push(scrut_let_r.hir)
+  let grown: Vector<i64> = out.push(scrut_let_r.hir)
   if chain_hir >= 0:
-    block_items = block_items.push(chain_hir)
-  let block_fl: HirFlush = hir_flush_list(cur, block_items)
-  let true_r: HirR = hs_add_node(block_fl.hs, HirNode::HirBoolLit(tok = to_i64(-1), typ = to_i64(10)))
-  return hs_add_node(true_r.hs, HirNode::HirIf(cond = true_r.hir, then_lp = block_fl.list_pos, else_lp = to_i64(-1)))
+    grown = grown.push(chain_hir)
+  return HirStmts(cur, grown)
 
-fn lower_body_stmts(hs: HS, list_pos: i64): HirFlush
-  if list_pos < 0:
-    return hir_flush_list(hs, Vector<i64>::new())
-  let stmts: Vector<i64> = read_list(hs.unit.idx_data, list_pos)
+// The `let`s an arm's bindings lower to: binding `j` of variant
+// `variant`'s pattern holds the scrutinee's `j`-th payload value, typed
+// as the checker typed the binding.
+fn lower_arm_bindings(hs: HS, pat_node: i64, scrut_sym: i64, scrut_ti: i64, variant: i64): HirStmts
+  let lets: Vector<i64> = Vector<i64>::new()
   let cur: HS = hs
-  let hir_stmts: Vector<i64> = Vector<i64>::new()
+  match cur.unit.nodes.get(pat_node):
+    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
+      let binders: Vector<i64> = read_list(cur.unit.idx_data, args_lp)
+      let bi: i64 = 0
+      while bi < binders.length():
+        let binding_sym: i64 = member_sym_of(cur.typecheck.lookup.index, cur.unit.module_id, binders.get(bi), "Local", "")
+        if binding_sym < 0:
+          cur = hs_add_diag(cur, Span(to_i64(0), to_i64(1)), "match arm binding has no symbol")
+        else:
+          let binding_ti: i64 = hir_sym_type(cur, binding_sym)
+          let ref_r: HirR = hs_add_node(cur, HirNode::HirIdent(sym = scrut_sym, typ = scrut_ti, tok = to_i64(-1)))
+          let payload_r: HirR = hs_add_node(ref_r.hs, HirNode::HirEnumPayload(value = ref_r.hir, variant = variant, field = bi, typ = binding_ti))
+          let let_r: HirR = hs_add_node(payload_r.hs, HirNode::HirLet(sym = binding_sym, typ = binding_ti, init = payload_r.hir))
+          cur = let_r.hs
+          lets = lets.push(let_r.hir)
+        bi = bi + 1
+  return HirStmts(cur, lets)
+
+// The declaration index of the variant a pattern names — `Enum::Variant`
+// or the same applied to bindings — as the checker recorded it; -1 for
+// any other pattern.
+fn hir_pattern_variant(hs: HS, pat_node: i64): i64
+  let named: i64 = pat_node
+  match hs.unit.nodes.get(pat_node):
+    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
+      named = callee
+  return hm_get_or(hs.typecheck.lookup.expr_types, variant_index_key(hs.unit.module_id, named), to_i64(-1))
+
+// Whether `ti` is an enum with a variant that carries a payload: its
+// values are tagged, and `match` tests their discriminant.  Variants
+// are recorded on the head (an instantiation's record names it).
+fn hir_enum_has_payload(hs: HS, ti: i64): bool
+  if ti < 0 or ti >= hs.typecheck.types.length():
+    return false
+  let t: DaoType = hs.typecheck.types.get(ti)
+  match t.kind:
+    TypeKind::TEnum:
+      let head: DaoType = t
+      if t.ret_type >= 0 and t.ret_type < hs.typecheck.type_info.length():
+        head = hs.typecheck.types.get(hs.typecheck.type_info.get(t.ret_type))
+      // Per variant: name, payload count, then (name, type) per value.
+      let at: i64 = head.info_lp
+      let vi: i64 = 0
+      while vi < head.info_count:
+        let count: i64 = hs.typecheck.type_info.get(at + 1)
+        if count > 0:
+          return true
+        at = at + 2 + count * 2
+        vi = vi + 1
+  return false
+
+// Lower the statements at `list_pos` onto `prefix`.  A `match` lowers
+// into two statements (lower_match_into), so statements lower into a
+// list rather than one node each.
+fn lower_stmts_into(hs: HS, list_pos: i64, prefix: Vector<i64>): HirStmts
+  if list_pos < 0:
+    return HirStmts(hs, prefix)
+  let stmts: Vector<i64> = read_list(hs.unit.idx_data, list_pos)
+  let cur: HirStmts = HirStmts(hs, prefix)
   let i: i64 = 0
   while i < stmts.length():
-    let sr: HirR = lower_stmt(cur, stmts.get(i))
-    cur = sr.hs
-    hir_stmts = hir_stmts.push(sr.hir)
+    let is_match: bool = false
+    match cur.hs.unit.nodes.get(stmts.get(i)):
+      Node::MatchS(scrut_node, arms_lp):
+        is_match = true
+        cur = lower_match_into(cur.hs, scrut_node, arms_lp, cur.stmts)
+    if is_match == false:
+      let sr: HirR = lower_stmt(cur.hs, stmts.get(i))
+      cur = HirStmts(sr.hs, cur.stmts.push(sr.hir))
     i = i + 1
-  return hir_flush_list(cur, hir_stmts)
+  return cur
+
+fn lower_body_stmts(hs: HS, list_pos: i64): HirFlush
+  let lowered: HirStmts = lower_stmts_into(hs, list_pos, Vector<i64>::new())
+  return hir_flush_list(lowered.hs, lowered.stmts)
 
 // =========================================================================
 // Section 56: Declaration lowering
@@ -1354,6 +1495,10 @@ fn hir_node_kind(node: HirNode): string
       return "HirPipe"
     HirNode::HirQualName(a, b, c):
       return "HirQualName"
+    HirNode::HirEnumDiscriminant(a, b):
+      return "HirEnumDiscriminant"
+    HirNode::HirEnumPayload(a, b, c, d):
+      return "HirEnumPayload"
     HirNode::HirErrorExpr(a):
       return "HirErrorExpr"
   return "Unknown"
@@ -1564,8 +1709,8 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
     HirNode::HirErrorStmt(d):
       line = line + "\n"
       return line
-    HirNode::HirIntLit(tidx, ti2):
-      line = line + " : " + hir_type_label(hr, ti2) + "\n"
+    HirNode::HirIntLit(value, ti2):
+      line = line + " " + i64_to_string(value) + " : " + hir_type_label(hr, ti2) + "\n"
       return line
     HirNode::HirFloatLit(tidx, ti2):
       line = line + " : " + hir_type_label(hr, ti2) + "\n"
@@ -1608,6 +1753,14 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
       return line
     HirNode::HirQualName(first_tok, seg_count, ti2):
       line = line + " : " + hir_type_label(hr, ti2) + "\n"
+      return line
+    HirNode::HirEnumDiscriminant(value, ti2):
+      line = line + "\n"
+      line = line + hir_dump_node(hr, value, indent + 1)
+      return line
+    HirNode::HirEnumPayload(value, variant, field, ti2):
+      line = line + " variant=" + i64_to_string(variant) + " field=" + i64_to_string(field) + " : " + hir_type_label(hr, ti2) + "\n"
+      line = line + hir_dump_node(hr, value, indent + 1)
       return line
     HirNode::HirErrorExpr(d):
       line = line + "\n"
