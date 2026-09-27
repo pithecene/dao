@@ -264,26 +264,27 @@ resource_block_sites() {
   done
   echo "### The prelude through the bootstrap"
   echo
-  echo "The \`resolve\`, \`typecheck\` and \`hir\` columns above are measured with"
-  echo "the prelude in the program -- every module under \`stdlib/core/\` and"
+  echo "The \`resolve\`, \`typecheck\`, \`hir\` and \`mir\` columns above are measured"
+  echo "with the prelude in the program -- every module under \`stdlib/core/\` and"
   echo "\`stdlib/io/\` (CONTRACT_MODULE_SYSTEM.md §7), loaded as declarations,"
-  echo "whatever the bootstrap parser keeps of each file; the \`hir\` column counts"
-  echo "what program-level lowering (\`program_run_hir\`) adds for the compiler"
-  echo "program's own file.  The \`mir\` and \`llvm\` columns run the"
-  echo "single-source adapters without it (the bootstrap has no program-level"
-  echo "MIR or LLVM driver) and do not choose the frontier until the program"
-  echo "pipeline reaches them."
+  echo "whatever the bootstrap parser keeps of each file; the \`hir\` and \`mir\`"
+  echo "columns count what program-level lowering (\`program_run_hir\`,"
+  echo "\`program_run_mir\`) adds for the compiler program's own file.  The \`llvm\`"
+  echo "column runs the single-source adapter without it (the bootstrap has no"
+  echo "program-level LLVM driver) and does not choose the frontier until the"
+  echo "program pipeline reaches it."
   echo
   echo "Per prelude file, the prelude group alone through the pipeline:"
   echo "diagnostics per stage, and the first."
   echo
-  echo "| File | parse | resolve | typecheck | hir | First diagnostic |"
-  echo "|---|---|---|---|---|---|"
+  echo "| File | parse | resolve | typecheck | hir | mir | First diagnostic |"
+  echo "|---|---|---|---|---|---|---|"
   awk -F'\t' '
     /^probe: prelude file\t/ { path = $2; split($3, a, "="); split($4, b, "="); parse[path] = a[2]; resolve[path] = b[2]; first[path] = substr($5, 7); order[++n] = path }
     /^probe: prelude typecheck\t/ { tc[$2] = $3; if (first[$2] == "") first[$2] = $4 }
     /^probe: prelude hir\t/ { hir[$2] = $3; if (first[$2] == "") first[$2] = $4 }
-    END { for (i = 1; i <= n; i++) { p = order[i]; f = first[p]; gsub(/\|/, "\\|", f); printf "| `%s` | %s | %s | %s | %s | %s |\n", p, parse[p], resolve[p], (p in tc ? tc[p] : "—"), (p in hir ? hir[p] : "—"), (f == "" ? "—" : f) } }
+    /^probe: prelude mir\t/ { mir[$2] = $3; if (first[$2] == "") first[$2] = $4 }
+    END { for (i = 1; i <= n; i++) { p = order[i]; f = first[p]; gsub(/\|/, "\\|", f); printf "| `%s` | %s | %s | %s | %s | %s | %s |\n", p, parse[p], resolve[p], (p in tc ? tc[p] : "—"), (p in hir ? hir[p] : "—"), (p in mir ? mir[p] : "—"), (f == "" ? "—" : f) } }
   ' "$AUDIT_OUT/probe-prelude.log"
   if [ -f "$AUDIT_OUT/probe-prelude.died" ]; then
     echo
@@ -368,8 +369,8 @@ PYSPLIT
   echo "- A stage with zero diagnostics on every program is closed for the corpus."
   echo "- The first blocking diagnostic names the construct to implement next for"
   echo "  that stage; rerun the audit after each slice."
-  echo "- The \`mir\` and \`llvm\` columns are measured without the prelude"
-  echo "  (see the prelude section) and are not frontier evidence yet."
+  echo "- The \`llvm\` column is measured without the prelude (see the prelude"
+  echo "  section) and is not frontier evidence yet."
 } > "$DOC"
 
 echo "audit: wrote $DOC"

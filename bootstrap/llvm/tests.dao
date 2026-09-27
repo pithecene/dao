@@ -223,11 +223,17 @@ fn closure_probe_stage(name: string, path: string, stage: string): string
     closure_report_file_diags(name, "hir", p.diags, carried_into_hir, to_i64(50), path)
     cols = cols + closure_stage_file_column(name, "hir", p.diags, carried_into_hir, path)
   if stage == "mir":
-    let mir: MirResult = mir_result_empty()
+    // MIR lowers the program the checker typed, prelude included, from
+    // HIR it lowers itself; the column counts what HIR and MIR add for
+    // the compiler program's own file, by path (HIR adds nothing there
+    // on a closed program; its own column says so).
+    let checked: ProbedProgram = closure_program_checked(name, path, src, false)
+    let carried_into_mir: i64 = checked.program.diags.length()
+    let pm: ProgramMir = ProgramMir(checked.program, mir_result_empty())
     resource memory mir =>
-      mir = lower_to_mir(src)
-    closure_report_diags(name, "mir", mir.diags, to_i64(50))
-    cols = cols + closure_stage_column(name, "mir", mir.diags, to_i64(0))
+      pm = program_run_mir(checked.program)
+    closure_report_file_diags(name, "mir", pm.program.diags, carried_into_mir, to_i64(50), path)
+    cols = cols + closure_stage_file_column(name, "mir", pm.program.diags, carried_into_mir, path)
   if stage == "llvm":
     let ll: LlvmTextResult = llvm_text_result_empty()
     resource memory llvm =>
@@ -288,8 +294,10 @@ fn closure_probe_prelude(): string
     let typed: DiagTally = closure_tally_by_path(p.diags, carried_into_typecheck, path)
     eprint("probe: prelude typecheck\t" + path + "\t" + i64_to_string(typed.count) + "\t" + typed.first)
     i = i + to_i64(1)
-  // The prelude lowered to HIR, as a program's is: what lowering adds,
-  // per file.
+  // The prelude lowered to HIR, then MIR, as a program's is: what each
+  // adds, per file.  MIR lowers from HIR of its own, so the checked
+  // program is kept for it.
+  let checked: Program = p
   let carried_into_hir: i64 = p.diags.length()
   resource memory hir =>
     p = program_run_hir(p)
@@ -298,6 +306,16 @@ fn closure_probe_prelude(): string
     let path: string = inputs.get(i).path
     let lowered: DiagTally = closure_tally_by_path(p.diags, carried_into_hir, path)
     eprint("probe: prelude hir\t" + path + "\t" + i64_to_string(lowered.count) + "\t" + lowered.first)
+    i = i + to_i64(1)
+  let carried_into_mir: i64 = p.diags.length()
+  let pm: ProgramMir = ProgramMir(checked, mir_result_empty())
+  resource memory mir =>
+    pm = program_run_mir(checked)
+  i = to_i64(0)
+  while i < inputs.length():
+    let path: string = inputs.get(i).path
+    let mir_added: DiagTally = closure_tally_by_path(pm.program.diags, carried_into_mir, path)
+    eprint("probe: prelude mir\t" + path + "\t" + i64_to_string(mir_added.count) + "\t" + mir_added.first)
     i = i + to_i64(1)
   return "prelude\tfiles=" + i64_to_string(inputs.length()) + "\n"
 
@@ -331,7 +349,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 25
+  let total: i32 = 26
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -808,6 +826,16 @@ fn main(): i32
       pass_count = pass_count + 1
   else:
     print("FAIL arity_overloads: backend not ok")
+
+  // Test 26: a call of a generic function names a template, which has no
+  // code until an instantiation names it; the backend fails the module
+  // rather than calling a function it never emits.
+  let r26: LlvmTextResult = lower_source_to_llvm_text("fn id<T>(x: T): T -> x\n\nfn main(): i32 -> id(1)\n")
+  if r26.ok == false and contains_substring(diags_text(r26.diags), "generic function 'id' has no concrete code"):
+    print("PASS generic_call_needs_instantiation")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL generic_call_needs_instantiation: expected the backend to fail naming 'id'; got " + diags_text(r26.diags))
 
   // -----------------------------------------------------------------
   // Summary

@@ -35,8 +35,15 @@ module bootstrap::mir::impl
 // For Tier A we do not track per-instruction types (defer to backend).
 
 enum class MirNode:
-  // Module root.
-  MirModule(fn_list_lp: i64, fn_count: i64)
+  // Program root: one MirModule per HIR module, in program order.
+  MirProgram(module_list_lp: i64, module_count: i64)
+
+  // A module's functions: the concrete ones (`fn_list_lp`), and the
+  // generic ones lowered as templates (`template_list_lp`), which are
+  // not concrete and are kept out of the function list until an
+  // instantiation names them.  Token indices in its nodes (literal
+  // lexemes, field names) are `file_id`'s.
+  MirModule(file_id: i64, fn_list_lp: i64, fn_count: i64, template_list_lp: i64, template_count: i64)
 
   // Function.  Params + locals are unified: params are indices [0, param_count)
   // and locals are [param_count, locals.length()).  `entry_bb` is the
@@ -131,6 +138,7 @@ class MS:
   fn_blocks: Vector<i64>    // list of MirBlock node indices for current fn
   sym_to_local: HashMap<i64> // resolver sym_idx (as string) → local slot index
   next_block_id: i64        // for block.id numbering
+  in_template: bool         // lowering a generic function's template
 
 fn mir_result_empty(): MirResult
   return MirResult(Vector<MirNode>::new(), Vector<i64>::new(), Vector<Diagnostic>::new(), to_i64(-1))
@@ -404,11 +412,14 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
     HirNode::HirCall(callee, args_lp, arg_count, type_idx):
       // A call on a member access is a call through a type parameter's
       // bound (lower_bound_call): which function it calls is decided by
-      // an instantiation, and Tier A MIR has none (monomorphization,
-      // Tasks 42–45), so it is rejected rather than lowered as a field.
+      // an instantiation.  A template carries it, as the host's template
+      // does, with the member access as its callee, for the instantiation
+      // to resolve (monomorphization, Task 43); a concrete function never
+      // has a type parameter's value to call through, so there it is
+      // rejected rather than lowered as a field.
       match br.ms.hir_nodes.get(callee):
         HirNode::HirFieldAccess(bound_obj, bound_field, bound_ti):
-          if mir_is_type_param(br.ms, ms_get_hir_type(br.ms, br.ms.hir_nodes.get(bound_obj))):
+          if br.ms.in_template == false and mir_is_type_param(br.ms, ms_get_hir_type(br.ms, br.ms.hir_nodes.get(bound_obj))):
             br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)),
               "unsupported in Tier A MIR lowering: a call through a type parameter's bound (HirCall on HirFieldAccess) needs an instantiation to name its function")
             return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
@@ -738,9 +749,195 @@ fn lower_function(ms: MS, hir_fn_idx: i64): MirR
 // Section 67: Top-level lowering
 // =========================================================================
 
+// A function is generic — lowered as a template — if it declares its
+// own type parameters or its signature mentions one (a method of a
+// generic class, whose `self` is the class's head): the host's
+// `hir_function_is_generic` rule.
+fn mir_function_is_generic(ms: MS, tparams_lp: i64, params_lp: i64, ret_ti: i64): bool
+  if read_hir_list_count(ms.hir_idx, tparams_lp) > 0:
+    return true
+  if mir_type_mentions_generic(ms, ret_ti):
+    return true
+  let param_count: i64 = read_hir_list_count(ms.hir_idx, params_lp)
+  let params_start: i64 = params_lp - (param_count * to_i64(2))
+  let pi: i64 = to_i64(0)
+  while pi < param_count:
+    if mir_type_mentions_generic(ms, ms.hir_idx.get(params_start + pi * to_i64(2) + to_i64(1))):
+      return true
+    pi = pi + to_i64(1)
+  return false
+
+// Whether `ti` is, or holds at any depth, a type parameter.  A type
+// graph shares its parts, so each type is searched once.
+fn mir_type_mentions_generic(ms: MS, ti: i64): bool
+  return mir_generic_search(ms, ti, HashMap<i64>::new()).found
+
+class GenericSearch:
+  seen: HashMap<i64>
+  found: bool
+
+fn mir_generic_search(ms: MS, ti: i64, seen: HashMap<i64>): GenericSearch
+  if ti < 0 or ti >= ms.types.length():
+    return GenericSearch(seen, false)
+  let key: string = i64_to_string(ti)
+  if seen.contains(key):
+    return GenericSearch(seen, false)
+  let so_far: HashMap<i64> = seen.set(key, to_i64(1))
+  let t: DaoType = ms.types.get(ti)
+  let parts: Vector<i64> = Vector<i64>::new()
+  match t.kind:
+    TypeKind::TGenericParam:
+      return GenericSearch(so_far, true)
+    TypeKind::TPointer:
+      parts = parts.push(t.pointee)
+    TypeKind::TGenerator:
+      parts = parts.push(t.pointee)
+    TypeKind::TFunction:
+      parts = parts.push(t.ret_type)
+      let fi: i64 = to_i64(0)
+      while fi < t.info_count:
+        parts = parts.push(ms.type_info.get(t.info_lp + fi))
+        fi = fi + to_i64(1)
+    TypeKind::TStruct:
+      parts = mir_stands_for_args(ms, t.ret_type)
+    TypeKind::TEnum:
+      parts = mir_stands_for_args(ms, t.ret_type)
+  let i: i64 = to_i64(0)
+  while i < parts.length():
+    let sub: GenericSearch = mir_generic_search(ms, parts.get(i), so_far)
+    if sub.found:
+      return sub
+    so_far = sub.seen
+    i = i + to_i64(1)
+  return GenericSearch(so_far, false)
+
+// The arguments a nominal type's stands-for record holds (typecheck
+// `write_stands_for`: head, count, arguments); none for -1.
+fn mir_stands_for_args(ms: MS, record: i64): Vector<i64>
+  let args: Vector<i64> = Vector<i64>::new()
+  if record < 0 or record + 1 >= ms.type_info.length():
+    return args
+  let count: i64 = ms.type_info.get(record + 1)
+  if record + 2 + count > ms.type_info.length():
+    return args
+  let i: i64 = to_i64(0)
+  while i < count:
+    args = args.push(ms.type_info.get(record + 2 + i))
+    i = i + to_i64(1)
+  return args
+
+// A program lowered to MIR: the program, its diagnostics grown by
+// MIR's (each on its module's file), and the MIR, rooted at a
+// MirProgram.
+class ProgramMir:
+  program: Program
+  mir: MirResult
+
+// One module's lowered functions: the MIR state after them, and the
+// MirModule node.
+class ModuleLowering:
+  ms: MS
+  module_node: i64
+
+// Lower each function of one HIR module, with the module's own tokens
+// and source: concrete functions into the module, generic ones into
+// its templates.
+fn lower_module(ms: MS, sf: SourceFile, decls: Vector<i64>): ModuleLowering
+  ms.toks = sf.parse_output.toks
+  ms.src = sf.source_text
+  ms.file_id = sf.file_id
+  let fns: Vector<i64> = Vector<i64>::new()
+  let templates: Vector<i64> = Vector<i64>::new()
+  let i: i64 = to_i64(0)
+  while i < decls.length():
+    let decl_idx: i64 = decls.get(i)
+    match ms.hir_nodes.get(decl_idx):
+      HirNode::HirFunction(n, tparams_lp, params_lp, ret_ti, b, ie, co):
+        ms.in_template = mir_function_is_generic(ms, tparams_lp, params_lp, ret_ti)
+        let r: MirR = lower_function(ms, decl_idx)
+        ms = r.ms
+        if r.mir >= 0:
+          if ms.in_template:
+            templates = templates.push(r.mir)
+          else:
+            fns = fns.push(r.mir)
+        ms.in_template = false
+    i = i + to_i64(1)
+  let fn_fl: MirFlush = mir_flush_list(ms, fns)
+  let tmpl_fl: MirFlush = mir_flush_list(fn_fl.ms, templates)
+  let mod_r: MirR = ms_add_node(tmpl_fl.ms, MirNode::MirModule(file_id = sf.file_id, fn_list_lp = fn_fl.list_pos, fn_count = fns.length(), template_list_lp = tmpl_fl.list_pos, template_count = templates.length()))
+  return ModuleLowering(mod_r.ms, mod_r.mir)
+
+// Lower a resolved, type-checked program to MIR: HIR for every module,
+// then each module's functions, in program order.  MIR's diagnostics
+// join the program's, each on the file of the module it came from.
+fn program_run_mir(p: Program): ProgramMir
+  let ph: ProgramHir = program_lower_hir(p)
+  let hp: Program = ph.program
+  let ms: MS = MS(
+    ph.arena.nodes,
+    ph.arena.idx,
+    hp.typecheck.types,
+    hp.typecheck.type_info,
+    Vector<Token>::new(),
+    "",
+    hp.resolve.symbols,
+    hp.typecheck.sym_types,
+    hp.resolve.uses,
+    Vector<MirNode>::new(),
+    Vector<i64>::new(),
+    Vector<Diagnostic>::new(),
+    to_i64(-1),
+    to_i64(-1),
+    Vector<i64>::new(),
+    Vector<i64>::new(),
+    HashMap<i64>::new(),
+    to_i64(0),
+    false)
+  let all_diags: Vector<FileDiagnostic> = hp.diags
+  let module_nodes: Vector<i64> = Vector<i64>::new()
+  if hp.hir.root >= 0 and hp.hir.root < ms.hir_nodes.length():
+    match ms.hir_nodes.get(hp.hir.root):
+      HirNode::HirProgram(module_list_lp):
+        let modules: Vector<i64> = read_hir_list(ms.hir_idx, module_list_lp)
+        let mi: i64 = to_i64(0)
+        while mi < modules.length():
+          match ms.hir_nodes.get(modules.get(mi)):
+            HirNode::HirModule(name_tok, decls_lp, module_id):
+              let sf: SourceFile = program_file_of_module(hp, module_id)
+              let before: i64 = ms.diags.length()
+              let lowered: ModuleLowering = lower_module(ms, sf, read_hir_list(ms.hir_idx, decls_lp))
+              ms = lowered.ms
+              module_nodes = module_nodes.push(lowered.module_node)
+              let di: i64 = before
+              while di < ms.diags.length():
+                all_diags = all_diags.push(FileDiagnostic(sf.file_id, sf.path, ms.diags.get(di)))
+                di = di + to_i64(1)
+          mi = mi + to_i64(1)
+  let mod_fl: MirFlush = mir_flush_list(ms, module_nodes)
+  let root_r: MirR = ms_add_node(mod_fl.ms, MirNode::MirProgram(module_list_lp = mod_fl.list_pos, module_count = module_nodes.length()))
+  let flat: Vector<Diagnostic> = Vector<Diagnostic>::new()
+  let fi: i64 = to_i64(0)
+  while fi < all_diags.length():
+    flat = flat.push(all_diags.get(fi).diag)
+    fi = fi + to_i64(1)
+  let out: Program = Program(hp.graph, hp.resolve, hp.typecheck, hp.hir, all_diags)
+  return ProgramMir(out, MirResult(root_r.ms.mir_nodes, root_r.ms.mir_idx, flat, root_r.mir))
+
+// The module a single-source program lowers to: its MirProgram holds
+// exactly one.
+fn mir_only_module(r: MirResult): i64
+  if r.root < 0:
+    return to_i64(-1)
+  match r.mir_nodes.get(r.root):
+    MirNode::MirProgram(module_list_lp, module_count):
+      if module_count == 1:
+        return read_hir_list(r.mir_idx, module_list_lp).get(to_i64(0))
+  return to_i64(-1)
+
+// Lower one source snippet, wrapped as a module, to MIR.  The root is
+// the snippet's MirModule, and the diagnostics every stage's.
 fn lower_to_mir(src: string): MirResult
-  // Route through the program pipeline so MS sees the same
-  // composite-keyed uses_map as the HIR pass does.
   let wrapped: string = wrap_test_module(src)
   let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
   inputs = inputs.push(SourceInput("test.dao", wrapped, false))
@@ -753,91 +950,53 @@ fn lower_to_mir(src: string): MirResult
     p = program_run_resolve(p)
   resource memory typecheck =>
     p = program_run_typecheck(p)
-
-  // Lower the single module to HIR here (the MIR state needs the HIR
-  // nodes, which the program-level HIR pass does not publish), so the
-  // HIR stage runs once and its diagnostics are reported once.
-  let mid: i64 = to_i64(0)
-  let sf: SourceFile = program_file_of_module(p, mid)
-  let po: ParseOutput = sf.parse_output
-  let hs: HS = hs_new(p, mid, arena_empty())
-  let result: HirR = HirR(hs, to_i64(-1))
-  resource memory hir_lowering =>
-    result = lower_file(hs, po.root)
-  let final_hs: HS = result.hs
-
-  let ms: MS = MS(
-    final_hs.arena.nodes,
-    final_hs.arena.idx,
-    final_hs.typecheck.types,
-    final_hs.typecheck.type_info,
-    final_hs.unit.toks,
-    final_hs.unit.src,
-    p.resolve.symbols,
-    p.typecheck.sym_types,
-    p.resolve.uses,
-    Vector<MirNode>::new(),
-    Vector<i64>::new(),
-    // Every diagnostic of the stages before MIR travels with the
-    // result: a construct HIR rejected fail-closed is reported here,
-    // never turned into a silent MirErrorExpr.
-    program_and_hir_diags(p, final_hs.diags),
-    sf.file_id,
-    to_i64(-1),
-    Vector<i64>::new(),
-    Vector<i64>::new(),
-    HashMap<i64>::new(),
-    to_i64(0))
-
-  // Build a HirResult-shaped wrapper so the rest of lowering reads
-  // from `hir.root` etc.
-  let hir_root: i64 = result.hir
-
-  // Walk the HIR root (HirFile or HirModule) and lower each function
-  // declaration.
-  let fn_indices: Vector<i64> = Vector<i64>::new()
-  let root_node: HirNode = ms.hir_nodes.get(hir_root)
+  let pm: ProgramMir = ProgramMir(p, mir_result_empty())
   resource memory mir_lowering =>
-    match root_node:
-      HirNode::HirFile(decls_lp):
-        let decls: Vector<i64> = read_hir_list(ms.hir_idx, decls_lp)
-        let i: i64 = to_i64(0)
-        while i < decls.length():
-          let decl_idx: i64 = decls.get(i)
-          let decl_node: HirNode = ms.hir_nodes.get(decl_idx)
-          match decl_node:
-            HirNode::HirFunction(n, tp, p, rt, b, ie, co):
-              let r: MirR = lower_function(ms, decl_idx)
-              ms = r.ms
-              if r.mir >= 0:
-                fn_indices = fn_indices.push(r.mir)
-          i = i + to_i64(1)
-      HirNode::HirProgram(module_list_lp):
-        let modules: Vector<i64> = read_hir_list(ms.hir_idx, module_list_lp)
-        let mi: i64 = to_i64(0)
-        while mi < modules.length():
-          let mod_idx: i64 = modules.get(mi)
-          let mod_node: HirNode = ms.hir_nodes.get(mod_idx)
-          match mod_node:
-            HirNode::HirModule(nt, decls_lp, module_id):
-              let decls: Vector<i64> = read_hir_list(ms.hir_idx, decls_lp)
-              let i: i64 = to_i64(0)
-              while i < decls.length():
-                let decl_idx: i64 = decls.get(i)
-                let decl_node: HirNode = ms.hir_nodes.get(decl_idx)
-                match decl_node:
-                  HirNode::HirFunction(n, tp, p, rt, b, ie, co):
-                    let r: MirR = lower_function(ms, decl_idx)
-                    ms = r.ms
-                    if r.mir >= 0:
-                      fn_indices = fn_indices.push(r.mir)
-                i = i + to_i64(1)
-          mi = mi + to_i64(1)
+    pm = program_run_mir(p)
+  let r: MirResult = pm.mir
+  return MirResult(r.mir_nodes, r.mir_idx, r.diags, mir_only_module(r))
 
-  // Emit MirModule root.
-  let fl: MirFlush = mir_flush_list(ms, fn_indices)
-  let root_r: MirR = ms_add_node(fl.ms, MirNode::MirModule(fn_list_lp = fl.list_pos, fn_count = fn_indices.length()))
-  return MirResult(root_r.ms.mir_nodes, root_r.ms.mir_idx, root_r.ms.diags, root_r.mir)
+// Every reference a module's concrete functions make to a generic
+// function: until an instantiation names a concrete copy (Task 43) a
+// template has no code, so a consumer that needs concrete MIR reports
+// each one rather than referring to a function it never emits.
+fn mir_template_refs(r: MirResult, symbols: Vector<Symbol>, module_node: i64): Vector<Diagnostic>
+  let out: Vector<Diagnostic> = Vector<Diagnostic>::new()
+  if module_node < 0:
+    return out
+  match r.mir_nodes.get(module_node):
+    MirNode::MirModule(file_id, fn_list_lp, fn_count, template_list_lp, template_count):
+      let generic_syms: HashMap<i64> = HashMap<i64>::new()
+      let templates: Vector<i64> = read_hir_list(r.mir_idx, template_list_lp)
+      let ti: i64 = to_i64(0)
+      while ti < templates.length():
+        match r.mir_nodes.get(templates.get(ti)):
+          MirNode::MirFunction(sym, rt, pc, llp, lc, blp, bc, ie):
+            generic_syms = generic_syms.set(i64_to_string(sym), to_i64(1))
+        ti = ti + to_i64(1)
+      if templates.length() == 0:
+        return out
+      let fns: Vector<i64> = read_hir_list(r.mir_idx, fn_list_lp)
+      let fi: i64 = to_i64(0)
+      while fi < fns.length():
+        match r.mir_nodes.get(fns.get(fi)):
+          MirNode::MirFunction(sym, rt, pc, llp, lc, block_list_lp, bc, ie):
+            let blocks: Vector<i64> = read_hir_list(r.mir_idx, block_list_lp)
+            let bi: i64 = to_i64(0)
+            while bi < blocks.length():
+              match r.mir_nodes.get(blocks.get(bi)):
+                MirNode::MirBlock(bid, inst_list_lp, ic):
+                  let insts: Vector<i64> = read_hir_list(r.mir_idx, inst_list_lp)
+                  let ii: i64 = to_i64(0)
+                  while ii < insts.length():
+                    match r.mir_nodes.get(insts.get(ii)):
+                      MirNode::MirFnRef(ref_sym, ref_ti):
+                        if generic_syms.contains(i64_to_string(ref_sym)):
+                          out = out.push(make_error(Span(to_i64(0), to_i64(1)), "generic function '" + symbols.get(ref_sym).name + "' has no concrete code until an instantiation names it (monomorphization, Task 43)"))
+                    ii = ii + to_i64(1)
+              bi = bi + to_i64(1)
+        fi = fi + to_i64(1)
+  return out
 
 // =========================================================================
 // Section 68: Node kind name (for tests and debug)
@@ -845,7 +1004,9 @@ fn lower_to_mir(src: string): MirResult
 
 fn mir_node_kind(n: MirNode): string
   match n:
-    MirNode::MirModule(a, b):
+    MirNode::MirProgram(a, b):
+      return "MirProgram"
+    MirNode::MirModule(a, b, c, d, e):
       return "MirModule"
     MirNode::MirFunction(a, b, c, d, e, f, g, h):
       return "MirFunction"

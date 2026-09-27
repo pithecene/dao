@@ -1463,9 +1463,10 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
 // =========================================================================
 
 fn lower_mir_to_ll_module(bs: BS, root: i64): BS
-  // Honor the MIR root contract: MirResult.root points at a
-  // MirModule(fn_list_lp, fn_count) node.  Walk its function list
-  // in deterministic order rather than scanning the entire arena.
+  // Honor the MIR root contract: MirResult.root points at a MirModule
+  // node.  Walk its concrete function list in deterministic order
+  // rather than scanning the entire arena; its templates have no code
+  // until an instantiation names them.
   if root < 0:
     bs = bs_error(bs, "bootstrap llvm backend: MirResult.root is negative")
     return bs
@@ -1474,7 +1475,7 @@ fn lower_mir_to_ll_module(bs: BS, root: i64): BS
     return bs
   let root_node: MirNode = bs.mir_nodes.get(root)
   match root_node:
-    MirNode::MirModule(fn_list_lp, fn_count):
+    MirNode::MirModule(file_id, fn_list_lp, fn_count, template_list_lp, template_count):
       let fn_indices: Vector<i64> = read_mir_list(bs.mir_idx, fn_list_lp)
       let i: i64 = to_i64(0)
       while i < fn_indices.length():
@@ -1666,6 +1667,14 @@ fn lower_mir_to_llvm_text(input: MirBackendInput): LlvmTextResult
     if ud.severity == Severity::Error:
       bs.had_error = to_i64(1)
     ui = ui + to_i64(1)
+  // The module's code must be concrete: a call of a generic function
+  // names a template that is never emitted.
+  let template_refs: Vector<Diagnostic> = mir_template_refs(input.mir, input.symbols, input.mir.root)
+  let ti: i64 = to_i64(0)
+  while ti < template_refs.length():
+    bs.diags = bs.diags.push(template_refs.get(ti))
+    bs.had_error = to_i64(1)
+    ti = ti + to_i64(1)
   // Each stage in its own domain: its scratch is reclaimed at the exit and the result is copied out.
   resource memory lowering =>
     bs = lower_mir_to_ll_module(bs, input.mir.root)
