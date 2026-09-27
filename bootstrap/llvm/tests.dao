@@ -349,7 +349,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 27
+  let total: i32 = 28
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -844,6 +844,15 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL extern_beside_template: " + diags_text(r26b.diags))
+
+  // Test 29: comparing strings is not lowered; the module fails rather
+  // than comparing their addresses.
+  let r29: LlvmTextResult = lower_source_to_llvm_text("fn f(s: string): i32\n  if s == \"x\":\n    return 1\n  return 0\n")
+  if r29.ok == false and contains_substring(diags_text(r29.diags), "comparison of strings"):
+    print("PASS string_comparison_fails_closed")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL string_comparison_fails_closed: " + diags_text(r29.diags))
 
   // -----------------------------------------------------------------
   // Summary

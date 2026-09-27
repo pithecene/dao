@@ -303,7 +303,11 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
       let int_ti: i64 = ti
       if int_ti < 0:
         int_ti = 2  // default i32
-      return hs_add_node(hs, HirNode::HirIntLit(value = parse_i64_literal(hs_tok_name(hs, tidx)), typ = int_ti))
+      let lexeme: string = hs_tok_name(hs, tidx)
+      if i64_literal_fits(lexeme) == false:
+        let wide: HS = hs_add_diag(hs, hs_tok_span(hs, tidx), "integer literal " + lexeme + " does not fit in 64 bits")
+        return hs_add_node(wide, HirNode::HirErrorExpr(tok = tidx))
+      return hs_add_node(hs, HirNode::HirIntLit(value = parse_i64_literal(lexeme), typ = int_ti))
     Node::FloatLitE(tidx):
       let float_ti: i64 = ti
       if float_ti < 0:
@@ -714,6 +718,32 @@ fn lower_return_stmt(hs: HS, val_node: i64): HirR
     return hs_add_node(hs, HirNode::HirReturn(value = to_i64(-1)))
   let vr: HirR = lower_expr(hs, val_node)
   return hs_add_node(vr.hs, HirNode::HirReturn(value = vr.hir))
+
+// Whether a decimal literal's value fits a signed 64-bit integer, so
+// parse_i64_literal can accumulate it without overflowing: at most
+// 9223372036854775807 (…808 with a leading minus).  Decided on the
+// digits, never by arithmetic that could itself overflow.
+fn i64_literal_fits(lex: string): bool
+  let start: i64 = 0
+  let limit: string = "9223372036854775807"
+  if length(lex) > to_i64(0):
+    if substring(lex, to_i64(0), to_i64(1)) == "-":
+      start = to_i64(1)
+      limit = "9223372036854775808"
+  while start < length(lex) - to_i64(1) and substring(lex, start, to_i64(1)) == "0":
+    start = start + to_i64(1)
+  let digits: string = substring(lex, start, length(lex) - start)
+  if length(digits) != length(limit):
+    return length(digits) < length(limit)
+  // Same length: the first differing digit decides.
+  let i: i64 = 0
+  while i < length(limit):
+    let d: i64 = char_to_digit(substring(digits, i, to_i64(1)))
+    let m: i64 = char_to_digit(substring(limit, i, to_i64(1)))
+    if d != m:
+      return d < m
+    i = i + to_i64(1)
+  return true
 
 // Parse an i64 literal (base 10, optional leading minus).
 fn parse_i64_literal(lex: string): i64

@@ -907,6 +907,12 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       let operand_ty: LlType = ll_type_text_to_lltype(operand_ty_text)
 
       if is_comparison_op(tk.kind):
+        // A string is a pointer here; comparing the pointers is not
+        // comparing the strings (the host calls __dao_eq_string), and
+        // this backend has no string comparison, so it fails the module.
+        if operand_ty_text == "ptr":
+          bs = bs_error(bs, "bootstrap llvm backend: comparison of strings is not lowered")
+          return LowerStepR(bs, insts)
         let fr_cmp: FreshR = bs_fresh_value(bs)
         bs = fr_cmp.bs
         let result: string = fr_cmp.name

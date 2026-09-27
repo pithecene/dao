@@ -57,7 +57,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 41
+  let total: i32 = 43
 
   // Test 1: simple_fn
   let src1: string = "fn add(a: i32, b: i32): i32\n  return a + b\n"
@@ -894,6 +894,24 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL match_on_integer_tests_value: expected two tests and the scrutinee let, got " + i64_to_string(hir_count_kind(r41, "HirIf")) + " ifs, " + i64_to_string(hir_count_diags(r41)) + " diagnostics")
+
+  // Test 42: a payload named `index` does not shadow its variant's
+  // index: `E::Value(x)` tests discriminant 1 and reads variant 1.
+  let r42: HirResult = lower_to_hir("enum class E:\n  Empty\n  Value(index: i32)\n\nfn f(e: E): i32\n  match e:\n    E::Value(x):\n      return x\n  return 0\n")
+  if hir_count_diags(r42) == 0 and hir_payloads(r42) == "variant=1 field=0 : i32;" and hir_int_lits_of(r42, "E") == "1;":
+    print("PASS payload_named_index_keeps_variant")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL payload_named_index_keeps_variant: got payloads '" + hir_payloads(r42) + "', tags '" + hir_int_lits_of(r42, "E") + "'")
+  // Test 43: a literal past 64 bits is reported, never accumulated into
+  // an overflowing value.
+  let r43: HirResult = lower_to_hir("fn f(): i64\n  return 9223372036854775808\n")
+  let r43_ok: HirResult = lower_to_hir("fn f(): i64\n  return 9223372036854775807\n")
+  if hir_count_diags(r43) >= 1 and hir_count_diags(r43_ok) == 0:
+    print("PASS oversized_literal_reported")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL oversized_literal_reported: got " + i64_to_string(hir_count_diags(r43)) + " and " + i64_to_string(hir_count_diags(r43_ok)) + " diagnostics")
 
   // -----------------------------------------------------------------
   // Summary
