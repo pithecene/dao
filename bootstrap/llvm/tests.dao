@@ -361,7 +361,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 36
+  let total: i32 = 38
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -409,8 +409,9 @@ fn main(): i32
   let r3: LlvmTextResult = lower_source_to_llvm_text(src3)
   write_failures = write_failures + emit_ir("int_arithmetic", r3, 7)
   if r3.ok:
-    let a: bool = check_contains(r3, "mul i32 2, 3", "int_arithmetic")
-    let b: bool = check_contains(r3, "add i32 1,", "int_arithmetic")
+    // Signed arithmetic is checked (the host's overflow intrinsics).
+    let a: bool = check_contains(r3, "@llvm.smul.with.overflow.i32(i32 2, i32 3)", "int_arithmetic")
+    let b: bool = check_contains(r3, "@llvm.sadd.with.overflow.i32(i32 1,", "int_arithmetic")
     if a:
       if b:
         print("PASS int_arithmetic")
@@ -853,14 +854,14 @@ fn main(): i32
   else:
     print("FAIL extern_beside_template: " + diags_text(r26b.diags))
 
-  // Test 29: comparing strings is not lowered; the module fails rather
-  // than comparing their addresses.
+  // Test 29: comparing strings compares their contents (the runtime's
+  // __dao_eq_string), never their addresses.
   let r29: LlvmTextResult = lower_source_to_llvm_text("fn f(s: string): i32\n  if s == \"x\":\n    return 1\n  return 0\n")
-  if r29.ok == false and contains_substring(diags_text(r29.diags), "comparison of strings"):
-    print("PASS string_comparison_fails_closed")
+  if r29.ok and contains_substring(r29.text, "@__dao_eq_string") and contains_substring(r29.text, "icmp eq ptr") == false:
+    print("PASS string_comparison_by_contents")
     pass_count = pass_count + 1
   else:
-    print("FAIL string_comparison_fails_closed: " + diags_text(r29.diags))
+    print("FAIL string_comparison_by_contents: " + diags_text(r29.diags))
 
   // Test 28: an enum's tag is an integer constant: a classification enum
   // is its `i32` tag (the host's): the comparison runs, exiting 1.
@@ -949,6 +950,26 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL pointer_roundtrip: " + diags_text(r36.diags))
+
+  // Test 37: signed `+` is checked (the host's overflow intrinsic and
+  // trap); an unsigned comparison is unsigned (`ult`); the program runs.
+  let r37: LlvmTextResult = lower_source_to_llvm_text("fn below(a: u32, b: u32): bool -> a < b\n\nfn main(): i32\n  let x: i32 = 40 + 2\n  if below(to_u32(1), to_u32(2)):\n    return x - 42\n  return 1\n\nfn to_u32(n: i32): u32\n  return 0\n")
+  write_failures = write_failures + emit_ir("checked_and_unsigned", r37, -1)
+  if r37.ok and check_contains(r37, "@llvm.sadd.with.overflow.i32", "checked_and_unsigned") and check_contains(r37, "icmp ult i32", "checked_and_unsigned"):
+    print("PASS checked_and_unsigned")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL checked_and_unsigned: " + diags_text(r37.diags))
+
+  // Test 38: strings compare and concatenate through the runtime
+  // (__dao_eq_string, __dao_str_concat): "ab" + "c" == "abc", exit 0.
+  let r38: LlvmTextResult = lower_source_to_llvm_text("fn main(): i32\n  let s: string = \"ab\" + \"c\"\n  if s == \"abc\":\n    return 0\n  return 1\n")
+  write_failures = write_failures + emit_ir("string_operators", r38, 0)
+  if r38.ok and check_contains(r38, "@__dao_eq_string", "string_operators") and check_contains(r38, "@__dao_str_concat", "string_operators"):
+    print("PASS string_operators")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL string_operators: " + diags_text(r38.diags))
 
   // -----------------------------------------------------------------
   // Summary
