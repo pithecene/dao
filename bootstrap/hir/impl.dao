@@ -63,7 +63,9 @@ enum class HirNode:
   HirIdent(sym: i64, typ: i64, tok: i64)
   HirBinary(op: i64, left: i64, right: i64, typ: i64)
   HirUnary(op: i64, operand: i64, typ: i64)
-  HirCall(callee: i64, args_lp: i64, arg_count: i64, typ: i64)
+  // `subst`: the checker's record of what the call decided of the
+  // parameters its callee is generic over (call_subst_key), or -1.
+  HirCall(callee: i64, args_lp: i64, arg_count: i64, typ: i64, subst: i64)
   HirFieldAccess(obj: i64, field: i64, typ: i64)
   HirPipe(left: i64, right: i64, typ: i64)
   HirQualName(segs_lp: i64, seg_count: i64, typ: i64)
@@ -212,7 +214,7 @@ fn hir_expr_type(node: HirNode): i64
       return ti
     HirNode::HirUnary(o, op, ti):
       return ti
-    HirNode::HirCall(c, a, n, ti):
+    HirNode::HirCall(c, a, n, ti, sb):
       return ti
     HirNode::HirFieldAccess(o, f, ti):
       return ti
@@ -384,7 +386,7 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
       let or2: HirR = lower_expr(hs, operand)
       return hs_add_node(or2.hs, HirNode::HirUnary(op = op_tidx, operand = or2.hir, typ = ti))
     Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
-      return lower_call_expr(hs, node_idx, callee, args_lp, names_lp, ti)
+      return with_call_subst(lower_call_expr(hs, node_idx, callee, args_lp, names_lp, ti), hm_get_or(hs.typecheck.lookup.expr_types, call_subst_key(hs.unit.module_id, node_idx), to_i64(-1)))
     Node::FieldE(obj, field_tidx):
       // A concept-provided member taken as a value has no field to read
       // and no implementation to name (see hir_member_concept).
@@ -434,6 +436,16 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
     Node::ErrorE(t):
       return hs_add_node(hs, HirNode::HirErrorExpr(tok = to_i64(0)))
   return hs_add_node(hs, HirNode::HirErrorExpr(tok = to_i64(0)))
+
+// A lowered call carries the checker's record of what it decided
+// (record_call_subst); whatever else the call lowered to is unchanged.
+fn with_call_subst(r: HirR, subst: i64): HirR
+  if subst < 0 or r.hir < 0:
+    return r
+  match r.hs.arena.nodes.get(r.hir):
+    HirNode::HirCall(callee, args_lp, arg_count, typ, old):
+      r.hs.arena = HirArena(r.hs.arena.nodes.set(r.hir, HirNode::HirCall(callee = callee, args_lp = args_lp, arg_count = arg_count, typ = typ, subst = subst)), r.hs.arena.idx)
+  return r
 
 // `p.get()`, `p.set(v)`, `p.offset(n)`, `p.cast<U>()`, `p.is_null()`,
 // `Ptr<T>::new()` → HirPtrOp: the receiver first, then the argument.
@@ -562,7 +574,7 @@ fn emit_method_call(hs: HS, msym: i64, callee_tok: i64, receiver: i64, args_lp: 
       match mt.kind:
         TypeKind::TFunction:
           call_ti = mt.ret_type
-  return hs_add_node(callee_hir.hs, HirNode::HirCall(callee = callee_hir.hir, args_lp = fl.list_pos, arg_count = hir_args.length(), typ = call_ti))
+  return hs_add_node(callee_hir.hs, HirNode::HirCall(callee = callee_hir.hir, args_lp = fl.list_pos, arg_count = hir_args.length(), typ = call_ti, subst = to_i64(-1)))
 
 // Whether the expression's type is a type parameter.
 fn hir_is_type_param(hs: HS, node_idx: i64): bool
@@ -591,7 +603,7 @@ fn lower_bound_call(hs: HS, callee: i64, obj: i64, field_tidx: i64, args_lp: i64
     hir_args = hir_args.push(ar.hir)
     ai = ai + 1
   let fl: HirFlush = hir_flush_list(cur, hir_args)
-  return hs_add_node(fl.hs, HirNode::HirCall(callee = access_r.hir, args_lp = fl.list_pos, arg_count = hir_args.length(), typ = ti))
+  return hs_add_node(fl.hs, HirNode::HirCall(callee = access_r.hir, args_lp = fl.list_pos, arg_count = hir_args.length(), typ = ti, subst = to_i64(-1)))
 
 fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i64, ti: i64): HirR
   // ---------------------------------------------------------------
@@ -716,7 +728,7 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
             match sym.kind:
               SymbolKind::Type:
                 call_ti = hir_sym_type(fl.hs, csym)
-  return hs_add_node(fl.hs, HirNode::HirCall(callee = callee_hir, args_lp = fl.list_pos, arg_count = args.length(), typ = call_ti))
+  return hs_add_node(fl.hs, HirNode::HirCall(callee = callee_hir, args_lp = fl.list_pos, arg_count = args.length(), typ = call_ti, subst = to_i64(-1)))
 
 // =========================================================================
 // Section 55: Statement lowering
@@ -1615,7 +1627,7 @@ fn hir_node_kind(node: HirNode): string
       return "HirBinary"
     HirNode::HirUnary(a, b, c):
       return "HirUnary"
-    HirNode::HirCall(a, b, c, d):
+    HirNode::HirCall(a, b, c, d, e):
       return "HirCall"
     HirNode::HirFieldAccess(a, b, c):
       return "HirFieldAccess"
@@ -1867,7 +1879,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
       line = line + " : " + hir_type_label(hr, ti2) + "\n"
       line = line + hir_dump_node(hr, operand, indent + 1)
       return line
-    HirNode::HirCall(callee, args_lp, arg_count, ti2):
+    HirNode::HirCall(callee, args_lp, arg_count, ti2, subst):
       line = line + " : " + hir_type_label(hr, ti2) + "\n"
       line = line + hir_dump_node(hr, callee, indent + 1)
       let args: Vector<i64> = read_list(hr.hir_idx, args_lp)
