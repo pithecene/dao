@@ -88,7 +88,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 37
+  let total: i32 = 39
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -579,7 +579,7 @@ fn main(): i32
   let ni32: i64 = 0
   while ni32 < r32.mir_nodes.length():
     match r32.mir_nodes.get(ni32):
-      MirNode::MirLoad(local_idx, ti):
+      MirNode::MirLoad(local_idx, path_lp, path_count, ti):
         if ti < 0:
           untyped32 = untyped32 + 1
     ni32 = ni32 + 1
@@ -608,6 +608,34 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL let_binds_its_module_symbol: got " + i64_to_string(r34.diags.length()) + " diagnostics, " + i64_to_string(mir_count_kind(r34, "MirFnRef")) + " function references")
+
+  // Tests 35–36: pointer operations lower as the host's (`daoc mir`):
+  // new / cast / offset are ptr_op; `set` and `get` store and load
+  // through the pointee's place (`store _4.*`, `load _4.*`); a pointer
+  // that is no local is held in a temporary first.
+  let r35: MirResult = lower_to_mir("fn f(): i64\n  let v: i64 = 0\n  mode unsafe =>\n    let p: Ptr<i64> = Ptr<i64>::new()\n    let raw: Ptr<void> = Ptr<void>::new()\n    let q: Ptr<i64> = raw.cast<i64>()\n    let r: Ptr<i64> = p.offset(2)\n    r.set(5)\n    v = r.get()\n  return v\n")
+  let derefs35: string = ""
+  let ni35: i64 = 0
+  while ni35 < r35.mir_nodes.length():
+    match r35.mir_nodes.get(ni35):
+      MirNode::MirStore(local_idx, path_lp, path_count, value):
+        if path_count == 1:
+          derefs35 = derefs35 + "store_" + i64_to_string(local_idx) + "." + i64_to_string(read_hir_list(r35.mir_idx, path_lp).get(0)) + ";"
+      MirNode::MirLoad(local_idx, path_lp, path_count, ti):
+        if path_count == 1:
+          derefs35 = derefs35 + "load_" + i64_to_string(local_idx) + "." + i64_to_string(read_hir_list(r35.mir_idx, path_lp).get(0)) + ";"
+    ni35 = ni35 + 1
+  if r35.diags.length() == 0 and mir_count_kind(r35, "MirPtrOp") == 4 and derefs35 == "store_4.-2;load_4.-2;":
+    print("PASS pointer_operations_lower")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL pointer_operations_lower: got '" + derefs35 + "', " + i64_to_string(mir_count_kind(r35, "MirPtrOp")) + " ptr ops, " + i64_to_string(r35.diags.length()) + " diagnostics")
+  let r36: MirResult = lower_to_mir("fn f(p: Ptr<i64>): i64\n  mode unsafe =>\n    return p.offset(1).get()\n  return 0\n")
+  if r36.diags.length() == 0 and mir_count_kind(r36, "MirLocal") == 2 and mir_count_kind(r36, "MirPtrOp") == 1:
+    print("PASS pointer_value_read_through_temporary")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL pointer_value_read_through_temporary: got " + i64_to_string(mir_count_kind(r36, "MirLocal")) + " locals, " + i64_to_string(r36.diags.length()) + " diagnostics")
 
   // -----------------------------------------------------------------
   print("")

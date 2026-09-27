@@ -2838,6 +2838,45 @@ class PtrCallR:
   ts: TS
   handled: bool
 
+// The operations of `Ptr<T>`, by the codes a checked call records for
+// later passes (the host's PtrOp, in its order).
+fn ptr_op_new(): i64
+  return to_i64(0)
+fn ptr_op_get(): i64
+  return to_i64(1)
+fn ptr_op_set(): i64
+  return to_i64(2)
+fn ptr_op_offset(): i64
+  return to_i64(3)
+fn ptr_op_cast(): i64
+  return to_i64(4)
+fn ptr_op_is_null(): i64
+  return to_i64(5)
+
+fn ptr_op_name(op: i64): string
+  if op == ptr_op_new():
+    return "new"
+  if op == ptr_op_get():
+    return "get"
+  if op == ptr_op_set():
+    return "set"
+  if op == ptr_op_offset():
+    return "offset"
+  if op == ptr_op_cast():
+    return "cast"
+  if op == ptr_op_is_null():
+    return "is_null"
+  return "?"
+
+// The key under which the checker records which pointer operation the
+// call at `node_idx` is.
+fn ptr_op_key(module_id: i64, node_idx: i64): string
+  return expr_id_key(module_id, node_idx) + ":ptr_op"
+
+fn record_ptr_op(ts: TS, node_idx: i64, op: i64): TS
+  ts.reg = reg_with_expr_types(ts.reg, ts.reg.expr_types.set(ptr_op_key(ts.tc.module_id, node_idx), op))
+  return ts
+
 fn check_ptr_method_call(ts: TS, node_idx: i64, callee: i64, args: Vector<i64>, targs_lp: i64): PtrCallR
   let unhandled: PtrCallR = PtrCallR(ts, false)
   let callee_node: Node = ts.tc.nodes.get(callee)
@@ -2868,11 +2907,11 @@ fn check_ptr_method_call(ts: TS, node_idx: i64, callee: i64, args: Vector<i64>, 
           if name == "get":
             if args.length() != 0:
               return PtrCallR(ts_add_diag(ts, sp, "Ptr.get takes no arguments"), true)
-            return PtrCallR(ts_set_expr_type(ts, node_idx, obj_type.pointee), true)
+            return PtrCallR(record_ptr_op(ts_set_expr_type(ts, node_idx, obj_type.pointee), node_idx, ptr_op_get()), true)
           if name == "is_null":
             if args.length() != 0:
               return PtrCallR(ts_add_diag(ts, sp, "Ptr.is_null takes no arguments"), true)
-            return PtrCallR(ts_set_expr_type(ts, node_idx, to_i64(10)), true)
+            return PtrCallR(record_ptr_op(ts_set_expr_type(ts, node_idx, to_i64(10)), node_idx, ptr_op_is_null()), true)
           if name == "set":
             if args.length() != 1:
               return PtrCallR(ts_add_diag(ts, sp, "Ptr.set takes one argument, the value written"), true)
@@ -2882,7 +2921,7 @@ fn check_ptr_method_call(ts: TS, node_idx: i64, callee: i64, args: Vector<i64>, 
             if fitted_ti >= 0:
               if types_equal(r_set, obj_type.pointee, fitted_ti) == false:
                 return PtrCallR(ts_add_diag(r_set, sp, "Ptr.set writes " + type_name(r_set, obj_type.pointee) + ", got " + type_name(r_set, fitted_ti)), true)
-            return PtrCallR(ts_set_expr_type(r_set, node_idx, to_i64(11)), true)
+            return PtrCallR(record_ptr_op(ts_set_expr_type(r_set, node_idx, to_i64(11)), node_idx, ptr_op_set()), true)
           if name == "offset":
             if args.length() != 1:
               return PtrCallR(ts_add_diag(ts, sp, "Ptr.offset takes one argument, how many elements to walk"), true)
@@ -2891,7 +2930,7 @@ fn check_ptr_method_call(ts: TS, node_idx: i64, callee: i64, args: Vector<i64>, 
             if count_ti >= 0:
               if is_integer(r_off, count_ti) == false:
                 return PtrCallR(ts_add_diag(r_off, sp, "Ptr.offset walks a whole number of elements, got " + type_name(r_off, count_ti)), true)
-            return PtrCallR(ts_set_expr_type(r_off, node_idx, obj_ti), true)
+            return PtrCallR(record_ptr_op(ts_set_expr_type(r_off, node_idx, obj_ti), node_idx, ptr_op_offset()), true)
           if name == "cast":
             if args.length() != 0:
               return PtrCallR(ts_add_diag(ts, sp, "Ptr.cast takes no arguments, only the type cast to"), true)
@@ -2901,7 +2940,7 @@ fn check_ptr_method_call(ts: TS, node_idx: i64, callee: i64, args: Vector<i64>, 
             if target_r.type_idx < 0:
               return PtrCallR(target_r.ts, true)
             let cast_r: TypeR = find_or_add_pointer_type(target_r.ts, target_r.type_idx)
-            return PtrCallR(ts_set_expr_type(cast_r.ts, node_idx, cast_r.type_idx), true)
+            return PtrCallR(record_ptr_op(ts_set_expr_type(cast_r.ts, node_idx, cast_r.type_idx), node_idx, ptr_op_cast()), true)
           return PtrCallR(ts_add_diag(ts, sp, "no operation '" + name + "' on " + type_name(ts, obj_ti) + "; a pointer has get, set, offset, cast and is_null"), true)
       return unhandled
     Node::QualNameE(seg_lp, seg_count):
@@ -2925,7 +2964,7 @@ fn check_ptr_method_call(ts: TS, node_idx: i64, callee: i64, args: Vector<i64>, 
       if pointee_r.type_idx < 0:
         return PtrCallR(pointee_r.ts, true)
       let new_r: TypeR = find_or_add_pointer_type(pointee_r.ts, pointee_r.type_idx)
-      return PtrCallR(ts_set_expr_type(new_r.ts, node_idx, new_r.type_idx), true)
+      return PtrCallR(record_ptr_op(ts_set_expr_type(new_r.ts, node_idx, new_r.type_idx), node_idx, ptr_op_new()), true)
   return unhandled
 
 // =========================================================================
