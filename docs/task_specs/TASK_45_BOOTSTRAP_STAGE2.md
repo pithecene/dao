@@ -61,3 +61,13 @@ has none).
 
 `bootstrap/stage2.sh` reports the fixed point and every suite passing
 under stage 2.
+
+## 6. Delivered
+
+One slice: the driver, its assembly, and `bootstrap/stage2.sh`.  The
+crossing held on its first run.  Stage 1 compiles the bootstrap compiler,
+prelude included, in about five seconds, peaking under 2 GiB.  Stage 2
+and stage 3 emit the same 5.9 MB module.  Every suite compiled by stage
+2 passes (lexer 105, parser 88, graph 12, resolver 64, typecheck 343,
+hir 46, mir 51, llvm 46), and `validate_ir.sh` accepts and runs every
+module the stage-2-compiled llvm suite writes.
