@@ -1006,16 +1006,16 @@ fn mir_tok_text(ms: MS, tok: i64): string
 // it (the host's owns_heap_memory): a string, a generator, a type
 // parameter, or a struct / enum holding a pointer or such a value.
 fn mir_owns_heap(ms: MS, ti: i64): bool
-  return mir_heap_search(ms, ti, HashMap<i64>::new()).found
+  return mir_heap_search_in(ms.types, ms.type_info, ti, HashMap<i64>::new()).found
 
-fn mir_heap_search(ms: MS, ti: i64, seen: HashMap<i64>): GenericSearch
-  if ti < 0 or ti >= ms.types.length():
+fn mir_heap_search_in(types: Vector<DaoType>, info: Vector<i64>, ti: i64, seen: HashMap<i64>): GenericSearch
+  if ti < 0 or ti >= types.length():
     return GenericSearch(seen, false)
   let key: string = i64_to_string(ti)
   if seen.contains(key):
     return GenericSearch(seen, false)
   let so_far: HashMap<i64> = seen.set(key, to_i64(1))
-  let t: DaoType = ms.types.get(ti)
+  let t: DaoType = types.get(ti)
   let held: Vector<i64> = Vector<i64>::new()
   match t.kind:
     TypeKind::TString:
@@ -1028,28 +1028,28 @@ fn mir_heap_search(ms: MS, ti: i64, seen: HashMap<i64>): GenericSearch
       // Field pairs: (name, type).
       let fi: i64 = to_i64(0)
       while fi < t.info_count:
-        held = held.push(ms.type_info.get(t.info_lp + fi * to_i64(2) + to_i64(1)))
+        held = held.push(info.get(t.info_lp + fi * to_i64(2) + to_i64(1)))
         fi = fi + to_i64(1)
     TypeKind::TEnum:
       // Per variant: name, payload count, then (name, type) per value.
       let at: i64 = t.info_lp
       let vi: i64 = to_i64(0)
       while vi < t.info_count:
-        let count: i64 = ms.type_info.get(at + to_i64(1))
+        let count: i64 = info.get(at + to_i64(1))
         let pi: i64 = to_i64(0)
         while pi < count:
-          held = held.push(ms.type_info.get(at + to_i64(2) + pi * to_i64(2) + to_i64(1)))
+          held = held.push(info.get(at + to_i64(2) + pi * to_i64(2) + to_i64(1)))
           pi = pi + to_i64(1)
         at = at + to_i64(2) + count * to_i64(2)
         vi = vi + to_i64(1)
   let i: i64 = to_i64(0)
   while i < held.length():
     let part: i64 = held.get(i)
-    if part >= 0 and part < ms.types.length():
-      match ms.types.get(part).kind:
+    if part >= 0 and part < types.length():
+      match types.get(part).kind:
         TypeKind::TPointer:
           return GenericSearch(so_far, true)
-    let sub: GenericSearch = mir_heap_search(ms, part, so_far)
+    let sub: GenericSearch = mir_heap_search_in(types, info, part, so_far)
     if sub.found:
       return sub
     so_far = sub.seen
@@ -1544,6 +1544,7 @@ class MonoTables:
 
 // The program's templates, and the specializations made of them.
 class MonoTemplates:
+  hooks: CopyHooks           // the prelude's copy_out and copy_out_string
   by_sym: HashMap<i64>       // template symbol → its MirFunction
   module_of: HashMap<i64>    // template symbol → position of its MirModule
   made: HashMap<i64>         // specialization key → the specialization's symbol
@@ -1593,7 +1594,7 @@ fn program_monomorphize(pt: ProgramTyped, pm: ProgramMir): ProgramConcrete
   let shell: TS = ts_new(build_module_tc(p, first_module), p.typecheck.types, p.typecheck.type_info, p.typecheck.sym_types, pt.reg)
   let m: Mono = Mono(
     MonoTables(shell, pm.mir.mir_nodes, pm.mir.mir_idx, p.resolve.symbols),
-    MonoTemplates(HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new()),
+    MonoTemplates(CopyHooks(to_i64(-1), to_i64(-1)), HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new()),
     MonoWork(Vector<i64>::new(), Vector<i64>::new(), HashMap<i64>::new(), Vector<i64>::new()),
     MonoNames(HashMap<i64>::new(), HashMap<i64>::new()),
     MonoSource(p, Vector<i64>::new()),
@@ -1601,6 +1602,7 @@ fn program_monomorphize(pt: ProgramTyped, pm: ProgramMir): ProgramConcrete
   let modules: Vector<i64> = mono_modules(m, pm.mir.root)
   m.source = MonoSource(p, modules)
   m = mono_collect(m, modules)
+  m.templates.hooks = mono_copy_hooks(m)
   // The fixpoint: every function scanned once, specializations appended
   // as they are made and scanned in their turn.
   let wi: i64 = to_i64(0)
@@ -1752,6 +1754,9 @@ class MonoType:
 fn mono_scan_function(m: Mono, wi: i64): Mono
   let fn_node: i64 = m.work.fns.get(wi)
   let here: HashMap<i64> = mono_fn_map(m, fn_node)
+  // Copies out of a domain first, per concrete type, so what a copy_out
+  // call becomes is what gets specialized below.
+  m = mono_expand_copy_outs(m, fn_node, m.templates.hooks)
   // A specialization's calls through a bound now have a concrete
   // receiver, and name its method.
   if m.work.fn_subst.contains(i64_to_string(fn_node)):
@@ -2281,6 +2286,348 @@ fn mono_fn_name(m: Mono, sym: i64): string
 
 fn mono_mentions_param(m: Mono, ti: i64): bool
   return mir_generic_search_in(m.tables.ts.types, m.tables.ts.type_info, ti, HashMap<i64>::new()).found
+
+// =========================================================================
+// Section 67c: copy_out expansion (Task 43)
+// =========================================================================
+//
+// The prelude's `copy_out<T>(x)` is the identity.  A call to it whose T
+// is concrete and owns heap memory is expanded, before specialization,
+// into what copies a T out of a `resource memory` domain into the
+// enclosing one (the host's expand_copy_out_calls):
+//   string                       → copy_out_string(x), the prelude's
+//   class with `copy_out(self)`   → x.copy_out(), the class's own
+//   any other class               → the class built from copy_out of each field
+//   enum                          → per variant, rebuilt from copied payloads
+//   anything owning no heap memory → left to specialize into the identity
+// The calls an expansion introduces are expanded in turn.
+
+// The prelude's copy hooks: its generic `copy_out` and its
+// `copy_out_string`; -1 for either a program does not have.
+class CopyHooks:
+  copy_out: i64
+  copy_out_string: i64
+
+fn mono_copy_hooks(m: Mono): CopyHooks
+  let hooks: CopyHooks = CopyHooks(to_i64(-1), to_i64(-1))
+  let symbols: Vector<Symbol> = m.tables.symbols
+  let modules: Vector<ModuleEntry> = m.source.program.graph.modules
+  let si: i64 = to_i64(0)
+  while si < symbols.length():
+    let s: Symbol = symbols.get(si)
+    if symbol_kind_name(s.kind) == "Function" and s.owner_module_id >= 0 and s.owner_module_id < modules.length():
+      if modules.get(s.owner_module_id).is_prelude:
+        if s.name == "copy_out" and m.templates.by_sym.contains(i64_to_string(si)):
+          hooks.copy_out = si
+        if s.name == "copy_out_string":
+          hooks.copy_out_string = si
+    si = si + to_i64(1)
+  return hooks
+
+// Expand the function's copy_out calls until none is left to expand.
+fn mono_expand_copy_outs(m: Mono, fn_node: i64, hooks: CopyHooks): Mono
+  if hooks.copy_out < 0:
+    return m
+  let again: bool = true
+  while again:
+    let step: MonoStep = mono_expand_one_copy_out(m, fn_node, hooks)
+    m = step.m
+    again = step.changed
+  return m
+
+class MonoStep:
+  m: Mono
+  changed: bool
+
+// The first expandable copy_out call of the function, expanded.
+fn mono_expand_one_copy_out(m: Mono, fn_node: i64, hooks: CopyHooks): MonoStep
+  let blocks: Vector<i64> = mono_fn_blocks(m, fn_node)
+  let bi: i64 = to_i64(0)
+  while bi < blocks.length():
+    let insts: Vector<i64> = mono_block_insts(m, blocks.get(bi))
+    let k: i64 = to_i64(0)
+    while k < insts.length():
+      let call: i64 = insts.get(k)
+      match m.tables.nodes.get(call):
+        MirNode::MirCall(callee, arg_list_lp, arg_count, call_ti, subst):
+          if arg_count == to_i64(1) and mono_is_ref_to(m, callee, hooks.copy_out):
+            if mono_mentions_param(m, call_ti) == false and mono_owns_heap(m, call_ti):
+              let value: i64 = read_hir_list(m.tables.idx, arg_list_lp).get(0)
+              return MonoStep(mono_expand_copy_at(m, fn_node, blocks.get(bi), k, call, callee, value, call_ti, hooks), true)
+      k = k + to_i64(1)
+    bi = bi + to_i64(1)
+  return MonoStep(m, false)
+
+fn mono_is_ref_to(m: Mono, node: i64, sym: i64): bool
+  match m.tables.nodes.get(node):
+    MirNode::MirFnRef(s, ti):
+      return s == sym
+  return false
+
+fn mono_expand_copy_at(m: Mono, fn_node: i64, block: i64, k: i64, call: i64, callee: i64, value: i64, ti: i64, hooks: CopyHooks): Mono
+  let t: DaoType = m.tables.ts.types.get(ti)
+  match t.kind:
+    TypeKind::TString:
+      if hooks.copy_out_string < 0:
+        m.diags = m.diags.push(make_error(Span(to_i64(0), to_i64(1)), "internal: the prelude declares `copy_out` but not `copy_out_string`"))
+        return m
+      m.tables.nodes = m.tables.nodes.set(callee, MirNode::MirFnRef(sym = hooks.copy_out_string, type_idx = m.tables.ts.sym_types.get(hooks.copy_out_string)))
+      return m
+    TypeKind::TGenerator:
+      m.diags = m.diags.push(make_error(Span(to_i64(0), to_i64(1)), "a generator cannot be copied out of a resource block: a '" + type_name(m.tables.ts, ti) + "' leaves one through a container"))
+      return m
+    TypeKind::TStruct:
+      let copier: i64 = find_inherent_method_sym(m.tables.ts.reg.methods, "copy_out", dispatch_owner(m.tables.ts.types, m.tables.ts.type_info, ti))
+      if copier >= 0:
+        // The class copies itself; the receiver is the one argument, and
+        // what the copier is generic over is decided from it.
+        m.tables.nodes = m.tables.nodes.set(callee, MirNode::MirFnRef(sym = copier, type_idx = m.tables.ts.sym_types.get(copier)))
+        return mono_clear_subst(m, call)
+      // Field by field, each owning field through its own copy_out.
+      let added: Vector<i64> = Vector<i64>::new()
+      let fields: Vector<i64> = Vector<i64>::new()
+      let fi: i64 = to_i64(0)
+      while fi < t.info_count:
+        let ft: i64 = m.tables.ts.type_info.get(t.info_lp + fi * to_i64(2) + to_i64(1))
+        m.tables.nodes = m.tables.nodes.push(MirNode::MirFieldAccess(obj = value, field_tok = to_i64(-1), field_index = fi, type_idx = ft))
+        let fv: i64 = m.tables.nodes.length() - to_i64(1)
+        added = added.push(fv)
+        let copied: MonoCopy = mono_emit_copy(m, fv, ft, hooks, added)
+        m = copied.m
+        added = copied.added
+        fields = fields.push(copied.value)
+        fi = fi + to_i64(1)
+      let fl: MonoFlush = mono_flush(m, fields)
+      m = fl.m
+      m.tables.nodes = m.tables.nodes.set(call, MirNode::MirConstruct(arg_list_lp = fl.list_pos, arg_count = fields.length(), type_idx = ti))
+      return mono_splice(m, block, callee, call, added)
+    TypeKind::TEnum:
+      return mono_expand_enum_copy(m, fn_node, block, call, callee, value, ti, hooks)
+  return m
+
+// Drop a call's substitution record: it is decided from its arguments.
+fn mono_clear_subst(m: Mono, call: i64): Mono
+  match m.tables.nodes.get(call):
+    MirNode::MirCall(c, a, n, ti, sb):
+      m.tables.nodes = m.tables.nodes.set(call, MirNode::MirCall(callee = c, arg_list_lp = a, arg_count = n, type_idx = ti, subst = to_i64(-1)))
+  return m
+
+class MonoCopy:
+  m: Mono
+  value: i64
+  added: Vector<i64>
+
+// `copy_out(value)` as two new instructions appended to `added` when the
+// type owns heap memory; the value itself otherwise.
+fn mono_emit_copy(m: Mono, value: i64, ti: i64, hooks: CopyHooks, added: Vector<i64>): MonoCopy
+  if mono_owns_heap(m, ti) == false:
+    return MonoCopy(m, value, added)
+  m.tables.nodes = m.tables.nodes.push(MirNode::MirFnRef(sym = hooks.copy_out, type_idx = m.tables.ts.sym_types.get(hooks.copy_out)))
+  let ref: i64 = m.tables.nodes.length() - to_i64(1)
+  let one: Vector<i64> = Vector<i64>::new()
+  let fl: MonoFlush = mono_flush(m, one.push(value))
+  m = fl.m
+  m.tables.nodes = m.tables.nodes.push(MirNode::MirCall(callee = ref, arg_list_lp = fl.list_pos, arg_count = to_i64(1), type_idx = ti, subst = to_i64(-1)))
+  let result: i64 = m.tables.nodes.length() - to_i64(1)
+  let grown: Vector<i64> = added.push(ref)
+  return MonoCopy(m, result, grown.push(result))
+
+// The block with `added` placed just before `call`, and `callee` — the
+// copy_out reference the call no longer makes — dropped.
+fn mono_splice(m: Mono, block: i64, callee: i64, call: i64, added: Vector<i64>): Mono
+  let insts: Vector<i64> = mono_block_insts(m, block)
+  let out: Vector<i64> = Vector<i64>::new()
+  let i: i64 = to_i64(0)
+  while i < insts.length():
+    let inst: i64 = insts.get(i)
+    if inst == call:
+      let a: i64 = to_i64(0)
+      while a < added.length():
+        out = out.push(added.get(a))
+        a = a + to_i64(1)
+    if inst != callee:
+      out = out.push(inst)
+    i = i + to_i64(1)
+  return mono_set_block_insts(m, block, out)
+
+// Per variant: the block ends at the call with a test of the value's
+// discriminant; each variant's block rebuilds the value from copied
+// payloads into a temporary; a merge block reads it back where the call
+// stood, followed by what came after the call.
+fn mono_expand_enum_copy(m: Mono, fn_node: i64, block: i64, call: i64, callee: i64, value: i64, ti: i64, hooks: CopyHooks): Mono
+  let t: DaoType = m.tables.ts.types.get(ti)
+  let i32_ti: i64 = to_i64(2)
+  let bool_ti: i64 = to_i64(10)
+  // The temporary the variants store into.
+  m.tables.nodes = m.tables.nodes.push(MirNode::MirLocal(sym = to_i64(-1), type_idx = ti, is_param = to_i64(0)))
+  let temp_local: i64 = m.tables.nodes.length() - to_i64(1)
+  let fnp: MonoFnParts = mono_fn_parts(m, fn_node)
+  let temp: i64 = fnp.locals.length()
+  let locals: Vector<i64> = fnp.locals.push(temp_local)
+  let blocks: Vector<i64> = fnp.blocks
+  let next_id: i64 = mono_next_block_id(m, blocks)
+  // Split: before the call stays; the call becomes a load of the
+  // temporary heading the merge block, what followed comes after it.
+  let insts: Vector<i64> = mono_block_insts(m, block)
+  let before: Vector<i64> = Vector<i64>::new()
+  let after: Vector<i64> = Vector<i64>::new()
+  let seen_call: bool = false
+  let i: i64 = to_i64(0)
+  while i < insts.length():
+    let inst: i64 = insts.get(i)
+    if inst == call:
+      seen_call = true
+    else:
+      if inst != callee:
+        if seen_call:
+          after = after.push(inst)
+        else:
+          before = before.push(inst)
+    i = i + to_i64(1)
+  let empty_path: Vector<i64> = Vector<i64>::new()
+  let path_fl: MonoFlush = mono_flush(m, empty_path)
+  m = path_fl.m
+  m.tables.nodes = m.tables.nodes.set(call, MirNode::MirLoad(local_idx = temp, path_lp = path_fl.list_pos, path_count = to_i64(0), type_idx = ti))
+  let merge_insts: Vector<i64> = Vector<i64>::new()
+  merge_insts = merge_insts.push(call)
+  let ai: i64 = to_i64(0)
+  while ai < after.length():
+    merge_insts = merge_insts.push(after.get(ai))
+    ai = ai + to_i64(1)
+  let merge: MonoBlock = mono_new_block(m, next_id, merge_insts)
+  m = merge.m
+  next_id = next_id + to_i64(1)
+  // The discriminant, tested per variant.
+  m.tables.nodes = m.tables.nodes.push(MirNode::MirEnumDiscriminant(value = value, type_idx = i32_ti))
+  let discr: i64 = m.tables.nodes.length() - to_i64(1)
+  let test_insts: Vector<i64> = before.push(discr)
+  let test_block: i64 = block
+  let new_blocks: Vector<i64> = Vector<i64>::new()
+  let at: i64 = t.info_lp
+  let vi: i64 = to_i64(0)
+  while vi < t.info_count:
+    let count: i64 = m.tables.ts.type_info.get(at + to_i64(1))
+    // The variant's block: copy each payload, rebuild, store, merge.
+    let var_insts: Vector<i64> = Vector<i64>::new()
+    let payloads: Vector<i64> = Vector<i64>::new()
+    let pj: i64 = to_i64(0)
+    while pj < count:
+      let pt: i64 = m.tables.ts.type_info.get(at + to_i64(2) + pj * to_i64(2) + to_i64(1))
+      m.tables.nodes = m.tables.nodes.push(MirNode::MirEnumPayload(value = value, variant = vi, field = pj, type_idx = pt))
+      let pv: i64 = m.tables.nodes.length() - to_i64(1)
+      var_insts = var_insts.push(pv)
+      let copied: MonoCopy = mono_emit_copy(m, pv, pt, hooks, var_insts)
+      m = copied.m
+      var_insts = copied.added
+      payloads = payloads.push(copied.value)
+      pj = pj + to_i64(1)
+    let pl: MonoFlush = mono_flush(m, payloads)
+    m = pl.m
+    m.tables.nodes = m.tables.nodes.push(MirNode::MirEnumConstruct(variant = vi, arg_list_lp = pl.list_pos, arg_count = payloads.length(), type_idx = ti))
+    let rebuilt: i64 = m.tables.nodes.length() - to_i64(1)
+    var_insts = var_insts.push(rebuilt)
+    let sp_fl: MonoFlush = mono_flush(m, empty_path)
+    m = sp_fl.m
+    m.tables.nodes = m.tables.nodes.push(MirNode::MirStore(local_idx = temp, path_lp = sp_fl.list_pos, path_count = to_i64(0), value = rebuilt))
+    var_insts = var_insts.push(m.tables.nodes.length() - to_i64(1))
+    m.tables.nodes = m.tables.nodes.push(MirNode::MirBr(target_block = merge.block))
+    var_insts = var_insts.push(m.tables.nodes.length() - to_i64(1))
+    let var_b: MonoBlock = mono_new_block(m, next_id, var_insts)
+    m = var_b.m
+    next_id = next_id + to_i64(1)
+    // The test that leads to it: the last variant is what remains.
+    if vi + to_i64(1) < t.info_count:
+      m.tables.nodes = m.tables.nodes.push(MirNode::MirConstInt(value = vi, type_idx = i32_ti))
+      let tag: i64 = m.tables.nodes.length() - to_i64(1)
+      m.tables.nodes = m.tables.nodes.push(MirNode::MirBinary(op_tok = synthesized_equality_op(), lhs = discr, rhs = tag, type_idx = bool_ti))
+      let is_v: i64 = m.tables.nodes.length() - to_i64(1)
+      let next_test: MonoBlock = mono_new_block(m, next_id, Vector<i64>::new())
+      m = next_test.m
+      next_id = next_id + to_i64(1)
+      m.tables.nodes = m.tables.nodes.push(MirNode::MirCondBr(cond = is_v, then_block = var_b.block, else_block = next_test.block))
+      test_insts = test_insts.push(tag)
+      test_insts = test_insts.push(is_v)
+      test_insts = test_insts.push(m.tables.nodes.length() - to_i64(1))
+      m = mono_set_block_insts(m, test_block, test_insts)
+      new_blocks = new_blocks.push(next_test.block)
+      test_block = next_test.block
+      test_insts = Vector<i64>::new()
+    else:
+      m.tables.nodes = m.tables.nodes.push(MirNode::MirBr(target_block = var_b.block))
+      test_insts = test_insts.push(m.tables.nodes.length() - to_i64(1))
+      m = mono_set_block_insts(m, test_block, test_insts)
+    new_blocks = new_blocks.push(var_b.block)
+    at = at + to_i64(2) + count * to_i64(2)
+    vi = vi + to_i64(1)
+  new_blocks = new_blocks.push(merge.block)
+  let bj: i64 = to_i64(0)
+  while bj < new_blocks.length():
+    blocks = blocks.push(new_blocks.get(bj))
+    bj = bj + to_i64(1)
+  return mono_set_fn_parts(m, fn_node, locals, blocks)
+
+class MonoBlock:
+  m: Mono
+  block: i64
+
+fn mono_new_block(m: Mono, block_id: i64, insts: Vector<i64>): MonoBlock
+  let fl: MonoFlush = mono_flush(m, insts)
+  m = fl.m
+  m.tables.nodes = m.tables.nodes.push(MirNode::MirBlock(block_id = block_id, inst_list_lp = fl.list_pos, inst_count = insts.length()))
+  return MonoBlock(m, m.tables.nodes.length() - to_i64(1))
+
+fn mono_next_block_id(m: Mono, blocks: Vector<i64>): i64
+  let next: i64 = to_i64(0)
+  let i: i64 = to_i64(0)
+  while i < blocks.length():
+    match m.tables.nodes.get(blocks.get(i)):
+      MirNode::MirBlock(bid, lp, n):
+        if bid + to_i64(1) > next:
+          next = bid + to_i64(1)
+    i = i + to_i64(1)
+  return next
+
+class MonoFnParts:
+  locals: Vector<i64>
+  blocks: Vector<i64>
+
+fn mono_fn_parts(m: Mono, fn_node: i64): MonoFnParts
+  match m.tables.nodes.get(fn_node):
+    MirNode::MirFunction(sym, rt, pc, local_list_lp, lc, block_list_lp, bc, ie):
+      return MonoFnParts(read_hir_list(m.tables.idx, local_list_lp), read_hir_list(m.tables.idx, block_list_lp))
+  return MonoFnParts(Vector<i64>::new(), Vector<i64>::new())
+
+fn mono_fn_blocks(m: Mono, fn_node: i64): Vector<i64>
+  return mono_fn_parts(m, fn_node).blocks
+
+fn mono_set_fn_parts(m: Mono, fn_node: i64, locals: Vector<i64>, blocks: Vector<i64>): Mono
+  match m.tables.nodes.get(fn_node):
+    MirNode::MirFunction(sym, rt, pc, llp, lc, blp, bc, ie):
+      let lfl: MonoFlush = mono_flush(m, locals)
+      m = lfl.m
+      let bfl: MonoFlush = mono_flush(m, blocks)
+      m = bfl.m
+      m.tables.nodes = m.tables.nodes.set(fn_node, MirNode::MirFunction(sym = sym, ret_type = rt, param_count = pc, local_list_lp = lfl.list_pos, local_count = locals.length(), block_list_lp = bfl.list_pos, block_count = blocks.length(), is_extern = ie))
+  return m
+
+fn mono_block_insts(m: Mono, block: i64): Vector<i64>
+  match m.tables.nodes.get(block):
+    MirNode::MirBlock(bid, inst_list_lp, ic):
+      return read_hir_list(m.tables.idx, inst_list_lp)
+  return Vector<i64>::new()
+
+fn mono_set_block_insts(m: Mono, block: i64, insts: Vector<i64>): Mono
+  match m.tables.nodes.get(block):
+    MirNode::MirBlock(bid, lp, ic):
+      let fl: MonoFlush = mono_flush(m, insts)
+      m = fl.m
+      m.tables.nodes = m.tables.nodes.set(block, MirNode::MirBlock(block_id = bid, inst_list_lp = fl.list_pos, inst_count = insts.length()))
+  return m
+
+// Whether a value of `ti` owns heap memory (mir_owns_heap, over the
+// monomorphizer's growing tables).
+fn mono_owns_heap(m: Mono, ti: i64): bool
+  return mir_heap_search_in(m.tables.ts.types, m.tables.ts.type_info, ti, HashMap<i64>::new()).found
 
 // =========================================================================
 // Section 68: Node kind name (for tests and debug)

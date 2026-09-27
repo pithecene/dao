@@ -135,7 +135,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 48
+  let total: i32 = 50
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -805,6 +805,32 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL bound_call_names_concrete_method: got '" + names44 + "', " + i64_to_string(pc44.mir.diags.length()) + " diagnostics")
+
+  // Tests 45–46: copy_out expanded per concrete type, as the host's: a
+  // string escaping a memory domain is copied by copy_out_string; a
+  // class without a copier is rebuilt field by field, its string field
+  // copied and its integer field taken as it is.
+  let hooks45: string = "module core::builtins\n\nfn copy_out<T>(x: T): T -> x\n\nextern fn __dao_str_copy_outer(s: string): string\n\nfn copy_out_string(s: string): string -> __dao_str_copy_outer(s)\n"
+  let in45: Vector<SourceInput> = Vector<SourceInput>::new()
+  in45 = in45.push(SourceInput("core_builtins.dao", hooks45, true))
+  in45 = in45.push(SourceInput("main.dao", "module app::main\n\nfn h(): i32\n  let s: string = \"a\"\n  resource memory scratch =>\n    s = \"b\"\n  return 0\n", false))
+  let pc45: ProgramConcrete = mono_of_program(in45)
+  let names45: string = mono_fn_names(pc45)
+  if pc45.mir.diags.length() == 0 and index_of(names45, "copy_out$") < 0:
+    print("PASS string_copy_out_expands")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL string_copy_out_expands: got '" + names45 + "', " + i64_to_string(pc45.mir.diags.length()) + " diagnostics")
+  let in46: Vector<SourceInput> = Vector<SourceInput>::new()
+  in46 = in46.push(SourceInput("core_builtins.dao", hooks45, true))
+  in46 = in46.push(SourceInput("main.dao", "module app::main\n\nclass P:\n  name: string\n  n: i32\n\nfn h(): i32\n  let p: P = P(\"a\", 1)\n  resource memory scratch =>\n    p = P(\"b\", 2)\n  return p.n\n", false))
+  let pc46: ProgramConcrete = mono_of_program(in46)
+  let names46: string = mono_fn_names(pc46)
+  if pc46.mir.diags.length() == 0 and index_of(names46, "copy_out$") < 0 and mir_count_kind(pc46.mir, "MirConstruct") >= 3:
+    print("PASS class_copy_out_expands_by_field")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL class_copy_out_expands_by_field: got '" + names46 + "', " + i64_to_string(mir_count_kind(pc46.mir, "MirConstruct")) + " constructs, " + i64_to_string(pc46.mir.diags.length()) + " diagnostics")
 
   // -----------------------------------------------------------------
   print("")
