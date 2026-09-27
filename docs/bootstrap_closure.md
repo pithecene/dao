@@ -10,39 +10,39 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 100365 |
-| `CallExpr` | 34105 |
-| `Callee` | 34105 |
-| `Args` | 30239 |
-| `FieldExpr` | 24947 |
-| `BinaryExpr` | 16164 |
-| `LetStatement` | 13522 |
-| `IntLiteral` | 11721 |
-| `Value` | 10580 |
-| `Target` | 10580 |
-| `Assignment` | 10580 |
-| `Condition` | 9455 |
-| `ReturnStatement` | 8051 |
-| `Then` | 7841 |
-| `IfStatement` | 7841 |
-| `StringLiteral` | 7231 |
-| `QualifiedName` | 7197 |
-| `Param` | 5874 |
-| `BoolLiteral` | 3538 |
-| `Pattern` | 3383 |
-| `Arm` | 3383 |
-| `ReturnType` | 2471 |
-| `FunctionDecl` | 2471 |
-| `WhileStatement` | 1614 |
-| `UnaryExpr` | 1551 |
-| `Else` | 1488 |
-| `Field` | 1414 |
-| `TypeArgs` | 1331 |
-| `Variant` | 1235 |
-| `Scrutinee` | 1001 |
-| `MatchStatement` | 1001 |
-| `ExpressionStatement` | 712 |
-| `ClassDecl` | 366 |
+| `Identifier` | 104380 |
+| `CallExpr` | 35840 |
+| `Callee` | 35840 |
+| `Args` | 31712 |
+| `FieldExpr` | 26316 |
+| `BinaryExpr` | 17020 |
+| `LetStatement` | 13952 |
+| `IntLiteral` | 12239 |
+| `Value` | 10870 |
+| `Target` | 10870 |
+| `Assignment` | 10870 |
+| `Condition` | 9736 |
+| `ReturnStatement` | 8362 |
+| `Then` | 8066 |
+| `IfStatement` | 8066 |
+| `StringLiteral` | 7694 |
+| `QualifiedName` | 7385 |
+| `Param` | 6102 |
+| `BoolLiteral` | 3633 |
+| `Pattern` | 3507 |
+| `Arm` | 3507 |
+| `ReturnType` | 2585 |
+| `FunctionDecl` | 2585 |
+| `WhileStatement` | 1670 |
+| `UnaryExpr` | 1606 |
+| `Else` | 1522 |
+| `Field` | 1458 |
+| `TypeArgs` | 1401 |
+| `Variant` | 1268 |
+| `Scrutinee` | 1050 |
+| `MatchStatement` | 1050 |
+| `ExpressionStatement` | 764 |
+| `ClassDecl` | 383 |
 | `BreakStatement` | 64 |
 | `ResourceBlock` | 40 |
 | `EnumDecl` | 31 |
@@ -59,12 +59,12 @@ bootstrap must compile for itself.
 
 | Function | Instantiations |
 |---|---|
-| `core::vector::Vector.refreshed` | 23 |
-| `core::vector::Vector.push` | 23 |
-| `core::vector::Vector.new` | 23 |
-| `core::vector::Vector.length` | 23 |
-| `core::vector::Vector.get` | 23 |
-| `core::vector::vec_log_values_new` | 23 |
+| `core::vector::Vector.refreshed` | 25 |
+| `core::vector::Vector.push` | 25 |
+| `core::vector::Vector.new` | 25 |
+| `core::vector::Vector.length` | 25 |
+| `core::vector::Vector.get` | 25 |
+| `core::vector::vec_log_values_new` | 25 |
 | `core::vector::Vector.copy_out` | 21 |
 | `core::vector::Vector.set` | 7 |
 | `core::vector::Vector.log_overwrite` | 7 |
@@ -210,8 +210,8 @@ bootstrap must compile for itself.
 | `core::convert::f32_to_i64` | 1 |
 | `core::convert::f32_to_i32` | 1 |
 | `core::convert::f32_to_f64` | 1 |
-| `size_of` (intrinsic; inlined by the host) | 47 |
-| `align_of` (intrinsic; inlined by the host) | 47 |
+| `size_of` (intrinsic; inlined by the host) | 51 |
+| `align_of` (intrinsic; inlined by the host) | 51 |
 
 The intrinsic family is counted from the MIR (distinct specializations
 of each), since the host lowers every specialization inline and emits no
@@ -233,14 +233,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 90 | 1 | 0 | 0 | 0 | 0 | 0 | 515 | 2448 | mir: unsupported expression kind in Tier A MIR lowering: HirQualName |
-| parser | 89 | 0 | 0 | 0 | 0 | 0 | 0 | 429 | 2539 | mir: unsupported expression kind in Tier A MIR lowering: HirQualName |
-| graph | 90 | 0 | 0 | 0 | 0 | 0 | 0 | 429 | 2451 | mir: unsupported expression kind in Tier A MIR lowering: HirQualName |
-| resolver | 215 | 1 | 0 | 0 | 0 | 0 | 0 | 497 | 4303 | mir: unsupported expression kind in Tier A MIR lowering: HirQualName |
-| typecheck | 953 | 2 | 0 | 0 | 0 | 0 | 0 | 602 | 8650 | mir: unsupported expression kind in Tier A MIR lowering: HirQualName |
-| hir | 1187 | 2 | 0 | 0 | 0 | 0 | 0 | 679 | 9150 | mir: unsupported expression kind in Tier A MIR lowering: HirQualName |
-| mir | 1208 | 2 | 0 | 0 | 0 | 0 | 0 | 763 | 9903 | mir: unsupported expression kind in Tier A MIR lowering: HirQualName |
-| llvm | 1567 | 2 | 0 | 0 | 0 | 0 | 0 | 865 | 11422 | mir: unsupported expression kind in Tier A MIR lowering: HirQualName |
+| lexer | 77 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2360 | llvm: unknown name 'Vector' |
+| parser | 83 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2612 | llvm: unknown name 'Vector' |
+| graph | 85 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2451 | llvm: unknown name 'Vector' |
+| resolver | 174 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 4768 | llvm: unknown name 'Vector' |
+| typecheck | 701 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 10046 | llvm: unknown name 'Vector' |
+| hir | 918 | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 11475 | llvm: unknown name 'Vector' |
+| mir | 1092 | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 13524 | llvm: unknown name 'Vector' |
+| llvm | 1279 | 4 | 0 | 0 | 0 | 0 | 0 | 0 | 14949 | llvm: unknown name 'Vector' |
 
 ### What each stage rejects
 
@@ -250,9 +250,6 @@ named, not inferred.
 
 **lexer**
 
-- `mir` ×37: unsupported expression kind in Tier A MIR lowering: HirQualName
-- `mir` ×9: unsupported assignment target
-- `mir` ×4: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `llvm` ×22: unknown name 'char_at'
 - `llvm` ×10: unknown name 'Vector'
 - `llvm` ×6: unknown name 'Span'
@@ -261,9 +258,6 @@ named, not inferred.
 
 **parser**
 
-- `mir` ×37: unsupported expression kind in Tier A MIR lowering: HirQualName
-- `mir` ×9: unsupported assignment target
-- `mir` ×4: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `llvm` ×22: unknown name 'char_at'
 - `llvm` ×10: unknown name 'Vector'
 - `llvm` ×6: unknown name 'Span'
@@ -272,9 +266,6 @@ named, not inferred.
 
 **graph**
 
-- `mir` ×37: unsupported expression kind in Tier A MIR lowering: HirQualName
-- `mir` ×9: unsupported assignment target
-- `mir` ×4: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `llvm` ×22: unknown name 'char_at'
 - `llvm` ×10: unknown name 'Vector'
 - `llvm` ×6: unknown name 'Span'
@@ -283,9 +274,6 @@ named, not inferred.
 
 **resolver**
 
-- `mir` ×37: unsupported expression kind in Tier A MIR lowering: HirQualName
-- `mir` ×9: unsupported assignment target
-- `mir` ×4: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `llvm` ×22: unknown name 'char_at'
 - `llvm` ×10: unknown name 'Vector'
 - `llvm` ×6: unknown name 'Span'
@@ -294,9 +282,6 @@ named, not inferred.
 
 **typecheck**
 
-- `mir` ×37: unsupported expression kind in Tier A MIR lowering: HirQualName
-- `mir` ×9: unsupported assignment target
-- `mir` ×4: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `llvm` ×22: unknown name 'char_at'
 - `llvm` ×10: unknown name 'Vector'
 - `llvm` ×6: unknown name 'Span'
@@ -305,9 +290,6 @@ named, not inferred.
 
 **hir**
 
-- `mir` ×37: unsupported expression kind in Tier A MIR lowering: HirQualName
-- `mir` ×9: unsupported assignment target
-- `mir` ×4: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `llvm` ×22: unknown name 'char_at'
 - `llvm` ×10: unknown name 'Vector'
 - `llvm` ×6: unknown name 'Span'
@@ -316,9 +298,6 @@ named, not inferred.
 
 **mir**
 
-- `mir` ×37: unsupported expression kind in Tier A MIR lowering: HirQualName
-- `mir` ×9: unsupported assignment target
-- `mir` ×4: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `llvm` ×22: unknown name 'char_at'
 - `llvm` ×10: unknown name 'Vector'
 - `llvm` ×6: unknown name 'Span'
@@ -327,9 +306,6 @@ named, not inferred.
 
 **llvm**
 
-- `mir` ×37: unsupported expression kind in Tier A MIR lowering: HirQualName
-- `mir` ×9: unsupported assignment target
-- `mir` ×4: unsupported statement kind in Tier A MIR lowering: HirBreak
 - `llvm` ×22: unknown name 'char_at'
 - `llvm` ×10: unknown name 'Vector'
 - `llvm` ×6: unknown name 'Span'
@@ -356,23 +332,23 @@ diagnostics per stage, and the first.
 | `stdlib/core/builtins.dao` | 0 | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/comparable.dao` | 0 | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/convert.dao` | 0 | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/diagnostic.dao` | 0 | 0 | 0 | 0 | 3 | unsupported expression kind in Tier A MIR lowering: HirQualName |
+| `stdlib/core/diagnostic.dao` | 0 | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/equatable.dao` | 0 | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/hashmap.dao` | 0 | 0 | 0 | 0 | 26 | unsupported expression kind in Tier A MIR lowering: HirQualName |
+| `stdlib/core/hashmap.dao` | 0 | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/math.dao` | 0 | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/memory.dao` | 0 | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/numeric.dao` | 0 | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/option.dao` | 0 | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/overflow.dao` | 0 | 0 | 0 | 0 | 31 | unsupported expression kind in Tier A MIR lowering: HirQualName |
+| `stdlib/core/overflow.dao` | 0 | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/panic.dao` | 0 | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/printable.dao` | 0 | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/range.dao` | 0 | 0 | 0 | 0 | 8 | unsupported statement kind in Tier A MIR lowering: HirYield |
+| `stdlib/core/range.dao` | 0 | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/result.dao` | 0 | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/span.dao` | 0 | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/string.dao` | 0 | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/text.dao` | 0 | 0 | 0 | 0 | 0 | — |
 | `stdlib/core/to_string.dao` | 0 | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/vector.dao` | 0 | 0 | 0 | 0 | 15 | unsupported expression kind in Tier A MIR lowering: HirQualName |
+| `stdlib/core/vector.dao` | 0 | 0 | 0 | 0 | 0 | — |
 | `stdlib/io/file.dao` | 0 | 0 | 0 | 0 | 0 | — |
 
 ### Parse-stage attribution
@@ -394,10 +370,10 @@ next.  Sites per program against the parse column above:
 | parser | 71 | 0 | 0 |
 | graph | 77 | 0 | 0 |
 | resolver | 126 | 0 | 0 |
-| typecheck | 273 | 0 | 0 |
-| hir | 240 | 4 | 0 |
-| mir | 267 | 8 | 0 |
-| llvm | 299 | 28 | 0 |
+| typecheck | 274 | 0 | 0 |
+| hir | 247 | 4 | 0 |
+| mir | 306 | 8 | 0 |
+| llvm | 332 | 28 | 0 |
 
 ### Closure surfaces: compiler implementation vs test harness
 
@@ -413,25 +389,25 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 
 | Prelude function | Compiler | Harness |
 |---|---:|---:|
-| `to_i64` | 823 | 160 |
-| `print` | 0 | 690 |
-| `new` | 293 | 107 |
-| `i64_to_string` | 104 | 207 |
-| `substring` | 25 | 11 |
+| `to_i64` | 937 | 160 |
+| `print` | 0 | 742 |
+| `new` | 324 | 111 |
+| `i64_to_string` | 107 | 262 |
+| `substring` | 32 | 11 |
+| `length` | 14 | 11 |
 | `char_at` | 23 | 0 |
 | `read_file` | 0 | 19 |
 | `make_error` | 18 | 0 |
-| `length` | 6 | 11 |
-| `index_of` | 0 | 17 |
+| `index_of` | 0 | 16 |
 | `file_exists` | 0 | 16 |
 | `i32_to_string` | 0 | 15 |
 | `eprint` | 0 | 13 |
+| `bool_to_string` | 0 | 6 |
 | `starts_with` | 3 | 0 |
-| `bool_to_string` | 0 | 3 |
 | `write_file` | 1 | 2 |
 | `make_warning` | 0 | 1 |
 | `str_compare` | 1 | 0 |
-| **Total** | **1297** | **1272** |
+| **Total** | **1460** | **1385** |
 
 ## 4. Reading the matrix
 
