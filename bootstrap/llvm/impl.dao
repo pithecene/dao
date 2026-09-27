@@ -1023,7 +1023,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       bs = bs_set_value(bs, mir_node_idx, cr.value_name, cr.ty_text)
       return LowerStepR(bs, insts)
 
-    MirNode::MirCall(callee, arg_list_lp, arg_count, type_idx):
+    MirNode::MirCall(callee, arg_list_lp, arg_count, type_idx, subst):
       let callee_text: string = bs_get_value_text(bs, callee)
       if callee_text == "":
         bs = bs_error(bs, "bootstrap llvm backend: MirCall callee has no mangled name (expected MirFnRef)")

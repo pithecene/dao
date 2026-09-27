@@ -489,7 +489,7 @@ fn main(): i32
   while i20 < hir_count_nodes(r20):
     let n20: HirNode = r20.hir_nodes.get(i20)
     match n20:
-      HirNode::HirCall(callee20, a20, n20c, t20):
+      HirNode::HirCall(callee20, a20, n20c, t20, s20):
         let callee_node20: HirNode = r20.hir_nodes.get(callee20)
         match callee_node20:
           HirNode::HirIdent(sym20, ti20, tok20):
@@ -652,7 +652,7 @@ fn main(): i32
   let i27b: i64 = 0
   while i27b < hir_count_nodes(r27b):
     match r27b.hir_nodes.get(i27b):
-      HirNode::HirCall(c27, a27, n27, t27):
+      HirNode::HirCall(c27, a27, n27, t27, s27):
         if hir_get_kind_at(r27b, c27) == "HirFieldAccess":
           bound_call_carried = true
     i27b = i27b + 1
@@ -701,7 +701,7 @@ fn main(): i32
   let i30b: i64 = 0
   while i30b < hir_count_nodes(r30b):
     match r30b.hir_nodes.get(i30b):
-      HirNode::HirCall(callee, args_lp, arg_count, ct):
+      HirNode::HirCall(callee, args_lp, arg_count, ct, csubst):
         if arg_count == 1:
           match r30b.hir_nodes.get(callee):
             HirNode::HirIdent(sym, typ, tok):
