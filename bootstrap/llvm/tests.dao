@@ -361,7 +361,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 34
+  let total: i32 = 36
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -923,6 +923,32 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL type_universe: " + diags_text(r34.diags))
+
+  // Test 35: a payload-bearing enum is built, matched and read through
+  // its layout: Rect(w = 3, h = 4) has area 12, and the program exits 0.
+  let r35: LlvmTextResult = lower_source_to_llvm_text("enum class Shape:\n  Circle(r: i32)\n  Rect(w: i32, h: i32)\n\nfn area(s: Shape): i32\n  match s:\n    Shape::Circle(r):\n      return r * r * 3\n    Shape::Rect(w, h):\n      return w * h\n  return 0\n\nfn main(): i32\n  let s: Shape = Shape::Rect(h = 4, w = 3)\n  return area(s) - 12\n")
+  write_failures = write_failures + emit_ir("enum_payload_roundtrip", r35, 0)
+  if r35.ok:
+    print("PASS enum_payload_roundtrip")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL enum_payload_roundtrip: " + diags_text(r35.diags))
+
+  // Test 36: pointers — allocated by the runtime, cast, walked, written
+  // and read through (`p.offset(1).set(5)`, `.get()`), sized by
+  // `size_of<i64>()`: the program exits 0.
+  // The runtime's allocator is declared by a prelude module: its `__dao_`
+  // name is reserved to the prelude.
+  let prog36: Vector<SourceInput> = Vector<SourceInput>::new()
+  prog36 = prog36.push(SourceInput("core_memory.dao", "module core::memory\n\nextern fn __dao_mem_alloc(size: i64, align: i64): Ptr<void>\n\nfn size_of<T>(): i64\n  let r: i64 = 0\n  return r\n", true))
+  prog36 = prog36.push(SourceInput("main.dao", "module app::main\n\nfn main(): i32\n  let got: i64 = 0\n  mode unsafe =>\n    let raw: Ptr<void> = __dao_mem_alloc(size_of<i64>() * 2, 8)\n    let p: Ptr<i64> = raw.cast<i64>()\n    p.offset(1).set(5)\n    got = p.offset(1).get()\n  if got == 5:\n    return 0\n  return 1\n", false))
+  let r36: LlvmTextResult = lower_program_to_llvm_text(prog36)
+  write_failures = write_failures + emit_ir("pointer_roundtrip", r36, 0)
+  if r36.ok and check_contains(r36, "getelementptr i64", "pointer_roundtrip"):
+    print("PASS pointer_roundtrip")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL pointer_roundtrip: " + diags_text(r36.diags))
 
   // -----------------------------------------------------------------
   // Summary
