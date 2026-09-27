@@ -244,20 +244,17 @@ fn main(): i32
     print("FAIL while_stmt: no MirCondBr")
 
   // -----------------------------------------------------------------
-  // Test 9: a resource block is rejected fail-closed — one diagnostic
-  // naming HirResource, nothing of the block lowered silently.
+  // Test 9: a resource block is a region (resource_enter / resource_exit),
+  // as the host's is.
   // -----------------------------------------------------------------
   let src9: string = "fn main(): i32\n  let x: i32 = 0\n  resource memory pool =>\n    x = 1\n  return x\n"
   let r9: MirResult = lower_to_mir(src9)
-  let rejected: bool = false
-  if r9.diags.length() == 1:
-    if index_of(r9.diags.get(0).message, "HirResource") >= 0:
-      rejected = true
-  if rejected:
-    print("PASS resource_block_rejected")
+  // An i32 owns no heap memory, so nothing is copied out of the domain.
+  if r9.diags.length() == 0 and mir_count_kind(r9, "MirResourceEnter") == 1 and mir_count_kind(r9, "MirResourceExit") == 1 and mir_count_kind(r9, "MirCall") == 0:
+    print("PASS resource_block_is_a_region")
     pass_count = pass_count + 1
   else:
-    print("FAIL resource_block_rejected: expected one diagnostic naming HirResource, got " + i64_to_string(r9.diags.length()))
+    print("FAIL resource_block_is_a_region: got " + i64_to_string(mir_count_kind(r9, "MirResourceExit")) + " exits, " + i64_to_string(r9.diags.length()) + " diagnostics")
 
   // -----------------------------------------------------------------
   // Tests 10–11: what HIR rejected fail-closed reaches MIR's result as
