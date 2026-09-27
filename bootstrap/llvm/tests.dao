@@ -247,11 +247,24 @@ fn closure_probe_stage(name: string, path: string, stage: string): string
     closure_report_diags_from(name, "mono", pc.mir.diags, carried_into_mono, to_i64(50))
     cols = cols + closure_stage_column(name, "mono", pc.mir.diags, carried_into_mono)
   if stage == "llvm":
+    // The whole program, prelude included, through the backend: what it
+    // reports beyond what MIR and monomorphization carried in, and the
+    // module written beside the probe for the audit to link and run.
+    let checked: ProbedProgram = closure_program_checked(name, path, src, false)
+    let pm: ProgramMir = ProgramMir(checked.program, mir_result_empty())
+    resource memory mir =>
+      pm = program_run_mir(checked.program)
+    let pc: ProgramConcrete = ProgramConcrete(pm.program, pm.mir)
+    resource memory mono =>
+      pc = program_monomorphize(checked.typed, pm)
+    let carried_into_llvm: i64 = pc.mir.diags.length()
     let ll: LlvmTextResult = llvm_text_result_empty()
     resource memory llvm =>
-      ll = lower_source_to_llvm_text(src)
-    closure_report_diags(name, "llvm", ll.diags, to_i64(50))
-    cols = cols + closure_stage_column(name, "llvm", ll.diags, to_i64(0))
+      ll = lower_mir_to_llvm_text(MirBackendInput(pc.mir, pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, Vector<Token>::new(), "", pc.program.graph.files))
+    closure_report_diags_from(name, "llvm", ll.diags, carried_into_llvm, to_i64(50))
+    cols = cols + closure_stage_column(name, "llvm", ll.diags, carried_into_llvm)
+    if ll.ok:
+      let wrote: bool = write_llvm_text(ll, "bootstrap/llvm/out/" + name + ".program.ll")
   return name + cols + "\n"
 
 // "\t<stage>=<count>", announcing the count and the stage's first

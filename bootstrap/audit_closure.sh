@@ -150,10 +150,25 @@ for p in $PROGRAMS; do
     fi
     # Stage counts and a first diagnostic survive on stderr even when the
     # stage dies part-way.
-    counts="$(grep -oE "^probe: $p (lex|parse|resolve|typecheck|hir|mir|llvm)=[0-9]+" "$AUDIT_OUT/probe-$p-$stage.log" | sed "s/^probe: $p //" | tr '\n' '\t' | sed 's/\t$//')"
+    counts="$(grep -oE "^probe: $p (lex|parse|resolve|typecheck|hir|mir|mono|llvm)=[0-9]+" "$AUDIT_OUT/probe-$p-$stage.log" | sed "s/^probe: $p //" | tr '\n' '\t' | sed 's/\t$//')"
     [ -n "$counts" ] && record="$record	$counts"
     break
   done
+  # The program as the bootstrap compiled it: its IR (written by the llvm
+  # stage) linked with the runtime and run; its suite's result, or why it
+  # did not run.
+  if [ -f "$OUT/$p.program.ll" ]; then
+    if ! clang -c -x ir "$OUT/$p.program.ll" -o "$AUDIT_OUT/$p.program.o" 2> "$AUDIT_OUT/$p.program.err"; then
+      record="$record	runs=LLVM rejected the IR: $(grep -m1 'error' "$AUDIT_OUT/$p.program.err" | cut -c1-120)"
+    elif ! clang "$AUDIT_OUT/$p.program.o" "$BUILD_DIR/runtime/core/libdao_runtime.a" -o "$AUDIT_OUT/$p.program" 2> "$AUDIT_OUT/$p.program.err"; then
+      record="$record	runs=link failed: $(grep -m1 'error\|undefined' "$AUDIT_OUT/$p.program.err" | cut -c1-120)"
+    else
+      ( ulimit -v "$LIMIT_KB"; timeout "$LIMIT_S" "$AUDIT_OUT/$p.program" ) > "$AUDIT_OUT/$p.program.run" 2>&1
+      run_status=$?
+      passed="$(grep -oE '[0-9]+ / [0-9]+ (tests )?passed' "$AUDIT_OUT/$p.program.run" | tail -1)"
+      record="$record	runs=${passed:-exit $run_status}"
+    fi
+  fi
   earlier="$(grep -m1 -oE "^probe: $p first [a-z]+: .*" "$AUDIT_OUT/probe-$p.log" | sed "s/^probe: $p first //")"
   if [ -n "$why" ]; then
     first="${earlier:+$earlier; then }in ${deepest}: $why"
@@ -224,15 +239,15 @@ resource_block_sites() {
   echo "A stage the program never reached reads as —; the last column says where"
   echo "it died and why."
   echo
-  echo "| Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | mono | llvm | First blocking diagnostic |"
-  echo "|---|---|---|---|---|---|---|---|---|---|---|---|"
+  echo "| Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | mono | llvm | runs | First blocking diagnostic |"
+  echo "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
   awk -F'\t' '{
-    name=$1; lex=""; parse=""; resolve=""; typecheck=""; hir=""; mir=""; mono=""; llvm=""; first=""; peak=""; secs="";
+    name=$1; lex=""; parse=""; resolve=""; typecheck=""; hir=""; mir=""; mono=""; llvm=""; runs=""; first=""; peak=""; secs="";
     for (i = 2; i <= NF; i++) {
       split($i, kv, "="); key=kv[1]; val=substr($i, length(key) + 2);
       if (key == "lex") lex=val; else if (key == "parse") parse=val; else if (key == "resolve") resolve=val;
       else if (key == "typecheck") typecheck=val; else if (key == "hir") hir=val;
-      else if (key == "mir") mir=val; else if (key == "mono") mono=val; else if (key == "llvm") llvm=val; else if (key == "first") first=val;
+      else if (key == "mir") mir=val; else if (key == "mono") mono=val; else if (key == "llvm") llvm=val; else if (key == "runs") runs=val; else if (key == "first") first=val;
       else if (key == "peak_mb") peak=val; else if (key == "seconds") secs=val;
       else if (key == "missing") first="not assembled: " val;
     }
@@ -240,8 +255,9 @@ resource_block_sites() {
     # A stage the program never reached (it died earlier; the last column
     # says where and why) reads as a dash, not as an empty count.
     if (lex == "") lex = "—"; if (parse == "") parse = "—"; if (resolve == "") resolve = "—"; if (typecheck == "") typecheck = "—";
-    if (hir == "") hir = "—"; if (mir == "") mir = "—"; if (mono == "") mono = "—"; if (llvm == "") llvm = "—";
-    printf "| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", name, peak, secs, lex, parse, resolve, typecheck, hir, mir, mono, llvm, (first == "" ? "—" : first);
+    if (hir == "") hir = "—"; if (mir == "") mir = "—"; if (mono == "") mono = "—"; if (llvm == "") llvm = "—"; if (runs == "") runs = "—";
+    gsub(/\|/, "\\|", runs);
+    printf "| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", name, peak, secs, lex, parse, resolve, typecheck, hir, mir, mono, llvm, runs, (first == "" ? "—" : first);
   }' "$AUDIT_OUT/closure.txt"
   echo
   echo "### What each stage rejects"
@@ -264,15 +280,15 @@ resource_block_sites() {
   done
   echo "### The prelude through the bootstrap"
   echo
-  echo "The \`resolve\`, \`typecheck\`, \`hir\` and \`mir\` columns above are measured"
+  echo "Every column above is measured"
   echo "with the prelude in the program -- every module under \`stdlib/core/\` and"
   echo "\`stdlib/io/\` (CONTRACT_MODULE_SYSTEM.md §7), loaded as declarations,"
   echo "whatever the bootstrap parser keeps of each file; the \`hir\` and \`mir\`"
   echo "columns count what program-level lowering (\`program_run_hir\`,"
-  echo "\`program_run_mir\`) adds for the compiler program's own file.  The \`llvm\`"
-  echo "column runs the single-source adapter without it (the bootstrap has no"
-  echo "program-level LLVM driver) and does not choose the frontier until the"
-  echo "program pipeline reaches it."
+  echo "\`program_run_mir\`) adds for the compiler program's own file; \`mono\`"
+  echo "and \`llvm\` what monomorphization and the backend add over the whole"
+  echo "program; \`runs\` is the program as the bootstrap compiled it, linked with"
+  echo "the runtime and run: its suite's result."
   echo
   echo "Per prelude file, the prelude group alone through the pipeline:"
   echo "diagnostics per stage, and the first."
@@ -369,8 +385,8 @@ PYSPLIT
   echo "- A stage with zero diagnostics on every program is closed for the corpus."
   echo "- The first blocking diagnostic names the construct to implement next for"
   echo "  that stage; rerun the audit after each slice."
-  echo "- The \`llvm\` column is measured without the prelude (see the prelude"
-  echo "  section) and is not frontier evidence yet."
+  echo "- \`runs\` reaching every suite's full pass count is the Stage-2"
+  echo "  precondition: the bootstrap compiles the compiler's programs correctly."
 } > "$DOC"
 
 echo "audit: wrote $DOC"
