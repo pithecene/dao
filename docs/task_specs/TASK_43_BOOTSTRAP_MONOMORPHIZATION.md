@@ -91,3 +91,17 @@ Program-level LLVM (Task 44); the Stage-2 crossing (Task 45).
 Every compiler program and the prelude it uses are concrete after the
 pass: no template reference and no type parameter left in any module
 function; the audit shows it.
+
+## 7. Delivered
+
+Five slices, each checked against `daoc mir`: every call's substitution
+recorded where the checker decides it and carried on HIR and MIR calls
+(1); specializations keyed by template and arguments, cloned with every
+type substituted and named `name$…`, the concreteness invariant in place
+of the backend's template-reference check (2), which covered generic
+classes' methods and static factories; a call through a bound
+dispatched to the concrete receiver's method (3); `copy_out` expanded
+per concrete type (4); the audit's `mono` column (5).  The intrinsics
+`size_of$T` / `align_of$T` stay calls for the backend to inline, as the
+host's do.  The closure report reads zero `mono` diagnostics on every
+compiler program.
