@@ -395,7 +395,10 @@ fn main(): i32
   let consts20: Vector<i64> = Vector<i64>::new()
   if main_fn >= 0:
     consts20 = mir_fn_int_consts(r19, main_fn)
-  if consts20.length() == 3 and consts20.get(0) == 7 and consts20.get(1) == 40 and consts20.get(2) == 2:
+  let read20: bool = false
+  if consts20.length() == 3:
+    read20 = consts20.get(0) == 7 and consts20.get(1) == 40 and consts20.get(2) == 2
+  if read20:
     print("PASS literal_reads_its_module_source")
     pass_count = pass_count + 1
   else:
@@ -416,14 +419,19 @@ fn main(): i32
   // Test 22: a MIR diagnostic is on the file of the module it came from.
   let two22: Vector<SourceInput> = Vector<SourceInput>::new()
   two22 = two22.push(SourceInput("core_util.dao", "module core::util\n\nfn add(a: i32, b: i32): i32 -> a + b\n", true))
-  two22 = two22.push(SourceInput("main.dao", "module app::main\n\nfn main(): i32\n  while true:\n    break\n  return add(1, 2)\n", false))
+  two22 = two22.push(SourceInput("main.dao", "module app::main\n\nclass P:\n  x: i32\n\nfn mk(): P -> P(1)\n\nfn main(): i32\n  mk().x = 2\n  return add(1, 2)\n", false))
   let pm22: ProgramMir = mir_of_program(two22)
   let d22: Vector<FileDiagnostic> = pm22.program.diags
-  if d22.length() == 1 and d22.get(0).path == "main.dao" and index_of(d22.get(0).diag.message, "HirBreak") >= 0:
+  // `mk().x = 2` stores to no local: MIR reports the target.  (`and`
+  // evaluates both sides, so the diagnostic is read only when present.)
+  let on_main22: bool = false
+  if d22.length() == 1:
+    on_main22 = d22.get(0).path == "main.dao" and index_of(d22.get(0).diag.message, "unsupported assignment target") >= 0
+  if on_main22:
     print("PASS mir_diagnostic_on_its_module_file")
     pass_count = pass_count + 1
   else:
-    print("FAIL mir_diagnostic_on_its_module_file: expected one diagnostic naming HirBreak on main.dao, got " + i64_to_string(d22.length()))
+    print("FAIL mir_diagnostic_on_its_module_file: expected one diagnostic naming the assignment target on main.dao, got " + i64_to_string(d22.length()))
 
   // Test 23: a match on a payload-bearing enum lowers as the host's does
   // (`daoc mir`): the scrutinee stored to a local, enum_discriminant

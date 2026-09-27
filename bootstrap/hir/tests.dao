@@ -618,11 +618,12 @@ fn main(): i32
     match r25.hir_nodes.get(oi):
       HirNode::HirEnumConstruct(variant, payload_lp, payload_count, ti):
         let pairs25: Vector<i64> = read_pairs(r25.hir_idx, payload_lp)
-        if payload_count == 2 and pairs25.get(1) == 1 and pairs25.get(3) == 0:
-          match r25.hir_nodes.get(pairs25.get(0)):
-            HirNode::HirIntLit(lit_value, lit_ti):
-              if lit_value == 2:
-                order_ok = true
+        if payload_count == 2:
+          if pairs25.get(1) == 1 and pairs25.get(3) == 0:
+            match r25.hir_nodes.get(pairs25.get(0)):
+              HirNode::HirIntLit(lit_value, lit_ti):
+                if lit_value == 2:
+                  order_ok = true
     oi = oi + 1
   if r25.root >= 0 and order_ok and hir_count_diags(r25) == 0:
     print("PASS named_construction_in_field_order")
