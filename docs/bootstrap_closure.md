@@ -10,41 +10,41 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 98714 |
-| `CallExpr` | 33427 |
-| `Callee` | 33427 |
-| `Args` | 29661 |
-| `FieldExpr` | 24348 |
-| `BinaryExpr` | 15774 |
-| `LetStatement` | 13354 |
-| `IntLiteral` | 11479 |
-| `Value` | 10424 |
-| `Target` | 10424 |
-| `Assignment` | 10424 |
-| `Condition` | 9333 |
-| `ReturnStatement` | 7913 |
-| `Then` | 7752 |
-| `IfStatement` | 7752 |
-| `QualifiedName` | 7107 |
-| `StringLiteral` | 7062 |
-| `Param` | 5755 |
-| `BoolLiteral` | 3482 |
-| `Pattern` | 3310 |
-| `Arm` | 3310 |
-| `ReturnType` | 2416 |
-| `FunctionDecl` | 2416 |
-| `WhileStatement` | 1581 |
-| `UnaryExpr` | 1529 |
-| `Else` | 1470 |
-| `Field` | 1388 |
-| `TypeArgs` | 1305 |
-| `Variant` | 1223 |
-| `Scrutinee` | 968 |
-| `MatchStatement` | 968 |
-| `ExpressionStatement` | 691 |
-| `ClassDecl` | 354 |
+| `Identifier` | 99524 |
+| `CallExpr` | 33815 |
+| `Callee` | 33815 |
+| `Args` | 29965 |
+| `FieldExpr` | 24695 |
+| `BinaryExpr` | 15944 |
+| `LetStatement` | 13437 |
+| `IntLiteral` | 11607 |
+| `Value` | 10503 |
+| `Target` | 10503 |
+| `Assignment` | 10503 |
+| `Condition` | 9397 |
+| `ReturnStatement` | 7972 |
+| `Then` | 7793 |
+| `IfStatement` | 7793 |
+| `QualifiedName` | 7138 |
+| `StringLiteral` | 7111 |
+| `Param` | 5805 |
+| `BoolLiteral` | 3518 |
+| `Pattern` | 3339 |
+| `Arm` | 3339 |
+| `ReturnType` | 2440 |
+| `FunctionDecl` | 2440 |
+| `WhileStatement` | 1604 |
+| `UnaryExpr` | 1539 |
+| `Else` | 1477 |
+| `Field` | 1408 |
+| `TypeArgs` | 1331 |
+| `Variant` | 1225 |
+| `Scrutinee` | 987 |
+| `MatchStatement` | 987 |
+| `ExpressionStatement` | 702 |
+| `ClassDecl` | 363 |
 | `BreakStatement` | 64 |
-| `ResourceBlock` | 41 |
+| `ResourceBlock` | 40 |
 | `EnumDecl` | 31 |
 | `ExprBody` | 27 |
 | `EnumClassDecl` | 14 |
@@ -233,14 +233,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 82 | 1 | 0 | 0 | 0 | 0 | 0 | 984 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 89 | 1 | 0 | 0 | 0 | 0 | 0 | 996 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 91 | 1 | 0 | 0 | 0 | 0 | 0 | 943 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 207 | 0 | 0 | 0 | 0 | 0 | 0 | 1694 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 919 | 2 | 0 | 0 | 0 | 0 | 0 | 3305 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 1247 | 2 | 0 | 0 | 0 | 0 | 0 | 3605 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 1153 | 2 | 0 | 0 | 0 | 0 | 0 | 3816 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 1406 | 3 | 0 | 0 | 0 | 0 | 0 | 4432 | — | mir: unknown name 'Vector'; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 84 | 1 | 0 | 0 | 0 | 0 | 0 | 651 | — | mir: unsupported expression kind in Tier A MIR lowering: HirQualName; then in llvm: panic: Vector.get: index out of bounds |
+| parser | 86 | 1 | 0 | 0 | 0 | 0 | 0 | 609 | — | mir: unsupported expression kind in Tier A MIR lowering: HirQualName; then in llvm: panic: Vector.get: index out of bounds |
+| graph | 87 | 1 | 0 | 0 | 0 | 0 | 0 | 565 | — | mir: unsupported expression kind in Tier A MIR lowering: HirQualName; then in llvm: panic: Vector.get: index out of bounds |
+| resolver | 178 | 1 | 0 | 0 | 0 | 0 | 0 | 818 | — | mir: unsupported expression kind in Tier A MIR lowering: HirQualName; then in llvm: panic: Vector.get: index out of bounds |
+| typecheck | 699 | 2 | 0 | 0 | 0 | 0 | 0 | 1284 | — | mir: unsupported expression kind in Tier A MIR lowering: HirQualName; then in llvm: panic: Vector.get: index out of bounds |
+| hir | 863 | 2 | 0 | 0 | 0 | 0 | 0 | 1556 | — | mir: unsupported expression kind in Tier A MIR lowering: HirQualName; then in llvm: panic: Vector.get: index out of bounds |
+| mir | 912 | 2 | 0 | 0 | 0 | 0 | 0 | 1712 | — | mir: unsupported expression kind in Tier A MIR lowering: HirQualName; then in llvm: panic: Vector.get: index out of bounds |
+| llvm | 1083 | 3 | 0 | 0 | 0 | 0 | 0 | 1889 | — | mir: unsupported expression kind in Tier A MIR lowering: HirQualName; then in llvm: panic: Vector.get: index out of bounds |
 
 ### What each stage rejects
 
@@ -250,106 +250,82 @@ named, not inferred.
 
 **lexer**
 
-- `mir` ×22: unknown name 'char_at'
-- `mir` ×10: unknown name 'Vector'
-- `mir` ×6: unknown name 'Span'
-- `mir` ×6: unknown name 'make_error'
-- `mir` ×3: unknown name 'to_i64'
+- `mir` ×49: unsupported expression kind in Tier A MIR lowering: HirQualName
+- `mir` ×1: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 
 **parser**
 
-- `mir` ×22: unknown name 'char_at'
-- `mir` ×10: unknown name 'Vector'
-- `mir` ×6: unknown name 'Span'
-- `mir` ×6: unknown name 'make_error'
-- `mir` ×3: unknown name 'to_i64'
+- `mir` ×49: unsupported expression kind in Tier A MIR lowering: HirQualName
+- `mir` ×1: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 
 **graph**
 
-- `mir` ×22: unknown name 'char_at'
-- `mir` ×10: unknown name 'Vector'
-- `mir` ×6: unknown name 'Span'
-- `mir` ×6: unknown name 'make_error'
-- `mir` ×3: unknown name 'to_i64'
+- `mir` ×49: unsupported expression kind in Tier A MIR lowering: HirQualName
+- `mir` ×1: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 
 **resolver**
 
-- `mir` ×22: unknown name 'char_at'
-- `mir` ×10: unknown name 'Vector'
-- `mir` ×6: unknown name 'Span'
-- `mir` ×6: unknown name 'make_error'
-- `mir` ×3: unknown name 'to_i64'
+- `mir` ×49: unsupported expression kind in Tier A MIR lowering: HirQualName
+- `mir` ×1: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 
 **typecheck**
 
-- `mir` ×22: unknown name 'char_at'
-- `mir` ×10: unknown name 'Vector'
-- `mir` ×6: unknown name 'Span'
-- `mir` ×6: unknown name 'make_error'
-- `mir` ×3: unknown name 'to_i64'
+- `mir` ×49: unsupported expression kind in Tier A MIR lowering: HirQualName
+- `mir` ×1: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 
 **hir**
 
-- `mir` ×22: unknown name 'char_at'
-- `mir` ×10: unknown name 'Vector'
-- `mir` ×6: unknown name 'Span'
-- `mir` ×6: unknown name 'make_error'
-- `mir` ×3: unknown name 'to_i64'
+- `mir` ×49: unsupported expression kind in Tier A MIR lowering: HirQualName
+- `mir` ×1: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 
 **mir**
 
-- `mir` ×22: unknown name 'char_at'
-- `mir` ×10: unknown name 'Vector'
-- `mir` ×6: unknown name 'Span'
-- `mir` ×6: unknown name 'make_error'
-- `mir` ×3: unknown name 'to_i64'
+- `mir` ×49: unsupported expression kind in Tier A MIR lowering: HirQualName
+- `mir` ×1: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 
 **llvm**
 
-- `mir` ×22: unknown name 'char_at'
-- `mir` ×10: unknown name 'Vector'
-- `mir` ×6: unknown name 'Span'
-- `mir` ×6: unknown name 'make_error'
-- `mir` ×3: unknown name 'to_i64'
+- `mir` ×49: unsupported expression kind in Tier A MIR lowering: HirQualName
+- `mir` ×1: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
 
 ### The prelude through the bootstrap
 
-The `resolve`, `typecheck` and `hir` columns above are measured with
-the prelude in the program -- every module under `stdlib/core/` and
+The `resolve`, `typecheck`, `hir` and `mir` columns above are measured
+with the prelude in the program -- every module under `stdlib/core/` and
 `stdlib/io/` (CONTRACT_MODULE_SYSTEM.md §7), loaded as declarations,
-whatever the bootstrap parser keeps of each file; the `hir` column counts
-what program-level lowering (`program_run_hir`) adds for the compiler
-program's own file.  The `mir` and `llvm` columns run the
-single-source adapters without it (the bootstrap has no program-level
-MIR or LLVM driver) and do not choose the frontier until the program
-pipeline reaches them.
+whatever the bootstrap parser keeps of each file; the `hir` and `mir`
+columns count what program-level lowering (`program_run_hir`,
+`program_run_mir`) adds for the compiler program's own file.  The `llvm`
+column runs the single-source adapter without it (the bootstrap has no
+program-level LLVM driver) and does not choose the frontier until the
+program pipeline reaches it.
 
 Per prelude file, the prelude group alone through the pipeline:
 diagnostics per stage, and the first.
 
-| File | parse | resolve | typecheck | hir | First diagnostic |
-|---|---|---|---|---|---|
-| `stdlib/core/builtins.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/comparable.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/convert.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/diagnostic.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/equatable.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/hashmap.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/math.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/memory.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/numeric.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/option.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/overflow.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/panic.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/printable.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/range.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/result.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/span.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/string.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/text.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/to_string.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/core/vector.dao` | 0 | 0 | 0 | 0 | — |
-| `stdlib/io/file.dao` | 0 | 0 | 0 | 0 | — |
+| File | parse | resolve | typecheck | hir | mir | First diagnostic |
+|---|---|---|---|---|---|---|
+| `stdlib/core/builtins.dao` | 0 | 0 | 0 | 0 | 0 | — |
+| `stdlib/core/comparable.dao` | 0 | 0 | 0 | 0 | 0 | — |
+| `stdlib/core/convert.dao` | 0 | 0 | 0 | 0 | 0 | — |
+| `stdlib/core/diagnostic.dao` | 0 | 0 | 0 | 0 | 3 | unsupported expression kind in Tier A MIR lowering: HirQualName |
+| `stdlib/core/equatable.dao` | 0 | 0 | 0 | 0 | 0 | — |
+| `stdlib/core/hashmap.dao` | 0 | 0 | 0 | 0 | 26 | unsupported expression kind in Tier A MIR lowering: HirQualName |
+| `stdlib/core/math.dao` | 0 | 0 | 0 | 0 | 0 | — |
+| `stdlib/core/memory.dao` | 0 | 0 | 0 | 0 | 0 | — |
+| `stdlib/core/numeric.dao` | 0 | 0 | 0 | 0 | 0 | — |
+| `stdlib/core/option.dao` | 0 | 0 | 0 | 0 | 0 | — |
+| `stdlib/core/overflow.dao` | 0 | 0 | 0 | 0 | 31 | unsupported expression kind in Tier A MIR lowering: HirQualName |
+| `stdlib/core/panic.dao` | 0 | 0 | 0 | 0 | 0 | — |
+| `stdlib/core/printable.dao` | 0 | 0 | 0 | 0 | 0 | — |
+| `stdlib/core/range.dao` | 0 | 0 | 0 | 0 | 8 | unsupported statement kind in Tier A MIR lowering: HirYield |
+| `stdlib/core/result.dao` | 0 | 0 | 0 | 0 | 0 | — |
+| `stdlib/core/span.dao` | 0 | 0 | 0 | 0 | 0 | — |
+| `stdlib/core/string.dao` | 0 | 0 | 0 | 0 | 0 | — |
+| `stdlib/core/text.dao` | 0 | 0 | 0 | 0 | 0 | — |
+| `stdlib/core/to_string.dao` | 0 | 0 | 0 | 0 | 0 | — |
+| `stdlib/core/vector.dao` | 0 | 0 | 0 | 0 | 15 | unsupported expression kind in Tier A MIR lowering: HirQualName |
+| `stdlib/io/file.dao` | 0 | 0 | 0 | 0 | 0 | — |
 
 ### Parse-stage attribution
 
@@ -372,8 +348,8 @@ next.  Sites per program against the parse column above:
 | resolver | 126 | 0 | 0 |
 | typecheck | 273 | 0 | 0 |
 | hir | 240 | 4 | 0 |
-| mir | 251 | 9 | 0 |
-| llvm | 289 | 28 | 0 |
+| mir | 267 | 8 | 0 |
+| llvm | 299 | 28 | 0 |
 
 ### Closure surfaces: compiler implementation vs test harness
 
@@ -389,25 +365,25 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 
 | Prelude function | Compiler | Harness |
 |---|---:|---:|
-| `to_i64` | 785 | 156 |
-| `print` | 0 | 670 |
-| `new` | 283 | 101 |
-| `i64_to_string` | 98 | 184 |
+| `to_i64` | 817 | 160 |
+| `print` | 0 | 680 |
+| `new` | 293 | 107 |
+| `i64_to_string` | 101 | 194 |
 | `substring` | 26 | 12 |
 | `char_at` | 23 | 0 |
 | `read_file` | 0 | 19 |
+| `make_error` | 18 | 0 |
 | `length` | 6 | 11 |
-| `make_error` | 16 | 0 |
-| `index_of` | 0 | 16 |
+| `index_of` | 0 | 17 |
 | `file_exists` | 0 | 16 |
 | `i32_to_string` | 0 | 15 |
-| `eprint` | 0 | 12 |
+| `eprint` | 0 | 13 |
 | `starts_with` | 3 | 0 |
 | `bool_to_string` | 0 | 3 |
 | `write_file` | 1 | 2 |
 | `make_warning` | 0 | 1 |
 | `str_compare` | 1 | 0 |
-| **Total** | **1242** | **1218** |
+| **Total** | **1289** | **1250** |
 
 ## 4. Reading the matrix
 
@@ -418,5 +394,5 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 - A stage with zero diagnostics on every program is closed for the corpus.
 - The first blocking diagnostic names the construct to implement next for
   that stage; rerun the audit after each slice.
-- The `mir` and `llvm` columns are measured without the prelude
-  (see the prelude section) and are not frontier evidence yet.
+- The `llvm` column is measured without the prelude (see the prelude
+  section) and is not frontier evidence yet.
