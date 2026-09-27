@@ -1338,8 +1338,10 @@ fn find_prelude_copy_out(p: Program, ms: MS): i64
               while di < decls.length():
                 match ms.hir_nodes.get(decls.get(di)):
                   HirNode::HirFunction(sym, tparams_lp, params_lp, ret_ti, body_lp, is_extern, class_owner):
-                    if class_owner < 0 and sym >= 0 and ms.symbols.get(sym).name == "copy_out" and read_hir_list_count(ms.hir_idx, params_lp) == 1:
-                      return sym
+                    // (`and` evaluates both sides: the name is read only for a symbol.)
+                    if class_owner < 0 and sym >= 0:
+                      if ms.symbols.get(sym).name == "copy_out" and read_hir_list_count(ms.hir_idx, params_lp) == 1:
+                        return sym
                 di = di + to_i64(1)
         mi = mi + to_i64(1)
   return to_i64(-1)
@@ -2391,7 +2393,11 @@ fn mono_expand_copy_at(m: Mono, fn_node: i64, block: i64, call: i64, callee: i64
     TypeKind::TStruct:
       let owner_ti: i64 = dispatch_owner(m.tables.ts.types, m.tables.ts.type_info, ti)
       let copier: i64 = find_inherent_method_sym(m.tables.ts.reg.methods, "copy_out", owner_ti)
-      if copier >= 0 and mono_is_copier(m, copier, owner_ti):
+      // (`and` evaluates both sides: the copier is checked only when found.)
+      let has_copier: bool = false
+      if copier >= 0:
+        has_copier = mono_is_copier(m, copier, owner_ti)
+      if has_copier:
         // The class copies itself; the receiver is the one argument, and
         // what the copier is generic over is decided from it.
         m.tables.nodes = m.tables.nodes.set(callee, MirNode::MirFnRef(sym = copier, type_idx = m.tables.ts.sym_types.get(copier)))
