@@ -88,7 +88,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 28
+  let total: i32 = 32
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -548,6 +548,14 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL break_leaves_mode_region: got " + i64_to_string(mir_count_kind(r29, "MirModeExit")) + " exits, " + i64_to_string(r29.diags.length()) + " diagnostics")
+  // Test 29b: a generator stored inside a memory domain it was declared
+  // outside of cannot be copied out; rejected, as the host rejects it.
+  let r29b: MirResult = lower_to_mir("extern fn make(): Generator<i32>\n\nfn f(g: Generator<i32>): void\n  resource memory scratch =>\n    g = make()\n")
+  if mir_diag_mentions(r29b, "a generator cannot be copied out of the block") and mir_count_kind(r29b, "MirCall") == 1:
+    print("PASS generator_escape_rejected")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL generator_escape_rejected: got " + i64_to_string(r29b.diags.length()) + " diagnostics, " + i64_to_string(mir_count_kind(r29b, "MirCall")) + " calls")
 
   // -----------------------------------------------------------------
   print("")

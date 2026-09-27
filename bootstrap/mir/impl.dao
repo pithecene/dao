@@ -696,7 +696,18 @@ fn lower_resource(br: BlockR, stmt: i64, kind_tok: i64, name_tok: i64, body_lp: 
   let escapes: Vector<i64> = Vector<i64>::new()
   let flags: Vector<i64> = Vector<i64>::new()
   if mir_tok_text(cur.ms, kind_tok) == "memory":
-    escapes = resource_escapes(cur.ms, body_lp, Vector<i64>::new())
+    let stored: Vector<i64> = resource_escapes(cur.ms, body_lp, Vector<i64>::new())
+    // A generator's frame layout is private to its function, so no
+    // copier can move it out of the domain: its escape is rejected, as
+    // the host's checker rejects it.
+    let si: i64 = to_i64(0)
+    while si < stored.length():
+      let slot: i64 = stored.get(si)
+      if mir_holds_generator(cur.ms, mir_local_type(cur.ms, slot)):
+        cur.ms = ms_add_diag(cur.ms, Span(to_i64(0), to_i64(1)), "'" + mir_local_name(cur.ms, slot) + "' is declared outside resource block '" + mir_tok_text(cur.ms, name_tok) + "' and stored to inside it: a generator cannot be copied out of the block")
+      else:
+        escapes = escapes.push(slot)
+      si = si + to_i64(1)
     let ei: i64 = to_i64(0)
     while ei < escapes.length():
       let flag: MirR = ms_declare_local(cur.ms, to_i64(-1), mir_bool_type(), false)
@@ -845,6 +856,42 @@ fn mir_local_type(ms: MS, slot: i64): i64
     MirNode::MirLocal(sym, type_idx, is_param):
       return type_idx
   return to_i64(-1)
+
+// Whether a value of `ti` is, or holds by value, a generator (the host's
+// holds_generator).
+fn mir_holds_generator(ms: MS, ti: i64): bool
+  return mir_generator_search(ms, ti, HashMap<i64>::new()).found
+
+fn mir_generator_search(ms: MS, ti: i64, seen: HashMap<i64>): GenericSearch
+  if ti < 0 or ti >= ms.types.length():
+    return GenericSearch(seen, false)
+  let key: string = i64_to_string(ti)
+  if seen.contains(key):
+    return GenericSearch(seen, false)
+  let so_far: HashMap<i64> = seen.set(key, to_i64(1))
+  let t: DaoType = ms.types.get(ti)
+  match t.kind:
+    TypeKind::TGenerator:
+      return GenericSearch(so_far, true)
+    TypeKind::TStruct:
+      let fi: i64 = to_i64(0)
+      while fi < t.info_count:
+        let sub: GenericSearch = mir_generator_search(ms, ms.type_info.get(t.info_lp + fi * to_i64(2) + to_i64(1)), so_far)
+        if sub.found:
+          return sub
+        so_far = sub.seen
+        fi = fi + to_i64(1)
+  return GenericSearch(so_far, false)
+
+// The name of a local slot's binding ("" for a synthesized local).
+fn mir_local_name(ms: MS, slot: i64): string
+  if slot < 0 or slot >= ms.locals.length():
+    return ""
+  match ms.mir_nodes.get(ms.locals.get(slot)):
+    MirNode::MirLocal(sym, type_idx, is_param):
+      if sym >= 0 and sym < ms.symbols.length():
+        return ms.symbols.get(sym).name
+  return ""
 
 // A token's text in the module being lowered.
 fn mir_tok_text(ms: MS, tok: i64): string
