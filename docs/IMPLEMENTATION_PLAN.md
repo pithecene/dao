@@ -924,7 +924,7 @@ the Stage-2 crossing (Task 45).
 
 ### Task 43 — Bootstrap Monomorphization
 
-Status: **in progress** — `docs/task_specs/TASK_43_BOOTSTRAP_MONOMORPHIZATION.md`.
+Status: **complete** — `docs/task_specs/TASK_43_BOOTSTRAP_MONOMORPHIZATION.md`.
 Authorized after Task 42.
 
 **Objective**: make the program's MIR concrete, as the host's
@@ -934,6 +934,21 @@ the concrete type's method; a value copied out of a memory domain is
 copied by what its concrete type needs — with the concreteness
 invariant checked, and the audit's `mono` column measuring what stays
 generic.
+
+**Outcome** (`docs/bootstrap_closure.md`): every compiler program, with
+the prelude, is concrete after the pass — the `mono` column reads zero
+on all eight.  Delivered in slices, each checked against `daoc mir`:
+
+- 1 each call's substitution recorded by the checker and carried on HIR
+  and MIR calls; 2 specializations keyed by (template, arguments),
+  named `name$…`, the concreteness invariant replacing the backend's
+  template-reference check; 3 calls through a bound dispatched to the
+  concrete receiver's method; 4 `copy_out` expanded per concrete type;
+  5 the audit's `mono` column.
+
+**Handed on**: the `llvm` column, still measured by the Tier A backend
+(`unknown name 'Vector'` on every program), is program-level LLVM
+(Task 44).
 
 ### Task 14 — Numeric Type Expansion
 
