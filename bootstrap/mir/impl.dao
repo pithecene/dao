@@ -15,7 +15,7 @@ module bootstrap::mir::impl
 // Deferred to Tier B (same deferrals as the bootstrap HIR, plus):
 //   - Generators (iter init/has_next/next/destroy/yield)
 //   - Monomorphization / generic template separation
-//   - Mode blocks; resource-block domains (HirResource is rejected with
+//   - (mode and resource blocks lower to regions: Task 42 slice 5)
 //     a diagnostic until the domain is represented in MIR)
 //   - Enum construction / discriminant / payload
 //   - Lambda / closures
@@ -113,6 +113,15 @@ enum class MirNode:
   // projections).  An empty path stores the whole local.
   MirStore(local_idx: i64, path_lp: i64, path_count: i64, value: i64)
 
+  // Execution-mode and resource regions (the host's mode_enter /
+  // mode_exit, resource_enter / resource_exit).  Token indices are the
+  // module's; a resource region's exit names its domain handle, the
+  // value of its resource_enter.
+  MirModeEnter(name_tok: i64)
+  MirModeExit(name_tok: i64)
+  MirResourceEnter(kind_tok: i64, name_tok: i64)
+  MirResourceExit(kind_tok: i64, name_tok: i64, handle: i64)
+
   // ---------- terminators (must be last in a block) ----------
 
   MirReturn(value: i64, has_value: i64)
@@ -152,7 +161,31 @@ class MS:
   sym_to_local: HashMap<i64> // resolver sym_idx (as string) → local slot index
   next_block_id: i64        // for block.id numbering
   in_template: bool         // lowering a generic function's template
-  loop_exits: Vector<i64>   // exit block of each enclosing loop, innermost last
+  flow: Flow                // enclosing loops and regions
+  copy_out_sym: i64         // the prelude's `copy_out`, for resource exits (-1 when absent)
+
+// A loop being lowered: where `break` goes, and how many regions were
+// open when it began — a `break` leaves only the regions entered inside.
+class LoopExit:
+  block: i64
+  region_depth: i64
+
+// An open region: its HirMode / HirResource statement and, for a
+// resource block, its domain handle (-1 for a mode) and the bindings its
+// exit copies out, each with the local holding its dirty flag.
+class ActiveRegion:
+  stmt: i64
+  handle: i64
+  escapes: Vector<i64>
+  flags: Vector<i64>
+
+// The control-flow context of the statement being lowered.
+class Flow:
+  loops: Vector<LoopExit>
+  regions: Vector<ActiveRegion>
+
+fn flow_empty(): Flow
+  return Flow(Vector<LoopExit>::new(), Vector<ActiveRegion>::new())
 
 fn mir_result_empty(): MirResult
   return MirResult(Vector<MirNode>::new(), Vector<i64>::new(), Vector<Diagnostic>::new(), to_i64(-1))
@@ -242,7 +275,7 @@ fn ms_reset_fn_state(ms: MS): MS
   ms.fn_blocks = Vector<i64>::new()
   ms.sym_to_local = HashMap<i64>::new()
   ms.next_block_id = to_i64(0)
-  ms.loop_exits = Vector<i64>::new()
+  ms.flow = flow_empty()
   return ms
 
 // Declare a local slot for the given resolver symbol.  Returns the
@@ -548,17 +581,29 @@ fn mir_lower_stmt(br: BlockR, hir_node_idx: i64): BlockR
       if place.place.local < 0:
         return br
       let val_r: ExprR = lower_expr_value(br, value)
-      return emit_store(val_r.br, place.place, val_r.value)
+      let stored: BlockR = emit_store(val_r.br, place.place, val_r.value)
+      return mark_escapes_dirty(stored, place.place.local)
     HirNode::HirBreak(t):
-      if br.ms.loop_exits.length() == 0:
+      let loop_count: i64 = br.ms.flow.loops.length()
+      if loop_count == 0:
         br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "break outside a loop")
         return br
-      return br_emit_terminator(br, MirNode::MirBr(target_block = br.ms.loop_exits.get(br.ms.loop_exits.length() - 1)))
+      // Leave the regions entered inside the loop, then branch out of it.
+      let lp: LoopExit = br.ms.flow.loops.get(loop_count - 1)
+      let left: RegionExitR = emit_region_exits(br, lp.region_depth, false, to_i64(-1), to_i64(-1))
+      return br_emit_terminator(left.br, MirNode::MirBr(target_block = lp.block))
+    HirNode::HirMode(name, body_lp):
+      return lower_mode(br, hir_node_idx, name, body_lp)
     HirNode::HirReturn(value):
+      // Every open region is left; a memory domain's exit copies the
+      // returned value out first.
       if value >= 0:
         let val_r: ExprR = lower_expr_value(br, value)
-        return br_emit_terminator(val_r.br, MirNode::MirReturn(value = val_r.value, has_value = to_i64(1)))
-      return br_emit_terminator(br, MirNode::MirReturn(value = to_i64(-1), has_value = to_i64(0)))
+        let ret_ti: i64 = ms_get_hir_type(val_r.br.ms, val_r.br.ms.hir_nodes.get(value))
+        let ret_left: RegionExitR = emit_region_exits(val_r.br, to_i64(0), true, val_r.value, ret_ti)
+        return br_emit_terminator(ret_left.br, MirNode::MirReturn(value = ret_left.carried, has_value = to_i64(1)))
+      let left_void: RegionExitR = emit_region_exits(br, to_i64(0), true, to_i64(-1), to_i64(-1))
+      return br_emit_terminator(left_void.br, MirNode::MirReturn(value = to_i64(-1), has_value = to_i64(0)))
     HirNode::HirExprStmt(expr):
       let expr_r: ExprR = lower_expr_value(br, expr)
       return expr_r.br
@@ -569,12 +614,7 @@ fn mir_lower_stmt(br: BlockR, hir_node_idx: i64): BlockR
     HirNode::HirWhile(cond, body_lp):
       return mir_lower_while_stmt(br, cond, body_lp)
     HirNode::HirResource(kind, name, body_lp):
-      // Rejected until the domain has a MIR representation: a resource
-      // region must survive to backend lowering (CONTRACT_MIR_BOUNDARY.md
-      // §4), and lowering the body in place would erase it.
-      br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)),
-        "unsupported statement kind in Tier A MIR lowering: HirResource (a resource block's domain is not represented in MIR yet)")
-      return br
+      return lower_resource(br, hir_node_idx, kind, name, body_lp)
   // Unsupported statement kind (Tier A): HirBreak, HirFor, etc.  Emit
   // a diagnostic so downstream consumers observe the failure instead
   // of seeing valid-looking MIR with silently-dropped control flow.
@@ -617,6 +657,302 @@ fn emit_store(br: BlockR, place: MirPlace, value: i64): BlockR
   let fl: MirFlush = mir_flush_list(br.ms, place.path)
   br.ms = fl.ms
   return emit_effect(br, MirNode::MirStore(local_idx = place.local, path_lp = fl.list_pos, path_count = place.path.length(), value = value))
+
+// =========================================================================
+// Section 65b: Regions — mode and resource blocks
+// =========================================================================
+//
+// As the host's MirBuilder: entering a region emits its enter and opens
+// it; leaving it — falling off its body, a `return` through it, a
+// `break` out of a loop around it — emits its exit.  A `resource memory`
+// block is an allocation domain: a binding declared outside it and
+// stored to inside, whose type owns heap memory, is copied one domain
+// outward at the exit (through the prelude's `copy_out`) when a store
+// marked it dirty; a `return` through it copies the returned value
+// instead.
+
+fn mir_bool_type(): i64
+  // ts_init registers the builtins first; bool is the eleventh.
+  return to_i64(10)
+
+class RegionExitR:
+  br: BlockR
+  carried: i64   // the value carried out (a return's, copied out), or -1
+
+fn lower_mode(br: BlockR, stmt: i64, name_tok: i64, body_lp: i64): BlockR
+  let entered: BlockR = emit_effect(br, MirNode::MirModeEnter(name_tok = name_tok))
+  let outer: Vector<ActiveRegion> = entered.ms.flow.regions
+  entered.ms.flow = Flow(entered.ms.flow.loops, outer.push(ActiveRegion(stmt, to_i64(-1), Vector<i64>::new(), Vector<i64>::new())))
+  let body: BlockR = lower_stmt_list(entered, body_lp)
+  body.ms.flow = Flow(body.ms.flow.loops, outer)
+  if body.sealed == to_i64(0):
+    return emit_effect(body, MirNode::MirModeExit(name_tok = name_tok))
+  return body
+
+fn lower_resource(br: BlockR, stmt: i64, kind_tok: i64, name_tok: i64, body_lp: i64): BlockR
+  let enter_r: ExprR = br_emit_value(br, MirNode::MirResourceEnter(kind_tok = kind_tok, name_tok = name_tok))
+  let cur: BlockR = enter_r.br
+  // One dirty flag per escaping binding, clear at entry.
+  let escapes: Vector<i64> = Vector<i64>::new()
+  let flags: Vector<i64> = Vector<i64>::new()
+  if mir_tok_text(cur.ms, kind_tok) == "memory":
+    let stored: Vector<i64> = resource_escapes(cur.ms, body_lp, Vector<i64>::new())
+    // A generator's frame layout is private to its function, so no
+    // copier can move it out of the domain: its escape is rejected, as
+    // the host's checker rejects it.
+    let si: i64 = to_i64(0)
+    while si < stored.length():
+      let slot: i64 = stored.get(si)
+      if mir_holds_generator(cur.ms, mir_local_type(cur.ms, slot)):
+        cur.ms = ms_add_diag(cur.ms, Span(to_i64(0), to_i64(1)), "'" + mir_local_name(cur.ms, slot) + "' is declared outside resource block '" + mir_tok_text(cur.ms, name_tok) + "' and stored to inside it: a generator cannot be copied out of the block")
+      else:
+        escapes = escapes.push(slot)
+      si = si + to_i64(1)
+    let ei: i64 = to_i64(0)
+    while ei < escapes.length():
+      let flag: MirR = ms_declare_local(cur.ms, to_i64(-1), mir_bool_type(), false)
+      cur.ms = flag.ms
+      flags = flags.push(flag.mir)
+      let clear: ExprR = br_emit_value(cur, MirNode::MirConstBool(value = to_i64(0), type_idx = mir_bool_type()))
+      cur = emit_store(clear.br, MirPlace(flag.mir, Vector<i64>::new()), clear.value)
+      ei = ei + to_i64(1)
+  let region: ActiveRegion = ActiveRegion(stmt, enter_r.value, escapes, flags)
+  let outer: Vector<ActiveRegion> = cur.ms.flow.regions
+  cur.ms.flow = Flow(cur.ms.flow.loops, outer.push(region))
+  let body: BlockR = lower_stmt_list(cur, body_lp)
+  body.ms.flow = Flow(body.ms.flow.loops, outer)
+  if body.sealed == to_i64(0):
+    return emit_region_exit(body, region, false, to_i64(-1), to_i64(-1)).br
+  return body
+
+// Leave the regions open above `depth`, innermost first.  Leaving the
+// function (`leaving_fn`) carries `carried` (of type `carried_ti`) out
+// of each memory domain instead of the domains' escaping bindings.
+fn emit_region_exits(br: BlockR, depth: i64, leaving_fn: bool, carried: i64, carried_ti: i64): RegionExitR
+  let r: RegionExitR = RegionExitR(br, carried)
+  let i: i64 = br.ms.flow.regions.length()
+  while i > depth:
+    r = emit_region_exit(r.br, r.br.ms.flow.regions.get(i - 1), leaving_fn, r.carried, carried_ti)
+    i = i - to_i64(1)
+  return r
+
+fn emit_region_exit(br: BlockR, region: ActiveRegion, leaving_fn: bool, carried: i64, carried_ti: i64): RegionExitR
+  match br.ms.hir_nodes.get(region.stmt):
+    HirNode::HirMode(name_tok, body_lp):
+      return RegionExitR(emit_effect(br, MirNode::MirModeExit(name_tok = name_tok)), carried)
+    HirNode::HirResource(kind_tok, name_tok, body_lp):
+      let cur: BlockR = br
+      let out: i64 = carried
+      if mir_tok_text(br.ms, kind_tok) == "memory":
+        if leaving_fn:
+          if carried >= 0:
+            let copied: ExprR = emit_copy_out(cur, carried, carried_ti)
+            cur = copied.br
+            out = copied.value
+        else:
+          let ei: i64 = to_i64(0)
+          while ei < region.escapes.length():
+            cur = emit_escape_copy(cur, region.escapes.get(ei), region.flags.get(ei))
+            ei = ei + to_i64(1)
+      let exit: BlockR = emit_effect(cur, MirNode::MirResourceExit(kind_tok = kind_tok, name_tok = name_tok, handle = region.handle))
+      return RegionExitR(exit, out)
+  return RegionExitR(br, carried)
+
+// `if dirty: binding = copy_out(binding)`, then continue.
+fn emit_escape_copy(br: BlockR, binding: i64, flag: i64): BlockR
+  let dirty: ExprR = br_emit_value(br, MirNode::MirLoad(local_idx = flag, type_idx = mir_bool_type()))
+  let copy_r: MirR = ms_new_block(dirty.br.ms)
+  let next_r: MirR = ms_new_block(copy_r.ms)
+  let cur: BlockR = dirty.br
+  cur.ms = next_r.ms
+  cur = br_emit_terminator(cur, MirNode::MirCondBr(cond = dirty.value, then_block = copy_r.mir, else_block = next_r.mir))
+  let copy_br: BlockR = block_open(block_seal(cur), copy_r.mir)
+  let binding_ti: i64 = mir_local_type(copy_br.ms, binding)
+  let current: ExprR = br_emit_value(copy_br, MirNode::MirLoad(local_idx = binding, type_idx = binding_ti))
+  let copied: ExprR = emit_copy_out(current.br, current.value, binding_ti)
+  let stored: BlockR = emit_store(copied.br, MirPlace(binding, Vector<i64>::new()), copied.value)
+  let jumped: BlockR = br_emit_terminator(stored, MirNode::MirBr(target_block = next_r.mir))
+  return block_open(block_seal(jumped), next_r.mir)
+
+// `copy_out(value)`: a value that owns heap memory, copied one domain
+// outward; any other value is itself.
+fn emit_copy_out(br: BlockR, value: i64, ti: i64): ExprR
+  if mir_owns_heap(br.ms, ti) == false:
+    return ExprR(br, value)
+  if br.ms.copy_out_sym < 0:
+    br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "no prelude `copy_out` to copy a value out of a resource block")
+    return ExprR(br, value)
+  let callee: ExprR = br_emit_value(br, MirNode::MirFnRef(sym = br.ms.copy_out_sym, type_idx = br.ms.sym_types.get(br.ms.copy_out_sym)))
+  let arg_values: Vector<i64> = Vector<i64>::new()
+  let args: MirFlush = mir_flush_list(callee.br.ms, arg_values.push(value))
+  let cur: BlockR = callee.br
+  cur.ms = args.ms
+  return br_emit_value(cur, MirNode::MirCall(callee = callee.value, arg_list_lp = args.list_pos, arg_count = to_i64(1), type_idx = ti))
+
+// Where a store inside open memory domains is rooted at an escaping
+// binding, mark it dirty in each: that domain's exit copies it.
+fn mark_escapes_dirty(br: BlockR, local: i64): BlockR
+  let cur: BlockR = br
+  let ri: i64 = to_i64(0)
+  while ri < cur.ms.flow.regions.length():
+    let region: ActiveRegion = cur.ms.flow.regions.get(ri)
+    let ei: i64 = to_i64(0)
+    while ei < region.escapes.length():
+      if region.escapes.get(ei) == local:
+        let set: ExprR = br_emit_value(cur, MirNode::MirConstBool(value = to_i64(1), type_idx = mir_bool_type()))
+        cur = emit_store(set.br, MirPlace(region.flags.get(ei), Vector<i64>::new()), set.value)
+      ei = ei + to_i64(1)
+    ri = ri + to_i64(1)
+  return cur
+
+// The bindings a resource block's body stores to (at any depth) that
+// were declared before it — they already have a slot — and whose type
+// owns heap memory, in first-store order.  (The host's checker records
+// the same set per block: check_store_escapes_domain.)
+fn resource_escapes(ms: MS, list_pos: i64, found: Vector<i64>): Vector<i64>
+  let out: Vector<i64> = found
+  let stmts: Vector<i64> = read_hir_list(ms.hir_idx, list_pos)
+  let i: i64 = to_i64(0)
+  while i < stmts.length():
+    match ms.hir_nodes.get(stmts.get(i)):
+      HirNode::HirAssign(target, value):
+        let root: i64 = place_root_local(ms, target)
+        if root >= 0 and mir_owns_heap(ms, mir_local_type(ms, root)) and vec_contains(out, root) == false:
+          out = out.push(root)
+      HirNode::HirIf(cond, then_lp, else_lp):
+        out = resource_escapes(ms, then_lp, out)
+        out = resource_escapes(ms, else_lp, out)
+      HirNode::HirWhile(cond, body_lp):
+        out = resource_escapes(ms, body_lp, out)
+      HirNode::HirMode(name, body_lp):
+        out = resource_escapes(ms, body_lp, out)
+      HirNode::HirResource(kind, name, body_lp):
+        out = resource_escapes(ms, body_lp, out)
+    i = i + to_i64(1)
+  return out
+
+// The local slot an assignment target is rooted at, or -1.
+fn place_root_local(ms: MS, target: i64): i64
+  match ms.hir_nodes.get(target):
+    HirNode::HirIdent(sym, ti, tok):
+      return ms_lookup_local(ms, sym)
+    HirNode::HirFieldAccess(obj, field_tok, ti):
+      return place_root_local(ms, obj)
+  return to_i64(-1)
+
+fn vec_contains(v: Vector<i64>, x: i64): bool
+  let i: i64 = to_i64(0)
+  while i < v.length():
+    if v.get(i) == x:
+      return true
+    i = i + to_i64(1)
+  return false
+
+// The type of a local slot of the function being lowered.
+fn mir_local_type(ms: MS, slot: i64): i64
+  if slot < 0 or slot >= ms.locals.length():
+    return to_i64(-1)
+  match ms.mir_nodes.get(ms.locals.get(slot)):
+    MirNode::MirLocal(sym, type_idx, is_param):
+      return type_idx
+  return to_i64(-1)
+
+// Whether a value of `ti` is, or holds by value, a generator (the host's
+// holds_generator).
+fn mir_holds_generator(ms: MS, ti: i64): bool
+  return mir_generator_search(ms, ti, HashMap<i64>::new()).found
+
+fn mir_generator_search(ms: MS, ti: i64, seen: HashMap<i64>): GenericSearch
+  if ti < 0 or ti >= ms.types.length():
+    return GenericSearch(seen, false)
+  let key: string = i64_to_string(ti)
+  if seen.contains(key):
+    return GenericSearch(seen, false)
+  let so_far: HashMap<i64> = seen.set(key, to_i64(1))
+  let t: DaoType = ms.types.get(ti)
+  match t.kind:
+    TypeKind::TGenerator:
+      return GenericSearch(so_far, true)
+    TypeKind::TStruct:
+      let fi: i64 = to_i64(0)
+      while fi < t.info_count:
+        let sub: GenericSearch = mir_generator_search(ms, ms.type_info.get(t.info_lp + fi * to_i64(2) + to_i64(1)), so_far)
+        if sub.found:
+          return sub
+        so_far = sub.seen
+        fi = fi + to_i64(1)
+  return GenericSearch(so_far, false)
+
+// The name of a local slot's binding ("" for a synthesized local).
+fn mir_local_name(ms: MS, slot: i64): string
+  if slot < 0 or slot >= ms.locals.length():
+    return ""
+  match ms.mir_nodes.get(ms.locals.get(slot)):
+    MirNode::MirLocal(sym, type_idx, is_param):
+      if sym >= 0 and sym < ms.symbols.length():
+        return ms.symbols.get(sym).name
+  return ""
+
+// A token's text in the module being lowered.
+fn mir_tok_text(ms: MS, tok: i64): string
+  if tok < 0 or tok >= ms.toks.length():
+    return ""
+  let t: Token = ms.toks.get(tok)
+  return substring(ms.src, t.offset, t.len)
+
+// Whether a value of `ti` owns heap memory, so leaving a domain must copy
+// it (the host's owns_heap_memory): a string, a generator, a type
+// parameter, or a struct / enum holding a pointer or such a value.
+fn mir_owns_heap(ms: MS, ti: i64): bool
+  return mir_heap_search(ms, ti, HashMap<i64>::new()).found
+
+fn mir_heap_search(ms: MS, ti: i64, seen: HashMap<i64>): GenericSearch
+  if ti < 0 or ti >= ms.types.length():
+    return GenericSearch(seen, false)
+  let key: string = i64_to_string(ti)
+  if seen.contains(key):
+    return GenericSearch(seen, false)
+  let so_far: HashMap<i64> = seen.set(key, to_i64(1))
+  let t: DaoType = ms.types.get(ti)
+  let held: Vector<i64> = Vector<i64>::new()
+  match t.kind:
+    TypeKind::TString:
+      return GenericSearch(so_far, true)
+    TypeKind::TGenerator:
+      return GenericSearch(so_far, true)
+    TypeKind::TGenericParam:
+      return GenericSearch(so_far, true)
+    TypeKind::TStruct:
+      // Field pairs: (name, type).
+      let fi: i64 = to_i64(0)
+      while fi < t.info_count:
+        held = held.push(ms.type_info.get(t.info_lp + fi * to_i64(2) + to_i64(1)))
+        fi = fi + to_i64(1)
+    TypeKind::TEnum:
+      // Per variant: name, payload count, then (name, type) per value.
+      let at: i64 = t.info_lp
+      let vi: i64 = to_i64(0)
+      while vi < t.info_count:
+        let count: i64 = ms.type_info.get(at + to_i64(1))
+        let pi: i64 = to_i64(0)
+        while pi < count:
+          held = held.push(ms.type_info.get(at + to_i64(2) + pi * to_i64(2) + to_i64(1)))
+          pi = pi + to_i64(1)
+        at = at + to_i64(2) + count * to_i64(2)
+        vi = vi + to_i64(1)
+  let i: i64 = to_i64(0)
+  while i < held.length():
+    let part: i64 = held.get(i)
+    if part >= 0 and part < ms.types.length():
+      match ms.types.get(part).kind:
+        TypeKind::TPointer:
+          return GenericSearch(so_far, true)
+    let sub: GenericSearch = mir_heap_search(ms, part, so_far)
+    if sub.found:
+      return sub
+    so_far = sub.seen
+    i = i + to_i64(1)
+  return GenericSearch(so_far, false)
 
 // Emit an effect-only instruction (e.g. Store).  Same pattern as
 // br_emit_value but discards the value id.
@@ -711,10 +1047,10 @@ fn mir_lower_while_stmt(br: BlockR, cond: i64, body_lp: i64): BlockR
   // Body: lower statements, then unconditional br back to header.
   // A `break` in the body leaves to the exit block.
   let body_br: BlockR = block_open(ms_after_header, body_r.mir)
-  let enclosing_exits: Vector<i64> = body_br.ms.loop_exits
-  body_br.ms.loop_exits = enclosing_exits.push(exit_r.mir)
+  let enclosing_loops: Vector<LoopExit> = body_br.ms.flow.loops
+  body_br.ms.flow = Flow(enclosing_loops.push(LoopExit(exit_r.mir, body_br.ms.flow.regions.length())), body_br.ms.flow.regions)
   let body_after: BlockR = lower_stmt_list(body_br, body_lp)
-  body_after.ms.loop_exits = enclosing_exits
+  body_after.ms.flow = Flow(enclosing_loops, body_after.ms.flow.regions)
   let body_final: BlockR = body_after
   if body_final.sealed == to_i64(0):
     body_final = br_emit_terminator(body_final, MirNode::MirBr(target_block = header_r.mir))
@@ -893,6 +1229,31 @@ fn mir_stands_for_args(ms: MS, record: i64): Vector<i64>
     i = i + to_i64(1)
   return args
 
+// The prelude's free function `copy_out(x)`, which a resource block's
+// exit calls to copy a value one domain outward; -1 when the program has
+// none (a program without the prelude).
+fn find_prelude_copy_out(p: Program, ms: MS): i64
+  if p.hir.root < 0 or p.hir.root >= ms.hir_nodes.length():
+    return to_i64(-1)
+  match ms.hir_nodes.get(p.hir.root):
+    HirNode::HirProgram(module_list_lp):
+      let modules: Vector<i64> = read_hir_list(ms.hir_idx, module_list_lp)
+      let mi: i64 = to_i64(0)
+      while mi < modules.length():
+        match ms.hir_nodes.get(modules.get(mi)):
+          HirNode::HirModule(name_tok, decls_lp, module_id):
+            if program_module(p, module_id).is_prelude:
+              let decls: Vector<i64> = read_hir_list(ms.hir_idx, decls_lp)
+              let di: i64 = to_i64(0)
+              while di < decls.length():
+                match ms.hir_nodes.get(decls.get(di)):
+                  HirNode::HirFunction(sym, tparams_lp, params_lp, ret_ti, body_lp, is_extern, class_owner):
+                    if class_owner < 0 and sym >= 0 and ms.symbols.get(sym).name == "copy_out" and read_hir_list_count(ms.hir_idx, params_lp) == 1:
+                      return sym
+                di = di + to_i64(1)
+        mi = mi + to_i64(1)
+  return to_i64(-1)
+
 // A program lowered to MIR: the program, its diagnostics grown by
 // MIR's (each on its module's file), and the MIR, rooted at a
 // MirProgram.
@@ -961,7 +1322,9 @@ fn program_run_mir(p: Program): ProgramMir
     HashMap<i64>::new(),
     to_i64(0),
     false,
-    Vector<i64>::new())
+    flow_empty(),
+    to_i64(-1))
+  ms.copy_out_sym = find_prelude_copy_out(hp, ms)
   let all_diags: Vector<FileDiagnostic> = hp.diags
   let module_nodes: Vector<i64> = Vector<i64>::new()
   if hp.hir.root >= 0 and hp.hir.root < ms.hir_nodes.length():
@@ -1112,6 +1475,14 @@ fn mir_node_kind(n: MirNode): string
       return "MirCall"
     MirNode::MirStore(a, b, c, d):
       return "MirStore"
+    MirNode::MirModeEnter(a):
+      return "MirModeEnter"
+    MirNode::MirModeExit(a):
+      return "MirModeExit"
+    MirNode::MirResourceEnter(a, b):
+      return "MirResourceEnter"
+    MirNode::MirResourceExit(a, b, c):
+      return "MirResourceExit"
     MirNode::MirReturn(a, b):
       return "MirReturn"
     MirNode::MirBr(a):
