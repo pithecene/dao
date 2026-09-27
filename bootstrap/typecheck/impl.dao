@@ -2868,6 +2868,18 @@ fn ptr_op_name(op: i64): string
     return "is_null"
   return "?"
 
+// The operation a pointer call's callee names — the member of `p.get`,
+// `new` of `Ptr<T>::new` — for a diagnostic; "" for any other callee.
+fn ptr_call_member(ts: TS, callee: i64): string
+  match ts.tc.nodes.get(callee):
+    Node::FieldE(obj, field_tidx):
+      return ts_tok_name(ts, field_tidx)
+    Node::QualNameE(seg_lp, seg_count):
+      let segs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+      if segs.length() == 2:
+        return ts_tok_name(ts, segs.get(1))
+  return ""
+
 // The key under which the checker records which pointer operation the
 // call at `node_idx` is.
 fn ptr_op_key(module_id: i64, node_idx: i64): string
@@ -2877,8 +2889,18 @@ fn record_ptr_op(ts: TS, node_idx: i64, op: i64): TS
   ts.reg = reg_with_expr_types(ts.reg, ts.reg.expr_types.set(ptr_op_key(ts.tc.module_id, node_idx), op))
   return ts
 
-fn check_ptr_method_call(ts: TS, node_idx: i64, callee: i64, args: Vector<i64>, targs_lp: i64): PtrCallR
+fn check_ptr_method_call(ts: TS, node_idx: i64, callee: i64, args: Vector<i64>, targs_lp: i64, names_lp: i64): PtrCallR
   let unhandled: PtrCallR = PtrCallR(ts, false)
+  // A pointer's operations take their arguments by position (host).
+  if names_lp >= 0:
+    let names: Vector<i64> = read_list(ts.tc.idx_data, names_lp)
+    let ni: i64 = 0
+    while ni < names.length():
+      if names.get(ni) >= 0:
+        let op_name: string = ptr_call_member(ts, callee)
+        if op_name != "":
+          return PtrCallR(ts_add_diag(ts, ts_tok_span(ts, names.get(ni)), "Ptr." + op_name + " takes its arguments by position"), true)
+      ni = ni + 1
   let callee_node: Node = ts.tc.nodes.get(callee)
   match callee_node:
     Node::FieldE(obj, field_tidx):
@@ -2904,6 +2926,9 @@ fn check_ptr_method_call(ts: TS, node_idx: i64, callee: i64, args: Vector<i64>, 
           if name == "get" or name == "set" or name == "offset":
             if ts.ctx.unsafe_depth == 0:
               return PtrCallR(ts_add_diag(ts, sp, "Ptr." + name + " requires 'mode unsafe =>'"), true)
+            // Reading, writing and walking need the pointee's size.
+            if is_void_type(ts, obj_type.pointee):
+              return PtrCallR(ts_add_diag(ts, sp, "Ptr." + name + " is invalid on '" + type_name(ts, obj_ti) + "', which has no value or element size; cast it to a sized pointee first"), true)
           if name == "get":
             if args.length() != 0:
               return PtrCallR(ts_add_diag(ts, sp, "Ptr.get takes no arguments"), true)
@@ -2925,11 +2950,13 @@ fn check_ptr_method_call(ts: TS, node_idx: i64, callee: i64, args: Vector<i64>, 
           if name == "offset":
             if args.length() != 1:
               return PtrCallR(ts_add_diag(ts, sp, "Ptr.offset takes one argument, how many elements to walk"), true)
+            // The element count is an i64 (host): a literal fits it, any
+            // other width is not assignable.
             let r_off: TS = fit_literal(ts, args.get(0), to_i64(3))
             let count_ti: i64 = get_expr_type(r_off, args.get(0))
             if count_ti >= 0:
-              if is_integer(r_off, count_ti) == false:
-                return PtrCallR(ts_add_diag(r_off, sp, "Ptr.offset walks a whole number of elements, got " + type_name(r_off, count_ti)), true)
+              if types_equal(r_off, count_ti, to_i64(3)) == false:
+                return PtrCallR(ts_add_diag(r_off, ts_node_span(r_off, args.get(0)), "argument type '" + type_name(r_off, count_ti) + "' is not assignable to parameter type 'i64'"), true)
             return PtrCallR(record_ptr_op(ts_set_expr_type(r_off, node_idx, obj_ti), node_idx, ptr_op_offset()), true)
           if name == "cast":
             if args.length() != 0:
@@ -3871,7 +3898,7 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
     while pi < args0.length():
       rp = check_expr(rp, args0.get(pi))
       pi = pi + 1
-    let ptr_call: PtrCallR = check_ptr_method_call(rp, node_idx, callee, args0, targs.list_lp)
+    let ptr_call: PtrCallR = check_ptr_method_call(rp, node_idx, callee, args0, targs.list_lp, names_lp)
     if ptr_call.handled:
       return ptr_call.ts
   let r: TS = check_expr(named_ptr.ts, callee)

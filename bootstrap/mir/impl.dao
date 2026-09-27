@@ -244,40 +244,10 @@ fn mir_flush_list(ms: MS, items: Vector<i64>): MirFlush
   ms.mir_idx = ms.mir_idx.push(items.length())
   return MirFlush(ms, pos)
 
-// Look up the HIR expression type for an AST node (by index).
+// The type of a lowered HIR expression: HIR's own accessor, so every
+// expression kind HIR has is covered.
 fn ms_get_hir_type(ms: MS, hir_node: HirNode): i64
-  match hir_node:
-    HirNode::HirIntLit(t, ti):
-      return ti
-    HirNode::HirFloatLit(t, ti):
-      return ti
-    HirNode::HirStringLit(t, ti):
-      return ti
-    HirNode::HirBoolLit(t, ti):
-      return ti
-    HirNode::HirIdent(s, ti, t):
-      return ti
-    HirNode::HirBinary(o, l, r, ti):
-      return ti
-    HirNode::HirUnary(o, op, ti):
-      return ti
-    HirNode::HirCall(c, a, n, ti):
-      return ti
-    HirNode::HirFieldAccess(o, f, ti):
-      return ti
-    HirNode::HirPipe(l, r, ti):
-      return ti
-    HirNode::HirQualName(s, n, ti):
-      return ti
-    HirNode::HirEnumDiscriminant(v, ti):
-      return ti
-    HirNode::HirEnumPayload(v, vi, fi, ti):
-      return ti
-    HirNode::HirConstruct(a, n, ti):
-      return ti
-    HirNode::HirEnumConstruct(v, p, n, ti):
-      return ti
-  return to_i64(-1)
+  return hir_expr_type(hir_node)
 
 // =========================================================================
 // Section 63: Per-function state management
