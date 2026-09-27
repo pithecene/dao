@@ -79,6 +79,10 @@ enum class HirNode:
   // (argument, field index) pairs in source order — evaluated in that
   // order, placed by field index.
   HirConstruct(args_lp: i64, arg_count: i64, typ: i64)
+  // An operation of `Ptr<T>` (the host's HirPtrOp): `op` is a
+  // ptr_op_* code; `pointer` is the receiver (-1 for `new`), `argument`
+  // the value written or the elements walked (-1 where there is none).
+  HirPtrOp(op: i64, pointer: i64, argument: i64, typ: i64)
   HirEnumConstruct(variant: i64, payload_lp: i64, payload_count: i64, typ: i64)
   HirErrorExpr(tok: i64)
 
@@ -223,6 +227,8 @@ fn hir_expr_type(node: HirNode): i64
     HirNode::HirConstruct(a, n, ti):
       return ti
     HirNode::HirEnumConstruct(v, p, n, ti):
+      return ti
+    HirNode::HirPtrOp(op, p, a, ti):
       return ti
   return to_i64(-1)
 
@@ -429,6 +435,26 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
       return hs_add_node(hs, HirNode::HirErrorExpr(tok = to_i64(0)))
   return hs_add_node(hs, HirNode::HirErrorExpr(tok = to_i64(0)))
 
+// `p.get()`, `p.set(v)`, `p.offset(n)`, `p.cast<U>()`, `p.is_null()`,
+// `Ptr<T>::new()` → HirPtrOp: the receiver first, then the argument.
+fn lower_ptr_op(hs: HS, op: i64, callee: i64, args_lp: i64, ti: i64): HirR
+  let cur: HS = hs
+  let pointer: i64 = to_i64(-1)
+  match cur.unit.nodes.get(callee):
+    Node::FieldE(obj, field_tidx):
+      let pr: HirR = lower_expr(cur, obj)
+      cur = pr.hs
+      pointer = pr.hir
+  let argument: i64 = to_i64(-1)
+  let args: Vector<i64> = Vector<i64>::new()
+  if args_lp >= 0:
+    args = read_list(cur.unit.idx_data, args_lp)
+  if args.length() > 0:
+    let ar: HirR = lower_expr(cur, args.get(0))
+    cur = ar.hs
+    argument = ar.hir
+  return hs_add_node(cur, HirNode::HirPtrOp(op = op, pointer = pointer, argument = argument, typ = ti))
+
 // The declaration index of the variant the name at `node_idx` denotes,
 // as the checker recorded it; -1 when it names no variant.
 fn hir_named_variant(hs: HS, node_idx: i64): i64
@@ -585,6 +611,11 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
   // when the class has both a field `name` and a method `name`:
   // check_field_expr prefers field lookup, so the FieldE's resolved
   // type is the field's type, not a function type.
+  // An operation of `Ptr<T>`, as the checker recorded it: never a
+  // method call or a call of a qualified name.
+  let ptr_op: i64 = hm_get_or(hs.typecheck.lookup.expr_types, ptr_op_key(hs.unit.module_id, node_idx), to_i64(-1))
+  if ptr_op >= 0:
+    return lower_ptr_op(hs, ptr_op, callee, args_lp, ti)
   let callee_node: Node = hs.unit.nodes.get(callee)
   match callee_node:
     Node::FieldE(mobj, mfield_tidx):
@@ -1598,6 +1629,8 @@ fn hir_node_kind(node: HirNode): string
       return "HirEnumPayload"
     HirNode::HirConstruct(a, b, c):
       return "HirConstruct"
+    HirNode::HirPtrOp(a, b, c, d):
+      return "HirPtrOp"
     HirNode::HirEnumConstruct(a, b, c, d):
       return "HirEnumConstruct"
     HirNode::HirErrorExpr(a):
@@ -1870,6 +1903,11 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
       while ci < cargs.length():
         line = line + hir_dump_node(hr, cargs.get(ci), indent + 1)
         ci = ci + 1
+      return line
+    HirNode::HirPtrOp(op, pointer, argument, ti2):
+      line = line + " " + ptr_op_name(op) + " : " + hir_type_label(hr, ti2) + "\n"
+      line = line + hir_dump_node(hr, pointer, indent + 1)
+      line = line + hir_dump_node(hr, argument, indent + 1)
       return line
     HirNode::HirEnumConstruct(variant, payload_lp, payload_count, ti2):
       line = line + " variant=" + i64_to_string(variant) + " : " + hir_type_label(hr, ti2) + "\n"

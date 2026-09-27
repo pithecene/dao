@@ -57,7 +57,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 45
+  let total: i32 = 46
 
   // Test 1: simple_fn
   let src1: string = "fn add(a: i32, b: i32): i32\n  return a + b\n"
@@ -938,6 +938,15 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL variant_values_construct: got Color '" + hir_int_lits_of(r45, "Color") + "', constructions '" + variants45 + "', " + i64_to_string(hir_count_diags(r45)) + " diagnostics")
+
+  // Test 46: pointer operations are HirPtrOp, as the host's (`daoc hir`),
+  // never a call of `Ptr::new` or of a member.
+  let r46: HirResult = lower_to_hir("fn f(): i64\n  let v: i64 = 0\n  mode unsafe =>\n    let p: Ptr<i64> = Ptr<i64>::new()\n    let r: Ptr<i64> = p.offset(2)\n    r.set(5)\n    v = r.get()\n  return v\n")
+  if hir_count_diags(r46) == 0 and hir_count_kind(r46, "HirPtrOp") == 4 and hir_count_kind(r46, "HirCall") == 0 and hir_count_kind(r46, "HirQualName") == 0:
+    print("PASS pointer_operations_are_ptr_ops")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL pointer_operations_are_ptr_ops: got " + i64_to_string(hir_count_kind(r46, "HirPtrOp")) + " ptr ops, " + i64_to_string(hir_count_kind(r46, "HirCall")) + " calls, " + i64_to_string(hir_count_diags(r46)) + " diagnostics")
 
   // -----------------------------------------------------------------
   // Summary

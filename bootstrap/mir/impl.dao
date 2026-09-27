@@ -78,8 +78,15 @@ enum class MirNode:
   MirBinary(op_tok: i64, lhs: i64, rhs: i64, type_idx: i64)
   MirUnary(op_tok: i64, operand: i64, type_idx: i64)
 
-  // Load the value stored in a local.
-  MirLoad(local_idx: i64, type_idx: i64)
+  // Load the value of a place: a local, or what its path reaches (see
+  // MirStore).
+  MirLoad(local_idx: i64, path_lp: i64, path_count: i64, type_idx: i64)
+
+  // An operation of `Ptr<T>` that yields a pointer or a flag (the host's
+  // ptr_op: new, offset, cast, is_null — a read or a write is a load or
+  // a store through the pointee's place).  `op` is a ptr_op_* code;
+  // `pointer` / `argument` are -1 where there is none.
+  MirPtrOp(op: i64, pointer: i64, argument: i64, type_idx: i64)
 
   // An enum value's variant index, and a payload value of one of its
   // variants (the host's enum_discriminant / enum_payload).
@@ -105,9 +112,10 @@ enum class MirNode:
 
   // ---------- effect-producing instructions (no result) ----------
 
-  // Store a value into a place: a local, or the field its field-index
-  // path reaches (`store _0.inner.v`, the host's MirPlace with field
-  // projections).  An empty path stores the whole local.
+  // Store a value into a place: a local, or what its path reaches from
+  // it — each step a field index, or mir_deref_step() for the value a
+  // pointer addresses (`store _0.inner.v`, `store _4.*`: the host's
+  // MirPlace projections).  An empty path stores the whole local.
   MirStore(local_idx: i64, path_lp: i64, path_count: i64, value: i64)
 
   // Execution-mode and resource regions (the host's mode_enter /
@@ -236,40 +244,10 @@ fn mir_flush_list(ms: MS, items: Vector<i64>): MirFlush
   ms.mir_idx = ms.mir_idx.push(items.length())
   return MirFlush(ms, pos)
 
-// Look up the HIR expression type for an AST node (by index).
+// The type of a lowered HIR expression: HIR's own accessor, so every
+// expression kind HIR has is covered.
 fn ms_get_hir_type(ms: MS, hir_node: HirNode): i64
-  match hir_node:
-    HirNode::HirIntLit(t, ti):
-      return ti
-    HirNode::HirFloatLit(t, ti):
-      return ti
-    HirNode::HirStringLit(t, ti):
-      return ti
-    HirNode::HirBoolLit(t, ti):
-      return ti
-    HirNode::HirIdent(s, ti, t):
-      return ti
-    HirNode::HirBinary(o, l, r, ti):
-      return ti
-    HirNode::HirUnary(o, op, ti):
-      return ti
-    HirNode::HirCall(c, a, n, ti):
-      return ti
-    HirNode::HirFieldAccess(o, f, ti):
-      return ti
-    HirNode::HirPipe(l, r, ti):
-      return ti
-    HirNode::HirQualName(s, n, ti):
-      return ti
-    HirNode::HirEnumDiscriminant(v, ti):
-      return ti
-    HirNode::HirEnumPayload(v, vi, fi, ti):
-      return ti
-    HirNode::HirConstruct(a, n, ti):
-      return ti
-    HirNode::HirEnumConstruct(v, p, n, ti):
-      return ti
-  return to_i64(-1)
+  return hir_expr_type(hir_node)
 
 // =========================================================================
 // Section 63: Per-function state management
@@ -448,6 +426,29 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
     HirNode::HirEnumPayload(value, variant, field, type_idx):
       let payload_of: ExprR = lower_expr_value(br, value)
       return br_emit_value(payload_of.br, MirNode::MirEnumPayload(value = payload_of.value, variant = variant, field = field, type_idx = type_idx))
+    HirNode::HirPtrOp(op, pointer, argument, type_idx):
+      // A read or a write goes through the pointee's place, as the
+      // host's does; the other operations yield a pointer or a flag.
+      if op == ptr_op_get():
+        let read: PlaceBR = deref_place(br, pointer)
+        return emit_load(read.br, read.place, type_idx)
+      if op == ptr_op_set():
+        let written: PlaceBR = deref_place(br, pointer)
+        let value_r: ExprR = lower_expr_value(written.br, argument)
+        let stored: BlockR = emit_store(value_r.br, written.place, value_r.value)
+        return ExprR(stored, to_i64(-1))
+      let ptr_cur: BlockR = br
+      let ptr_val: i64 = to_i64(-1)
+      if pointer >= 0:
+        let pr: ExprR = lower_expr_value(ptr_cur, pointer)
+        ptr_cur = pr.br
+        ptr_val = pr.value
+      let arg_val: i64 = to_i64(-1)
+      if argument >= 0:
+        let ar: ExprR = lower_expr_value(ptr_cur, argument)
+        ptr_cur = ar.br
+        arg_val = ar.value
+      return br_emit_value(ptr_cur, MirNode::MirPtrOp(op = op, pointer = ptr_val, argument = arg_val, type_idx = type_idx))
     HirNode::HirConstruct(args_lp, arg_count, type_idx):
       let fields: ExprValues = lower_expr_values(br, read_hir_list(br.ms.hir_idx, args_lp))
       let cfl: MirFlush = mir_flush_list(fields.br.ms, fields.values)
@@ -489,7 +490,7 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
     HirNode::HirIdent(sym, type_idx, tok):
       let slot: i64 = ms_lookup_local(br.ms, sym)
       if slot >= 0:
-        return br_emit_value(br, MirNode::MirLoad(local_idx = slot, type_idx = type_idx))
+        return emit_load(br, MirPlace(slot, Vector<i64>::new()), type_idx)
       // A local or parameter always has a slot by the time it is read; one
       // without is a binding lowering lost, never a function to call.
       if sym >= 0 and sym < br.ms.symbols.length():
@@ -674,6 +675,37 @@ fn lower_place(ms: MS, target: i64): PlaceR
       return PlaceR(base.ms, MirPlace(base.place.local, base.place.path.push(field)))
   return PlaceR(ms_add_diag(ms, Span(to_i64(0), to_i64(1)), "unsupported assignment target: " + hir_node_kind(ms.hir_nodes.get(target))), none)
 
+// The step of a place path to the value a pointer addresses.
+fn mir_deref_step(): i64
+  return to_i64(-2)
+
+class PlaceBR:
+  br: BlockR
+  place: MirPlace
+
+// The place a pointer addresses: the pointer's own place with a deref
+// step when it is a local or a field path rooted at one (`p.get()`,
+// `self.data.get()`), else a temporary holding the pointer value
+// (`q.offset(1).get()`) — the host's deref_place.
+fn deref_place(br: BlockR, pointer: i64): PlaceBR
+  if place_root_local(br.ms, pointer) >= 0:
+    let rooted: PlaceR = lower_place(br.ms, pointer)
+    br.ms = rooted.ms
+    return PlaceBR(br, MirPlace(rooted.place.local, rooted.place.path.push(mir_deref_step())))
+  let value: ExprR = lower_expr_value(br, pointer)
+  let ptr_ti: i64 = ms_get_hir_type(value.br.ms, value.br.ms.hir_nodes.get(pointer))
+  let temp: MirR = ms_declare_local(value.br.ms, to_i64(-1), ptr_ti, false)
+  let cur: BlockR = value.br
+  cur.ms = temp.ms
+  cur = emit_store(cur, MirPlace(temp.mir, Vector<i64>::new()), value.value)
+  let deref_only: Vector<i64> = Vector<i64>::new()
+  return PlaceBR(cur, MirPlace(temp.mir, deref_only.push(mir_deref_step())))
+
+fn emit_load(br: BlockR, place: MirPlace, type_idx: i64): ExprR
+  let fl: MirFlush = mir_flush_list(br.ms, place.path)
+  br.ms = fl.ms
+  return br_emit_value(br, MirNode::MirLoad(local_idx = place.local, path_lp = fl.list_pos, path_count = place.path.length(), type_idx = type_idx))
+
 fn emit_store(br: BlockR, place: MirPlace, value: i64): BlockR
   let fl: MirFlush = mir_flush_list(br.ms, place.path)
   br.ms = fl.ms
@@ -825,7 +857,7 @@ fn emit_region_exit(br: BlockR, region: ActiveRegion, leaving_fn: bool, carried:
 
 // `if dirty: binding = copy_out(binding)`, then continue.
 fn emit_escape_copy(br: BlockR, binding: i64, flag: i64): BlockR
-  let dirty: ExprR = br_emit_value(br, MirNode::MirLoad(local_idx = flag, type_idx = mir_bool_type()))
+  let dirty: ExprR = emit_load(br, MirPlace(flag, Vector<i64>::new()), mir_bool_type())
   let copy_r: MirR = ms_new_block(dirty.br.ms)
   let next_r: MirR = ms_new_block(copy_r.ms)
   let cur: BlockR = dirty.br
@@ -833,7 +865,7 @@ fn emit_escape_copy(br: BlockR, binding: i64, flag: i64): BlockR
   cur = br_emit_terminator(cur, MirNode::MirCondBr(cond = dirty.value, then_block = copy_r.mir, else_block = next_r.mir))
   let copy_br: BlockR = block_open(block_seal(cur), copy_r.mir)
   let binding_ti: i64 = mir_local_type(copy_br.ms, binding)
-  let current: ExprR = br_emit_value(copy_br, MirNode::MirLoad(local_idx = binding, type_idx = binding_ti))
+  let current: ExprR = emit_load(copy_br, MirPlace(binding, Vector<i64>::new()), binding_ti)
   let copied: ExprR = emit_copy_out(current.br, current.value, binding_ti)
   let stored: BlockR = emit_store(copied.br, MirPlace(binding, Vector<i64>::new()), copied.value)
   let jumped: BlockR = br_emit_terminator(stored, MirNode::MirBr(target_block = next_r.mir))
@@ -1524,8 +1556,10 @@ fn mir_node_kind(n: MirNode): string
       return "MirBinary"
     MirNode::MirUnary(a, b, c):
       return "MirUnary"
-    MirNode::MirLoad(a, b):
+    MirNode::MirLoad(a, b, c, d):
       return "MirLoad"
+    MirNode::MirPtrOp(a, b, c, d):
+      return "MirPtrOp"
     MirNode::MirEnumDiscriminant(a, b):
       return "MirEnumDiscriminant"
     MirNode::MirEnumPayload(a, b, c, d):

@@ -810,6 +810,43 @@ fn bs_lower_struct_ctor(bs: BS, insts: Vector<LlInst>, type_idx: i64, arg_list_l
   insts = insts.push(load_inst)
   return StructCtorR(bs, insts, load_name, struct_ty_text)
 
+// The address of a MIR place: its local's slot, then one GEP per field
+// step of its path, with the LLVM type of what it addresses.  A step
+// this backend does not lower (a pointer's deref, an unresolved field)
+// fails the module, and the result's name is "".
+class PlacePtrR:
+  bs: BS
+  insts: Vector<LlInst>
+  ptr_name: string
+  ty_text: string
+
+fn bs_place_pointer(bs: BS, insts: Vector<LlInst>, local_idx: i64, path_lp: i64, what: string): PlacePtrR
+  let slot_name: string = bs_slot_name_by_index(bs, local_idx)
+  if slot_name == "":
+    return PlacePtrR(bs_error(bs, "bootstrap llvm backend: " + what + " references unknown local slot " + i64_to_string(local_idx)), insts, "", "")
+  let ptr_name: string = slot_name
+  let ty_text: string = bs_slot_ty_by_index(bs, local_idx)
+  let path: Vector<i64> = read_mir_list(bs.mir_idx, path_lp)
+  if path.length() == 0:
+    return PlacePtrR(bs, insts, ptr_name, ty_text)
+  let cur_ti: i64 = bs_slot_type_idx(bs, local_idx)
+  let pi: i64 = to_i64(0)
+  while pi < path.length():
+    let field: i64 = path.get(pi)
+    if cur_ti < 0 or cur_ti >= bs.types.length():
+      return PlacePtrR(bs_error(bs, "bootstrap llvm backend: " + what + " path has no struct type"), insts, "", "")
+    let owner: DaoType = bs.types.get(cur_ti)
+    if field < 0 or field >= owner.info_count:
+      return PlacePtrR(bs_error(bs, "bootstrap llvm backend: " + what + " path step " + i64_to_string(field) + " into " + owner.name + " is not lowered"), insts, "", "")
+    bs = bs_ensure_struct_def(bs, cur_ti)
+    let fr_gep: FreshR = bs_fresh_value(bs)
+    bs = fr_gep.bs
+    insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = ptr_name, struct_ty_text = bs_type_text(bs.types, cur_ti), field_index = field), fr_gep.name))
+    ptr_name = fr_gep.name
+    cur_ti = bs.type_info.get(owner.info_lp + field * to_i64(2) + to_i64(1))
+    pi = pi + to_i64(1)
+  return PlacePtrR(bs, insts, ptr_name, bs_type_text(bs.types, cur_ti))
+
 class LowerStepR:
   bs: BS
   insts: Vector<LlInst>
@@ -855,60 +892,28 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       return LowerStepR(bs, insts)
 
     // ---------- memory ----------
-    MirNode::MirLoad(local_idx, type_idx):
-      let slot_name: string = bs_slot_name_by_index(bs, local_idx)
-      let slot_ty: string = bs_slot_ty_by_index(bs, local_idx)
-      if slot_name == "":
-        bs = bs_error(bs, "bootstrap llvm backend: MirLoad references unknown local slot " + i64_to_string(local_idx))
+    MirNode::MirLoad(local_idx, path_lp, path_count, type_idx):
+      let at: PlacePtrR = bs_place_pointer(bs, insts, local_idx, path_lp, "MirLoad")
+      bs = at.bs
+      insts = at.insts
+      if at.ptr_name == "":
         return LowerStepR(bs, insts)
-      let ty: LlType = ll_type_from_mir(bs.types, type_idx)
       let ty_text: string = bs_type_text(bs.types, type_idx)
       let fr_ld: FreshR = bs_fresh_value(bs)
       bs = fr_ld.bs
       let result: string = fr_ld.name
-      let inst: LlInst = LlInst(
-        LlInstKind::LlLoad(ptr_name = slot_name, ty_text = ty_text),
-        result)
-      insts = insts.push(inst)
+      insts = insts.push(LlInst(LlInstKind::LlLoad(ptr_name = at.ptr_name, ty_text = ty_text), result))
       bs = bs_set_value(bs, mir_node_idx, result, ty_text)
       return LowerStepR(bs, insts)
 
     MirNode::MirStore(local_idx, path_lp, path_count, value_node):
-      let slot_name: string = bs_slot_name_by_index(bs, local_idx)
-      let slot_ty_text: string = bs_slot_ty_by_index(bs, local_idx)
-      if slot_name == "":
-        bs = bs_error(bs, "bootstrap llvm backend: MirStore references unknown local slot " + i64_to_string(local_idx))
+      let at: PlacePtrR = bs_place_pointer(bs, insts, local_idx, path_lp, "MirStore")
+      bs = at.bs
+      insts = at.insts
+      if at.ptr_name == "":
         return LowerStepR(bs, insts)
       let val_text: string = bs_get_value_text(bs, value_node)
-      // A field path is walked from the slot, one GEP per field; the
-      // store's type is the last field's.
-      let ptr_name: string = slot_name
-      let stored_ty_text: string = slot_ty_text
-      let path: Vector<i64> = read_mir_list(bs.mir_idx, path_lp)
-      if path.length() > 0:
-        let cur_ti: i64 = bs_slot_type_idx(bs, local_idx)
-        let pi: i64 = to_i64(0)
-        while pi < path.length():
-          let field: i64 = path.get(pi)
-          if cur_ti < 0 or cur_ti >= bs.types.length():
-            bs = bs_error(bs, "bootstrap llvm backend: MirStore field path has no struct type")
-            return LowerStepR(bs, insts)
-          let owner: DaoType = bs.types.get(cur_ti)
-          if field < 0 or field >= owner.info_count:
-            bs = bs_error(bs, "bootstrap llvm backend: MirStore field path leaves struct " + owner.name)
-            return LowerStepR(bs, insts)
-          bs = bs_ensure_struct_def(bs, cur_ti)
-          let fr_gep: FreshR = bs_fresh_value(bs)
-          bs = fr_gep.bs
-          insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = ptr_name, struct_ty_text = bs_type_text(bs.types, cur_ti), field_index = field), fr_gep.name))
-          ptr_name = fr_gep.name
-          cur_ti = bs.type_info.get(owner.info_lp + field * to_i64(2) + to_i64(1))
-          pi = pi + to_i64(1)
-        stored_ty_text = bs_type_text(bs.types, cur_ti)
-      let inst: LlInst = LlInst(
-        LlInstKind::LlStore(ptr_name = ptr_name, value_text = val_text, value_ty_text = stored_ty_text),
-        "")
-      insts = insts.push(inst)
+      insts = insts.push(LlInst(LlInstKind::LlStore(ptr_name = at.ptr_name, value_text = val_text, value_ty_text = at.ty_text), ""))
       return LowerStepR(bs, insts)
 
     // ---------- binary / unary ----------
