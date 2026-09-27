@@ -349,7 +349,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 29
+  let total: i32 = 30
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -862,6 +862,15 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL enum_constant_fails_closed: backend reported ok")
+
+  // Test 27: field stores and `break` run: 5 + 7 + 4 - 16 exits 0.
+  let r27: LlvmTextResult = lower_source_to_llvm_text("class In:\n  v: i32\n\nclass Out:\n  a: i32\n  inner: In\n\nfn main(): i32\n  let o: Out = Out(1, In(2))\n  o.a = 5\n  o.inner.v = 7\n  let n: i32 = 0\n  while true:\n    if n > 3:\n      break\n    n = n + 1\n  return o.a + o.inner.v + n - 16\n")
+  write_failures = write_failures + emit_ir("field_store_and_break", r27, 0)
+  if r27.ok:
+    print("PASS field_store_and_break")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL field_store_and_break: backend not ok: " + diags_text(r27.diags))
 
   // -----------------------------------------------------------------
   // Summary
