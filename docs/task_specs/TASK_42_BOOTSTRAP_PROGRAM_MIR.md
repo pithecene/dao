@@ -57,7 +57,7 @@ one file without the prelude, so every prelude name is `unknown name
 One authorized task, several implementation PRs, each a measured
 slice.  In dependency order:
 
-1. **The program MIR driver.**  `program_run_hir` publishes its arena;
+1. **The program MIR driver.**  The HIR pass keeps its arena;
    `program_run_mir` lowers every module in program order, each with
    its own tokens, source and file id; a function whose declaration has
    type parameters or whose signature mentions a generic parameter is
@@ -86,15 +86,20 @@ Where contract and host disagree, stop and report.
 
 ### Change
 
-- `HirData` carries the program's HIR arena (nodes and index data);
-  `program_run_hir` returns it instead of dropping it.
+- `program_lower_hir` returns the program's HIR arena beside the
+  program (`ProgramHir`) instead of dropping it — beside, not in
+  `HirData`, which `shared/base.dao` gives programs that have no HIR
+  types; `program_run_hir` is it without the arena.
 - `MS` reads a module's tokens, source and file id from the module it
   is lowering; `program_run_mir(p)` walks the `HirProgram` root, sets
   them per `HirModule`, and lowers each `HirFunction`.
-- Generic templates: lowered into a template list (their symbol and
-  MIR function), not the module's function list.  Their bodies are not
-  concrete, so nothing downstream reads them as concrete; Task 43
-  instantiates them.
+- Generic templates: lowered into the module's template list, not its
+  function list.  A template carries a call through a bound with the
+  member access as its callee, as the host's template does; a concrete
+  function never has a type parameter's value, and there the call stays
+  rejected.  A template has no code until Task 43 instantiates it, so
+  the backend fails a module whose concrete code refers to one, rather
+  than calling a function it never emits.
 - MIR diagnostics become file diagnostics (the module's file), so the
   audit can count the compiler program's own file by path.
 - `lower_to_mir` (single-source) goes through the same driver; its
@@ -110,8 +115,8 @@ Any new MIR construct; monomorphization; LLVM.
 ## 4. Non-goals (task)
 
 - Monomorphization — instantiating templates, and naming the function
-  a call through a bound calls (MIR keeps rejecting that fail-closed) —
-  Task 43.
+  a call through a bound calls (the backend keeps rejecting a concrete
+  reference to a template) — Task 43.
 - Program-level LLVM lowering — Task 44.  The Stage-2 crossing — Task
   45.  Retiring `assemble.sh` — Task 46.
 - Generators / `for` over iterables, lambdas, `?`, unless the measured
@@ -136,8 +141,10 @@ MIR suite:
 - an integer literal in the second module lowers with its own module's
   lexeme (per-module tokens, not the first module's);
 - `fn id<T>(x: T): T -> x` lowers to a template, not a module
-  function; a method on `class Box<T>` whose `self` is `Box<T>` does
-  too; a non-generic function beside them is in the module;
+  function; a method on `class Box<T>` does too; a non-generic
+  function beside them is in the module;
+- a call through a bound in a template is carried with no diagnostic;
+  the backend fails `main` calling `id(1)`, naming `id`;
 - a MIR diagnostic is attributed to the file of the module it came
   from;
 - the existing single-source MIR tests stay green.
