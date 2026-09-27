@@ -76,3 +76,20 @@ The Stage-2 / Stage-3 crossing (Task 45).
 Every compiler program, lowered by the bootstrap, links with the runtime
 and passes its suite; the audit's `llvm` column is measured through the
 program pipeline and reads zero.
+
+## 6. Delivered
+
+Six slices, then what their review and the audit's run found: the
+program driver with keyed tables (1); the host's type universe and
+layouts (2); values, places, enum and pointer operations, intrinsics
+and regions (3); operators (4); generators (5); the audit lowering each
+program through the backend, linking and running it (6).  The audit's
+run then exposed the fall-through a match leaves after arms that cover
+every variant, which the backend had rejected as a function falling off
+its end (7), and review brought the host's names — `module::name`, the
+entry's `main`, a shared type name qualified by its module — extern
+signature agreement, construction by `insertvalue`, and the types a
+pointer or a yield reaches (8).  An extern that passes a class or enum
+by value is refused rather than coerced to the C ABI; the corpus has
+none.  Every compiler program, compiled by the bootstrap, links and
+passes its suite.
