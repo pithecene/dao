@@ -145,6 +145,10 @@ Self-hosting compiler subsystems written in Dao.
 - `audit_closure.sh` — measures the constructs and prelude functions the
   bootstrap corpus needs and where the bootstrap pipeline stops on its own
   programs; writes `docs/bootstrap_closure.md`
+- `stage2.sh` — the bootstrap crossing: the host builds the driver
+  (stage 1), which compiles itself (stage 2) and again (stage 3); checks
+  the stage-2 / stage-3 fixed point and runs every suite compiled by
+  stage 2 (Task 45); its outputs go under `driver/out/` (gitignored)
 - `lexer/` — indentation-aware lexer matching the host compiler's token
   surface; tests in `tests.dao` (Task 20)
 - `parser/` — recursive-descent parser producing arena-indexed AST for
@@ -167,6 +171,10 @@ Self-hosting compiler subsystems written in Dao.
   arithmetic, strings, places, enums, pointers, regions, generators) via
   a backend-private Dao-side LLVM mini-IR and text serializer.  Logic +
   tests in `impl.dao` (Tasks 30, 44)
+- `driver/` — the bootstrap compiler as a program: `main.dao` runs the
+  whole pipeline over the files a manifest names and writes one LLVM
+  module; assembled into `driver.gen.dao` with every library fragment
+  (Task 45)
 
 ## `examples/`
 

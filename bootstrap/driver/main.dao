@@ -1,0 +1,65 @@
+module bootstrap::driver_main
+// The bootstrap compiler as a program (Task 45): the whole pipeline —
+// lex, parse, resolve, typecheck, HIR, MIR, monomorphization, LLVM —
+// over the files a manifest names, written as one LLVM module.
+//
+// The runtime has no command line (stdlib/io), so the inputs are a
+// manifest, `bootstrap/driver/out/.manifest`, one entry per line:
+//   output <path>     where the module is written
+//   prelude <path>    a prelude file (CONTRACT_MODULE_SYSTEM.md §7)
+//   source <path>     a program file
+// Assembled after every library fragment; never compiled standalone.
+
+class Manifest:
+  output: string
+  inputs: Vector<SourceInput>
+
+fn read_manifest(path: string): Manifest
+  let listing: string = read_file(path)
+  let out: Manifest = Manifest("", Vector<SourceInput>::new())
+  let start: i64 = 0
+  while start < length(listing):
+    let rest: string = substring(listing, start, length(listing) - start)
+    let nl: i64 = index_of(rest, "\n")
+    let line: string = rest
+    if nl >= to_i64(0):
+      line = substring(rest, to_i64(0), nl)
+      start = start + nl + to_i64(1)
+    else:
+      start = length(listing)
+    // A CRLF manifest's line ends in a carriage return, no part of a path.
+    if length(line) > to_i64(0) and index_of(line, "\r") == length(line) - to_i64(1):
+      line = substring(line, to_i64(0), length(line) - to_i64(1))
+    let space: i64 = index_of(line, " ")
+    if space > to_i64(0):
+      let kind: string = substring(line, to_i64(0), space)
+      let arg: string = substring(line, space + to_i64(1), length(line) - space - to_i64(1))
+      if kind == "output":
+        out.output = arg
+      if kind == "prelude":
+        out.inputs = out.inputs.push(SourceInput(arg, read_file(arg), true))
+      if kind == "source":
+        out.inputs = out.inputs.push(SourceInput(arg, read_file(arg), false))
+  return out
+
+fn main(): i32
+  let manifest_path: string = "bootstrap/driver/out/.manifest"
+  if file_exists(manifest_path) == false:
+    eprint("driver: no manifest at " + manifest_path)
+    return 2
+  let m: Manifest = read_manifest(manifest_path)
+  if m.output == "" or m.inputs.length() == 0:
+    eprint("driver: the manifest names no output or no inputs")
+    return 2
+  let result: LlvmTextResult = lower_program_to_llvm_text(m.inputs)
+  let di: i64 = 0
+  while di < result.diags.length():
+    eprint("driver: " + result.diags.get(di).message)
+    di = di + 1
+  if result.ok == false:
+    eprint("driver: " + i64_to_string(result.diags.length()) + " diagnostic(s); no module written")
+    return 1
+  if write_llvm_text(result, m.output) == false:
+    eprint("driver: could not write " + m.output)
+    return 1
+  return 0
