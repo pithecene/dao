@@ -224,15 +224,15 @@ resource_block_sites() {
   echo "A stage the program never reached reads as —; the last column says where"
   echo "it died and why."
   echo
-  echo "| Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |"
-  echo "|---|---|---|---|---|---|---|---|---|---|---|"
+  echo "| Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | mono | llvm | First blocking diagnostic |"
+  echo "|---|---|---|---|---|---|---|---|---|---|---|---|"
   awk -F'\t' '{
-    name=$1; lex=""; parse=""; resolve=""; typecheck=""; hir=""; mir=""; llvm=""; first=""; peak=""; secs="";
+    name=$1; lex=""; parse=""; resolve=""; typecheck=""; hir=""; mir=""; mono=""; llvm=""; first=""; peak=""; secs="";
     for (i = 2; i <= NF; i++) {
       split($i, kv, "="); key=kv[1]; val=substr($i, length(key) + 2);
       if (key == "lex") lex=val; else if (key == "parse") parse=val; else if (key == "resolve") resolve=val;
       else if (key == "typecheck") typecheck=val; else if (key == "hir") hir=val;
-      else if (key == "mir") mir=val; else if (key == "llvm") llvm=val; else if (key == "first") first=val;
+      else if (key == "mir") mir=val; else if (key == "mono") mono=val; else if (key == "llvm") llvm=val; else if (key == "first") first=val;
       else if (key == "peak_mb") peak=val; else if (key == "seconds") secs=val;
       else if (key == "missing") first="not assembled: " val;
     }
@@ -240,8 +240,8 @@ resource_block_sites() {
     # A stage the program never reached (it died earlier; the last column
     # says where and why) reads as a dash, not as an empty count.
     if (lex == "") lex = "—"; if (parse == "") parse = "—"; if (resolve == "") resolve = "—"; if (typecheck == "") typecheck = "—";
-    if (hir == "") hir = "—"; if (mir == "") mir = "—"; if (llvm == "") llvm = "—";
-    printf "| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", name, peak, secs, lex, parse, resolve, typecheck, hir, mir, llvm, (first == "" ? "—" : first);
+    if (hir == "") hir = "—"; if (mir == "") mir = "—"; if (mono == "") mono = "—"; if (llvm == "") llvm = "—";
+    printf "| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n", name, peak, secs, lex, parse, resolve, typecheck, hir, mir, mono, llvm, (first == "" ? "—" : first);
   }' "$AUDIT_OUT/closure.txt"
   echo
   echo "### What each stage rejects"
@@ -254,7 +254,7 @@ resource_block_sites() {
     if grep -q "^probe: $p diag " "$AUDIT_OUT/probe-$p.log" 2>/dev/null; then
       echo "**$p**"
       echo
-      for stage in lex parse resolve typecheck hir mir llvm; do
+      for stage in lex parse resolve typecheck hir mir mono llvm; do
         grep "^probe: $p diag $stage: " "$AUDIT_OUT/probe-$p.log" | sed "s/^probe: $p diag $stage: //" \
           | sort | uniq -c | sort -rn | head -5 \
           | awk -v stage="$stage" '{ n=$1; $1=""; sub(/^ /, ""); gsub(/\|/, "\\|"); printf "- `%s` ×%s: %s\n", stage, n, $0 }'
