@@ -135,7 +135,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 50
+  let total: i32 = 51
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -831,6 +831,24 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL class_copy_out_expands_by_field: got '" + names46 + "', " + i64_to_string(mir_count_kind(pc46.mir, "MirConstruct")) + " constructs, " + i64_to_string(pc46.mir.diags.length()) + " diagnostics")
+
+  // Test 46b: a `copy_out` that is no copier (static, no `self`) is not
+  // the class's copy: the class is rebuilt field by field (host); and a
+  // generator reached through a pointer field is rejected, once, rather
+  // than expanded without end.
+  let in46b: Vector<SourceInput> = Vector<SourceInput>::new()
+  in46b = in46b.push(SourceInput("core_builtins.dao", hooks45, true))
+  in46b = in46b.push(SourceInput("main.dao", "module app::main\n\nclass Label:\n  text: string\n\n  fn copy_out(value: Label): Label -> Label(\"wrong\")\n\nfn f(x: Label): Label -> copy_out(x)\n", false))
+  let pc46b: ProgramConcrete = mono_of_program(in46b)
+  let in46c: Vector<SourceInput> = Vector<SourceInput>::new()
+  in46c = in46c.push(SourceInput("core_builtins.dao", hooks45, true))
+  in46c = in46c.push(SourceInput("main.dao", "module app::main\n\nclass Box:\n  data: Ptr<Generator<i32>>\n\nfn f(x: Box): Box -> copy_out(x)\n", false))
+  let pc46c: ProgramConcrete = mono_of_program(in46c)
+  if pc46b.mir.diags.length() == 0 and mir_count_kind(pc46b.mir, "MirConstruct") >= 2 and mir_diag_mentions(pc46c.mir, "a generator cannot be copied out") and pc46c.mir.diags.length() == 1:
+    print("PASS copier_shape_and_generator_storage")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL copier_shape_and_generator_storage: " + i64_to_string(pc46b.mir.diags.length()) + " / " + i64_to_string(pc46c.mir.diags.length()) + " diagnostics")
 
   // -----------------------------------------------------------------
   print("")
