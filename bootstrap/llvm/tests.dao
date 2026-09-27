@@ -162,6 +162,7 @@ fn closure_prelude_inputs(): Vector<SourceInput>
 // the resolve and typecheck columns it reports.
 class ProbedProgram:
   program: Program
+  typed: ProgramTyped
   cols: string
 
 // The program pipeline, with the prelude, through typecheck: the columns
@@ -178,17 +179,19 @@ fn closure_program_checked(name: string, path: string, src: string, report: bool
   let p: Program = program_from_graph(pg)
   resource memory resolve =>
     p = program_run_resolve(p)
+  let pt: ProgramTyped = ProgramTyped(p, registry_new(p.resolve.symbols, p.graph.modules))
   resource memory typecheck =>
-    p = program_run_typecheck(p)
+    pt = program_check(p)
+  p = pt.program
   if report == false:
-    return ProbedProgram(p, "")
+    return ProbedProgram(p, pt, "")
   let carried_into_resolve: i64 = pg.diags.length()
   closure_report_file_diags(name, "resolve", p.resolve.diags, carried_into_resolve, to_i64(50), path)
   let cols: string = closure_stage_file_column(name, "resolve", p.resolve.diags, carried_into_resolve, path)
   let carried_into_typecheck: i64 = p.resolve.diags.length()
   closure_report_file_diags(name, "typecheck", p.diags, carried_into_typecheck, to_i64(50), path)
   cols = cols + closure_stage_file_column(name, "typecheck", p.diags, carried_into_typecheck, path)
-  return ProbedProgram(p, cols)
+  return ProbedProgram(p, pt, cols)
 
 fn closure_probe_stage(name: string, path: string, stage: string): string
   if file_exists(path) == false:
@@ -234,6 +237,15 @@ fn closure_probe_stage(name: string, path: string, stage: string): string
       pm = program_run_mir(checked.program)
     closure_report_file_diags(name, "mir", pm.program.diags, carried_into_mir, to_i64(50), path)
     cols = cols + closure_stage_file_column(name, "mir", pm.program.diags, carried_into_mir, path)
+    // Monomorphization over the whole program, prelude included: what it
+    // could not make concrete (its diagnostics are the program's, not one
+    // file's).
+    let carried_into_mono: i64 = pm.mir.diags.length()
+    let pc: ProgramConcrete = ProgramConcrete(pm.program, pm.mir)
+    resource memory mono =>
+      pc = program_monomorphize(checked.typed, pm)
+    closure_report_diags_from(name, "mono", pc.mir.diags, carried_into_mono, to_i64(50))
+    cols = cols + closure_stage_column(name, "mono", pc.mir.diags, carried_into_mono)
   if stage == "llvm":
     let ll: LlvmTextResult = llvm_text_result_empty()
     resource memory llvm =>
