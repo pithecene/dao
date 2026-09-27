@@ -376,7 +376,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 44
+  let total: i32 = 46
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -605,16 +605,18 @@ fn main(): i32
       di = di + to_i64(1)
 
   // -----------------------------------------------------------------
-  // Test 13: struct_construction — P(1, 2) emits alloca + GEP stores
+  // Test 13: struct_construction — P(1, 2) is built as a value, one
+  // `insertvalue` per field (the host's), and its field read back by
+  // `extractvalue`
   // -----------------------------------------------------------------
   let src13: string = "class P:\n  x: i32\n  y: i32\n\nfn main(): i32\n  let p: P = P(1, 2)\n  return p.x\n"
   let r13: LlvmTextResult = lower_source_to_llvm_text(src13)
   write_failures = write_failures + emit_ir("struct_construction", r13, 1)
   if r13.ok:
     let a: bool = check_contains(r13, "%struct.P = type { i32, i32 }", "struct_construction")
-    let b: bool = check_contains(r13, "getelementptr inbounds %struct.P", "struct_construction")
-    let c: bool = check_contains(r13, "store i32 1", "struct_construction")
-    let d: bool = check_contains(r13, "store i32 2", "struct_construction")
+    let b: bool = check_contains(r13, "extractvalue %struct.P", "struct_construction")
+    let c: bool = check_contains(r13, "insertvalue %struct.P undef, i32 1, 0", "struct_construction")
+    let d: bool = check_contains(r13, ", i32 2, 1", "struct_construction")
     if a:
       if b:
         if c:
@@ -1056,6 +1058,33 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL void_pointee_get_rejected: ok=" + bool_to_string(r44.ok) + " " + diags_text(r44.diags))
+
+  // Test 45: a repeated arm can never match, so a match exhaustive
+  // without it still returns on every path; a class constructed in a
+  // loop takes no stack per iteration (a million iterations under the
+  // default stack); and the program exits 0.
+  let r45: LlvmTextResult = lower_source_to_llvm_text("enum E:\n  A\n  B\n\nclass P:\n  x: i32\n\nfn f(e: E): i32\n  match e:\n    E::A:\n      return 0\n    E::A:\n      let unused: i32 = 0\n    E::B:\n      return 1\n\nfn main(): i32\n  let i: i32 = 0\n  while i < 1000000:\n    let p: P = P(i)\n    i = p.x + 1\n  return f(E::B) - 1\n")
+  write_failures = write_failures + emit_ir("repeated_arm_and_loop_construct", r45, 0)
+  if r45.ok:
+    print("PASS repeated_arm_and_loop_construct")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL repeated_arm_and_loop_construct: " + diags_text(r45.diags))
+
+  // Test 46: three modules' `main`s are as ambiguous as two; an extern
+  // passing a class by value is refused, not called with the wrong
+  // register layout.
+  let prog46: Vector<SourceInput> = Vector<SourceInput>::new()
+  prog46 = prog46.push(SourceInput("a.dao", "module p::a\n\nfn main(): i32 -> 1\n", false))
+  prog46 = prog46.push(SourceInput("b.dao", "module p::b\n\nfn main(): i32 -> 2\n", false))
+  prog46 = prog46.push(SourceInput("c.dao", "module p::c\n\nfn main(): i32 -> 3\n", false))
+  let r46: LlvmTextResult = lower_program_to_llvm_text(prog46)
+  let r46b: LlvmTextResult = lower_source_to_llvm_text("class Pair:\n  x: i32\n  y: i32\n\nextern fn take(p: Pair): i32\n\nfn main(): i32 -> take(Pair(1, 2))\n")
+  if r46.ok == false and contains_substring(diags_text(r46.diags), "ambiguous entry") and r46b.ok == false and contains_substring(diags_text(r46b.diags), "C ABI"):
+    print("PASS entry_and_extern_abi_fail_closed")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL entry_and_extern_abi_fail_closed: three mains ok=" + bool_to_string(r46.ok) + ", extern ok=" + bool_to_string(r46b.ok) + " " + diags_text(r46b.diags))
 
   // -----------------------------------------------------------------
   // Summary

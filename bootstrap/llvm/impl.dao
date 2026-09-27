@@ -661,8 +661,9 @@ fn bs_program_of(input: MirBackendInput): BsProgram
     if sym.name == "main" and sym.owner_module_id >= 0 and sym.owner_module_id < modules.length():
       match sym.kind:
         SymbolKind::Function:
+          // -2 once two modules declare one; it stays ambiguous.
           if modules.get(sym.owner_module_id).is_prelude == false:
-            if entry < 0:
+            if entry == to_i64(-1):
               entry = sym.owner_module_id
             else:
               if entry != sym.owner_module_id:
@@ -873,6 +874,28 @@ fn bs_mark_extern(bs: BS, name: string, signature: string): BS
   bs.extern_sigs = bs.extern_sigs.push(signature)
   return bs
 
+// A class or payload enum passed to or returned from C by value needs
+// the host's x86-64 C ABI coercion (llvm_abi.cpp), which this backend
+// does not lower: such an extern fails the module rather than calling
+// C with the wrong register layout.  A string is a pointer to its
+// `%dao.string` (the runtime's own ABI).
+fn bs_check_extern_scalars(bs: BS, name: string, ret_type: i64, locals_raw: Vector<i64>, param_count: i64): BS
+  let what: string = ""
+  match ll_type_of(bs, ret_type):
+    LlType::LlStruct:
+      what = "returns"
+  let i: i64 = to_i64(0)
+  while i < param_count and i < locals_raw.length():
+    match bs.mir_nodes.get(locals_raw.get(i)):
+      MirNode::MirLocal(lsym, ltype_idx, lis_param):
+        match ll_type_of(bs, ltype_idx):
+          LlType::LlStruct:
+            what = "takes"
+    i = i + to_i64(1)
+  if what == "":
+    return bs
+  return bs_error(bs, "bootstrap llvm backend: extern '" + llvm_name_body(name) + "' " + what + " a class or enum by value; its C ABI coercion is not lowered")
+
 // An extern's Dao signature by type identity -- its result's and each
 // parameter's type index -- as the host compares them: `*i32` and
 // `*f64` both lower to `ptr`, and two modules' classes named `P` print
@@ -1037,40 +1060,18 @@ fn bs_lower_struct_ctor(bs: BS, insts: Vector<LlInst>, type_idx: i64, arg_list_l
   let struct_ty_text: string = bs_ty(bs, type_idx)
   bs = bs_ensure_struct_def(bs, type_idx)
   let args_raw: Vector<i64> = read_mir_list(bs.mir_idx, arg_list_lp)
-  // Alloca for the temp struct.
-  let fr_tmp: FreshR = bs_fresh_value(bs)
-  bs = fr_tmp.bs
-  let tmp_name: string = fr_tmp.name
-  let alloca_inst: LlInst = LlInst(
-    LlInstKind::LlAlloca(ty_text = struct_ty_text), tmp_name)
-  insts = insts.push(alloca_inst)
-  // GEP + store each field.
+  // Built as a value, one `insertvalue` per field (the host's): no stack
+  // slot, so a construction in a loop does not grow the frame.
+  let value: string = "undef"
   let fi: i64 = to_i64(0)
   while fi < args_raw.length():
     let arg_idx: i64 = args_raw.get(fi)
-    let arg_text: string = bs_get_value_text(bs, arg_idx)
-    let arg_ty_text: string = bs_get_value_ty(bs, arg_idx)
-    let fr_gep: FreshR = bs_fresh_value(bs)
-    bs = fr_gep.bs
-    let gep_name: string = fr_gep.name
-    let gep_inst: LlInst = LlInst(
-      LlInstKind::LlGepField(ptr_text = tmp_name, struct_ty_text = struct_ty_text, field_index = fi),
-      gep_name)
-    insts = insts.push(gep_inst)
-    let store_inst: LlInst = LlInst(
-      LlInstKind::LlStore(ptr_name = gep_name, value_text = arg_text, value_ty_text = arg_ty_text),
-      "")
-    insts = insts.push(store_inst)
+    let next: FreshR = bs_fresh_value(bs)
+    bs = next.bs
+    insts = insts.push(LlInst(LlInstKind::LlText(rhs = "insertvalue " + struct_ty_text + " " + value + ", " + bs_get_value_ty(bs, arg_idx) + " " + bs_get_value_text(bs, arg_idx) + ", " + i64_to_string(fi)), next.name))
+    value = next.name
     fi = fi + to_i64(1)
-  // Load the complete struct value.
-  let fr_load: FreshR = bs_fresh_value(bs)
-  bs = fr_load.bs
-  let load_name: string = fr_load.name
-  let load_inst: LlInst = LlInst(
-    LlInstKind::LlLoad(ptr_name = tmp_name, ty_text = struct_ty_text),
-    load_name)
-  insts = insts.push(load_inst)
-  return StructCtorR(bs, insts, load_name, struct_ty_text)
+  return StructCtorR(bs, insts, value, struct_ty_text)
 
 // The address of a MIR place: its local's slot, then one GEP per field
 // step of its path, with the LLVM type of what it addresses.  A step
@@ -2076,21 +2077,24 @@ fn mir_reachable_blocks(bs: BS, blocks_raw: Vector<i64>): Vector<i64>
     let at: i64 = r.queue.get(next)
     let here: Ruled = r.ruled.get(at)
     let exit: BlockExit = mir_block_exit(bs, r.blocks.get(at))
-    if exit.target >= 0:
-      r = reach_block(r, exit.target, ruled_nothing())
-    if exit.else_block >= 0:
-      let test: MatchTest = mir_match_test(bs, exit.cond)
-      if test.local < 0:
+    let test: MatchTest = mir_match_test(bs, exit.cond)
+    if exit.else_block < 0 or test.local < 0:
+      if exit.target >= 0:
+        r = reach_block(r, exit.target, ruled_nothing())
+      if exit.else_block >= 0:
         r = reach_block(r, exit.else_block, ruled_nothing())
-      else:
-        let failed: Ruled = Ruled(test.local, ",", to_i64(0))
-        if here.local == test.local:
-          failed = here
-        let tag: string = i64_to_string(test.variant) + ","
-        if index_of(failed.variants, "," + tag) < to_i64(0):
-          failed = Ruled(test.local, failed.variants + tag, failed.count + to_i64(1))
-        if failed.count < test.variants:
-          r = reach_block(r, exit.else_block, failed)
+    else:
+      let failed: Ruled = Ruled(test.local, ",", to_i64(0))
+      if here.local == test.local:
+        failed = here
+      let tag: string = i64_to_string(test.variant) + ","
+      // A variant an earlier test already failed cannot match here: a
+      // repeated arm is dead.
+      if index_of(failed.variants, "," + tag) < to_i64(0):
+        r = reach_block(r, exit.target, ruled_nothing())
+        failed = Ruled(test.local, failed.variants + tag, failed.count + to_i64(1))
+      if failed.count < test.variants:
+        r = reach_block(r, exit.else_block, failed)
     next = next + to_i64(1)
   return r.blocks
 
@@ -2144,6 +2148,7 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
 
       // Extern declarations: no body, no blocks.
       if is_extern_i > to_i64(0):
+        bs = bs_check_extern_scalars(bs, name, ret_type, locals_raw, param_count)
         let signature: string = bs_extern_signature(bs, ret_type, locals_raw, param_count)
         // Two externs of one C name coalesce when they agree (the host's
         // extern_signatures_); a runtime hook's declaration is canonical.
