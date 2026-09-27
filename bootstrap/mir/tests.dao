@@ -88,7 +88,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 32
+  let total: i32 = 36
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -571,6 +571,28 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL return_from_for_destroys_iterator: got " + i64_to_string(mir_count_kind(r31, "MirIterDestroy")) + " destroys, " + i64_to_string(r31.diags.length()) + " diagnostics")
+  // Tests 32–33: the loop variable takes the generator's element type
+  // (its load is `i32`, as the host's); a non-generator iterable is
+  // rejected, as the host rejects it.
+  let r32: MirResult = lower_to_mir("fn f(g: Generator<i32>): i32\n  for x in g:\n    return x\n  return 0\n")
+  let untyped32: i64 = 0
+  let ni32: i64 = 0
+  while ni32 < r32.mir_nodes.length():
+    match r32.mir_nodes.get(ni32):
+      MirNode::MirLoad(local_idx, ti):
+        if ti < 0:
+          untyped32 = untyped32 + 1
+    ni32 = ni32 + 1
+  if r32.diags.length() == 0 and untyped32 == 0:
+    print("PASS loop_variable_typed")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL loop_variable_typed: " + i64_to_string(untyped32) + " untyped loads, " + i64_to_string(r32.diags.length()) + " diagnostics")
+  if mir_diag_mentions(lower_to_mir("fn f(): void\n  for x in 1:\n    break\n"), "for-in requires Generator<T>"):
+    print("PASS non_generator_iterable_rejected")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL non_generator_iterable_rejected: expected the host's diagnostic")
 
   // -----------------------------------------------------------------
   print("")
