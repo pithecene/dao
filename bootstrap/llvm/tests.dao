@@ -361,7 +361,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 32
+  let total: i32 = 33
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -902,6 +902,19 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL bound_call_specialized: " + diags_text(r31.diags))
+
+  // Test 33: a program of two modules lowers whole, each function read
+  // with its own module's tokens, and runs: add(40, 2) - 42 exits 0.
+  let prog33: Vector<SourceInput> = Vector<SourceInput>::new()
+  prog33 = prog33.push(SourceInput("core_util.dao", "module core::util\n\nfn add(a: i32, b: i32): i32\n  let sum: i32 = a + b\n  return sum\n", true))
+  prog33 = prog33.push(SourceInput("main.dao", "module app::main\n\nfn main(): i32\n  let x: i32 = add(40, 2)\n  return x - 42\n", false))
+  let r33: LlvmTextResult = lower_program_to_llvm_text(prog33)
+  write_failures = write_failures + emit_ir("two_module_program", r33, 0)
+  if r33.ok and check_contains(r33, "define i32 @add(", "two_module_program"):
+    print("PASS two_module_program")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL two_module_program: " + diags_text(r33.diags))
 
   // -----------------------------------------------------------------
   // Summary

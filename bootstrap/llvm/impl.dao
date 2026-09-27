@@ -148,6 +148,7 @@ class MirBackendInput:
   type_info: Vector<i64>
   toks: Vector<Token>
   src: string
+  files: Vector<SourceFile>   // every module's source, for a MirProgram root
 
 // =========================================================================
 // Section 82: Type lowering (MIR type_idx → LlType → textual form)
@@ -422,6 +423,28 @@ class BS:
   // the whole backend result `ok = false`.
   had_error: i64
 
+  // Where each keyed entry of the side tables above sits, so a lookup
+  // is a hash probe rather than a scan (a compiler-sized function has
+  // thousands of values).
+  index: BsIndex
+
+  // The program's source files, for the tokens of the module whose
+  // functions are being lowered (`toks` / `src` above).
+  files: Vector<SourceFile>
+
+// Positions in BS's side tables, by key: a value's and a block label's
+// by MIR node, a slot's by MirLocal node, an extern's and a struct's by
+// name / type index.
+class BsIndex:
+  values: HashMap<i64>
+  slots: HashMap<i64>
+  labels: HashMap<i64>
+  externs: HashMap<i64>
+  structs: HashMap<i64>
+
+fn bs_index_empty(): BsIndex
+  return BsIndex(HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new())
+
 fn bs_new(input: MirBackendInput): BS
   return BS(
     input.mir.mir_nodes,
@@ -448,7 +471,9 @@ fn bs_new(input: MirBackendInput): BS
     Vector<string>::new(),
     Vector<CallArgs>::new(),
     Vector<LlStructDef>::new(),
-    to_i64(0))
+    to_i64(0),
+    bs_index_empty(),
+    input.files)
 
 fn bs_reset_fn_state(bs: BS): BS
   bs.val_keys = Vector<i64>::new()
@@ -460,6 +485,7 @@ fn bs_reset_fn_state(bs: BS): BS
   bs.block_keys = Vector<i64>::new()
   bs.block_labels = Vector<string>::new()
   bs.next_value = to_i64(0)
+  bs.index = BsIndex(HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), bs.index.externs, bs.index.structs)
   return bs
 
 // Fail-closed type check: if ty is LlUnsupported, emit a diagnostic
@@ -492,49 +518,43 @@ fn bs_error(bs: BS, msg: string): BS
 
 // Value side-table helpers.
 fn bs_set_value(bs: BS, mir_idx: i64, text: string, ty_text: string): BS
+  bs.index.values = bs.index.values.set(i64_to_string(mir_idx), bs.val_keys.length())
   bs.val_keys = bs.val_keys.push(mir_idx)
   bs.val_texts = bs.val_texts.push(text)
   bs.val_tys = bs.val_tys.push(ty_text)
   return bs
 
 fn bs_get_value_text(bs: BS, mir_idx: i64): string
-  let i: i64 = to_i64(0)
-  while i < bs.val_keys.length():
-    if bs.val_keys.get(i) == mir_idx:
-      return bs.val_texts.get(i)
-    i = i + to_i64(1)
-  return ""
+  let at: i64 = hm_get_or(bs.index.values, i64_to_string(mir_idx), to_i64(-1))
+  if at < 0:
+    return ""
+  return bs.val_texts.get(at)
 
 fn bs_get_value_ty(bs: BS, mir_idx: i64): string
-  let i: i64 = to_i64(0)
-  while i < bs.val_keys.length():
-    if bs.val_keys.get(i) == mir_idx:
-      return bs.val_tys.get(i)
-    i = i + to_i64(1)
-  return ""
+  let at: i64 = hm_get_or(bs.index.values, i64_to_string(mir_idx), to_i64(-1))
+  if at < 0:
+    return ""
+  return bs.val_tys.get(at)
 
 // Slot side-table helpers (MirLocal node idx → alloca name + ty text).
 fn bs_set_slot(bs: BS, local_node_idx: i64, slot_name: string, ty_text: string): BS
+  bs.index.slots = bs.index.slots.set(i64_to_string(local_node_idx), bs.slot_keys.length())
   bs.slot_keys = bs.slot_keys.push(local_node_idx)
   bs.slot_names = bs.slot_names.push(slot_name)
   bs.slot_tys = bs.slot_tys.push(ty_text)
   return bs
 
 fn bs_get_slot_name(bs: BS, local_node_idx: i64): string
-  let i: i64 = to_i64(0)
-  while i < bs.slot_keys.length():
-    if bs.slot_keys.get(i) == local_node_idx:
-      return bs.slot_names.get(i)
-    i = i + to_i64(1)
-  return ""
+  let at: i64 = hm_get_or(bs.index.slots, i64_to_string(local_node_idx), to_i64(-1))
+  if at < 0:
+    return ""
+  return bs.slot_names.get(at)
 
 fn bs_get_slot_ty(bs: BS, local_node_idx: i64): string
-  let i: i64 = to_i64(0)
-  while i < bs.slot_keys.length():
-    if bs.slot_keys.get(i) == local_node_idx:
-      return bs.slot_tys.get(i)
-    i = i + to_i64(1)
-  return ""
+  let at: i64 = hm_get_or(bs.index.slots, i64_to_string(local_node_idx), to_i64(-1))
+  if at < 0:
+    return ""
+  return bs.slot_tys.get(at)
 
 // Slot position-indexed lookup for MirLocal local_slot_index.  Task 29
 // MirLoad/MirStore reference locals by slot index (0..param_count..locals.length()),
@@ -565,28 +585,23 @@ fn bs_slot_ty_by_index(bs: BS, slot_idx: i64): string
 
 // Block label side-table helpers (MirBlock node idx → label text).
 fn bs_set_block_label(bs: BS, block_node_idx: i64, label: string): BS
+  bs.index.labels = bs.index.labels.set(i64_to_string(block_node_idx), bs.block_keys.length())
   bs.block_keys = bs.block_keys.push(block_node_idx)
   bs.block_labels = bs.block_labels.push(label)
   return bs
 
 fn bs_get_block_label(bs: BS, block_node_idx: i64): string
-  let i: i64 = to_i64(0)
-  while i < bs.block_keys.length():
-    if bs.block_keys.get(i) == block_node_idx:
-      return bs.block_labels.get(i)
-    i = i + to_i64(1)
-  return ""
+  let at: i64 = hm_get_or(bs.index.labels, i64_to_string(block_node_idx), to_i64(-1))
+  if at < 0:
+    return ""
+  return bs.block_labels.get(at)
 
 // Extern-declare dedup.
 fn bs_has_extern(bs: BS, name: string): bool
-  let i: i64 = to_i64(0)
-  while i < bs.extern_emitted.length():
-    if bs.extern_emitted.get(i) == name:
-      return true
-    i = i + to_i64(1)
-  return false
+  return bs.index.externs.contains(name)
 
 fn bs_mark_extern(bs: BS, name: string): BS
+  bs.index.externs = bs.index.externs.set(name, bs.extern_emitted.length())
   bs.extern_emitted = bs.extern_emitted.push(name)
   return bs
 
@@ -597,17 +612,15 @@ fn bs_ensure_struct_def(bs: BS, type_idx: i64): BS
   // Already registered?  (Dedup check runs first so cyclic /
   // mutually-referential struct graphs terminate — we push a
   // placeholder before recursing into field types.)
-  let i: i64 = to_i64(0)
-  while i < bs.struct_defs.length():
-    if bs.struct_defs.get(i).mir_type_idx == type_idx:
-      return bs
-    i = i + to_i64(1)
+  if bs.index.structs.contains(i64_to_string(type_idx)):
+    return bs
   // Push a placeholder entry first so that recursive struct field
   // registration sees this type as already present and doesn't
   // recurse back into it.
   let t: DaoType = bs.types.get(type_idx)
   let ll_name: string = bs_struct_name(t.name, type_idx)
   let slot_idx: i64 = bs.struct_defs.length()
+  bs.index.structs = bs.index.structs.set(i64_to_string(type_idx), slot_idx)
   bs.struct_defs = bs.struct_defs.push(LlStructDef(t.name, ll_name, Vector<string>::new(), type_idx))
   // Walk the struct's field type pairs.  For every field whose
   // type is another struct, recursively register that struct def
@@ -1523,13 +1536,32 @@ fn lower_mir_to_ll_module(bs: BS, root: i64): BS
   let root_node: MirNode = bs.mir_nodes.get(root)
   match root_node:
     MirNode::MirModule(file_id, fn_list_lp, fn_count, template_list_lp, template_count):
-      let fn_indices: Vector<i64> = read_mir_list(bs.mir_idx, fn_list_lp)
-      let i: i64 = to_i64(0)
-      while i < fn_indices.length():
-        bs = bs_lower_function(bs, fn_indices.get(i))
-        i = i + to_i64(1)
+      return bs_lower_module_fns(bs, fn_list_lp)
+    MirNode::MirProgram(module_list_lp, module_count):
+      // A whole program: every module's functions, each read with its
+      // own module's tokens.
+      let modules: Vector<i64> = read_mir_list(bs.mir_idx, module_list_lp)
+      let mi: i64 = to_i64(0)
+      while mi < modules.length():
+        match bs.mir_nodes.get(modules.get(mi)):
+          MirNode::MirModule(mfile, mfn_lp, mfn_count, mtl, mtc):
+            if mfile < 0 or mfile >= bs.files.length():
+              return bs_error(bs, "bootstrap llvm backend: a module's file " + i64_to_string(mfile) + " is not in the program")
+            let sf: SourceFile = bs.files.get(mfile)
+            bs.toks = sf.parse_output.toks
+            bs.src = sf.source_text
+            bs = bs_lower_module_fns(bs, mfn_lp)
+        mi = mi + to_i64(1)
       return bs
-  bs = bs_error(bs, "bootstrap llvm backend: MirResult.root is not a MirModule node")
+  bs = bs_error(bs, "bootstrap llvm backend: MirResult.root is neither a MirProgram nor a MirModule")
+  return bs
+
+fn bs_lower_module_fns(bs: BS, fn_list_lp: i64): BS
+  let fn_indices: Vector<i64> = read_mir_list(bs.mir_idx, fn_list_lp)
+  let i: i64 = to_i64(0)
+  while i < fn_indices.length():
+    bs = bs_lower_function(bs, fn_indices.get(i))
+    i = i + to_i64(1)
   return bs
 
 // =========================================================================
@@ -1762,7 +1794,29 @@ fn lower_to_mir_backend_input(src: string): MirBackendInput
   let r: MirResult = pc.mir
   let sf: SourceFile = program_file_of_module(pc.program, to_i64(0))
   let po: ParseOutput = sf.parse_output
-  return MirBackendInput(MirResult(r.mir_nodes, r.mir_idx, r.diags, mir_only_module(r)), pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, po.toks, sf.source_text)
+  return MirBackendInput(MirResult(r.mir_nodes, r.mir_idx, r.diags, mir_only_module(r)), pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, po.toks, sf.source_text, pc.program.graph.files)
+
+// A whole program to LLVM text: every module, checked, lowered to MIR,
+// made concrete (Task 43) and lowered here, each function with its own
+// module's tokens.
+fn lower_program_to_llvm_text(inputs: Vector<SourceInput>): LlvmTextResult
+  let pg: ProgramGraph = program_graph_empty()
+  resource memory graph =>
+    pg = build_program(inputs)
+  let p: Program = program_from_graph(pg)
+  resource memory resolve =>
+    p = program_run_resolve(p)
+  let pt: ProgramTyped = ProgramTyped(p, registry_new(p.resolve.symbols, p.graph.modules))
+  resource memory typecheck =>
+    pt = program_check(p)
+  let pm: ProgramMir = ProgramMir(pt.program, mir_result_empty())
+  resource memory mir =>
+    pm = program_run_mir(pt.program)
+  let pc: ProgramConcrete = ProgramConcrete(pm.program, pm.mir)
+  resource memory mono =>
+    pc = program_monomorphize(pt, pm)
+  let input: MirBackendInput = MirBackendInput(pc.mir, pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, Vector<Token>::new(), "", pc.program.graph.files)
+  return lower_mir_to_llvm_text(input)
 
 fn lower_source_to_llvm_text(src: string): LlvmTextResult
   let input: MirBackendInput = lower_to_mir_backend_input(src)
