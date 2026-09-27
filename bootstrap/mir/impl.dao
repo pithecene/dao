@@ -633,6 +633,11 @@ fn lower_stmt_list(br: BlockR, list_pos: i64): BlockR
   let stmts: Vector<i64> = read_hir_list(br.ms.hir_idx, list_pos)
   let i: i64 = to_i64(0)
   while i < stmts.length():
+    // After a terminator (`return`, `break`) the rest of the list is
+    // unreachable; the host's builder drops it, and so does this one,
+    // rather than appending instructions after the block's terminator.
+    if br.sealed == to_i64(1):
+      return br
     br = mir_lower_stmt(br, stmts.get(i))
     i = i + to_i64(1)
   return br

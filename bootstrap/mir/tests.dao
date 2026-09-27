@@ -88,7 +88,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 27
+  let total: i32 = 28
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -500,6 +500,14 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL break_branches_to_loop_exit: got " + i64_to_string(r26.diags.length()) + " diagnostics, " + i64_to_string(mir_count_kind(r26, "MirBr")) + " branches")
+  // Test 26b: statements after `break` are unreachable and dropped, as
+  // the host drops them: the assignment `n = 1` leaves no constant 1.
+  let r26b: MirResult = lower_to_mir("fn main(): i32\n  let n: i32 = 0\n  while true:\n    break\n    n = 1\n  return n\n")
+  if r26b.diags.length() == 0 and mir_count_kind(r26b, "MirConstInt") == 1:
+    print("PASS statements_after_break_dropped")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL statements_after_break_dropped: got " + i64_to_string(mir_count_kind(r26b, "MirConstInt")) + " integer constants, " + i64_to_string(r26b.diags.length()) + " diagnostics")
 
   // -----------------------------------------------------------------
   print("")
