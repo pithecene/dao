@@ -135,7 +135,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 46
+  let total: i32 = 47
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -770,6 +770,20 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL specializations_are_concrete: got '" + mono_fn_names(pc43) + "'")
+
+  // Test 43b: a specialization's reference is concrete: `id(1)` refers
+  // to `id$i32` as `fn(i32): i32`, nothing of `T` left (host).
+  let concrete43b: bool = true
+  let ri43b: i64 = 0
+  while ri43b < pc40.mir.diags.length():
+    if index_of(pc40.mir.diags.get(ri43b).message, "concreteness") >= 0:
+      concrete43b = false
+    ri43b = ri43b + 1
+  if concrete43b:
+    print("PASS specialized_reference_is_concrete")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL specialized_reference_is_concrete: a reference still holds a type parameter")
 
   // -----------------------------------------------------------------
   print("")

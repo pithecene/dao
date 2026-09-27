@@ -349,7 +349,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 30
+  let total: i32 = 31
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -871,6 +871,16 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL field_store_and_break: backend not ok: " + diags_text(r27.diags))
+
+  // Test 32: a specialization whose name LLVM cannot take bare
+  // (`tag$Ptr<i32>`) is quoted, and the module is valid IR.
+  let r32: LlvmTextResult = lower_source_to_llvm_text("fn tag<T>(): i32 -> 0\n\nfn main(): i32 -> tag<Ptr<i32>>()\n")
+  write_failures = write_failures + emit_ir("quoted_specialization_name", r32, 0)
+  if r32.ok and check_contains(r32, "@\"tag$Ptr<i32>\"", "quoted_specialization_name"):
+    print("PASS quoted_specialization_name")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL quoted_specialization_name: " + diags_text(r32.diags))
 
   // -----------------------------------------------------------------
   // Summary

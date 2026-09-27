@@ -1718,8 +1718,18 @@ fn mono_read_subst(data: Vector<i64>, start: i64, into: HashMap<i64>): HashMap<i
   return out
 
 fn mono_subst_type(m: Mono, map: HashMap<i64>, ti: i64): MonoType
-  if ti < 0:
+  if ti < 0 or ti >= m.tables.ts.types.length():
     return MonoType(m, ti)
+  // A function type (a reference's) is rebuilt parameter by parameter;
+  // substitute_type rebuilds what a class or enum stands for.
+  let is_fn: bool = false
+  match m.tables.ts.types.get(ti).kind:
+    TypeKind::TFunction:
+      is_fn = true
+  if is_fn:
+    let rf: TypeR = substitute_fn_type(m.tables.ts, map, ti)
+    m.tables.ts = rf.ts
+    return MonoType(m, rf.type_idx)
   let r: TypeR = substitute_type(m.tables.ts, map, ti)
   m.tables.ts = r.ts
   return MonoType(m, r.type_idx)
