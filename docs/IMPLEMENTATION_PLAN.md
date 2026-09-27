@@ -891,6 +891,24 @@ audit's host sweep found (a field mismatch printed with identical types,
 a missing field through a chained instantiation, `obj.m<T>::x`
 accepted), which the bootstrap does not follow.
 
+### Task 42 — Bootstrap Program MIR
+
+Status: **in progress** — `docs/task_specs/TASK_42_BOOTSTRAP_PROGRAM_MIR.md`.
+Authorized after Task 41.
+
+**Objective**: bring the compiler corpus, with the prelude, through a
+program-level HIR → MIR pipeline with the host's HIR and MIR shape —
+`match` as discriminant tests and payload bindings, construction,
+stores to places, `break`, `mode` / `resource` regions — one measured
+slice at a time; generic bodies lowered to templates kept out of the
+module, as the host keeps them.
+
+Slice 1 is the program MIR driver: `program_run_hir` publishes its
+arena, `program_run_mir` lowers every module with its own tokens and
+source, and the audit's `mir` column is measured through it with the
+prelude.  Monomorphization is Task 43, program-level LLVM Task 44, the
+Stage-2 crossing Task 45.
+
 ### Task 14 — Numeric Type Expansion
 
 **Objective**: Implement the numeric semantics frozen in
