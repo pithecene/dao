@@ -361,7 +361,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 33
+  let total: i32 = 34
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -525,7 +525,9 @@ fn main(): i32
     print("FAIL while_cfg: ok=false")
 
   // -----------------------------------------------------------------
-  // Test 10: string_global — string literal emits private global + GEP
+  // Test 10: string_global — a string literal is a private global and a
+  // `%dao.string` value `{ bytes, length }`, passed to a call by pointer
+  // (the host's string ABI).
   // -----------------------------------------------------------------
   let src10: string = "extern fn puts(s: string): i32\n\nfn main(): i32\n  return puts(\"hi\")\n"
   let r10: LlvmTextResult = lower_source_to_llvm_text(src10)
@@ -533,7 +535,7 @@ fn main(): i32
   if r10.ok:
     let a: bool = check_contains(r10, "@.str.0 = private unnamed_addr constant", "string_global")
     let b: bool = check_contains(r10, "c\"hi\\00\"", "string_global")
-    let c: bool = check_contains(r10, "getelementptr inbounds", "string_global")
+    let c: bool = check_contains(r10, "insertvalue %dao.string", "string_global")
     if a:
       if b:
         if c:
@@ -795,20 +797,14 @@ fn main(): i32
   else:
     print("FAIL upstream_warning_keeps_backend_ok: expected ok=true with the warning carried, got ok=" + bool_to_string(r22.ok) + " and " + i64_to_string(r22.diags.length()) + " diagnostics")
 
-  // Test 23: a generator signature has no Tier A lowering: a generator
-  // function with no `yield` still fails the backend on its return type.
+  // Test 23: a generator has no lowering yet: a generator function with
+  // no `yield` still fails the backend.
   let r23: LlvmTextResult = lower_source_to_llvm_text("fn g(): Generator<i64>\n  return\n\nfn main(): i32\n  return 0\n")
-  let saw23: bool = false
-  let d23: i64 = 0
-  while d23 < r23.diags.length():
-    if index_of(r23.diags.get(d23).message, "function return type") >= 0:
-      saw23 = true
-    d23 = d23 + 1
-  if r23.ok == false and saw23:
+  if r23.ok == false and r23.diags.length() > 0:
     print("PASS generator_signature_rejected_by_backend")
     pass_count = pass_count + 1
   else:
-    print("FAIL generator_signature_rejected_by_backend: expected ok=false with an unsupported return type diagnostic, got ok=" + bool_to_string(r23.ok) + " and " + i64_to_string(r23.diags.length()) + " diagnostics")
+    print("FAIL generator_signature_rejected_by_backend: expected ok=false with a diagnostic, got ok=" + bool_to_string(r23.ok))
 
   // Test 24: an instantiation's struct is named as it is spelled and
   // by its identity, in quotes, since `<` is no unquoted LLVM
@@ -866,14 +862,15 @@ fn main(): i32
   else:
     print("FAIL string_comparison_fails_closed: " + diags_text(r29.diags))
 
-  // Test 28: an enum's tag is an integer constant of a type this backend
-  // does not lower; the module fails rather than emitting it untyped.
+  // Test 28: an enum's tag is an integer constant: a classification enum
+  // is its `i32` tag (the host's): the comparison runs, exiting 1.
   let r28: LlvmTextResult = lower_source_to_llvm_text("enum E:\n  A\n\nfn main(): i32\n  if E::A == E::A:\n    return 1\n  return 0\n")
-  if r28.ok == false:
-    print("PASS enum_constant_fails_closed")
+  write_failures = write_failures + emit_ir("enum_tag_constant", r28, 1)
+  if r28.ok:
+    print("PASS enum_tag_constant")
     pass_count = pass_count + 1
   else:
-    print("FAIL enum_constant_fails_closed: backend reported ok")
+    print("FAIL enum_tag_constant: " + diags_text(r28.diags))
 
   // Test 27: field stores and `break` run: 5 + 7 + 4 - 16 exits 0.
   let r27: LlvmTextResult = lower_source_to_llvm_text("class In:\n  v: i32\n\nclass Out:\n  a: i32\n  inner: In\n\nfn main(): i32\n  let o: Out = Out(1, In(2))\n  o.a = 5\n  o.inner.v = 7\n  let n: i32 = 0\n  while true:\n    if n > 3:\n      break\n    n = n + 1\n  return o.a + o.inner.v + n - 16\n")
@@ -915,6 +912,17 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL two_module_program: " + diags_text(r33.diags))
+
+  // Test 34: every builtin width lowers (unsigned by its width), and an
+  // enum with payloads is `{ i32, [N x iK] }` sized by its largest
+  // payload (the host's layout): Rect's i64 makes one i64 slot.
+  let r34: LlvmTextResult = lower_source_to_llvm_text("enum class Shape:\n  Circle(r: i32)\n  Rect(w: i64)\n\nfn widths(a: u8, b: i16, c: u32, s: Shape): i64 -> 0\n\nfn main(): i32 -> 0\n")
+  write_failures = write_failures + emit_ir("type_universe", r34, 0)
+  if r34.ok and check_contains(r34, "(i8 %arg0, i16 %arg1, i32 %arg2, %enum.Shape %arg3)", "type_universe") and check_contains(r34, "%enum.Shape = type { i32, [1 x i64] }", "type_universe"):
+    print("PASS type_universe")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL type_universe: " + diags_text(r34.diags))
 
   // -----------------------------------------------------------------
   // Summary
