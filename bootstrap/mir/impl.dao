@@ -1917,7 +1917,14 @@ fn mir_stands_for_args_of(info: Vector<i64>, t: DaoType): Vector<i64>
 
 // The type of the value an instruction produces.
 fn mono_value_type(m: Mono, inst: i64): i64
-  match m.tables.nodes.get(inst):
+  return mir_value_type(m.tables.nodes, inst)
+
+// The type of the value the instruction at `inst` produces; -1 for one
+// that produces none.
+fn mir_value_type(nodes: Vector<MirNode>, inst: i64): i64
+  if inst < 0 or inst >= nodes.length():
+    return to_i64(-1)
+  match nodes.get(inst):
     MirNode::MirConstInt(v, ti):
       return ti
     MirNode::MirConstFloat(v, ti):
@@ -2010,6 +2017,23 @@ fn mono_specialize_ref(m: Mono, inst: i64, tmpl_sym: i64, ref_ti: i64, tmpl: i64
   let concrete: MonoType = mono_subst_type(in_caller.m, decided.map, in_caller.type_idx)
   m = concrete.m
   m.tables.nodes = m.tables.nodes.set(inst, MirNode::MirFnRef(sym = spec_sym, type_idx = concrete.type_idx))
+  // The call now records what it decided in concrete terms, for a
+  // consumer that reads its type arguments (an intrinsic's, in the
+  // backend: `size_of$T` sizes T).
+  if call >= 0:
+    let params: Vector<i64> = mono_sorted(decided.params)
+    let start: i64 = m.tables.ts.type_info.length()
+    let record: Vector<i64> = Vector<i64>::new()
+    record = record.push(params.length())
+    let pi: i64 = to_i64(0)
+    while pi < params.length():
+      record = record.push(params.get(pi))
+      record = record.push(hm_get_or(decided.map, i64_to_string(params.get(pi)), to_i64(-1)))
+      pi = pi + to_i64(1)
+    m.tables.ts = ts_push_info_run(m.tables.ts, record)
+    match m.tables.nodes.get(call):
+      MirNode::MirCall(callee, arg_list_lp, arg_count, call_ti, old_subst):
+        m.tables.nodes = m.tables.nodes.set(call, MirNode::MirCall(callee = callee, arg_list_lp = arg_list_lp, arg_count = arg_count, type_idx = call_ti, subst = start))
   return m
 
 class MonoMade:
