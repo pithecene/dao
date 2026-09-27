@@ -349,7 +349,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 31
+  let total: i32 = 32
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -881,6 +881,15 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL quoted_specialization_name: " + diags_text(r32.diags))
+  // Test 31: a call through a bound compiles and runs once its generic
+  // function is specialized: call(5) - 5 exits 0.
+  let r31: LlvmTextResult = lower_source_to_llvm_text("concept Shows:\n  fn show(self): i32\n\nextend i32 as Shows:\n  fn show(self): i32 -> self\n\nfn call<T: Shows>(x: T): i32 -> x.show()\n\nfn main(): i32 -> call(5) - 5\n")
+  write_failures = write_failures + emit_ir("bound_call_specialized", r31, 0)
+  if r31.ok:
+    print("PASS bound_call_specialized")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL bound_call_specialized: " + diags_text(r31.diags))
 
   // -----------------------------------------------------------------
   // Summary
