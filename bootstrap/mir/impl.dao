@@ -1275,20 +1275,23 @@ fn mir_function_is_generic(ms: MS, tparams_lp: i64, params_lp: i64, ret_ti: i64)
 // Whether `ti` is, or holds at any depth, a type parameter.  A type
 // graph shares its parts, so each type is searched once.
 fn mir_type_mentions_generic(ms: MS, ti: i64): bool
-  return mir_generic_search(ms, ti, HashMap<i64>::new()).found
+  return mir_generic_search_in(ms.types, ms.type_info, ti, HashMap<i64>::new()).found
 
 class GenericSearch:
   seen: HashMap<i64>
   found: bool
 
-fn mir_generic_search(ms: MS, ti: i64, seen: HashMap<i64>): GenericSearch
-  if ti < 0 or ti >= ms.types.length():
+// Whether `ti` is, or holds at any depth, a type parameter, in the type
+// tables `types` / `info`.  A type graph shares its parts, so each type
+// is searched once.
+fn mir_generic_search_in(types: Vector<DaoType>, info: Vector<i64>, ti: i64, seen: HashMap<i64>): GenericSearch
+  if ti < 0 or ti >= types.length():
     return GenericSearch(seen, false)
   let key: string = i64_to_string(ti)
   if seen.contains(key):
     return GenericSearch(seen, false)
   let so_far: HashMap<i64> = seen.set(key, to_i64(1))
-  let t: DaoType = ms.types.get(ti)
+  let t: DaoType = types.get(ti)
   let parts: Vector<i64> = Vector<i64>::new()
   match t.kind:
     TypeKind::TGenericParam:
@@ -1301,35 +1304,20 @@ fn mir_generic_search(ms: MS, ti: i64, seen: HashMap<i64>): GenericSearch
       parts = parts.push(t.ret_type)
       let fi: i64 = to_i64(0)
       while fi < t.info_count:
-        parts = parts.push(ms.type_info.get(t.info_lp + fi))
+        parts = parts.push(info.get(t.info_lp + fi))
         fi = fi + to_i64(1)
     TypeKind::TStruct:
-      parts = mir_stands_for_args(ms, t.ret_type)
+      parts = mir_stands_for_args_of(info, t)
     TypeKind::TEnum:
-      parts = mir_stands_for_args(ms, t.ret_type)
+      parts = mir_stands_for_args_of(info, t)
   let i: i64 = to_i64(0)
   while i < parts.length():
-    let sub: GenericSearch = mir_generic_search(ms, parts.get(i), so_far)
+    let sub: GenericSearch = mir_generic_search_in(types, info, parts.get(i), so_far)
     if sub.found:
       return sub
     so_far = sub.seen
     i = i + to_i64(1)
   return GenericSearch(so_far, false)
-
-// The arguments a nominal type's stands-for record holds (typecheck
-// `write_stands_for`: head, count, arguments); none for -1.
-fn mir_stands_for_args(ms: MS, record: i64): Vector<i64>
-  let args: Vector<i64> = Vector<i64>::new()
-  if record < 0 or record + 1 >= ms.type_info.length():
-    return args
-  let count: i64 = ms.type_info.get(record + 1)
-  if record + 2 + count > ms.type_info.length():
-    return args
-  let i: i64 = to_i64(0)
-  while i < count:
-    args = args.push(ms.type_info.get(record + 2 + i))
-    i = i + to_i64(1)
-  return args
 
 // The prelude's free function `copy_out(x)`, which a resource block's
 // exit calls to copy a value one domain outward; -1 when the program has
@@ -1530,6 +1518,703 @@ fn mir_template_refs(r: MirResult, symbols: Vector<Symbol>, module_node: i64): V
               bi = bi + to_i64(1)
         fi = fi + to_i64(1)
   return out
+
+// =========================================================================
+// Section 67b: Monomorphization (Task 43)
+// =========================================================================
+//
+// As the host's `monomorphize` (compiler/ir/mir/mir_monomorphize.cpp):
+// every reference a concrete function makes to a template names a
+// concrete copy of it — a specialization, keyed by the template and what
+// each parameter it is generic over stands for, cloned with every type
+// substituted, and itself scanned in turn until nothing new is made.
+// What a call decided is the checker's record on the call (Task 43
+// slice 1), composed through the specialization the call sits in; a
+// call MIR made itself (copy_out at a domain's exit) is decided from its
+// arguments.  Types are made by the checker's own machinery, continuing
+// from its registry (ProgramTyped).
+
+// The tables monomorphization reads and grows: the checker's state (its
+// types and registry, for substitute_type), the MIR, and the symbols.
+class MonoTables:
+  ts: TS
+  nodes: Vector<MirNode>
+  idx: Vector<i64>
+  symbols: Vector<Symbol>
+
+// The program's templates, and the specializations made of them.
+class MonoTemplates:
+  by_sym: HashMap<i64>       // template symbol → its MirFunction
+  module_of: HashMap<i64>    // template symbol → position of its MirModule
+  made: HashMap<i64>         // specialization key → the specialization's symbol
+
+// The concrete functions, originals and specializations, in the order
+// they are scanned; the module each belongs to; and each
+// specialization's substitution (subst_data: [count, (param, arg)*]).
+class MonoWork:
+  fns: Vector<i64>
+  fn_module: Vector<i64>
+  fn_subst: HashMap<i64>     // function node → start of its substitution in subst_data
+  subst_data: Vector<i64>
+
+// How a type argument is spelled in a specialization's name: the first
+// type to claim a spelling keeps it, later ones are numbered (the
+// host's MangledTypeNames).
+class MonoNames:
+  spelled: HashMap<i64>      // type index → claim number (0 for the first)
+  claims: HashMap<i64>       // spelling → claims so far
+
+class Mono:
+  tables: MonoTables
+  templates: MonoTemplates
+  work: MonoWork
+  names: MonoNames
+  diags: Vector<Diagnostic>
+
+// A monomorphized program: the program (its types and symbols grown by
+// the specializations) and its MIR, every module function concrete.
+class ProgramConcrete:
+  program: Program
+  mir: MirResult
+
+fn program_monomorphize(pt: ProgramTyped, pm: ProgramMir): ProgramConcrete
+  let p: Program = pm.program
+  let first_module: i64 = to_i64(0)
+  if p.graph.topo_order.length() > 0:
+    first_module = p.graph.topo_order.get(0)
+  // Substitution reads no module's syntax; any module's view will do.
+  let shell: TS = ts_new(build_module_tc(p, first_module), p.typecheck.types, p.typecheck.type_info, p.typecheck.sym_types, pt.reg)
+  let m: Mono = Mono(
+    MonoTables(shell, pm.mir.mir_nodes, pm.mir.mir_idx, p.resolve.symbols),
+    MonoTemplates(HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new()),
+    MonoWork(Vector<i64>::new(), Vector<i64>::new(), HashMap<i64>::new(), Vector<i64>::new()),
+    MonoNames(HashMap<i64>::new(), HashMap<i64>::new()),
+    Vector<Diagnostic>::new())
+  let modules: Vector<i64> = mono_modules(m, pm.mir.root)
+  m = mono_collect(m, modules)
+  // The fixpoint: every function scanned once, specializations appended
+  // as they are made and scanned in their turn.
+  let wi: i64 = to_i64(0)
+  while wi < m.work.fns.length():
+    m = mono_scan_function(m, wi)
+    wi = wi + to_i64(1)
+  m = mono_check_concrete(m)
+  // Each module's function list, originals then its specializations.
+  let new_modules: Vector<i64> = Vector<i64>::new()
+  let mi: i64 = to_i64(0)
+  while mi < modules.length():
+    let mine: Vector<i64> = Vector<i64>::new()
+    let fi: i64 = to_i64(0)
+    while fi < m.work.fns.length():
+      if m.work.fn_module.get(fi) == mi:
+        mine = mine.push(m.work.fns.get(fi))
+      fi = fi + to_i64(1)
+    match m.tables.nodes.get(modules.get(mi)):
+      MirNode::MirModule(file_id, fn_list_lp, fn_count, template_list_lp, template_count):
+        let fl: MonoFlush = mono_flush(m, mine)
+        m = fl.m
+        m.tables.nodes = m.tables.nodes.push(MirNode::MirModule(file_id = file_id, fn_list_lp = fl.list_pos, fn_count = mine.length(), template_list_lp = template_list_lp, template_count = template_count))
+        new_modules = new_modules.push(m.tables.nodes.length() - to_i64(1))
+    mi = mi + to_i64(1)
+  let mod_fl: MonoFlush = mono_flush(m, new_modules)
+  m = mod_fl.m
+  m.tables.nodes = m.tables.nodes.push(MirNode::MirProgram(module_list_lp = mod_fl.list_pos, module_count = new_modules.length()))
+  let root: i64 = m.tables.nodes.length() - to_i64(1)
+  // The program, its types and symbols as monomorphization left them;
+  // its diagnostics on the file of the module whose function had them
+  // are not kept apart: they are internal errors of the pass.
+  let tables: MonoTables = m.tables
+  let resolved: ProgramResolveResult = ProgramResolveResult(tables.symbols, p.resolve.scopes, p.resolve.uses, p.resolve.diags, p.resolve.module_exports, p.resolve.extend_concept_bindings)
+  let typed: TypeCheckData = TypeCheckData(p.typecheck.initialized, tables.ts.types, tables.ts.type_info, tables.ts.sym_types, p.typecheck.lookup)
+  let all_diags: Vector<FileDiagnostic> = p.diags
+  let flat: Vector<Diagnostic> = pm.mir.diags
+  let di: i64 = to_i64(0)
+  while di < m.diags.length():
+    all_diags = all_diags.push(FileDiagnostic(to_i64(-1), "", m.diags.get(di)))
+    flat = flat.push(m.diags.get(di))
+    di = di + to_i64(1)
+  let out: Program = Program(p.graph, resolved, typed, p.hir, all_diags)
+  return ProgramConcrete(out, MirResult(tables.nodes, tables.idx, flat, root))
+
+class MonoFlush:
+  m: Mono
+  list_pos: i64
+
+fn mono_flush(m: Mono, items: Vector<i64>): MonoFlush
+  let i: i64 = to_i64(0)
+  while i < items.length():
+    m.tables.idx = m.tables.idx.push(items.get(i))
+    i = i + to_i64(1)
+  let pos: i64 = m.tables.idx.length()
+  m.tables.idx = m.tables.idx.push(items.length())
+  return MonoFlush(m, pos)
+
+fn mono_modules(m: Mono, root: i64): Vector<i64>
+  if root < 0 or root >= m.tables.nodes.length():
+    return Vector<i64>::new()
+  match m.tables.nodes.get(root):
+    MirNode::MirProgram(module_list_lp, module_count):
+      return read_hir_list(m.tables.idx, module_list_lp)
+  return Vector<i64>::new()
+
+// Every module's concrete functions start the work list; every
+// template is indexed by its symbol.
+fn mono_collect(m: Mono, modules: Vector<i64>): Mono
+  let mi: i64 = to_i64(0)
+  while mi < modules.length():
+    match m.tables.nodes.get(modules.get(mi)):
+      MirNode::MirModule(file_id, fn_list_lp, fn_count, template_list_lp, template_count):
+        let fns: Vector<i64> = read_hir_list(m.tables.idx, fn_list_lp)
+        let fi: i64 = to_i64(0)
+        while fi < fns.length():
+          m.work.fns = m.work.fns.push(fns.get(fi))
+          m.work.fn_module = m.work.fn_module.push(mi)
+          fi = fi + to_i64(1)
+        let tmpls: Vector<i64> = read_hir_list(m.tables.idx, template_list_lp)
+        let ti: i64 = to_i64(0)
+        while ti < tmpls.length():
+          match m.tables.nodes.get(tmpls.get(ti)):
+            MirNode::MirFunction(sym, rt, pc, llp, lc, blp, bc, ie):
+              m.templates.by_sym = m.templates.by_sym.set(i64_to_string(sym), tmpls.get(ti))
+              m.templates.module_of = m.templates.module_of.set(i64_to_string(sym), mi)
+          ti = ti + to_i64(1)
+    mi = mi + to_i64(1)
+  return m
+
+// The instruction nodes of a function, block by block.
+fn mono_fn_insts(m: Mono, fn_node: i64): Vector<i64>
+  let out: Vector<i64> = Vector<i64>::new()
+  match m.tables.nodes.get(fn_node):
+    MirNode::MirFunction(sym, rt, pc, llp, lc, block_list_lp, bc, ie):
+      let blocks: Vector<i64> = read_hir_list(m.tables.idx, block_list_lp)
+      let bi: i64 = to_i64(0)
+      while bi < blocks.length():
+        match m.tables.nodes.get(blocks.get(bi)):
+          MirNode::MirBlock(bid, inst_list_lp, ic):
+            let insts: Vector<i64> = read_hir_list(m.tables.idx, inst_list_lp)
+            let ii: i64 = to_i64(0)
+            while ii < insts.length():
+              out = out.push(insts.get(ii))
+              ii = ii + to_i64(1)
+        bi = bi + to_i64(1)
+  return out
+
+// The substitution a scanned function stands in: a specialization's, or
+// none for an original.
+fn mono_fn_map(m: Mono, fn_node: i64): HashMap<i64>
+  let start: i64 = hm_get_or(m.work.fn_subst, i64_to_string(fn_node), to_i64(-1))
+  return mono_read_subst(m.work.subst_data, start, HashMap<i64>::new())
+
+// A [count, (param, arg)*] record, as a map from parameter to argument.
+fn mono_read_subst(data: Vector<i64>, start: i64, into: HashMap<i64>): HashMap<i64>
+  if start < 0 or start >= data.length():
+    return into
+  let out: HashMap<i64> = into
+  let count: i64 = data.get(start)
+  let i: i64 = to_i64(0)
+  while i < count:
+    out = out.set(i64_to_string(data.get(start + to_i64(1) + i * to_i64(2))), data.get(start + to_i64(2) + i * to_i64(2)))
+    i = i + to_i64(1)
+  return out
+
+fn mono_subst_type(m: Mono, map: HashMap<i64>, ti: i64): MonoType
+  if ti < 0:
+    return MonoType(m, ti)
+  let r: TypeR = substitute_type(m.tables.ts, map, ti)
+  m.tables.ts = r.ts
+  return MonoType(m, r.type_idx)
+
+class MonoType:
+  m: Mono
+  type_idx: i64
+
+// Scan one function: each reference to a template names its
+// specialization, made when new.
+fn mono_scan_function(m: Mono, wi: i64): Mono
+  let fn_node: i64 = m.work.fns.get(wi)
+  let here: HashMap<i64> = mono_fn_map(m, fn_node)
+  let insts: Vector<i64> = mono_fn_insts(m, fn_node)
+  // The call each callee value feeds.
+  let call_of: HashMap<i64> = HashMap<i64>::new()
+  let ci: i64 = to_i64(0)
+  while ci < insts.length():
+    match m.tables.nodes.get(insts.get(ci)):
+      MirNode::MirCall(callee, arg_list_lp, arg_count, ti, subst):
+        call_of = call_of.set(i64_to_string(callee), insts.get(ci))
+    ci = ci + to_i64(1)
+  let ii: i64 = to_i64(0)
+  while ii < insts.length():
+    let inst: i64 = insts.get(ii)
+    match m.tables.nodes.get(inst):
+      MirNode::MirFnRef(ref_sym, ref_ti):
+        let tmpl: i64 = hm_get_or(m.templates.by_sym, i64_to_string(ref_sym), to_i64(-1))
+        if tmpl >= 0:
+          m = mono_specialize_ref(m, inst, ref_sym, ref_ti, tmpl, hm_get_or(call_of, i64_to_string(inst), to_i64(-1)), here, wi)
+    ii = ii + to_i64(1)
+  return m
+
+// What a call to template `tmpl` decided: the checker's record, each
+// argument substituted by the enclosing specialization's map; else, for
+// a call MIR made itself, what its arguments' types say of the
+// template's parameters.
+fn mono_call_map(m: Mono, call: i64, tmpl: i64, here: HashMap<i64>): MonoMap
+  let decided: HashMap<i64> = HashMap<i64>::new()
+  let params: Vector<i64> = Vector<i64>::new()
+  if call < 0:
+    return MonoMap(m, decided, params)
+  match m.tables.nodes.get(call):
+    MirNode::MirCall(callee, arg_list_lp, arg_count, ti, subst):
+      if subst >= 0:
+        let info: Vector<i64> = m.tables.ts.type_info
+        let count: i64 = info.get(subst)
+        let k: i64 = to_i64(0)
+        while k < count:
+          let param: i64 = info.get(subst + to_i64(1) + k * to_i64(2))
+          let arg: MonoType = mono_subst_type(m, here, info.get(subst + to_i64(2) + k * to_i64(2)))
+          m = arg.m
+          decided = decided.set(i64_to_string(param), arg.type_idx)
+          params = params.push(param)
+          k = k + to_i64(1)
+        return MonoMap(m, decided, params)
+      // Decided from the arguments: each template parameter's type
+      // matched against the argument's.
+      let args: Vector<i64> = read_hir_list(m.tables.idx, arg_list_lp)
+      match m.tables.nodes.get(tmpl):
+        MirNode::MirFunction(sym, rt, param_count, local_list_lp, lc, blp, bc, ie):
+          let locals: Vector<i64> = read_hir_list(m.tables.idx, local_list_lp)
+          let ai: i64 = to_i64(0)
+          while ai < args.length() and ai < param_count:
+            match m.tables.nodes.get(locals.get(ai)):
+              MirNode::MirLocal(lsym, pattern_ti, is_param):
+                let found: MonoMap = mono_match(m, pattern_ti, mono_value_type(m, args.get(ai)), MonoMap(m, decided, params))
+                m = found.m
+                decided = found.map
+                params = found.params
+            ai = ai + to_i64(1)
+  return MonoMap(m, decided, params)
+
+class MonoMap:
+  m: Mono
+  map: HashMap<i64>
+  params: Vector<i64>
+
+// Bind the type parameters `pattern` holds to what `concrete` holds in
+// their place (the host's infer_bindings_recursive, for a call MIR made).
+fn mono_match(m: Mono, pattern: i64, concrete: i64, so_far: MonoMap): MonoMap
+  let types: Vector<DaoType> = m.tables.ts.types
+  if pattern < 0 or concrete < 0 or pattern >= types.length() or concrete >= types.length():
+    return so_far
+  let pt: DaoType = types.get(pattern)
+  match pt.kind:
+    TypeKind::TGenericParam:
+      let key: string = i64_to_string(pattern)
+      if so_far.map.contains(key):
+        return so_far
+      return MonoMap(so_far.m, so_far.map.set(key, concrete), so_far.params.push(pattern))
+    TypeKind::TPointer:
+      return mono_match(m, pt.pointee, types.get(concrete).pointee, so_far)
+    TypeKind::TGenerator:
+      return mono_match(m, pt.pointee, types.get(concrete).pointee, so_far)
+  let p_args: Vector<i64> = mir_stands_for_args_of(m.tables.ts.type_info, pt)
+  let c_args: Vector<i64> = mir_stands_for_args_of(m.tables.ts.type_info, types.get(concrete))
+  let out: MonoMap = so_far
+  if p_args.length() == c_args.length():
+    let i: i64 = to_i64(0)
+    while i < p_args.length():
+      out = mono_match(out.m, p_args.get(i), c_args.get(i), out)
+      i = i + to_i64(1)
+  return out
+
+fn mir_stands_for_args_of(info: Vector<i64>, t: DaoType): Vector<i64>
+  let args: Vector<i64> = Vector<i64>::new()
+  let record: i64 = to_i64(-1)
+  match t.kind:
+    TypeKind::TStruct:
+      record = t.ret_type
+    TypeKind::TEnum:
+      record = t.ret_type
+  if record < 0 or record + 1 >= info.length():
+    return args
+  let count: i64 = info.get(record + 1)
+  let i: i64 = to_i64(0)
+  while i < count and record + 2 + i < info.length():
+    args = args.push(info.get(record + 2 + i))
+    i = i + to_i64(1)
+  return args
+
+// The type of the value an instruction produces.
+fn mono_value_type(m: Mono, inst: i64): i64
+  match m.tables.nodes.get(inst):
+    MirNode::MirConstInt(v, ti):
+      return ti
+    MirNode::MirConstFloat(v, ti):
+      return ti
+    MirNode::MirConstBool(v, ti):
+      return ti
+    MirNode::MirConstString(v, ti):
+      return ti
+    MirNode::MirBinary(o, l, r, ti):
+      return ti
+    MirNode::MirUnary(o, v, ti):
+      return ti
+    MirNode::MirLoad(l, pl, pc, ti):
+      return ti
+    MirNode::MirPtrOp(o, p, a, ti):
+      return ti
+    MirNode::MirEnumDiscriminant(v, ti):
+      return ti
+    MirNode::MirEnumPayload(v, vi, fi, ti):
+      return ti
+    MirNode::MirConstruct(a, n, ti):
+      return ti
+    MirNode::MirEnumConstruct(v, a, n, ti):
+      return ti
+    MirNode::MirFieldAccess(o, f, fi, ti):
+      return ti
+    MirNode::MirFnRef(s, ti):
+      return ti
+    MirNode::MirCall(c, a, n, ti, sb):
+      return ti
+    MirNode::MirIterInit(v, ti):
+      return ti
+    MirNode::MirIterHasNext(v, ti):
+      return ti
+    MirNode::MirIterNext(v, ti):
+      return ti
+  return to_i64(-1)
+
+// The key of a specialization: its template and what each parameter it
+// is generic over stands for, in parameter order.
+fn mono_key(tmpl_sym: i64, map: MonoMap): string
+  let params: Vector<i64> = mono_sorted(map.params)
+  let key: string = i64_to_string(tmpl_sym)
+  let i: i64 = to_i64(0)
+  while i < params.length():
+    key = key + ":" + i64_to_string(params.get(i)) + "=" + i64_to_string(hm_get_or(map.map, i64_to_string(params.get(i)), to_i64(-1)))
+    i = i + to_i64(1)
+  return key
+
+// Ascending, by insertion (a callee is generic over a handful of
+// parameters).
+fn mono_sorted(v: Vector<i64>): Vector<i64>
+  let out: Vector<i64> = Vector<i64>::new()
+  let i: i64 = to_i64(0)
+  while i < v.length():
+    let x: i64 = v.get(i)
+    let placed: Vector<i64> = Vector<i64>::new()
+    let done: bool = false
+    let j: i64 = to_i64(0)
+    while j < out.length():
+      if done == false and x < out.get(j):
+        placed = placed.push(x)
+        done = true
+      placed = placed.push(out.get(j))
+      j = j + to_i64(1)
+    if done == false:
+      placed = placed.push(x)
+    out = placed
+    i = i + to_i64(1)
+  return out
+
+// Name, reuse or make the specialization a reference to a template
+// names, and point the reference at it.
+fn mono_specialize_ref(m: Mono, inst: i64, tmpl_sym: i64, ref_ti: i64, tmpl: i64, call: i64, here: HashMap<i64>, wi: i64): Mono
+  let decided: MonoMap = mono_call_map(m, call, tmpl, here)
+  m = decided.m
+  if decided.params.length() == 0:
+    // Nothing decided: the concreteness check reports the reference.
+    return m
+  let key: string = mono_key(tmpl_sym, decided)
+  let spec_sym: i64 = hm_get_or(m.templates.made, key, to_i64(-1))
+  if spec_sym < 0:
+    let made: MonoMade = mono_make(m, tmpl_sym, tmpl, decided)
+    m = made.m
+    spec_sym = made.sym
+    m.templates.made = m.templates.made.set(key, spec_sym)
+  // The reference's type: what the caller's map and the call's decision
+  // make of the template's signature.
+  let in_caller: MonoType = mono_subst_type(m, here, ref_ti)
+  let concrete: MonoType = mono_subst_type(in_caller.m, decided.map, in_caller.type_idx)
+  m = concrete.m
+  m.tables.nodes = m.tables.nodes.set(inst, MirNode::MirFnRef(sym = spec_sym, type_idx = concrete.type_idx))
+  return m
+
+class MonoMade:
+  m: Mono
+  sym: i64
+
+// A new specialization: a symbol named `name$args`, and the template
+// cloned with every type substituted, queued to be scanned.
+fn mono_make(m: Mono, tmpl_sym: i64, tmpl: i64, decided: MonoMap): MonoMade
+  let params: Vector<i64> = mono_sorted(decided.params)
+  let spelled: Vector<i64> = Vector<i64>::new()
+  let i: i64 = to_i64(0)
+  while i < params.length():
+    spelled = spelled.push(hm_get_or(decided.map, i64_to_string(params.get(i)), to_i64(-1)))
+    i = i + to_i64(1)
+  let named: MonoName = mono_mangle(m, m.tables.symbols.get(tmpl_sym).name, spelled)
+  m = named.m
+  let t: Symbol = m.tables.symbols.get(tmpl_sym)
+  let sym: i64 = m.tables.symbols.length()
+  m.tables.symbols = m.tables.symbols.push(Symbol(t.kind, named.name, t.decl_node, t.scope_id, t.owner_module_id))
+  let cloned: MonoMade = mono_clone(m, tmpl, sym, decided.map)
+  m = cloned.m
+  // Its substitution, kept for the scan of its own calls.
+  let start: i64 = m.work.subst_data.length()
+  m.work.subst_data = m.work.subst_data.push(params.length())
+  let pi: i64 = to_i64(0)
+  while pi < params.length():
+    m.work.subst_data = m.work.subst_data.push(params.get(pi))
+    m.work.subst_data = m.work.subst_data.push(hm_get_or(decided.map, i64_to_string(params.get(pi)), to_i64(-1)))
+    pi = pi + to_i64(1)
+  m.work.fn_subst = m.work.fn_subst.set(i64_to_string(cloned.sym), start)
+  m.work.fns = m.work.fns.push(cloned.sym)
+  m.work.fn_module = m.work.fn_module.push(hm_get_or(m.templates.module_of, i64_to_string(tmpl_sym), to_i64(0)))
+  return MonoMade(m, sym)
+
+class MonoName:
+  m: Mono
+  name: string
+
+// `name$A_B`: each argument spelled by its type's name, a spelling taken
+// by an earlier, different type numbered (`Box.1`).
+fn mono_mangle(m: Mono, base: string, args: Vector<i64>): MonoName
+  let out: string = base + "$"
+  let i: i64 = to_i64(0)
+  while i < args.length():
+    if i > to_i64(0):
+      out = out + "_"
+    let ti: i64 = args.get(i)
+    let spelling: string = mono_type_spelling(m, ti)
+    let key: string = i64_to_string(ti)
+    let claim: i64 = hm_get_or(m.names.spelled, key, to_i64(-1))
+    if claim < 0:
+      claim = hm_get_or(m.names.claims, spelling, to_i64(0))
+      m.names.claims = m.names.claims.set(spelling, claim + to_i64(1))
+      m.names.spelled = m.names.spelled.set(key, claim)
+    if claim == to_i64(0):
+      out = out + spelling
+    else:
+      out = out + spelling + "." + i64_to_string(claim)
+    i = i + to_i64(1)
+  return MonoName(m, out)
+
+// A type's spelling in a name: a class or enum by its head's name (its
+// arguments are the numbering's to tell apart), anything else by its
+// own.
+fn mono_type_spelling(m: Mono, ti: i64): string
+  let types: Vector<DaoType> = m.tables.ts.types
+  if ti < 0 or ti >= types.length():
+    return "?"
+  let t: DaoType = types.get(ti)
+  let args: Vector<i64> = mir_stands_for_args_of(m.tables.ts.type_info, t)
+  if args.length() > 0:
+    let record: i64 = t.ret_type
+    let head: i64 = m.tables.ts.type_info.get(record)
+    if head >= 0 and head < types.length():
+      return types.get(head).name
+  return t.name
+
+// Clone template `tmpl` as function `sym`: locals and every instruction
+// with their types substituted by `map`, operands and branch targets
+// renumbered to the clone's own nodes.
+fn mono_clone(m: Mono, tmpl: i64, sym: i64, map: HashMap<i64>): MonoMade
+  match m.tables.nodes.get(tmpl):
+    MirNode::MirFunction(tsym, ret_ti, param_count, local_list_lp, local_count, block_list_lp, block_count, is_extern):
+      // Locals, substituted.
+      let new_locals: Vector<i64> = Vector<i64>::new()
+      let locals: Vector<i64> = read_hir_list(m.tables.idx, local_list_lp)
+      let li: i64 = to_i64(0)
+      while li < locals.length():
+        match m.tables.nodes.get(locals.get(li)):
+          MirNode::MirLocal(lsym, lti, is_param):
+            let lt: MonoType = mono_subst_type(m, map, lti)
+            m = lt.m
+            m.tables.nodes = m.tables.nodes.push(MirNode::MirLocal(sym = lsym, type_idx = lt.type_idx, is_param = is_param))
+            new_locals = new_locals.push(m.tables.nodes.length() - to_i64(1))
+        li = li + to_i64(1)
+      // Every block and instruction a node of the clone's own, reserved
+      // first so an operand or a branch target can be renumbered however
+      // the template ordered them.
+      let renumber: HashMap<i64> = HashMap<i64>::new()
+      let blocks: Vector<i64> = read_hir_list(m.tables.idx, block_list_lp)
+      let bi: i64 = to_i64(0)
+      while bi < blocks.length():
+        renumber = renumber.set(i64_to_string(blocks.get(bi)), m.tables.nodes.length())
+        m.tables.nodes = m.tables.nodes.push(MirNode::MirErrorExpr(tok = to_i64(0)))
+        bi = bi + to_i64(1)
+      let insts: Vector<i64> = mono_fn_insts(m, tmpl)
+      let ii: i64 = to_i64(0)
+      while ii < insts.length():
+        renumber = renumber.set(i64_to_string(insts.get(ii)), m.tables.nodes.length())
+        m.tables.nodes = m.tables.nodes.push(MirNode::MirErrorExpr(tok = to_i64(0)))
+        ii = ii + to_i64(1)
+      let ij: i64 = to_i64(0)
+      while ij < insts.length():
+        let old: i64 = insts.get(ij)
+        let redone: MonoNode = mono_clone_inst(m, m.tables.nodes.get(old), renumber, map)
+        m = redone.m
+        m.tables.nodes = m.tables.nodes.set(hm_get_or(renumber, i64_to_string(old), to_i64(-1)), redone.node)
+        ij = ij + to_i64(1)
+      let new_blocks: Vector<i64> = Vector<i64>::new()
+      let bj: i64 = to_i64(0)
+      while bj < blocks.length():
+        match m.tables.nodes.get(blocks.get(bj)):
+          MirNode::MirBlock(block_id, inst_list_lp, inst_count):
+            let fl: MonoFlush = mono_flush(m, mono_renumbered(read_hir_list(m.tables.idx, inst_list_lp), renumber))
+            m = fl.m
+            let nb: i64 = hm_get_or(renumber, i64_to_string(blocks.get(bj)), to_i64(-1))
+            m.tables.nodes = m.tables.nodes.set(nb, MirNode::MirBlock(block_id = block_id, inst_list_lp = fl.list_pos, inst_count = inst_count))
+            new_blocks = new_blocks.push(nb)
+        bj = bj + to_i64(1)
+      let loc_fl: MonoFlush = mono_flush(m, new_locals)
+      m = loc_fl.m
+      let blk_fl: MonoFlush = mono_flush(m, new_blocks)
+      m = blk_fl.m
+      let rt: MonoType = mono_subst_type(m, map, ret_ti)
+      m = rt.m
+      m.tables.nodes = m.tables.nodes.push(MirNode::MirFunction(sym = sym, ret_type = rt.type_idx, param_count = param_count, local_list_lp = loc_fl.list_pos, local_count = new_locals.length(), block_list_lp = blk_fl.list_pos, block_count = new_blocks.length(), is_extern = is_extern))
+      return MonoMade(m, m.tables.nodes.length() - to_i64(1))
+  return MonoMade(m, to_i64(-1))
+
+fn mono_renumbered(v: Vector<i64>, renumber: HashMap<i64>): Vector<i64>
+  let out: Vector<i64> = Vector<i64>::new()
+  let i: i64 = to_i64(0)
+  while i < v.length():
+    out = out.push(mono_re(renumber, v.get(i)))
+    i = i + to_i64(1)
+  return out
+
+// A node of the template renumbered into the clone; -1 stays -1.
+fn mono_re(renumber: HashMap<i64>, old: i64): i64
+  if old < 0:
+    return old
+  return hm_get_or(renumber, i64_to_string(old), old)
+
+class MonoNode:
+  m: Mono
+  node: MirNode
+
+// One instruction of the template, in the clone: operands and targets
+// renumbered, its type substituted, an argument list flushed afresh.
+fn mono_clone_inst(m: Mono, node: MirNode, rn: HashMap<i64>, map: HashMap<i64>): MonoNode
+  match node:
+    MirNode::MirConstInt(v, ti):
+      let t: MonoType = mono_subst_type(m, map, ti)
+      return MonoNode(t.m, MirNode::MirConstInt(value = v, type_idx = t.type_idx))
+    MirNode::MirConstFloat(v, ti):
+      let t: MonoType = mono_subst_type(m, map, ti)
+      return MonoNode(t.m, MirNode::MirConstFloat(tok = v, type_idx = t.type_idx))
+    MirNode::MirConstBool(v, ti):
+      let t: MonoType = mono_subst_type(m, map, ti)
+      return MonoNode(t.m, MirNode::MirConstBool(value = v, type_idx = t.type_idx))
+    MirNode::MirConstString(v, ti):
+      let t: MonoType = mono_subst_type(m, map, ti)
+      return MonoNode(t.m, MirNode::MirConstString(tok = v, type_idx = t.type_idx))
+    MirNode::MirBinary(op, l, r, ti):
+      let t: MonoType = mono_subst_type(m, map, ti)
+      return MonoNode(t.m, MirNode::MirBinary(op_tok = op, lhs = mono_re(rn, l), rhs = mono_re(rn, r), type_idx = t.type_idx))
+    MirNode::MirUnary(op, v, ti):
+      let t: MonoType = mono_subst_type(m, map, ti)
+      return MonoNode(t.m, MirNode::MirUnary(op_tok = op, operand = mono_re(rn, v), type_idx = t.type_idx))
+    MirNode::MirLoad(l, pl, pc, ti):
+      let t: MonoType = mono_subst_type(m, map, ti)
+      return MonoNode(t.m, MirNode::MirLoad(local_idx = l, path_lp = pl, path_count = pc, type_idx = t.type_idx))
+    MirNode::MirPtrOp(op, p, a, ti):
+      let t: MonoType = mono_subst_type(m, map, ti)
+      return MonoNode(t.m, MirNode::MirPtrOp(op = op, pointer = mono_re(rn, p), argument = mono_re(rn, a), type_idx = t.type_idx))
+    MirNode::MirEnumDiscriminant(v, ti):
+      let t: MonoType = mono_subst_type(m, map, ti)
+      return MonoNode(t.m, MirNode::MirEnumDiscriminant(value = mono_re(rn, v), type_idx = t.type_idx))
+    MirNode::MirEnumPayload(v, vi, fi, ti):
+      let t: MonoType = mono_subst_type(m, map, ti)
+      return MonoNode(t.m, MirNode::MirEnumPayload(value = mono_re(rn, v), variant = vi, field = fi, type_idx = t.type_idx))
+    MirNode::MirConstruct(a, n, ti):
+      let t: MonoType = mono_subst_type(m, map, ti)
+      let fl: MonoFlush = mono_flush(t.m, mono_renumbered(read_hir_list(t.m.tables.idx, a), rn))
+      return MonoNode(fl.m, MirNode::MirConstruct(arg_list_lp = fl.list_pos, arg_count = n, type_idx = t.type_idx))
+    MirNode::MirEnumConstruct(vi, a, n, ti):
+      let t: MonoType = mono_subst_type(m, map, ti)
+      let fl: MonoFlush = mono_flush(t.m, mono_renumbered(read_hir_list(t.m.tables.idx, a), rn))
+      return MonoNode(fl.m, MirNode::MirEnumConstruct(variant = vi, arg_list_lp = fl.list_pos, arg_count = n, type_idx = t.type_idx))
+    MirNode::MirFieldAccess(o, f, fi, ti):
+      let t: MonoType = mono_subst_type(m, map, ti)
+      return MonoNode(t.m, MirNode::MirFieldAccess(obj = mono_re(rn, o), field_tok = f, field_index = fi, type_idx = t.type_idx))
+    MirNode::MirFnRef(s, ti):
+      // Left as the template wrote it; the scan of the clone names what
+      // it calls, through this clone's substitution.
+      return MonoNode(m, MirNode::MirFnRef(sym = s, type_idx = ti))
+    MirNode::MirCall(c, a, n, ti, sb):
+      let t: MonoType = mono_subst_type(m, map, ti)
+      let fl: MonoFlush = mono_flush(t.m, mono_renumbered(read_hir_list(t.m.tables.idx, a), rn))
+      return MonoNode(fl.m, MirNode::MirCall(callee = mono_re(rn, c), arg_list_lp = fl.list_pos, arg_count = n, type_idx = t.type_idx, subst = sb))
+    MirNode::MirStore(l, pl, pc, v):
+      return MonoNode(m, MirNode::MirStore(local_idx = l, path_lp = pl, path_count = pc, value = mono_re(rn, v)))
+    MirNode::MirYield(v):
+      return MonoNode(m, MirNode::MirYield(value = mono_re(rn, v)))
+    MirNode::MirIterInit(v, ti):
+      let t: MonoType = mono_subst_type(m, map, ti)
+      return MonoNode(t.m, MirNode::MirIterInit(source = mono_re(rn, v), type_idx = t.type_idx))
+    MirNode::MirIterHasNext(v, ti):
+      let t: MonoType = mono_subst_type(m, map, ti)
+      return MonoNode(t.m, MirNode::MirIterHasNext(iter = mono_re(rn, v), type_idx = t.type_idx))
+    MirNode::MirIterNext(v, ti):
+      let t: MonoType = mono_subst_type(m, map, ti)
+      return MonoNode(t.m, MirNode::MirIterNext(iter = mono_re(rn, v), type_idx = t.type_idx))
+    MirNode::MirIterDestroy(v):
+      return MonoNode(m, MirNode::MirIterDestroy(iter = mono_re(rn, v)))
+    MirNode::MirResourceExit(k, nm, h):
+      return MonoNode(m, MirNode::MirResourceExit(kind_tok = k, name_tok = nm, handle = mono_re(rn, h)))
+    MirNode::MirReturn(v, hv):
+      return MonoNode(m, MirNode::MirReturn(value = mono_re(rn, v), has_value = hv))
+    MirNode::MirBr(b):
+      return MonoNode(m, MirNode::MirBr(target_block = mono_re(rn, b)))
+    MirNode::MirCondBr(c, tb, eb):
+      return MonoNode(m, MirNode::MirCondBr(cond = mono_re(rn, c), then_block = mono_re(rn, tb), else_block = mono_re(rn, eb)))
+  // Mode and resource entries, error sentinels: nothing to renumber or
+  // substitute.
+  return MonoNode(m, node)
+
+// The concreteness invariant (the host's, after monomorphization): no
+// module function's signature, locals or instruction types mention a
+// type parameter, and none refers to a template.
+fn mono_check_concrete(m: Mono): Mono
+  let fi: i64 = to_i64(0)
+  while fi < m.work.fns.length():
+    let fn_node: i64 = m.work.fns.get(fi)
+    match m.tables.nodes.get(fn_node):
+      MirNode::MirFunction(sym, ret_ti, pc, local_list_lp, lc, blp, bc, ie):
+        let residue: bool = mono_mentions_param(m, ret_ti)
+        let locals: Vector<i64> = read_hir_list(m.tables.idx, local_list_lp)
+        let li: i64 = to_i64(0)
+        while li < locals.length():
+          match m.tables.nodes.get(locals.get(li)):
+            MirNode::MirLocal(lsym, lti, is_param):
+              if mono_mentions_param(m, lti):
+                residue = true
+          li = li + to_i64(1)
+        let insts: Vector<i64> = mono_fn_insts(m, fn_node)
+        let ii: i64 = to_i64(0)
+        while ii < insts.length():
+          if mono_mentions_param(m, mono_value_type(m, insts.get(ii))):
+            residue = true
+          match m.tables.nodes.get(insts.get(ii)):
+            MirNode::MirFnRef(ref_sym, ref_ti):
+              if m.templates.by_sym.contains(i64_to_string(ref_sym)):
+                m.diags = m.diags.push(make_error(Span(to_i64(0), to_i64(1)), "a call in '" + mono_fn_name(m, sym) + "' names generic function '" + mono_fn_name(m, ref_sym) + "' with nothing deciding its type parameters"))
+          ii = ii + to_i64(1)
+        if residue:
+          m.diags = m.diags.push(make_error(Span(to_i64(0), to_i64(1)), "internal: MIR concreteness invariant violated — function '" + mono_fn_name(m, sym) + "' holds an unresolved type parameter after monomorphization"))
+    fi = fi + to_i64(1)
+  return m
+
+fn mono_fn_name(m: Mono, sym: i64): string
+  if sym < 0 or sym >= m.tables.symbols.length():
+    return "<anonymous>"
+  return m.tables.symbols.get(sym).name
+
+fn mono_mentions_param(m: Mono, ti: i64): bool
+  return mir_generic_search_in(m.tables.ts.types, m.tables.ts.type_info, ti, HashMap<i64>::new()).found
 
 // =========================================================================
 // Section 68: Node kind name (for tests and debug)

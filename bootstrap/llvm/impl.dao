@@ -1732,20 +1732,21 @@ fn lower_to_mir_backend_input(src: string): MirBackendInput
   // Each stage in its own domain: its scratch is reclaimed at the exit and the result is copied out.
   resource memory resolve =>
     p = program_run_resolve(p)
+  let pt: ProgramTyped = ProgramTyped(p, registry_new(p.resolve.symbols, p.graph.modules))
   resource memory typecheck =>
-    p = program_run_typecheck(p)
-  resource memory hir =>
-    p = program_run_hir(p)
-
-  // lower_to_mir runs its own pipeline internally (wasted work, but
-  // fine for tests).  We take its MirResult and pair with p's symbols
-  // + types plus the single source file's tokens/source text.
-  let mir: MirResult = mir_result_empty()
+    pt = program_check(p)
+  let pm: ProgramMir = ProgramMir(pt.program, mir_result_empty())
   resource memory mir =>
-    mir = lower_to_mir(src)
-  let sf: SourceFile = program_file_of_module(p, to_i64(0))
+    pm = program_run_mir(pt.program)
+  // Concrete before the backend sees it: every call of a generic
+  // function names its specialization (Task 43).
+  let pc: ProgramConcrete = ProgramConcrete(pm.program, pm.mir)
+  resource memory mono =>
+    pc = program_monomorphize(pt, pm)
+  let r: MirResult = pc.mir
+  let sf: SourceFile = program_file_of_module(pc.program, to_i64(0))
   let po: ParseOutput = sf.parse_output
-  return MirBackendInput(mir, p.resolve.symbols, p.typecheck.types, p.typecheck.type_info, po.toks, sf.source_text)
+  return MirBackendInput(MirResult(r.mir_nodes, r.mir_idx, r.diags, mir_only_module(r)), pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, po.toks, sf.source_text)
 
 fn lower_source_to_llvm_text(src: string): LlvmTextResult
   let input: MirBackendInput = lower_to_mir_backend_input(src)

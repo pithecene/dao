@@ -66,6 +66,27 @@ fn mir_call_substs(pm: ProgramMir): string
     i = i + 1
   return out
 
+// A program of `inputs` checked, lowered to MIR and monomorphized.
+fn mono_of_program(inputs: Vector<SourceInput>): ProgramConcrete
+  let p: Program = program_from_graph(build_program(inputs))
+  p = program_run_resolve(p)
+  let pt: ProgramTyped = program_check(p)
+  return program_monomorphize(pt, program_run_mir(pt.program))
+
+// The names of every module function of a concrete program, "a;b;".
+fn mono_fn_names(pc: ProgramConcrete): string
+  let out: string = ""
+  let mods: Vector<i64> = mir_modules(pc.mir)
+  let mi: i64 = 0
+  while mi < mods.length():
+    let fns: Vector<i64> = mir_module_fns(pc.mir, mods.get(mi), false)
+    let fi: i64 = 0
+    while fi < fns.length():
+      out = out + pc.program.resolve.symbols.get(mir_fn_sym(pc.mir, fns.get(fi))).name + ";"
+      fi = fi + 1
+    mi = mi + 1
+  return out
+
 // The MirModule nodes of a MirProgram root, in program order.
 fn mir_modules(r: MirResult): Vector<i64>
   match r.mir_nodes.get(r.root):
@@ -114,7 +135,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 42
+  let total: i32 = 46
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -702,6 +723,53 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL method_call_carries_class_substitution: got '" + s39 + "'")
+
+  // Tests 40–43: monomorphization, as the host's (`daoc mir`): each call
+  // of a generic function names its specialization, one per template and
+  // arguments, named `name$args`, cloned concrete; a generic function's
+  // own generic calls are specialized through its substitution; a call
+  // nothing decides is reported.
+  let in40: Vector<SourceInput> = Vector<SourceInput>::new()
+  in40 = in40.push(SourceInput("main.dao", "module app::main\n\nfn id<T>(x: T): T -> x\n\nfn main(): i32\n  let s: string = id(\"a\")\n  return id(1) + id(2)\n", false))
+  let pc40: ProgramConcrete = mono_of_program(in40)
+  let names40: string = mono_fn_names(pc40)
+  if pc40.mir.diags.length() == 0 and names40 == "main;id$string;id$i32;":
+    print("PASS generic_calls_name_specializations")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL generic_calls_name_specializations: got '" + names40 + "', " + i64_to_string(pc40.mir.diags.length()) + " diagnostics")
+  let in41: Vector<SourceInput> = Vector<SourceInput>::new()
+  in41 = in41.push(SourceInput("main.dao", "module app::main\n\nfn inner<T>(x: T): T -> x\n\nfn outer<U>(y: U): U -> inner(y)\n\nfn main(): i32 -> outer(1)\n", false))
+  let pc41: ProgramConcrete = mono_of_program(in41)
+  let names41: string = mono_fn_names(pc41)
+  if pc41.mir.diags.length() == 0 and names41 == "main;outer$i32;inner$i32;":
+    print("PASS nested_generic_calls_specialize_through")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL nested_generic_calls_specialize_through: got '" + names41 + "', " + i64_to_string(pc41.mir.diags.length()) + " diagnostics")
+  let in42: Vector<SourceInput> = Vector<SourceInput>::new()
+  in42 = in42.push(SourceInput("main.dao", "module app::main\n\nclass Box<T>:\n  v: T\n\n  fn get(self): T -> self.v\n\nfn main(): i32\n  let b: Box<i32> = Box<i32>(1)\n  return b.get()\n", false))
+  let pc42: ProgramConcrete = mono_of_program(in42)
+  let names42: string = mono_fn_names(pc42)
+  if pc42.mir.diags.length() == 0 and index_of(names42, "get$i32;") >= 0:
+    print("PASS generic_class_method_specializes")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL generic_class_method_specializes: got '" + names42 + "', " + i64_to_string(pc42.mir.diags.length()) + " diagnostics")
+  let in43: Vector<SourceInput> = Vector<SourceInput>::new()
+  in43 = in43.push(SourceInput("main.dao", "module app::main\n\nfn id<T>(x: T): T -> x\n\nfn main(): i32\n  let s: string = id(\"a\")\n  return 0\n", false))
+  let pc43: ProgramConcrete = mono_of_program(in43)
+  let concrete43: bool = true
+  let di43: i64 = 0
+  while di43 < pc43.mir.diags.length():
+    if index_of(pc43.mir.diags.get(di43).message, "concreteness") >= 0:
+      concrete43 = false
+    di43 = di43 + 1
+  if concrete43 and mono_fn_names(pc43) == "main;id$string;":
+    print("PASS specializations_are_concrete")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL specializations_are_concrete: got '" + mono_fn_names(pc43) + "'")
 
   // -----------------------------------------------------------------
   print("")
