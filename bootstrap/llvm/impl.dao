@@ -608,6 +608,17 @@ class BS:
   // stack.
   entry_allocas: Vector<LlInst>
 
+  // The generator frame a resume function is lowering against; its frame
+  // is "" in any other function.
+  gen: GenCtx
+
+// A generator's resume function in progress: the frame pointer, the
+// frame's type, and how many yields it has lowered so far.
+class GenCtx:
+  frame: string
+  frame_ty: string
+  yields: i64
+
 // Positions in BS's side tables, by key: a value's and a block label's
 // by MIR node, a slot's by MirLocal node, an extern's and a struct's by
 // name / type index.
@@ -650,7 +661,8 @@ fn bs_new(input: MirBackendInput): BS
     to_i64(0),
     bs_index_empty(),
     input.files,
-    Vector<LlInst>::new())
+    Vector<LlInst>::new(),
+    GenCtx("", "", to_i64(0)))
 
 fn bs_reset_fn_state(bs: BS): BS
   bs.val_keys = Vector<i64>::new()
@@ -663,6 +675,7 @@ fn bs_reset_fn_state(bs: BS): BS
   bs.block_labels = Vector<string>::new()
   bs.next_value = to_i64(0)
   bs.entry_allocas = Vector<LlInst>::new()
+  bs.gen = GenCtx("", "", to_i64(0))
   bs.index = BsIndex(HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), bs.index.externs, bs.index.structs)
   return bs
 
@@ -1235,6 +1248,14 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
 
     // ---------- terminators ----------
     MirNode::MirReturn(value, has_value):
+      // A generator's `return` ends it: done, and back to the consumer.
+      if bs.gen.frame != "":
+        let done_at: FreshR = bs_fresh_value(bs)
+        bs = done_at.bs
+        insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = bs.gen.frame, struct_ty_text = bs.gen.frame_ty, field_index = to_i64(1)), done_at.name))
+        insts = insts.push(LlInst(LlInstKind::LlStore(ptr_name = done_at.name, value_text = "true", value_ty_text = "i1"), ""))
+        insts = insts.push(LlInst(LlInstKind::LlRet(value_text = "", value_ty_text = "void", has_value = to_i64(0)), ""))
+        return LowerStepR(bs, insts)
       if has_value > 0:
         let val_text: string = bs_get_value_text(bs, value)
         let val_ty_text: string = bs_get_value_ty(bs, value)
@@ -1276,6 +1297,70 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
         "")
       insts = insts.push(inst)
       return LowerStepR(bs, insts)
+    // ---------- generators (the host's lower_generator_resume / iter) ----------
+    MirNode::MirYield(value):
+      // Store the value in the frame's yield slot, note where to resume,
+      // and return to the consumer; resumption continues from here.
+      if bs.gen.frame == "":
+        bs = bs_error(bs, "bootstrap llvm backend: yield outside a generator")
+        return LowerStepR(bs, insts)
+      bs.gen.yields = bs.gen.yields + to_i64(1)
+      let k: string = i64_to_string(bs.gen.yields)
+      let slot_at: FreshR = bs_fresh_value(bs)
+      bs = slot_at.bs
+      insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = bs.gen.frame, struct_ty_text = bs.gen.frame_ty, field_index = to_i64(2)), slot_at.name))
+      insts = insts.push(LlInst(LlInstKind::LlStore(ptr_name = slot_at.name, value_text = bs_get_value_text(bs, value), value_ty_text = bs_get_value_ty(bs, value)), ""))
+      let state_at: FreshR = bs_fresh_value(bs)
+      bs = state_at.bs
+      insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = bs.gen.frame, struct_ty_text = bs.gen.frame_ty, field_index = to_i64(0)), state_at.name))
+      insts = insts.push(LlInst(LlInstKind::LlStore(ptr_name = state_at.name, value_text = k, value_ty_text = "i32"), ""))
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "ret void"), ""))
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "resume." + k + ":"), ""))
+      return LowerStepR(bs, insts)
+    MirNode::MirIterInit(source, type_idx):
+      // The handle's frame is the iterator; its first resume runs the
+      // generator to its first yield.
+      let gen_val: string = bs_get_value_text(bs, source)
+      let frame: FreshR = bs_fresh_value(bs)
+      bs = frame.bs
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "extractvalue %dao.generator " + gen_val + ", 0"), frame.name))
+      let resume: FreshR = bs_fresh_value(bs)
+      bs = resume.bs
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "extractvalue %dao.generator " + gen_val + ", 1"), resume.name))
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "call void " + resume.name + "(ptr " + frame.name + ")"), ""))
+      bs = bs_set_value(bs, mir_node_idx, frame.name, "ptr")
+      bs = bs_set_value(bs, bs_resume_key(mir_node_idx), resume.name, "ptr")
+      return LowerStepR(bs, insts)
+    MirNode::MirIterHasNext(iter, type_idx):
+      let done_at: FreshR = bs_fresh_value(bs)
+      bs = done_at.bs
+      insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = bs_get_value_text(bs, iter), struct_ty_text = bs_frame_view(bs, iter), field_index = to_i64(1)), done_at.name))
+      let done: FreshR = bs_fresh_value(bs)
+      bs = done.bs
+      insts = insts.push(LlInst(LlInstKind::LlLoad(ptr_name = done_at.name, ty_text = "i1"), done.name))
+      let has_next: FreshR = bs_fresh_value(bs)
+      bs = has_next.bs
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "xor i1 " + done.name + ", true"), has_next.name))
+      bs = bs_set_value(bs, mir_node_idx, has_next.name, "i1")
+      return LowerStepR(bs, insts)
+    MirNode::MirIterNext(iter, type_idx):
+      // The value in the yield slot, then a resume to the next yield.
+      let slot_at: FreshR = bs_fresh_value(bs)
+      bs = slot_at.bs
+      insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = bs_get_value_text(bs, iter), struct_ty_text = bs_frame_view(bs, iter), field_index = to_i64(2)), slot_at.name))
+      let elem_ty: string = bs_ty(bs, type_idx)
+      let got: FreshR = bs_fresh_value(bs)
+      bs = got.bs
+      insts = insts.push(LlInst(LlInstKind::LlLoad(ptr_name = slot_at.name, ty_text = elem_ty), got.name))
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "call void " + bs_get_value_text(bs, bs_resume_key(iter)) + "(ptr " + bs_get_value_text(bs, iter) + ")"), ""))
+      bs = bs_set_value(bs, mir_node_idx, got.name, elem_ty)
+      return LowerStepR(bs, insts)
+    MirNode::MirIterDestroy(iter):
+      let one_ptr: Vector<string> = Vector<string>::new()
+      bs = bs_declare_hook(bs, "@__dao_gen_free", "void", one_ptr.push("ptr"))
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "call void @__dao_gen_free(ptr " + bs_get_value_text(bs, iter) + ")"), ""))
+      return LowerStepR(bs, insts)
+
     // ---------- regions ----------
     MirNode::MirModeEnter(name_tok):
       // `mode unsafe` gates what the checker accepts; it emits nothing
@@ -1596,6 +1681,20 @@ fn ll_arith_instr(op: string, is_float: bool, unsigned: bool): string
     return "srem"
   return ""
 
+// The value-table key under which an iterator's resume function is kept
+// beside its frame: negative, so it is no MIR node's.
+fn bs_resume_key(iter_node: i64): i64
+  return to_i64(-2) - iter_node
+
+// The consumer's view of a generator frame's header, `{ i32 state,
+// i1 done, T yield_slot }`, for the iterator made at `iter`.
+fn bs_frame_view(bs: BS, iter: i64): string
+  let gen_ti: i64 = mir_value_type(bs.mir_nodes, iter)
+  let elem: i64 = to_i64(-1)
+  if gen_ti >= 0 and gen_ti < bs.types.length():
+    elem = bs.types.get(gen_ti).pointee
+  return "{ i32, i1, " + bs_ty(bs, elem) + " }"
+
 // Declare a runtime hook once, with its canonical signature (the host's
 // llvm_runtime_hooks).
 fn bs_declare_hook(bs: BS, name: string, ret_ty: string, param_tys: Vector<string>): BS
@@ -1885,6 +1984,12 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
         bs = bs_mark_extern(bs, name)
         return bs
 
+      // A generator lowers to its init and resume functions.
+      if ret_type >= 0 and ret_type < bs.types.length():
+        match bs.types.get(ret_type).kind:
+          TypeKind::TGenerator:
+            return bs_lower_generator(bs, name, fn_sym, ret_type, params, param_count, locals_raw, block_list_lp)
+
       // ----- normal function body -----
 
       // Pre-assign slot names for every MirLocal in declaration order
@@ -1964,41 +2069,9 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
       // First block's instructions are appended to entry_insts (so
       // the prologue lives with the body).  Subsequent blocks get
       // their own fresh LlBlock.
-      let ll_blocks: Vector<LlBlock> = Vector<LlBlock>::new()
-      let reachable_blocks: Vector<i64> = mir_reachable_blocks(bs, blocks_raw)
-      let block_i: i64 = to_i64(0)
-      while block_i < blocks_raw.length():
-        let block_node_idx: i64 = blocks_raw.get(block_i)
-        let mb: MirNode = bs.mir_nodes.get(block_node_idx)
-        match mb:
-          MirNode::MirBlock(block_id, inst_list_lp, inst_count):
-            let insts_raw: Vector<i64> = read_mir_list(bs.mir_idx, inst_list_lp)
-            let this_insts: Vector<LlInst> = Vector<LlInst>::new()
-            if block_i == to_i64(0):
-              this_insts = entry_insts
-            let ii: i64 = to_i64(0)
-            while ii < insts_raw.length():
-              let mir_inst_idx: i64 = insts_raw.get(ii)
-              let step: LowerStepR = bs_lower_inst(bs, this_insts, mir_inst_idx, ret_ty_text)
-              bs = step.bs
-              this_insts = step.insts
-              ii = ii + to_i64(1)
-            // Validate that the block ends with a terminator (TASK_30 §13).
-            let label: string = bs_get_block_label(bs, block_node_idx)
-            if this_insts.length() == to_i64(0):
-              bs = bs_error(bs, "bootstrap llvm backend expected block terminator in block " + label)
-            else:
-              let last: LlInst = this_insts.get(this_insts.length() - to_i64(1))
-              if ll_inst_is_terminator(last) == false:
-                bs = bs_error(bs, "bootstrap llvm backend expected block terminator in block " + label)
-              // An `unreachable` end is only right in a block no path
-              // reaches; in a reachable block it is a non-void function
-              // falling off its end.
-              if ll_inst_is_unreachable(last):
-                if i64_vector_contains(reachable_blocks, block_node_idx):
-                  bs = bs_error(bs, "bootstrap llvm backend rejects function '" + name + "': block " + label + " ends without returning a value")
-            ll_blocks = ll_blocks.push(LlBlock(label, this_insts))
-        block_i = block_i + to_i64(1)
+      let lowered: BlocksR = bs_lower_blocks(bs, blocks_raw, entry_insts, ret_ty_text, name)
+      bs = lowered.bs
+      let ll_blocks: Vector<LlBlock> = lowered.blocks
 
       // The body's extra allocas lead the entry block.
       if bs.entry_allocas.length() > to_i64(0) and ll_blocks.length() > to_i64(0):
@@ -2013,6 +2086,175 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
       bs.functions = bs.functions.push(llfn)
       return bs
   return bs
+
+// A generator, as the host lowers one (lower_generator_init / _resume):
+// a frame `{ i32 state, i1 done, T yield_slot, locals... }`; `name`
+// allocates it, seeds its parameters and returns the handle
+// `{ frame, name.resume }`; `name.resume(frame)` runs the body from the
+// frame's state to its next yield or its end, every local a field of
+// the frame.
+fn bs_lower_generator(bs: BS, name: string, fn_sym: i64, gen_ti: i64, params: Vector<LlParam>, param_count: i64, locals_raw: Vector<i64>, block_list_lp: i64): BS
+  let base: string = bs.symbols.get(fn_sym).name
+  let frame_ty: string = "%\"dao.gen." + base + "\""
+  let resume_name: string = llvm_suffixed(name, ".resume")
+  // The frame's type.
+  let fields: Vector<string> = Vector<string>::new()
+  fields = fields.push("i32")
+  fields = fields.push("i1")
+  fields = fields.push(bs_ty(bs, bs.types.get(gen_ti).pointee))
+  let li: i64 = to_i64(0)
+  while li < locals_raw.length():
+    match bs.mir_nodes.get(locals_raw.get(li)):
+      MirNode::MirLocal(lsym, lti, lis_param):
+        match ll_type_of(bs, lti):
+          LlType::LlStruct:
+            bs = bs_ensure_struct_def(bs, lti)
+        fields = fields.push(bs_ty(bs, lti))
+    li = li + to_i64(1)
+  bs.struct_defs = bs.struct_defs.push(LlStructDef("dao.gen." + base, frame_ty, fields, to_i64(-1)))
+  let one_i64s: Vector<string> = Vector<string>::new()
+  one_i64s = one_i64s.push("i64")
+  one_i64s = one_i64s.push("i64")
+  bs = bs_declare_hook(bs, "@__dao_gen_alloc", "ptr", one_i64s)
+
+  // Init: allocate the frame, state 0, not done, parameters in place.
+  let init: Vector<LlInst> = Vector<LlInst>::new()
+  init = init.push(LlInst(LlInstKind::LlText(rhs = "getelementptr " + frame_ty + ", ptr null, i64 1"), "%size.at"))
+  init = init.push(LlInst(LlInstKind::LlText(rhs = "ptrtoint ptr %size.at to i64"), "%size"))
+  init = init.push(LlInst(LlInstKind::LlText(rhs = "getelementptr { i8, " + frame_ty + " }, ptr null, i64 0, i32 1"), "%align.at"))
+  init = init.push(LlInst(LlInstKind::LlText(rhs = "ptrtoint ptr %align.at to i64"), "%align"))
+  init = init.push(LlInst(LlInstKind::LlText(rhs = "call ptr @__dao_gen_alloc(i64 %size, i64 %align)"), "%frame"))
+  init = init.push(LlInst(LlInstKind::LlGepField(ptr_text = "%frame", struct_ty_text = frame_ty, field_index = to_i64(0)), "%state.at"))
+  init = init.push(LlInst(LlInstKind::LlStore(ptr_name = "%state.at", value_text = "0", value_ty_text = "i32"), ""))
+  init = init.push(LlInst(LlInstKind::LlGepField(ptr_text = "%frame", struct_ty_text = frame_ty, field_index = to_i64(1)), "%done.at"))
+  init = init.push(LlInst(LlInstKind::LlStore(ptr_name = "%done.at", value_text = "false", value_ty_text = "i1"), ""))
+  let pi: i64 = to_i64(0)
+  while pi < param_count:
+    let field_ty: string = fields.get(to_i64(3) + pi)
+    let arg: string = "%arg" + i64_to_string(pi)
+    if field_ty == "%dao.string":
+      // A string parameter arrives as a pointer to the string.
+      init = init.push(LlInst(LlInstKind::LlLoad(ptr_name = arg, ty_text = field_ty), arg + ".val"))
+      arg = arg + ".val"
+    init = init.push(LlInst(LlInstKind::LlGepField(ptr_text = "%frame", struct_ty_text = frame_ty, field_index = to_i64(3) + pi), "%param.at" + i64_to_string(pi)))
+    init = init.push(LlInst(LlInstKind::LlStore(ptr_name = "%param.at" + i64_to_string(pi), value_text = arg, value_ty_text = field_ty), ""))
+    pi = pi + to_i64(1)
+  init = init.push(LlInst(LlInstKind::LlText(rhs = "insertvalue %dao.generator undef, ptr %frame, 0"), "%handle.frame"))
+  init = init.push(LlInst(LlInstKind::LlText(rhs = "insertvalue %dao.generator %handle.frame, ptr " + resume_name + ", 1"), "%handle"))
+  init = init.push(LlInst(LlInstKind::LlRet(value_text = "%handle", value_ty_text = "%dao.generator", has_value = to_i64(1)), ""))
+  let init_blocks: Vector<LlBlock> = Vector<LlBlock>::new()
+  bs.functions = bs.functions.push(LlFunction(name, "%dao.generator", params, init_blocks.push(LlBlock("entry", init)), to_i64(0)))
+
+  // Resume: every local a field of the frame; dispatch on the state.
+  bs = bs_reset_fn_state(bs)
+  bs.gen = GenCtx("%frame", frame_ty, to_i64(0))
+  let entry: Vector<LlInst> = Vector<LlInst>::new()
+  let lj: i64 = to_i64(0)
+  while lj < locals_raw.length():
+    let slot: string = "%slot" + i64_to_string(lj)
+    bs = bs_set_slot(bs, locals_raw.get(lj), slot, fields.get(to_i64(3) + lj))
+    entry = entry.push(LlInst(LlInstKind::LlGepField(ptr_text = "%frame", struct_ty_text = frame_ty, field_index = to_i64(3) + lj), slot))
+    lj = lj + to_i64(1)
+  let blocks_raw: Vector<i64> = read_mir_list(bs.mir_idx, block_list_lp)
+  let bi: i64 = to_i64(0)
+  let yields: i64 = to_i64(0)
+  while bi < blocks_raw.length():
+    bs = bs_set_block_label(bs, blocks_raw.get(bi), "bb" + i64_to_string(bi))
+    match bs.mir_nodes.get(blocks_raw.get(bi)):
+      MirNode::MirBlock(bid, inst_list_lp, ic):
+        let insts: Vector<i64> = read_mir_list(bs.mir_idx, inst_list_lp)
+        let ii: i64 = to_i64(0)
+        while ii < insts.length():
+          match bs.mir_nodes.get(insts.get(ii)):
+            MirNode::MirYield(v):
+              yields = yields + to_i64(1)
+          ii = ii + to_i64(1)
+    bi = bi + to_i64(1)
+  entry = entry.push(LlInst(LlInstKind::LlGepField(ptr_text = "%frame", struct_ty_text = frame_ty, field_index = to_i64(0)), "%state.at"))
+  entry = entry.push(LlInst(LlInstKind::LlLoad(ptr_name = "%state.at", ty_text = "i32"), "%state"))
+  let cases: string = "switch i32 %state, label %gen.unreachable [ i32 0, label %bb0"
+  let yi: i64 = to_i64(1)
+  while yi <= yields:
+    cases = cases + " i32 " + i64_to_string(yi) + ", label %resume." + i64_to_string(yi)
+    yi = yi + to_i64(1)
+  entry = entry.push(LlInst(LlInstKind::LlText(rhs = cases + " ]"), ""))
+  let lowered: BlocksR = bs_lower_blocks(bs, blocks_raw, Vector<LlInst>::new(), "void", resume_name)
+  bs = lowered.bs
+  // A state no yield set: the generator is done.
+  let unreachable: Vector<LlInst> = Vector<LlInst>::new()
+  unreachable = unreachable.push(LlInst(LlInstKind::LlGepField(ptr_text = "%frame", struct_ty_text = frame_ty, field_index = to_i64(1)), "%done.at"))
+  unreachable = unreachable.push(LlInst(LlInstKind::LlStore(ptr_name = "%done.at", value_text = "true", value_ty_text = "i1"), ""))
+  unreachable = unreachable.push(LlInst(LlInstKind::LlRet(value_text = "", value_ty_text = "void", has_value = to_i64(0)), ""))
+  let led: Vector<LlInst> = bs.entry_allocas
+  let ei: i64 = to_i64(0)
+  while ei < entry.length():
+    led = led.push(entry.get(ei))
+    ei = ei + to_i64(1)
+  let resume_blocks: Vector<LlBlock> = Vector<LlBlock>::new()
+  resume_blocks = resume_blocks.push(LlBlock("entry", led))
+  let rb: i64 = to_i64(0)
+  while rb < lowered.blocks.length():
+    resume_blocks = resume_blocks.push(lowered.blocks.get(rb))
+    rb = rb + to_i64(1)
+  resume_blocks = resume_blocks.push(LlBlock("gen.unreachable", unreachable))
+  let frame_param: Vector<LlParam> = Vector<LlParam>::new()
+  bs.functions = bs.functions.push(LlFunction(resume_name, "void", frame_param.push(LlParam("%frame", "ptr")), resume_blocks, to_i64(0)))
+  bs.gen = GenCtx("", "", to_i64(0))
+  return bs
+
+// `@name` with `suffix` appended to the name, inside its quotes if any.
+fn llvm_suffixed(name: string, suffix: string): string
+  if length(name) > to_i64(1) and substring(name, length(name) - to_i64(1), to_i64(1)) == "\"":
+    return substring(name, to_i64(0), length(name) - to_i64(1)) + suffix + "\""
+  return name + suffix
+
+// Lower a function's MIR blocks, each into its own LlBlock labelled as
+// bs_set_block_label named it; `lead` opens the first block's
+// instructions (the prologue), and the first block keeps the first
+// MIR block's label.
+class BlocksR:
+  bs: BS
+  blocks: Vector<LlBlock>
+
+fn bs_lower_blocks(bs: BS, blocks_raw: Vector<i64>, lead: Vector<LlInst>, ret_ty_text: string, name: string): BlocksR
+  let entry_insts: Vector<LlInst> = lead
+  let ll_blocks: Vector<LlBlock> = Vector<LlBlock>::new()
+
+  let reachable_blocks: Vector<i64> = mir_reachable_blocks(bs, blocks_raw)
+  let block_i: i64 = to_i64(0)
+  while block_i < blocks_raw.length():
+    let block_node_idx: i64 = blocks_raw.get(block_i)
+    let mb: MirNode = bs.mir_nodes.get(block_node_idx)
+    match mb:
+      MirNode::MirBlock(block_id, inst_list_lp, inst_count):
+        let insts_raw: Vector<i64> = read_mir_list(bs.mir_idx, inst_list_lp)
+        let this_insts: Vector<LlInst> = Vector<LlInst>::new()
+        if block_i == to_i64(0):
+          this_insts = entry_insts
+        let ii: i64 = to_i64(0)
+        while ii < insts_raw.length():
+          let mir_inst_idx: i64 = insts_raw.get(ii)
+          let step: LowerStepR = bs_lower_inst(bs, this_insts, mir_inst_idx, ret_ty_text)
+          bs = step.bs
+          this_insts = step.insts
+          ii = ii + to_i64(1)
+        // Validate that the block ends with a terminator (TASK_30 §13).
+        let label: string = bs_get_block_label(bs, block_node_idx)
+        if this_insts.length() == to_i64(0):
+          bs = bs_error(bs, "bootstrap llvm backend expected block terminator in block " + label)
+        else:
+          let last: LlInst = this_insts.get(this_insts.length() - to_i64(1))
+          if ll_inst_is_terminator(last) == false:
+            bs = bs_error(bs, "bootstrap llvm backend expected block terminator in block " + label)
+          // An `unreachable` end is only right in a block no path
+          // reaches; in a reachable block it is a non-void function
+          // falling off its end.
+          if ll_inst_is_unreachable(last):
+            if i64_vector_contains(reachable_blocks, block_node_idx):
+              bs = bs_error(bs, "bootstrap llvm backend rejects function '" + name + "': block " + label + " ends without returning a value")
+        ll_blocks = ll_blocks.push(LlBlock(label, this_insts))
+    block_i = block_i + to_i64(1)
+  return BlocksR(bs, ll_blocks)
 
 // =========================================================================
 // Section 89b: Top-level module lowering
