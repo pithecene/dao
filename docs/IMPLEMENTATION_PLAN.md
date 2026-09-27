@@ -922,6 +922,19 @@ slices, each checked against `daoc hir` / `daoc mir`:
 **Handed on**: monomorphization (Task 43), program-level LLVM (Task 44),
 the Stage-2 crossing (Task 45).
 
+### Task 43 — Bootstrap Monomorphization
+
+Status: **in progress** — `docs/task_specs/TASK_43_BOOTSTRAP_MONOMORPHIZATION.md`.
+Authorized after Task 42.
+
+**Objective**: make the program's MIR concrete, as the host's
+`monomorphize` does — every call of a generic function names a
+specialization for what the call decided; a call through a bound names
+the concrete type's method; a value copied out of a memory domain is
+copied by what its concrete type needs — with the concreteness
+invariant checked, and the audit's `mono` column measuring what stays
+generic.
+
 ### Task 14 — Numeric Type Expansion
 
 **Objective**: Implement the numeric semantics frozen in
