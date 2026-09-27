@@ -1564,11 +1564,18 @@ class MonoNames:
   spelled: HashMap<i64>      // type index → claim number (0 for the first)
   claims: HashMap<i64>       // spelling → claims so far
 
+// The program being monomorphized and its MirModules, for a function's
+// module (its tokens, its view of `extend`s).
+class MonoSource:
+  program: Program
+  modules: Vector<i64>
+
 class Mono:
   tables: MonoTables
   templates: MonoTemplates
   work: MonoWork
   names: MonoNames
+  source: MonoSource
   diags: Vector<Diagnostic>
 
 // A monomorphized program: the program (its types and symbols grown by
@@ -1589,8 +1596,10 @@ fn program_monomorphize(pt: ProgramTyped, pm: ProgramMir): ProgramConcrete
     MonoTemplates(HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new()),
     MonoWork(Vector<i64>::new(), Vector<i64>::new(), HashMap<i64>::new(), Vector<i64>::new()),
     MonoNames(HashMap<i64>::new(), HashMap<i64>::new()),
+    MonoSource(p, Vector<i64>::new()),
     Vector<Diagnostic>::new())
   let modules: Vector<i64> = mono_modules(m, pm.mir.root)
+  m.source = MonoSource(p, modules)
   m = mono_collect(m, modules)
   // The fixpoint: every function scanned once, specializations appended
   // as they are made and scanned in their turn.
@@ -1743,6 +1752,10 @@ class MonoType:
 fn mono_scan_function(m: Mono, wi: i64): Mono
   let fn_node: i64 = m.work.fns.get(wi)
   let here: HashMap<i64> = mono_fn_map(m, fn_node)
+  // A specialization's calls through a bound now have a concrete
+  // receiver, and name its method.
+  if m.work.fn_subst.contains(i64_to_string(fn_node)):
+    m = mono_fixup_bound_calls(m, fn_node, m.work.fn_module.get(wi))
   let insts: Vector<i64> = mono_fn_insts(m, fn_node)
   // The call each callee value feeds.
   let call_of: HashMap<i64> = HashMap<i64>::new()
@@ -1761,6 +1774,49 @@ fn mono_scan_function(m: Mono, wi: i64): Mono
         if tmpl >= 0:
           m = mono_specialize_ref(m, inst, ref_sym, ref_ti, tmpl, hm_get_or(call_of, i64_to_string(inst), to_i64(-1)), here, wi)
     ii = ii + to_i64(1)
+  return m
+
+// Each call of a function whose callee is a member access — a call
+// through a type parameter's bound, carried by the template (Task 42) —
+// names the method its now-concrete receiver answers the member with,
+// as seen from the function's module; the receiver becomes the first
+// argument (the host's fixup_method_calls).  What the method is generic
+// over, if anything, is decided from the arguments when it is scanned.
+fn mono_fixup_bound_calls(m: Mono, fn_node: i64, module_pos: i64): Mono
+  let module_node: i64 = m.source.modules.get(module_pos)
+  let file_id: i64 = to_i64(-1)
+  match m.tables.nodes.get(module_node):
+    MirNode::MirModule(fid, fl, fc, tl, tc):
+      file_id = fid
+  let sf: SourceFile = m.source.program.graph.files.get(file_id)
+  let insts: Vector<i64> = mono_fn_insts(m, fn_node)
+  let i: i64 = to_i64(0)
+  while i < insts.length():
+    let call: i64 = insts.get(i)
+    match m.tables.nodes.get(call):
+      MirNode::MirCall(callee, arg_list_lp, arg_count, call_ti, subst):
+        match m.tables.nodes.get(callee):
+          MirNode::MirFieldAccess(obj, field_tok, field_index, access_ti):
+            let receiver_ti: i64 = mono_value_type(m, obj)
+            let tk: Token = sf.parse_output.toks.get(field_tok)
+            let member: string = substring(sf.source_text, tk.offset, tk.len)
+            let owner_ti: i64 = dispatch_owner(m.tables.ts.types, m.tables.ts.type_info, receiver_ti)
+            let method: i64 = find_method_sym_for_receiver(m.tables.ts.reg.methods, sf.module_id, member, receiver_ti, owner_ti)
+            if method < 0:
+              m.diags = m.diags.push(make_error(Span(tk.offset, tk.len), "'" + member + "' is no method of '" + type_name(m.tables.ts, receiver_ti) + "' to call through the bound"))
+            else:
+              m.tables.nodes = m.tables.nodes.set(callee, MirNode::MirFnRef(sym = method, type_idx = m.tables.ts.sym_types.get(method)))
+              let with_receiver: Vector<i64> = Vector<i64>::new()
+              with_receiver = with_receiver.push(obj)
+              let old_args: Vector<i64> = read_hir_list(m.tables.idx, arg_list_lp)
+              let ai: i64 = to_i64(0)
+              while ai < old_args.length():
+                with_receiver = with_receiver.push(old_args.get(ai))
+                ai = ai + to_i64(1)
+              let fl: MonoFlush = mono_flush(m, with_receiver)
+              m = fl.m
+              m.tables.nodes = m.tables.nodes.set(call, MirNode::MirCall(callee = callee, arg_list_lp = fl.list_pos, arg_count = arg_count + to_i64(1), type_idx = call_ti, subst = to_i64(-1)))
+    i = i + to_i64(1)
   return m
 
 // What a call to template `tmpl` decided: the checker's record, each

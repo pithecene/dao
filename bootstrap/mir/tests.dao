@@ -135,7 +135,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 47
+  let total: i32 = 48
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -784,6 +784,27 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL specialized_reference_is_concrete: a reference still holds a type parameter")
+  // Test 44: a call through a bound, in a specialization, names the
+  // method its concrete receiver answers with (host: `call$i32` calls
+  // `i32.show` with the receiver as its argument).
+  let in44: Vector<SourceInput> = Vector<SourceInput>::new()
+  in44 = in44.push(SourceInput("main.dao", "module app::main\n\nconcept Shows:\n  fn show(self): i32\n\nextend i32 as Shows:\n  fn show(self): i32 -> self\n\nfn call<T: Shows>(x: T): i32 -> x.show()\n\nfn main(): i32 -> call(5) - 5\n", false))
+  let pc44: ProgramConcrete = mono_of_program(in44)
+  let access44: i64 = 0
+  let ni44: i64 = 0
+  while ni44 < pc44.mir.mir_nodes.length():
+    match pc44.mir.mir_nodes.get(ni44):
+      MirNode::MirCall(callee, arg_list_lp, arg_count, ti, sb):
+        match pc44.mir.mir_nodes.get(callee):
+          MirNode::MirFieldAccess(o, f, fi, fti):
+            access44 = access44 + 1
+    ni44 = ni44 + 1
+  let names44: string = mono_fn_names(pc44)
+  if pc44.mir.diags.length() == 0 and index_of(names44, "call$i32;") >= 0:
+    print("PASS bound_call_names_concrete_method")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL bound_call_names_concrete_method: got '" + names44 + "', " + i64_to_string(pc44.mir.diags.length()) + " diagnostics")
 
   // -----------------------------------------------------------------
   print("")
