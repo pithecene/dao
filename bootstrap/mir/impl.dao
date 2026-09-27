@@ -8,19 +8,16 @@ module bootstrap::mir::impl
 //   MirBlock → list of MirInst, last must be terminator
 //   MirInst → result value id, semantic type, payload variant
 //
-// Tier A scope (matches the host's MIR surface at the time Task 24
-// landed HIR): functions, constants, binary/unary, let/assign,
-// calls, returns, if/else, while, field-access reads.
+// Scope (the host's MirBuilder, Task 42): a program's modules, generic
+// functions as templates; constants, binary/unary, loads and stores to
+// places, field reads, calls, construction, enum discriminant / payload
+// / construction, if/else, while, break, return, `mode` and `resource`
+// regions, generators (`yield`, `for` over a generator).
 //
-// Deferred to Tier B (same deferrals as the bootstrap HIR, plus):
-//   - Generators (iter init/has_next/next/destroy/yield)
-//   - Monomorphization / generic template separation
-//   - (mode and resource blocks lower to regions: Task 42 slice 5)
-//     a diagnostic until the domain is represented in MIR)
-//   - Enum construction / discriminant / payload
+// Deferred (the same as the bootstrap HIR's):
+//   - Monomorphization — instantiating templates (Task 43)
 //   - Lambda / closures
 //   - Try operator
-//   - For-over-iterable
 //   - Index expressions
 
 // =========================================================================
@@ -117,6 +114,15 @@ enum class MirNode:
   // mode_exit, resource_enter / resource_exit).  Token indices are the
   // module's; a resource region's exit names its domain handle, the
   // value of its resource_enter.
+  // Generators (the host's yield and narrow iteration model): `yield`
+  // in a generator's body; `for` over a generator initializes an
+  // iterator, asks it for a next value, takes it, and destroys it.
+  MirYield(value: i64)
+  MirIterInit(source: i64, type_idx: i64)
+  MirIterHasNext(iter: i64, type_idx: i64)
+  MirIterNext(iter: i64, type_idx: i64)
+  MirIterDestroy(iter: i64)
+
   MirModeEnter(name_tok: i64)
   MirModeExit(name_tok: i64)
   MirResourceEnter(kind_tok: i64, name_tok: i64)
@@ -594,6 +600,14 @@ fn mir_lower_stmt(br: BlockR, hir_node_idx: i64): BlockR
       return br_emit_terminator(left.br, MirNode::MirBr(target_block = lp.block))
     HirNode::HirMode(name, body_lp):
       return lower_mode(br, hir_node_idx, name, body_lp)
+    HirNode::HirYield(value):
+      if value < 0:
+        br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "yield without a value")
+        return br
+      let yielded: ExprR = lower_expr_value(br, value)
+      return emit_effect(yielded.br, MirNode::MirYield(value = yielded.value))
+    HirNode::HirFor(var_sym, iter, body_lp):
+      return lower_for(br, hir_node_idx, var_sym, iter, body_lp)
     HirNode::HirReturn(value):
       // Every open region is left; a memory domain's exit copies the
       // returned value out first.
@@ -615,7 +629,7 @@ fn mir_lower_stmt(br: BlockR, hir_node_idx: i64): BlockR
       return mir_lower_while_stmt(br, cond, body_lp)
     HirNode::HirResource(kind, name, body_lp):
       return lower_resource(br, hir_node_idx, kind, name, body_lp)
-  // Unsupported statement kind (Tier A): HirBreak, HirFor, etc.  Emit
+  // Unsupported statement kind (Tier A).  Emit
   // a diagnostic so downstream consumers observe the failure instead
   // of seeing valid-looking MIR with silently-dropped control flow.
   br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)),
@@ -678,6 +692,48 @@ fn mir_bool_type(): i64
 class RegionExitR:
   br: BlockR
   carried: i64   // the value carried out (a return's, copied out), or -1
+
+// `for x in it:` as the host lowers it:
+//   iter_init; [cond] iter_has_next → [body] / [exit]
+//   [body] x = iter_next; ...; br [cond]
+//   [exit] iter_destroy
+// The iterator is a region of the body: a `return` from it destroys the
+// iterator first; a `break` does not — the exit block destroys it.
+fn lower_for(br: BlockR, stmt: i64, var_sym: i64, iter: i64, body_lp: i64): BlockR
+  let src: ExprR = lower_expr_value(br, iter)
+  let iter_ti: i64 = ms_get_hir_type(src.br.ms, src.br.ms.hir_nodes.get(iter))
+  let init: ExprR = br_emit_value(src.br, MirNode::MirIterInit(source = src.value, type_idx = iter_ti))
+  let elem_ti: i64 = iter_ti
+  if iter_ti >= 0 and iter_ti < init.br.ms.types.length():
+    match init.br.ms.types.get(iter_ti).kind:
+      TypeKind::TGenerator:
+        elem_ti = init.br.ms.types.get(iter_ti).pointee
+  let var_r: MirR = ms_declare_local(init.br.ms, var_sym, elem_ti, false)
+  let cur: BlockR = init.br
+  cur.ms = var_r.ms
+  let cond_r: MirR = ms_new_block(cur.ms)
+  let body_r: MirR = ms_new_block(cond_r.ms)
+  let exit_r: MirR = ms_new_block(body_r.ms)
+  cur.ms = exit_r.ms
+  cur = br_emit_terminator(cur, MirNode::MirBr(target_block = cond_r.mir))
+
+  let cond_br: BlockR = block_open(block_seal(cur), cond_r.mir)
+  let has_next: ExprR = br_emit_value(cond_br, MirNode::MirIterHasNext(iter = init.value, type_idx = mir_bool_type()))
+  let cond_end: BlockR = br_emit_terminator(has_next.br, MirNode::MirCondBr(cond = has_next.value, then_block = body_r.mir, else_block = exit_r.mir))
+
+  let body_br: BlockR = block_open(block_seal(cond_end), body_r.mir)
+  let next: ExprR = br_emit_value(body_br, MirNode::MirIterNext(iter = init.value, type_idx = elem_ti))
+  let stored: BlockR = emit_store(next.br, MirPlace(var_r.mir, Vector<i64>::new()), next.value)
+  let outer: Flow = stored.ms.flow
+  let regions_in: Vector<ActiveRegion> = outer.regions.push(ActiveRegion(stmt, init.value, Vector<i64>::new(), Vector<i64>::new()))
+  stored.ms.flow = Flow(outer.loops.push(LoopExit(exit_r.mir, regions_in.length())), regions_in)
+  let body_after: BlockR = lower_stmt_list(stored, body_lp)
+  body_after.ms.flow = outer
+  if body_after.sealed == to_i64(0):
+    body_after = br_emit_terminator(body_after, MirNode::MirBr(target_block = cond_r.mir))
+
+  let exit_br: BlockR = block_open(block_seal(body_after), exit_r.mir)
+  return emit_effect(exit_br, MirNode::MirIterDestroy(iter = init.value))
 
 fn lower_mode(br: BlockR, stmt: i64, name_tok: i64, body_lp: i64): BlockR
   let entered: BlockR = emit_effect(br, MirNode::MirModeEnter(name_tok = name_tok))
@@ -756,6 +812,8 @@ fn emit_region_exit(br: BlockR, region: ActiveRegion, leaving_fn: bool, carried:
             ei = ei + to_i64(1)
       let exit: BlockR = emit_effect(cur, MirNode::MirResourceExit(kind_tok = kind_tok, name_tok = name_tok, handle = region.handle))
       return RegionExitR(exit, out)
+    HirNode::HirFor(var_sym, iter, body_lp):
+      return RegionExitR(emit_effect(br, MirNode::MirIterDestroy(iter = region.handle)), carried)
   return RegionExitR(br, carried)
 
 // `if dirty: binding = copy_out(binding)`, then continue.
@@ -827,6 +885,8 @@ fn resource_escapes(ms: MS, list_pos: i64, found: Vector<i64>): Vector<i64>
       HirNode::HirMode(name, body_lp):
         out = resource_escapes(ms, body_lp, out)
       HirNode::HirResource(kind, name, body_lp):
+        out = resource_escapes(ms, body_lp, out)
+      HirNode::HirFor(var_sym, iter, body_lp):
         out = resource_escapes(ms, body_lp, out)
     i = i + to_i64(1)
   return out
@@ -1475,6 +1535,16 @@ fn mir_node_kind(n: MirNode): string
       return "MirCall"
     MirNode::MirStore(a, b, c, d):
       return "MirStore"
+    MirNode::MirYield(a):
+      return "MirYield"
+    MirNode::MirIterInit(a, b):
+      return "MirIterInit"
+    MirNode::MirIterHasNext(a, b):
+      return "MirIterHasNext"
+    MirNode::MirIterNext(a, b):
+      return "MirIterNext"
+    MirNode::MirIterDestroy(a):
+      return "MirIterDestroy"
     MirNode::MirModeEnter(a):
       return "MirModeEnter"
     MirNode::MirModeExit(a):
