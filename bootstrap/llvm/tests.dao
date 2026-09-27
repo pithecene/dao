@@ -361,7 +361,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 38
+  let total: i32 = 39
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -798,14 +798,15 @@ fn main(): i32
   else:
     print("FAIL upstream_warning_keeps_backend_ok: expected ok=true with the warning carried, got ok=" + bool_to_string(r22.ok) + " and " + i64_to_string(r22.diags.length()) + " diagnostics")
 
-  // Test 23: a generator has no lowering yet: a generator function with
-  // no `yield` still fails the backend.
+  // Test 23: a generator function with no `yield` lowers too: its init
+  // returns the handle, its resume only marks it done.
   let r23: LlvmTextResult = lower_source_to_llvm_text("fn g(): Generator<i64>\n  return\n\nfn main(): i32\n  return 0\n")
-  if r23.ok == false and r23.diags.length() > 0:
-    print("PASS generator_signature_rejected_by_backend")
+  write_failures = write_failures + emit_ir("empty_generator", r23, 0)
+  if r23.ok and check_contains(r23, "define %dao.generator @g()", "empty_generator") and check_contains(r23, "define void @g.resume(ptr %frame)", "empty_generator"):
+    print("PASS empty_generator")
     pass_count = pass_count + 1
   else:
-    print("FAIL generator_signature_rejected_by_backend: expected ok=false with a diagnostic, got ok=" + bool_to_string(r23.ok))
+    print("FAIL empty_generator: " + diags_text(r23.diags))
 
   // Test 24: an instantiation's struct is named as it is spelled and
   // by its identity, in quotes, since `<` is no unquoted LLVM
@@ -970,6 +971,17 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL string_operators: " + diags_text(r38.diags))
+
+  // Test 39: a generator runs as the host's does: its frame allocated by
+  // init, driven by resume through a `for`, freed at the loop's end;
+  // 0 + 1 + 2 = 3, and the program exits 0.
+  let r39: LlvmTextResult = lower_source_to_llvm_text("fn count(n: i32): Generator<i32>\n  let i: i32 = 0\n  while i < n:\n    yield i\n    i = i + 1\n\nfn main(): i32\n  let total: i32 = 0\n  for x in count(3):\n    total = total + x\n  return total - 3\n")
+  write_failures = write_failures + emit_ir("generator_runs", r39, 0)
+  if r39.ok and check_contains(r39, "@__dao_gen_alloc", "generator_runs") and check_contains(r39, "@count.resume", "generator_runs"):
+    print("PASS generator_runs")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL generator_runs: " + diags_text(r39.diags))
 
   // -----------------------------------------------------------------
   // Summary
