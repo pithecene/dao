@@ -10,39 +10,39 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 99524 |
-| `CallExpr` | 33815 |
-| `Callee` | 33815 |
-| `Args` | 29965 |
-| `FieldExpr` | 24695 |
-| `BinaryExpr` | 15944 |
-| `LetStatement` | 13437 |
-| `IntLiteral` | 11607 |
-| `Value` | 10503 |
-| `Target` | 10503 |
-| `Assignment` | 10503 |
-| `Condition` | 9397 |
-| `ReturnStatement` | 7972 |
-| `Then` | 7793 |
-| `IfStatement` | 7793 |
-| `QualifiedName` | 7138 |
-| `StringLiteral` | 7111 |
-| `Param` | 5805 |
-| `BoolLiteral` | 3518 |
-| `Pattern` | 3339 |
-| `Arm` | 3339 |
-| `ReturnType` | 2440 |
-| `FunctionDecl` | 2440 |
-| `WhileStatement` | 1604 |
-| `UnaryExpr` | 1539 |
-| `Else` | 1477 |
-| `Field` | 1408 |
+| `Identifier` | 100365 |
+| `CallExpr` | 34105 |
+| `Callee` | 34105 |
+| `Args` | 30239 |
+| `FieldExpr` | 24947 |
+| `BinaryExpr` | 16164 |
+| `LetStatement` | 13522 |
+| `IntLiteral` | 11721 |
+| `Value` | 10580 |
+| `Target` | 10580 |
+| `Assignment` | 10580 |
+| `Condition` | 9455 |
+| `ReturnStatement` | 8051 |
+| `Then` | 7841 |
+| `IfStatement` | 7841 |
+| `StringLiteral` | 7231 |
+| `QualifiedName` | 7197 |
+| `Param` | 5874 |
+| `BoolLiteral` | 3538 |
+| `Pattern` | 3383 |
+| `Arm` | 3383 |
+| `ReturnType` | 2471 |
+| `FunctionDecl` | 2471 |
+| `WhileStatement` | 1614 |
+| `UnaryExpr` | 1551 |
+| `Else` | 1488 |
+| `Field` | 1414 |
 | `TypeArgs` | 1331 |
-| `Variant` | 1225 |
-| `Scrutinee` | 987 |
-| `MatchStatement` | 987 |
-| `ExpressionStatement` | 702 |
-| `ClassDecl` | 363 |
+| `Variant` | 1235 |
+| `Scrutinee` | 1001 |
+| `MatchStatement` | 1001 |
+| `ExpressionStatement` | 712 |
+| `ClassDecl` | 366 |
 | `BreakStatement` | 64 |
 | `ResourceBlock` | 40 |
 | `EnumDecl` | 31 |
@@ -233,14 +233,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 84 | 1 | 0 | 0 | 0 | 0 | 0 | 651 | — | mir: unsupported expression kind in Tier A MIR lowering: HirQualName; then in llvm: panic: Vector.get: index out of bounds |
-| parser | 86 | 1 | 0 | 0 | 0 | 0 | 0 | 609 | — | mir: unsupported expression kind in Tier A MIR lowering: HirQualName; then in llvm: panic: Vector.get: index out of bounds |
-| graph | 87 | 1 | 0 | 0 | 0 | 0 | 0 | 565 | — | mir: unsupported expression kind in Tier A MIR lowering: HirQualName; then in llvm: panic: Vector.get: index out of bounds |
-| resolver | 178 | 1 | 0 | 0 | 0 | 0 | 0 | 818 | — | mir: unsupported expression kind in Tier A MIR lowering: HirQualName; then in llvm: panic: Vector.get: index out of bounds |
-| typecheck | 699 | 2 | 0 | 0 | 0 | 0 | 0 | 1284 | — | mir: unsupported expression kind in Tier A MIR lowering: HirQualName; then in llvm: panic: Vector.get: index out of bounds |
-| hir | 863 | 2 | 0 | 0 | 0 | 0 | 0 | 1556 | — | mir: unsupported expression kind in Tier A MIR lowering: HirQualName; then in llvm: panic: Vector.get: index out of bounds |
-| mir | 912 | 2 | 0 | 0 | 0 | 0 | 0 | 1712 | — | mir: unsupported expression kind in Tier A MIR lowering: HirQualName; then in llvm: panic: Vector.get: index out of bounds |
-| llvm | 1083 | 3 | 0 | 0 | 0 | 0 | 0 | 1889 | — | mir: unsupported expression kind in Tier A MIR lowering: HirQualName; then in llvm: panic: Vector.get: index out of bounds |
+| lexer | 90 | 1 | 0 | 0 | 0 | 0 | 0 | 515 | 2448 | mir: unsupported expression kind in Tier A MIR lowering: HirQualName |
+| parser | 89 | 0 | 0 | 0 | 0 | 0 | 0 | 429 | 2539 | mir: unsupported expression kind in Tier A MIR lowering: HirQualName |
+| graph | 90 | 0 | 0 | 0 | 0 | 0 | 0 | 429 | 2451 | mir: unsupported expression kind in Tier A MIR lowering: HirQualName |
+| resolver | 215 | 1 | 0 | 0 | 0 | 0 | 0 | 497 | 4303 | mir: unsupported expression kind in Tier A MIR lowering: HirQualName |
+| typecheck | 953 | 2 | 0 | 0 | 0 | 0 | 0 | 602 | 8650 | mir: unsupported expression kind in Tier A MIR lowering: HirQualName |
+| hir | 1187 | 2 | 0 | 0 | 0 | 0 | 0 | 679 | 9150 | mir: unsupported expression kind in Tier A MIR lowering: HirQualName |
+| mir | 1208 | 2 | 0 | 0 | 0 | 0 | 0 | 763 | 9903 | mir: unsupported expression kind in Tier A MIR lowering: HirQualName |
+| llvm | 1567 | 2 | 0 | 0 | 0 | 0 | 0 | 865 | 11422 | mir: unsupported expression kind in Tier A MIR lowering: HirQualName |
 
 ### What each stage rejects
 
@@ -250,43 +250,91 @@ named, not inferred.
 
 **lexer**
 
-- `mir` ×49: unsupported expression kind in Tier A MIR lowering: HirQualName
-- `mir` ×1: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×37: unsupported expression kind in Tier A MIR lowering: HirQualName
+- `mir` ×9: unsupported assignment target
+- `mir` ×4: unsupported statement kind in Tier A MIR lowering: HirBreak
+- `llvm` ×22: unknown name 'char_at'
+- `llvm` ×10: unknown name 'Vector'
+- `llvm` ×6: unknown name 'Span'
+- `llvm` ×6: unknown name 'make_error'
+- `llvm` ×3: unknown name 'to_i64'
 
 **parser**
 
-- `mir` ×49: unsupported expression kind in Tier A MIR lowering: HirQualName
-- `mir` ×1: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×37: unsupported expression kind in Tier A MIR lowering: HirQualName
+- `mir` ×9: unsupported assignment target
+- `mir` ×4: unsupported statement kind in Tier A MIR lowering: HirBreak
+- `llvm` ×22: unknown name 'char_at'
+- `llvm` ×10: unknown name 'Vector'
+- `llvm` ×6: unknown name 'Span'
+- `llvm` ×6: unknown name 'make_error'
+- `llvm` ×3: unknown name 'to_i64'
 
 **graph**
 
-- `mir` ×49: unsupported expression kind in Tier A MIR lowering: HirQualName
-- `mir` ×1: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×37: unsupported expression kind in Tier A MIR lowering: HirQualName
+- `mir` ×9: unsupported assignment target
+- `mir` ×4: unsupported statement kind in Tier A MIR lowering: HirBreak
+- `llvm` ×22: unknown name 'char_at'
+- `llvm` ×10: unknown name 'Vector'
+- `llvm` ×6: unknown name 'Span'
+- `llvm` ×6: unknown name 'make_error'
+- `llvm` ×3: unknown name 'to_i64'
 
 **resolver**
 
-- `mir` ×49: unsupported expression kind in Tier A MIR lowering: HirQualName
-- `mir` ×1: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×37: unsupported expression kind in Tier A MIR lowering: HirQualName
+- `mir` ×9: unsupported assignment target
+- `mir` ×4: unsupported statement kind in Tier A MIR lowering: HirBreak
+- `llvm` ×22: unknown name 'char_at'
+- `llvm` ×10: unknown name 'Vector'
+- `llvm` ×6: unknown name 'Span'
+- `llvm` ×6: unknown name 'make_error'
+- `llvm` ×3: unknown name 'to_i64'
 
 **typecheck**
 
-- `mir` ×49: unsupported expression kind in Tier A MIR lowering: HirQualName
-- `mir` ×1: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×37: unsupported expression kind in Tier A MIR lowering: HirQualName
+- `mir` ×9: unsupported assignment target
+- `mir` ×4: unsupported statement kind in Tier A MIR lowering: HirBreak
+- `llvm` ×22: unknown name 'char_at'
+- `llvm` ×10: unknown name 'Vector'
+- `llvm` ×6: unknown name 'Span'
+- `llvm` ×6: unknown name 'make_error'
+- `llvm` ×3: unknown name 'to_i64'
 
 **hir**
 
-- `mir` ×49: unsupported expression kind in Tier A MIR lowering: HirQualName
-- `mir` ×1: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×37: unsupported expression kind in Tier A MIR lowering: HirQualName
+- `mir` ×9: unsupported assignment target
+- `mir` ×4: unsupported statement kind in Tier A MIR lowering: HirBreak
+- `llvm` ×22: unknown name 'char_at'
+- `llvm` ×10: unknown name 'Vector'
+- `llvm` ×6: unknown name 'Span'
+- `llvm` ×6: unknown name 'make_error'
+- `llvm` ×3: unknown name 'to_i64'
 
 **mir**
 
-- `mir` ×49: unsupported expression kind in Tier A MIR lowering: HirQualName
-- `mir` ×1: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×37: unsupported expression kind in Tier A MIR lowering: HirQualName
+- `mir` ×9: unsupported assignment target
+- `mir` ×4: unsupported statement kind in Tier A MIR lowering: HirBreak
+- `llvm` ×22: unknown name 'char_at'
+- `llvm` ×10: unknown name 'Vector'
+- `llvm` ×6: unknown name 'Span'
+- `llvm` ×6: unknown name 'make_error'
+- `llvm` ×3: unknown name 'to_i64'
 
 **llvm**
 
-- `mir` ×49: unsupported expression kind in Tier A MIR lowering: HirQualName
-- `mir` ×1: unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)
+- `mir` ×37: unsupported expression kind in Tier A MIR lowering: HirQualName
+- `mir` ×9: unsupported assignment target
+- `mir` ×4: unsupported statement kind in Tier A MIR lowering: HirBreak
+- `llvm` ×22: unknown name 'char_at'
+- `llvm` ×10: unknown name 'Vector'
+- `llvm` ×6: unknown name 'Span'
+- `llvm` ×6: unknown name 'make_error'
+- `llvm` ×3: unknown name 'to_i64'
 
 ### The prelude through the bootstrap
 
@@ -365,11 +413,11 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 
 | Prelude function | Compiler | Harness |
 |---|---:|---:|
-| `to_i64` | 817 | 160 |
-| `print` | 0 | 680 |
+| `to_i64` | 823 | 160 |
+| `print` | 0 | 690 |
 | `new` | 293 | 107 |
-| `i64_to_string` | 101 | 194 |
-| `substring` | 26 | 12 |
+| `i64_to_string` | 104 | 207 |
+| `substring` | 25 | 11 |
 | `char_at` | 23 | 0 |
 | `read_file` | 0 | 19 |
 | `make_error` | 18 | 0 |
@@ -383,7 +431,7 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 | `write_file` | 1 | 2 |
 | `make_warning` | 0 | 1 |
 | `str_compare` | 1 | 0 |
-| **Total** | **1289** | **1250** |
+| **Total** | **1297** | **1272** |
 
 ## 4. Reading the matrix
 

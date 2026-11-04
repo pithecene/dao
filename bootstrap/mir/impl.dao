@@ -84,6 +84,11 @@ enum class MirNode:
   // Load the value stored in a local.
   MirLoad(local_idx: i64, type_idx: i64)
 
+  // An enum value's variant index, and a payload value of one of its
+  // variants (the host's enum_discriminant / enum_payload).
+  MirEnumDiscriminant(value: i64, type_idx: i64)
+  MirEnumPayload(value: i64, variant: i64, field: i64, type_idx: i64)
+
   // Field access on a struct value: obj is a value, field_tok is the name.
   // field_index is resolved at lowering time (−1 if deferred).
   MirFieldAccess(obj: i64, field_tok: i64, field_index: i64, type_idx: i64)
@@ -208,6 +213,10 @@ fn ms_get_hir_type(ms: MS, hir_node: HirNode): i64
       return ti
     HirNode::HirQualName(s, n, ti):
       return ti
+    HirNode::HirEnumDiscriminant(v, ti):
+      return ti
+    HirNode::HirEnumPayload(v, vi, fi, ti):
+      return ti
   return to_i64(-1)
 
 // =========================================================================
@@ -231,12 +240,14 @@ fn ms_declare_local(ms: MS, sym: i64, type_idx: i64, is_param: bool): MirR
   let r: MirR = ms_add_node(ms, MirNode::MirLocal(sym = sym, type_idx = type_idx, is_param = is_param_i))
   let slot: i64 = r.ms.locals.length()
   r.ms.locals = r.ms.locals.push(r.mir)
-  if sym >= 0:
+  // Any symbol but -1 ("none"): a synthesized local's is negative
+  // (synthetic_local_sym).
+  if sym != to_i64(-1):
     r.ms.sym_to_local = r.ms.sym_to_local.set(i64_to_string(sym), slot)
   return MirR(r.ms, slot)
 
 fn ms_lookup_local(ms: MS, sym: i64): i64
-  if sym < 0:
+  if sym == to_i64(-1):
     return to_i64(-1)
   let found: Option<i64> = ms.sym_to_local.get(i64_to_string(sym))
   match found:
@@ -376,13 +387,14 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
     return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
   let node: HirNode = br.ms.hir_nodes.get(hir_node_idx)
   match node:
-    HirNode::HirIntLit(tok, type_idx):
-      if tok < to_i64(0) or tok >= br.ms.toks.length():
-        br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "unsupported in Tier A MIR lowering: integer literal without a source token (synthesized HIR)")
-        return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
-      let tk: Token = br.ms.toks.get(tok)
-      let lex: string = substring(br.ms.src, tk.offset, tk.len)
-      return br_emit_value(br, MirNode::MirConstInt(value = parse_i64_literal(lex), type_idx = type_idx))
+    HirNode::HirIntLit(value, type_idx):
+      return br_emit_value(br, MirNode::MirConstInt(value = value, type_idx = type_idx))
+    HirNode::HirEnumDiscriminant(value, type_idx):
+      let disc_of: ExprR = lower_expr_value(br, value)
+      return br_emit_value(disc_of.br, MirNode::MirEnumDiscriminant(value = disc_of.value, type_idx = type_idx))
+    HirNode::HirEnumPayload(value, variant, field, type_idx):
+      let payload_of: ExprR = lower_expr_value(br, value)
+      return br_emit_value(payload_of.br, MirNode::MirEnumPayload(value = payload_of.value, variant = variant, field = field, type_idx = type_idx))
     HirNode::HirBoolLit(tok, type_idx):
       if tok < to_i64(0) or tok >= br.ms.toks.length():
         br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)")
@@ -461,50 +473,6 @@ fn mir_is_type_param(ms: MS, ti: i64): bool
     TypeKind::TGenericParam:
       return true
   return false
-
-// Parse an i64 literal (base 10, optional leading minus).
-fn parse_i64_literal(lex: string): i64
-  let lex_len: i64 = length(lex)
-  let neg: bool = false
-  let start: i64 = 0
-  if lex_len > to_i64(0):
-    if substring(lex, to_i64(0), to_i64(1)) == "-":
-      neg = true
-      start = to_i64(1)
-  let v: i64 = to_i64(0)
-  let i: i64 = start
-  while i < lex_len:
-    let ch: string = substring(lex, i, to_i64(1))
-    let d: i64 = char_to_digit(ch)
-    if d >= 0:
-      v = v * to_i64(10) + d
-    i = i + to_i64(1)
-  if neg:
-    v = to_i64(0) - v
-  return v
-
-fn char_to_digit(ch: string): i64
-  if ch == "0":
-    return to_i64(0)
-  if ch == "1":
-    return to_i64(1)
-  if ch == "2":
-    return to_i64(2)
-  if ch == "3":
-    return to_i64(3)
-  if ch == "4":
-    return to_i64(4)
-  if ch == "5":
-    return to_i64(5)
-  if ch == "6":
-    return to_i64(6)
-  if ch == "7":
-    return to_i64(7)
-  if ch == "8":
-    return to_i64(8)
-  if ch == "9":
-    return to_i64(9)
-  return to_i64(-1)
 
 // =========================================================================
 // Section 65: Statement lowering
@@ -1032,6 +1000,10 @@ fn mir_node_kind(n: MirNode): string
       return "MirUnary"
     MirNode::MirLoad(a, b):
       return "MirLoad"
+    MirNode::MirEnumDiscriminant(a, b):
+      return "MirEnumDiscriminant"
+    MirNode::MirEnumPayload(a, b, c, d):
+      return "MirEnumPayload"
     MirNode::MirFieldAccess(a, b, c, d):
       return "MirFieldAccess"
     MirNode::MirFnRef(a, b):

@@ -20,12 +20,44 @@ fn hir_count_nodes(hr: HirResult): i64
 fn hir_count_diags(hr: HirResult): i64
   return hr.diags.length()
 
+fn hir_count_kind(hr: HirResult, kind: string): i64
+  let n: i64 = 0
+  let i: i64 = 0
+  while i < hr.hir_nodes.length():
+    if hir_node_kind(hr.hir_nodes.get(i)) == kind:
+      n = n + 1
+    i = i + 1
+  return n
+
+// "variant=<v> field=<f> : <type>" for each HirEnumPayload, in order.
+fn hir_payloads(hr: HirResult): string
+  let out: string = ""
+  let i: i64 = 0
+  while i < hr.hir_nodes.length():
+    match hr.hir_nodes.get(i):
+      HirNode::HirEnumPayload(value, variant, field, ti):
+        out = out + "variant=" + i64_to_string(variant) + " field=" + i64_to_string(field) + " : " + hir_type_label(hr, ti) + ";"
+    i = i + 1
+  return out
+
+// The value of each HirIntLit whose type is named `type_name`, in order.
+fn hir_int_lits_of(hr: HirResult, type_name: string): string
+  let out: string = ""
+  let i: i64 = 0
+  while i < hr.hir_nodes.length():
+    match hr.hir_nodes.get(i):
+      HirNode::HirIntLit(value, ti):
+        if hir_type_label(hr, ti) == type_name:
+          out = out + i64_to_string(value) + ";"
+    i = i + 1
+  return out
+
 fn main(): i32
   print("=== bootstrap/hir: Task 24 — Bootstrap HIR ===")
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 37
+  let total: i32 = 43
 
   // Test 1: simple_fn
   let src1: string = "fn add(a: i32, b: i32): i32\n  return a + b\n"
@@ -593,9 +625,8 @@ fn main(): i32
         if arg_count == 2:
           let first_arg: i64 = r25.hir_idx.get(args_lp - 2)
           match r25.hir_nodes.get(first_arg):
-            HirNode::HirIntLit(tok, lit_ti):
-              let lit_tok: Token = r25.toks.get(tok)
-              if substring(r25.src, lit_tok.offset, lit_tok.len) == "1":
+            HirNode::HirIntLit(lit_value, lit_ti):
+              if lit_value == 1:
                 order_ok = true
     oi = oi + 1
   if r25.root >= 0 and order_ok and hir_count_diags(r25) == 0:
@@ -832,6 +863,55 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL instantiated_payload_type_in_hir: expected payload type Box<i32>, got '" + payload37 + "'")
+
+  // Tests 38–41: `match` lowers as the host's does (`daoc hir`): a `let`
+  // of the scrutinee and an `if` chain.  A payload-bearing enum is tested
+  // on its discriminant against each arm's variant index, each binding a
+  // `let` of its payload value; a classification enum and an integer are
+  // tested by value, a variant's value being its index.
+  let r38: HirResult = lower_to_hir("enum class Shape:\n  Circle(r: i32)\n  Empty\n\nfn s(x: Shape): i32\n  match x:\n    Shape::Empty:\n      return 0\n    Shape::Circle(r):\n      return r\n  return 9\n")
+  let lets38: i64 = hir_count_kind(r38, "HirLet")
+  if hir_count_diags(r38) == 0 and hir_count_kind(r38, "HirEnumDiscriminant") == 2 and hir_payloads(r38) == "variant=0 field=0 : i32;" and hir_int_lits_of(r38, "Shape") == "1;0;" and lets38 == 2:
+    print("PASS match_tests_discriminant_and_binds_payload")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL match_tests_discriminant_and_binds_payload: got payloads '" + hir_payloads(r38) + "', tags '" + hir_int_lits_of(r38, "Shape") + "', " + i64_to_string(lets38) + " lets, " + i64_to_string(hir_count_diags(r38)) + " diagnostics")
+  let r39: HirResult = lower_to_hir("enum Color:\n  Red\n  Green\n\nfn c(x: Color): i32\n  match x:\n    Color::Red:\n      return 1\n    Color::Green:\n      return 2\n  return 0\n")
+  if hir_count_diags(r39) == 0 and hir_count_kind(r39, "HirEnumDiscriminant") == 0 and hir_int_lits_of(r39, "Color") == "0;1;" and hir_count_kind(r39, "HirQualName") == 0:
+    print("PASS match_on_classification_enum_tests_value")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL match_on_classification_enum_tests_value: got tags '" + hir_int_lits_of(r39, "Color") + "', " + i64_to_string(hir_count_kind(r39, "HirEnumDiscriminant")) + " discriminants")
+  let r40: HirResult = lower_to_hir("enum class Opt<T>:\n  Some(v: T)\n  Nothing\n\nfn o(x: Opt<i64>): i64\n  match x:\n    Opt::Some(v):\n      return v\n    Opt::Nothing:\n      return 0\n  return 0\n")
+  if hir_count_diags(r40) == 0 and hir_payloads(r40) == "variant=0 field=0 : i64;":
+    print("PASS match_payload_typed_by_instantiation")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL match_payload_typed_by_instantiation: got payloads '" + hir_payloads(r40) + "', " + i64_to_string(hir_count_diags(r40)) + " diagnostics")
+  let r41: HirResult = lower_to_hir("fn n(k: i32): i32\n  match k:\n    1:\n      return 10\n    2:\n      return 20\n  return 0\n")
+  if hir_count_diags(r41) == 0 and hir_count_kind(r41, "HirEnumDiscriminant") == 0 and hir_count_kind(r41, "HirIf") == 2 and hir_count_kind(r41, "HirLet") == 1:
+    print("PASS match_on_integer_tests_value")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL match_on_integer_tests_value: expected two tests and the scrutinee let, got " + i64_to_string(hir_count_kind(r41, "HirIf")) + " ifs, " + i64_to_string(hir_count_diags(r41)) + " diagnostics")
+
+  // Test 42: a payload named `index` does not shadow its variant's
+  // index: `E::Value(x)` tests discriminant 1 and reads variant 1.
+  let r42: HirResult = lower_to_hir("enum class E:\n  Empty\n  Value(index: i32)\n\nfn f(e: E): i32\n  match e:\n    E::Value(x):\n      return x\n  return 0\n")
+  if hir_count_diags(r42) == 0 and hir_payloads(r42) == "variant=1 field=0 : i32;" and hir_int_lits_of(r42, "E") == "1;":
+    print("PASS payload_named_index_keeps_variant")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL payload_named_index_keeps_variant: got payloads '" + hir_payloads(r42) + "', tags '" + hir_int_lits_of(r42, "E") + "'")
+  // Test 43: a literal past 64 bits is reported, never accumulated into
+  // an overflowing value.
+  let r43: HirResult = lower_to_hir("fn f(): i64\n  return 9223372036854775808\n")
+  let r43_ok: HirResult = lower_to_hir("fn f(): i64\n  return 9223372036854775807\n")
+  if hir_count_diags(r43) >= 1 and hir_count_diags(r43_ok) == 0:
+    print("PASS oversized_literal_reported")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL oversized_literal_reported: got " + i64_to_string(hir_count_diags(r43)) + " and " + i64_to_string(hir_count_diags(r43_ok)) + " diagnostics")
 
   // -----------------------------------------------------------------
   // Summary
