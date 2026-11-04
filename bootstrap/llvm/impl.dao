@@ -1066,14 +1066,23 @@ fn bs_place_pointer(bs: BS, insts: Vector<LlInst>, local_idx: i64, path_lp: i64,
     if cur_ti < 0 or cur_ti >= bs.types.length():
       return PlacePtrR(bs_error(bs, "bootstrap llvm backend: " + what + " path has no struct type"), insts, "", "")
     let owner: DaoType = bs.types.get(cur_ti)
-    if field < 0 or field >= owner.info_count:
-      return PlacePtrR(bs_error(bs, "bootstrap llvm backend: " + what + " path step " + i64_to_string(field) + " into " + owner.name + " is not lowered"), insts, "", "")
-    bs = bs_ensure_struct_def(bs, cur_ti)
-    let fr_gep: FreshR = bs_fresh_value(bs)
-    bs = fr_gep.bs
-    insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = ptr_name, struct_ty_text = bs_ty(bs, cur_ti), field_index = field), fr_gep.name))
-    ptr_name = fr_gep.name
-    cur_ti = bs.type_info.get(owner.info_lp + field * to_i64(2) + to_i64(1))
+    // A deref step: the place so far holds a pointer; what it addresses
+    // is the place from here on.
+    if field == mir_deref_step():
+      let loaded: FreshR = bs_fresh_value(bs)
+      bs = loaded.bs
+      insts = insts.push(LlInst(LlInstKind::LlLoad(ptr_name = ptr_name, ty_text = "ptr"), loaded.name))
+      ptr_name = loaded.name
+      cur_ti = owner.pointee
+    else:
+      if field < 0 or field >= owner.info_count:
+        return PlacePtrR(bs_error(bs, "bootstrap llvm backend: " + what + " path step " + i64_to_string(field) + " into " + owner.name + " is not lowered"), insts, "", "")
+      bs = bs_ensure_struct_def(bs, cur_ti)
+      let fr_gep: FreshR = bs_fresh_value(bs)
+      bs = fr_gep.bs
+      insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = ptr_name, struct_ty_text = bs_ty(bs, cur_ti), field_index = field), fr_gep.name))
+      ptr_name = fr_gep.name
+      cur_ti = bs.type_info.get(owner.info_lp + field * to_i64(2) + to_i64(1))
     pi = pi + to_i64(1)
   return PlacePtrR(bs, insts, ptr_name, bs_ty(bs, cur_ti))
 
@@ -1255,6 +1264,20 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       return LowerStepR(bs, insts)
 
     MirNode::MirCall(callee, arg_list_lp, arg_count, type_idx, subst):
+      // A compiler intrinsic (`size_of$T`, `align_of$T`) has no body to
+      // call: it is the size or alignment of the type the call decided
+      // (the host's lower_builtin_call).
+      let intrinsic: string = bs_intrinsic_of(bs, callee)
+      if intrinsic != "":
+        if subst < 0 or subst + to_i64(2) >= bs.type_info.length():
+          bs = bs_error(bs, "bootstrap llvm backend: intrinsic '" + intrinsic + "' is called with no type decided")
+          return LowerStepR(bs, insts)
+        let measured: SizeAlign = ll_size_align(bs, bs.type_info.get(subst + to_i64(2)))
+        let answer: i64 = measured.size
+        if intrinsic == "align_of":
+          answer = measured.align
+        bs = bs_set_value(bs, mir_node_idx, i64_to_string(answer), "i64")
+        return LowerStepR(bs, insts)
       let callee_text: string = bs_get_value_text(bs, callee)
       if callee_text == "":
         bs = bs_error(bs, "bootstrap llvm backend: MirCall callee has no mangled name (expected MirFnRef)")
@@ -1371,10 +1394,185 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
         "")
       insts = insts.push(inst)
       return LowerStepR(bs, insts)
+    // ---------- regions ----------
+    MirNode::MirModeEnter(name_tok):
+      // `mode unsafe` gates what the checker accepts; it emits nothing
+      // (the host's).  Any other mode has no lowering yet.
+      if bs_tok_lex(bs, name_tok) != "unsafe":
+        bs = bs_error(bs, "mode '" + bs_tok_lex(bs, name_tok) + "' lowering not yet supported")
+      return LowerStepR(bs, insts)
+    MirNode::MirModeExit(name_tok):
+      return LowerStepR(bs, insts)
+    MirNode::MirResourceEnter(kind_tok, name_tok):
+      // A memory domain is the runtime's (runtime/core/dao_abi.h).
+      if bs_tok_lex(bs, kind_tok) != "memory":
+        bs = bs_error(bs, "resource '" + bs_tok_lex(bs, kind_tok) + "' lowering not yet supported")
+        return LowerStepR(bs, insts)
+      bs = bs_declare_hook(bs, "@__dao_mem_resource_enter", "ptr", Vector<string>::new())
+      let domain: FreshR = bs_fresh_value(bs)
+      bs = domain.bs
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "call ptr @__dao_mem_resource_enter()"), domain.name))
+      bs = bs_set_value(bs, mir_node_idx, domain.name, "ptr")
+      return LowerStepR(bs, insts)
+    MirNode::MirResourceExit(kind_tok, name_tok, handle):
+      if bs_tok_lex(bs, kind_tok) != "memory":
+        return LowerStepR(bs, insts)
+      let one_ptr: Vector<string> = Vector<string>::new()
+      bs = bs_declare_hook(bs, "@__dao_mem_resource_exit", "void", one_ptr.push("ptr"))
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "call void @__dao_mem_resource_exit(ptr " + bs_get_value_text(bs, handle) + ")"), ""))
+      return LowerStepR(bs, insts)
+
+    // ---------- pointers (the host's lower_ptr_op) ----------
+    MirNode::MirPtrOp(op, pointer, argument, type_idx):
+      if op == ptr_op_new():
+        bs = bs_set_value(bs, mir_node_idx, "null", "ptr")
+        return LowerStepR(bs, insts)
+      if op == ptr_op_cast():
+        // Opaque pointers carry no pointee: the cast is the value itself.
+        bs = bs_set_value(bs, mir_node_idx, bs_get_value_text(bs, pointer), "ptr")
+        return LowerStepR(bs, insts)
+      if op == ptr_op_is_null():
+        let is_null: FreshR = bs_fresh_value(bs)
+        bs = is_null.bs
+        insts = insts.push(LlInst(LlInstKind::LlText(rhs = "icmp eq ptr " + bs_get_value_text(bs, pointer) + ", null"), is_null.name))
+        bs = bs_set_value(bs, mir_node_idx, is_null.name, "i1")
+        return LowerStepR(bs, insts)
+      if op == ptr_op_offset():
+        let pointee: i64 = to_i64(-1)
+        if type_idx >= 0 and type_idx < bs.types.length():
+          pointee = bs.types.get(type_idx).pointee
+        let element: string = bs_ty(bs, pointee)
+        if element == "void":
+          bs = bs_error(bs, "Ptr.offset is invalid on 'Ptr<void>', which has no element size")
+          return LowerStepR(bs, insts)
+        match ll_type_of(bs, pointee):
+          LlType::LlStruct:
+            bs = bs_ensure_struct_def(bs, pointee)
+        let walked: FreshR = bs_fresh_value(bs)
+        bs = walked.bs
+        insts = insts.push(LlInst(LlInstKind::LlText(rhs = "getelementptr " + element + ", ptr " + bs_get_value_text(bs, pointer) + ", " + bs_get_value_ty(bs, argument) + " " + bs_get_value_text(bs, argument)), walked.name))
+        bs = bs_set_value(bs, mir_node_idx, walked.name, "ptr")
+        return LowerStepR(bs, insts)
+      bs = bs_error(bs, "bootstrap llvm backend: Ptr.get / Ptr.set reach the backend as load / store")
+      return LowerStepR(bs, insts)
+
+    // ---------- enums (the host's lower_enum_*) ----------
+    MirNode::MirEnumConstruct(variant, arg_list_lp, arg_count, type_idx):
+      // Built in memory: the tag at field 0, the variant's payload as its
+      // own struct over the payload slots at field 1, then loaded whole.
+      bs = bs_ensure_struct_def(bs, type_idx)
+      let enum_ty: string = bs_ty(bs, type_idx)
+      let tmp: FreshR = bs_fresh_named(bs, "enum.tmp")
+      bs = tmp.bs
+      bs.entry_allocas = bs.entry_allocas.push(LlInst(LlInstKind::LlAlloca(ty_text = enum_ty), tmp.name))
+      let tag_at: FreshR = bs_fresh_value(bs)
+      bs = tag_at.bs
+      insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = tmp.name, struct_ty_text = enum_ty, field_index = to_i64(0)), tag_at.name))
+      insts = insts.push(LlInst(LlInstKind::LlStore(ptr_name = tag_at.name, value_text = i64_to_string(variant), value_ty_text = "i32"), ""))
+      let payload_ty: string = bs_payload_struct(bs, type_idx, variant)
+      let payload_at: FreshR = bs_fresh_value(bs)
+      bs = payload_at.bs
+      insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = tmp.name, struct_ty_text = enum_ty, field_index = to_i64(1)), payload_at.name))
+      let values: Vector<i64> = read_mir_list(bs.mir_idx, arg_list_lp)
+      let vi: i64 = to_i64(0)
+      while vi < values.length():
+        let field_at: FreshR = bs_fresh_value(bs)
+        bs = field_at.bs
+        insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = payload_at.name, struct_ty_text = payload_ty, field_index = vi), field_at.name))
+        insts = insts.push(LlInst(LlInstKind::LlStore(ptr_name = field_at.name, value_text = bs_get_value_text(bs, values.get(vi)), value_ty_text = bs_get_value_ty(bs, values.get(vi))), ""))
+        vi = vi + to_i64(1)
+      let whole: FreshR = bs_fresh_value(bs)
+      bs = whole.bs
+      insts = insts.push(LlInst(LlInstKind::LlLoad(ptr_name = tmp.name, ty_text = enum_ty), whole.name))
+      bs = bs_set_value(bs, mir_node_idx, whole.name, enum_ty)
+      return LowerStepR(bs, insts)
+
+    MirNode::MirEnumDiscriminant(value, type_idx):
+      // A classification enum's value is its tag; a payload-bearing
+      // one's tag is field 0.
+      if bs_get_value_ty(bs, value) == "i32":
+        bs = bs_set_value(bs, mir_node_idx, bs_get_value_text(bs, value), "i32")
+        return LowerStepR(bs, insts)
+      let tag: FreshR = bs_fresh_value(bs)
+      bs = tag.bs
+      insts = insts.push(LlInst(LlInstKind::LlExtractValue(agg_text = bs_get_value_text(bs, value), agg_ty_text = bs_get_value_ty(bs, value), field_index = to_i64(0)), tag.name))
+      bs = bs_set_value(bs, mir_node_idx, tag.name, "i32")
+      return LowerStepR(bs, insts)
+
+    MirNode::MirEnumPayload(value, variant, field, type_idx):
+      // Stored, then read through the variant's payload struct.
+      let enum_ty: string = bs_get_value_ty(bs, value)
+      let enum_ti: i64 = bs_value_enum_type(bs, value)
+      let tmp: FreshR = bs_fresh_named(bs, "enum.ext")
+      bs = tmp.bs
+      bs.entry_allocas = bs.entry_allocas.push(LlInst(LlInstKind::LlAlloca(ty_text = enum_ty), tmp.name))
+      insts = insts.push(LlInst(LlInstKind::LlStore(ptr_name = tmp.name, value_text = bs_get_value_text(bs, value), value_ty_text = enum_ty), ""))
+      let payload_at: FreshR = bs_fresh_value(bs)
+      bs = payload_at.bs
+      insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = tmp.name, struct_ty_text = enum_ty, field_index = to_i64(1)), payload_at.name))
+      let field_at: FreshR = bs_fresh_value(bs)
+      bs = field_at.bs
+      insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = payload_at.name, struct_ty_text = bs_payload_struct(bs, enum_ti, variant), field_index = field), field_at.name))
+      let read: FreshR = bs_fresh_value(bs)
+      bs = read.bs
+      let field_ty: string = bs_ty(bs, type_idx)
+      insts = insts.push(LlInst(LlInstKind::LlLoad(ptr_name = field_at.name, ty_text = field_ty), read.name))
+      bs = bs_set_value(bs, mir_node_idx, read.name, field_ty)
+      return LowerStepR(bs, insts)
   // An instruction with no lowering here fails the module rather than
   // vanishing from it.
   bs = bs_error(bs, "bootstrap llvm backend: unsupported MIR instruction " + mir_node_kind(node))
   return LowerStepR(bs, insts)
+
+// Declare a runtime hook once, with its canonical signature (the host's
+// llvm_runtime_hooks).
+fn bs_declare_hook(bs: BS, name: string, ret_ty: string, param_tys: Vector<string>): BS
+  if bs_has_extern(bs, name):
+    return bs
+  let params: Vector<LlParam> = Vector<LlParam>::new()
+  let i: i64 = to_i64(0)
+  while i < param_tys.length():
+    params = params.push(LlParam("%arg" + i64_to_string(i), param_tys.get(i)))
+    i = i + to_i64(1)
+  bs.extern_decls = bs.extern_decls.push(LlFunction(name, ret_ty, params, Vector<LlBlock>::new(), to_i64(1)))
+  return bs_mark_extern(bs, name)
+
+// "size_of" / "align_of" when the callee is a specialization of that
+// prelude intrinsic; "" otherwise.
+fn bs_intrinsic_of(bs: BS, callee: i64): string
+  match bs.mir_nodes.get(callee):
+    MirNode::MirFnRef(sym, ti):
+      if sym >= 0 and sym < bs.symbols.length():
+        let name: string = bs.symbols.get(sym).name
+        if index_of(name, "size_of$") == to_i64(0):
+          return "size_of"
+        if index_of(name, "align_of$") == to_i64(0):
+          return "align_of"
+  return ""
+
+// The literal struct type of one variant's payload: `{ T0, T1, ... }`.
+fn bs_payload_struct(bs: BS, enum_ti: i64, variant: i64): string
+  let out: string = "{ "
+  if enum_ti >= 0 and enum_ti < bs.types.length():
+    let t: DaoType = bs.types.get(enum_ti)
+    let at: i64 = t.info_lp
+    let vi: i64 = to_i64(0)
+    while vi < t.info_count:
+      let count: i64 = bs.type_info.get(at + to_i64(1))
+      if vi == variant:
+        let pi: i64 = to_i64(0)
+        while pi < count:
+          if pi > to_i64(0):
+            out = out + ", "
+          out = out + bs_ty(bs, bs.type_info.get(at + to_i64(2) + pi * to_i64(2) + to_i64(1)))
+          pi = pi + to_i64(1)
+      at = at + to_i64(2) + count * to_i64(2)
+      vi = vi + to_i64(1)
+  return out + " }"
+
+// The Dao enum type of a value an instruction produced (MIR types it).
+fn bs_value_enum_type(bs: BS, value: i64): i64
+  return mir_value_type(bs.mir_nodes, value)
 
 // =========================================================================
 // Section 88b: Helpers pulled out of instruction lowering
