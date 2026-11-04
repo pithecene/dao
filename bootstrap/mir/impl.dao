@@ -154,7 +154,7 @@ enum class MirNode:
 // =========================================================================
 
 // Mutable state threaded through lowering.
-// The arena of the HIR being lowered, read-only.
+// The arena of the current HIR, read-only.
 class MsHir:
   nodes: Vector<HirNode>
   idx: Vector<i64>
@@ -168,7 +168,7 @@ class MsProgram:
   uses_map: HashMap<i64>    // program-level uses_key(file_id, tok_idx) → sym_idx
   copy_out_sym: i64         // the prelude's `copy_out`, for resource exits (-1 when absent)
 
-// The module being lowered.
+// The current module.
 class MsSource:
   toks: Vector<Token>
   src: string
@@ -180,7 +180,7 @@ class MsOutput:
   idx: Vector<i64>
   diags: Vector<Diagnostic>
 
-// The function being lowered.
+// The current function.
 class MsFunction:
   current_fn: i64           // index into mir_nodes of current MirFunction (−1 none)
   locals: Vector<i64>       // list of MirLocal node indices for current fn
@@ -1100,8 +1100,8 @@ fn lower_stmt_list(br: BlockR, list_pos: i64): BlockR
 //   [current] --cond_br--> [then] --br--> [merge]
 //                      \-> [else] --br--> [merge]
 // The returned BlockR is positioned on [merge].  If both branches
-// returned or broke, no path reaches [merge]: it is closed here, so the
-// statements after the `if` are dropped as the host's builder drops them.
+// returned or broke, no path reaches [merge]. This function closes it, so the lowering drops the
+// statements after the `if` as the host's builder drops them.
 fn mir_lower_if_stmt(br: BlockR, cond: i64, then_lp: i64, else_lp: i64): BlockR
   let cond_r: ExprR = lower_expr_value(br, cond)
   br = cond_r.br
@@ -1538,8 +1538,8 @@ fn mir_template_refs(r: MirResult, symbols: Vector<Symbol>, module_node: i64): V
 // each parameter it is generic over stands for, cloned with every type
 // substituted, and itself scanned in turn until nothing new is made.
 // What a call decided is the checker's record on the call, composed
-// through the specialization the call sits in.  A call MIR made itself
-// (copy_out at a domain's exit) is decided from its arguments.  Types are made by the checker's own machinery, continuing
+// through the specialization the call sits in.  The arguments decide a call MIR made itself (copy_out at a domain's exit).
+// The checker's own machinery makes types, continuing
 // from its registry (ProgramTyped).
 
 // The tables monomorphization reads and grows: the checker's state (its
@@ -1793,9 +1793,8 @@ fn mono_scan_function(m: Mono, wi: i64): Mono
 // member access as its callee.  Each such call names the method its
 // now-concrete receiver answers the member with, as seen from the
 // function's module, and the receiver becomes the first argument (the
-// host's fixup_method_calls).  What the method is generic
-// over, if anything, is decided from the arguments when it is scanned:
-// the checker rejects a type argument written on a call through a bound.
+// host's fixup_method_calls).  The scan decides from the arguments what the method is generic over, if
+// anything, because the checker rejects a type argument written on a call through a bound.
 fn mono_fixup_bound_calls(m: Mono, fn_node: i64, module_pos: i64): Mono
   let module_node: i64 = m.source.modules.get(module_pos)
   let file_id: i64 = to_i64(-1)

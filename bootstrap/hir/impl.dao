@@ -851,7 +851,7 @@ fn lower_return_stmt(hs: HS, val_node: i64): HirR
 
 // Whether `-` applies to the literal 9223372036854775808.  The parser
 // keeps the sign apart from the digits, and those digits alone do not
-// fit, so this one negation is decided before its operand is lowered.
+// fit, so this check decides the negation before lowering its operand.
 fn hir_is_i64_min_literal(hs: HS, op_tidx: i64, operand: i64): bool
   if hs_tok_name(hs, op_tidx) != "-":
     return false

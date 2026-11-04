@@ -236,8 +236,7 @@ void cmd_build(const dao::ProgramRequest& request, std::span<const std::string> 
   auto llvm_result = dao::lower_to_llvm(mir, llvm_ctx);
 
   // The entry module names the program, whichever files came with it. A
-  // prelude file's display path is relative to the standard library, so
-  // an entry there is named by what the command line gave.
+  // prelude file's display path is relative to the standard library, so what the command line gave names an entry there.
   const auto& entry_file = reported_file(mir.hir_result.frontend.program);
   const auto path = entry_file.is_prelude ? request.primary_file()
                                           : dao::canonical_or_self(entry_file.display_path);
