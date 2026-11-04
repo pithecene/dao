@@ -30,7 +30,7 @@ jobs:
     timeout-minutes: 15
     container:
       # Pinned, so a new Bosun rule cannot stop this required check's merges.
-      image: ghcr.io/pithecene/bosun:0.4.0
+      image: ghcr.io/pithecene/bosun:0.5.0
       credentials: { username: bosun, password: "${{ secrets.BOSUN_REGISTRY_TOKEN }}" }
     steps:
       - uses: actions/checkout@v6
