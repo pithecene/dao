@@ -98,7 +98,7 @@ fi
 # bootstrap run is recorded as such instead of exhausting the machine.
 LIMIT_KB="${AUDIT_MEMORY_KB:-6291456}"   # 6 GiB
 LIMIT_S="${AUDIT_SECONDS:-600}"
-STAGES="parse typecheck hir mir llvm"
+STAGES="parse typecheck hir mir mono llvm"
 if [ "$REPORT_ONLY" -eq 0 ]; then
 "$DAOC" build bootstrap/llvm/llvm.gen.dao > /dev/null || { echo "audit: building llvm.gen failed"; exit 1; }
 rm -f "$OUT/closure.txt" "$AUDIT_OUT/closure.merged"
@@ -296,7 +296,8 @@ resource_block_sites() {
   done
   echo "### The prelude through the bootstrap"
   echo
-  echo "Every column above is measured"
+  echo "The \`lex\` and \`parse\` columns read the compiler program's own file alone."
+  echo "Every later column is measured"
   echo "with the prelude in the program -- every module under \`stdlib/core/\` and"
   echo "\`stdlib/io/\` (CONTRACT_MODULE_SYSTEM.md §7), loaded as declarations,"
   echo "whatever the bootstrap parser keeps of each file; the \`hir\` and \`mir\`"

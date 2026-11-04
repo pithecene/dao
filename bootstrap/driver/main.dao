@@ -1,7 +1,7 @@
 module bootstrap::driver_main
-// The bootstrap compiler as a program (Task 45): the whole pipeline —
-// lex, parse, resolve, typecheck, HIR, MIR, monomorphization, LLVM —
-// over the files a manifest names, written as one LLVM module.
+// The bootstrap compiler as a program.  It runs lex, parse, resolve,
+// typecheck, HIR, MIR, monomorphization and LLVM over the files a manifest
+// names, and writes one LLVM module.
 //
 // The runtime has no command line (stdlib/io), so the inputs are a
 // manifest, `bootstrap/driver/out/.manifest`, one entry per line:

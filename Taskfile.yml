@@ -98,6 +98,7 @@ tasks:
       - bootstrap/hir/impl.dao
       - bootstrap/mir/impl.dao
       - bootstrap/llvm/impl.dao
+      - bootstrap/driver/main.dao
     generates:
       - bootstrap/lexer/lexer.gen.dao
       - bootstrap/parser/parser.gen.dao
@@ -107,6 +108,7 @@ tasks:
       - bootstrap/hir/hir.gen.dao
       - bootstrap/mir/mir.gen.dao
       - bootstrap/llvm/llvm.gen.dao
+      - bootstrap/driver/driver.gen.dao
 
   bootstrap-test:
     desc: Assemble, build, and test all bootstrap subsystems

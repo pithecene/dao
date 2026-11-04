@@ -44,8 +44,9 @@ driver, with no test runner.
 3. stage 3: the stage-2 binary compiles the same source;
 4. the fixed point: stage 2's and stage 3's modules are byte-identical;
 5. every bootstrap suite (lexer through llvm), compiled by stage 2,
-   linked and run, passes and exits 0; `validate_ir.sh` accepts and
-   runs the IR the stage-2-compiled llvm suite writes.
+   linked and run, passes and exits 0; `validate_ir.sh` accepts the IR
+   the stage-2-compiled llvm suite writes and runs each module with a
+   recorded exit code.
 
 The prelude is the host's: every module under `stdlib/core` and
 `stdlib/io`, in path order.
@@ -69,5 +70,6 @@ crossing held on its first run.  Stage 1 compiles the bootstrap compiler,
 prelude included, in about five seconds, peaking under 2 GiB.  Stage 2
 and stage 3 emit the same 5.9 MB module.  Every suite compiled by stage
 2 passes (lexer 105, parser 88, graph 12, resolver 64, typecheck 343,
-hir 46, mir 51, llvm 46), and `validate_ir.sh` accepts and runs every
-module the stage-2-compiled llvm suite writes.
+hir 46, mir 51, llvm 46), and `validate_ir.sh` accepts every module the
+stage-2-compiled llvm suite writes and runs each one with a recorded
+exit code.

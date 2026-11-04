@@ -153,9 +153,15 @@ class MirBackendInput:
   symbols: Vector<Symbol>
   types: Vector<DaoType>
   type_info: Vector<i64>
+  source: BackendSource
+
+// The source a backend run reads tokens and names from.  A MirProgram
+// root takes each module's own from `graph`, and `toks` and `src` serve a
+// single-module root.
+class BackendSource:
   toks: Vector<Token>
   src: string
-  graph: ProgramGraph   // every module's source and name, for a MirProgram root and for naming
+  graph: ProgramGraph
 
 // =========================================================================
 // Section 82: Type lowering (MIR type_idx → LlType → textual form)
@@ -218,14 +224,14 @@ fn ll_type_from_mir(types: Vector<DaoType>, type_idx: i64): LlType
 // with a payload is `{ i32, [N x iK] }` (the host's layout), which is an
 // aggregate here.
 fn ll_type_of(bs: BS, type_idx: i64): LlType
-  if type_idx >= 0 and type_idx < bs.types.length():
-    let t: DaoType = bs.types.get(type_idx)
+  if type_idx >= 0 and type_idx < bs.input.types.length():
+    let t: DaoType = bs.input.types.get(type_idx)
     match t.kind:
       TypeKind::TEnum:
-        if ll_enum_has_payload(bs.type_info, t):
+        if ll_enum_has_payload(bs.input.type_info, t):
           return LlType::LlStruct
         return LlType::LlI32
-  return ll_type_from_mir(bs.types, type_idx)
+  return ll_type_from_mir(bs.input.types, type_idx)
 
 // Whether an enum has a variant that carries a payload (per variant:
 // name, payload count, then (name, type) per value).
@@ -316,23 +322,23 @@ class LlStructDef:
 fn bs_type_text(bs: BS, type_idx: i64): string
   if type_idx < 0:
     return "void"
-  if type_idx >= bs.types.length():
+  if type_idx >= bs.input.types.length():
     return "<unsupported>"
-  let t: DaoType = bs.types.get(type_idx)
+  let t: DaoType = bs.input.types.get(type_idx)
   match t.kind:
     TypeKind::TStruct:
       return bs_named_type(bs, "struct.", type_idx)
-  return ll_type_text(ll_type_from_mir(bs.types, type_idx))
+  return ll_type_text(ll_type_from_mir(bs.input.types, type_idx))
 
 // The LLVM type text of the Dao type at `type_idx`, as the host lowers
 // it: a payload-bearing enum is its named layout struct, a generator
 // `%dao.generator`; everything else as bs_type_text.
 fn bs_ty(bs: BS, type_idx: i64): string
-  if type_idx >= 0 and type_idx < bs.types.length():
-    let t: DaoType = bs.types.get(type_idx)
+  if type_idx >= 0 and type_idx < bs.input.types.length():
+    let t: DaoType = bs.input.types.get(type_idx)
     match t.kind:
       TypeKind::TEnum:
-        if ll_enum_has_payload(bs.type_info, t):
+        if ll_enum_has_payload(bs.input.type_info, t):
           return bs_named_type(bs, "enum.", type_idx)
         return "i32"
       TypeKind::TGenerator:
@@ -352,9 +358,9 @@ fn ll_round_up(n: i64, align: i64): i64
   return ((n + align - to_i64(1)) / align) * align
 
 fn ll_size_align(bs: BS, ti: i64): SizeAlign
-  if ti < 0 or ti >= bs.types.length():
+  if ti < 0 or ti >= bs.input.types.length():
     return SizeAlign(to_i64(0), to_i64(1))
-  let t: DaoType = bs.types.get(ti)
+  let t: DaoType = bs.input.types.get(ti)
   match t.kind:
     TypeKind::TString:
       return SizeAlign(to_i64(16), to_i64(8))
@@ -369,19 +375,19 @@ fn ll_size_align(bs: BS, ti: i64): SizeAlign
       let align: i64 = to_i64(1)
       let fi: i64 = to_i64(0)
       while fi < t.info_count:
-        let f: SizeAlign = ll_size_align(bs, bs.type_info.get(t.info_lp + fi * to_i64(2) + to_i64(1)))
+        let f: SizeAlign = ll_size_align(bs, bs.input.type_info.get(t.info_lp + fi * to_i64(2) + to_i64(1)))
         size = ll_round_up(size, f.align) + f.size
         if f.align > align:
           align = f.align
         fi = fi + to_i64(1)
       return SizeAlign(ll_round_up(size, align), align)
     TypeKind::TEnum:
-      if ll_enum_has_payload(bs.type_info, t) == false:
+      if ll_enum_has_payload(bs.input.type_info, t) == false:
         return SizeAlign(to_i64(4), to_i64(4))
       let payload: SizeAlign = ll_enum_payload_size(bs, t)
       let size: i64 = ll_round_up(to_i64(4), payload.align) + ll_enum_slots(payload) * payload.align
       return SizeAlign(ll_round_up(size, payload.align), payload.align)
-  match ll_type_from_mir(bs.types, ti):
+  match ll_type_from_mir(bs.input.types, ti):
     LlType::LlI8:
       return SizeAlign(to_i64(1), to_i64(1))
     LlType::LlI1:
@@ -406,13 +412,13 @@ fn ll_enum_payload_size(bs: BS, t: DaoType): SizeAlign
   let at: i64 = t.info_lp
   let vi: i64 = to_i64(0)
   while vi < t.info_count:
-    let count: i64 = bs.type_info.get(at + to_i64(1))
+    let count: i64 = bs.input.type_info.get(at + to_i64(1))
     if count > to_i64(0):
       let size: i64 = to_i64(0)
       let align: i64 = to_i64(1)
       let pi: i64 = to_i64(0)
       while pi < count:
-        let f: SizeAlign = ll_size_align(bs, bs.type_info.get(at + to_i64(2) + pi * to_i64(2) + to_i64(1)))
+        let f: SizeAlign = ll_size_align(bs, bs.input.type_info.get(at + to_i64(2) + pi * to_i64(2) + to_i64(1)))
         size = ll_round_up(size, f.align) + f.size
         if f.align > align:
           align = f.align
@@ -440,12 +446,12 @@ fn ll_enum_slots(payload: SizeAlign): i64
 // in the type's index, its identity: two can spell alike (`Tag<T>`
 // under two binders).
 fn bs_named_type(bs: BS, prefix: string, type_idx: i64): string
-  let t: DaoType = bs.types.get(type_idx)
+  let t: DaoType = bs.input.types.get(type_idx)
   if llvm_ident_is_plain(t.name) == false:
     return "%\"" + prefix + t.name + "#" + i64_to_string(type_idx) + "\""
-  if bs.program.shared_type_names.contains(t.name):
-    if t.builtin_id >= 0 and t.builtin_id < bs.program.graph.modules.length():
-      return "%\"" + prefix + bs.program.graph.modules.get(t.builtin_id).name + "::" + t.name + "\""
+  if bs.input.source.program.shared_type_names.contains(t.name):
+    if t.builtin_id >= 0 and t.builtin_id < bs.input.source.program.graph.modules.length():
+      return "%\"" + prefix + bs.input.source.program.graph.modules.get(t.builtin_id).name + "::" + t.name + "\""
   return "%" + prefix + t.name
 
 // =========================================================================
@@ -511,18 +517,18 @@ fn llvm_global_name(name: string): string
 // name; the entry module's `main` is `main`; any other is
 // `<module>::<name>`, so two modules' same-named functions stay apart.
 fn bs_function_name(bs: BS, sym_idx: i64): string
-  if sym_idx < 0 or sym_idx >= bs.symbols.length():
+  if sym_idx < 0 or sym_idx >= bs.input.symbols.length():
     return ""
-  let s: Symbol = bs.symbols.get(sym_idx)
+  let s: Symbol = bs.input.symbols.get(sym_idx)
   let owner: i64 = s.owner_module_id
-  if owner < 0 or owner >= bs.program.graph.modules.length():
+  if owner < 0 or owner >= bs.input.source.program.graph.modules.length():
     return mangle_symbol_name(s.name)
-  let m: ModuleEntry = bs.program.graph.modules.get(owner)
-  if bs.program.extern_syms.contains(i64_to_string(sym_idx)):
+  let m: ModuleEntry = bs.input.source.program.graph.modules.get(owner)
+  if bs.input.source.program.extern_syms.contains(i64_to_string(sym_idx)):
     return mangle_symbol_name(s.name)
   if m.is_prelude and is_prelude_intrinsic_name(s.name):
     return mangle_symbol_name(s.name)
-  if s.name == "main" and owner == bs.program.entry_module:
+  if s.name == "main" and owner == bs.input.source.program.entry_module:
     return "@main"
   return llvm_global_name(m.name + "::" + s.name)
 
@@ -547,71 +553,78 @@ fn is_prelude_intrinsic_name(name: string): bool
 // side tables with linear scan.  Functions are small; this is
 // fine for Tier A.
 
-class BS:
-  // Inputs (read-only).
+// The module whose tokens are being read, and the program it belongs to:
+// every module's source and name, and what naming reads off them.
+class BsSource:
+  toks: Vector<Token>
+  src: string
+  program: BsProgram
+
+// What a backend run reads and never changes, apart from `source`
+// following the module being lowered.
+class BsInput:
   mir_nodes: Vector<MirNode>
   mir_idx: Vector<i64>
   symbols: Vector<Symbol>
   types: Vector<DaoType>
   type_info: Vector<i64>
-  toks: Vector<Token>
-  src: string
+  source: BsSource
 
-  // Output.
+// The module's text as it accumulates.
+class BsOutput:
   globals: Vector<LlGlobal>
+  next_global: i64          // the counter behind "@.str.0", "@.str.1", ...
   functions: Vector<LlFunction>
   extern_decls: Vector<LlFunction>
   diags: Vector<Diagnostic>
+  // Set when lowering has emitted a diagnostic that makes the whole
+  // backend result `ok = false`.
+  had_error: i64
 
-  // Per-function lowering state (reset between functions).
-  // Value side table: maps MirInst node idx → result text (either
-  // "%N" for LLVM-instruction results, or an inline constant text
-  // like "42" / "1.500000e+00" / "true" for folded constants) and
-  // its LLVM type text.  Linear-scan lookup via `bs_get_value_*`.
-  val_keys: Vector<i64>
-  val_texts: Vector<string>
-  val_tys: Vector<string>
-
-  // MirLocal node idx → alloca slot name ("%slot0", etc.) + slot type text.
-  slot_keys: Vector<i64>
-  slot_names: Vector<string>
-  slot_tys: Vector<string>
-
-  // MirBlock node idx → textual label ("entry" / "bb1" / ...).
-  block_keys: Vector<i64>
-  block_labels: Vector<string>
-
-  // Next value counter (per function) — "%0", "%1", ...
-  next_value: i64
-
-  // Globals counter — "@.str.0", "@.str.1", ...
-  next_global: i64
-
+// What the module's declarations have accumulated so far.
+class BsDecls:
   // Every declared extern's Dao signature (bs_extern_signature; "" for
   // a runtime hook), positioned by `index.externs`: a second extern of
   // one C name must declare the same one.
   extern_sigs: Vector<string>
 
-  // Call arg bundles — LlInstKind::LlCall stores an index into this
+  // Call arg bundles.  LlInstKind::LlCall stores an index into this
   // list rather than carrying Vector<string>/Vector<LlType> inline
   // (enum-class variants over vectors are expensive to thread).
   call_arg_bundles: Vector<CallArgs>
 
-  // Struct type definitions — module-level, populated on first use.
+  // Struct type definitions, populated on first use.
   struct_defs: Vector<LlStructDef>
 
-  // Flag: set when lowering has emitted a diagnostic that makes
-  // the whole backend result `ok = false`.
-  had_error: i64
+// MirInst node idx → result text (either "%N" for LLVM-instruction
+// results, or an inline constant text like "42" / "1.500000e+00" / "true"
+// for folded constants) and its LLVM type text.
+class BsValues:
+  keys: Vector<i64>
+  texts: Vector<string>
+  tys: Vector<string>
 
-  // Where each keyed entry of the side tables above sits, so a lookup
-  // is a hash probe rather than a scan (a compiler-sized function has
-  // thousands of values).
-  index: BsIndex
+// MirLocal node idx → alloca slot name ("%slot0", etc.) + slot type text.
+class BsSlots:
+  keys: Vector<i64>
+  names: Vector<string>
+  tys: Vector<string>
 
-  // The program being lowered: its modules' sources and names, and what
-  // naming reads off them.
-  program: BsProgram
+// MirBlock node idx → textual label ("entry" / "bb1" / ...).
+class BsLabels:
+  keys: Vector<i64>
+  labels: Vector<string>
+
+// A function's side tables, keyed through `index`.
+class BsTables:
+  values: BsValues
+  slots: BsSlots
+  blocks: BsLabels
+
+// The rest of a function's lowering state.
+class BsFunction:
+  // Next value counter: "%0", "%1", ...
+  next_value: i64
 
   // Allocas a function's body needs beyond its locals (a string passed
   // by pointer), placed in its entry block so a loop does not grow the
@@ -622,12 +635,29 @@ class BS:
   // is "" in any other function.
   gen: GenCtx
 
+class BS:
+  input: BsInput
+  out: BsOutput
+  decls: BsDecls
+  tables: BsTables
+  func: BsFunction
+
+  // Where each keyed entry of the side tables sits, so a lookup is a hash
+  // probe rather than a scan (a compiler-sized function has thousands of
+  // values).
+  index: BsIndex
+
 // A generator's resume function in progress: the frame pointer, the
-// frame's type, and how many yields it has lowered so far.
+// frame's type, and how many yields it has lowered so far.  A resume
+// enters past every instruction before its yield, so an iterator open
+// across one lives in the frame rather than in SSA values.
 class GenCtx:
   frame: string
   frame_ty: string
   yields: i64
+  // Each iterator the function makes, by its MirIterInit node: which pair
+  // of frame fields holds it.
+  iters: HashMap<i64>
 
 // Positions in BS's side tables, by key: a value's and a block label's
 // by MIR node, a slot's by MirLocal node, an extern's and a struct's by
@@ -652,13 +682,22 @@ class BsProgram:
   shared_type_names: HashMap<i64>
 
 fn bs_program_of(input: MirBackendInput): BsProgram
-  let modules: Vector<ModuleEntry> = input.graph.modules
-  // The entry: the one module outside the prelude that declares `main`.
+  let modules: Vector<ModuleEntry> = input.source.graph.modules
+  let externs: HashMap<i64> = HashMap<i64>::new()
+  let ni: i64 = to_i64(0)
+  while ni < input.mir.mir_nodes.length():
+    match input.mir.mir_nodes.get(ni):
+      MirNode::MirFunction(fn_sym, ret_type, param_count, local_list_lp, local_count, block_list_lp, block_count, is_extern_i):
+        if is_extern_i > to_i64(0):
+          externs = externs.set(i64_to_string(fn_sym), to_i64(1))
+    ni = ni + to_i64(1)
+  // The entry: the one module outside the prelude that defines `main`.
+  // An extern `main` is C's, so it selects nothing.
   let entry: i64 = to_i64(-1)
   let si: i64 = to_i64(0)
   while si < input.symbols.length():
     let sym: Symbol = input.symbols.get(si)
-    if sym.name == "main" and sym.owner_module_id >= 0 and sym.owner_module_id < modules.length():
+    if sym.name == "main" and sym.owner_module_id >= 0 and sym.owner_module_id < modules.length() and externs.contains(i64_to_string(si)) == false:
       match sym.kind:
         SymbolKind::Function:
           // -2 once two modules declare one; it stays ambiguous.
@@ -669,14 +708,6 @@ fn bs_program_of(input: MirBackendInput): BsProgram
               if entry != sym.owner_module_id:
                 entry = to_i64(-2)
     si = si + to_i64(1)
-  let externs: HashMap<i64> = HashMap<i64>::new()
-  let ni: i64 = to_i64(0)
-  while ni < input.mir.mir_nodes.length():
-    match input.mir.mir_nodes.get(ni):
-      MirNode::MirFunction(fn_sym, ret_type, param_count, local_list_lp, local_count, block_list_lp, block_count, is_extern_i):
-        if is_extern_i > to_i64(0):
-          externs = externs.set(i64_to_string(fn_sym), to_i64(1))
-    ni = ni + to_i64(1)
   // A named type's declaring module, by its name; -2 once two differ.
   let declared_by: HashMap<i64> = HashMap<i64>::new()
   let shared: HashMap<i64> = HashMap<i64>::new()
@@ -697,55 +728,30 @@ fn bs_program_of(input: MirBackendInput): BsProgram
         if first != t.builtin_id:
           shared = shared.set(t.name, to_i64(1))
     ti = ti + to_i64(1)
-  return BsProgram(input.graph, entry, externs, shared)
+  return BsProgram(input.source.graph, entry, externs, shared)
 
 fn bs_index_empty(): BsIndex
   return BsIndex(HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new())
 
+fn gen_ctx_none(): GenCtx
+  return GenCtx("", "", to_i64(0), HashMap<i64>::new())
+
+fn bs_tables_empty(): BsTables
+  return BsTables(BsValues(Vector<i64>::new(), Vector<string>::new(), Vector<string>::new()), BsSlots(Vector<i64>::new(), Vector<string>::new(), Vector<string>::new()), BsLabels(Vector<i64>::new(), Vector<string>::new()))
+
+fn bs_function_empty(): BsFunction
+  return BsFunction(to_i64(0), Vector<LlInst>::new(), gen_ctx_none())
+
 fn bs_new(input: MirBackendInput): BS
-  return BS(
-    input.mir.mir_nodes,
-    input.mir.mir_idx,
-    input.symbols,
-    input.types,
-    input.type_info,
-    input.toks,
-    input.src,
-    Vector<LlGlobal>::new(),
-    Vector<LlFunction>::new(),
-    Vector<LlFunction>::new(),
-    Vector<Diagnostic>::new(),
-    Vector<i64>::new(),
-    Vector<string>::new(),
-    Vector<string>::new(),
-    Vector<i64>::new(),
-    Vector<string>::new(),
-    Vector<string>::new(),
-    Vector<i64>::new(),
-    Vector<string>::new(),
-    to_i64(0),
-    to_i64(0),
-    Vector<string>::new(),
-    Vector<CallArgs>::new(),
-    Vector<LlStructDef>::new(),
-    to_i64(0),
-    bs_index_empty(),
-    bs_program_of(input),
-    Vector<LlInst>::new(),
-    GenCtx("", "", to_i64(0)))
+  let source: BsSource = BsSource(input.source.toks, input.source.src, bs_program_of(input))
+  let reads: BsInput = BsInput(input.mir.mir_nodes, input.mir.mir_idx, input.symbols, input.types, input.type_info, source)
+  let out: BsOutput = BsOutput(Vector<LlGlobal>::new(), to_i64(0), Vector<LlFunction>::new(), Vector<LlFunction>::new(), Vector<Diagnostic>::new(), to_i64(0))
+  let decls: BsDecls = BsDecls(Vector<string>::new(), Vector<CallArgs>::new(), Vector<LlStructDef>::new())
+  return BS(reads, out, decls, bs_tables_empty(), bs_function_empty(), bs_index_empty())
 
 fn bs_reset_fn_state(bs: BS): BS
-  bs.val_keys = Vector<i64>::new()
-  bs.val_texts = Vector<string>::new()
-  bs.val_tys = Vector<string>::new()
-  bs.slot_keys = Vector<i64>::new()
-  bs.slot_names = Vector<string>::new()
-  bs.slot_tys = Vector<string>::new()
-  bs.block_keys = Vector<i64>::new()
-  bs.block_labels = Vector<string>::new()
-  bs.next_value = to_i64(0)
-  bs.entry_allocas = Vector<LlInst>::new()
-  bs.gen = GenCtx("", "", to_i64(0))
+  bs.tables = bs_tables_empty()
+  bs.func = bs_function_empty()
   bs.index = BsIndex(HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), bs.index.externs, bs.index.structs)
   return bs
 
@@ -768,62 +774,62 @@ class FreshR:
 // call boundaries — the counter update only takes effect when the
 // caller re-binds `bs` from the returned FreshR.
 fn bs_fresh_value(bs: BS): FreshR
-  let n: i64 = bs.next_value
-  bs.next_value = n + to_i64(1)
+  let n: i64 = bs.func.next_value
+  bs.func.next_value = n + to_i64(1)
   return FreshR(bs, "%" + i64_to_string(n))
 
 // A fresh named value (`%<stem>.<n>`): LLVM requires the unnamed `%N`
 // to be defined in order, so a value placed out of order — an entry-block
 // temporary, a label within a block — takes a name instead.
 fn bs_fresh_named(bs: BS, stem: string): FreshR
-  let n: i64 = bs.next_global
-  bs.next_global = n + to_i64(1)
+  let n: i64 = bs.out.next_global
+  bs.out.next_global = n + to_i64(1)
   return FreshR(bs, "%" + stem + "." + i64_to_string(n))
 
 fn bs_error(bs: BS, msg: string): BS
-  bs.diags = bs.diags.push(make_error(Span(to_i64(0), to_i64(1)), msg))
-  bs.had_error = to_i64(1)
+  bs.out.diags = bs.out.diags.push(make_error(Span(to_i64(0), to_i64(1)), msg))
+  bs.out.had_error = to_i64(1)
   return bs
 
 // Value side-table helpers.
 fn bs_set_value(bs: BS, mir_idx: i64, text: string, ty_text: string): BS
-  bs.index.values = bs.index.values.set(i64_to_string(mir_idx), bs.val_keys.length())
-  bs.val_keys = bs.val_keys.push(mir_idx)
-  bs.val_texts = bs.val_texts.push(text)
-  bs.val_tys = bs.val_tys.push(ty_text)
+  bs.index.values = bs.index.values.set(i64_to_string(mir_idx), bs.tables.values.keys.length())
+  bs.tables.values.keys = bs.tables.values.keys.push(mir_idx)
+  bs.tables.values.texts = bs.tables.values.texts.push(text)
+  bs.tables.values.tys = bs.tables.values.tys.push(ty_text)
   return bs
 
 fn bs_get_value_text(bs: BS, mir_idx: i64): string
   let at: i64 = hm_get_or(bs.index.values, i64_to_string(mir_idx), to_i64(-1))
   if at < 0:
     return ""
-  return bs.val_texts.get(at)
+  return bs.tables.values.texts.get(at)
 
 fn bs_get_value_ty(bs: BS, mir_idx: i64): string
   let at: i64 = hm_get_or(bs.index.values, i64_to_string(mir_idx), to_i64(-1))
   if at < 0:
     return ""
-  return bs.val_tys.get(at)
+  return bs.tables.values.tys.get(at)
 
 // Slot side-table helpers (MirLocal node idx → alloca name + ty text).
 fn bs_set_slot(bs: BS, local_node_idx: i64, slot_name: string, ty_text: string): BS
-  bs.index.slots = bs.index.slots.set(i64_to_string(local_node_idx), bs.slot_keys.length())
-  bs.slot_keys = bs.slot_keys.push(local_node_idx)
-  bs.slot_names = bs.slot_names.push(slot_name)
-  bs.slot_tys = bs.slot_tys.push(ty_text)
+  bs.index.slots = bs.index.slots.set(i64_to_string(local_node_idx), bs.tables.slots.keys.length())
+  bs.tables.slots.keys = bs.tables.slots.keys.push(local_node_idx)
+  bs.tables.slots.names = bs.tables.slots.names.push(slot_name)
+  bs.tables.slots.tys = bs.tables.slots.tys.push(ty_text)
   return bs
 
 fn bs_get_slot_name(bs: BS, local_node_idx: i64): string
   let at: i64 = hm_get_or(bs.index.slots, i64_to_string(local_node_idx), to_i64(-1))
   if at < 0:
     return ""
-  return bs.slot_names.get(at)
+  return bs.tables.slots.names.get(at)
 
 fn bs_get_slot_ty(bs: BS, local_node_idx: i64): string
   let at: i64 = hm_get_or(bs.index.slots, i64_to_string(local_node_idx), to_i64(-1))
   if at < 0:
     return ""
-  return bs.slot_tys.get(at)
+  return bs.tables.slots.tys.get(at)
 
 // Slot position-indexed lookup for MirLocal local_slot_index.  Task 29
 // MirLoad/MirStore reference locals by slot index (0..param_count..locals.length()),
@@ -832,15 +838,15 @@ fn bs_get_slot_ty(bs: BS, local_node_idx: i64): string
 fn bs_slot_name_by_index(bs: BS, slot_idx: i64): string
   if slot_idx < 0:
     return ""
-  if slot_idx >= bs.slot_names.length():
+  if slot_idx >= bs.tables.slots.names.length():
     return ""
-  return bs.slot_names.get(slot_idx)
+  return bs.tables.slots.names.get(slot_idx)
 
 // The MIR type of a local slot, from its MirLocal node.
 fn bs_slot_type_idx(bs: BS, slot_idx: i64): i64
-  if slot_idx < 0 or slot_idx >= bs.slot_keys.length():
+  if slot_idx < 0 or slot_idx >= bs.tables.slots.keys.length():
     return to_i64(-1)
-  match bs.mir_nodes.get(bs.slot_keys.get(slot_idx)):
+  match bs.input.mir_nodes.get(bs.tables.slots.keys.get(slot_idx)):
     MirNode::MirLocal(sym, type_idx, is_param):
       return type_idx
   return to_i64(-1)
@@ -848,30 +854,30 @@ fn bs_slot_type_idx(bs: BS, slot_idx: i64): i64
 fn bs_slot_ty_by_index(bs: BS, slot_idx: i64): string
   if slot_idx < 0:
     return ""
-  if slot_idx >= bs.slot_tys.length():
+  if slot_idx >= bs.tables.slots.tys.length():
     return ""
-  return bs.slot_tys.get(slot_idx)
+  return bs.tables.slots.tys.get(slot_idx)
 
 // Block label side-table helpers (MirBlock node idx → label text).
 fn bs_set_block_label(bs: BS, block_node_idx: i64, label: string): BS
-  bs.index.labels = bs.index.labels.set(i64_to_string(block_node_idx), bs.block_keys.length())
-  bs.block_keys = bs.block_keys.push(block_node_idx)
-  bs.block_labels = bs.block_labels.push(label)
+  bs.index.labels = bs.index.labels.set(i64_to_string(block_node_idx), bs.tables.blocks.keys.length())
+  bs.tables.blocks.keys = bs.tables.blocks.keys.push(block_node_idx)
+  bs.tables.blocks.labels = bs.tables.blocks.labels.push(label)
   return bs
 
 fn bs_get_block_label(bs: BS, block_node_idx: i64): string
   let at: i64 = hm_get_or(bs.index.labels, i64_to_string(block_node_idx), to_i64(-1))
   if at < 0:
     return ""
-  return bs.block_labels.get(at)
+  return bs.tables.blocks.labels.get(at)
 
 // Extern-declare dedup.
 fn bs_has_extern(bs: BS, name: string): bool
   return bs.index.externs.contains(name)
 
 fn bs_mark_extern(bs: BS, name: string, signature: string): BS
-  bs.index.externs = bs.index.externs.set(name, bs.extern_sigs.length())
-  bs.extern_sigs = bs.extern_sigs.push(signature)
+  bs.index.externs = bs.index.externs.set(name, bs.decls.extern_sigs.length())
+  bs.decls.extern_sigs = bs.decls.extern_sigs.push(signature)
   return bs
 
 // A class or payload enum passed to or returned from C by value needs
@@ -886,7 +892,7 @@ fn bs_check_extern_scalars(bs: BS, name: string, ret_type: i64, locals_raw: Vect
       what = "returns"
   let i: i64 = to_i64(0)
   while i < param_count and i < locals_raw.length():
-    match bs.mir_nodes.get(locals_raw.get(i)):
+    match bs.input.mir_nodes.get(locals_raw.get(i)):
       MirNode::MirLocal(lsym, ltype_idx, lis_param):
         match ll_type_of(bs, ltype_idx):
           LlType::LlStruct:
@@ -904,7 +910,7 @@ fn bs_extern_signature(bs: BS, ret_type: i64, locals_raw: Vector<i64>, param_cou
   let out: string = i64_to_string(ret_type) + "("
   let i: i64 = to_i64(0)
   while i < param_count and i < locals_raw.length():
-    match bs.mir_nodes.get(locals_raw.get(i)):
+    match bs.input.mir_nodes.get(locals_raw.get(i)):
       MirNode::MirLocal(lsym, ltype_idx, lis_param):
         out = out + i64_to_string(ltype_idx) + ","
     i = i + to_i64(1)
@@ -931,15 +937,15 @@ fn bs_ensure_struct_def(bs: BS, type_idx: i64): BS
   // Push a placeholder entry first so that recursive struct field
   // registration sees this type as already present and doesn't
   // recurse back into it.
-  let t: DaoType = bs.types.get(type_idx)
+  let t: DaoType = bs.input.types.get(type_idx)
   // The generator handle is a declared type of the module prologue.
   match t.kind:
     TypeKind::TGenerator:
       return bs
   let ll_name: string = bs_ty(bs, type_idx)
-  let slot_idx: i64 = bs.struct_defs.length()
+  let slot_idx: i64 = bs.decls.struct_defs.length()
   bs.index.structs = bs.index.structs.set(i64_to_string(type_idx), slot_idx)
-  bs.struct_defs = bs.struct_defs.push(LlStructDef(t.name, ll_name, Vector<string>::new(), type_idx))
+  bs.decls.struct_defs = bs.decls.struct_defs.push(LlStructDef(t.name, ll_name, Vector<string>::new(), type_idx))
   // An enum's layout: its tag and the payload slots (the host's).
   let field_tys: Vector<string> = Vector<string>::new()
   let is_enum: bool = false
@@ -955,16 +961,16 @@ fn bs_ensure_struct_def(bs: BS, type_idx: i64): BS
   // emit a reference to an undefined named type (invalid IR).
   let fi: i64 = to_i64(0)
   while is_enum == false and fi < t.info_count:
-    let field_type_idx: i64 = bs.type_info.get(t.info_lp + fi * to_i64(2) + to_i64(1))
+    let field_type_idx: i64 = bs.input.type_info.get(t.info_lp + fi * to_i64(2) + to_i64(1))
     bs = bs_define_aggregate(bs, field_type_idx)
     field_tys = field_tys.push(bs_ty(bs, field_type_idx))
     fi = fi + to_i64(1)
   // Re-read the placeholder entry and update its field_tys.  The
   // placeholder may have moved if a recursive call pushed more
   // entries, but slot_idx is stable (append-only vector).
-  let existing: LlStructDef = bs.struct_defs.get(slot_idx)
+  let existing: LlStructDef = bs.decls.struct_defs.get(slot_idx)
   existing.field_ty_texts = field_tys
-  bs.struct_defs = bs.struct_defs.set(slot_idx, existing)
+  bs.decls.struct_defs = bs.decls.struct_defs.set(slot_idx, existing)
   return bs
 
 // =========================================================================
@@ -992,10 +998,10 @@ fn read_mir_list(mir_idx: Vector<i64>, list_pos: i64): Vector<i64>
 fn bs_tok_lex(bs: BS, tok_idx: i64): string
   if tok_idx < 0:
     return ""
-  if tok_idx >= bs.toks.length():
+  if tok_idx >= bs.input.source.toks.length():
     return ""
-  let t: Token = bs.toks.get(tok_idx)
-  return substring(bs.src, t.offset, t.len)
+  let t: Token = bs.input.source.toks.get(tok_idx)
+  return substring(bs.input.source.src, t.offset, t.len)
 
 // =========================================================================
 // Section 87: Op-token → LLVM mnemonic dispatch
@@ -1019,7 +1025,7 @@ fn bs_lower_params(bs: BS, params_raw: Vector<i64>, param_count: i64): ParamsR
   let i: i64 = to_i64(0)
   while i < param_count:
     let local_node_idx: i64 = params_raw.get(i)
-    let node: MirNode = bs.mir_nodes.get(local_node_idx)
+    let node: MirNode = bs.input.mir_nodes.get(local_node_idx)
     match node:
       MirNode::MirLocal(sym, type_idx, is_param):
         let ty: LlType = ll_type_of(bs, type_idx)
@@ -1059,7 +1065,7 @@ class StructCtorR:
 fn bs_lower_struct_ctor(bs: BS, insts: Vector<LlInst>, type_idx: i64, arg_list_lp: i64): StructCtorR
   let struct_ty_text: string = bs_ty(bs, type_idx)
   bs = bs_ensure_struct_def(bs, type_idx)
-  let args_raw: Vector<i64> = read_mir_list(bs.mir_idx, arg_list_lp)
+  let args_raw: Vector<i64> = read_mir_list(bs.input.mir_idx, arg_list_lp)
   // Built as a value, one `insertvalue` per field (the host's): no stack
   // slot, so a construction in a loop does not grow the frame.
   let value: string = "undef"
@@ -1089,16 +1095,16 @@ fn bs_place_pointer(bs: BS, insts: Vector<LlInst>, local_idx: i64, path_lp: i64,
     return PlacePtrR(bs_error(bs, "bootstrap llvm backend: " + what + " references unknown local slot " + i64_to_string(local_idx)), insts, "", "")
   let ptr_name: string = slot_name
   let ty_text: string = bs_slot_ty_by_index(bs, local_idx)
-  let path: Vector<i64> = read_mir_list(bs.mir_idx, path_lp)
+  let path: Vector<i64> = read_mir_list(bs.input.mir_idx, path_lp)
   if path.length() == 0:
     return PlacePtrR(bs, insts, ptr_name, ty_text)
   let cur_ti: i64 = bs_slot_type_idx(bs, local_idx)
   let pi: i64 = to_i64(0)
   while pi < path.length():
     let field: i64 = path.get(pi)
-    if cur_ti < 0 or cur_ti >= bs.types.length():
+    if cur_ti < 0 or cur_ti >= bs.input.types.length():
       return PlacePtrR(bs_error(bs, "bootstrap llvm backend: " + what + " path has no struct type"), insts, "", "")
-    let owner: DaoType = bs.types.get(cur_ti)
+    let owner: DaoType = bs.input.types.get(cur_ti)
     // A deref step: the place so far holds a pointer; what it addresses
     // is the place from here on.
     if field == mir_deref_step():
@@ -1120,7 +1126,7 @@ fn bs_place_pointer(bs: BS, insts: Vector<LlInst>, local_idx: i64, path_lp: i64,
       bs = fr_gep.bs
       insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = ptr_name, struct_ty_text = bs_ty(bs, cur_ti), field_index = field), fr_gep.name))
       ptr_name = fr_gep.name
-      cur_ti = bs.type_info.get(owner.info_lp + field * to_i64(2) + to_i64(1))
+      cur_ti = bs.input.type_info.get(owner.info_lp + field * to_i64(2) + to_i64(1))
     pi = pi + to_i64(1)
   return PlacePtrR(bs, insts, ptr_name, bs_ty(bs, cur_ti))
 
@@ -1129,7 +1135,7 @@ class LowerStepR:
   insts: Vector<LlInst>
 
 fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_text: string): LowerStepR
-  let node: MirNode = bs.mir_nodes.get(mir_node_idx)
+  let node: MirNode = bs.input.mir_nodes.get(mir_node_idx)
   match node:
     // ---------- constants (inlined as operand text) ----------
     MirNode::MirConstInt(value, type_idx):
@@ -1155,9 +1161,9 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       // Decode Dao escapes and re-escape for LLVM IR c"..." form.
       let decoded: StrDecode = decode_string_literal(raw)
       let nbytes: i64 = decoded.byte_count  // includes trailing NUL
-      let gname: string = "@.str." + i64_to_string(bs.next_global)
-      bs.next_global = bs.next_global + to_i64(1)
-      bs.globals = bs.globals.push(LlGlobal(gname, decoded.llvm_payload, nbytes))
+      let gname: string = "@.str." + i64_to_string(bs.out.next_global)
+      bs.out.next_global = bs.out.next_global + to_i64(1)
+      bs.out.globals = bs.out.globals.push(LlGlobal(gname, decoded.llvm_payload, nbytes))
       // A string value is `{ bytes, length }` (the host's %dao.string);
       // the length leaves out the terminating NUL.
       let with_ptr: FreshR = bs_fresh_value(bs)
@@ -1199,11 +1205,11 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       // A comparison `match` synthesized has no source token: it is `==`.
       let tk: Token = Token(TK::EqEq, to_i64(0), to_i64(0))
       if op_tok != synthesized_equality_op():
-        tk = bs.toks.get(op_tok)
+        tk = bs.input.source.toks.get(op_tok)
       return bs_lower_binary(bs, insts, mir_node_idx, tk_name(tk.kind), lhs, rhs)
 
     MirNode::MirUnary(op_tok, operand, type_idx):
-      let tk: Token = bs.toks.get(op_tok)
+      let tk: Token = bs.input.source.toks.get(op_tok)
       let operand_text: string = bs_get_value_text(bs, operand)
       let ty: LlType = ll_type_of(bs, type_idx)
       let fr_un: FreshR = bs_fresh_value(bs)
@@ -1259,10 +1265,10 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       // (the host's lower_builtin_call).
       let intrinsic: string = bs_intrinsic_of(bs, callee)
       if intrinsic != "":
-        if subst < 0 or subst + to_i64(2) >= bs.type_info.length():
+        if subst < 0 or subst + to_i64(2) >= bs.input.type_info.length():
           bs = bs_error(bs, "bootstrap llvm backend: intrinsic '" + intrinsic + "' is called with no type decided")
           return LowerStepR(bs, insts)
-        let measured: SizeAlign = ll_size_align(bs, bs.type_info.get(subst + to_i64(2)))
+        let measured: SizeAlign = ll_size_align(bs, bs.input.type_info.get(subst + to_i64(2)))
         let answer: i64 = measured.size
         if intrinsic == "align_of":
           answer = measured.align
@@ -1274,7 +1280,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
         return LowerStepR(bs, insts)
       let ret_ty: LlType = ll_type_of(bs, type_idx)
       let ret_ty_text: string = bs_ty(bs, type_idx)
-      let args_raw: Vector<i64> = read_mir_list(bs.mir_idx, arg_list_lp)
+      let args_raw: Vector<i64> = read_mir_list(bs.input.mir_idx, arg_list_lp)
       let arg_entry: CallArgs = CallArgs(Vector<string>::new(), Vector<string>::new())
       let ai: i64 = to_i64(0)
       while ai < args_raw.length():
@@ -1286,15 +1292,15 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
         if a_ty_text == "%dao.string":
           let tmp: FreshR = bs_fresh_named(bs, "str.arg")
           bs = tmp.bs
-          bs.entry_allocas = bs.entry_allocas.push(LlInst(LlInstKind::LlAlloca(ty_text = "%dao.string"), tmp.name))
+          bs.func.entry_allocas = bs.func.entry_allocas.push(LlInst(LlInstKind::LlAlloca(ty_text = "%dao.string"), tmp.name))
           insts = insts.push(LlInst(LlInstKind::LlStore(ptr_name = tmp.name, value_text = a_text, value_ty_text = a_ty_text), ""))
           a_text = tmp.name
           a_ty_text = "ptr"
         arg_entry.arg_texts = arg_entry.arg_texts.push(a_text)
         arg_entry.arg_ty_texts = arg_entry.arg_ty_texts.push(a_ty_text)
         ai = ai + to_i64(1)
-      let bundle_idx: i64 = bs.call_arg_bundles.length()
-      bs.call_arg_bundles = bs.call_arg_bundles.push(arg_entry)
+      let bundle_idx: i64 = bs.decls.call_arg_bundles.length()
+      bs.decls.call_arg_bundles = bs.decls.call_arg_bundles.push(arg_entry)
 
       let result: string = ""
       let needs_result: bool = true
@@ -1344,10 +1350,10 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
     // ---------- terminators ----------
     MirNode::MirReturn(value, has_value):
       // A generator's `return` ends it: done, and back to the consumer.
-      if bs.gen.frame != "":
+      if bs.func.gen.frame != "":
         let done_at: FreshR = bs_fresh_value(bs)
         bs = done_at.bs
-        insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = bs.gen.frame, struct_ty_text = bs.gen.frame_ty, field_index = to_i64(1)), done_at.name))
+        insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = bs.func.gen.frame, struct_ty_text = bs.func.gen.frame_ty, field_index = to_i64(1)), done_at.name))
         insts = insts.push(LlInst(LlInstKind::LlStore(ptr_name = done_at.name, value_text = "true", value_ty_text = "i1"), ""))
         insts = insts.push(LlInst(LlInstKind::LlRet(value_text = "", value_ty_text = "void", has_value = to_i64(0)), ""))
         return LowerStepR(bs, insts)
@@ -1398,18 +1404,18 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
     MirNode::MirYield(value):
       // Store the value in the frame's yield slot, note where to resume,
       // and return to the consumer; resumption continues from here.
-      if bs.gen.frame == "":
+      if bs.func.gen.frame == "":
         bs = bs_error(bs, "bootstrap llvm backend: yield outside a generator")
         return LowerStepR(bs, insts)
-      bs.gen.yields = bs.gen.yields + to_i64(1)
-      let k: string = i64_to_string(bs.gen.yields)
+      bs.func.gen.yields = bs.func.gen.yields + to_i64(1)
+      let k: string = i64_to_string(bs.func.gen.yields)
       let slot_at: FreshR = bs_fresh_value(bs)
       bs = slot_at.bs
-      insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = bs.gen.frame, struct_ty_text = bs.gen.frame_ty, field_index = to_i64(2)), slot_at.name))
+      insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = bs.func.gen.frame, struct_ty_text = bs.func.gen.frame_ty, field_index = to_i64(2)), slot_at.name))
       insts = insts.push(LlInst(LlInstKind::LlStore(ptr_name = slot_at.name, value_text = bs_get_value_text(bs, value), value_ty_text = bs_get_value_ty(bs, value)), ""))
       let state_at: FreshR = bs_fresh_value(bs)
       bs = state_at.bs
-      insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = bs.gen.frame, struct_ty_text = bs.gen.frame_ty, field_index = to_i64(0)), state_at.name))
+      insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = bs.func.gen.frame, struct_ty_text = bs.func.gen.frame_ty, field_index = to_i64(0)), state_at.name))
       insts = insts.push(LlInst(LlInstKind::LlStore(ptr_name = state_at.name, value_text = k, value_ty_text = "i32"), ""))
       insts = insts.push(LlInst(LlInstKind::LlText(rhs = "ret void"), ""))
       insts = insts.push(LlInst(LlInstKind::LlText(rhs = "resume." + k + ":"), ""))
@@ -1425,13 +1431,20 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       bs = resume.bs
       insts = insts.push(LlInst(LlInstKind::LlText(rhs = "extractvalue %dao.generator " + gen_val + ", 1"), resume.name))
       insts = insts.push(LlInst(LlInstKind::LlText(rhs = "call void " + resume.name + "(ptr " + frame.name + ")"), ""))
+      if bs.func.gen.iters.contains(i64_to_string(mir_node_idx)):
+        let pair: string = i64_to_string(hm_get_or(bs.func.gen.iters, i64_to_string(mir_node_idx), to_i64(-1)))
+        insts = insts.push(LlInst(LlInstKind::LlStore(ptr_name = "%iter.frame.at" + pair, value_text = frame.name, value_ty_text = "ptr"), ""))
+        insts = insts.push(LlInst(LlInstKind::LlStore(ptr_name = "%iter.resume.at" + pair, value_text = resume.name, value_ty_text = "ptr"), ""))
       bs = bs_set_value(bs, mir_node_idx, frame.name, "ptr")
       bs = bs_set_value(bs, bs_resume_key(mir_node_idx), resume.name, "ptr")
       return LowerStepR(bs, insts)
     MirNode::MirIterHasNext(iter, type_idx):
+      let open: IterRef = bs_iter_ref(bs, insts, iter)
+      bs = open.bs
+      insts = open.insts
       let done_at: FreshR = bs_fresh_value(bs)
       bs = done_at.bs
-      insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = bs_get_value_text(bs, iter), struct_ty_text = bs_frame_view(bs, iter), field_index = to_i64(1)), done_at.name))
+      insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = open.frame, struct_ty_text = bs_frame_view(bs, iter), field_index = to_i64(1)), done_at.name))
       let done: FreshR = bs_fresh_value(bs)
       bs = done.bs
       insts = insts.push(LlInst(LlInstKind::LlLoad(ptr_name = done_at.name, ty_text = "i1"), done.name))
@@ -1442,20 +1455,26 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       return LowerStepR(bs, insts)
     MirNode::MirIterNext(iter, type_idx):
       // The value in the yield slot, then a resume to the next yield.
+      let open: IterRef = bs_iter_ref(bs, insts, iter)
+      bs = open.bs
+      insts = open.insts
       let slot_at: FreshR = bs_fresh_value(bs)
       bs = slot_at.bs
-      insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = bs_get_value_text(bs, iter), struct_ty_text = bs_frame_view(bs, iter), field_index = to_i64(2)), slot_at.name))
+      insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = open.frame, struct_ty_text = bs_frame_view(bs, iter), field_index = to_i64(2)), slot_at.name))
       let elem_ty: string = bs_ty(bs, type_idx)
       let got: FreshR = bs_fresh_value(bs)
       bs = got.bs
       insts = insts.push(LlInst(LlInstKind::LlLoad(ptr_name = slot_at.name, ty_text = elem_ty), got.name))
-      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "call void " + bs_get_value_text(bs, bs_resume_key(iter)) + "(ptr " + bs_get_value_text(bs, iter) + ")"), ""))
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "call void " + open.resume + "(ptr " + open.frame + ")"), ""))
       bs = bs_set_value(bs, mir_node_idx, got.name, elem_ty)
       return LowerStepR(bs, insts)
     MirNode::MirIterDestroy(iter):
+      let open: IterRef = bs_iter_ref(bs, insts, iter)
+      bs = open.bs
+      insts = open.insts
       let one_ptr: Vector<string> = Vector<string>::new()
       bs = bs_declare_hook(bs, "@__dao_gen_free", "void", one_ptr.push("ptr"))
-      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "call void @__dao_gen_free(ptr " + bs_get_value_text(bs, iter) + ")"), ""))
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "call void @__dao_gen_free(ptr " + open.frame + ")"), ""))
       return LowerStepR(bs, insts)
 
     // ---------- regions ----------
@@ -1503,8 +1522,8 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
         return LowerStepR(bs, insts)
       if op == ptr_op_offset():
         let pointee: i64 = to_i64(-1)
-        if type_idx >= 0 and type_idx < bs.types.length():
-          pointee = bs.types.get(type_idx).pointee
+        if type_idx >= 0 and type_idx < bs.input.types.length():
+          pointee = bs.input.types.get(type_idx).pointee
         let element: string = bs_ty(bs, pointee)
         if element == "void":
           bs = bs_error(bs, "Ptr.offset is invalid on 'Ptr<void>', which has no element size")
@@ -1526,7 +1545,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       let enum_ty: string = bs_ty(bs, type_idx)
       let tmp: FreshR = bs_fresh_named(bs, "enum.tmp")
       bs = tmp.bs
-      bs.entry_allocas = bs.entry_allocas.push(LlInst(LlInstKind::LlAlloca(ty_text = enum_ty), tmp.name))
+      bs.func.entry_allocas = bs.func.entry_allocas.push(LlInst(LlInstKind::LlAlloca(ty_text = enum_ty), tmp.name))
       let tag_at: FreshR = bs_fresh_value(bs)
       bs = tag_at.bs
       insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = tmp.name, struct_ty_text = enum_ty, field_index = to_i64(0)), tag_at.name))
@@ -1535,7 +1554,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       let payload_at: FreshR = bs_fresh_value(bs)
       bs = payload_at.bs
       insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = tmp.name, struct_ty_text = enum_ty, field_index = to_i64(1)), payload_at.name))
-      let values: Vector<i64> = read_mir_list(bs.mir_idx, arg_list_lp)
+      let values: Vector<i64> = read_mir_list(bs.input.mir_idx, arg_list_lp)
       let vi: i64 = to_i64(0)
       while vi < values.length():
         let field_at: FreshR = bs_fresh_value(bs)
@@ -1567,7 +1586,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       let enum_ti: i64 = bs_value_enum_type(bs, value)
       let tmp: FreshR = bs_fresh_named(bs, "enum.ext")
       bs = tmp.bs
-      bs.entry_allocas = bs.entry_allocas.push(LlInst(LlInstKind::LlAlloca(ty_text = enum_ty), tmp.name))
+      bs.func.entry_allocas = bs.func.entry_allocas.push(LlInst(LlInstKind::LlAlloca(ty_text = enum_ty), tmp.name))
       insts = insts.push(LlInst(LlInstKind::LlStore(ptr_name = tmp.name, value_text = bs_get_value_text(bs, value), value_ty_text = enum_ty), ""))
       let payload_at: FreshR = bs_fresh_value(bs)
       bs = payload_at.bs
@@ -1593,8 +1612,8 @@ fn bs_lower_binary(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, op: string,
   let lhs_text: string = bs_get_value_text(bs, lhs)
   let rhs_text: string = bs_get_value_text(bs, rhs)
   let ty_text: string = bs_get_value_ty(bs, lhs)
-  let operand_ti: i64 = mir_value_type(bs.mir_nodes, lhs)
-  let unsigned: bool = ll_is_unsigned(bs.types, operand_ti)
+  let operand_ti: i64 = mir_value_type(bs.input.mir_nodes, lhs)
+  let unsigned: bool = ll_is_unsigned(bs.input.types, operand_ti)
   let is_float: bool = ty_text == "float" or ty_text == "double"
   if ty_text == "%dao.string":
     return bs_lower_string_binary(bs, insts, mir_node_idx, op, lhs_text, rhs_text)
@@ -1651,8 +1670,8 @@ fn bs_checked_op(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, op: string, t
   bs = over.bs
   insts = insts.push(LlInst(LlInstKind::LlText(rhs = "extractvalue { " + ty + ", i1 } " + pair.name + ", 1"), over.name))
   // Labels take no value number (LLVM numbers unnamed values without gaps).
-  let n: string = i64_to_string(bs.next_global)
-  bs.next_global = bs.next_global + to_i64(1)
+  let n: string = i64_to_string(bs.out.next_global)
+  bs.out.next_global = bs.out.next_global + to_i64(1)
   insts = insts.push(LlInst(LlInstKind::LlText(rhs = "br i1 " + over.name + ", label %overflow.trap." + n + ", label %overflow.cont." + n), ""))
   insts = insts.push(LlInst(LlInstKind::LlText(rhs = "overflow.trap." + n + ":"), ""))
   insts = insts.push(LlInst(LlInstKind::LlText(rhs = "call void @llvm.trap()"), ""))
@@ -1668,8 +1687,8 @@ fn bs_lower_string_binary(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, op: 
   bs = at_l.bs
   let at_r: FreshR = bs_fresh_named(bs, "str.rhs")
   bs = at_r.bs
-  bs.entry_allocas = bs.entry_allocas.push(LlInst(LlInstKind::LlAlloca(ty_text = "%dao.string"), at_l.name))
-  bs.entry_allocas = bs.entry_allocas.push(LlInst(LlInstKind::LlAlloca(ty_text = "%dao.string"), at_r.name))
+  bs.func.entry_allocas = bs.func.entry_allocas.push(LlInst(LlInstKind::LlAlloca(ty_text = "%dao.string"), at_l.name))
+  bs.func.entry_allocas = bs.func.entry_allocas.push(LlInst(LlInstKind::LlAlloca(ty_text = "%dao.string"), at_r.name))
   insts = insts.push(LlInst(LlInstKind::LlStore(ptr_name = at_l.name, value_text = lhs, value_ty_text = "%dao.string"), ""))
   insts = insts.push(LlInst(LlInstKind::LlStore(ptr_name = at_r.name, value_text = rhs, value_ty_text = "%dao.string"), ""))
   let two_ptrs: Vector<string> = Vector<string>::new()
@@ -1781,13 +1800,49 @@ fn ll_arith_instr(op: string, is_float: bool, unsigned: bool): string
 fn bs_resume_key(iter_node: i64): i64
   return to_i64(-2) - iter_node
 
+class IterRef:
+  bs: BS
+  insts: Vector<LlInst>
+  frame: string
+  resume: string
+
+// The iterator made at `iter`, usable at this point of the function.  In
+// a generator it is loaded from the frame, where its MirIterInit stored
+// it, since this point may follow a yield.
+fn bs_iter_ref(bs: BS, insts: Vector<LlInst>, iter: i64): IterRef
+  if bs.func.gen.iters.contains(i64_to_string(iter)) == false:
+    return IterRef(bs, insts, bs_get_value_text(bs, iter), bs_get_value_text(bs, bs_resume_key(iter)))
+  let pair: string = i64_to_string(hm_get_or(bs.func.gen.iters, i64_to_string(iter), to_i64(-1)))
+  let frame: FreshR = bs_fresh_value(bs)
+  let resume: FreshR = bs_fresh_value(frame.bs)
+  let loaded: Vector<LlInst> = insts.push(LlInst(LlInstKind::LlLoad(ptr_name = "%iter.frame.at" + pair, ty_text = "ptr"), frame.name))
+  loaded = loaded.push(LlInst(LlInstKind::LlLoad(ptr_name = "%iter.resume.at" + pair, ty_text = "ptr"), resume.name))
+  return IterRef(resume.bs, loaded, frame.name, resume.name)
+
+// Each MirIterInit in `blocks`, in order.
+fn bs_iter_inits(bs: BS, blocks: Vector<i64>): Vector<i64>
+  let found: Vector<i64> = Vector<i64>::new()
+  let bi: i64 = to_i64(0)
+  while bi < blocks.length():
+    match bs.input.mir_nodes.get(blocks.get(bi)):
+      MirNode::MirBlock(bid, inst_list_lp, ic):
+        let insts: Vector<i64> = read_mir_list(bs.input.mir_idx, inst_list_lp)
+        let ii: i64 = to_i64(0)
+        while ii < insts.length():
+          match bs.input.mir_nodes.get(insts.get(ii)):
+            MirNode::MirIterInit(source, type_idx):
+              found = found.push(insts.get(ii))
+          ii = ii + to_i64(1)
+    bi = bi + to_i64(1)
+  return found
+
 // The consumer's view of a generator frame's header, `{ i32 state,
 // i1 done, T yield_slot }`, for the iterator made at `iter`.
 fn bs_frame_view(bs: BS, iter: i64): string
-  let gen_ti: i64 = mir_value_type(bs.mir_nodes, iter)
+  let gen_ti: i64 = mir_value_type(bs.input.mir_nodes, iter)
   let elem: i64 = to_i64(-1)
-  if gen_ti >= 0 and gen_ti < bs.types.length():
-    elem = bs.types.get(gen_ti).pointee
+  if gen_ti >= 0 and gen_ti < bs.input.types.length():
+    elem = bs.input.types.get(gen_ti).pointee
   return "{ i32, i1, " + bs_ty(bs, elem) + " }"
 
 // Declare a runtime hook once, with its canonical signature (the host's
@@ -1800,16 +1855,16 @@ fn bs_declare_hook(bs: BS, name: string, ret_ty: string, param_tys: Vector<strin
   while i < param_tys.length():
     params = params.push(LlParam("%arg" + i64_to_string(i), param_tys.get(i)))
     i = i + to_i64(1)
-  bs.extern_decls = bs.extern_decls.push(LlFunction(name, ret_ty, params, Vector<LlBlock>::new(), to_i64(1)))
+  bs.out.extern_decls = bs.out.extern_decls.push(LlFunction(name, ret_ty, params, Vector<LlBlock>::new(), to_i64(1)))
   return bs_mark_extern(bs, name, "")
 
 // "size_of" / "align_of" when the callee is a specialization of that
 // prelude intrinsic; "" otherwise.
 fn bs_intrinsic_of(bs: BS, callee: i64): string
-  match bs.mir_nodes.get(callee):
+  match bs.input.mir_nodes.get(callee):
     MirNode::MirFnRef(sym, ti):
-      if sym >= 0 and sym < bs.symbols.length():
-        let name: string = bs.symbols.get(sym).name
+      if sym >= 0 and sym < bs.input.symbols.length():
+        let name: string = bs.input.symbols.get(sym).name
         if index_of(name, "size_of$") == to_i64(0):
           return "size_of"
         if index_of(name, "align_of$") == to_i64(0):
@@ -1819,18 +1874,18 @@ fn bs_intrinsic_of(bs: BS, callee: i64): string
 // The literal struct type of one variant's payload: `{ T0, T1, ... }`.
 fn bs_payload_struct(bs: BS, enum_ti: i64, variant: i64): string
   let out: string = "{ "
-  if enum_ti >= 0 and enum_ti < bs.types.length():
-    let t: DaoType = bs.types.get(enum_ti)
+  if enum_ti >= 0 and enum_ti < bs.input.types.length():
+    let t: DaoType = bs.input.types.get(enum_ti)
     let at: i64 = t.info_lp
     let vi: i64 = to_i64(0)
     while vi < t.info_count:
-      let count: i64 = bs.type_info.get(at + to_i64(1))
+      let count: i64 = bs.input.type_info.get(at + to_i64(1))
       if vi == variant:
         let pi: i64 = to_i64(0)
         while pi < count:
           if pi > to_i64(0):
             out = out + ", "
-          out = out + bs_ty(bs, bs.type_info.get(at + to_i64(2) + pi * to_i64(2) + to_i64(1)))
+          out = out + bs_ty(bs, bs.input.type_info.get(at + to_i64(2) + pi * to_i64(2) + to_i64(1)))
           pi = pi + to_i64(1)
       at = at + to_i64(2) + count * to_i64(2)
       vi = vi + to_i64(1)
@@ -1838,7 +1893,7 @@ fn bs_payload_struct(bs: BS, enum_ti: i64, variant: i64): string
 
 // The Dao enum type of a value an instruction produced (MIR types it).
 fn bs_value_enum_type(bs: BS, value: i64): i64
-  return mir_value_type(bs.mir_nodes, value)
+  return mir_value_type(bs.input.mir_nodes, value)
 
 // =========================================================================
 // Section 88b: Helpers pulled out of instruction lowering
@@ -1962,12 +2017,12 @@ class BlockExit:
 
 fn mir_block_exit(bs: BS, block_node_idx: i64): BlockExit
   let exit: BlockExit = BlockExit(to_i64(-1), to_i64(-1), to_i64(-1))
-  match bs.mir_nodes.get(block_node_idx):
+  match bs.input.mir_nodes.get(block_node_idx):
     MirNode::MirBlock(block_id, inst_list_lp, inst_count):
-      let insts_raw: Vector<i64> = read_mir_list(bs.mir_idx, inst_list_lp)
+      let insts_raw: Vector<i64> = read_mir_list(bs.input.mir_idx, inst_list_lp)
       let ii: i64 = to_i64(0)
       while ii < insts_raw.length():
-        match bs.mir_nodes.get(insts_raw.get(ii)):
+        match bs.input.mir_nodes.get(insts_raw.get(ii)):
           MirNode::MirBr(target_block):
             exit = BlockExit(to_i64(-1), target_block, to_i64(-1))
           MirNode::MirCondBr(cond, then_block, else_block):
@@ -1988,25 +2043,25 @@ fn mir_match_test(bs: BS, cond: i64): MatchTest
   let none: MatchTest = MatchTest(to_i64(-1), to_i64(-1), to_i64(-1))
   if cond < 0:
     return none
-  match bs.mir_nodes.get(cond):
+  match bs.input.mir_nodes.get(cond):
     MirNode::MirBinary(op_tok, lhs, rhs, type_idx):
       if op_tok != synthesized_equality_op():
         return none
       let tested: i64 = lhs
-      match bs.mir_nodes.get(lhs):
+      match bs.input.mir_nodes.get(lhs):
         MirNode::MirEnumDiscriminant(value, dti):
           tested = value
       let local: i64 = to_i64(-1)
-      match bs.mir_nodes.get(tested):
+      match bs.input.mir_nodes.get(tested):
         MirNode::MirLoad(local_idx, path_lp, path_count, lti):
           if path_count == to_i64(0):
             local = local_idx
       if local < 0:
         return none
-      match bs.mir_nodes.get(rhs):
+      match bs.input.mir_nodes.get(rhs):
         MirNode::MirConstInt(value, cti):
-          if cti >= 0 and cti < bs.types.length():
-            let t: DaoType = bs.types.get(cti)
+          if cti >= 0 and cti < bs.input.types.length():
+            let t: DaoType = bs.input.types.get(cti)
             match t.kind:
               TypeKind::TEnum:
                 return MatchTest(local, value, t.info_count)
@@ -2123,7 +2178,7 @@ fn ll_inst_is_terminator(inst: LlInst): bool
 // =========================================================================
 
 fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
-  let node: MirNode = bs.mir_nodes.get(mir_fn_idx)
+  let node: MirNode = bs.input.mir_nodes.get(mir_fn_idx)
   match node:
     MirNode::MirFunction(fn_sym, ret_type, param_count, local_list_lp, local_count, block_list_lp, block_count, is_extern_i):
       bs = bs_reset_fn_state(bs)
@@ -2139,7 +2194,7 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
       bs = bs_define_aggregate(bs, ret_type)
 
       // Read the local node list.  First `param_count` are params.
-      let locals_raw: Vector<i64> = read_mir_list(bs.mir_idx, local_list_lp)
+      let locals_raw: Vector<i64> = read_mir_list(bs.input.mir_idx, local_list_lp)
 
       // Declare param LlParams for the LlFunction signature.
       let params_r: ParamsR = bs_lower_params(bs, locals_raw, param_count)
@@ -2153,19 +2208,19 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
         // Two externs of one C name coalesce when they agree (the host's
         // extern_signatures_); a runtime hook's declaration is canonical.
         if bs_has_extern(bs, name):
-          let known: string = bs.extern_sigs.get(hm_get_or(bs.index.externs, name, to_i64(0)))
+          let known: string = bs.decls.extern_sigs.get(hm_get_or(bs.index.externs, name, to_i64(0)))
           if known != "" and known != signature:
             bs = bs_error(bs, "extern '" + llvm_name_body(name) + "' is declared with conflicting signatures")
           return bs
         let llfn: LlFunction = LlFunction(
           name, ret_ty_text, params, Vector<LlBlock>::new(), to_i64(1))
-        bs.extern_decls = bs.extern_decls.push(llfn)
+        bs.out.extern_decls = bs.out.extern_decls.push(llfn)
         bs = bs_mark_extern(bs, name, signature)
         return bs
 
       // A generator lowers to its init and resume functions.
-      if ret_type >= 0 and ret_type < bs.types.length():
-        match bs.types.get(ret_type).kind:
+      if ret_type >= 0 and ret_type < bs.input.types.length():
+        match bs.input.types.get(ret_type).kind:
           TypeKind::TGenerator:
             return bs_lower_generator(bs, name, ret_type, params, param_count, locals_raw, block_list_lp)
 
@@ -2178,7 +2233,7 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
       let li: i64 = to_i64(0)
       while li < locals_raw.length():
         let local_node_idx: i64 = locals_raw.get(li)
-        let ln: MirNode = bs.mir_nodes.get(local_node_idx)
+        let ln: MirNode = bs.input.mir_nodes.get(local_node_idx)
         match ln:
           MirNode::MirLocal(lsym, ltype_idx, lis_param):
             let slot_name: string = "%slot" + i64_to_string(li)
@@ -2191,7 +2246,7 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
         li = li + to_i64(1)
 
       // Pre-assign block labels (MirBlock node idx → "entry"/"bbN").
-      let blocks_raw: Vector<i64> = read_mir_list(bs.mir_idx, block_list_lp)
+      let blocks_raw: Vector<i64> = read_mir_list(bs.input.mir_idx, block_list_lp)
       let bi: i64 = to_i64(0)
       while bi < blocks_raw.length():
         let block_node_idx: i64 = blocks_raw.get(bi)
@@ -2249,16 +2304,16 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
       let ll_blocks: Vector<LlBlock> = lowered.blocks
 
       // The body's extra allocas lead the entry block.
-      if bs.entry_allocas.length() > to_i64(0) and ll_blocks.length() > to_i64(0):
+      if bs.func.entry_allocas.length() > to_i64(0) and ll_blocks.length() > to_i64(0):
         let entry: LlBlock = ll_blocks.get(to_i64(0))
-        let led: Vector<LlInst> = bs.entry_allocas
+        let led: Vector<LlInst> = bs.func.entry_allocas
         let ei: i64 = to_i64(0)
         while ei < entry.insts.length():
           led = led.push(entry.insts.get(ei))
           ei = ei + to_i64(1)
         ll_blocks = ll_blocks.set(to_i64(0), LlBlock(entry.label, led))
       let llfn: LlFunction = LlFunction(name, ret_ty_text, params, ll_blocks, to_i64(0))
-      bs.functions = bs.functions.push(llfn)
+      bs.out.functions = bs.out.functions.push(llfn)
       return bs
   return bs
 
@@ -2278,17 +2333,25 @@ fn bs_lower_generator(bs: BS, name: string, gen_ti: i64, params: Vector<LlParam>
   let fields: Vector<string> = Vector<string>::new()
   fields = fields.push("i32")
   fields = fields.push("i1")
-  let yield_ti: i64 = bs.types.get(gen_ti).pointee
+  let yield_ti: i64 = bs.input.types.get(gen_ti).pointee
   bs = bs_define_aggregate(bs, yield_ti)
   fields = fields.push(bs_ty(bs, yield_ti))
   let li: i64 = to_i64(0)
   while li < locals_raw.length():
-    match bs.mir_nodes.get(locals_raw.get(li)):
+    match bs.input.mir_nodes.get(locals_raw.get(li)):
       MirNode::MirLocal(lsym, lti, lis_param):
         bs = bs_define_aggregate(bs, lti)
         fields = fields.push(bs_ty(bs, lti))
     li = li + to_i64(1)
-  bs.struct_defs = bs.struct_defs.push(LlStructDef("dao.gen." + base, frame_ty, fields, to_i64(-1)))
+  // After the locals, a frame and a resume function per iterator.
+  let iter_inits: Vector<i64> = bs_iter_inits(bs, read_mir_list(bs.input.mir_idx, block_list_lp))
+  let iter_base: i64 = fields.length()
+  let ifi: i64 = to_i64(0)
+  while ifi < iter_inits.length():
+    fields = fields.push("ptr")
+    fields = fields.push("ptr")
+    ifi = ifi + to_i64(1)
+  bs.decls.struct_defs = bs.decls.struct_defs.push(LlStructDef("dao.gen." + base, frame_ty, fields, to_i64(-1)))
   let one_i64s: Vector<string> = Vector<string>::new()
   one_i64s = one_i64s.push("i64")
   one_i64s = one_i64s.push("i64")
@@ -2320,29 +2383,36 @@ fn bs_lower_generator(bs: BS, name: string, gen_ti: i64, params: Vector<LlParam>
   init = init.push(LlInst(LlInstKind::LlText(rhs = "insertvalue %dao.generator %handle.frame, ptr " + resume_name + ", 1"), "%handle"))
   init = init.push(LlInst(LlInstKind::LlRet(value_text = "%handle", value_ty_text = "%dao.generator", has_value = to_i64(1)), ""))
   let init_blocks: Vector<LlBlock> = Vector<LlBlock>::new()
-  bs.functions = bs.functions.push(LlFunction(name, "%dao.generator", params, init_blocks.push(LlBlock("entry", init)), to_i64(0)))
+  bs.out.functions = bs.out.functions.push(LlFunction(name, "%dao.generator", params, init_blocks.push(LlBlock("entry", init)), to_i64(0)))
 
   // Resume: every local a field of the frame; dispatch on the state.
   bs = bs_reset_fn_state(bs)
-  bs.gen = GenCtx("%frame", frame_ty, to_i64(0))
+  bs.func.gen = GenCtx("%frame", frame_ty, to_i64(0), HashMap<i64>::new())
   let entry: Vector<LlInst> = Vector<LlInst>::new()
+  let ie: i64 = to_i64(0)
+  while ie < iter_inits.length():
+    let pair: string = i64_to_string(ie)
+    bs.func.gen.iters = bs.func.gen.iters.set(i64_to_string(iter_inits.get(ie)), ie)
+    entry = entry.push(LlInst(LlInstKind::LlGepField(ptr_text = "%frame", struct_ty_text = frame_ty, field_index = iter_base + ie * to_i64(2)), "%iter.frame.at" + pair))
+    entry = entry.push(LlInst(LlInstKind::LlGepField(ptr_text = "%frame", struct_ty_text = frame_ty, field_index = iter_base + ie * to_i64(2) + to_i64(1)), "%iter.resume.at" + pair))
+    ie = ie + to_i64(1)
   let lj: i64 = to_i64(0)
   while lj < locals_raw.length():
     let slot: string = "%slot" + i64_to_string(lj)
     bs = bs_set_slot(bs, locals_raw.get(lj), slot, fields.get(to_i64(3) + lj))
     entry = entry.push(LlInst(LlInstKind::LlGepField(ptr_text = "%frame", struct_ty_text = frame_ty, field_index = to_i64(3) + lj), slot))
     lj = lj + to_i64(1)
-  let blocks_raw: Vector<i64> = read_mir_list(bs.mir_idx, block_list_lp)
+  let blocks_raw: Vector<i64> = read_mir_list(bs.input.mir_idx, block_list_lp)
   let bi: i64 = to_i64(0)
   let yields: i64 = to_i64(0)
   while bi < blocks_raw.length():
     bs = bs_set_block_label(bs, blocks_raw.get(bi), "bb" + i64_to_string(bi))
-    match bs.mir_nodes.get(blocks_raw.get(bi)):
+    match bs.input.mir_nodes.get(blocks_raw.get(bi)):
       MirNode::MirBlock(bid, inst_list_lp, ic):
-        let insts: Vector<i64> = read_mir_list(bs.mir_idx, inst_list_lp)
+        let insts: Vector<i64> = read_mir_list(bs.input.mir_idx, inst_list_lp)
         let ii: i64 = to_i64(0)
         while ii < insts.length():
-          match bs.mir_nodes.get(insts.get(ii)):
+          match bs.input.mir_nodes.get(insts.get(ii)):
             MirNode::MirYield(v):
               yields = yields + to_i64(1)
           ii = ii + to_i64(1)
@@ -2362,7 +2432,7 @@ fn bs_lower_generator(bs: BS, name: string, gen_ti: i64, params: Vector<LlParam>
   unreachable = unreachable.push(LlInst(LlInstKind::LlGepField(ptr_text = "%frame", struct_ty_text = frame_ty, field_index = to_i64(1)), "%done.at"))
   unreachable = unreachable.push(LlInst(LlInstKind::LlStore(ptr_name = "%done.at", value_text = "true", value_ty_text = "i1"), ""))
   unreachable = unreachable.push(LlInst(LlInstKind::LlRet(value_text = "", value_ty_text = "void", has_value = to_i64(0)), ""))
-  let led: Vector<LlInst> = bs.entry_allocas
+  let led: Vector<LlInst> = bs.func.entry_allocas
   let ei: i64 = to_i64(0)
   while ei < entry.length():
     led = led.push(entry.get(ei))
@@ -2375,8 +2445,8 @@ fn bs_lower_generator(bs: BS, name: string, gen_ti: i64, params: Vector<LlParam>
     rb = rb + to_i64(1)
   resume_blocks = resume_blocks.push(LlBlock("gen.unreachable", unreachable))
   let frame_param: Vector<LlParam> = Vector<LlParam>::new()
-  bs.functions = bs.functions.push(LlFunction(resume_name, "void", frame_param.push(LlParam("%frame", "ptr")), resume_blocks, to_i64(0)))
-  bs.gen = GenCtx("", "", to_i64(0))
+  bs.out.functions = bs.out.functions.push(LlFunction(resume_name, "void", frame_param.push(LlParam("%frame", "ptr")), resume_blocks, to_i64(0)))
+  bs.func.gen = gen_ctx_none()
   return bs
 
 // `@name` with `suffix` appended to the name, inside its quotes if any.
@@ -2408,10 +2478,10 @@ fn bs_lower_blocks(bs: BS, blocks_raw: Vector<i64>, lead: Vector<LlInst>, ret_ty
   let block_i: i64 = to_i64(0)
   while block_i < blocks_raw.length():
     let block_node_idx: i64 = blocks_raw.get(block_i)
-    let mb: MirNode = bs.mir_nodes.get(block_node_idx)
+    let mb: MirNode = bs.input.mir_nodes.get(block_node_idx)
     match mb:
       MirNode::MirBlock(block_id, inst_list_lp, inst_count):
-        let insts_raw: Vector<i64> = read_mir_list(bs.mir_idx, inst_list_lp)
+        let insts_raw: Vector<i64> = read_mir_list(bs.input.mir_idx, inst_list_lp)
         let this_insts: Vector<LlInst> = Vector<LlInst>::new()
         if block_i == to_i64(0):
           this_insts = entry_insts
@@ -2452,34 +2522,38 @@ fn lower_mir_to_ll_module(bs: BS, root: i64): BS
   if root < 0:
     bs = bs_error(bs, "bootstrap llvm backend: MirResult.root is negative")
     return bs
-  if root >= bs.mir_nodes.length():
+  if root >= bs.input.mir_nodes.length():
     bs = bs_error(bs, "bootstrap llvm backend: MirResult.root out of bounds")
     return bs
-  let root_node: MirNode = bs.mir_nodes.get(root)
+  let root_node: MirNode = bs.input.mir_nodes.get(root)
   match root_node:
     MirNode::MirModule(file_id, fn_list_lp, fn_count, template_list_lp, template_count):
       return bs_lower_module_fns(bs, fn_list_lp)
     MirNode::MirProgram(module_list_lp, module_count):
       // A whole program: every module's functions, each read with its
       // own module's tokens.
-      let modules: Vector<i64> = read_mir_list(bs.mir_idx, module_list_lp)
+      let modules: Vector<i64> = read_mir_list(bs.input.mir_idx, module_list_lp)
       let mi: i64 = to_i64(0)
       while mi < modules.length():
-        match bs.mir_nodes.get(modules.get(mi)):
+        let lowered: bool = false
+        match bs.input.mir_nodes.get(modules.get(mi)):
           MirNode::MirModule(mfile, mfn_lp, mfn_count, mtl, mtc):
-            if mfile < 0 or mfile >= bs.program.graph.files.length():
+            if mfile < 0 or mfile >= bs.input.source.program.graph.files.length():
               return bs_error(bs, "bootstrap llvm backend: a module's file " + i64_to_string(mfile) + " is not in the program")
-            let sf: SourceFile = bs.program.graph.files.get(mfile)
-            bs.toks = sf.parse_output.toks
-            bs.src = sf.source_text
+            let sf: SourceFile = bs.input.source.program.graph.files.get(mfile)
+            bs.input.source.toks = sf.parse_output.toks
+            bs.input.source.src = sf.source_text
             bs = bs_lower_module_fns(bs, mfn_lp)
+            lowered = true
+        if lowered == false:
+          return bs_error(bs, "bootstrap llvm backend: program entry " + i64_to_string(modules.get(mi)) + " is not a MirModule")
         mi = mi + to_i64(1)
       return bs
   bs = bs_error(bs, "bootstrap llvm backend: MirResult.root is neither a MirProgram nor a MirModule")
   return bs
 
 fn bs_lower_module_fns(bs: BS, fn_list_lp: i64): BS
-  let fn_indices: Vector<i64> = read_mir_list(bs.mir_idx, fn_list_lp)
+  let fn_indices: Vector<i64> = read_mir_list(bs.input.mir_idx, fn_list_lp)
   let i: i64 = to_i64(0)
   while i < fn_indices.length():
     bs = bs_lower_function(bs, fn_indices.get(i))
@@ -2557,7 +2631,7 @@ fn serialize_inst(bs: BS, inst: LlInst): string
     LlInstKind::LlFCmp(pred, lhs, rhs_text, op_ty):
       rhs = serialize_fcmp(pred, lhs, rhs_text, op_ty)
     LlInstKind::LlCall(callee, bundle_idx, arg_count, ret_ty_text):
-      let args: CallArgs = bs.call_arg_bundles.get(bundle_idx)
+      let args: CallArgs = bs.decls.call_arg_bundles.get(bundle_idx)
       rhs = serialize_call(callee, args, ret_ty_text)
     LlInstKind::LlGepString(gname, len):
       rhs = serialize_gep_string(gname, len)
@@ -2620,8 +2694,8 @@ fn serialize_module(bs: BS): string
   out = out.push("%dao.string = type { ptr, i64 }\n%dao.generator = type { ptr, ptr }\n\n")
   // Struct type definitions first.
   let si: i64 = to_i64(0)
-  while si < bs.struct_defs.length():
-    let sd: LlStructDef = bs.struct_defs.get(si)
+  while si < bs.decls.struct_defs.length():
+    let sd: LlStructDef = bs.decls.struct_defs.get(si)
     out = out.push(sd.ll_name + " = type { ")
     let fi: i64 = to_i64(0)
     while fi < sd.field_ty_texts.length():
@@ -2631,27 +2705,27 @@ fn serialize_module(bs: BS): string
       fi = fi + to_i64(1)
     out = out.push(" }\n")
     si = si + to_i64(1)
-  if bs.struct_defs.length() > to_i64(0):
+  if bs.decls.struct_defs.length() > to_i64(0):
     out = out.push("\n")
   // Globals next.
   let gi: i64 = to_i64(0)
-  while gi < bs.globals.length():
-    out = out.push(serialize_global(bs.globals.get(gi)))
+  while gi < bs.out.globals.length():
+    out = out.push(serialize_global(bs.out.globals.get(gi)))
     gi = gi + to_i64(1)
-  if bs.globals.length() > to_i64(0):
+  if bs.out.globals.length() > to_i64(0):
     out = out.push("\n")
   // Extern declares next.
   let ei: i64 = to_i64(0)
-  while ei < bs.extern_decls.length():
-    out = out.push(serialize_function(bs, bs.extern_decls.get(ei)))
+  while ei < bs.out.extern_decls.length():
+    out = out.push(serialize_function(bs, bs.out.extern_decls.get(ei)))
     ei = ei + to_i64(1)
-  if bs.extern_decls.length() > to_i64(0):
+  if bs.out.extern_decls.length() > to_i64(0):
     out = out.push("\n")
   // Function definitions last.
   let fi: i64 = to_i64(0)
-  while fi < bs.functions.length():
-    out = out.push(serialize_function(bs, bs.functions.get(fi)))
-    if fi + to_i64(1) < bs.functions.length():
+  while fi < bs.out.functions.length():
+    out = out.push(serialize_function(bs, bs.out.functions.get(fi)))
+    if fi + to_i64(1) < bs.out.functions.length():
       out = out.push("\n")
     fi = fi + to_i64(1)
   return out.to_string()
@@ -2669,21 +2743,21 @@ fn lower_mir_to_llvm_text(input: MirBackendInput): LlvmTextResult
   let ui: i64 = to_i64(0)
   while ui < input.mir.diags.length():
     let ud: Diagnostic = input.mir.diags.get(ui)
-    bs.diags = bs.diags.push(ud)
+    bs.out.diags = bs.out.diags.push(ud)
     if ud.severity == Severity::Error:
-      bs.had_error = to_i64(1)
+      bs.out.had_error = to_i64(1)
     ui = ui + to_i64(1)
   // The module's code must be concrete: a call of a generic function
   // names a template that is never emitted.
   let template_refs: Vector<Diagnostic> = mir_template_refs(input.mir, input.symbols, input.mir.root)
   let ti: i64 = to_i64(0)
   while ti < template_refs.length():
-    bs.diags = bs.diags.push(template_refs.get(ti))
-    bs.had_error = to_i64(1)
+    bs.out.diags = bs.out.diags.push(template_refs.get(ti))
+    bs.out.had_error = to_i64(1)
     ti = ti + to_i64(1)
   // Two modules' `main`s leave no entry to name `main` (the host's
   // driver rejects the set).
-  if bs.program.entry_module == to_i64(-2):
+  if bs.input.source.program.entry_module == to_i64(-2):
     bs = bs_error(bs, "bootstrap llvm backend: ambiguous entry module: more than one module declares 'fn main'")
   // Each stage in its own domain: its scratch is reclaimed at the exit and the result is copied out.
   resource memory lowering =>
@@ -2692,9 +2766,9 @@ fn lower_mir_to_llvm_text(input: MirBackendInput): LlvmTextResult
   resource memory serializing =>
     text = serialize_module(bs)
   let ok: bool = true
-  if bs.had_error > to_i64(0):
+  if bs.out.had_error > to_i64(0):
     ok = false
-  return LlvmTextResult(text, bs.diags, ok)
+  return LlvmTextResult(text, bs.out.diags, ok)
 
 // Convenience adapter: run the bootstrap pipeline on a bare snippet
 // (same wrap/run-pipeline path as Task 29's lower_to_mir, but keep
@@ -2718,17 +2792,17 @@ fn lower_to_mir_backend_input(src: string): MirBackendInput
   resource memory mir =>
     pm = program_run_mir(pt.program)
   // Concrete before the backend sees it: every call of a generic
-  // function names its specialization (Task 43).
+  // function names its specialization.
   let pc: ProgramConcrete = ProgramConcrete(pm.program, pm.mir)
   resource memory mono =>
     pc = program_monomorphize(pt, pm)
   let r: MirResult = pc.mir
   let sf: SourceFile = program_file_of_module(pc.program, to_i64(0))
   let po: ParseOutput = sf.parse_output
-  return MirBackendInput(MirResult(r.mir_nodes, r.mir_idx, r.diags, mir_only_module(r)), pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, po.toks, sf.source_text, pc.program.graph)
+  return MirBackendInput(MirResult(r.mir_nodes, r.mir_idx, r.diags, mir_only_module(r)), pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, BackendSource(po.toks, sf.source_text, pc.program.graph))
 
 // A whole program to LLVM text: every module, checked, lowered to MIR,
-// made concrete (Task 43) and lowered here, each function with its own
+// made concrete and lowered here, each function with its own
 // module's tokens.
 fn lower_program_to_llvm_text(inputs: Vector<SourceInput>): LlvmTextResult
   let pg: ProgramGraph = program_graph_empty()
@@ -2746,7 +2820,7 @@ fn lower_program_to_llvm_text(inputs: Vector<SourceInput>): LlvmTextResult
   let pc: ProgramConcrete = ProgramConcrete(pm.program, pm.mir)
   resource memory mono =>
     pc = program_monomorphize(pt, pm)
-  let input: MirBackendInput = MirBackendInput(pc.mir, pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, Vector<Token>::new(), "", pc.program.graph)
+  let input: MirBackendInput = MirBackendInput(pc.mir, pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, BackendSource(Vector<Token>::new(), "", pc.program.graph))
   return lower_mir_to_llvm_text(input)
 
 fn lower_source_to_llvm_text(src: string): LlvmTextResult

@@ -8,14 +8,15 @@ module bootstrap::mir::impl
 //   MirBlock → list of MirInst, last must be terminator
 //   MirInst → result value id, semantic type, payload variant
 //
-// Scope (the host's MirBuilder, Task 42): a program's modules, generic
+// Scope (the host's MirBuilder): a program's modules, generic
 // functions as templates; constants, binary/unary, loads and stores to
 // places, field reads, calls, construction, enum discriminant / payload
 // / construction, if/else, while, break, return, `mode` and `resource`
 // regions, generators (`yield`, `for` over a generator).
 //
+// Monomorphization is Section 67b.
+//
 // Deferred (the same as the bootstrap HIR's):
-//   - Monomorphization — instantiating templates (Task 43)
 //   - Lambda / closures
 //   - Try operator
 //   - Index expressions
@@ -153,33 +154,48 @@ enum class MirNode:
 // =========================================================================
 
 // Mutable state threaded through lowering.
-class MS:
-  // Input (read-only, from HIR result).
-  hir_nodes: Vector<HirNode>
-  hir_idx: Vector<i64>
+// The arena of the HIR being lowered, read-only.
+class MsHir:
+  nodes: Vector<HirNode>
+  idx: Vector<i64>
+
+// The whole program's types and symbols, read-only once lowering starts.
+class MsProgram:
   types: Vector<DaoType>
   type_info: Vector<i64>
-  toks: Vector<Token>
-  src: string
   symbols: Vector<Symbol>
   sym_types: Vector<i64>
   uses_map: HashMap<i64>    // program-level uses_key(file_id, tok_idx) → sym_idx
+  copy_out_sym: i64         // the prelude's `copy_out`, for resource exits (-1 when absent)
 
-  // Accumulated MIR.
-  mir_nodes: Vector<MirNode>
-  mir_idx: Vector<i64>
+// The module being lowered.
+class MsSource:
+  toks: Vector<Token>
+  src: string
+  file_id: i64              // file id for uses_map lookups (-1 in single-file)
+
+// The MIR accumulated so far.
+class MsOutput:
+  nodes: Vector<MirNode>
+  idx: Vector<i64>
   diags: Vector<Diagnostic>
 
-  // Per-function state.
-  file_id: i64              // file id for uses_map lookups (-1 in single-file)
+// The function being lowered.
+class MsFunction:
   current_fn: i64           // index into mir_nodes of current MirFunction (−1 none)
   locals: Vector<i64>       // list of MirLocal node indices for current fn
   fn_blocks: Vector<i64>    // list of MirBlock node indices for current fn
   sym_to_local: HashMap<i64> // resolver sym_idx (as string) → local slot index
   next_block_id: i64        // for block.id numbering
   in_template: bool         // lowering a generic function's template
+
+class MS:
+  hir: MsHir
+  program: MsProgram
+  source: MsSource
+  out: MsOutput
+  func: MsFunction
   flow: Flow                // enclosing loops and regions
-  copy_out_sym: i64         // the prelude's `copy_out`, for resource exits (-1 when absent)
 
 // A loop being lowered: where `break` goes, and how many regions were
 // open when it began — a `break` leaves only the regions entered inside.
@@ -226,12 +242,12 @@ class MirFlush:
 // =========================================================================
 
 fn ms_add_node(ms: MS, node: MirNode): MirR
-  let idx: i64 = ms.mir_nodes.length()
-  ms.mir_nodes = ms.mir_nodes.push(node)
+  let idx: i64 = ms.out.nodes.length()
+  ms.out.nodes = ms.out.nodes.push(node)
   return MirR(ms, idx)
 
 fn ms_add_diag(ms: MS, span: Span, msg: string): MS
-  ms.diags = ms.diags.push(make_error(span, msg))
+  ms.out.diags = ms.out.diags.push(make_error(span, msg))
   return ms
 
 // Flush a Vector<i64> of node indices into the shared mir_idx store
@@ -241,10 +257,10 @@ fn ms_add_diag(ms: MS, span: Span, msg: string): MS
 fn mir_flush_list(ms: MS, items: Vector<i64>): MirFlush
   let i: i64 = to_i64(0)
   while i < items.length():
-    ms.mir_idx = ms.mir_idx.push(items.get(i))
+    ms.out.idx = ms.out.idx.push(items.get(i))
     i = i + to_i64(1)
-  let pos: i64 = ms.mir_idx.length()
-  ms.mir_idx = ms.mir_idx.push(items.length())
+  let pos: i64 = ms.out.idx.length()
+  ms.out.idx = ms.out.idx.push(items.length())
   return MirFlush(ms, pos)
 
 // The type of a lowered HIR expression: HIR's own accessor, so every
@@ -257,11 +273,11 @@ fn ms_get_hir_type(ms: MS, hir_node: HirNode): i64
 // =========================================================================
 
 fn ms_reset_fn_state(ms: MS): MS
-  ms.current_fn = to_i64(-1)
-  ms.locals = Vector<i64>::new()
-  ms.fn_blocks = Vector<i64>::new()
-  ms.sym_to_local = HashMap<i64>::new()
-  ms.next_block_id = to_i64(0)
+  ms.func.current_fn = to_i64(-1)
+  ms.func.locals = Vector<i64>::new()
+  ms.func.fn_blocks = Vector<i64>::new()
+  ms.func.sym_to_local = HashMap<i64>::new()
+  ms.func.next_block_id = to_i64(0)
   ms.flow = flow_empty()
   return ms
 
@@ -272,18 +288,18 @@ fn ms_declare_local(ms: MS, sym: i64, type_idx: i64, is_param: bool): MirR
   if is_param:
     is_param_i = to_i64(1)
   let r: MirR = ms_add_node(ms, MirNode::MirLocal(sym = sym, type_idx = type_idx, is_param = is_param_i))
-  let slot: i64 = r.ms.locals.length()
-  r.ms.locals = r.ms.locals.push(r.mir)
+  let slot: i64 = r.ms.func.locals.length()
+  r.ms.func.locals = r.ms.func.locals.push(r.mir)
   // Any symbol but -1 ("none"): a synthesized local's is negative
   // (synthetic_local_sym).
   if sym != to_i64(-1):
-    r.ms.sym_to_local = r.ms.sym_to_local.set(i64_to_string(sym), slot)
+    r.ms.func.sym_to_local = r.ms.func.sym_to_local.set(i64_to_string(sym), slot)
   return MirR(r.ms, slot)
 
 fn ms_lookup_local(ms: MS, sym: i64): i64
   if sym == to_i64(-1):
     return to_i64(-1)
-  let found: Option<i64> = ms.sym_to_local.get(i64_to_string(sym))
+  let found: Option<i64> = ms.func.sym_to_local.get(i64_to_string(sym))
   match found:
     Option::Some(slot):
       return slot
@@ -295,8 +311,8 @@ fn ms_lookup_local(ms: MS, sym: i64): i64
 fn ms_tok_to_sym(ms: MS, tok_idx: i64): i64
   if tok_idx < 0:
     return to_i64(-1)
-  let key: string = uses_key(ms.file_id, tok_idx)
-  let found: Option<i64> = ms.uses_map.get(key)
+  let key: string = uses_key(ms.source.file_id, tok_idx)
+  let found: Option<i64> = ms.program.uses_map.get(key)
   match found:
     Option::Some(sym):
       return sym
@@ -306,10 +322,10 @@ fn ms_tok_to_sym(ms: MS, tok_idx: i64): i64
 // Create a new basic block, append it to the current function's
 // block list, and return its node index.
 fn ms_new_block(ms: MS): MirR
-  let bid: i64 = ms.next_block_id
-  ms.next_block_id = bid + 1
+  let bid: i64 = ms.func.next_block_id
+  ms.func.next_block_id = bid + 1
   let r: MirR = ms_add_node(ms, MirNode::MirBlock(block_id = bid, inst_list_lp = to_i64(0), inst_count = to_i64(0)))
-  r.ms.fn_blocks = r.ms.fn_blocks.push(r.mir)
+  r.ms.func.fn_blocks = r.ms.func.fn_blocks.push(r.mir)
   return r
 
 // Append an instruction to the current block.  Because MirBlock stores
@@ -338,10 +354,10 @@ fn block_emit(br: BlockR, inst_idx: i64): BlockR
 // MirBlock node with the list offset and count.
 fn block_seal(br: BlockR): MS
   let fl: MirFlush = mir_flush_list(br.ms, br.insts)
-  let blk: MirNode = fl.ms.mir_nodes.get(br.block_idx)
+  let blk: MirNode = fl.ms.out.nodes.get(br.block_idx)
   match blk:
     MirNode::MirBlock(bid, old_lp, old_count):
-      fl.ms.mir_nodes = fl.ms.mir_nodes.set(br.block_idx, MirNode::MirBlock(block_id = bid, inst_list_lp = fl.list_pos, inst_count = br.insts.length()))
+      fl.ms.out.nodes = fl.ms.out.nodes.set(br.block_idx, MirNode::MirBlock(block_id = bid, inst_list_lp = fl.list_pos, inst_count = br.insts.length()))
   return fl.ms
 
 // Mark the current block sealed (terminator emitted).
@@ -369,19 +385,19 @@ fn block_advance(br: BlockR): BlockR
 fn mir_resolve_field_index(ms: MS, struct_type_idx: i64, field_tok: i64): i64
   if struct_type_idx < 0:
     return to_i64(-1)
-  if struct_type_idx >= ms.types.length():
+  if struct_type_idx >= ms.program.types.length():
     return to_i64(-1)
-  let t: DaoType = ms.types.get(struct_type_idx)
+  let t: DaoType = ms.program.types.get(struct_type_idx)
   match t.kind:
     TypeKind::TStruct:
       // Extract the field name from the field_tok.
-      let ft: Token = ms.toks.get(field_tok)
-      let field_name: string = substring(ms.src, ft.offset, ft.len)
+      let ft: Token = ms.source.toks.get(field_tok)
+      let field_name: string = substring(ms.source.src, ft.offset, ft.len)
       // Walk the struct's field pairs in type_info; each name slot holds
       // the field's symbol (field_slot_name), readable from any module.
       let i: i64 = to_i64(0)
       while i < t.info_count:
-        if field_slot_name(ms.symbols, ms.type_info.get(t.info_lp + i * to_i64(2))) == field_name:
+        if field_slot_name(ms.program.symbols, ms.program.type_info.get(t.info_lp + i * to_i64(2))) == field_name:
           return i
         i = i + to_i64(1)
   return to_i64(-1)
@@ -419,7 +435,7 @@ fn br_emit_terminator(br: BlockR, node: MirNode): BlockR
 fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
   if hir_node_idx < 0:
     return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
-  let node: HirNode = br.ms.hir_nodes.get(hir_node_idx)
+  let node: HirNode = br.ms.hir.nodes.get(hir_node_idx)
   match node:
     HirNode::HirIntLit(value, type_idx):
       return br_emit_value(br, MirNode::MirConstInt(value = value, type_idx = type_idx))
@@ -453,13 +469,13 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
         arg_val = ar.value
       return br_emit_value(ptr_cur, MirNode::MirPtrOp(op = op, pointer = ptr_val, argument = arg_val, type_idx = type_idx))
     HirNode::HirConstruct(args_lp, arg_count, type_idx):
-      let fields: ExprValues = lower_expr_values(br, read_hir_list(br.ms.hir_idx, args_lp))
+      let fields: ExprValues = lower_expr_values(br, read_hir_list(br.ms.hir.idx, args_lp))
       let cfl: MirFlush = mir_flush_list(fields.br.ms, fields.values)
       fields.br.ms = cfl.ms
       return br_emit_value(fields.br, MirNode::MirConstruct(arg_list_lp = cfl.list_pos, arg_count = arg_count, type_idx = type_idx))
     HirNode::HirEnumConstruct(variant, payload_lp, payload_count, type_idx):
       // Evaluated in source order, placed in declaration order.
-      let pairs: Vector<i64> = read_pairs(br.ms.hir_idx, payload_lp)
+      let pairs: Vector<i64> = read_pairs(br.ms.hir.idx, payload_lp)
       let exprs: Vector<i64> = Vector<i64>::new()
       let pi: i64 = to_i64(0)
       while pi < pairs.length():
@@ -477,11 +493,11 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       payload.br.ms = efl.ms
       return br_emit_value(payload.br, MirNode::MirEnumConstruct(variant = variant, arg_list_lp = efl.list_pos, arg_count = payload_count, type_idx = type_idx))
     HirNode::HirBoolLit(tok, type_idx):
-      if tok < to_i64(0) or tok >= br.ms.toks.length():
+      if tok < to_i64(0) or tok >= br.ms.source.toks.length():
         br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)")
         return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
-      let tk: Token = br.ms.toks.get(tok)
-      let lex: string = substring(br.ms.src, tk.offset, tk.len)
+      let tk: Token = br.ms.source.toks.get(tok)
+      let lex: string = substring(br.ms.source.src, tk.offset, tk.len)
       let v: i64 = to_i64(0)
       if lex == "true":
         v = to_i64(1)
@@ -496,8 +512,8 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
         return emit_load(br, MirPlace(slot, Vector<i64>::new()), type_idx)
       // A local or parameter always has a slot by the time it is read; one
       // without is a binding lowering lost, never a function to call.
-      if sym >= 0 and sym < br.ms.symbols.length():
-        let named: Symbol = br.ms.symbols.get(sym)
+      if sym >= 0 and sym < br.ms.program.symbols.length():
+        let named: Symbol = br.ms.program.symbols.get(sym)
         if symbol_kind_name(named.kind) == "Local" or symbol_kind_name(named.kind) == "Param":
           br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "'" + named.name + "' has no local slot in MIR")
           return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
@@ -514,17 +530,17 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       // bound (lower_bound_call): which function it calls is decided by
       // an instantiation.  A template carries it, as the host's template
       // does, with the member access as its callee, for the instantiation
-      // to resolve (monomorphization, Task 43); a concrete function never
+      // to resolve during monomorphization.  A concrete function never
       // has a type parameter's value to call through, so there it is
       // rejected rather than lowered as a field.
-      match br.ms.hir_nodes.get(callee):
+      match br.ms.hir.nodes.get(callee):
         HirNode::HirFieldAccess(bound_obj, bound_field, bound_ti):
-          if br.ms.in_template == false and mir_is_type_param(br.ms, ms_get_hir_type(br.ms, br.ms.hir_nodes.get(bound_obj))):
+          if br.ms.func.in_template == false and mir_is_type_param(br.ms, ms_get_hir_type(br.ms, br.ms.hir.nodes.get(bound_obj))):
             br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)),
               "unsupported in Tier A MIR lowering: a call through a type parameter's bound (HirCall on HirFieldAccess) needs an instantiation to name its function")
             return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
       let callee_r: ExprR = lower_expr_value(br, callee)
-      let call_args: ExprValues = lower_expr_values(callee_r.br, read_hir_list(callee_r.br.ms.hir_idx, args_lp))
+      let call_args: ExprValues = lower_expr_values(callee_r.br, read_hir_list(callee_r.br.ms.hir.idx, args_lp))
       let cur_br: BlockR = call_args.br
       let fl: MirFlush = mir_flush_list(cur_br.ms, call_args.values)
       cur_br.ms = fl.ms
@@ -532,7 +548,7 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
     HirNode::HirFieldAccess(obj, field_tok, type_idx):
       let obj_r: ExprR = lower_expr_value(br, obj)
       // Resolve field_index from the object's struct type (Tier B).
-      let obj_hir: HirNode = obj_r.br.ms.hir_nodes.get(obj)
+      let obj_hir: HirNode = obj_r.br.ms.hir.nodes.get(obj)
       let obj_ti: i64 = ms_get_hir_type(obj_r.br.ms, obj_hir)
       let fidx: i64 = mir_resolve_field_index(obj_r.br.ms, obj_ti, field_tok)
       return br_emit_value(obj_r.br, MirNode::MirFieldAccess(obj = obj_r.value, field_tok = field_tok, field_index = fidx, type_idx = type_idx))
@@ -564,9 +580,9 @@ fn lower_expr_values(br: BlockR, exprs: Vector<i64>): ExprValues
 
 // Whether a type index names a type parameter.
 fn mir_is_type_param(ms: MS, ti: i64): bool
-  if ti < 0 or ti >= ms.types.length():
+  if ti < 0 or ti >= ms.program.types.length():
     return false
-  match ms.types.get(ti).kind:
+  match ms.program.types.get(ti).kind:
     TypeKind::TGenericParam:
       return true
   return false
@@ -581,7 +597,7 @@ fn mir_is_type_param(ms: MS, ti: i64): bool
 fn mir_lower_stmt(br: BlockR, hir_node_idx: i64): BlockR
   if hir_node_idx < 0:
     return br
-  let node: HirNode = br.ms.hir_nodes.get(hir_node_idx)
+  let node: HirNode = br.ms.hir.nodes.get(hir_node_idx)
   match node:
     HirNode::HirLet(let_sym, type_idx, init):
       let dl: MirR = ms_declare_local(br.ms, let_sym, type_idx, false)
@@ -624,7 +640,7 @@ fn mir_lower_stmt(br: BlockR, hir_node_idx: i64): BlockR
       // returned value out first.
       if value >= 0:
         let val_r: ExprR = lower_expr_value(br, value)
-        let ret_ti: i64 = ms_get_hir_type(val_r.br.ms, val_r.br.ms.hir_nodes.get(value))
+        let ret_ti: i64 = ms_get_hir_type(val_r.br.ms, val_r.br.ms.hir.nodes.get(value))
         let ret_left: RegionExitR = emit_region_exits(val_r.br, to_i64(0), true, val_r.value, ret_ti)
         return br_emit_terminator(ret_left.br, MirNode::MirReturn(value = ret_left.carried, has_value = to_i64(1)))
       let left_void: RegionExitR = emit_region_exits(br, to_i64(0), true, to_i64(-1), to_i64(-1))
@@ -662,7 +678,7 @@ class PlaceR:
 // parameter's value) is tolerated there, as the host tolerates it.
 fn lower_place(ms: MS, target: i64): PlaceR
   let none: MirPlace = MirPlace(to_i64(-1), Vector<i64>::new())
-  match ms.hir_nodes.get(target):
+  match ms.hir.nodes.get(target):
     HirNode::HirIdent(sym, ti, tok):
       let slot: i64 = ms_lookup_local(ms, sym)
       if slot >= 0:
@@ -671,12 +687,12 @@ fn lower_place(ms: MS, target: i64): PlaceR
       let base: PlaceR = lower_place(ms, obj)
       if base.place.local < 0:
         return base
-      let field: i64 = mir_resolve_field_index(base.ms, ms_get_hir_type(base.ms, base.ms.hir_nodes.get(obj)), field_tok)
-      if field < 0 and base.ms.in_template == false:
-        let ft: Token = base.ms.toks.get(field_tok)
-        return PlaceR(ms_add_diag(base.ms, Span(ft.offset, ft.len), "unresolved field '" + substring(base.ms.src, ft.offset, ft.len) + "' in assignment target"), none)
+      let field: i64 = mir_resolve_field_index(base.ms, ms_get_hir_type(base.ms, base.ms.hir.nodes.get(obj)), field_tok)
+      if field < 0 and base.ms.func.in_template == false:
+        let ft: Token = base.ms.source.toks.get(field_tok)
+        return PlaceR(ms_add_diag(base.ms, Span(ft.offset, ft.len), "unresolved field '" + substring(base.ms.source.src, ft.offset, ft.len) + "' in assignment target"), none)
       return PlaceR(base.ms, MirPlace(base.place.local, base.place.path.push(field)))
-  return PlaceR(ms_add_diag(ms, Span(to_i64(0), to_i64(1)), "unsupported assignment target: " + hir_node_kind(ms.hir_nodes.get(target))), none)
+  return PlaceR(ms_add_diag(ms, Span(to_i64(0), to_i64(1)), "unsupported assignment target: " + hir_node_kind(ms.hir.nodes.get(target))), none)
 
 // The step of a place path to the value a pointer addresses.
 fn mir_deref_step(): i64
@@ -696,7 +712,7 @@ fn deref_place(br: BlockR, pointer: i64): PlaceBR
     br.ms = rooted.ms
     return PlaceBR(br, MirPlace(rooted.place.local, rooted.place.path.push(mir_deref_step())))
   let value: ExprR = lower_expr_value(br, pointer)
-  let ptr_ti: i64 = ms_get_hir_type(value.br.ms, value.br.ms.hir_nodes.get(pointer))
+  let ptr_ti: i64 = ms_get_hir_type(value.br.ms, value.br.ms.hir.nodes.get(pointer))
   let temp: MirR = ms_declare_local(value.br.ms, to_i64(-1), ptr_ti, false)
   let cur: BlockR = value.br
   cur.ms = temp.ms
@@ -743,13 +759,13 @@ class RegionExitR:
 // iterator first; a `break` does not — the exit block destroys it.
 fn lower_for(br: BlockR, stmt: i64, var_sym: i64, iter: i64, body_lp: i64): BlockR
   let src: ExprR = lower_expr_value(br, iter)
-  let iter_ti: i64 = ms_get_hir_type(src.br.ms, src.br.ms.hir_nodes.get(iter))
+  let iter_ti: i64 = ms_get_hir_type(src.br.ms, src.br.ms.hir.nodes.get(iter))
   let init: ExprR = br_emit_value(src.br, MirNode::MirIterInit(source = src.value, type_idx = iter_ti))
   let elem_ti: i64 = iter_ti
-  if iter_ti >= 0 and iter_ti < init.br.ms.types.length():
-    match init.br.ms.types.get(iter_ti).kind:
+  if iter_ti >= 0 and iter_ti < init.br.ms.program.types.length():
+    match init.br.ms.program.types.get(iter_ti).kind:
       TypeKind::TGenerator:
-        elem_ti = init.br.ms.types.get(iter_ti).pointee
+        elem_ti = init.br.ms.program.types.get(iter_ti).pointee
   let var_r: MirR = ms_declare_local(init.br.ms, var_sym, elem_ti, false)
   let cur: BlockR = init.br
   cur.ms = var_r.ms
@@ -835,7 +851,7 @@ fn emit_region_exits(br: BlockR, depth: i64, leaving_fn: bool, carried: i64, car
   return r
 
 fn emit_region_exit(br: BlockR, region: ActiveRegion, leaving_fn: bool, carried: i64, carried_ti: i64): RegionExitR
-  match br.ms.hir_nodes.get(region.stmt):
+  match br.ms.hir.nodes.get(region.stmt):
     HirNode::HirMode(name_tok, body_lp):
       return RegionExitR(emit_effect(br, MirNode::MirModeExit(name_tok = name_tok)), carried)
     HirNode::HirResource(kind_tok, name_tok, body_lp):
@@ -879,10 +895,10 @@ fn emit_escape_copy(br: BlockR, binding: i64, flag: i64): BlockR
 fn emit_copy_out(br: BlockR, value: i64, ti: i64): ExprR
   if mir_owns_heap(br.ms, ti) == false:
     return ExprR(br, value)
-  if br.ms.copy_out_sym < 0:
+  if br.ms.program.copy_out_sym < 0:
     br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "no prelude `copy_out` to copy a value out of a resource block")
     return ExprR(br, value)
-  let callee: ExprR = br_emit_value(br, MirNode::MirFnRef(sym = br.ms.copy_out_sym, type_idx = br.ms.sym_types.get(br.ms.copy_out_sym)))
+  let callee: ExprR = br_emit_value(br, MirNode::MirFnRef(sym = br.ms.program.copy_out_sym, type_idx = br.ms.program.sym_types.get(br.ms.program.copy_out_sym)))
   let arg_values: Vector<i64> = Vector<i64>::new()
   let args: MirFlush = mir_flush_list(callee.br.ms, arg_values.push(value))
   let cur: BlockR = callee.br
@@ -911,10 +927,10 @@ fn mark_escapes_dirty(br: BlockR, local: i64): BlockR
 // the same set per block: check_store_escapes_domain.)
 fn resource_escapes(ms: MS, list_pos: i64, found: Vector<i64>): Vector<i64>
   let out: Vector<i64> = found
-  let stmts: Vector<i64> = read_hir_list(ms.hir_idx, list_pos)
+  let stmts: Vector<i64> = read_hir_list(ms.hir.idx, list_pos)
   let i: i64 = to_i64(0)
   while i < stmts.length():
-    match ms.hir_nodes.get(stmts.get(i)):
+    match ms.hir.nodes.get(stmts.get(i)):
       HirNode::HirAssign(target, value):
         let root: i64 = place_root_local(ms, target)
         if root >= 0 and mir_owns_heap(ms, mir_local_type(ms, root)) and vec_contains(out, root) == false:
@@ -935,7 +951,7 @@ fn resource_escapes(ms: MS, list_pos: i64, found: Vector<i64>): Vector<i64>
 
 // The local slot an assignment target is rooted at, or -1.
 fn place_root_local(ms: MS, target: i64): i64
-  match ms.hir_nodes.get(target):
+  match ms.hir.nodes.get(target):
     HirNode::HirIdent(sym, ti, tok):
       return ms_lookup_local(ms, sym)
     HirNode::HirFieldAccess(obj, field_tok, ti):
@@ -952,9 +968,9 @@ fn vec_contains(v: Vector<i64>, x: i64): bool
 
 // The type of a local slot of the function being lowered.
 fn mir_local_type(ms: MS, slot: i64): i64
-  if slot < 0 or slot >= ms.locals.length():
+  if slot < 0 or slot >= ms.func.locals.length():
     return to_i64(-1)
-  match ms.mir_nodes.get(ms.locals.get(slot)):
+  match ms.out.nodes.get(ms.func.locals.get(slot)):
     MirNode::MirLocal(sym, type_idx, is_param):
       return type_idx
   return to_i64(-1)
@@ -965,20 +981,20 @@ fn mir_holds_generator(ms: MS, ti: i64): bool
   return mir_generator_search(ms, ti, HashMap<i64>::new()).found
 
 fn mir_generator_search(ms: MS, ti: i64, seen: HashMap<i64>): GenericSearch
-  if ti < 0 or ti >= ms.types.length():
+  if ti < 0 or ti >= ms.program.types.length():
     return GenericSearch(seen, false)
   let key: string = i64_to_string(ti)
   if seen.contains(key):
     return GenericSearch(seen, false)
   let so_far: HashMap<i64> = seen.set(key, to_i64(1))
-  let t: DaoType = ms.types.get(ti)
+  let t: DaoType = ms.program.types.get(ti)
   match t.kind:
     TypeKind::TGenerator:
       return GenericSearch(so_far, true)
     TypeKind::TStruct:
       let fi: i64 = to_i64(0)
       while fi < t.info_count:
-        let sub: GenericSearch = mir_generator_search(ms, ms.type_info.get(t.info_lp + fi * to_i64(2) + to_i64(1)), so_far)
+        let sub: GenericSearch = mir_generator_search(ms, ms.program.type_info.get(t.info_lp + fi * to_i64(2) + to_i64(1)), so_far)
         if sub.found:
           return sub
         so_far = sub.seen
@@ -987,26 +1003,26 @@ fn mir_generator_search(ms: MS, ti: i64, seen: HashMap<i64>): GenericSearch
 
 // The name of a local slot's binding ("" for a synthesized local).
 fn mir_local_name(ms: MS, slot: i64): string
-  if slot < 0 or slot >= ms.locals.length():
+  if slot < 0 or slot >= ms.func.locals.length():
     return ""
-  match ms.mir_nodes.get(ms.locals.get(slot)):
+  match ms.out.nodes.get(ms.func.locals.get(slot)):
     MirNode::MirLocal(sym, type_idx, is_param):
-      if sym >= 0 and sym < ms.symbols.length():
-        return ms.symbols.get(sym).name
+      if sym >= 0 and sym < ms.program.symbols.length():
+        return ms.program.symbols.get(sym).name
   return ""
 
 // A token's text in the module being lowered.
 fn mir_tok_text(ms: MS, tok: i64): string
-  if tok < 0 or tok >= ms.toks.length():
+  if tok < 0 or tok >= ms.source.toks.length():
     return ""
-  let t: Token = ms.toks.get(tok)
-  return substring(ms.src, t.offset, t.len)
+  let t: Token = ms.source.toks.get(tok)
+  return substring(ms.source.src, t.offset, t.len)
 
 // Whether a value of `ti` owns heap memory, so leaving a domain must copy
 // it (the host's owns_heap_memory): a string, a generator, a type
 // parameter, or a struct / enum holding a pointer or such a value.
 fn mir_owns_heap(ms: MS, ti: i64): bool
-  return mir_heap_search_in(ms.types, ms.type_info, ti, HashMap<i64>::new()).found
+  return mir_heap_search_in(ms.program.types, ms.program.type_info, ti, HashMap<i64>::new()).found
 
 fn mir_heap_search_in(types: Vector<DaoType>, info: Vector<i64>, ti: i64, seen: HashMap<i64>): GenericSearch
   if ti < 0 or ti >= types.length():
@@ -1068,7 +1084,7 @@ fn emit_effect(br: BlockR, node: MirNode): BlockR
 // the block (returns/break/etc.), subsequent statements are
 // appended to whatever new block that statement switched to.
 fn lower_stmt_list(br: BlockR, list_pos: i64): BlockR
-  let stmts: Vector<i64> = read_hir_list(br.ms.hir_idx, list_pos)
+  let stmts: Vector<i64> = read_hir_list(br.ms.hir.idx, list_pos)
   let i: i64 = to_i64(0)
   while i < stmts.length():
     // After a terminator (`return`, `break`) the rest of the list is
@@ -1084,8 +1100,8 @@ fn lower_stmt_list(br: BlockR, list_pos: i64): BlockR
 //   [current] --cond_br--> [then] --br--> [merge]
 //                      \-> [else] --br--> [merge]
 // The returned BlockR is positioned on [merge].  If both branches
-// returned / unconditionally exited, [merge] may end up empty —
-// lower_function will still emit an implicit return to terminate it.
+// returned or broke, no path reaches [merge]: it is closed here, so the
+// statements after the `if` are dropped as the host's builder drops them.
 fn mir_lower_if_stmt(br: BlockR, cond: i64, then_lp: i64, else_lp: i64): BlockR
   let cond_r: ExprR = lower_expr_value(br, cond)
   br = cond_r.br
@@ -1123,7 +1139,10 @@ fn mir_lower_if_stmt(br: BlockR, cond: i64, then_lp: i64, else_lp: i64): BlockR
   let ms_after_else: MS = block_seal(else_final)
 
   // Continue on the merge block.
-  return block_open(ms_after_else, merge_r.mir)
+  let merge_br: BlockR = block_open(ms_after_else, merge_r.mir)
+  if then_after.sealed == to_i64(1) and else_lp >= 0 and else_after.sealed == to_i64(1):
+    return br_emit_terminator(merge_br, MirNode::MirReturn(value = to_i64(-1), has_value = to_i64(0)))
+  return merge_br
 
 // Lower a while loop.  Control flow:
 //   [current] --br--> [header] --cond_br--> [body] --br--> [header]
@@ -1190,7 +1209,7 @@ fn read_hir_list_count(hir_idx: Vector<i64>, list_pos: i64): i64
   return hir_idx.get(list_pos)
 
 fn lower_function(ms: MS, hir_fn_idx: i64): MirR
-  let node: HirNode = ms.hir_nodes.get(hir_fn_idx)
+  let node: HirNode = ms.hir.nodes.get(hir_fn_idx)
   match node:
     HirNode::HirFunction(fn_sym, tparams, params_lp, ret_ti, body_lp, is_extern_i, class_owner):
       ms = ms_reset_fn_state(ms)
@@ -1199,16 +1218,16 @@ fn lower_function(ms: MS, hir_fn_idx: i64): MirR
       let fn_r: MirR = ms_add_node(ms, MirNode::MirFunction(sym = fn_sym, ret_type = ret_ti, param_count = to_i64(0), local_list_lp = to_i64(0), local_count = to_i64(0), block_list_lp = to_i64(0), block_count = to_i64(0), is_extern = is_extern_i))
       let fn_idx: i64 = fn_r.mir
       ms = fn_r.ms
-      ms.current_fn = fn_idx
+      ms.func.current_fn = fn_idx
 
       // Params are (sym, type_idx) pairs stored via hir_flush_pairs
       // (count = pair_count, not flat item count).
-      let param_count: i64 = read_hir_list_count(ms.hir_idx, params_lp)
+      let param_count: i64 = read_hir_list_count(ms.hir.idx, params_lp)
       let params_start: i64 = params_lp - (param_count * to_i64(2))
       let pi: i64 = to_i64(0)
       while pi < param_count:
-        let psym: i64 = ms.hir_idx.get(params_start + pi * to_i64(2))
-        let pti: i64 = ms.hir_idx.get(params_start + pi * to_i64(2) + to_i64(1))
+        let psym: i64 = ms.hir.idx.get(params_start + pi * to_i64(2))
+        let pti: i64 = ms.hir.idx.get(params_start + pi * to_i64(2) + to_i64(1))
         let dl: MirR = ms_declare_local(ms, psym, pti, true)
         ms = dl.ms
         pi = pi + to_i64(1)
@@ -1217,13 +1236,13 @@ fn lower_function(ms: MS, hir_fn_idx: i64): MirR
       // mir_idx so consumers reading (local_list_lp, local_count)
       // get a real local list instead of indexing unrelated data.
       if is_extern_i > 0:
-        let extern_local_fl: MirFlush = mir_flush_list(ms, ms.locals)
+        let extern_local_fl: MirFlush = mir_flush_list(ms, ms.func.locals)
         ms = extern_local_fl.ms
         // …and an empty block list of its own, so a reader walking the
         // blocks reads none rather than following a stray offset.
         let no_blocks: MirFlush = mir_flush_list(ms, Vector<i64>::new())
         ms = no_blocks.ms
-        ms.mir_nodes = ms.mir_nodes.set(fn_idx, MirNode::MirFunction(sym = fn_sym, ret_type = ret_ti, param_count = param_count, local_list_lp = extern_local_fl.list_pos, local_count = ms.locals.length(), block_list_lp = no_blocks.list_pos, block_count = to_i64(0), is_extern = is_extern_i))
+        ms.out.nodes = ms.out.nodes.set(fn_idx, MirNode::MirFunction(sym = fn_sym, ret_type = ret_ti, param_count = param_count, local_list_lp = extern_local_fl.list_pos, local_count = ms.func.locals.length(), block_list_lp = no_blocks.list_pos, block_count = to_i64(0), is_extern = is_extern_i))
         return MirR(ms, fn_idx)
 
       // Create the entry block and lower the body into it.  Control
@@ -1241,12 +1260,12 @@ fn lower_function(ms: MS, hir_fn_idx: i64): MirR
       ms = block_seal(closed_br)
 
       // Flush locals and per-function block list.
-      let local_fl: MirFlush = mir_flush_list(ms, ms.locals)
+      let local_fl: MirFlush = mir_flush_list(ms, ms.func.locals)
       ms = local_fl.ms
-      let block_fl: MirFlush = mir_flush_list(ms, ms.fn_blocks)
+      let block_fl: MirFlush = mir_flush_list(ms, ms.func.fn_blocks)
       ms = block_fl.ms
 
-      ms.mir_nodes = ms.mir_nodes.set(fn_idx, MirNode::MirFunction(sym = fn_sym, ret_type = ret_ti, param_count = param_count, local_list_lp = local_fl.list_pos, local_count = ms.locals.length(), block_list_lp = block_fl.list_pos, block_count = ms.fn_blocks.length(), is_extern = is_extern_i))
+      ms.out.nodes = ms.out.nodes.set(fn_idx, MirNode::MirFunction(sym = fn_sym, ret_type = ret_ti, param_count = param_count, local_list_lp = local_fl.list_pos, local_count = ms.func.locals.length(), block_list_lp = block_fl.list_pos, block_count = ms.func.fn_blocks.length(), is_extern = is_extern_i))
       return MirR(ms, fn_idx)
   return MirR(ms, to_i64(-1))
 
@@ -1259,15 +1278,15 @@ fn lower_function(ms: MS, hir_fn_idx: i64): MirR
 // generic class, whose `self` is the class's head): the host's
 // `hir_function_is_generic` rule.
 fn mir_function_is_generic(ms: MS, tparams_lp: i64, params_lp: i64, ret_ti: i64): bool
-  if read_hir_list_count(ms.hir_idx, tparams_lp) > 0:
+  if read_hir_list_count(ms.hir.idx, tparams_lp) > 0:
     return true
   if mir_type_mentions_generic(ms, ret_ti):
     return true
-  let param_count: i64 = read_hir_list_count(ms.hir_idx, params_lp)
+  let param_count: i64 = read_hir_list_count(ms.hir.idx, params_lp)
   let params_start: i64 = params_lp - (param_count * to_i64(2))
   let pi: i64 = to_i64(0)
   while pi < param_count:
-    if mir_type_mentions_generic(ms, ms.hir_idx.get(params_start + pi * to_i64(2) + to_i64(1))):
+    if mir_type_mentions_generic(ms, ms.hir.idx.get(params_start + pi * to_i64(2) + to_i64(1))):
       return true
     pi = pi + to_i64(1)
   return false
@@ -1275,7 +1294,7 @@ fn mir_function_is_generic(ms: MS, tparams_lp: i64, params_lp: i64, ret_ti: i64)
 // Whether `ti` is, or holds at any depth, a type parameter.  A type
 // graph shares its parts, so each type is searched once.
 fn mir_type_mentions_generic(ms: MS, ti: i64): bool
-  return mir_generic_search_in(ms.types, ms.type_info, ti, HashMap<i64>::new()).found
+  return mir_generic_search_in(ms.program.types, ms.program.type_info, ti, HashMap<i64>::new()).found
 
 class GenericSearch:
   seen: HashMap<i64>
@@ -1323,24 +1342,24 @@ fn mir_generic_search_in(types: Vector<DaoType>, info: Vector<i64>, ti: i64, see
 // exit calls to copy a value one domain outward; -1 when the program has
 // none (a program without the prelude).
 fn find_prelude_copy_out(p: Program, ms: MS): i64
-  if p.hir.root < 0 or p.hir.root >= ms.hir_nodes.length():
+  if p.hir.root < 0 or p.hir.root >= ms.hir.nodes.length():
     return to_i64(-1)
-  match ms.hir_nodes.get(p.hir.root):
+  match ms.hir.nodes.get(p.hir.root):
     HirNode::HirProgram(module_list_lp):
-      let modules: Vector<i64> = read_hir_list(ms.hir_idx, module_list_lp)
+      let modules: Vector<i64> = read_hir_list(ms.hir.idx, module_list_lp)
       let mi: i64 = to_i64(0)
       while mi < modules.length():
-        match ms.hir_nodes.get(modules.get(mi)):
+        match ms.hir.nodes.get(modules.get(mi)):
           HirNode::HirModule(name_tok, decls_lp, module_id):
             if program_module(p, module_id).is_prelude:
-              let decls: Vector<i64> = read_hir_list(ms.hir_idx, decls_lp)
+              let decls: Vector<i64> = read_hir_list(ms.hir.idx, decls_lp)
               let di: i64 = to_i64(0)
               while di < decls.length():
-                match ms.hir_nodes.get(decls.get(di)):
+                match ms.hir.nodes.get(decls.get(di)):
                   HirNode::HirFunction(sym, tparams_lp, params_lp, ret_ti, body_lp, is_extern, class_owner):
                     // (`and` evaluates both sides: the name is read only for a symbol.)
                     if class_owner < 0 and sym >= 0:
-                      if ms.symbols.get(sym).name == "copy_out" and read_hir_list_count(ms.hir_idx, params_lp) == 1:
+                      if ms.program.symbols.get(sym).name == "copy_out" and read_hir_list_count(ms.hir.idx, params_lp) == 1:
                         return sym
                 di = di + to_i64(1)
         mi = mi + to_i64(1)
@@ -1363,25 +1382,25 @@ class ModuleLowering:
 // and source: concrete functions into the module, generic ones into
 // its templates.
 fn lower_module(ms: MS, sf: SourceFile, decls: Vector<i64>): ModuleLowering
-  ms.toks = sf.parse_output.toks
-  ms.src = sf.source_text
-  ms.file_id = sf.file_id
+  ms.source.toks = sf.parse_output.toks
+  ms.source.src = sf.source_text
+  ms.source.file_id = sf.file_id
   let fns: Vector<i64> = Vector<i64>::new()
   let templates: Vector<i64> = Vector<i64>::new()
   let i: i64 = to_i64(0)
   while i < decls.length():
     let decl_idx: i64 = decls.get(i)
-    match ms.hir_nodes.get(decl_idx):
+    match ms.hir.nodes.get(decl_idx):
       HirNode::HirFunction(n, tparams_lp, params_lp, ret_ti, b, ie, co):
-        ms.in_template = mir_function_is_generic(ms, tparams_lp, params_lp, ret_ti)
+        ms.func.in_template = mir_function_is_generic(ms, tparams_lp, params_lp, ret_ti)
         let r: MirR = lower_function(ms, decl_idx)
         ms = r.ms
         if r.mir >= 0:
-          if ms.in_template:
+          if ms.func.in_template:
             templates = templates.push(r.mir)
           else:
             fns = fns.push(r.mir)
-        ms.in_template = false
+        ms.func.in_template = false
     i = i + to_i64(1)
   let fn_fl: MirFlush = mir_flush_list(ms, fns)
   let tmpl_fl: MirFlush = mir_flush_list(fn_fl.ms, templates)
@@ -1391,50 +1410,38 @@ fn lower_module(ms: MS, sf: SourceFile, decls: Vector<i64>): ModuleLowering
 // Lower a resolved, type-checked program to MIR: HIR for every module,
 // then each module's functions, in program order.  MIR's diagnostics
 // join the program's, each on the file of the module it came from.
+fn ms_function_empty(): MsFunction
+  return MsFunction(to_i64(-1), Vector<i64>::new(), Vector<i64>::new(), HashMap<i64>::new(), to_i64(0), false)
+
 fn program_run_mir(p: Program): ProgramMir
   let ph: ProgramHir = program_lower_hir(p)
   let hp: Program = ph.program
   let ms: MS = MS(
-    ph.arena.nodes,
-    ph.arena.idx,
-    hp.typecheck.types,
-    hp.typecheck.type_info,
-    Vector<Token>::new(),
-    "",
-    hp.resolve.symbols,
-    hp.typecheck.sym_types,
-    hp.resolve.uses,
-    Vector<MirNode>::new(),
-    Vector<i64>::new(),
-    Vector<Diagnostic>::new(),
-    to_i64(-1),
-    to_i64(-1),
-    Vector<i64>::new(),
-    Vector<i64>::new(),
-    HashMap<i64>::new(),
-    to_i64(0),
-    false,
-    flow_empty(),
-    to_i64(-1))
-  ms.copy_out_sym = find_prelude_copy_out(hp, ms)
+    MsHir(ph.arena.nodes, ph.arena.idx),
+    MsProgram(hp.typecheck.types, hp.typecheck.type_info, hp.resolve.symbols, hp.typecheck.sym_types, hp.resolve.uses, to_i64(-1)),
+    MsSource(Vector<Token>::new(), "", to_i64(-1)),
+    MsOutput(Vector<MirNode>::new(), Vector<i64>::new(), Vector<Diagnostic>::new()),
+    ms_function_empty(),
+    flow_empty())
+  ms.program.copy_out_sym = find_prelude_copy_out(hp, ms)
   let all_diags: Vector<FileDiagnostic> = hp.diags
   let module_nodes: Vector<i64> = Vector<i64>::new()
-  if hp.hir.root >= 0 and hp.hir.root < ms.hir_nodes.length():
-    match ms.hir_nodes.get(hp.hir.root):
+  if hp.hir.root >= 0 and hp.hir.root < ms.hir.nodes.length():
+    match ms.hir.nodes.get(hp.hir.root):
       HirNode::HirProgram(module_list_lp):
-        let modules: Vector<i64> = read_hir_list(ms.hir_idx, module_list_lp)
+        let modules: Vector<i64> = read_hir_list(ms.hir.idx, module_list_lp)
         let mi: i64 = to_i64(0)
         while mi < modules.length():
-          match ms.hir_nodes.get(modules.get(mi)):
+          match ms.hir.nodes.get(modules.get(mi)):
             HirNode::HirModule(name_tok, decls_lp, module_id):
               let sf: SourceFile = program_file_of_module(hp, module_id)
-              let before: i64 = ms.diags.length()
-              let lowered: ModuleLowering = lower_module(ms, sf, read_hir_list(ms.hir_idx, decls_lp))
+              let before: i64 = ms.out.diags.length()
+              let lowered: ModuleLowering = lower_module(ms, sf, read_hir_list(ms.hir.idx, decls_lp))
               ms = lowered.ms
               module_nodes = module_nodes.push(lowered.module_node)
               let di: i64 = before
-              while di < ms.diags.length():
-                all_diags = all_diags.push(FileDiagnostic(sf.file_id, sf.path, ms.diags.get(di)))
+              while di < ms.out.diags.length():
+                all_diags = all_diags.push(FileDiagnostic(sf.file_id, sf.path, ms.out.diags.get(di)))
                 di = di + to_i64(1)
           mi = mi + to_i64(1)
   let mod_fl: MirFlush = mir_flush_list(ms, module_nodes)
@@ -1445,7 +1452,7 @@ fn program_run_mir(p: Program): ProgramMir
     flat = flat.push(all_diags.get(fi).diag)
     fi = fi + to_i64(1)
   let out: Program = Program(hp.graph, hp.resolve, hp.typecheck, hp.hir, all_diags)
-  return ProgramMir(out, MirResult(root_r.ms.mir_nodes, root_r.ms.mir_idx, flat, root_r.mir))
+  return ProgramMir(out, MirResult(root_r.ms.out.nodes, root_r.ms.out.idx, flat, root_r.mir))
 
 // The module a single-source program lowers to: its MirProgram holds
 // exactly one.
@@ -1480,7 +1487,7 @@ fn lower_to_mir(src: string): MirResult
   return MirResult(r.mir_nodes, r.mir_idx, r.diags, mir_only_module(r))
 
 // Every reference a module's concrete functions make to a generic
-// function: until an instantiation names a concrete copy (Task 43) a
+// function: until an instantiation names a concrete copy a
 // template has no code, so a consumer that needs concrete MIR reports
 // each one rather than referring to a function it never emits.
 fn mir_template_refs(r: MirResult, symbols: Vector<Symbol>, module_node: i64): Vector<Diagnostic>
@@ -1515,14 +1522,14 @@ fn mir_template_refs(r: MirResult, symbols: Vector<Symbol>, module_node: i64): V
                     match r.mir_nodes.get(insts.get(ii)):
                       MirNode::MirFnRef(ref_sym, ref_ti):
                         if generic_syms.contains(i64_to_string(ref_sym)):
-                          out = out.push(make_error(Span(to_i64(0), to_i64(1)), "generic function '" + symbols.get(ref_sym).name + "' has no concrete code until an instantiation names it (monomorphization, Task 43)"))
+                          out = out.push(make_error(Span(to_i64(0), to_i64(1)), "generic function '" + symbols.get(ref_sym).name + "' has no concrete code until an instantiation names it (monomorphization)"))
                     ii = ii + to_i64(1)
               bi = bi + to_i64(1)
         fi = fi + to_i64(1)
   return out
 
 // =========================================================================
-// Section 67b: Monomorphization (Task 43)
+// Section 67b: Monomorphization
 // =========================================================================
 //
 // As the host's `monomorphize` (compiler/ir/mir/mir_monomorphize.cpp):
@@ -1530,10 +1537,9 @@ fn mir_template_refs(r: MirResult, symbols: Vector<Symbol>, module_node: i64): V
 // concrete copy of it — a specialization, keyed by the template and what
 // each parameter it is generic over stands for, cloned with every type
 // substituted, and itself scanned in turn until nothing new is made.
-// What a call decided is the checker's record on the call (Task 43
-// slice 1), composed through the specialization the call sits in; a
-// call MIR made itself (copy_out at a domain's exit) is decided from its
-// arguments.  Types are made by the checker's own machinery, continuing
+// What a call decided is the checker's record on the call, composed
+// through the specialization the call sits in.  A call MIR made itself
+// (copy_out at a domain's exit) is decided from its arguments.  Types are made by the checker's own machinery, continuing
 // from its registry (ProgramTyped).
 
 // The tables monomorphization reads and grows: the checker's state (its
@@ -1783,12 +1789,13 @@ fn mono_scan_function(m: Mono, wi: i64): Mono
     ii = ii + to_i64(1)
   return m
 
-// Each call of a function whose callee is a member access — a call
-// through a type parameter's bound, carried by the template (Task 42) —
-// names the method its now-concrete receiver answers the member with,
-// as seen from the function's module; the receiver becomes the first
-// argument (the host's fixup_method_calls).  What the method is generic
-// over, if anything, is decided from the arguments when it is scanned.
+// A template carries a call through a type parameter's bound with a
+// member access as its callee.  Each such call names the method its
+// now-concrete receiver answers the member with, as seen from the
+// function's module, and the receiver becomes the first argument (the
+// host's fixup_method_calls).  What the method is generic
+// over, if anything, is decided from the arguments when it is scanned:
+// the checker rejects a type argument written on a call through a bound.
 fn mono_fixup_bound_calls(m: Mono, fn_node: i64, module_pos: i64): Mono
   let module_node: i64 = m.source.modules.get(module_pos)
   let file_id: i64 = to_i64(-1)
@@ -2314,7 +2321,7 @@ fn mono_mentions_param(m: Mono, ti: i64): bool
   return mir_generic_search_in(m.tables.ts.types, m.tables.ts.type_info, ti, HashMap<i64>::new()).found
 
 // =========================================================================
-// Section 67c: copy_out expansion (Task 43)
+// Section 67c: copy_out expansion
 // =========================================================================
 //
 // The prelude's `copy_out<T>(x)` is the identity.  A call to it whose T
@@ -2375,7 +2382,7 @@ class MonoStep:
 // The first expandable copy_out call of the function not refused before,
 // expanded.
 fn mono_expand_one_copy_out(m: Mono, fn_node: i64, hooks: CopyHooks, refused: HashMap<i64>): MonoStep
-  let blocks: Vector<i64> = mono_fn_blocks(m, fn_node)
+  let blocks: Vector<i64> = mono_fn_parts(m, fn_node).blocks
   let bi: i64 = to_i64(0)
   while bi < blocks.length():
     let insts: Vector<i64> = mono_block_insts(m, blocks.get(bi))
@@ -2448,9 +2455,11 @@ fn mono_expand_copy_at(m: Mono, fn_node: i64, block: i64, call: i64, callee: i64
       return MonoStep(mono_expand_enum_copy(m, fn_node, block, call, callee, value, ti, hooks), call, true)
   return MonoStep(m, call, false)
 
-// Whether a class's `copy_out` is its copier: a method taking only
-// `self` and returning the class (the host's is_copier_shaped) — a
-// static `copy_out(value: C)` or one with other parameters is not.
+// Whether a class's `copy_out` is its copier: a method generic over
+// nothing of its own, taking only `self` and returning `self`'s exact
+// type (the host's is_copier_shaped).  A static `copy_out(value: C)`,
+// one with other parameters, and one returning another instantiation of
+// the class are not.
 fn mono_is_copier(m: Mono, method: i64, owner_ti: i64): bool
   let fn_ti: i64 = m.tables.ts.sym_types.get(method)
   if fn_ti < 0 or fn_ti >= m.tables.ts.types.length():
@@ -2462,7 +2471,11 @@ fn mono_is_copier(m: Mono, method: i64, owner_ti: i64): bool
       is_fn = true
   if is_fn == false or ft.builtin_id != to_i64(1) or ft.info_count != to_i64(1):
     return false
-  return dispatch_owner(m.tables.ts.types, m.tables.ts.type_info, ft.ret_type) == owner_ti
+  if stands_for_args(m.tables.ts, ft.pointee).length() > to_i64(0):
+    return false
+  if dispatch_owner(m.tables.ts.types, m.tables.ts.type_info, ft.ret_type) != owner_ti:
+    return false
+  return ft.ret_type == m.tables.ts.type_info.get(ft.info_lp)
 
 // Whether a value of `ti` is, or holds, a generator: by value, or in the
 // storage a pointer field of an aggregate addresses (the host's
@@ -2703,10 +2716,8 @@ fn mono_fn_parts(m: Mono, fn_node: i64): MonoFnParts
   match m.tables.nodes.get(fn_node):
     MirNode::MirFunction(sym, rt, pc, local_list_lp, lc, block_list_lp, bc, ie):
       return MonoFnParts(read_hir_list(m.tables.idx, local_list_lp), read_hir_list(m.tables.idx, block_list_lp))
+  panic("monomorphization: node " + i64_to_string(fn_node) + " is not a MirFunction")
   return MonoFnParts(Vector<i64>::new(), Vector<i64>::new())
-
-fn mono_fn_blocks(m: Mono, fn_node: i64): Vector<i64>
-  return mono_fn_parts(m, fn_node).blocks
 
 fn mono_set_fn_parts(m: Mono, fn_node: i64, locals: Vector<i64>, blocks: Vector<i64>): Mono
   match m.tables.nodes.get(fn_node):

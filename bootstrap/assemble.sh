@@ -112,7 +112,7 @@ assemble bootstrap/llvm/llvm.gen.dao \
   bootstrap/llvm/tests.dao
 
 # The bootstrap compiler itself: every library fragment and the driver
-# that runs the whole pipeline over a manifest's files (Task 45).
+# that runs the whole pipeline over a manifest's files.
 assemble bootstrap/driver/driver.gen.dao \
   "$RESOLVER" \
   "$TYPECHECK" \

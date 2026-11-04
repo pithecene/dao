@@ -25,17 +25,17 @@ function cannot afford.
   with payloads `{ i32, [N x iK] }` sized and aligned by the target
   data layout; a generator `%dao.generator = { ptr, ptr }`.
 - Functions (`declare_functions`): declared before any body; a string
-  parameter passed by pointer; an extern's struct parameters and
-  returns coerced to the C ABI (`llvm_abi.cpp`); runtime hooks declared
+  parameter passed by pointer; an extern with a class or enum parameter
+  or return refused with a diagnostic (§4); runtime hooks declared
   with their canonical signatures (`llvm_runtime_hooks.cpp`).
 - Values: string constants as private globals and a `%dao.string`
   aggregate; loads and stores through places (field GEPs, a pointer's
   deref); construction, enum construction, discriminant and payload;
-  pointer operations; the intrinsics `size_of$T` / `align_of$T` /
-  `ptr_offset` inlined.
+  pointer operations, `offset` among them; the intrinsics `size_of$T` /
+  `align_of$T` inlined.
 - Operators: signed arithmetic checked (overflow intrinsics, a trap on
   overflow), unsigned, float; comparisons; `==` on strings through
-  `__dao_eq_string`.
+  `__dao_eq_string`, `+` through `__dao_str_concat`.
 - Regions: `resource memory` enter / exit through the runtime's domain
   hooks; `mode` enter / exit.
 - Generators: a frame per generator function, init and resume
@@ -54,9 +54,10 @@ function cannot afford.
    deref paths, construction, enum operations, pointer operations,
    intrinsics.
 4. **Operators** — checked signed arithmetic, unsigned and float
-   operations, comparisons, string equality.
-5. **Calls and the C boundary** — string parameters by pointer, extern
-   struct coercion, runtime hooks with their canonical signatures.
+   operations, comparisons, string equality and concatenation.
+5. **Calls and the C boundary:** string parameters by pointer, the
+   refusal of a by-value class or enum at an extern, runtime hooks with
+   their canonical signatures.
 6. **Regions** — resource and mode enter / exit.
 7. **Generators** — frames, init / resume, iteration.
 8. **The programs run** — each compiler program, compiled by the
@@ -64,12 +65,17 @@ function cannot afford.
 
 Each slice: the host's IR for a probe (`daoc build` / `daoc llvm`) is the
 parity target for what the IR means, `validate_ir.sh` proves LLVM
-accepts every emitted module and that it runs, one review pass checked
-against the host.
+accepts every emitted module and runs each one with a recorded exit
+code, one review pass checked against the host.  A program's suite
+counts as passing on its reported result and its exit status, never on
+its exit status alone: most suites exit 0 after a failed test.
 
 ## 4. Non-goals
 
-The Stage-2 / Stage-3 crossing (Task 45).
+The Stage-2 / Stage-3 crossing (Task 45).  The C ABI coercion of a class
+or enum passed to or returned from an extern by value (`llvm_abi.cpp`):
+the corpus has no such extern, and the backend refuses one rather than
+miscompile it.
 
 ## 5. Acceptance
 
@@ -89,7 +95,5 @@ every variant, which the backend had rejected as a function falling off
 its end (7), and review brought the host's names — `module::name`, the
 entry's `main`, a shared type name qualified by its module — extern
 signature agreement, construction by `insertvalue`, and the types a
-pointer or a yield reaches (8).  An extern that passes a class or enum
-by value is refused rather than coerced to the C ABI; the corpus has
-none.  Every compiler program, compiled by the bootstrap, links and
+pointer or a yield reaches (8).  Every compiler program, compiled by the bootstrap, links and
 passes its suite.

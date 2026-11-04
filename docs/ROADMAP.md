@@ -29,9 +29,15 @@ participating in its own development.  That gives two named targets:
 
 and a mechanical definition of "bootstrapped":
 
-- Stage 1: the C++ `daoc` compiles the multi-file Dao compiler sources
+- Stage 1: the C++ `daoc` compiles the Dao compiler sources
 - Stage 2: that Dao-built compiler compiles the same sources
 - Stage 3: the Stage-2 compiler does it again
+
+The sources are the compiler assembled into one file
+(`bootstrap/driver/driver.gen.dao`), so the crossing does not exercise
+self-hosted imports, module identity or entry selection across the
+compiler's own files.  Order 6 still owes that: the same crossing over
+the sources as real modules.
 
 with every bootstrap semantic suite passing under Stage 2, native
 compilation succeeding at each generation, deterministic outputs where
@@ -46,8 +52,8 @@ equivalence.
 | 3 | Bootstrap closure audit | exact list of language features and stdlib instantiations the compiler corpus needs, per pipeline stage |
 | 4 | Tier B core: methods + generics + monomorphization | `Vector<T>`, `HashMap<T>`, compiler methods and generic calls survive HIR → MIR → LLVM |
 | 5 | Compiler-self execution surface | pointers, `mode unsafe`, intrinsics/runtime hooks, plus whichever enum/control-flow pieces the audit proves necessary |
-| 6 | Task 32 + Task 33 convergence | bootstrap sources are real modules; the bootstrap compiler obeys the host's module/prelude/entry rules |
-| 7 | Stage-2 / Stage-3 bootstrap harness | host builds A → A builds B → B builds C; tests and outputs reach fixed-point parity |
+| 6 | Task 32 + Task 33 convergence | bootstrap sources are real modules; the bootstrap compiler obeys the host's module/prelude/entry rules; the crossing holds over them |
+| 7 | Stage-2 / Stage-3 bootstrap harness — **ran before order 6 over the assembled source** | host builds A → A builds B → B builds C; tests and outputs reach fixed-point parity |
 | 8 | Remaining Tier B parity | features that were not bootstrap blockers |
 
 Order 0 is deliberately narrow: harden the compiler ↔ tooling seam

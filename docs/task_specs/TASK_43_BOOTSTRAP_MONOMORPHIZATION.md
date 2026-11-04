@@ -64,7 +64,8 @@ program (as `program_lower_hir` publishes the HIR arena).
    program's concrete functions: a reference to a template, with its
    call's substitution composed with the enclosing specialization's,
    names the specialization keyed by (template, arguments), cloned with
-   every type index substituted, named `name$…`; the concreteness
+   every type index substituted, named `name$…`, and placed in its
+   template's module, whose tokens its body indexes; the concreteness
    invariant replaces the backend's template-reference check.
 3. **Methods of generic classes and static factories** — the receiver's
    instantiation and the type written on the callee decide the class's
