@@ -893,20 +893,34 @@ accepted), which the bootstrap does not follow.
 
 ### Task 42 — Bootstrap Program MIR
 
-Status: **in progress** — `docs/task_specs/TASK_42_BOOTSTRAP_PROGRAM_MIR.md`.
+Status: **complete** — `docs/task_specs/TASK_42_BOOTSTRAP_PROGRAM_MIR.md`.
 Authorized after Task 41.
 
 **Objective**: bring the compiler corpus, with the prelude, through a
-program-level HIR → MIR pipeline with the host's HIR and MIR shape —
-`match` as discriminant tests and payload bindings, construction,
-stores to places, `break`, `mode` / `resource` regions — one measured
-slice at a time; generic bodies lowered to templates kept out of the
-module, as the host keeps them.
+program-level HIR → MIR pipeline with the host's HIR and MIR shape, one
+measured slice at a time; generic bodies lowered to templates kept out
+of the module, as the host keeps them.
 
-Slice 1 is the program MIR driver: the HIR pass keeps its arena,
-`program_run_mir` lowers every module with its own tokens and source,
-and the audit's `mir` column is measured through it with the prelude.  Monomorphization is Task 43, program-level LLVM Task 44, the
-Stage-2 crossing Task 45.
+**Outcome** (`docs/bootstrap_closure.md`): every compiler program and
+every prelude file reads zero diagnostics through lex, parse, resolve,
+typecheck, HIR and MIR, MIR measured through the program pipeline with
+the prelude (the `llvm` program: 4,432 single-file → 0).  Delivered in
+slices, each checked against `daoc hir` / `daoc mir`:
+
+- 1 the whole program lowers to MIR (the HIR pass keeps its arena;
+  per-module tokens; generic functions as templates, a call through a
+  bound carried by its template, the backend failing concrete code that
+  calls a template).
+- 2 `match` as discriminant tests and payload bindings; 3 construction
+  (`Construct` / `EnumConstruct`); 4 stores to places, `break`; 5 `mode`
+  and `resource` regions with escaping bindings copied out through the
+  prelude's `copy_out`; 6 generators (`yield`, `for` over a generator).
+- 7 a `let` binds its own module's symbol (HIR had matched declaration
+  nodes across modules); 8 pointer operations (`HirPtrOp`, deref
+  places).
+
+**Handed on**: monomorphization (Task 43), program-level LLVM (Task 44),
+the Stage-2 crossing (Task 45).
 
 ### Task 14 — Numeric Type Expansion
 

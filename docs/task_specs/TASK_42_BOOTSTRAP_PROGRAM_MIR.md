@@ -1,6 +1,6 @@
 # Task 42 — Bootstrap Program MIR
 
-Status: implementation spec
+Status: complete (see §9)
 Phase: Tier B-Bootstrap, authorized after Task 41
 Scope: bring the real compiler corpus, with the prelude, through a
 program-level HIR → MIR pipeline whose HIR and MIR have the host's
@@ -172,3 +172,15 @@ The bootstrap lowers the whole program, prelude and all, to MIR with
 the host's HIR and MIR shape — match, construction, places, regions —
 so the compiler's own monomorphic code reaches MIR meaning what the
 host's does, and what remains is instantiation.
+
+## 9. Delivered
+
+Eight slices, each measured by the audit: the program MIR driver (1);
+`match` (2), construction (3), places and `break` (4), regions (5) and
+generators (6) with the host's shape; a `let` bound to its own module's
+symbol (7), found by the audit's last compiler-program family; pointer
+operations (8), the prelude's.  Escape analysis for `resource memory`
+blocks lives in MIR (the host records it in its checker): it needs only
+which bindings existed at the block's entry, which MIR knows.  The
+closure report reads zero MIR diagnostics on every compiler program and
+prelude file.
