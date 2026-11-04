@@ -1,14 +1,8 @@
-# Non-Dao Inventory
+# Non-Dao inventory
 
-Status: binding
-Scope: every program and build input in this repository not written in Dao
-
-## Rule
-
-Everything in this project is eventually written in Dao.  Code in any other
-language is a stopgap, and this table records each one and what must exist
-in Dao before it can go.  A change that adds non-Dao code adds or updates its
-row in the same change.
+This note is explanatory.  The rule it serves is in `AGENTS.md`, under Language
+Discipline.  It lists every program and build input in this repository not
+written in Dao, and what must exist in Dao before each can go.
 
 The compiler chain is the one exception, and its tiers all stay permanently,
 so a machine with no Dao on it can always rebuild the language:

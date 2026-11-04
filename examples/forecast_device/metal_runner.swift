@@ -1,4 +1,4 @@
-// STOPGAP: this file is not Dao, and docs/NON_DAO_INVENTORY.md records it.
+// STOPGAP: this file is not Dao, and docs/non_dao_inventory.md records it.
 // It goes when Dao can lower a kernel and drive a device itself.
 //
 // This runner executes the plans examples/forecast_plans.dao prints and

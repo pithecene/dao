@@ -68,7 +68,7 @@ Agents must:
 - write new code in Dao whenever Dao can express it
 - raise any other language before opening the pull request, and name what must
   exist in Dao to replace it
-- add or update its row in `docs/NON_DAO_INVENTORY.md` in the same change
+- add or update its row in `docs/non_dao_inventory.md` in the same change
 
 ## Repository Discipline
 

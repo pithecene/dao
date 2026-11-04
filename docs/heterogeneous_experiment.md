@@ -128,7 +128,7 @@ distributed retries and scheduling stay out of scope.
 ## The runner is a stopgap
 
 The Swift runner and its Metal kernels are not Dao, and
-`docs/NON_DAO_INVENTORY.md` records them.  They exist because Dao cannot yet
+`docs/non_dao_inventory.md` records them.  They exist because Dao cannot yet
 lower a kernel or drive a device, which is the same capability the next
 experiment tests.
 

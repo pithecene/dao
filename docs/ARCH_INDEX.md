@@ -30,7 +30,7 @@ Conan profiles and their lockfiles (`clang-21-debug` for Linux x86-64,
 Contracts and explanatory material.
 
 - `ARCH_INDEX.md` — this file
-- `NON_DAO_INVENTORY.md` — binding record of every stopgap not written in Dao
+- `non_dao_inventory.md` — every stopgap not written in Dao, and what replaces it
 - `contracts/` — normative contracts for structure, syntax, the module system, execution contexts, compiler architecture, bootstrap/interop posture, tooling boundaries, runtime ABI, numeric semantics, and C ABI interop, with ADRs for `enum class` and the raw pointer surface
 - `bootstrap_closure_split.md` — measurement separating compiler-implementation closure from bootstrap test-harness closure
 - `ROADMAP.md` — staged implementation plan from frontend skeleton to self-hosting, tooling maturity, and GPU expansion
