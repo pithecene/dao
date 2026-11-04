@@ -444,6 +444,9 @@ fn main(): i32
 
   print("")
   print("=== records ===")
+  // The count lets the runner tell a complete stream from a damaged one.
+  let record_count: i64 = straightforward_plan().steps.length() + proposed_plan().steps.length() + audited_shared_plan().steps.length()
+  print("records\t" + i64_to_string(record_count))
   print_records(straightforward_plan())
   print_records(proposed_plan())
   print_records(audited_shared_plan())

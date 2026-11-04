@@ -33,11 +33,13 @@ let windDomain: ClosedRange<Int32> = 0...1000
 enum RunError: Error, CustomStringConvertible {
   case outOfDomain(Int32)
   case emptyBatch
+  case noDevice
   case malformed(String)
   var description: String {
     switch self {
     case .outOfDomain(let wind): return "wind \(wind) is outside \(windDomain)"
     case .emptyBatch: return "an empty batch has nothing to run"
+    case .noDevice: return "no usable Metal device"
     case .malformed(let what): return "malformed plan: \(what)"
     }
   }
@@ -92,9 +94,13 @@ func checkShape(_ step: Step) throws {
 func readPlans() throws -> (order: [String], steps: [String: [Step]]) {
   var order: [String] = []
   var steps: [String: [Step]] = [:]
+  var announced: Int?
+  var seen = 0
   while let line = readLine() {
     let fields = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+    if fields.count == 2 && fields[0] == "records" { announced = Int(fields[1]) }
     guard fields.count >= 3, fields[0] == "record" else { continue }
+    seen += 1
     if steps[fields[1]] == nil {
       order.append(fields[1])
       steps[fields[1]] = []
@@ -102,6 +108,11 @@ func readPlans() throws -> (order: [String], steps: [String: [Step]]) {
     let step = Step(op: fields[2], args: Array(fields[3...]))
     try checkShape(step)
     steps[fields[1]]!.append(step)
+  }
+  // Standard input also carries the program's report, so only the announced
+  // count can show that a record was lost or mangled.
+  guard announced == seen else {
+    throw RunError.malformed("\(seen) records, announced \(announced.map(String.init) ?? "none")")
   }
   return (order, steps)
 }
@@ -112,8 +123,11 @@ final class Gpu {
   let pipelines: [String: MTLComputePipelineState]
 
   init() throws {
-    device = MTLCreateSystemDefaultDevice()!
-    queue = device.makeCommandQueue()!
+    guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue() else {
+      throw RunError.noDevice
+    }
+    self.device = device
+    self.queue = queue
     let library = try device.makeLibrary(source: kernelSource, options: nil)
     var made: [String: MTLComputePipelineState] = [:]
     for name in kernelInputs.keys {
@@ -300,8 +314,10 @@ func median(_ values: [Double]) -> Double { values.sorted()[values.count / 2] }
 
 let planOrder: [String]
 let plans: [String: [Step]]
+let gpu: Gpu
 do {
   (planOrder, plans) = try readPlans()
+  gpu = try Gpu()
 } catch {
   print("\(error)")
   exit(2)
@@ -312,7 +328,6 @@ for required in ["straightforward", "proposed", "audited_shared"] where plans[re
   print("no \(required) plan on standard input: pipe examples/forecast_plans into this runner")
   exit(2)
 }
-let gpu = try Gpu()
 print("device\t\(gpu.device.name)\tunified_memory=\(gpu.device.hasUnifiedMemory)\tbackend=Metal")
 print("plans\t\(planOrder.joined(separator: " "))")
 

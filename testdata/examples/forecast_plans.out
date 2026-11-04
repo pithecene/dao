@@ -54,6 +54,7 @@ other archive: rejected: archive 1 is not 2
 other cutoff: rejected: cutoff 9:00 is not 9:10
 
 === records ===
+records	25
 record	straightforward	read	wind
 record	straightforward	upload	wind	wind_a
 record	straightforward	dispatch	score_v1	wind_a		score

@@ -2915,6 +2915,42 @@ File
           Identifier print
         Args
           StringLiteral "=== records ==="
+    LetStatement record_count: i64
+      BinaryExpr +
+        BinaryExpr +
+          CallExpr
+            Callee
+              FieldExpr .length
+                FieldExpr .steps
+                  CallExpr
+                    Callee
+                      Identifier straightforward_plan
+          CallExpr
+            Callee
+              FieldExpr .length
+                FieldExpr .steps
+                  CallExpr
+                    Callee
+                      Identifier proposed_plan
+        CallExpr
+          Callee
+            FieldExpr .length
+              FieldExpr .steps
+                CallExpr
+                  Callee
+                    Identifier audited_shared_plan
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            StringLiteral "records\t"
+            CallExpr
+              Callee
+                Identifier i64_to_string
+              Args
+                Identifier record_count
     ExpressionStatement
       CallExpr
         Callee
