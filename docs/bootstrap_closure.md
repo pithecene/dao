@@ -10,41 +10,41 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 109708 |
-| `CallExpr` | 38056 |
-| `Callee` | 38056 |
-| `Args` | 33569 |
-| `FieldExpr` | 28868 |
-| `BinaryExpr` | 17735 |
-| `LetStatement` | 14581 |
-| `IntLiteral` | 12805 |
-| `Value` | 11415 |
-| `Target` | 11415 |
-| `Assignment` | 11415 |
-| `Condition` | 9999 |
-| `ReturnStatement` | 8650 |
-| `Then` | 8213 |
-| `IfStatement` | 8213 |
-| `StringLiteral` | 7850 |
-| `QualifiedName` | 7684 |
-| `Param` | 6430 |
-| `BoolLiteral` | 3733 |
-| `Pattern` | 3691 |
-| `Arm` | 3691 |
-| `ReturnType` | 2700 |
-| `FunctionDecl` | 2700 |
-| `WhileStatement` | 1786 |
-| `UnaryExpr` | 1674 |
-| `Field` | 1565 |
-| `Else` | 1545 |
-| `TypeArgs` | 1518 |
-| `Variant` | 1268 |
-| `Scrutinee` | 1132 |
-| `MatchStatement` | 1132 |
-| `ExpressionStatement` | 791 |
-| `ClassDecl` | 423 |
+| `Identifier` | 112176 |
+| `CallExpr` | 39157 |
+| `Callee` | 39157 |
+| `Args` | 34575 |
+| `FieldExpr` | 29613 |
+| `BinaryExpr` | 18237 |
+| `LetStatement` | 14766 |
+| `IntLiteral` | 13072 |
+| `Value` | 11723 |
+| `Target` | 11723 |
+| `Assignment` | 11723 |
+| `Condition` | 10126 |
+| `ReturnStatement` | 8780 |
+| `Then` | 8324 |
+| `IfStatement` | 8324 |
+| `StringLiteral` | 8319 |
+| `QualifiedName` | 7824 |
+| `Param` | 6529 |
+| `Pattern` | 3753 |
+| `Arm` | 3753 |
+| `BoolLiteral` | 3747 |
+| `ReturnType` | 2735 |
+| `FunctionDecl` | 2735 |
+| `WhileStatement` | 1802 |
+| `UnaryExpr` | 1713 |
+| `Field` | 1598 |
+| `Else` | 1561 |
+| `TypeArgs` | 1558 |
+| `Variant` | 1272 |
+| `Scrutinee` | 1157 |
+| `MatchStatement` | 1157 |
+| `ExpressionStatement` | 820 |
+| `ClassDecl` | 432 |
 | `BreakStatement` | 64 |
-| `ResourceBlock` | 41 |
+| `ResourceBlock` | 48 |
 | `EnumDecl` | 31 |
 | `ExprBody` | 27 |
 | `EnumClassDecl` | 14 |
@@ -59,15 +59,15 @@ bootstrap must compile for itself.
 
 | Function | Instantiations |
 |---|---|
-| `core::vector::Vector.refreshed` | 25 |
-| `core::vector::Vector.push` | 25 |
-| `core::vector::Vector.new` | 25 |
+| `core::vector::Vector.refreshed` | 26 |
+| `core::vector::Vector.push` | 26 |
+| `core::vector::Vector.new` | 26 |
+| `core::vector::Vector.get` | 26 |
+| `core::vector::vec_log_values_new` | 26 |
 | `core::vector::Vector.length` | 25 |
-| `core::vector::Vector.get` | 25 |
-| `core::vector::vec_log_values_new` | 25 |
 | `core::vector::Vector.copy_out` | 21 |
-| `core::vector::Vector.set` | 8 |
-| `core::vector::Vector.log_overwrite` | 8 |
+| `core::vector::Vector.set` | 10 |
+| `core::vector::Vector.log_overwrite` | 10 |
 | `core::range::range` | 5 |
 | `core::builtins::copy_out` | 5 |
 | `core::vector::Vector.snapshot` | 1 |
@@ -210,8 +210,8 @@ bootstrap must compile for itself.
 | `core::convert::f32_to_i64` | 1 |
 | `core::convert::f32_to_i32` | 1 |
 | `core::convert::f32_to_f64` | 1 |
-| `size_of` (intrinsic; inlined by the host) | 51 |
-| `align_of` (intrinsic; inlined by the host) | 51 |
+| `size_of` (intrinsic; inlined by the host) | 53 |
+| `align_of` (intrinsic; inlined by the host) | 53 |
 
 The intrinsic family is counted from the MIR (distinct specializations
 of each), since the host lowers every specialization inline and emits no
@@ -231,16 +231,16 @@ one self-compilation attempt through that stage.
 A stage the program never reached reads as —; the last column says where
 it died and why.
 
-| Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | mono | llvm | First blocking diagnostic |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 74 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2360 | llvm: unknown name 'Vector' |
-| parser | 76 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2612 | llvm: unknown name 'Vector' |
-| graph | 68 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2451 | llvm: unknown name 'Vector' |
-| resolver | 170 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 4768 | llvm: unknown name 'Vector' |
-| typecheck | 988 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10100 | llvm: unknown name 'Vector' |
-| hir | 1063 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 11559 | llvm: unknown name 'Vector' |
-| mir | 1504 | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 16025 | llvm: unknown name 'Vector' |
-| llvm | 1531 | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 17207 | llvm: unknown name 'Vector' |
+| Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | mono | llvm | runs | First blocking diagnostic |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| lexer | 114 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 105 / 105 passed | — |
+| parser | 120 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 88 / 88 passed | — |
+| graph | 106 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 12 / 12 passed | — |
+| resolver | 175 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 64 / 64 passed | — |
+| typecheck | 884 | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 343 / 343 passed | — |
+| hir | 1150 | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 46 / 46 tests passed | — |
+| mir | 1625 | 4 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 51 / 51 tests passed | — |
+| llvm | 1994 | 5 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 46 / 46 tests passed | — |
 
 ### What each stage rejects
 
@@ -248,81 +248,17 @@ The most frequent diagnostic messages per program and stage (the probe
 reports at most 50 per stage), so the construct to implement next is
 named, not inferred.
 
-**lexer**
-
-- `llvm` ×22: unknown name 'char_at'
-- `llvm` ×10: unknown name 'Vector'
-- `llvm` ×6: unknown name 'Span'
-- `llvm` ×6: unknown name 'make_error'
-- `llvm` ×3: unknown name 'to_i64'
-
-**parser**
-
-- `llvm` ×22: unknown name 'char_at'
-- `llvm` ×10: unknown name 'Vector'
-- `llvm` ×6: unknown name 'Span'
-- `llvm` ×6: unknown name 'make_error'
-- `llvm` ×3: unknown name 'to_i64'
-
-**graph**
-
-- `llvm` ×22: unknown name 'char_at'
-- `llvm` ×10: unknown name 'Vector'
-- `llvm` ×6: unknown name 'Span'
-- `llvm` ×6: unknown name 'make_error'
-- `llvm` ×3: unknown name 'to_i64'
-
-**resolver**
-
-- `llvm` ×22: unknown name 'char_at'
-- `llvm` ×10: unknown name 'Vector'
-- `llvm` ×6: unknown name 'Span'
-- `llvm` ×6: unknown name 'make_error'
-- `llvm` ×3: unknown name 'to_i64'
-
-**typecheck**
-
-- `llvm` ×22: unknown name 'char_at'
-- `llvm` ×10: unknown name 'Vector'
-- `llvm` ×6: unknown name 'Span'
-- `llvm` ×6: unknown name 'make_error'
-- `llvm` ×3: unknown name 'to_i64'
-
-**hir**
-
-- `llvm` ×22: unknown name 'char_at'
-- `llvm` ×10: unknown name 'Vector'
-- `llvm` ×6: unknown name 'Span'
-- `llvm` ×6: unknown name 'make_error'
-- `llvm` ×3: unknown name 'to_i64'
-
-**mir**
-
-- `llvm` ×22: unknown name 'char_at'
-- `llvm` ×10: unknown name 'Vector'
-- `llvm` ×6: unknown name 'Span'
-- `llvm` ×6: unknown name 'make_error'
-- `llvm` ×3: unknown name 'to_i64'
-
-**llvm**
-
-- `llvm` ×22: unknown name 'char_at'
-- `llvm` ×10: unknown name 'Vector'
-- `llvm` ×6: unknown name 'Span'
-- `llvm` ×6: unknown name 'make_error'
-- `llvm` ×3: unknown name 'to_i64'
-
 ### The prelude through the bootstrap
 
-The `resolve`, `typecheck`, `hir` and `mir` columns above are measured
+Every column above is measured
 with the prelude in the program -- every module under `stdlib/core/` and
 `stdlib/io/` (CONTRACT_MODULE_SYSTEM.md §7), loaded as declarations,
 whatever the bootstrap parser keeps of each file; the `hir` and `mir`
 columns count what program-level lowering (`program_run_hir`,
-`program_run_mir`) adds for the compiler program's own file.  The `llvm`
-column runs the single-source adapter without it (the bootstrap has no
-program-level LLVM driver) and does not choose the frontier until the
-program pipeline reaches it.
+`program_run_mir`) adds for the compiler program's own file; `mono`
+and `llvm` what monomorphization and the backend add over the whole
+program; `runs` is the program as the bootstrap compiled it, linked with
+the runtime and run: its suite's result.
 
 Per prelude file, the prelude group alone through the pipeline:
 diagnostics per stage, and the first.
@@ -372,8 +308,8 @@ next.  Sites per program against the parse column above:
 | resolver | 126 | 0 | 0 |
 | typecheck | 276 | 0 | 0 |
 | hir | 249 | 4 | 0 |
-| mir | 368 | 8 | 0 |
-| llvm | 383 | 29 | 0 |
+| mir | 369 | 8 | 0 |
+| llvm | 423 | 36 | 0 |
 
 ### Closure surfaces: compiler implementation vs test harness
 
@@ -389,25 +325,25 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 
 | Prelude function | Compiler | Harness |
 |---|---:|---:|
-| `to_i64` | 1149 | 161 |
-| `print` | 0 | 768 |
-| `new` | 375 | 122 |
-| `i64_to_string` | 138 | 271 |
-| `substring` | 35 | 11 |
-| `length` | 16 | 11 |
+| `to_i64` | 1346 | 160 |
+| `print` | 0 | 796 |
+| `new` | 408 | 128 |
+| `i64_to_string` | 172 | 270 |
+| `substring` | 39 | 11 |
+| `length` | 20 | 11 |
+| `index_of` | 6 | 21 |
 | `make_error` | 23 | 0 |
-| `char_at` | 23 | 0 |
-| `index_of` | 1 | 22 |
+| `char_at` | 22 | 0 |
 | `read_file` | 0 | 19 |
 | `file_exists` | 0 | 16 |
 | `i32_to_string` | 0 | 15 |
-| `eprint` | 0 | 13 |
-| `bool_to_string` | 1 | 6 |
-| `starts_with` | 3 | 0 |
+| `eprint` | 0 | 14 |
+| `bool_to_string` | 1 | 10 |
+| `starts_with` | 4 | 0 |
 | `write_file` | 1 | 2 |
 | `make_warning` | 0 | 1 |
 | `str_compare` | 1 | 0 |
-| **Total** | **1766** | **1438** |
+| **Total** | **2043** | **1474** |
 
 ## 4. Reading the matrix
 
@@ -418,5 +354,5 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 - A stage with zero diagnostics on every program is closed for the corpus.
 - The first blocking diagnostic names the construct to implement next for
   that stage; rerun the audit after each slice.
-- The `llvm` column is measured without the prelude (see the prelude
-  section) and is not frontier evidence yet.
+- `runs` reaching every suite's full pass count is the Stage-2
+  precondition: the bootstrap compiles the compiler's programs correctly.
