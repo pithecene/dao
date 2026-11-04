@@ -72,7 +72,7 @@ struct Report {
   var seconds = 0.0
 }
 
-let kernelNames = ["score_v1", "high_wind", "adjust"]
+let kernelInputs = ["score_v1": 1, "high_wind": 1, "adjust": 2]
 let stepArguments = ["read": 1, "upload": 2, "dispatch": 4, "readback": 2, "host_adjust": 3, "observe": 2, "reply": 1]
 
 // A record the executor could not run stops here, before anything indexes it.
@@ -80,8 +80,12 @@ func checkShape(_ step: Step) throws {
   guard stepArguments[step.op] == step.args.count else {
     throw RunError.malformed("\(step.op) with \(step.args.count) arguments")
   }
-  if step.op == "dispatch" && !kernelNames.contains(step.args[0]) {
+  guard step.op == "dispatch" else { return }
+  guard let inputs = kernelInputs[step.args[0]] else {
     throw RunError.malformed("unknown kernel \(step.args[0])")
+  }
+  guard (step.args[2].isEmpty ? 1 : 2) == inputs else {
+    throw RunError.malformed("\(step.args[0]) takes \(inputs) input(s)")
   }
 }
 
@@ -112,7 +116,7 @@ final class Gpu {
     queue = device.makeCommandQueue()!
     let library = try device.makeLibrary(source: kernelSource, options: nil)
     var made: [String: MTLComputePipelineState] = [:]
-    for name in kernelNames {
+    for name in kernelInputs.keys {
       made[name] = try device.makeComputePipelineState(function: library.makeFunction(name: name)!)
     }
     pipelines = made
@@ -294,7 +298,14 @@ func milliseconds(_ seconds: Double) -> String { String(format: "%.3f", seconds 
 
 func median(_ values: [Double]) -> Double { values.sorted()[values.count / 2] }
 
-let (planOrder, plans) = try readPlans()
+let planOrder: [String]
+let plans: [String: [Step]]
+do {
+  (planOrder, plans) = try readPlans()
+} catch {
+  print("\(error)")
+  exit(2)
+}
 // Without its plans the run would measure only the handwritten code and
 // could still report success.
 for required in ["straightforward", "proposed", "audited_shared"] where plans[required] == nil {
