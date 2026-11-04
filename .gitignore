@@ -34,6 +34,7 @@ examples/**
 !examples/**/*.md
 !examples/**/*.c
 !examples/**/*.h
+!examples/**/*.swift
 
 # Bootstrap: ignore assembled outputs and compiled binaries
 bootstrap/**/*.gen.dao
