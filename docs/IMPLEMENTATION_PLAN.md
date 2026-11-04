@@ -981,13 +981,23 @@ passed to externs by value (refused; the corpus passes none).
 
 ### Task 45 — The Bootstrap Crossing
 
-Status: **in progress** — `docs/task_specs/TASK_45_BOOTSTRAP_STAGE2.md`.
+Status: **complete** — `docs/task_specs/TASK_45_BOOTSTRAP_STAGE2.md`.
 Authorized after Task 44.
 
 **Objective**: a bootstrap compiler that compiles itself: the host
 builds it (stage 1), it compiles its own source (stage 2), and that
 compiler does again (stage 3); stage 2 and stage 3 emit the same module,
 and every bootstrap suite compiled by stage 2 passes.
+
+**Outcome** (`bootstrap/stage2.sh`): the fixed point holds, with stage 2
+and stage 3 emitting byte-identical modules.  Every bootstrap suite
+compiled by the stage-2 compiler passes, and the IR its llvm suite
+writes validates.  The bootstrap compiler, built by itself, rebuilds
+itself.
+
+**Handed on**: not chased here: the extern C ABI coercion of classes
+passed by value; a command line for the runtime; the bootstrap's own
+optimization.
 
 ### Task 14 — Numeric Type Expansion
 
