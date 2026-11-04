@@ -950,6 +950,17 @@ on all eight.  Delivered in slices, each checked against `daoc mir`:
 (`unknown name 'Vector'` on every program), is program-level LLVM
 (Task 44).
 
+### Task 44 — Bootstrap Program LLVM
+
+Status: **in progress** — `docs/task_specs/TASK_44_BOOTSTRAP_PROGRAM_LLVM.md`.
+Authorized after Task 43.
+
+**Objective**: lower the concrete program — every module, the prelude
+included — to textual LLVM IR with the host backend's meaning, and link
+and run it: each compiler program, compiled by the bootstrap, passes its
+own suite, the audit measuring the `llvm` stage through the program
+pipeline and running what it emits.
+
 ### Task 14 — Numeric Type Expansion
 
 **Objective**: Implement the numeric semantics frozen in
