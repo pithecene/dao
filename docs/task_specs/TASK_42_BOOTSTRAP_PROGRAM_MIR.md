@@ -32,7 +32,8 @@ one file without the prelude, so every prelude name is `unknown name
    means.  The host (`daoc hir`) lowers:
    - `match` to a scrutinee `let` and an `if` chain over
      `EnumDiscriminant == <variant index>`, each binding a `let` of
-     `EnumPayload variant=i field=j` — the bootstrap lowers it to
+     `EnumPayload variant=i field=j`, while a fieldless enum compares
+     the value itself with the variant's tag — the bootstrap lowers it to
      `HirBinary(op = −1, scrutinee, <pattern as an expression>)`, no
      binding ever given its payload;
    - `P(1)` to `Construct P`, `Shape::Circle(r = 2)` to
@@ -67,7 +68,8 @@ slice.  In dependency order:
    the prelude, counting the compiler program's own file, as the `hir`
    column does (Task 41 slice 12).  This names the true MIR frontier.
 2. **`match` with the host's shape** — HIR discriminant tests and
-   payload bindings; MIR `enum_discriminant` / `enum_payload`.
+   payload bindings for an enum with payloads, direct tag comparison for
+   a fieldless one; MIR `enum_discriminant` / `enum_payload`.
 3. **Construction** — HIR `Construct` / `EnumConstruct`; MIR
    `construct` / `enum_construct`.
 4. **Places** — assignment to a field (and what else the corpus
@@ -136,8 +138,9 @@ against the host.
 MIR suite:
 
 - a two-module program (`app::util` defines `add`, `app::main` calls
-  it) lowers to one MIR module holding both functions; the call's
-  `fn_ref` names `add`'s symbol;
+  it) lowers to a `MirProgram` with one `MirModule` per source module,
+  since each function reads its own module's tokens; the call's `fn_ref`
+  names `add`'s symbol, and a template resolves across modules;
 - an integer literal in the second module lowers with its own module's
   lexeme (per-module tokens, not the first module's);
 - `fn id<T>(x: T): T -> x` lowers to a template, not a module

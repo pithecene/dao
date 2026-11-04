@@ -250,7 +250,8 @@ named, not inferred.
 
 ### The prelude through the bootstrap
 
-Every column above is measured
+The `lex` and `parse` columns read the compiler program's own file alone.
+Every later column is measured
 with the prelude in the program -- every module under `stdlib/core/` and
 `stdlib/io/` (CONTRACT_MODULE_SYSTEM.md §7), loaded as declarations,
 whatever the bootstrap parser keeps of each file; the `hir` and `mir`
