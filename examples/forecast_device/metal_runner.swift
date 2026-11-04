@@ -46,13 +46,17 @@ struct Step {
   let args: [String]
 }
 
-struct Report {
-  var eta: [Int32] = []
-  var observed: [String: [Int32]] = [:]
+struct Transfers {
   var uploads = 0
   var readbacks = 0
   var uploadBytes = 0
   var readbackBytes = 0
+}
+
+struct Report {
+  var eta: [Int32] = []
+  var observed: [String: [Int32]] = [:]
+  var transfers = Transfers()
   var dispatches = 0
   var waits = 0
   var seconds = 0.0
@@ -164,8 +168,8 @@ func execute(_ steps: [Step], winds: [Int32], gpu: Gpu) throws -> Report {
       let blit = commandBuffer().makeBlitCommandEncoder()!
       blit.copy(from: shared, sourceOffset: 0, to: privateBuffer(step.args[1]), destinationOffset: 0, size: bytes)
       blit.endEncoding()
-      report.uploads += 1
-      report.uploadBytes += bytes
+      report.transfers.uploads += 1
+      report.transfers.uploadBytes += bytes
     case "dispatch":
       let encoder = commandBuffer().makeComputeCommandEncoder()!
       var buffers = [privateBuffer(step.args[1])]
@@ -181,8 +185,8 @@ func execute(_ steps: [Step], winds: [Int32], gpu: Gpu) throws -> Report {
       blit.endEncoding()
       staging[step.args[1]] = shared
       pendingHost.append(step.args[1])
-      report.readbacks += 1
-      report.readbackBytes += bytes
+      report.transfers.readbacks += 1
+      report.transfers.readbackBytes += bytes
     case "host_adjust":
       let base = try hostValue(step.args[0])
       let flag = try hostValue(step.args[1])
@@ -240,10 +244,10 @@ func handwritten(winds: [Int32], gpu: Gpu) throws -> Report {
   commands.waitUntilCompleted()
   var report = Report()
   report.eta = contents(down, rows)
-  report.uploads = 1
-  report.readbacks = 1
-  report.uploadBytes = bytes
-  report.readbackBytes = bytes
+  report.transfers.uploads = 1
+  report.transfers.readbacks = 1
+  report.transfers.uploadBytes = bytes
+  report.transfers.readbackBytes = bytes
   report.dispatches = 3
   report.waits = 1
   report.seconds = Double(DispatchTime.now().uptimeNanoseconds - start) / 1e9
@@ -270,6 +274,12 @@ func milliseconds(_ seconds: Double) -> String { String(format: "%.3f", seconds 
 func median(_ values: [Double]) -> Double { values.sorted()[values.count / 2] }
 
 let (planOrder, plans) = readPlans()
+// Without its plans the run would measure only the handwritten code and
+// could still report success.
+for required in ["straightforward", "proposed", "audited_shared"] where plans[required] == nil {
+  print("no \(required) plan on standard input: pipe examples/forecast_plans into this runner")
+  exit(2)
+}
 let gpu = try Gpu()
 print("device\t\(gpu.device.name)\tunified_memory=\(gpu.device.hasUnifiedMemory)\tbackend=Metal")
 print("plans\t\(planOrder.joined(separator: " "))")
@@ -279,18 +289,16 @@ print("\n--- oracle, N = 2, winds [8, 12] ---")
 for name in planOrder {
   let run = try execute(plans[name]!, winds: [8, 12], gpu: gpu)
   check(run.eta == [76, 89], "\(name) returns \(run.eta)")
-  print("     uploads \(run.uploads) (\(run.uploadBytes) B), readbacks \(run.readbacks) (\(run.readbackBytes) B), dispatches \(run.dispatches), waits \(run.waits)")
+  print("     uploads \(run.transfers.uploads) (\(run.transfers.uploadBytes) B), readbacks \(run.transfers.readbacks) (\(run.transfers.readbackBytes) B), dispatches \(run.dispatches), waits \(run.waits)")
 }
 let glue = try handwritten(winds: [8, 12], gpu: gpu)
 check(glue.eta == [76, 89], "handwritten returns \(glue.eta)")
 
 // The observation the audited plan must keep, and when it arrives.
 print("\n--- observation ---")
-if let audited = plans["audited_shared"] {
-  let run = try execute(audited, winds: [8, 12], gpu: gpu)
-  check(run.observed["audit_score"] == [76, 84], "audit_score observed as \(run.observed["audit_score"] ?? [])")
-  check(run.waits == 2, "the callback forces a wait before the reply: \(run.waits) waits")
-}
+let audited = try execute(plans["audited_shared"]!, winds: [8, 12], gpu: gpu)
+check(audited.observed["audit_score"] == [76, 84], "audit_score observed as \(audited.observed["audit_score"] ?? [])")
+check(audited.waits == 2, "the callback forces a wait before the reply: \(audited.waits) waits")
 
 // Both request modes on the error path: no plan touches the device.
 print("\n--- error behavior ---")
@@ -337,8 +345,8 @@ for mode in modes {
   for name in planOrder + ["handwritten"] {
     let run = last[name]!
     print([mode.name, "\(mode.rows)", name, milliseconds(cold[name]!), milliseconds(median(warm[name]!)),
-           milliseconds(warm[name]!.min()!), "\(run.uploads)", "\(run.readbacks)",
-           "\(run.uploadBytes + run.readbackBytes)", "\(run.waits)"].joined(separator: "\t"))
+           milliseconds(warm[name]!.min()!), "\(run.transfers.uploads)", "\(run.transfers.readbacks)",
+           "\(run.transfers.uploadBytes + run.transfers.readbackBytes)", "\(run.waits)"].joined(separator: "\t"))
   }
 }
 
