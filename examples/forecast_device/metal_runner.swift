@@ -113,7 +113,7 @@ func readPlans() throws -> (order: [String], steps: [String: [Step]]) {
     steps[fields[1]]!.append(step)
   }
   // Standard input also carries the program's report, so only the announced
-  // count can show that a record was lost or mangled.
+  // count can show a lost or mangled record.
   guard announced == seen else {
     throw RunError.malformed("\(seen) records, announced \(announced.map(String.init) ?? "none")")
   }

@@ -553,15 +553,14 @@ fn is_prelude_intrinsic_name(name: string): bool
 // side tables with linear scan.  Functions are small; this is
 // fine for Tier A.
 
-// The module whose tokens are being read, and the program it belongs to:
+// The module the backend reads tokens from, and the program it belongs to:
 // every module's source and name, and what naming reads off them.
 class BsSource:
   toks: Vector<Token>
   src: string
   program: BsProgram
 
-// What a backend run reads and never changes, apart from `source`
-// following the module being lowered.
+// What a backend run reads and never changes, apart from `source` following the current module.
 class BsInput:
   mir_nodes: Vector<MirNode>
   mir_idx: Vector<i64>
@@ -1806,9 +1805,7 @@ class IterRef:
   frame: string
   resume: string
 
-// The iterator made at `iter`, usable at this point of the function.  In
-// a generator it is loaded from the frame, where its MirIterInit stored
-// it, since this point may follow a yield.
+// The iterator made at `iter`, usable at this point of the function.  In a generator it comes from the frame, where its MirIterInit stored it, since this point may follow a yield.
 fn bs_iter_ref(bs: BS, insts: Vector<LlInst>, iter: i64): IterRef
   if bs.func.gen.iters.contains(i64_to_string(iter)) == false:
     return IterRef(bs, insts, bs_get_value_text(bs, iter), bs_get_value_text(bs, bs_resume_key(iter)))
@@ -2807,8 +2804,7 @@ fn lower_to_mir_backend_input(src: string): MirBackendInput
 fn lower_program_to_llvm_text(inputs: Vector<SourceInput>): LlvmTextResult
   return lower_program_to_llvm(inputs).result
 
-// A whole program's module, with what is known of where its diagnostics
-// came from.  `result.diags` begins with `program.diags`, in order, and the
+// A whole program's module, with the source files of its diagnostics.  `result.diags` begins with `program.diags`, in order, and the
 // rest are monomorphization's and the backend's, which name no source file.
 class ProgramLlvm:
   program: Program

@@ -9,5 +9,5 @@ MAKEFLAGS = "-j{{ env.DAO_BUILD_JOBS }}"
 node = "22"
 conan = "2.26.2"
 "aqua:go-task/task" = "3.40.1"
-# macOS only: Conan builds its CMake packages with this; Linux hosts bring their own.
+# macOS only: Conan builds its CMake packages with this, and Linux hosts bring their own.
 cmake = { version = "3.31.11", os = ["macos"] }

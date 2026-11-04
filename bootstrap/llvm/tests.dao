@@ -975,7 +975,7 @@ fn main(): i32
   else:
     print("FAIL pointer_roundtrip: " + diags_text(r36.diags))
 
-  // Signed `+` is checked (the host's overflow intrinsic and
+  // Signed `+` traps on overflow (the host's overflow intrinsic and
   // trap); an unsigned comparison is unsigned (`ult`); the program runs.
   let checked_and_unsigned: LlvmTextResult = lower_source_to_llvm_text("fn below(a: u32, b: u32): bool -> a < b\n\nfn main(): i32\n  let x: i32 = 40 + 2\n  if below(to_u32(1), to_u32(2)):\n    return x - 42\n  return 1\n\nfn to_u32(n: i32): u32\n  return 0\n")
   write_failures = write_failures + emit_ir("checked_and_unsigned", checked_and_unsigned, -1)

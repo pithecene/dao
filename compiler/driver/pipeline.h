@@ -110,7 +110,7 @@ struct ProgramRequest {
   /// The file that names a build whose entry is a prelude file: the root,
   /// else the source whose path sorts first.  Never simply the first
   /// source, because §8.4 makes output a function of the set and not of
-  /// the order.  Any other build is named after its entry module's file.
+  /// the order.  Any other build takes its entry module's file name.
   [[nodiscard]] auto primary_file() const -> std::filesystem::path {
     if (!root.empty() || sources.empty()) {
       return root;

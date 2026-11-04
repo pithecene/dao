@@ -851,7 +851,7 @@ fn main(): i32
     print("FAIL copier_shape_and_generator_storage: " + i64_to_string(pc46b.mir.diags.length()) + " / " + i64_to_string(pc46c.mir.diags.length()) + " diagnostics")
 
   // An `if` whose branches both break leaves nothing reachable after it:
-  // the call that follows is dropped, as the host's builder drops it.
+  // lowering drops the call that follows, as the host's builder does.
   let both_break: MirResult = lower_to_mir("fn g(): i32 -> 1\n\nfn f(): i32\n  while true:\n    if true:\n      break\n    else:\n      break\n    g()\n  return 0\n")
   if both_break.diags.length() == 0 and mir_count_kind(both_break, "MirCall") == 0:
     print("PASS both_branches_break_drop_the_rest")
@@ -860,8 +860,8 @@ fn main(): i32
     print("FAIL both_branches_break_drop_the_rest: got " + i64_to_string(mir_count_kind(both_break, "MirCall")) + " calls, " + i64_to_string(both_break.diags.length()) + " diagnostics")
 
   // A generic class's `copy_out` that returns another instantiation, or
-  // is generic over its own parameter, is no copier: the class is rebuilt
-  // field by field and the method is never called.
+  // is generic over its own parameter, is no copier: the expansion rebuilds the class field by field and never
+  // calls the method.
   let other_instance_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
   other_instance_inputs = other_instance_inputs.push(SourceInput("core_builtins.dao", hooks45, true))
   other_instance_inputs = other_instance_inputs.push(SourceInput("main.dao", "module app::main\n\nclass Wrap<T>:\n  v: T\n\n  fn copy_out(self): Wrap<i32> -> Wrap<i32>(1)\n\nfn f(x: Wrap<string>): Wrap<string> -> copy_out(x)\n", false))
@@ -876,8 +876,8 @@ fn main(): i32
   else:
     print("FAIL copier_is_exactly_self_to_self: got '" + mono_fn_names(other_instance) + "' and '" + mono_fn_names(own_generic) + "', " + i64_to_string(other_instance.mir.diags.length()) + " / " + i64_to_string(own_generic.mir.diags.length()) + " diagnostics")
 
-  // A generator leaving a memory domain is rejected through an enum, a
-  // stored pointer, and a returned aggregate alike.
+  // Monomorphization rejects a generator leaving a memory domain through an
+  // enum, a stored pointer, and a returned aggregate alike.
   let enum_generator_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
   enum_generator_inputs = enum_generator_inputs.push(SourceInput("core_builtins.dao", hooks45, true))
   enum_generator_inputs = enum_generator_inputs.push(SourceInput("main.dao", "module app::main\n\nenum class Holder:\n  Held(g: Generator<i32>)\n  Empty\n\nfn f(h: Holder): Holder\n  let kept: Holder = h\n  resource memory scratch =>\n    kept = h\n  return kept\n", false))

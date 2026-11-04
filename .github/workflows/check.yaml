@@ -1,31 +1,30 @@
-# Pithecene's standard Bosun prose check, run only as the merge gate: the prose
-# gate on the documents that bosun.yaml lists and on the queued commit's title
-# and body. A required check must also report on the pull request before the
-# pull request can enter the merge queue, so the pull request's job only reports.
-# A contributor runs `bosun check` locally for earlier feedback.
+# Pithecene's standard Bosun prose check: the prose gate on the documents that
+# bosun.yaml lists and on the pull request's title and body. It also runs in the
+# merge queue. The pull request's run stays until a release reads a queued
+# commit's title and body, because no earlier check reads them there.
 name: check
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   merge_group:
     types: [checks_requested]
 
 permissions:
   contents: read
 
-jobs:
-  # Both jobs report as the required check `bosun`, and only one runs per event.
-  report:
-    name: bosun
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    steps:
-      - run: echo "The merge queue runs this check."
+concurrency:
+  group: check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
-  gate:
-    name: bosun
-    if: github.event_name == 'merge_group'
+jobs:
+  bosun:
+    # A fork's pull request holds no secrets, so it cannot pull the private image.
+    # An edit matters only when it changes the title or body, which the gate reads.
+    if: >-
+      github.event_name == 'merge_group' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       (github.event.action != 'edited' || github.event.changes.title || github.event.changes.body))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container:
@@ -36,5 +35,5 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      # The event holds the queued commit, whose message is the title and body.
+      # The event holds the pull request or the queued commit.
       - run: bosun check --pull-request "$GITHUB_EVENT_PATH"

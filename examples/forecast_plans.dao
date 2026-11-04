@@ -2,10 +2,9 @@ module forecast_plans
 // This example holds one forecast rule, two execution plans for it, and the
 // rewrites a reviewer must see rejected.
 //
-// A prediction may read only the forecast revisions received by the time
-// it was decided.  The reference computes that rule on the CPU.  A plan is
+// A prediction may read only the forecast revisions received by its decision time.  The reference computes that rule on the CPU.  A plan is
 // a list of steps.  Its meaning (its cutoff, its model, its archive, what it
-// lets the host observe) is read off those steps rather than declared, so a
+// lets the host observe) comes from those steps rather than a declaration, so a
 // rewrite cannot drop a step and keep the claim.
 //
 // Times are minutes after midnight UTC.  The same steps print twice: once
@@ -223,7 +222,7 @@ fn audited_plan(): Plan
   return Plan("audited", s)
 
 // The audited program with the one shared upload it can keep: the score
-// still returns for the callback, so only one transfer is saved.
+// still returns for the callback, so it saves only one transfer.
 fn audited_shared_plan(): Plan
   let s: Vector<Step> = Vector<Step>::new()
   s = s.push(read_as_of_decision())
