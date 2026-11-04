@@ -182,6 +182,8 @@ Self-hosting compiler subsystems written in Dao.
 ## `examples/`
 
 Small Dao programs and human-readable examples. Non-authoritative.
+`forecast_plans.dao` and `forecast_device/` hold the heterogeneous
+computation experiment; see `docs/heterogeneous_experiment.md`.
 Also serves as a playground corpus and early regression corpus.
 
 ## `testdata/`

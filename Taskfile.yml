@@ -131,6 +131,16 @@ tasks:
     cmds:
       - bash bootstrap/validate_ir.sh {{.BUILD_DIR}}
 
+  forecast-device:
+    desc: Run examples/forecast_plans.dao's plans on the GPU through Metal and report their copies, waits and times (macOS)
+    platforms: [darwin]
+    deps: [build]
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}/forecast_device
+      - "{{.BUILD_DIR}}/compiler/driver/daoc build examples/forecast_plans.dao"
+      - swiftc -O examples/forecast_device/metal_runner.swift -o {{.BUILD_DIR}}/forecast_device/metal_runner
+      - ./examples/forecast_plans | {{.BUILD_DIR}}/forecast_device/metal_runner
+
   format:
     desc: Run clang-format on all source files
     cmds:

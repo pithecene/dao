@@ -1,0 +1,2979 @@
+File
+  Module forecast_plans
+  ClassDecl Revision
+    Field id: string
+    Field cell: i32
+    Field valid_at: i32
+    Field received_at: i32
+    Field wind: i32
+  ClassDecl Archive
+    Field version: i32
+    Field revisions: Vector<Revision>
+  ClassDecl Query
+    Field cell: i32
+    Field valid_at: i32
+    Field decided_at: i32
+  ClassDecl Missing
+    Field cell: i32
+    Field valid_at: i32
+  EnumDecl Visibility
+    Variant AsOfDecision
+    Variant LatestNow
+  FunctionDecl at
+    Param hours: i32
+    Param minutes: i32
+    ReturnType: i32
+    ExprBody
+      BinaryExpr +
+        BinaryExpr *
+          Identifier hours
+          IntLiteral 60
+        Identifier minutes
+  FunctionDecl clock
+    Param minutes: i32
+    ReturnType: string
+    LetStatement m: i32
+      BinaryExpr %
+        Identifier minutes
+        IntLiteral 60
+    LetStatement padding: string
+      StringLiteral ""
+    IfStatement
+      Condition
+        BinaryExpr <
+          Identifier m
+          IntLiteral 10
+      Then
+        Assignment
+          Target
+            Identifier padding
+          Value
+            StringLiteral "0"
+    ReturnStatement
+      BinaryExpr +
+        BinaryExpr +
+          BinaryExpr +
+            CallExpr
+              Callee
+                Identifier i32_to_string
+              Args
+                BinaryExpr /
+                  Identifier minutes
+                  IntLiteral 60
+            StringLiteral ":"
+          Identifier padding
+        CallExpr
+          Callee
+            Identifier i32_to_string
+          Args
+            Identifier m
+  FunctionDecl fixture_archive
+    ReturnType: Archive
+    LetStatement revisions: Vector<Revision>
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          Revision
+    Assignment
+      Target
+        Identifier revisions
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier revisions
+          Args
+            CallExpr
+              Callee
+                Identifier Revision
+              Args
+                StringLiteral "r1"
+                IntLiteral 7
+                CallExpr
+                  Callee
+                    Identifier at
+                  Args
+                    IntLiteral 10
+                    IntLiteral 0
+                CallExpr
+                  Callee
+                    Identifier at
+                  Args
+                    IntLiteral 8
+                    IntLiteral 55
+                IntLiteral 8
+    Assignment
+      Target
+        Identifier revisions
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier revisions
+          Args
+            CallExpr
+              Callee
+                Identifier Revision
+              Args
+                StringLiteral "r2"
+                IntLiteral 7
+                CallExpr
+                  Callee
+                    Identifier at
+                  Args
+                    IntLiteral 10
+                    IntLiteral 0
+                CallExpr
+                  Callee
+                    Identifier at
+                  Args
+                    IntLiteral 9
+                    IntLiteral 7
+                IntLiteral 12
+    ReturnStatement
+      CallExpr
+        Callee
+          Identifier Archive
+        Args
+          IntLiteral 1
+          Identifier revisions
+  FunctionDecl score_v1
+    Param wind: i32
+    ReturnType: i32
+    ExprBody
+      BinaryExpr +
+        IntLiteral 60
+        BinaryExpr *
+          IntLiteral 2
+          Identifier wind
+  FunctionDecl high_wind
+    Param wind: i32
+    ReturnType: i32
+    IfStatement
+      Condition
+        BinaryExpr >=
+          Identifier wind
+          IntLiteral 10
+      Then
+        ReturnStatement
+          IntLiteral 1
+    ReturnStatement
+      IntLiteral 0
+  FunctionDecl adjust
+    Param base: i32
+    Param flag: i32
+    ReturnType: i32
+    ExprBody
+      BinaryExpr +
+        Identifier base
+        BinaryExpr *
+          IntLiteral 5
+          Identifier flag
+  FunctionDecl latest_visible
+    Param archive: Archive
+    Param q: Query
+    Param visibility: Visibility
+    ReturnType: Option<Revision>
+    LetStatement best: Option<Revision>
+      QualifiedName Option::None
+    LetStatement i: i64
+      CallExpr
+        Callee
+          Identifier to_i64
+        Args
+          IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          CallExpr
+            Callee
+              FieldExpr .length
+                FieldExpr .revisions
+                  Identifier archive
+      LetStatement r: Revision
+        CallExpr
+          Callee
+            FieldExpr .get
+              FieldExpr .revisions
+                Identifier archive
+          Args
+            Identifier i
+      IfStatement
+        Condition
+          BinaryExpr and
+            BinaryExpr and
+              BinaryExpr ==
+                FieldExpr .cell
+                  Identifier r
+                FieldExpr .cell
+                  Identifier q
+              BinaryExpr ==
+                FieldExpr .valid_at
+                  Identifier r
+                FieldExpr .valid_at
+                  Identifier q
+            CallExpr
+              Callee
+                Identifier visible_to
+              Args
+                Identifier r
+                Identifier q
+                Identifier visibility
+        Then
+          Assignment
+            Target
+              Identifier best
+            Value
+              CallExpr
+                Callee
+                  Identifier later_of
+                Args
+                  Identifier best
+                  Identifier r
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 1
+    ReturnStatement
+      Identifier best
+  FunctionDecl visible_to
+    Param r: Revision
+    Param q: Query
+    Param visibility: Visibility
+    ReturnType: bool
+    MatchStatement
+      Scrutinee
+        Identifier visibility
+      Arm
+        Pattern
+          QualifiedName Visibility::AsOfDecision
+        ReturnStatement
+          BinaryExpr <=
+            FieldExpr .received_at
+              Identifier r
+            FieldExpr .decided_at
+              Identifier q
+      Arm
+        Pattern
+          QualifiedName Visibility::LatestNow
+        ReturnStatement
+          BoolLiteral true
+  FunctionDecl later_of
+    Param best: Option<Revision>
+    Param r: Revision
+    ReturnType: Option<Revision>
+    MatchStatement
+      Scrutinee
+        Identifier best
+      Arm
+        Pattern
+          QualifiedName Option::None
+        ReturnStatement
+          CallExpr
+            Callee
+              QualifiedName Option::Some
+            Args
+              Identifier r
+      Arm
+        Pattern
+          QualifiedName Option::Some
+        IfStatement
+          Condition
+            BinaryExpr >
+              FieldExpr .received_at
+                Identifier r
+              FieldExpr .received_at
+                Identifier value
+          Then
+            ReturnStatement
+              CallExpr
+                Callee
+                  QualifiedName Option::Some
+                Args
+                  Identifier r
+        IfStatement
+          Condition
+            BinaryExpr and
+              BinaryExpr ==
+                FieldExpr .received_at
+                  Identifier r
+                FieldExpr .received_at
+                  Identifier value
+              BinaryExpr >
+                CallExpr
+                  Callee
+                    Identifier str_compare
+                  Args
+                    FieldExpr .id
+                      Identifier r
+                    FieldExpr .id
+                      Identifier value
+                IntLiteral 0
+          Then
+            ReturnStatement
+              CallExpr
+                Callee
+                  QualifiedName Option::Some
+                Args
+                  Identifier r
+        ReturnStatement
+          Identifier best
+  FunctionDecl predict
+    Param q: Query
+    Param archive: Archive
+    Param visibility: Visibility
+    ReturnType: Result<i32, Missing>
+    MatchStatement
+      Scrutinee
+        CallExpr
+          Callee
+            Identifier latest_visible
+          Args
+            Identifier archive
+            Identifier q
+            Identifier visibility
+      Arm
+        Pattern
+          QualifiedName Option::None
+        ReturnStatement
+          CallExpr
+            Callee
+              QualifiedName Result::Err
+            Args
+              CallExpr
+                Callee
+                  Identifier Missing
+                Args
+                  FieldExpr .cell
+                    Identifier q
+                  FieldExpr .valid_at
+                    Identifier q
+      Arm
+        Pattern
+          QualifiedName Option::Some
+        ReturnStatement
+          CallExpr
+            Callee
+              QualifiedName Result::Ok
+            Args
+              CallExpr
+                Callee
+                  Identifier adjust
+                Args
+                  CallExpr
+                    Callee
+                      Identifier score_v1
+                    Args
+                      FieldExpr .wind
+                        Identifier value
+                  CallExpr
+                    Callee
+                      Identifier high_wind
+                    Args
+                      FieldExpr .wind
+                        Identifier value
+  FunctionDecl outcome
+    Param r: Result<i32, Missing>
+    ReturnType: string
+    MatchStatement
+      Scrutinee
+        Identifier r
+      Arm
+        Pattern
+          QualifiedName Result::Ok
+        ReturnStatement
+          BinaryExpr +
+            CallExpr
+              Callee
+                Identifier i32_to_string
+              Args
+                Identifier value
+            StringLiteral " minutes"
+      Arm
+        Pattern
+          QualifiedName Result::Err
+        ReturnStatement
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                StringLiteral "missing for cell "
+                CallExpr
+                  Callee
+                    Identifier i32_to_string
+                  Args
+                    FieldExpr .cell
+                      Identifier error
+              StringLiteral " at "
+            CallExpr
+              Callee
+                Identifier clock
+              Args
+                FieldExpr .valid_at
+                  Identifier error
+  FunctionDecl predict_batch
+    Param winds: Vector<i32>
+    ReturnType: Vector<i32>
+    LetStatement scores: Vector<i32>
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          i32
+    LetStatement flags: Vector<i32>
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          i32
+    ForStatement w
+      Iterable
+        CallExpr
+          Callee
+            FieldExpr .iter
+              Identifier winds
+      Assignment
+        Target
+          Identifier scores
+        Value
+          CallExpr
+            Callee
+              FieldExpr .push
+                Identifier scores
+            Args
+              CallExpr
+                Callee
+                  Identifier score_v1
+                Args
+                  Identifier w
+    ForStatement w
+      Iterable
+        CallExpr
+          Callee
+            FieldExpr .iter
+              Identifier winds
+      Assignment
+        Target
+          Identifier flags
+        Value
+          CallExpr
+            Callee
+              FieldExpr .push
+                Identifier flags
+            Args
+              CallExpr
+                Callee
+                  Identifier high_wind
+                Args
+                  Identifier w
+    LetStatement results: Vector<i32>
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          i32
+    LetStatement i: i64
+      CallExpr
+        Callee
+          Identifier to_i64
+        Args
+          IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier winds
+      Assignment
+        Target
+          Identifier results
+        Value
+          CallExpr
+            Callee
+              FieldExpr .push
+                Identifier results
+            Args
+              CallExpr
+                Callee
+                  Identifier adjust
+                Args
+                  CallExpr
+                    Callee
+                      FieldExpr .get
+                        Identifier scores
+                    Args
+                      Identifier i
+                  CallExpr
+                    Callee
+                      FieldExpr .get
+                        Identifier flags
+                    Args
+                      Identifier i
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 1
+    ReturnStatement
+      Identifier results
+  EnumClassDecl Step
+    Variant ReadVisible
+    Variant Upload
+    Variant Dispatch
+    Variant Readback
+    Variant HostAdjust
+    Variant Observe
+    Variant Reply
+  ClassDecl Plan
+    Field name: string
+    Field steps: Vector<Step>
+  FunctionDecl read_as_of_decision
+    ReturnType: Step
+    ExprBody
+      CallExpr
+        Callee
+          QualifiedName Step::ReadVisible
+        Args
+          IntLiteral 1
+          StringLiteral "decided_at"
+          StringLiteral "wind"
+  FunctionDecl upload
+    Param input: string
+    Param buffer: string
+    ReturnType: Step
+    ExprBody
+      CallExpr
+        Callee
+          QualifiedName Step::Upload
+        Args
+          Identifier input
+          Identifier buffer
+  FunctionDecl dispatch
+    Param kernel: string
+    Param left: string
+    Param right: string
+    Param output: string
+    ReturnType: Step
+    ReturnStatement
+      CallExpr
+        Callee
+          QualifiedName Step::Dispatch
+        Args
+          Identifier kernel
+          StringLiteral "v1"
+          Identifier left
+          Identifier right
+          Identifier output
+  FunctionDecl readback
+    Param buffer: string
+    Param host: string
+    ReturnType: Step
+    ExprBody
+      CallExpr
+        Callee
+          QualifiedName Step::Readback
+        Args
+          Identifier buffer
+          Identifier host
+  FunctionDecl observe
+    Param name: string
+    Param host: string
+    ReturnType: Step
+    ExprBody
+      CallExpr
+        Callee
+          QualifiedName Step::Observe
+        Args
+          Identifier name
+          Identifier host
+  FunctionDecl reply
+    Param host: string
+    ReturnType: Step
+    ExprBody
+      CallExpr
+        Callee
+          QualifiedName Step::Reply
+        Args
+          Identifier host
+  FunctionDecl straightforward_plan
+    ReturnType: Plan
+    LetStatement s: Vector<Step>
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          Step
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier read_as_of_decision
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier upload
+              Args
+                StringLiteral "wind"
+                StringLiteral "wind_a"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier dispatch
+              Args
+                StringLiteral "score_v1"
+                StringLiteral "wind_a"
+                StringLiteral ""
+                StringLiteral "score"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier readback
+              Args
+                StringLiteral "score"
+                StringLiteral "score_host"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier upload
+              Args
+                StringLiteral "wind"
+                StringLiteral "wind_b"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier dispatch
+              Args
+                StringLiteral "high_wind"
+                StringLiteral "wind_b"
+                StringLiteral ""
+                StringLiteral "flag"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier readback
+              Args
+                StringLiteral "flag"
+                StringLiteral "flag_host"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                QualifiedName Step::HostAdjust
+              Args
+                StringLiteral "score_host"
+                StringLiteral "flag_host"
+                StringLiteral "eta_host"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier reply
+              Args
+                StringLiteral "eta_host"
+    ReturnStatement
+      CallExpr
+        Callee
+          Identifier Plan
+        Args
+          StringLiteral "straightforward"
+          Identifier s
+  FunctionDecl proposed_plan
+    ReturnType: Plan
+    LetStatement s: Vector<Step>
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          Step
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier read_as_of_decision
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier upload
+              Args
+                StringLiteral "wind"
+                StringLiteral "wind_shared"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier dispatch
+              Args
+                StringLiteral "score_v1"
+                StringLiteral "wind_shared"
+                StringLiteral ""
+                StringLiteral "score"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier dispatch
+              Args
+                StringLiteral "high_wind"
+                StringLiteral "wind_shared"
+                StringLiteral ""
+                StringLiteral "flag"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier dispatch
+              Args
+                StringLiteral "adjust"
+                StringLiteral "score"
+                StringLiteral "flag"
+                StringLiteral "eta"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier readback
+              Args
+                StringLiteral "eta"
+                StringLiteral "eta_host"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier reply
+              Args
+                StringLiteral "eta_host"
+    ReturnStatement
+      CallExpr
+        Callee
+          Identifier Plan
+        Args
+          StringLiteral "proposed"
+          Identifier s
+  FunctionDecl latest_now_plan
+    ReturnType: Plan
+    LetStatement s: Vector<Step>
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          Step
+    LetStatement source: Vector<Step>
+      FieldExpr .steps
+        CallExpr
+          Callee
+            Identifier proposed_plan
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                QualifiedName Step::ReadVisible
+              Args
+                IntLiteral 1
+                StringLiteral "none"
+                StringLiteral "wind"
+    LetStatement i: i64
+      CallExpr
+        Callee
+          Identifier to_i64
+        Args
+          IntLiteral 1
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier source
+      Assignment
+        Target
+          Identifier s
+        Value
+          CallExpr
+            Callee
+              FieldExpr .push
+                Identifier s
+            Args
+              CallExpr
+                Callee
+                  FieldExpr .get
+                    Identifier source
+                Args
+                  Identifier i
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 1
+    ReturnStatement
+      CallExpr
+        Callee
+          Identifier Plan
+        Args
+          StringLiteral "latest_now"
+          Identifier s
+  FunctionDecl miswired_plan
+    ReturnType: Plan
+    LetStatement s: Vector<Step>
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          Step
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier read_as_of_decision
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier upload
+              Args
+                StringLiteral "wind"
+                StringLiteral "wind_shared"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier dispatch
+              Args
+                StringLiteral "score_v1"
+                StringLiteral "wind_shared"
+                StringLiteral ""
+                StringLiteral "score"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier dispatch
+              Args
+                StringLiteral "high_wind"
+                StringLiteral "wind_shared"
+                StringLiteral ""
+                StringLiteral "flag"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier dispatch
+              Args
+                StringLiteral "adjust"
+                StringLiteral "score"
+                StringLiteral "score"
+                StringLiteral "eta"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier readback
+              Args
+                StringLiteral "eta"
+                StringLiteral "eta_host"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier reply
+              Args
+                StringLiteral "eta_host"
+    ReturnStatement
+      CallExpr
+        Callee
+          Identifier Plan
+        Args
+          StringLiteral "miswired"
+          Identifier s
+  FunctionDecl audited_plan
+    ReturnType: Plan
+    LetStatement s: Vector<Step>
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          Step
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier read_as_of_decision
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier upload
+              Args
+                StringLiteral "wind"
+                StringLiteral "wind_a"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier dispatch
+              Args
+                StringLiteral "score_v1"
+                StringLiteral "wind_a"
+                StringLiteral ""
+                StringLiteral "score"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier readback
+              Args
+                StringLiteral "score"
+                StringLiteral "score_host"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier observe
+              Args
+                StringLiteral "audit_score"
+                StringLiteral "score_host"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier upload
+              Args
+                StringLiteral "wind"
+                StringLiteral "wind_b"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier dispatch
+              Args
+                StringLiteral "high_wind"
+                StringLiteral "wind_b"
+                StringLiteral ""
+                StringLiteral "flag"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier readback
+              Args
+                StringLiteral "flag"
+                StringLiteral "flag_host"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                QualifiedName Step::HostAdjust
+              Args
+                StringLiteral "score_host"
+                StringLiteral "flag_host"
+                StringLiteral "eta_host"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier reply
+              Args
+                StringLiteral "eta_host"
+    ReturnStatement
+      CallExpr
+        Callee
+          Identifier Plan
+        Args
+          StringLiteral "audited"
+          Identifier s
+  FunctionDecl audited_shared_plan
+    ReturnType: Plan
+    LetStatement s: Vector<Step>
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          Step
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier read_as_of_decision
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier upload
+              Args
+                StringLiteral "wind"
+                StringLiteral "wind_shared"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier dispatch
+              Args
+                StringLiteral "score_v1"
+                StringLiteral "wind_shared"
+                StringLiteral ""
+                StringLiteral "score"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier readback
+              Args
+                StringLiteral "score"
+                StringLiteral "score_host"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier observe
+              Args
+                StringLiteral "audit_score"
+                StringLiteral "score_host"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier dispatch
+              Args
+                StringLiteral "high_wind"
+                StringLiteral "wind_shared"
+                StringLiteral ""
+                StringLiteral "flag"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier dispatch
+              Args
+                StringLiteral "adjust"
+                StringLiteral "score"
+                StringLiteral "flag"
+                StringLiteral "eta"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier readback
+              Args
+                StringLiteral "eta"
+                StringLiteral "eta_host"
+    Assignment
+      Target
+        Identifier s
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier s
+          Args
+            CallExpr
+              Callee
+                Identifier reply
+              Args
+                StringLiteral "eta_host"
+    ReturnStatement
+      CallExpr
+        Callee
+          Identifier Plan
+        Args
+          StringLiteral "audited_shared"
+          Identifier s
+  ClassDecl Meaning
+    Field archive: i32
+    Field cutoff: string
+    Field models: string
+    Field observations: string
+    Field result: string
+  FunctionDecl computed
+    Param values: HashMap<string>
+    Param name: string
+    ReturnType: string
+    MatchStatement
+      Scrutinee
+        CallExpr
+          Callee
+            FieldExpr .get
+              Identifier values
+          Args
+            Identifier name
+      Arm
+        Pattern
+          QualifiedName Option::Some
+        ReturnStatement
+          Identifier value
+      Arm
+        Pattern
+          QualifiedName Option::None
+        ReturnStatement
+          Identifier name
+  FunctionDecl applied
+    Param operation: string
+    Param values: HashMap<string>
+    Param left: string
+    Param right: string
+    ReturnType: string
+    IfStatement
+      Condition
+        BinaryExpr ==
+          Identifier right
+          StringLiteral ""
+      Then
+        ReturnStatement
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                Identifier operation
+                StringLiteral "("
+              CallExpr
+                Callee
+                  Identifier computed
+                Args
+                  Identifier values
+                  Identifier left
+            StringLiteral ")"
+    ReturnStatement
+      BinaryExpr +
+        BinaryExpr +
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                Identifier operation
+                StringLiteral "("
+              CallExpr
+                Callee
+                  Identifier computed
+                Args
+                  Identifier values
+                  Identifier left
+            StringLiteral ", "
+          CallExpr
+            Callee
+              Identifier computed
+            Args
+              Identifier values
+              Identifier right
+        StringLiteral ")"
+  FunctionDecl meaning_of
+    Param p: Plan
+    ReturnType: Meaning
+    LetStatement m: Meaning
+      CallExpr
+        Callee
+          Identifier Meaning
+        Args
+          UnaryExpr -
+            IntLiteral 1
+          StringLiteral ""
+          StringLiteral ""
+          StringLiteral ""
+          StringLiteral ""
+    LetStatement values: HashMap<string>
+      CallExpr
+        Callee
+          Identifier HashMap.new
+        TypeArgs
+          string
+    ForStatement step
+      Iterable
+        CallExpr
+          Callee
+            FieldExpr .iter
+              FieldExpr .steps
+                Identifier p
+      MatchStatement
+        Scrutinee
+          Identifier step
+        Arm
+          Pattern
+            QualifiedName Step::ReadVisible
+          Assignment
+            Target
+              FieldExpr .archive
+                Identifier m
+            Value
+              Identifier archive
+          Assignment
+            Target
+              FieldExpr .cutoff
+                Identifier m
+            Value
+              Identifier cutoff
+        Arm
+          Pattern
+            QualifiedName Step::Upload
+          Assignment
+            Target
+              Identifier values
+            Value
+              CallExpr
+                Callee
+                  FieldExpr .set
+                    Identifier values
+                Args
+                  Identifier buffer
+                  CallExpr
+                    Callee
+                      Identifier computed
+                    Args
+                      Identifier values
+                      Identifier input
+        Arm
+          Pattern
+            QualifiedName Step::Dispatch
+          IfStatement
+            Condition
+              BinaryExpr and
+                BinaryExpr !=
+                  Identifier kernel
+                  StringLiteral "adjust"
+                BinaryExpr <
+                  CallExpr
+                    Callee
+                      Identifier index_of
+                    Args
+                      FieldExpr .models
+                        Identifier m
+                      Identifier model
+                  CallExpr
+                    Callee
+                      Identifier to_i64
+                    Args
+                      IntLiteral 0
+            Then
+              Assignment
+                Target
+                  FieldExpr .models
+                    Identifier m
+                Value
+                  BinaryExpr +
+                    FieldExpr .models
+                      Identifier m
+                    Identifier model
+          Assignment
+            Target
+              Identifier values
+            Value
+              CallExpr
+                Callee
+                  FieldExpr .set
+                    Identifier values
+                Args
+                  Identifier output
+                  CallExpr
+                    Callee
+                      Identifier applied
+                    Args
+                      Identifier kernel
+                      Identifier values
+                      Identifier left
+                      Identifier right
+        Arm
+          Pattern
+            QualifiedName Step::Readback
+          Assignment
+            Target
+              Identifier values
+            Value
+              CallExpr
+                Callee
+                  FieldExpr .set
+                    Identifier values
+                Args
+                  Identifier host
+                  CallExpr
+                    Callee
+                      Identifier computed
+                    Args
+                      Identifier values
+                      Identifier buffer
+        Arm
+          Pattern
+            QualifiedName Step::HostAdjust
+          Assignment
+            Target
+              Identifier values
+            Value
+              CallExpr
+                Callee
+                  FieldExpr .set
+                    Identifier values
+                Args
+                  Identifier output
+                  CallExpr
+                    Callee
+                      Identifier applied
+                    Args
+                      StringLiteral "adjust"
+                      Identifier values
+                      Identifier left
+                      Identifier right
+        Arm
+          Pattern
+            QualifiedName Step::Observe
+          Assignment
+            Target
+              FieldExpr .observations
+                Identifier m
+            Value
+              BinaryExpr +
+                BinaryExpr +
+                  BinaryExpr +
+                    BinaryExpr +
+                      FieldExpr .observations
+                        Identifier m
+                      Identifier name
+                    StringLiteral "="
+                  CallExpr
+                    Callee
+                      Identifier computed
+                    Args
+                      Identifier values
+                      Identifier host
+                StringLiteral ";"
+        Arm
+          Pattern
+            QualifiedName Step::Reply
+          Assignment
+            Target
+              FieldExpr .result
+                Identifier m
+            Value
+              CallExpr
+                Callee
+                  Identifier computed
+                Args
+                  Identifier values
+                  Identifier host
+    ReturnStatement
+      Identifier m
+  ClassDecl Transfers
+    Field uploads: i32
+    Field readbacks: i32
+  FunctionDecl transfers_of
+    Param p: Plan
+    ReturnType: Transfers
+    LetStatement t: Transfers
+      CallExpr
+        Callee
+          Identifier Transfers
+        Args
+          IntLiteral 0
+          IntLiteral 0
+    ForStatement step
+      Iterable
+        CallExpr
+          Callee
+            FieldExpr .iter
+              FieldExpr .steps
+                Identifier p
+      MatchStatement
+        Scrutinee
+          Identifier step
+        Arm
+          Pattern
+            QualifiedName Step::Upload
+          Assignment
+            Target
+              FieldExpr .uploads
+                Identifier t
+            Value
+              BinaryExpr +
+                FieldExpr .uploads
+                  Identifier t
+                IntLiteral 1
+        Arm
+          Pattern
+            QualifiedName Step::Readback
+          Assignment
+            Target
+              FieldExpr .readbacks
+                Identifier t
+            Value
+              BinaryExpr +
+                FieldExpr .readbacks
+                  Identifier t
+                IntLiteral 1
+    ReturnStatement
+      Identifier t
+  FunctionDecl describe
+    Param step: Step
+    ReturnType: string
+    MatchStatement
+      Scrutinee
+        Identifier step
+      Arm
+        Pattern
+          QualifiedName Step::ReadVisible
+        ReturnStatement
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                BinaryExpr +
+                  BinaryExpr +
+                    StringLiteral "read "
+                    Identifier output
+                  StringLiteral " from archive "
+                CallExpr
+                  Callee
+                    Identifier i32_to_string
+                  Args
+                    Identifier archive
+              StringLiteral ", cutoff "
+            Identifier cutoff
+      Arm
+        Pattern
+          QualifiedName Step::Upload
+        ReturnStatement
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                StringLiteral "upload "
+                Identifier input
+              StringLiteral " to "
+            Identifier buffer
+      Arm
+        Pattern
+          QualifiedName Step::Dispatch
+        ReturnStatement
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                BinaryExpr +
+                  BinaryExpr +
+                    BinaryExpr +
+                      BinaryExpr +
+                        BinaryExpr +
+                          BinaryExpr +
+                            StringLiteral "gpu "
+                            Identifier kernel
+                          StringLiteral "("
+                        Identifier left
+                      StringLiteral " "
+                    Identifier right
+                  StringLiteral ") to "
+                Identifier output
+              StringLiteral ", model "
+            Identifier model
+      Arm
+        Pattern
+          QualifiedName Step::Readback
+        ReturnStatement
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                StringLiteral "readback "
+                Identifier buffer
+              StringLiteral " to "
+            Identifier host
+      Arm
+        Pattern
+          QualifiedName Step::HostAdjust
+        ReturnStatement
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                BinaryExpr +
+                  BinaryExpr +
+                    StringLiteral "cpu adjust("
+                    Identifier left
+                  StringLiteral " "
+                Identifier right
+              StringLiteral ") to "
+            Identifier output
+      Arm
+        Pattern
+          QualifiedName Step::Observe
+        ReturnStatement
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                StringLiteral "host observes "
+                Identifier host
+              StringLiteral " as "
+            Identifier name
+      Arm
+        Pattern
+          QualifiedName Step::Reply
+        ReturnStatement
+          BinaryExpr +
+            StringLiteral "reply "
+            Identifier host
+  FunctionDecl record_line
+    Param plan: string
+    Param step: Step
+    ReturnType: string
+    LetStatement start: string
+      BinaryExpr +
+        BinaryExpr +
+          StringLiteral "record\t"
+          Identifier plan
+        StringLiteral "\t"
+    MatchStatement
+      Scrutinee
+        Identifier step
+      Arm
+        Pattern
+          QualifiedName Step::ReadVisible
+        ReturnStatement
+          BinaryExpr +
+            BinaryExpr +
+              Identifier start
+              StringLiteral "read\t"
+            Identifier output
+      Arm
+        Pattern
+          QualifiedName Step::Upload
+        ReturnStatement
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                BinaryExpr +
+                  Identifier start
+                  StringLiteral "upload\t"
+                Identifier input
+              StringLiteral "\t"
+            Identifier buffer
+      Arm
+        Pattern
+          QualifiedName Step::Dispatch
+        ReturnStatement
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                BinaryExpr +
+                  BinaryExpr +
+                    BinaryExpr +
+                      BinaryExpr +
+                        BinaryExpr +
+                          Identifier start
+                          StringLiteral "dispatch\t"
+                        Identifier kernel
+                      StringLiteral "\t"
+                    Identifier left
+                  StringLiteral "\t"
+                Identifier right
+              StringLiteral "\t"
+            Identifier output
+      Arm
+        Pattern
+          QualifiedName Step::Readback
+        ReturnStatement
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                BinaryExpr +
+                  Identifier start
+                  StringLiteral "readback\t"
+                Identifier buffer
+              StringLiteral "\t"
+            Identifier host
+      Arm
+        Pattern
+          QualifiedName Step::HostAdjust
+        ReturnStatement
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                BinaryExpr +
+                  BinaryExpr +
+                    BinaryExpr +
+                      Identifier start
+                      StringLiteral "host_adjust\t"
+                    Identifier left
+                  StringLiteral "\t"
+                Identifier right
+              StringLiteral "\t"
+            Identifier output
+      Arm
+        Pattern
+          QualifiedName Step::Observe
+        ReturnStatement
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                BinaryExpr +
+                  Identifier start
+                  StringLiteral "observe\t"
+                Identifier name
+              StringLiteral "\t"
+            Identifier host
+      Arm
+        Pattern
+          QualifiedName Step::Reply
+        ReturnStatement
+          BinaryExpr +
+            BinaryExpr +
+              Identifier start
+              StringLiteral "reply\t"
+            Identifier host
+  FunctionDecl print_plan
+    Param p: Plan
+    ReturnType: void
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                StringLiteral "plan "
+                FieldExpr .name
+                  Identifier p
+              StringLiteral ", reply = "
+            FieldExpr .result
+              CallExpr
+                Callee
+                  Identifier meaning_of
+                Args
+                  Identifier p
+    ForStatement step
+      Iterable
+        CallExpr
+          Callee
+            FieldExpr .iter
+              FieldExpr .steps
+                Identifier p
+      ExpressionStatement
+        CallExpr
+          Callee
+            Identifier print
+          Args
+            BinaryExpr +
+              StringLiteral "  "
+              CallExpr
+                Callee
+                  Identifier describe
+                Args
+                  Identifier step
+  FunctionDecl print_records
+    Param p: Plan
+    ReturnType: void
+    ForStatement step
+      Iterable
+        CallExpr
+          Callee
+            FieldExpr .iter
+              FieldExpr .steps
+                Identifier p
+      ExpressionStatement
+        CallExpr
+          Callee
+            Identifier print
+          Args
+            CallExpr
+              Callee
+                Identifier record_line
+              Args
+                FieldExpr .name
+                  Identifier p
+                Identifier step
+  FunctionDecl meaning_changes
+    Param before: Meaning
+    Param after: Meaning
+    ReturnType: Vector<string>
+    LetStatement changes: Vector<string>
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          string
+    IfStatement
+      Condition
+        BinaryExpr !=
+          FieldExpr .cutoff
+            Identifier before
+          FieldExpr .cutoff
+            Identifier after
+      Then
+        Assignment
+          Target
+            Identifier changes
+          Value
+            CallExpr
+              Callee
+                FieldExpr .push
+                  Identifier changes
+              Args
+                BinaryExpr +
+                  BinaryExpr +
+                    BinaryExpr +
+                      StringLiteral "cutoff "
+                      FieldExpr .cutoff
+                        Identifier before
+                    StringLiteral " became "
+                  FieldExpr .cutoff
+                    Identifier after
+    IfStatement
+      Condition
+        BinaryExpr !=
+          FieldExpr .archive
+            Identifier before
+          FieldExpr .archive
+            Identifier after
+      Then
+        Assignment
+          Target
+            Identifier changes
+          Value
+            CallExpr
+              Callee
+                FieldExpr .push
+                  Identifier changes
+              Args
+                BinaryExpr +
+                  BinaryExpr +
+                    BinaryExpr +
+                      StringLiteral "archive "
+                      CallExpr
+                        Callee
+                          Identifier i32_to_string
+                        Args
+                          FieldExpr .archive
+                            Identifier before
+                    StringLiteral " became "
+                  CallExpr
+                    Callee
+                      Identifier i32_to_string
+                    Args
+                      FieldExpr .archive
+                        Identifier after
+    IfStatement
+      Condition
+        BinaryExpr !=
+          FieldExpr .models
+            Identifier before
+          FieldExpr .models
+            Identifier after
+      Then
+        Assignment
+          Target
+            Identifier changes
+          Value
+            CallExpr
+              Callee
+                FieldExpr .push
+                  Identifier changes
+              Args
+                BinaryExpr +
+                  BinaryExpr +
+                    BinaryExpr +
+                      StringLiteral "model "
+                      FieldExpr .models
+                        Identifier before
+                    StringLiteral " became "
+                  FieldExpr .models
+                    Identifier after
+    IfStatement
+      Condition
+        BinaryExpr !=
+          FieldExpr .observations
+            Identifier before
+          FieldExpr .observations
+            Identifier after
+      Then
+        Assignment
+          Target
+            Identifier changes
+          Value
+            CallExpr
+              Callee
+                FieldExpr .push
+                  Identifier changes
+              Args
+                BinaryExpr +
+                  BinaryExpr +
+                    BinaryExpr +
+                      BinaryExpr +
+                        StringLiteral "observations '"
+                        FieldExpr .observations
+                          Identifier before
+                      StringLiteral "' became '"
+                    FieldExpr .observations
+                      Identifier after
+                  StringLiteral "'"
+    IfStatement
+      Condition
+        BinaryExpr !=
+          FieldExpr .result
+            Identifier before
+          FieldExpr .result
+            Identifier after
+      Then
+        Assignment
+          Target
+            Identifier changes
+          Value
+            CallExpr
+              Callee
+                FieldExpr .push
+                  Identifier changes
+              Args
+                BinaryExpr +
+                  BinaryExpr +
+                    BinaryExpr +
+                      StringLiteral "result "
+                      FieldExpr .result
+                        Identifier before
+                    StringLiteral " became "
+                  FieldExpr .result
+                    Identifier after
+    ReturnStatement
+      Identifier changes
+  FunctionDecl review
+    Param before: Plan
+    Param after: Plan
+    Param payload_rows: i32
+    ReturnType: void
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                StringLiteral "review "
+                FieldExpr .name
+                  Identifier before
+              StringLiteral " -> "
+            FieldExpr .name
+              Identifier after
+    LetStatement b: Transfers
+      CallExpr
+        Callee
+          Identifier transfers_of
+        Args
+          Identifier before
+    LetStatement a: Transfers
+      CallExpr
+        Callee
+          Identifier transfers_of
+        Args
+          Identifier after
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                BinaryExpr +
+                  BinaryExpr +
+                    BinaryExpr +
+                      BinaryExpr +
+                        StringLiteral "  uploads "
+                        CallExpr
+                          Callee
+                            Identifier i32_to_string
+                          Args
+                            FieldExpr .uploads
+                              Identifier b
+                      StringLiteral " -> "
+                    CallExpr
+                      Callee
+                        Identifier i32_to_string
+                      Args
+                        FieldExpr .uploads
+                          Identifier a
+                  StringLiteral "; readbacks "
+                CallExpr
+                  Callee
+                    Identifier i32_to_string
+                  Args
+                    FieldExpr .readbacks
+                      Identifier b
+              StringLiteral " -> "
+            CallExpr
+              Callee
+                Identifier i32_to_string
+              Args
+                FieldExpr .readbacks
+                  Identifier a
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                BinaryExpr +
+                  BinaryExpr +
+                    BinaryExpr +
+                      BinaryExpr +
+                        BinaryExpr +
+                          BinaryExpr +
+                            StringLiteral "  bytes at N="
+                            CallExpr
+                              Callee
+                                Identifier i32_to_string
+                              Args
+                                Identifier payload_rows
+                          StringLiteral ": up "
+                        CallExpr
+                          Callee
+                            Identifier i32_to_string
+                          Args
+                            BinaryExpr *
+                              BinaryExpr *
+                                FieldExpr .uploads
+                                  Identifier b
+                                IntLiteral 4
+                              Identifier payload_rows
+                      StringLiteral " -> "
+                    CallExpr
+                      Callee
+                        Identifier i32_to_string
+                      Args
+                        BinaryExpr *
+                          BinaryExpr *
+                            FieldExpr .uploads
+                              Identifier a
+                            IntLiteral 4
+                          Identifier payload_rows
+                  StringLiteral ", down "
+                CallExpr
+                  Callee
+                    Identifier i32_to_string
+                  Args
+                    BinaryExpr *
+                      BinaryExpr *
+                        FieldExpr .readbacks
+                          Identifier b
+                        IntLiteral 4
+                      Identifier payload_rows
+              StringLiteral " -> "
+            CallExpr
+              Callee
+                Identifier i32_to_string
+              Args
+                BinaryExpr *
+                  BinaryExpr *
+                    FieldExpr .readbacks
+                      Identifier a
+                    IntLiteral 4
+                  Identifier payload_rows
+    LetStatement changes: Vector<string>
+      CallExpr
+        Callee
+          Identifier meaning_changes
+        Args
+          CallExpr
+            Callee
+              Identifier meaning_of
+            Args
+              Identifier before
+          CallExpr
+            Callee
+              Identifier meaning_of
+            Args
+              Identifier after
+    IfStatement
+      Condition
+        BinaryExpr ==
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier changes
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 0
+      Then
+        ExpressionStatement
+          CallExpr
+            Callee
+              Identifier print
+            Args
+              StringLiteral "  meaning unchanged: accepted"
+      Else
+        ForStatement reason
+          Iterable
+            CallExpr
+              Callee
+                FieldExpr .iter
+                  Identifier changes
+          ExpressionStatement
+            CallExpr
+              Callee
+                Identifier print
+              Args
+                BinaryExpr +
+                  StringLiteral "  REJECTED: "
+                  Identifier reason
+  ClassDecl ResultKey
+    Field operation: string
+    Field model: string
+    Field archive: i32
+    Field cutoff: i32
+  FunctionDecl reuse_verdict
+    Param stored: ResultKey
+    Param wanted: ResultKey
+    ReturnType: string
+    IfStatement
+      Condition
+        BinaryExpr !=
+          FieldExpr .operation
+            Identifier stored
+          FieldExpr .operation
+            Identifier wanted
+      Then
+        ReturnStatement
+          StringLiteral "rejected: a different operation"
+    IfStatement
+      Condition
+        BinaryExpr !=
+          FieldExpr .model
+            Identifier stored
+          FieldExpr .model
+            Identifier wanted
+      Then
+        ReturnStatement
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                StringLiteral "rejected: model "
+                FieldExpr .model
+                  Identifier stored
+              StringLiteral " is not "
+            FieldExpr .model
+              Identifier wanted
+    IfStatement
+      Condition
+        BinaryExpr !=
+          FieldExpr .archive
+            Identifier stored
+          FieldExpr .archive
+            Identifier wanted
+      Then
+        ReturnStatement
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                StringLiteral "rejected: archive "
+                CallExpr
+                  Callee
+                    Identifier i32_to_string
+                  Args
+                    FieldExpr .archive
+                      Identifier stored
+              StringLiteral " is not "
+            CallExpr
+              Callee
+                Identifier i32_to_string
+              Args
+                FieldExpr .archive
+                  Identifier wanted
+    IfStatement
+      Condition
+        BinaryExpr !=
+          FieldExpr .cutoff
+            Identifier stored
+          FieldExpr .cutoff
+            Identifier wanted
+      Then
+        ReturnStatement
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                StringLiteral "rejected: cutoff "
+                CallExpr
+                  Callee
+                    Identifier clock
+                  Args
+                    FieldExpr .cutoff
+                      Identifier stored
+              StringLiteral " is not "
+            CallExpr
+              Callee
+                Identifier clock
+              Args
+                FieldExpr .cutoff
+                  Identifier wanted
+    ReturnStatement
+      StringLiteral "reused"
+  FunctionDecl main
+    ReturnType: i32
+    LetStatement archive: Archive
+      CallExpr
+        Callee
+          Identifier fixture_archive
+    LetStatement early: Query
+      CallExpr
+        Callee
+          Identifier Query
+        Args
+          IntLiteral 7
+          CallExpr
+            Callee
+              Identifier at
+            Args
+              IntLiteral 10
+              IntLiteral 0
+          CallExpr
+            Callee
+              Identifier at
+            Args
+              IntLiteral 9
+              IntLiteral 0
+    LetStatement late: Query
+      CallExpr
+        Callee
+          Identifier Query
+        Args
+          IntLiteral 7
+          CallExpr
+            Callee
+              Identifier at
+            Args
+              IntLiteral 10
+              IntLiteral 0
+          CallExpr
+            Callee
+              Identifier at
+            Args
+              IntLiteral 9
+              IntLiteral 10
+    LetStatement before_any: Query
+      CallExpr
+        Callee
+          Identifier Query
+        Args
+          IntLiteral 7
+          CallExpr
+            Callee
+              Identifier at
+            Args
+              IntLiteral 10
+              IntLiteral 0
+          CallExpr
+            Callee
+              Identifier at
+            Args
+              IntLiteral 8
+              IntLiteral 0
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          StringLiteral "=== reference ==="
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                StringLiteral "decided "
+                CallExpr
+                  Callee
+                    Identifier clock
+                  Args
+                    FieldExpr .decided_at
+                      Identifier early
+              StringLiteral ": "
+            CallExpr
+              Callee
+                Identifier outcome
+              Args
+                CallExpr
+                  Callee
+                    Identifier predict
+                  Args
+                    Identifier early
+                    Identifier archive
+                    QualifiedName Visibility::AsOfDecision
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                StringLiteral "decided "
+                CallExpr
+                  Callee
+                    Identifier clock
+                  Args
+                    FieldExpr .decided_at
+                      Identifier late
+              StringLiteral ": "
+            CallExpr
+              Callee
+                Identifier outcome
+              Args
+                CallExpr
+                  Callee
+                    Identifier predict
+                  Args
+                    Identifier late
+                    Identifier archive
+                    QualifiedName Visibility::AsOfDecision
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                StringLiteral "decided "
+                CallExpr
+                  Callee
+                    Identifier clock
+                  Args
+                    FieldExpr .decided_at
+                      Identifier before_any
+              StringLiteral ": "
+            CallExpr
+              Callee
+                Identifier outcome
+              Args
+                CallExpr
+                  Callee
+                    Identifier predict
+                  Args
+                    Identifier before_any
+                    Identifier archive
+                    QualifiedName Visibility::AsOfDecision
+    LetStatement winds: Vector<i32>
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          i32
+    Assignment
+      Target
+        Identifier winds
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier winds
+          Args
+            IntLiteral 8
+    Assignment
+      Target
+        Identifier winds
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier winds
+          Args
+            IntLiteral 12
+    LetStatement batch: Vector<i32>
+      CallExpr
+        Callee
+          Identifier predict_batch
+        Args
+          Identifier winds
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                BinaryExpr +
+                  StringLiteral "batch [8, 12]: ["
+                  CallExpr
+                    Callee
+                      Identifier i32_to_string
+                    Args
+                      CallExpr
+                        Callee
+                          FieldExpr .get
+                            Identifier batch
+                        Args
+                          CallExpr
+                            Callee
+                              Identifier to_i64
+                            Args
+                              IntLiteral 0
+                StringLiteral ", "
+              CallExpr
+                Callee
+                  Identifier i32_to_string
+                Args
+                  CallExpr
+                    Callee
+                      FieldExpr .get
+                        Identifier batch
+                    Args
+                      CallExpr
+                        Callee
+                          Identifier to_i64
+                        Args
+                          IntLiteral 1
+            StringLiteral "]"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          StringLiteral ""
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          StringLiteral "=== plans ==="
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print_plan
+        Args
+          CallExpr
+            Callee
+              Identifier straightforward_plan
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print_plan
+        Args
+          CallExpr
+            Callee
+              Identifier proposed_plan
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          StringLiteral ""
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          StringLiteral "=== reviews ==="
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier review
+        Args
+          CallExpr
+            Callee
+              Identifier straightforward_plan
+          CallExpr
+            Callee
+              Identifier proposed_plan
+          IntLiteral 2
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier review
+        Args
+          CallExpr
+            Callee
+              Identifier proposed_plan
+          CallExpr
+            Callee
+              Identifier latest_now_plan
+          IntLiteral 2
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            BinaryExpr +
+              BinaryExpr +
+                BinaryExpr +
+                  BinaryExpr +
+                    StringLiteral "  counterexample, decided "
+                    CallExpr
+                      Callee
+                        Identifier clock
+                      Args
+                        FieldExpr .decided_at
+                          Identifier early
+                  StringLiteral ": "
+                CallExpr
+                  Callee
+                    Identifier outcome
+                  Args
+                    CallExpr
+                      Callee
+                        Identifier predict
+                      Args
+                        Identifier early
+                        Identifier archive
+                        QualifiedName Visibility::AsOfDecision
+              StringLiteral " became "
+            CallExpr
+              Callee
+                Identifier outcome
+              Args
+                CallExpr
+                  Callee
+                    Identifier predict
+                  Args
+                    Identifier early
+                    Identifier archive
+                    QualifiedName Visibility::LatestNow
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier review
+        Args
+          CallExpr
+            Callee
+              Identifier proposed_plan
+          CallExpr
+            Callee
+              Identifier miswired_plan
+          IntLiteral 2
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier review
+        Args
+          CallExpr
+            Callee
+              Identifier audited_plan
+          CallExpr
+            Callee
+              Identifier proposed_plan
+          IntLiteral 2
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier review
+        Args
+          CallExpr
+            Callee
+              Identifier audited_plan
+          CallExpr
+            Callee
+              Identifier audited_shared_plan
+          IntLiteral 2
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          StringLiteral ""
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          StringLiteral "=== reuse ==="
+    LetStatement stored: ResultKey
+      CallExpr
+        Callee
+          Identifier ResultKey
+        Args
+          StringLiteral "predict"
+          StringLiteral "v1"
+          IntLiteral 1
+          CallExpr
+            Callee
+              Identifier at
+            Args
+              IntLiteral 9
+              IntLiteral 0
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            StringLiteral "same key: "
+            CallExpr
+              Callee
+                Identifier reuse_verdict
+              Args
+                Identifier stored
+                CallExpr
+                  Callee
+                    Identifier ResultKey
+                  Args
+                    StringLiteral "predict"
+                    StringLiteral "v1"
+                    IntLiteral 1
+                    CallExpr
+                      Callee
+                        Identifier at
+                      Args
+                        IntLiteral 9
+                        IntLiteral 0
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            StringLiteral "other model: "
+            CallExpr
+              Callee
+                Identifier reuse_verdict
+              Args
+                Identifier stored
+                CallExpr
+                  Callee
+                    Identifier ResultKey
+                  Args
+                    StringLiteral "predict"
+                    StringLiteral "v2"
+                    IntLiteral 1
+                    CallExpr
+                      Callee
+                        Identifier at
+                      Args
+                        IntLiteral 9
+                        IntLiteral 0
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            StringLiteral "other archive: "
+            CallExpr
+              Callee
+                Identifier reuse_verdict
+              Args
+                Identifier stored
+                CallExpr
+                  Callee
+                    Identifier ResultKey
+                  Args
+                    StringLiteral "predict"
+                    StringLiteral "v1"
+                    IntLiteral 2
+                    CallExpr
+                      Callee
+                        Identifier at
+                      Args
+                        IntLiteral 9
+                        IntLiteral 0
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            StringLiteral "other cutoff: "
+            CallExpr
+              Callee
+                Identifier reuse_verdict
+              Args
+                Identifier stored
+                CallExpr
+                  Callee
+                    Identifier ResultKey
+                  Args
+                    StringLiteral "predict"
+                    StringLiteral "v1"
+                    IntLiteral 1
+                    CallExpr
+                      Callee
+                        Identifier at
+                      Args
+                        IntLiteral 9
+                        IntLiteral 10
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          StringLiteral ""
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          StringLiteral "=== records ==="
+    LetStatement record_count: i64
+      BinaryExpr +
+        BinaryExpr +
+          CallExpr
+            Callee
+              FieldExpr .length
+                FieldExpr .steps
+                  CallExpr
+                    Callee
+                      Identifier straightforward_plan
+          CallExpr
+            Callee
+              FieldExpr .length
+                FieldExpr .steps
+                  CallExpr
+                    Callee
+                      Identifier proposed_plan
+        CallExpr
+          Callee
+            FieldExpr .length
+              FieldExpr .steps
+                CallExpr
+                  Callee
+                    Identifier audited_shared_plan
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            StringLiteral "records\t"
+            CallExpr
+              Callee
+                Identifier i64_to_string
+              Args
+                Identifier record_count
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print_records
+        Args
+          CallExpr
+            Callee
+              Identifier straightforward_plan
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print_records
+        Args
+          CallExpr
+            Callee
+              Identifier proposed_plan
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print_records
+        Args
+          CallExpr
+            Callee
+              Identifier audited_shared_plan
+    ReturnStatement
+      IntLiteral 0

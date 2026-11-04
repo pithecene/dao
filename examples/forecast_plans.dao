@@ -1,0 +1,453 @@
+module forecast_plans
+// This example holds one forecast rule, two execution plans for it, and the
+// rewrites a reviewer must see rejected.
+//
+// A prediction may read only the forecast revisions received by the time
+// it was decided.  The reference computes that rule on the CPU.  A plan is
+// a list of steps.  Its meaning (its cutoff, its model, its archive, what it
+// lets the host observe) is read off those steps rather than declared, so a
+// rewrite cannot drop a step and keep the claim.
+//
+// Times are minutes after midnight UTC.  The same steps print twice: once
+// for a person, and once as `record` lines that
+// examples/forecast_device/metal_runner.swift executes on a GPU.
+
+// ---------------------------------------------------------------
+// The fixture
+// ---------------------------------------------------------------
+
+class Revision:
+  id: string
+  cell: i32
+  valid_at: i32
+  received_at: i32
+  wind: i32
+
+class Archive:
+  version: i32
+  revisions: Vector<Revision>
+
+class Query:
+  cell: i32
+  valid_at: i32
+  decided_at: i32
+
+class Missing:
+  cell: i32
+  valid_at: i32
+
+enum Visibility:
+  AsOfDecision
+  LatestNow
+
+fn at(hours: i32, minutes: i32): i32 -> hours * 60 + minutes
+
+fn clock(minutes: i32): string
+  let m: i32 = minutes % 60
+  let padding: string = ""
+  if m < 10:
+    padding = "0"
+  return i32_to_string(minutes / 60) + ":" + padding + i32_to_string(m)
+
+fn fixture_archive(): Archive
+  let revisions: Vector<Revision> = Vector<Revision>::new()
+  revisions = revisions.push(Revision("r1", 7, at(10, 0), at(8, 55), 8))
+  revisions = revisions.push(Revision("r2", 7, at(10, 0), at(9, 7), 12))
+  return Archive(1, revisions)
+
+// ---------------------------------------------------------------
+// The reference
+// ---------------------------------------------------------------
+
+fn score_v1(wind: i32): i32 -> 60 + 2 * wind
+
+fn high_wind(wind: i32): i32
+  if wind >= 10:
+    return 1
+  return 0
+
+fn adjust(base: i32, flag: i32): i32 -> base + 5 * flag
+
+// The revision for a cell and valid time with the greatest receipt time a
+// query may see, a stable revision id breaking ties.
+fn latest_visible(archive: Archive, q: Query, visibility: Visibility): Option<Revision>
+  let best: Option<Revision> = Option::None
+  let i: i64 = to_i64(0)
+  while i < archive.revisions.length():
+    let r: Revision = archive.revisions.get(i)
+    if r.cell == q.cell and r.valid_at == q.valid_at and visible_to(r, q, visibility):
+      best = later_of(best, r)
+    i = i + to_i64(1)
+  return best
+
+fn visible_to(r: Revision, q: Query, visibility: Visibility): bool
+  match visibility:
+    Visibility::AsOfDecision:
+      return r.received_at <= q.decided_at
+    Visibility::LatestNow:
+      return true
+
+fn later_of(best: Option<Revision>, r: Revision): Option<Revision>
+  match best:
+    Option::None:
+      return Option::Some(value = r)
+    Option::Some(value):
+      if r.received_at > value.received_at:
+        return Option::Some(value = r)
+      if r.received_at == value.received_at and str_compare(r.id, value.id) > 0:
+        return Option::Some(value = r)
+      return best
+
+fn predict(q: Query, archive: Archive, visibility: Visibility): Result<i32, Missing>
+  match latest_visible(archive, q, visibility):
+    Option::None:
+      return Result::Err(error = Missing(q.cell, q.valid_at))
+    Option::Some(value):
+      return Result::Ok(value = adjust(score_v1(value.wind), high_wind(value.wind)))
+
+fn outcome(r: Result<i32, Missing>): string
+  match r:
+    Result::Ok(value):
+      return i32_to_string(value) + " minutes"
+    Result::Err(error):
+      return "missing for cell " + i32_to_string(error.cell) + " at " + clock(error.valid_at)
+
+// The same arithmetic over a batch, stage by stage, as a device would run it.
+fn predict_batch(winds: Vector<i32>): Vector<i32>
+  let scores: Vector<i32> = Vector<i32>::new()
+  let flags: Vector<i32> = Vector<i32>::new()
+  for w in winds.iter():
+    scores = scores.push(score_v1(w))
+  for w in winds.iter():
+    flags = flags.push(high_wind(w))
+  let results: Vector<i32> = Vector<i32>::new()
+  let i: i64 = to_i64(0)
+  while i < winds.length():
+    results = results.push(adjust(scores.get(i), flags.get(i)))
+    i = i + to_i64(1)
+  return results
+
+// ---------------------------------------------------------------
+// Plans
+// ---------------------------------------------------------------
+
+enum class Step:
+  ReadVisible(archive: i32, cutoff: string, output: string)
+  Upload(input: string, buffer: string)
+  Dispatch(kernel: string, model: string, left: string, right: string, output: string)
+  Readback(buffer: string, host: string)
+  HostAdjust(left: string, right: string, output: string)
+  Observe(name: string, host: string)
+  Reply(host: string)
+
+class Plan:
+  name: string
+  steps: Vector<Step>
+
+fn read_as_of_decision(): Step -> Step::ReadVisible(archive = 1, cutoff = "decided_at", output = "wind")
+
+fn upload(input: string, buffer: string): Step -> Step::Upload(input = input, buffer = buffer)
+
+fn dispatch(kernel: string, left: string, right: string, output: string): Step
+  return Step::Dispatch(kernel = kernel, model = "v1", left = left, right = right, output = output)
+
+fn readback(buffer: string, host: string): Step -> Step::Readback(buffer = buffer, host = host)
+
+fn observe(name: string, host: string): Step -> Step::Observe(name = name, host = host)
+
+fn reply(host: string): Step -> Step::Reply(host = host)
+
+// Each stage uploads its own copy and returns its own output.
+fn straightforward_plan(): Plan
+  let s: Vector<Step> = Vector<Step>::new()
+  s = s.push(read_as_of_decision())
+  s = s.push(upload("wind", "wind_a"))
+  s = s.push(dispatch("score_v1", "wind_a", "", "score"))
+  s = s.push(readback("score", "score_host"))
+  s = s.push(upload("wind", "wind_b"))
+  s = s.push(dispatch("high_wind", "wind_b", "", "flag"))
+  s = s.push(readback("flag", "flag_host"))
+  s = s.push(Step::HostAdjust(left = "score_host", right = "flag_host", output = "eta_host"))
+  s = s.push(reply("eta_host"))
+  return Plan("straightforward", s)
+
+// The stages share one read-only upload, and only the final ETAs return.
+fn proposed_plan(): Plan
+  let s: Vector<Step> = Vector<Step>::new()
+  s = s.push(read_as_of_decision())
+  s = s.push(upload("wind", "wind_shared"))
+  s = s.push(dispatch("score_v1", "wind_shared", "", "score"))
+  s = s.push(dispatch("high_wind", "wind_shared", "", "flag"))
+  s = s.push(dispatch("adjust", "score", "flag", "eta"))
+  s = s.push(readback("eta", "eta_host"))
+  s = s.push(reply("eta_host"))
+  return Plan("proposed", s)
+
+// The rewrite the fixture rejects: the same steps, joined against whatever
+// is latest when the plan runs.
+fn latest_now_plan(): Plan
+  let s: Vector<Step> = Vector<Step>::new()
+  let source: Vector<Step> = proposed_plan().steps
+  s = s.push(Step::ReadVisible(archive = 1, cutoff = "none", output = "wind"))
+  let i: i64 = to_i64(1)
+  while i < source.length():
+    s = s.push(source.get(i))
+    i = i + to_i64(1)
+  return Plan("latest_now", s)
+
+// A rewrite that keeps every declared fact and miswires one stage.
+fn miswired_plan(): Plan
+  let s: Vector<Step> = Vector<Step>::new()
+  s = s.push(read_as_of_decision())
+  s = s.push(upload("wind", "wind_shared"))
+  s = s.push(dispatch("score_v1", "wind_shared", "", "score"))
+  s = s.push(dispatch("high_wind", "wind_shared", "", "flag"))
+  s = s.push(dispatch("adjust", "score", "score", "eta"))
+  s = s.push(readback("eta", "eta_host"))
+  s = s.push(reply("eta_host"))
+  return Plan("miswired", s)
+
+// A host audit callback must see the score before the final result.
+fn audited_plan(): Plan
+  let s: Vector<Step> = Vector<Step>::new()
+  s = s.push(read_as_of_decision())
+  s = s.push(upload("wind", "wind_a"))
+  s = s.push(dispatch("score_v1", "wind_a", "", "score"))
+  s = s.push(readback("score", "score_host"))
+  s = s.push(observe("audit_score", "score_host"))
+  s = s.push(upload("wind", "wind_b"))
+  s = s.push(dispatch("high_wind", "wind_b", "", "flag"))
+  s = s.push(readback("flag", "flag_host"))
+  s = s.push(Step::HostAdjust(left = "score_host", right = "flag_host", output = "eta_host"))
+  s = s.push(reply("eta_host"))
+  return Plan("audited", s)
+
+// The audited program with the one shared upload it can keep: the score
+// still returns for the callback, so only one transfer is saved.
+fn audited_shared_plan(): Plan
+  let s: Vector<Step> = Vector<Step>::new()
+  s = s.push(read_as_of_decision())
+  s = s.push(upload("wind", "wind_shared"))
+  s = s.push(dispatch("score_v1", "wind_shared", "", "score"))
+  s = s.push(readback("score", "score_host"))
+  s = s.push(observe("audit_score", "score_host"))
+  s = s.push(dispatch("high_wind", "wind_shared", "", "flag"))
+  s = s.push(dispatch("adjust", "score", "flag", "eta"))
+  s = s.push(readback("eta", "eta_host"))
+  s = s.push(reply("eta_host"))
+  return Plan("audited_shared", s)
+
+// ---------------------------------------------------------------
+// What a plan means, read off its steps
+// ---------------------------------------------------------------
+
+class Meaning:
+  archive: i32
+  cutoff: string
+  models: string
+  observations: string
+  result: string
+
+// What a named value computes, spelled out through every buffer it passed
+// through, so two plans agree only if their replies are the same expression.
+fn computed(values: HashMap<string>, name: string): string
+  match values.get(name):
+    Option::Some(value):
+      return value
+    Option::None:
+      return name
+
+fn applied(operation: string, values: HashMap<string>, left: string, right: string): string
+  if right == "":
+    return operation + "(" + computed(values, left) + ")"
+  return operation + "(" + computed(values, left) + ", " + computed(values, right) + ")"
+
+fn meaning_of(p: Plan): Meaning
+  let m: Meaning = Meaning(-1, "", "", "", "")
+  let values: HashMap<string> = HashMap<string>::new()
+  for step in p.steps.iter():
+    match step:
+      Step::ReadVisible(archive, cutoff, output):
+        m.archive = archive
+        m.cutoff = cutoff
+      Step::Upload(input, buffer):
+        values = values.set(buffer, computed(values, input))
+      Step::Dispatch(kernel, model, left, right, output):
+        if kernel != "adjust" and index_of(m.models, model) < to_i64(0):
+          m.models = m.models + model
+        values = values.set(output, applied(kernel, values, left, right))
+      Step::Readback(buffer, host):
+        values = values.set(host, computed(values, buffer))
+      Step::HostAdjust(left, right, output):
+        values = values.set(output, applied("adjust", values, left, right))
+      Step::Observe(name, host):
+        m.observations = m.observations + name + "=" + computed(values, host) + ";"
+      Step::Reply(host):
+        m.result = computed(values, host)
+  return m
+
+// The transfers a plan makes.  Each value is one signed 32-bit integer.
+class Transfers:
+  uploads: i32
+  readbacks: i32
+
+fn transfers_of(p: Plan): Transfers
+  let t: Transfers = Transfers(0, 0)
+  for step in p.steps.iter():
+    match step:
+      Step::Upload(input, buffer):
+        t.uploads = t.uploads + 1
+      Step::Readback(buffer, host):
+        t.readbacks = t.readbacks + 1
+  return t
+
+fn describe(step: Step): string
+  match step:
+    Step::ReadVisible(archive, cutoff, output):
+      return "read " + output + " from archive " + i32_to_string(archive) + ", cutoff " + cutoff
+    Step::Upload(input, buffer):
+      return "upload " + input + " to " + buffer
+    Step::Dispatch(kernel, model, left, right, output):
+      return "gpu " + kernel + "(" + left + " " + right + ") to " + output + ", model " + model
+    Step::Readback(buffer, host):
+      return "readback " + buffer + " to " + host
+    Step::HostAdjust(left, right, output):
+      return "cpu adjust(" + left + " " + right + ") to " + output
+    Step::Observe(name, host):
+      return "host observes " + host + " as " + name
+    Step::Reply(host):
+      return "reply " + host
+
+// One tab-separated line per step, for the device runner.
+fn record_line(plan: string, step: Step): string
+  let start: string = "record\t" + plan + "\t"
+  match step:
+    Step::ReadVisible(archive, cutoff, output):
+      return start + "read\t" + output
+    Step::Upload(input, buffer):
+      return start + "upload\t" + input + "\t" + buffer
+    Step::Dispatch(kernel, model, left, right, output):
+      return start + "dispatch\t" + kernel + "\t" + left + "\t" + right + "\t" + output
+    Step::Readback(buffer, host):
+      return start + "readback\t" + buffer + "\t" + host
+    Step::HostAdjust(left, right, output):
+      return start + "host_adjust\t" + left + "\t" + right + "\t" + output
+    Step::Observe(name, host):
+      return start + "observe\t" + name + "\t" + host
+    Step::Reply(host):
+      return start + "reply\t" + host
+
+fn print_plan(p: Plan): void
+  print("plan " + p.name + ", reply = " + meaning_of(p).result)
+  for step in p.steps.iter():
+    print("  " + describe(step))
+
+fn print_records(p: Plan): void
+  for step in p.steps.iter():
+    print(record_line(p.name, step))
+
+// ---------------------------------------------------------------
+// Reviewing a rewrite
+// ---------------------------------------------------------------
+
+// The change between two meanings, one reason per line.  An empty list means
+// the rewrite changes only where the work runs and what it moves.
+fn meaning_changes(before: Meaning, after: Meaning): Vector<string>
+  let changes: Vector<string> = Vector<string>::new()
+  if before.cutoff != after.cutoff:
+    changes = changes.push("cutoff " + before.cutoff + " became " + after.cutoff)
+  if before.archive != after.archive:
+    changes = changes.push("archive " + i32_to_string(before.archive) + " became " + i32_to_string(after.archive))
+  if before.models != after.models:
+    changes = changes.push("model " + before.models + " became " + after.models)
+  if before.observations != after.observations:
+    changes = changes.push("observations '" + before.observations + "' became '" + after.observations + "'")
+  if before.result != after.result:
+    changes = changes.push("result " + before.result + " became " + after.result)
+  return changes
+
+fn review(before: Plan, after: Plan, payload_rows: i32): void
+  print("review " + before.name + " -> " + after.name)
+  let b: Transfers = transfers_of(before)
+  let a: Transfers = transfers_of(after)
+  print("  uploads " + i32_to_string(b.uploads) + " -> " + i32_to_string(a.uploads) + "; readbacks " + i32_to_string(b.readbacks) + " -> " + i32_to_string(a.readbacks))
+  print("  bytes at N=" + i32_to_string(payload_rows) + ": up " + i32_to_string(b.uploads * 4 * payload_rows) + " -> " + i32_to_string(a.uploads * 4 * payload_rows) + ", down " + i32_to_string(b.readbacks * 4 * payload_rows) + " -> " + i32_to_string(a.readbacks * 4 * payload_rows))
+  let changes: Vector<string> = meaning_changes(meaning_of(before), meaning_of(after))
+  if changes.length() == to_i64(0):
+    print("  meaning unchanged: accepted")
+  else:
+    for reason in changes.iter():
+      print("  REJECTED: " + reason)
+
+// ---------------------------------------------------------------
+// Reuse of a stored result
+// ---------------------------------------------------------------
+
+class ResultKey:
+  operation: string
+  model: string
+  archive: i32
+  cutoff: i32
+
+fn reuse_verdict(stored: ResultKey, wanted: ResultKey): string
+  if stored.operation != wanted.operation:
+    return "rejected: a different operation"
+  if stored.model != wanted.model:
+    return "rejected: model " + stored.model + " is not " + wanted.model
+  if stored.archive != wanted.archive:
+    return "rejected: archive " + i32_to_string(stored.archive) + " is not " + i32_to_string(wanted.archive)
+  if stored.cutoff != wanted.cutoff:
+    return "rejected: cutoff " + clock(stored.cutoff) + " is not " + clock(wanted.cutoff)
+  return "reused"
+
+// ---------------------------------------------------------------
+// The demonstration
+// ---------------------------------------------------------------
+
+fn main(): i32
+  let archive: Archive = fixture_archive()
+  let early: Query = Query(7, at(10, 0), at(9, 0))
+  let late: Query = Query(7, at(10, 0), at(9, 10))
+  let before_any: Query = Query(7, at(10, 0), at(8, 0))
+
+  print("=== reference ===")
+  print("decided " + clock(early.decided_at) + ": " + outcome(predict(early, archive, Visibility::AsOfDecision)))
+  print("decided " + clock(late.decided_at) + ": " + outcome(predict(late, archive, Visibility::AsOfDecision)))
+  print("decided " + clock(before_any.decided_at) + ": " + outcome(predict(before_any, archive, Visibility::AsOfDecision)))
+  let winds: Vector<i32> = Vector<i32>::new()
+  winds = winds.push(8)
+  winds = winds.push(12)
+  let batch: Vector<i32> = predict_batch(winds)
+  print("batch [8, 12]: [" + i32_to_string(batch.get(to_i64(0))) + ", " + i32_to_string(batch.get(to_i64(1))) + "]")
+
+  print("")
+  print("=== plans ===")
+  print_plan(straightforward_plan())
+  print_plan(proposed_plan())
+
+  print("")
+  print("=== reviews ===")
+  review(straightforward_plan(), proposed_plan(), 2)
+  review(proposed_plan(), latest_now_plan(), 2)
+  print("  counterexample, decided " + clock(early.decided_at) + ": " + outcome(predict(early, archive, Visibility::AsOfDecision)) + " became " + outcome(predict(early, archive, Visibility::LatestNow)))
+  review(proposed_plan(), miswired_plan(), 2)
+  review(audited_plan(), proposed_plan(), 2)
+  review(audited_plan(), audited_shared_plan(), 2)
+
+  print("")
+  print("=== reuse ===")
+  let stored: ResultKey = ResultKey("predict", "v1", 1, at(9, 0))
+  print("same key: " + reuse_verdict(stored, ResultKey("predict", "v1", 1, at(9, 0))))
+  print("other model: " + reuse_verdict(stored, ResultKey("predict", "v2", 1, at(9, 0))))
+  print("other archive: " + reuse_verdict(stored, ResultKey("predict", "v1", 2, at(9, 0))))
+  print("other cutoff: " + reuse_verdict(stored, ResultKey("predict", "v1", 1, at(9, 10))))
+
+  print("")
+  print("=== records ===")
+  // The count lets the runner tell a complete stream from a damaged one.
+  let record_count: i64 = straightforward_plan().steps.length() + proposed_plan().steps.length() + audited_shared_plan().steps.length()
+  print("records\t" + i64_to_string(record_count))
+  print_records(straightforward_plan())
+  print_records(proposed_plan())
+  print_records(audited_shared_plan())
+  return 0
