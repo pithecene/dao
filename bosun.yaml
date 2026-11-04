@@ -13,5 +13,5 @@ prose:
     - examples/README.md
     - docs/building.md
     - docs/heterogeneous_experiment.md
-    - docs/NON_DAO_INVENTORY.md
+    - docs/non_dao_inventory.md
     - docs/task_specs/TASK_46_BOOTSTRAP_FIRST_MODULE.md
