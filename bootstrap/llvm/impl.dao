@@ -2805,6 +2805,16 @@ fn lower_to_mir_backend_input(src: string): MirBackendInput
 // made concrete and lowered here, each function with its own
 // module's tokens.
 fn lower_program_to_llvm_text(inputs: Vector<SourceInput>): LlvmTextResult
+  return lower_program_to_llvm(inputs).result
+
+// A whole program's module, with what is known of where its diagnostics
+// came from.  `result.diags` begins with `program.diags`, in order, and the
+// rest are monomorphization's and the backend's, which name no source file.
+class ProgramLlvm:
+  program: Program
+  result: LlvmTextResult
+
+fn lower_program_to_llvm(inputs: Vector<SourceInput>): ProgramLlvm
   let pg: ProgramGraph = program_graph_empty()
   resource memory graph =>
     pg = build_program(inputs)
@@ -2821,7 +2831,23 @@ fn lower_program_to_llvm_text(inputs: Vector<SourceInput>): LlvmTextResult
   resource memory mono =>
     pc = program_monomorphize(pt, pm)
   let input: MirBackendInput = MirBackendInput(pc.mir, pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, BackendSource(Vector<Token>::new(), "", pc.program.graph))
-  return lower_mir_to_llvm_text(input)
+  return ProgramLlvm(pc.program, lower_mir_to_llvm_text(input))
+
+// A diagnostic as the host prints it: `path:line:column: message`, or the
+// message alone when no source file carries it.
+fn located_message(fd: FileDiagnostic, files: Vector<SourceFile>): string
+  if fd.file_id < to_i64(0) or fd.file_id >= files.length():
+    return fd.diag.message
+  let source: string = files.get(fd.file_id).source_text
+  let line: i64 = to_i64(1)
+  let line_start: i64 = to_i64(0)
+  let i: i64 = to_i64(0)
+  while i < fd.diag.span.offset and i < length(source):
+    if char_at(source, i) == 10:
+      line = line + to_i64(1)
+      line_start = i + to_i64(1)
+    i = i + to_i64(1)
+  return fd.path + ":" + i64_to_string(line) + ":" + i64_to_string(fd.diag.span.offset - line_start + to_i64(1)) + ": " + fd.diag.message
 
 fn lower_source_to_llvm_text(src: string): LlvmTextResult
   let input: MirBackendInput = lower_to_mir_backend_input(src)
