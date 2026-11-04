@@ -54,9 +54,9 @@ done
 # and `--` ends option parsing.  A bad link input reaches the linker, which
 # is where it is diagnosed — the driver does not reject it.
 out=$("$DAOC" build --source "$BM/app_main.dao" --source "$BM/app_math.dao" --source "$BM/core_fmt.dao" -Wl,--no-such-option 2>&1) || true
-echo "$out" | grep -q 'unknown option' && fail "build rejected a link input instead of forwarding it"
+echo "$out" | grep -q '^error: unknown option' && fail "build rejected a link input instead of forwarding it"
 out=$("$DAOC" build --source "$BM/app_main.dao" --source "$BM/app_math.dao" --source "$BM/core_fmt.dao" -- -Wl,--no-such-option 2>&1) || true
-echo "$out" | grep -q 'unknown option' && fail "build rejected a link input after --"
+echo "$out" | grep -q '^error: unknown option' && fail "build rejected a link input after --"
 # The analysis commands still reject one.
 "$DAOC" check --source "$BM/core_fmt.dao" --bogus > "$WORK/bogus.txt" 2>&1 && fail "check accepted an unknown option"
 grep -q 'unknown option' "$WORK/bogus.txt" || fail "check did not name the unknown option"

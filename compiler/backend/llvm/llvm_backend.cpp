@@ -1844,7 +1844,10 @@ auto LlvmBackend::lower_return(const MirReturn& p, const MirInst& inst,
     }
     state.builder->CreateRet(val);
   } else {
-    state.builder->CreateRetVoid();
+    // The builder's implicit return closes a block no path reaches, such
+    // as the fall-through of an exhaustive match. A non-void function has
+    // no valid `ret void`, and AArch64's CFG pass crashes on one.
+    state.builder->CreateUnreachable();
   }
   return true;
 }

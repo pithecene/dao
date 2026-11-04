@@ -1,0 +1,17 @@
+{
+    "version": "0.5",
+    "requires": [
+        "zstd/1.5.6#8b5ebac476eb7d9ec2080ad31f2816fc%1760955094.262",
+        "zlib/1.3.2#1cb806da49011867778ffb6ac7190fcb%1777558780.503",
+        "nlohmann_json/3.11.3#45828be26eb619a2e04ca517bb7b828d%1701220705.259",
+        "llvm-core/19.1.7#d2905c45145d0e5cae53bf31e24b8e91%1742668846.949",
+        "cpp-httplib/0.18.3#ad62795f35f0fecaea1fd4bdb7b949f0%1748426309.372",
+        "boost-ext-ut/2.3.1#e0a2761f845926e65a8aee07e3995ed5%1749912869.147"
+    ],
+    "build_requires": [
+        "ninja/1.13.2#c8c5dc2a52ed6e4e42a66d75b4717ceb%1764096931.974",
+        "cmake/3.31.12#5c883f7908780190d9d4ab52e0da7bfd%1789658723.981"
+    ],
+    "python_requires": [],
+    "config_requires": []
+}
