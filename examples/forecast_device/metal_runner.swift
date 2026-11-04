@@ -72,7 +72,20 @@ struct Report {
   var seconds = 0.0
 }
 
-func readPlans() -> (order: [String], steps: [String: [Step]]) {
+let kernelNames = ["score_v1", "high_wind", "adjust"]
+let stepArguments = ["read": 1, "upload": 2, "dispatch": 4, "readback": 2, "host_adjust": 3, "observe": 2, "reply": 1]
+
+// A record the executor could not run stops here, before anything indexes it.
+func checkShape(_ step: Step) throws {
+  guard stepArguments[step.op] == step.args.count else {
+    throw RunError.malformed("\(step.op) with \(step.args.count) arguments")
+  }
+  if step.op == "dispatch" && !kernelNames.contains(step.args[0]) {
+    throw RunError.malformed("unknown kernel \(step.args[0])")
+  }
+}
+
+func readPlans() throws -> (order: [String], steps: [String: [Step]]) {
   var order: [String] = []
   var steps: [String: [Step]] = [:]
   while let line = readLine() {
@@ -82,7 +95,9 @@ func readPlans() -> (order: [String], steps: [String: [Step]]) {
       order.append(fields[1])
       steps[fields[1]] = []
     }
-    steps[fields[1]]!.append(Step(op: fields[2], args: Array(fields[3...])))
+    let step = Step(op: fields[2], args: Array(fields[3...]))
+    try checkShape(step)
+    steps[fields[1]]!.append(step)
   }
   return (order, steps)
 }
@@ -97,7 +112,7 @@ final class Gpu {
     queue = device.makeCommandQueue()!
     let library = try device.makeLibrary(source: kernelSource, options: nil)
     var made: [String: MTLComputePipelineState] = [:]
-    for name in ["score_v1", "high_wind", "adjust"] {
+    for name in kernelNames {
       made[name] = try device.makeComputePipelineState(function: library.makeFunction(name: name)!)
     }
     pipelines = made
@@ -279,7 +294,7 @@ func milliseconds(_ seconds: Double) -> String { String(format: "%.3f", seconds 
 
 func median(_ values: [Double]) -> Double { values.sorted()[values.count / 2] }
 
-let (planOrder, plans) = readPlans()
+let (planOrder, plans) = try readPlans()
 // Without its plans the run would measure only the handwritten code and
 // could still report success.
 for required in ["straightforward", "proposed", "audited_shared"] where plans[required] == nil {
