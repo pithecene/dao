@@ -5,7 +5,7 @@ Phase: Tier B-Bootstrap, the first step of roadmap order 6
 Scope: carry one real import through the host, the bootstrap compiler,
 self-compilation and the tools, and keep generated sources fresh.
 
-## 1. What Task 45 leaves
+## 1. What Task 45 Leaves
 
 The crossing compiles one assembled file.  `assemble.sh` strips every
 fragment's module declaration, so the compiler never compiles an import
@@ -13,7 +13,7 @@ of its own and every name shares one synthetic module identity.  The
 design handoff measured 1,004 resolution errors with seven fragments
 passed as separate files, because they depend on shared unqualified names.
 
-## 2. The boundary
+## 2. The Boundary
 
 The file `bootstrap/ascii.dao` declares `module bootstrap::ascii` and holds
 `is_digit`, `is_alpha` and `is_alnum`, the one definition of each.
@@ -21,10 +21,10 @@ The file `bootstrap/ascii.dao` declares `module bootstrap::ascii` and holds
 Every compile of a generated program passes the file explicitly: the
 Taskfile's suites, `stage2.sh` and `audit_closure.sh` with its probe.
 
-## 3. What the boundary changed
+## 3. What the Boundary Changed
 
 The `daoc build` command named its executable after the source whose path sorted
-first, so every program would have been written to `bootstrap/ascii`.  It
+first, so it would have written every program to `bootstrap/ascii`.  It
 now names the executable after the entry module's file, which is equally
 independent of input order.
 
@@ -63,10 +63,10 @@ Measured on macOS arm64 (`arm64-apple-darwin25.6.0`), Apple clang
 | References from the call and from the definition | the same six sites |
 | Diagnostic in the module, host and self-hosted driver | `bootstrap/ascii.dao:10:10` |
 
-## 6. Known gaps
+## 6. Known Gaps
 
 - Navigation starts from the generated file: a call in `base.dao` line
   522 is `driver.gen.dao` line 525.  This ends when `base.dao` is itself a
   module.
 - `audit_closure.sh` needs GNU `time` and `timeout`, so its change did not
-  run here, and the Linux x86-64 crossing was not rerun.
+  run here, and nobody reran the Linux x86-64 crossing.

@@ -8,16 +8,13 @@ and run.  A subdirectory whose files declare one `fn main` between them
 is a single multi-file program instead.  The `playground_service_test` suite
 analyzes each of its files and builds and runs the set together against
 `testdata/examples/<dir>.out`.  A subdirectory whose files each declare
-their own `fn main` is a collection of separate programs and is left
-alone.  The playground lists this directory, and each file is a
+their own `fn main` is a collection of separate programs, which the suite leaves alone.  The playground lists this directory, and each file is a
 regression input, so a new language feature should land with an
 example of that feature.  `playground_service_test` compiles and
 runs every file, compares its output with `testdata/examples/<name>.out`
-(`task update-example-goldens` rewrites them), and requires every token
-to be classified.  One file does not build today: `raw_memory.dao`
+(`task update-example-goldens` rewrites them), and requires a classification for every token.  One file does not build today: `raw_memory.dao`
 trips a MIR concreteness invariant in the host compiler (pre-existing).
-It stays here as the regression input for that fix and is listed in
-`testdata/examples/known_failures.txt` with that diagnostic.
+It stays here as the regression input for that fix, and `testdata/examples/known_failures.txt` lists it with that diagnostic.
 
 | File | Demonstrates |
 |------|--------------|

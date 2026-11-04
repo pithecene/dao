@@ -14,7 +14,7 @@ C++23 host compiler targeting LLVM, a native runtime, an initial standard
 library, a web playground, and a Dao-implemented bootstrap compiler that
 lowers Tier A Dao to textual LLVM IR.
 
-## Repository shape
+## Repository Shape
 
 - `bootstrap/`: self-hosting compiler subsystems written in Dao
 - `compiler/`: C++23 host compiler: lexer → parser → resolve → typecheck → HIR → MIR → LLVM backend → driver, plus tooling-facing analysis
@@ -27,7 +27,7 @@ lowers Tier A Dao to textual LLVM IR.
 - `tools/`: playground, LSP, formatter, and diagnostics tooling
 - `ai/`: Bonsai governance skills, baselines, outputs
 
-## Governance docs
+## Governance Docs
 
 The authoritative files for AI-assisted work are:
 1. `CLAUDE.md`
@@ -37,7 +37,7 @@ The authoritative files for AI-assisted work are:
 
 `README.md` is informational only.
 
-## Implementation roadmap
+## Implementation Roadmap
 
 See `docs/ROADMAP.md` for the staged implementation plan and
 `docs/compiler_bootstrap_and_architecture.md` for current architecture

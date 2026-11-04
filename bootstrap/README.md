@@ -2,16 +2,13 @@
 
 Self-hosting compiler subsystems written in Dao.
 
-This directory contains maintained bootstrap infrastructure: code that
-is intended to evolve into the self-hosted Dao compiler.  It is **not**
+This directory contains maintained bootstrap infrastructure: code meant to evolve into the self-hosted Dao compiler.  It is **not**
 a probe or experiment directory.
 
-## Shared substrate
+## Shared Substrate
 
 The file `shared/base.dao` is the single source of truth for the bootstrap
-frontend pipeline (token model, lexer, AST, parser).  Subsystem
-`.dao` files are assembled from `base.dao` + subsystem `.part.dao`
-fragments via `bash bootstrap/assemble.sh`.  See `shared/README.md`.
+frontend pipeline (token model, lexer, AST, parser).  The command `bash bootstrap/assemble.sh` assembles subsystem `.dao` files from `base.dao` + subsystem `.part.dao` fragments.  See `shared/README.md`.
 
 ## Subsystems
 
@@ -48,7 +45,7 @@ The bootstrap lexer matches the C++ lexer on:
 - No hex/octal/binary integer literal support
 - No multiline string literals
 - No raw string literals
-- Escape sequences are consumed but not validated beyond `\\`
+- The lexer consumes escape sequences but validates nothing beyond `\\`
 - No Unicode identifier support
 - `vec_pop` is O(n), because it rebuilds the vector on every pop
 
@@ -138,8 +135,7 @@ uses map over the bootstrap parser's AST.
   - The prelude group (`stdlib/core`, `stdlib/io`, loaded as declarations
     with `is_prelude`) is one shared scope every module's scope hangs from.
   - A module's own declaration shadows a prelude declaration.
-  - Qualified and unqualified paths reach one symbol.
-  - Builtin names cannot be redeclared at top level.
+  - Qualified and unqualified paths reach one symbol.  - No top-level declaration can reuse a builtin name.
   - The `__dao_` names and the intrinsic family are the prelude's to declare.
 - Duplicate declaration diagnostics
 - `let` / `for` / lambda / param / field declarations
@@ -234,8 +230,7 @@ the host compiler's structure (`compiler/ir/mir/mir.h`).
 
 - Lowers typed HIR → flat `MirNode` arena with `MirModule` root
 - `MirFunction` owns a list of `MirLocal` slots (params first) and a
-  list of `MirBlock` nodes (entry first).  Per-function state is
-  accumulated on `MS.func.fn_blocks` / `MS.func.locals` and flushed on seal
+  list of `MirBlock` nodes (entry first).  Per-function state accumulates on `MS.func.fn_blocks` / `MS.func.locals` and flushes on seal
 - `BlockR` threads block-local instruction buffers and a `sealed`
   flag through statement lowering, and `block_seal` rewrites each
   `MirBlock` with its instruction list offset and count
@@ -254,8 +249,7 @@ if/else, while.
 **Tier B deferrals**: generators, monomorphization, `resource` blocks,
 `mode` blocks, enum construction/discriminant/payload, lambda
 / closures, try operator, for-over-iterable, index expressions,
-break/continue.  A `resource` block is rejected with the
-unsupported-statement diagnostic, fail-closed, until MIR holds the domain
+break/continue.  MIR rejects a `resource` block with the unsupported-statement diagnostic, fail-closed, until MIR holds the domain
 (`CONTRACT_MIR_BOUNDARY.md` §4, Task 37 §5).
 
 **How to run tests**:
@@ -315,8 +309,7 @@ expressions, break/continue, LLVM C API integration,
 task bootstrap-test   # every suite, then validate_ir over bootstrap/llvm/out
 ```
 
-Or by hand (the suite writes its artifacts under `bootstrap/llvm/out`,
-which is gitignored, so create it first):
+Or by hand (the suite writes its artifacts under `bootstrap/llvm/out`, which Git ignores, so create it first):
 
 ```sh
 rm -rf bootstrap/llvm/out && mkdir -p bootstrap/llvm/out
@@ -325,12 +318,11 @@ bash bootstrap/validate_ir.sh build/debug
 ```
 
 The suite writes the IR of every fixture it lowers to
-`bootstrap/llvm/out/<test>.ll` (and `<test>.exit` where the program's
-result is known).  The script `validate_ir.sh` compiles each with `clang`, links the
+`bootstrap/llvm/out/<test>.ll` (and `<test>.exit` where the suite knows the program's result).  The script `validate_ir.sh` compiles each with `clang`, links the
 ones with an expectation against the runtime, runs them, and compares
 exit codes (Task 30.5).  `task bootstrap-test` runs both steps.
 
-## Module-system contract parity
+## Module-System Contract Parity
 
 The contract `docs/contracts/CONTRACT_MODULE_SYSTEM.md` governs both compilers.
 This table mirrors its §12 for the bootstrap side and must move in the
@@ -342,24 +334,22 @@ same change as the bootstrap work that closes a row.
 | §3 imports | conforms (Tasks 25–26) — one-segment binding, module-name-only exposure, cycle rejection |
 | §4 exports, same-module access | conforms (Task 26) |
 | §5 `extend` scoping | conforms (Task 26 §6.5) — module granularity, not imported |
-| §6 qualified forms | `b::f`, `b::T`, `b::E::V` conform (Task 27 D4). `b::C` in conformance positions and `b::T::m` are rejected until the bootstrap has concepts and methods (Task 33). |
+| §6 qualified forms | `b::f`, `b::T`, `b::E::V` conform (Task 27 D4). The bootstrap rejects `b::C` in conformance positions and `b::T::m` until it has concepts and methods (Task 33). |
 | §7 prelude | partial (Tasks 38, 41). Scope order, shadowing, identity, reserved names, prelude method and `extend` visibility, and derived conformance through the prelude conform. Prelude files load partially. The `hir`/`mir`/`llvm` probe columns are not yet measured with the prelude. |
 | §8 entry module | not implemented: no driver or entry concept, and MIR flattens every function of every module (Task 33) |
 | §9 determinism | graph construction conforms (Task 25 §8, graph tests 7 and 8). Program-level output determinism is unverified (Task 33). |
 
-## Relationship to probes
+## Relationship to Probes
 
 The `examples/bootstrap_probe/` directory contains earlier experimental
-probes that informed the design of these subsystems.  Probes are
-learning artifacts, and bootstrap subsystems are maintained code.
+probes that informed the design of these subsystems.  Probes are learning artifacts, and bootstrap subsystems are code under maintenance.
 
-After Task 20, `examples/bootstrap_probe/dao_lexer_v2.dao` is
-superseded by `bootstrap/lexer/lexer.dao`.
+After Task 20, `bootstrap/lexer/lexer.dao` supersedes `examples/bootstrap_probe/dao_lexer_v2.dao`.
 
 After Task 21, the bootstrap parser supersedes the `expr_parser.dao`
-probe. The probe is retained as a historical artifact.
+probe. The probe remains as a historical artifact.
 
-## What comes next
+## What Comes Next
 
 - Tier B expansion (generics, concepts, extend, mode/resource)
 - Diagnostic formatting integration

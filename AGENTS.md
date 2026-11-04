@@ -47,11 +47,8 @@ explicit syntax revision task.
 
 ## Dependency Discipline
 
-- Native dependencies are managed via **Conan 2.x** in manifest mode
-  (`conanfile.txt` or `conanfile.py`).  The playground frontend's
-  JavaScript dependencies are declared in its `package.json` and pinned
-  by `package-lock.json`, installed with `npm ci --ignore-scripts`.  A dependency the frontend imports must be declared there, never used
-  through hoisting.
+- **Conan 2.x** manages native dependencies in manifest mode
+  (`conanfile.txt` or `conanfile.py`).  The playground frontend declares its JavaScript dependencies in its `package.json` and pins them in `package-lock.json`, and `npm ci --ignore-scripts` installs them.  The frontend must declare every dependency it imports there, and must never use one through hoisting.
 - Agents must **never** install, suggest, or attempt to install system
   packages (e.g. via `zypper`, `apt`, `dnf`, `brew`, or any other
   system package manager). No exceptions.
@@ -98,10 +95,9 @@ Agents must:
 
 ## Code Quality Discipline
 
-Every diff must be evaluated in context of the larger project, not
-in isolation.  Passing tests is necessary but not sufficient.
+Evaluate every diff in context of the larger project, not in isolation.  This evaluation is mandatory.  Passing tests is necessary but not sufficient.
 
-### Pre-commit self-review gate
+### Pre-Commit Self-Review Gate
 
 Before committing, verify:
 
@@ -122,7 +118,7 @@ Before committing, verify:
 5. **Workarounds require escalation.** If writing a comment that
    says "workaround" or "temporary," that is a flag to escalate to
    the user, not a license to ship it.  Document the root cause,
-   the workaround, and the conditions under which it can be removed, all in one place, not scattered across files.
+   the workaround, and the conditions for removing it, all in one place, not scattered across files.
 6. **No silent regressions.** Every function that can fail must
    have an observable failure path (diagnostic, error return, or
    assert).  Returning a valid-looking default (0, nullptr, empty)
@@ -132,21 +128,21 @@ Before committing, verify:
    are fine for small n with a documented size bound, and they are not
    fine as the default lookup strategy.
 
-### Naming rules
+### Naming Rules
 
 - Variables describe what they hold, not their type or scope depth
 - Functions describe what they do, not which pass calls them
 - Test fixtures describe the scenario, not their sequential number
 - Comments explain why, not what, because the code shows what
 
-### Abstraction rules
+### Abstraction Rules
 
 - Every abstraction must earn its keep: if removing it would require
   copy-pasting code in ≥3 places, it belongs, and otherwise it does not
 - Do not introduce wrappers that add no semantic value
 - Do not duplicate type definitions across subsystems.  Promote shared types to the appropriate substrate layer
 
-### Review posture
+### Review Posture
 
 Agents must review their own output as if they were the reviewer,
 not the author.  The question is not "does this work" but "would I
