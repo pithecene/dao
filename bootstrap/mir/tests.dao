@@ -40,6 +40,32 @@ fn mir_of_program(inputs: Vector<SourceInput>): ProgramMir
   p = program_run_typecheck(p)
   return program_run_mir(p)
 
+// For each call carrying the checker's substitution record, what each
+// parameter stands for, by type name: "i32;" per call, "," between
+// parameters.
+fn mir_call_substs(pm: ProgramMir): string
+  let r: MirResult = pm.mir
+  let types: Vector<DaoType> = pm.program.typecheck.types
+  let info: Vector<i64> = pm.program.typecheck.type_info
+  let out: string = ""
+  let i: i64 = 0
+  while i < r.mir_nodes.length():
+    match r.mir_nodes.get(i):
+      MirNode::MirCall(callee, arg_list_lp, arg_count, ti, subst):
+        if subst >= 0:
+          let count: i64 = info.get(subst)
+          let k: i64 = 0
+          while k < count:
+            if k > 0:
+              out = out + ","
+            let stands: i64 = info.get(subst + 2 + k * 2)
+            if stands >= 0 and stands < types.length():
+              out = out + types.get(stands).name
+            k = k + 1
+          out = out + ";"
+    i = i + 1
+  return out
+
 // The MirModule nodes of a MirProgram root, in program order.
 fn mir_modules(r: MirResult): Vector<i64>
   match r.mir_nodes.get(r.root):
@@ -88,7 +114,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 40
+  let total: i32 = 42
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -655,6 +681,27 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL pointer_operations_checked_as_host: void/width/named = " + bool_to_string(void37) + "/" + bool_to_string(width37) + "/" + bool_to_string(named37))
+
+  // Tests 38–39: a call to a generic callee carries what the checker
+  // decided of the parameters the callee is generic over — its own
+  // (`id(1)`: T is i32), and its class's (`b.get()` on a `Box<i32>`:
+  // Box's T is i32) — for monomorphization to name the concrete copy.
+  let in38: Vector<SourceInput> = Vector<SourceInput>::new()
+  in38 = in38.push(SourceInput("main.dao", "module app::main\n\nfn id<T>(x: T): T -> x\n\nfn main(): i32 -> id(1)\n", false))
+  let s38: string = mir_call_substs(mir_of_program(in38))
+  if s38 == "i32;":
+    print("PASS generic_call_carries_substitution")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL generic_call_carries_substitution: got '" + s38 + "'")
+  let in39: Vector<SourceInput> = Vector<SourceInput>::new()
+  in39 = in39.push(SourceInput("main.dao", "module app::main\n\nclass Box<T>:\n  v: T\n\n  fn get(self): T -> self.v\n\nfn main(): i32\n  let b: Box<i32> = Box<i32>(1)\n  return b.get()\n", false))
+  let s39: string = mir_call_substs(mir_of_program(in39))
+  if s39 == "i32;":
+    print("PASS method_call_carries_class_substitution")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL method_call_carries_class_substitution: got '" + s39 + "'")
 
   // -----------------------------------------------------------------
   print("")

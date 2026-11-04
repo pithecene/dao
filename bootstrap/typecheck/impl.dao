@@ -3612,6 +3612,48 @@ fn type_args_head(ts: TS, callee: i64): i64
           return head_ti
   return to_i64(-1)
 
+/// The parameters of the class whose method a call names: the
+/// receiver's class for `obj.m(...)`, the named class for `Type::m(...)`;
+/// none for a free function.
+fn call_owner_params(ts: TS, callee: i64): ParamIds
+  let none: ParamIds = ParamIds(ts, Vector<i64>::new())
+  let owner_ti: i64 = to_i64(-1)
+  match ts.tc.nodes.get(callee):
+    Node::FieldE(obj, field_tidx):
+      let obj_ti: i64 = get_expr_type(ts, obj)
+      if obj_ti >= 0 and obj_ti < ts.types.length():
+        owner_ti = record_head(ts, ts.types.get(obj_ti))
+    Node::QualNameE(seg_lp, seg_count):
+      owner_ti = type_args_head(ts, callee)
+  if owner_ti < 0 or owner_ti >= ts.types.length():
+    return none
+  return head_params(ts, ts.types.get(owner_ti))
+
+/// The key under which the checker records a call's substitution: a
+/// type_info record [count, (parameter, what it stands for) * count].
+fn call_subst_key(module_id: i64, node_idx: i64): string
+  return expr_id_key(module_id, node_idx) + ":subst"
+
+/// Record what the call at `node_idx` decided of `params`; a parameter
+/// it left undecided stands for itself, and the concreteness check after
+/// monomorphization reports it.  A call to a callee generic over nothing
+/// records nothing.
+fn record_call_subst(ts: TS, node_idx: i64, params: Vector<i64>, decided: HashMap<i64>): TS
+  if params.length() == 0:
+    return ts
+  let pairs: Vector<i64> = Vector<i64>::new()
+  pairs = pairs.push(params.length())
+  let i: i64 = 0
+  while i < params.length():
+    let p: i64 = params.get(i)
+    pairs = pairs.push(p)
+    pairs = pairs.push(hm_get_or(decided, i64_to_string(p), p))
+    i = i + 1
+  let start: i64 = ts.type_info.length()
+  let r: TS = ts_push_info_run(ts, pairs)
+  r.reg = reg_with_expr_types(r.reg, r.reg.expr_types.set(call_subst_key(r.tc.module_id, node_idx), start))
+  return r
+
 /// The type arguments written at a call, decided for `params` in
 /// order and added to `into`.  A count that is not the parameters' is
 /// a diagnostic in the host's words, and decides nothing.
@@ -4093,7 +4135,18 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
         r = check_decided_bounds(r, decided, own.ids, ts_node_span(r, callee))
       // The result is what the signature says of what the call decided.
       let result: TypeR = substitute_type(r, decided, callee_type.ret_type)
-      return ts_set_expr_type(result.ts, node_idx, result.type_idx)
+      r = ts_set_expr_type(result.ts, node_idx, result.type_idx)
+      // What the call decided of every parameter its callee is generic
+      // over — its own, and its class's — for the pass that names the
+      // concrete copy it calls (monomorphization).
+      let owner: ParamIds = call_owner_params(r, callee)
+      r = owner.ts
+      let generic_over: Vector<i64> = own.ids
+      let oi: i64 = 0
+      while oi < owner.ids.length():
+        generic_over = generic_over.push(owner.ids.get(oi))
+        oi = oi + 1
+      return record_call_subst(r, node_idx, generic_over, decided)
     TypeKind::TStruct:
       // A class is constructed positionally (`Point(1, 2)`); a named
       // argument constructs a variant, never a class.
@@ -5550,6 +5603,18 @@ fn run_program_pass(p: Program, acc: TcAccum, pass: TcPass): TcAccum
 // has a matching signature on the implementing type's method set.  Body
 // correctness is the bodies pass's.
 fn program_run_typecheck(p: Program): Program
+  return program_check(p).program
+
+// A type-checked program and the checker's program-wide registry — the
+// instantiations it made, the variant registry, conformances, dispatch —
+// which a later pass that makes types of its own (monomorphization)
+// continues from.  Beside the program, not in TypeCheckData, which
+// shared/base.dao gives programs that have no checker types.
+class ProgramTyped:
+  program: Program
+  reg: Registry
+
+fn program_check(p: Program): ProgramTyped
   p = program_init_typecheck(p)
   // Seed diagnostics from the resolve pass only (the pre-typecheck
   // baseline), NOT from p.diags which may already include typecheck
@@ -5566,7 +5631,7 @@ fn program_run_typecheck(p: Program): Program
   acc = TcAccum(acc.types, acc.type_info, acc.sym_types, derive_program_conformances(acc.reg, index_program_structs(acc.types, acc.type_info)), acc.diags)
   acc = run_program_pass(p, acc, TcPass::Bodies)
   let td: TypeCheckData = TypeCheckData(true, acc.types, acc.type_info, acc.sym_types, ProgramLookup(acc.reg.expr_types, acc.reg.methods, acc.reg.index))
-  return Program(p.graph, p.resolve, td, p.hir, acc.diags)
+  return ProgramTyped(Program(p.graph, p.resolve, td, p.hir, acc.diags), acc.reg)
 
 // =========================================================================
 // Section 46b: Legacy single-file typecheck adapter

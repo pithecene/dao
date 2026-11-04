@@ -108,7 +108,10 @@ enum class MirNode:
   MirFnRef(sym: i64, type_idx: i64)
 
   // Call: callee is the value id of a MirFnRef (Tier A).
-  MirCall(callee: i64, arg_list_lp: i64, arg_count: i64, type_idx: i64)
+  // `subst`: the checker's record of what the call decided of its
+  // callee's type parameters (HirCall's), or -1 — a call MIR itself
+  // makes (copy_out at a domain's exit) is decided from its arguments.
+  MirCall(callee: i64, arg_list_lp: i64, arg_count: i64, type_idx: i64, subst: i64)
 
   // ---------- effect-producing instructions (no result) ----------
 
@@ -506,7 +509,7 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
     HirNode::HirUnary(op_tok, operand, type_idx):
       let operand_r: ExprR = lower_expr_value(br, operand)
       return br_emit_value(operand_r.br, MirNode::MirUnary(op_tok = op_tok, operand = operand_r.value, type_idx = type_idx))
-    HirNode::HirCall(callee, args_lp, arg_count, type_idx):
+    HirNode::HirCall(callee, args_lp, arg_count, type_idx, call_subst):
       // A call on a member access is a call through a type parameter's
       // bound (lower_bound_call): which function it calls is decided by
       // an instantiation.  A template carries it, as the host's template
@@ -525,7 +528,7 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       let cur_br: BlockR = call_args.br
       let fl: MirFlush = mir_flush_list(cur_br.ms, call_args.values)
       cur_br.ms = fl.ms
-      return br_emit_value(cur_br, MirNode::MirCall(callee = callee_r.value, arg_list_lp = fl.list_pos, arg_count = arg_count, type_idx = type_idx))
+      return br_emit_value(cur_br, MirNode::MirCall(callee = callee_r.value, arg_list_lp = fl.list_pos, arg_count = arg_count, type_idx = type_idx, subst = call_subst))
     HirNode::HirFieldAccess(obj, field_tok, type_idx):
       let obj_r: ExprR = lower_expr_value(br, obj)
       // Resolve field_index from the object's struct type (Tier B).
@@ -884,7 +887,7 @@ fn emit_copy_out(br: BlockR, value: i64, ti: i64): ExprR
   let args: MirFlush = mir_flush_list(callee.br.ms, arg_values.push(value))
   let cur: BlockR = callee.br
   cur.ms = args.ms
-  return br_emit_value(cur, MirNode::MirCall(callee = callee.value, arg_list_lp = args.list_pos, arg_count = to_i64(1), type_idx = ti))
+  return br_emit_value(cur, MirNode::MirCall(callee = callee.value, arg_list_lp = args.list_pos, arg_count = to_i64(1), type_idx = ti, subst = to_i64(-1)))
 
 // Where a store inside open memory domains is rooted at an escaping
 // binding, mark it dirty in each: that domain's exit copies it.
@@ -1572,7 +1575,7 @@ fn mir_node_kind(n: MirNode): string
       return "MirFieldAccess"
     MirNode::MirFnRef(a, b):
       return "MirFnRef"
-    MirNode::MirCall(a, b, c, d):
+    MirNode::MirCall(a, b, c, d, e):
       return "MirCall"
     MirNode::MirStore(a, b, c, d):
       return "MirStore"
