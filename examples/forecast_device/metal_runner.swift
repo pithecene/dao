@@ -32,12 +32,22 @@ let windDomain: ClosedRange<Int32> = 0...1000
 
 enum RunError: Error, CustomStringConvertible {
   case outOfDomain(Int32)
+  case emptyBatch
   case malformed(String)
   var description: String {
     switch self {
     case .outOfDomain(let wind): return "wind \(wind) is outside \(windDomain)"
+    case .emptyBatch: return "an empty batch has nothing to run"
     case .malformed(let what): return "malformed plan: \(what)"
     }
+  }
+}
+
+// Every path checks its input the same way before touching the device.
+func validate(_ winds: [Int32]) throws {
+  if winds.isEmpty { throw RunError.emptyBatch }
+  if let bad = winds.first(where: { !windDomain.contains($0) }) {
+    throw RunError.outOfDomain(bad)
   }
 }
 
@@ -113,9 +123,7 @@ func contents(_ buffer: MTLBuffer, _ rows: Int) -> [Int32] {
 // ---------------------------------------------------------------
 
 func execute(_ steps: [Step], winds: [Int32], gpu: Gpu) throws -> Report {
-  if let bad = winds.first(where: { !windDomain.contains($0) }) {
-    throw RunError.outOfDomain(bad)
-  }
+  try validate(winds)
   var report = Report()
   let rows = winds.count
   let bytes = rows * MemoryLayout<Int32>.stride
@@ -212,9 +220,7 @@ func execute(_ steps: [Step], winds: [Int32], gpu: Gpu) throws -> Report {
 
 // HANDWRITTEN GLUE BEGIN
 func handwritten(winds: [Int32], gpu: Gpu) throws -> Report {
-  if let bad = winds.first(where: { !windDomain.contains($0) }) {
-    throw RunError.outOfDomain(bad)
-  }
+  try validate(winds)
   let rows = winds.count
   let bytes = rows * MemoryLayout<Int32>.stride
   let start = DispatchTime.now().uptimeNanoseconds
@@ -302,14 +308,16 @@ check(audited.waits == 2, "the callback forces a wait before the reply: \(audite
 
 // Both request modes on the error path: no plan touches the device.
 print("\n--- error behavior ---")
-for name in planOrder + ["handwritten"] {
-  do {
-    _ = name == "handwritten"
-      ? try handwritten(winds: [8, 2_000_000_000], gpu: gpu)
-      : try execute(plans[name]!, winds: [8, 2_000_000_000], gpu: gpu)
-    check(false, "\(name) accepted an out-of-domain wind")
-  } catch {
-    check("\(error)".contains("outside"), "\(name) rejects: \(error)")
+for (winds, reason) in [([Int32(8), 2_000_000_000], "outside"), ([], "empty")] {
+  for name in planOrder + ["handwritten"] {
+    do {
+      _ = name == "handwritten"
+        ? try handwritten(winds: winds, gpu: gpu)
+        : try execute(plans[name]!, winds: winds, gpu: gpu)
+      check(false, "\(name) accepted the invalid batch \(winds)")
+    } catch {
+      check("\(error)".contains(reason), "\(name) rejects: \(error)")
+    }
   }
 }
 
