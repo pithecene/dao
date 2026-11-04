@@ -155,7 +155,7 @@ class MirBackendInput:
   type_info: Vector<i64>
   toks: Vector<Token>
   src: string
-  files: Vector<SourceFile>   // every module's source, for a MirProgram root
+  graph: ProgramGraph   // every module's source and name, for a MirProgram root and for naming
 
 // =========================================================================
 // Section 82: Type lowering (MIR type_idx → LlType → textual form)
@@ -241,7 +241,7 @@ fn ll_enum_has_payload(info: Vector<i64>, t: DaoType): bool
   return false
 
 // Serialize an LlType to its textual LLVM form.  Primitive-only
-// by construction: callers must use `bs_type_text(types, type_idx)`
+// by construction: callers must use `bs_type_text(bs, type_idx)`
 // for any type_idx that might be a struct, because `LlStruct`
 // carries no name of its own.  The `LlStruct` / `LlUnsupported`
 // arms return a loud placeholder so any accidental caller shows
@@ -313,42 +313,16 @@ class LlStructDef:
 // Return the LLVM type text for a MIR type_idx, including struct
 // names.  For primitives, delegates to ll_type_text.  For structs,
 // returns "%struct.Name".
-// The LLVM name of the struct type for the Dao type at `type_idx`: an
-// unquoted identifier keeps letters, digits, `_`, `.` and `$`; an
-// instantiation's spelling (`Tag<i32>`) has more, and LLVM takes any
-// name in quotes.  Two instantiations can spell alike (`Tag<T>` under
-// two binders), so a quoted name ends in the type's index, its identity.
-fn bs_struct_name(name: string, type_idx: i64): string
-  let plain: bool = true
-  let i: i64 = 0
-  while i < length(name):
-    let c: i32 = char_at(name, i)
-    let ok: bool = false
-    if c >= 48 and c <= 57:
-      ok = true
-    if c >= 65 and c <= 90:
-      ok = true
-    if c >= 97 and c <= 122:
-      ok = true
-    if c == 95 or c == 46 or c == 36:
-      ok = true
-    if ok == false:
-      plain = false
-    i = i + 1
-  if plain:
-    return "%struct." + name
-  return "%\"struct." + name + "#" + i64_to_string(type_idx) + "\""
-
-fn bs_type_text(types: Vector<DaoType>, type_idx: i64): string
+fn bs_type_text(bs: BS, type_idx: i64): string
   if type_idx < 0:
     return "void"
-  if type_idx >= types.length():
+  if type_idx >= bs.types.length():
     return "<unsupported>"
-  let t: DaoType = types.get(type_idx)
+  let t: DaoType = bs.types.get(type_idx)
   match t.kind:
     TypeKind::TStruct:
-      return bs_struct_name(t.name, type_idx)
-  return ll_type_text(ll_type_from_mir(types, type_idx))
+      return bs_named_type(bs, "struct.", type_idx)
+  return ll_type_text(ll_type_from_mir(bs.types, type_idx))
 
 // The LLVM type text of the Dao type at `type_idx`, as the host lowers
 // it: a payload-bearing enum is its named layout struct, a generator
@@ -359,11 +333,11 @@ fn bs_ty(bs: BS, type_idx: i64): string
     match t.kind:
       TypeKind::TEnum:
         if ll_enum_has_payload(bs.type_info, t):
-          return bs_named_type("enum.", t.name, type_idx)
+          return bs_named_type(bs, "enum.", type_idx)
         return "i32"
       TypeKind::TGenerator:
         return "%dao.generator"
-  return bs_type_text(bs.types, type_idx)
+  return bs_type_text(bs, type_idx)
 
 // Size and alignment, in bytes, of a value of the Dao type at `ti` as
 // the x86-64 data layout lays it out (what the host reads from LLVM's
@@ -459,12 +433,20 @@ fn ll_enum_slots(payload: SizeAlign): i64
     return to_i64(1)
   return n
 
-// The LLVM name of a named type, `%<prefix><name>`, quoted with the
-// type's index when the name has characters an identifier cannot hold.
-fn bs_named_type(prefix: string, name: string, type_idx: i64): string
-  if llvm_ident_is_plain(name):
-    return "%" + prefix + name
-  return "%\"" + prefix + name + "#" + i64_to_string(type_idx) + "\""
+// The LLVM name of the class or enum type at `type_idx`,
+// `%<prefix><name>`.  A name more than one module declares is qualified
+// by the declaring module (`%"struct.a::P"`), so each keeps its own
+// layout.  An instantiation's spelling (`Tag<i32>`) is quoted and ends
+// in the type's index, its identity: two can spell alike (`Tag<T>`
+// under two binders).
+fn bs_named_type(bs: BS, prefix: string, type_idx: i64): string
+  let t: DaoType = bs.types.get(type_idx)
+  if llvm_ident_is_plain(t.name) == false:
+    return "%\"" + prefix + t.name + "#" + i64_to_string(type_idx) + "\""
+  if bs.program.shared_type_names.contains(t.name):
+    if t.builtin_id >= 0 and t.builtin_id < bs.program.graph.modules.length():
+      return "%\"" + prefix + bs.program.graph.modules.get(t.builtin_id).name + "::" + t.name + "\""
+  return "%" + prefix + t.name
 
 // =========================================================================
 // Section 83: Symbol mangling (placeholder — TASK_30 §9)
@@ -518,13 +500,39 @@ fn llvm_ident_is_plain(s: string): bool
     i = i + to_i64(1)
   return true
 
-fn mangle_function_sym(symbols: Vector<Symbol>, sym_idx: i64): string
-  if sym_idx < 0:
+// `@name`, quoted when LLVM cannot take it bare.
+fn llvm_global_name(name: string): string
+  if llvm_ident_is_plain(name):
+    return "@" + name
+  return "@\"" + name + "\""
+
+// The LLVM name of a function symbol, as the host's (llvm_function_name):
+// an extern, a prelude intrinsic or a symbol no module owns keeps its
+// name; the entry module's `main` is `main`; any other is
+// `<module>::<name>`, so two modules' same-named functions stay apart.
+fn bs_function_name(bs: BS, sym_idx: i64): string
+  if sym_idx < 0 or sym_idx >= bs.symbols.length():
     return ""
-  if sym_idx >= symbols.length():
-    return ""
-  let s: Symbol = symbols.get(sym_idx)
-  return mangle_symbol_name(s.name)
+  let s: Symbol = bs.symbols.get(sym_idx)
+  let owner: i64 = s.owner_module_id
+  if owner < 0 or owner >= bs.program.graph.modules.length():
+    return mangle_symbol_name(s.name)
+  let m: ModuleEntry = bs.program.graph.modules.get(owner)
+  if bs.program.extern_syms.contains(i64_to_string(sym_idx)):
+    return mangle_symbol_name(s.name)
+  if m.is_prelude and is_prelude_intrinsic_name(s.name):
+    return mangle_symbol_name(s.name)
+  if s.name == "main" and owner == bs.program.entry_module:
+    return "@main"
+  return llvm_global_name(m.name + "::" + s.name)
+
+// `size_of` / `align_of`, or a specialization of one (`size_of$i32`):
+// the prelude intrinsics the backend lowers inline (the host's
+// is_prelude_intrinsic).
+fn is_prelude_intrinsic_name(name: string): bool
+  if name == "size_of" or name == "align_of":
+    return true
+  return index_of(name, "size_of$") == to_i64(0) or index_of(name, "align_of$") == to_i64(0)
 
 // =========================================================================
 // Section 84: Backend lowering state
@@ -579,8 +587,10 @@ class BS:
   // Globals counter — "@.str.0", "@.str.1", ...
   next_global: i64
 
-  // Extern-declare dedup: list of mangled names already emitted.
-  extern_emitted: Vector<string>
+  // Every declared extern's Dao signature (bs_extern_signature; "" for
+  // a runtime hook), positioned by `index.externs`: a second extern of
+  // one C name must declare the same one.
+  extern_sigs: Vector<string>
 
   // Call arg bundles — LlInstKind::LlCall stores an index into this
   // list rather than carrying Vector<string>/Vector<LlType> inline
@@ -599,9 +609,9 @@ class BS:
   // thousands of values).
   index: BsIndex
 
-  // The program's source files, for the tokens of the module whose
-  // functions are being lowered (`toks` / `src` above).
-  files: Vector<SourceFile>
+  // The program being lowered: its modules' sources and names, and what
+  // naming reads off them.
+  program: BsProgram
 
   // Allocas a function's body needs beyond its locals (a string passed
   // by pointer), placed in its entry block so a loop does not grow the
@@ -628,6 +638,66 @@ class BsIndex:
   labels: HashMap<i64>
   externs: HashMap<i64>
   structs: HashMap<i64>
+
+// What naming reads off the program as a whole, as the host's names
+// do (llvm_names.cpp, llvm_type_lowering.cpp): the module graph (each
+// module's source and `a::b` name), the entry module, whose `main` keeps
+// that name (-1: none), the extern functions, which keep their C names,
+// and the type names more than one module declares, which a module
+// qualifies.
+class BsProgram:
+  graph: ProgramGraph
+  entry_module: i64
+  extern_syms: HashMap<i64>
+  shared_type_names: HashMap<i64>
+
+fn bs_program_of(input: MirBackendInput): BsProgram
+  let modules: Vector<ModuleEntry> = input.graph.modules
+  // The entry: the one module outside the prelude that declares `main`.
+  let entry: i64 = to_i64(-1)
+  let si: i64 = to_i64(0)
+  while si < input.symbols.length():
+    let sym: Symbol = input.symbols.get(si)
+    if sym.name == "main" and sym.owner_module_id >= 0 and sym.owner_module_id < modules.length():
+      match sym.kind:
+        SymbolKind::Function:
+          // -2 once two modules declare one; it stays ambiguous.
+          if modules.get(sym.owner_module_id).is_prelude == false:
+            if entry == to_i64(-1):
+              entry = sym.owner_module_id
+            else:
+              if entry != sym.owner_module_id:
+                entry = to_i64(-2)
+    si = si + to_i64(1)
+  let externs: HashMap<i64> = HashMap<i64>::new()
+  let ni: i64 = to_i64(0)
+  while ni < input.mir.mir_nodes.length():
+    match input.mir.mir_nodes.get(ni):
+      MirNode::MirFunction(fn_sym, ret_type, param_count, local_list_lp, local_count, block_list_lp, block_count, is_extern_i):
+        if is_extern_i > to_i64(0):
+          externs = externs.set(i64_to_string(fn_sym), to_i64(1))
+    ni = ni + to_i64(1)
+  // A named type's declaring module, by its name; -2 once two differ.
+  let declared_by: HashMap<i64> = HashMap<i64>::new()
+  let shared: HashMap<i64> = HashMap<i64>::new()
+  let ti: i64 = to_i64(0)
+  while ti < input.types.length():
+    let t: DaoType = input.types.get(ti)
+    let named: bool = false
+    match t.kind:
+      TypeKind::TStruct:
+        named = true
+      TypeKind::TEnum:
+        named = true
+    if named:
+      let first: i64 = hm_get_or(declared_by, t.name, to_i64(-1))
+      if first < 0:
+        declared_by = declared_by.set(t.name, t.builtin_id)
+      else:
+        if first != t.builtin_id:
+          shared = shared.set(t.name, to_i64(1))
+    ti = ti + to_i64(1)
+  return BsProgram(input.graph, entry, externs, shared)
 
 fn bs_index_empty(): BsIndex
   return BsIndex(HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new())
@@ -660,7 +730,7 @@ fn bs_new(input: MirBackendInput): BS
     Vector<LlStructDef>::new(),
     to_i64(0),
     bs_index_empty(),
-    input.files,
+    bs_program_of(input),
     Vector<LlInst>::new(),
     GenCtx("", "", to_i64(0)))
 
@@ -799,9 +869,54 @@ fn bs_get_block_label(bs: BS, block_node_idx: i64): string
 fn bs_has_extern(bs: BS, name: string): bool
   return bs.index.externs.contains(name)
 
-fn bs_mark_extern(bs: BS, name: string): BS
-  bs.index.externs = bs.index.externs.set(name, bs.extern_emitted.length())
-  bs.extern_emitted = bs.extern_emitted.push(name)
+fn bs_mark_extern(bs: BS, name: string, signature: string): BS
+  bs.index.externs = bs.index.externs.set(name, bs.extern_sigs.length())
+  bs.extern_sigs = bs.extern_sigs.push(signature)
+  return bs
+
+// A class or payload enum passed to or returned from C by value needs
+// the host's x86-64 C ABI coercion (llvm_abi.cpp), which this backend
+// does not lower: such an extern fails the module rather than calling
+// C with the wrong register layout.  A string is a pointer to its
+// `%dao.string` (the runtime's own ABI).
+fn bs_check_extern_scalars(bs: BS, name: string, ret_type: i64, locals_raw: Vector<i64>, param_count: i64): BS
+  let what: string = ""
+  match ll_type_of(bs, ret_type):
+    LlType::LlStruct:
+      what = "returns"
+  let i: i64 = to_i64(0)
+  while i < param_count and i < locals_raw.length():
+    match bs.mir_nodes.get(locals_raw.get(i)):
+      MirNode::MirLocal(lsym, ltype_idx, lis_param):
+        match ll_type_of(bs, ltype_idx):
+          LlType::LlStruct:
+            what = "takes"
+    i = i + to_i64(1)
+  if what == "":
+    return bs
+  return bs_error(bs, "bootstrap llvm backend: extern '" + llvm_name_body(name) + "' " + what + " a class or enum by value; its C ABI coercion is not lowered")
+
+// An extern's Dao signature by type identity -- its result's and each
+// parameter's type index -- as the host compares them: `*i32` and
+// `*f64` both lower to `ptr`, and two modules' classes named `P` print
+// alike, so neither the LLVM nor the printed types can tell them apart.
+fn bs_extern_signature(bs: BS, ret_type: i64, locals_raw: Vector<i64>, param_count: i64): string
+  let out: string = i64_to_string(ret_type) + "("
+  let i: i64 = to_i64(0)
+  while i < param_count and i < locals_raw.length():
+    match bs.mir_nodes.get(locals_raw.get(i)):
+      MirNode::MirLocal(lsym, ltype_idx, lis_param):
+        out = out + i64_to_string(ltype_idx) + ","
+    i = i + to_i64(1)
+  return out + ")"
+
+// Register the definition of the type at `type_idx` when it is an
+// aggregate the module must define (a class, a payload-bearing enum);
+// any other type needs none.
+fn bs_define_aggregate(bs: BS, type_idx: i64): BS
+  match ll_type_of(bs, type_idx):
+    LlType::LlStruct:
+      return bs_ensure_struct_def(bs, type_idx)
   return bs
 
 // Ensure a struct type definition is registered for the given MIR
@@ -841,10 +956,7 @@ fn bs_ensure_struct_def(bs: BS, type_idx: i64): BS
   let fi: i64 = to_i64(0)
   while is_enum == false and fi < t.info_count:
     let field_type_idx: i64 = bs.type_info.get(t.info_lp + fi * to_i64(2) + to_i64(1))
-    let field_kind: LlType = ll_type_of(bs, field_type_idx)
-    match field_kind:
-      LlType::LlStruct:
-        bs = bs_ensure_struct_def(bs, field_type_idx)
+    bs = bs_define_aggregate(bs, field_type_idx)
     field_tys = field_tys.push(bs_ty(bs, field_type_idx))
     fi = fi + to_i64(1)
   // Re-read the placeholder entry and update its field_tys.  The
@@ -948,40 +1060,18 @@ fn bs_lower_struct_ctor(bs: BS, insts: Vector<LlInst>, type_idx: i64, arg_list_l
   let struct_ty_text: string = bs_ty(bs, type_idx)
   bs = bs_ensure_struct_def(bs, type_idx)
   let args_raw: Vector<i64> = read_mir_list(bs.mir_idx, arg_list_lp)
-  // Alloca for the temp struct.
-  let fr_tmp: FreshR = bs_fresh_value(bs)
-  bs = fr_tmp.bs
-  let tmp_name: string = fr_tmp.name
-  let alloca_inst: LlInst = LlInst(
-    LlInstKind::LlAlloca(ty_text = struct_ty_text), tmp_name)
-  insts = insts.push(alloca_inst)
-  // GEP + store each field.
+  // Built as a value, one `insertvalue` per field (the host's): no stack
+  // slot, so a construction in a loop does not grow the frame.
+  let value: string = "undef"
   let fi: i64 = to_i64(0)
   while fi < args_raw.length():
     let arg_idx: i64 = args_raw.get(fi)
-    let arg_text: string = bs_get_value_text(bs, arg_idx)
-    let arg_ty_text: string = bs_get_value_ty(bs, arg_idx)
-    let fr_gep: FreshR = bs_fresh_value(bs)
-    bs = fr_gep.bs
-    let gep_name: string = fr_gep.name
-    let gep_inst: LlInst = LlInst(
-      LlInstKind::LlGepField(ptr_text = tmp_name, struct_ty_text = struct_ty_text, field_index = fi),
-      gep_name)
-    insts = insts.push(gep_inst)
-    let store_inst: LlInst = LlInst(
-      LlInstKind::LlStore(ptr_name = gep_name, value_text = arg_text, value_ty_text = arg_ty_text),
-      "")
-    insts = insts.push(store_inst)
+    let next: FreshR = bs_fresh_value(bs)
+    bs = next.bs
+    insts = insts.push(LlInst(LlInstKind::LlText(rhs = "insertvalue " + struct_ty_text + " " + value + ", " + bs_get_value_ty(bs, arg_idx) + " " + bs_get_value_text(bs, arg_idx) + ", " + i64_to_string(fi)), next.name))
+    value = next.name
     fi = fi + to_i64(1)
-  // Load the complete struct value.
-  let fr_load: FreshR = bs_fresh_value(bs)
-  bs = fr_load.bs
-  let load_name: string = fr_load.name
-  let load_inst: LlInst = LlInst(
-    LlInstKind::LlLoad(ptr_name = tmp_name, ty_text = struct_ty_text),
-    load_name)
-  insts = insts.push(load_inst)
-  return StructCtorR(bs, insts, load_name, struct_ty_text)
+  return StructCtorR(bs, insts, value, struct_ty_text)
 
 // The address of a MIR place: its local's slot, then one GEP per field
 // step of its path, with the LLVM type of what it addresses.  A step
@@ -1017,6 +1107,11 @@ fn bs_place_pointer(bs: BS, insts: Vector<LlInst>, local_idx: i64, path_lp: i64,
       insts = insts.push(LlInst(LlInstKind::LlLoad(ptr_name = ptr_name, ty_text = "ptr"), loaded.name))
       ptr_name = loaded.name
       cur_ti = owner.pointee
+      // A specialization can make the pointee void (`Ptr<T>` at T =
+      // void), which the checker saw only as `T`.
+      if bs_ty(bs, cur_ti) == "void":
+        return PlacePtrR(bs_error(bs, "Ptr.get is invalid on 'Ptr<void>', which has no value"), insts, "", "")
+      bs = bs_define_aggregate(bs, cur_ti)
     else:
       if field < 0 or field >= owner.info_count:
         return PlacePtrR(bs_error(bs, "bootstrap llvm backend: " + what + " path step " + i64_to_string(field) + " into " + owner.name + " is not lowered"), insts, "", "")
@@ -1144,7 +1239,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       // Not a real LLVM instruction — the callee is materialized
       // inline as the mangled name.  Record the mapping so the
       // subsequent MirCall picks it up via bs_get_value_text.
-      let name: string = mangle_function_sym(bs.symbols, sym)
+      let name: string = bs_function_name(bs, sym)
       if name == "":
         bs = bs_error(bs, "bootstrap llvm backend cannot mangle anonymous symbol")
         return LowerStepR(bs, insts)
@@ -1256,7 +1351,9 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
         insts = insts.push(LlInst(LlInstKind::LlStore(ptr_name = done_at.name, value_text = "true", value_ty_text = "i1"), ""))
         insts = insts.push(LlInst(LlInstKind::LlRet(value_text = "", value_ty_text = "void", has_value = to_i64(0)), ""))
         return LowerStepR(bs, insts)
-      if has_value > 0:
+      // A void function returning its void call's "value"
+      // (`fn panic(m: string): void -> __dao_panic(m)`) returns nothing.
+      if has_value > 0 and fn_ret_ty_text != "void":
         let val_text: string = bs_get_value_text(bs, value)
         let val_ty_text: string = bs_get_value_ty(bs, value)
         let inst: LlInst = LlInst(
@@ -1412,9 +1509,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
         if element == "void":
           bs = bs_error(bs, "Ptr.offset is invalid on 'Ptr<void>', which has no element size")
           return LowerStepR(bs, insts)
-        match ll_type_of(bs, pointee):
-          LlType::LlStruct:
-            bs = bs_ensure_struct_def(bs, pointee)
+        bs = bs_define_aggregate(bs, pointee)
         let walked: FreshR = bs_fresh_value(bs)
         bs = walked.bs
         insts = insts.push(LlInst(LlInstKind::LlText(rhs = "getelementptr " + element + ", ptr " + bs_get_value_text(bs, pointer) + ", " + bs_get_value_ty(bs, argument) + " " + bs_get_value_text(bs, argument)), walked.name))
@@ -1706,7 +1801,7 @@ fn bs_declare_hook(bs: BS, name: string, ret_ty: string, param_tys: Vector<strin
     params = params.push(LlParam("%arg" + i64_to_string(i), param_tys.get(i)))
     i = i + to_i64(1)
   bs.extern_decls = bs.extern_decls.push(LlFunction(name, ret_ty, params, Vector<LlBlock>::new(), to_i64(1)))
-  return bs_mark_extern(bs, name)
+  return bs_mark_extern(bs, name, "")
 
 // "size_of" / "align_of" when the callee is a specialization of that
 // prelude intrinsic; "" otherwise.
@@ -1748,25 +1843,6 @@ fn bs_value_enum_type(bs: BS, value: i64): i64
 // =========================================================================
 // Section 88b: Helpers pulled out of instruction lowering
 // =========================================================================
-
-// Reverse of ll_type_text — used when we've stashed a type as text
-// and need to resolve back to LlType for a new instruction.
-fn ll_type_text_to_lltype(t: string): LlType
-  if t == "i32":
-    return LlType::LlI32
-  if t == "i64":
-    return LlType::LlI64
-  if t == "float":
-    return LlType::LlF32
-  if t == "double":
-    return LlType::LlF64
-  if t == "i1":
-    return LlType::LlI1
-  if t == "void":
-    return LlType::LlVoid
-  if t == "ptr":
-    return LlType::LlPtr
-  return LlType::LlUnsupported
 
 // Call argument bundles live in a side table on BS because
 // LlInstKind::LlCall stores only an index into the bundle list,
@@ -2001,21 +2077,24 @@ fn mir_reachable_blocks(bs: BS, blocks_raw: Vector<i64>): Vector<i64>
     let at: i64 = r.queue.get(next)
     let here: Ruled = r.ruled.get(at)
     let exit: BlockExit = mir_block_exit(bs, r.blocks.get(at))
-    if exit.target >= 0:
-      r = reach_block(r, exit.target, ruled_nothing())
-    if exit.else_block >= 0:
-      let test: MatchTest = mir_match_test(bs, exit.cond)
-      if test.local < 0:
+    let test: MatchTest = mir_match_test(bs, exit.cond)
+    if exit.else_block < 0 or test.local < 0:
+      if exit.target >= 0:
+        r = reach_block(r, exit.target, ruled_nothing())
+      if exit.else_block >= 0:
         r = reach_block(r, exit.else_block, ruled_nothing())
-      else:
-        let failed: Ruled = Ruled(test.local, ",", to_i64(0))
-        if here.local == test.local:
-          failed = here
-        let tag: string = i64_to_string(test.variant) + ","
-        if index_of(failed.variants, "," + tag) < to_i64(0):
-          failed = Ruled(test.local, failed.variants + tag, failed.count + to_i64(1))
-        if failed.count < test.variants:
-          r = reach_block(r, exit.else_block, failed)
+    else:
+      let failed: Ruled = Ruled(test.local, ",", to_i64(0))
+      if here.local == test.local:
+        failed = here
+      let tag: string = i64_to_string(test.variant) + ","
+      // A variant an earlier test already failed cannot match here: a
+      // repeated arm is dead.
+      if index_of(failed.variants, "," + tag) < to_i64(0):
+        r = reach_block(r, exit.target, ruled_nothing())
+        failed = Ruled(test.local, failed.variants + tag, failed.count + to_i64(1))
+      if failed.count < test.variants:
+        r = reach_block(r, exit.else_block, failed)
     next = next + to_i64(1)
   return r.blocks
 
@@ -2049,7 +2128,7 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
     MirNode::MirFunction(fn_sym, ret_type, param_count, local_list_lp, local_count, block_list_lp, block_count, is_extern_i):
       bs = bs_reset_fn_state(bs)
 
-      let name: string = mangle_function_sym(bs.symbols, fn_sym)
+      let name: string = bs_function_name(bs, fn_sym)
       if name == "":
         bs = bs_error(bs, "bootstrap llvm backend cannot mangle anonymous symbol")
         return bs
@@ -2057,10 +2136,7 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
       let ret_ty: LlType = ll_type_of(bs, ret_type)
       bs = bs_check_supported_type(bs, ret_ty, "function return type")
       let ret_ty_text: string = bs_ty(bs, ret_type)
-      // Register struct def if the return type is a struct.
-      match ret_ty:
-        LlType::LlStruct:
-          bs = bs_ensure_struct_def(bs, ret_type)
+      bs = bs_define_aggregate(bs, ret_type)
 
       // Read the local node list.  First `param_count` are params.
       let locals_raw: Vector<i64> = read_mir_list(bs.mir_idx, local_list_lp)
@@ -2072,19 +2148,26 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
 
       // Extern declarations: no body, no blocks.
       if is_extern_i > to_i64(0):
+        bs = bs_check_extern_scalars(bs, name, ret_type, locals_raw, param_count)
+        let signature: string = bs_extern_signature(bs, ret_type, locals_raw, param_count)
+        // Two externs of one C name coalesce when they agree (the host's
+        // extern_signatures_); a runtime hook's declaration is canonical.
         if bs_has_extern(bs, name):
+          let known: string = bs.extern_sigs.get(hm_get_or(bs.index.externs, name, to_i64(0)))
+          if known != "" and known != signature:
+            bs = bs_error(bs, "extern '" + llvm_name_body(name) + "' is declared with conflicting signatures")
           return bs
         let llfn: LlFunction = LlFunction(
           name, ret_ty_text, params, Vector<LlBlock>::new(), to_i64(1))
         bs.extern_decls = bs.extern_decls.push(llfn)
-        bs = bs_mark_extern(bs, name)
+        bs = bs_mark_extern(bs, name, signature)
         return bs
 
       // A generator lowers to its init and resume functions.
       if ret_type >= 0 and ret_type < bs.types.length():
         match bs.types.get(ret_type).kind:
           TypeKind::TGenerator:
-            return bs_lower_generator(bs, name, fn_sym, ret_type, params, param_count, locals_raw, block_list_lp)
+            return bs_lower_generator(bs, name, ret_type, params, param_count, locals_raw, block_list_lp)
 
       // ----- normal function body -----
 
@@ -2103,10 +2186,7 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
             bs = bs_check_supported_type(bs, slot_ty, "local slot")
             // Use bs_type_text for struct-aware type names.
             let slot_ty_text: string = bs_ty(bs, ltype_idx)
-            // Register struct defs for struct-typed locals.
-            match slot_ty:
-              LlType::LlStruct:
-                bs = bs_ensure_struct_def(bs, ltype_idx)
+            bs = bs_define_aggregate(bs, ltype_idx)
             bs = bs_set_slot(bs, local_node_idx, slot_name, slot_ty_text)
         li = li + to_i64(1)
 
@@ -2134,7 +2214,6 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
         let local_node_idx: i64 = locals_raw.get(ai)
         let slot_name: string = bs_slot_name_by_index(bs, ai)
         let slot_ty_text: string = bs_slot_ty_by_index(bs, ai)
-        let slot_ty: LlType = ll_type_text_to_lltype(slot_ty_text)
         let alloca_inst: LlInst = LlInst(
           LlInstKind::LlAlloca(ty_text = slot_ty_text),
           slot_name)
@@ -2189,22 +2268,24 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
 // `{ frame, name.resume }`; `name.resume(frame)` runs the body from the
 // frame's state to its next yield or its end, every local a field of
 // the frame.
-fn bs_lower_generator(bs: BS, name: string, fn_sym: i64, gen_ti: i64, params: Vector<LlParam>, param_count: i64, locals_raw: Vector<i64>, block_list_lp: i64): BS
-  let base: string = bs.symbols.get(fn_sym).name
+fn bs_lower_generator(bs: BS, name: string, gen_ti: i64, params: Vector<LlParam>, param_count: i64, locals_raw: Vector<i64>, block_list_lp: i64): BS
+  // The frame is named after the function, as the host's
+  // (`dao.gen.<module>::<name>`): two modules' generators stay apart.
+  let base: string = llvm_name_body(name)
   let frame_ty: string = "%\"dao.gen." + base + "\""
   let resume_name: string = llvm_suffixed(name, ".resume")
   // The frame's type.
   let fields: Vector<string> = Vector<string>::new()
   fields = fields.push("i32")
   fields = fields.push("i1")
-  fields = fields.push(bs_ty(bs, bs.types.get(gen_ti).pointee))
+  let yield_ti: i64 = bs.types.get(gen_ti).pointee
+  bs = bs_define_aggregate(bs, yield_ti)
+  fields = fields.push(bs_ty(bs, yield_ti))
   let li: i64 = to_i64(0)
   while li < locals_raw.length():
     match bs.mir_nodes.get(locals_raw.get(li)):
       MirNode::MirLocal(lsym, lti, lis_param):
-        match ll_type_of(bs, lti):
-          LlType::LlStruct:
-            bs = bs_ensure_struct_def(bs, lti)
+        bs = bs_define_aggregate(bs, lti)
         fields = fields.push(bs_ty(bs, lti))
     li = li + to_i64(1)
   bs.struct_defs = bs.struct_defs.push(LlStructDef("dao.gen." + base, frame_ty, fields, to_i64(-1)))
@@ -2299,6 +2380,13 @@ fn bs_lower_generator(bs: BS, name: string, fn_sym: i64, gen_ti: i64, params: Ve
   return bs
 
 // `@name` with `suffix` appended to the name, inside its quotes if any.
+// A global's name without its sigil or quotes: `@"a::f"` is `a::f`.
+fn llvm_name_body(name: string): string
+  let body: string = substring(name, to_i64(1), length(name) - to_i64(1))
+  if starts_with(body, "\""):
+    return substring(body, to_i64(1), length(body) - to_i64(2))
+  return body
+
 fn llvm_suffixed(name: string, suffix: string): string
   if length(name) > to_i64(1) and substring(name, length(name) - to_i64(1), to_i64(1)) == "\"":
     return substring(name, to_i64(0), length(name) - to_i64(1)) + suffix + "\""
@@ -2379,9 +2467,9 @@ fn lower_mir_to_ll_module(bs: BS, root: i64): BS
       while mi < modules.length():
         match bs.mir_nodes.get(modules.get(mi)):
           MirNode::MirModule(mfile, mfn_lp, mfn_count, mtl, mtc):
-            if mfile < 0 or mfile >= bs.files.length():
+            if mfile < 0 or mfile >= bs.program.graph.files.length():
               return bs_error(bs, "bootstrap llvm backend: a module's file " + i64_to_string(mfile) + " is not in the program")
-            let sf: SourceFile = bs.files.get(mfile)
+            let sf: SourceFile = bs.program.graph.files.get(mfile)
             bs.toks = sf.parse_output.toks
             bs.src = sf.source_text
             bs = bs_lower_module_fns(bs, mfn_lp)
@@ -2593,6 +2681,10 @@ fn lower_mir_to_llvm_text(input: MirBackendInput): LlvmTextResult
     bs.diags = bs.diags.push(template_refs.get(ti))
     bs.had_error = to_i64(1)
     ti = ti + to_i64(1)
+  // Two modules' `main`s leave no entry to name `main` (the host's
+  // driver rejects the set).
+  if bs.program.entry_module == to_i64(-2):
+    bs = bs_error(bs, "bootstrap llvm backend: ambiguous entry module: more than one module declares 'fn main'")
   // Each stage in its own domain: its scratch is reclaimed at the exit and the result is copied out.
   resource memory lowering =>
     bs = lower_mir_to_ll_module(bs, input.mir.root)
@@ -2633,7 +2725,7 @@ fn lower_to_mir_backend_input(src: string): MirBackendInput
   let r: MirResult = pc.mir
   let sf: SourceFile = program_file_of_module(pc.program, to_i64(0))
   let po: ParseOutput = sf.parse_output
-  return MirBackendInput(MirResult(r.mir_nodes, r.mir_idx, r.diags, mir_only_module(r)), pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, po.toks, sf.source_text, pc.program.graph.files)
+  return MirBackendInput(MirResult(r.mir_nodes, r.mir_idx, r.diags, mir_only_module(r)), pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, po.toks, sf.source_text, pc.program.graph)
 
 // A whole program to LLVM text: every module, checked, lowered to MIR,
 // made concrete (Task 43) and lowered here, each function with its own
@@ -2654,7 +2746,7 @@ fn lower_program_to_llvm_text(inputs: Vector<SourceInput>): LlvmTextResult
   let pc: ProgramConcrete = ProgramConcrete(pm.program, pm.mir)
   resource memory mono =>
     pc = program_monomorphize(pt, pm)
-  let input: MirBackendInput = MirBackendInput(pc.mir, pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, Vector<Token>::new(), "", pc.program.graph.files)
+  let input: MirBackendInput = MirBackendInput(pc.mir, pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, Vector<Token>::new(), "", pc.program.graph)
   return lower_mir_to_llvm_text(input)
 
 fn lower_source_to_llvm_text(src: string): LlvmTextResult

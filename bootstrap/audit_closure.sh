@@ -116,6 +116,9 @@ elif [ "$prelude_status" -ne 0 ]; then
 fi
 for p in $PROGRAMS; do
   : > "$AUDIT_OUT/probe-$p.log"
+  # Only this run's IR may be linked and run: a stage that fails writes
+  # none, and an earlier run's must not stand in for it.
+  rm -f "$OUT/$p.program.ll"
   record="$p"
   why=""
   for stage in $STAGES; do
@@ -156,8 +159,15 @@ for p in $PROGRAMS; do
   done
   # The program as the bootstrap compiled it: its IR (written by the llvm
   # stage) linked with the runtime and run; its suite's result, or why it
-  # did not run.
-  if [ -f "$OUT/$p.program.ll" ]; then
+  # did not run.  The probe marker goes first: the compiled llvm program
+  # reads it as the host-built one does, and would probe instead of
+  # running its suite.
+  rm -f "$OUT/.closure_probe"
+  if [ ! -f "$OUT/$p.program.ll" ]; then
+    case "$record" in
+      *"	llvm=0"*) record="$record	runs=no IR written (see $AUDIT_OUT/probe-$p-llvm.log)" ;;
+    esac
+  else
     if ! clang -c -x ir "$OUT/$p.program.ll" -o "$AUDIT_OUT/$p.program.o" 2> "$AUDIT_OUT/$p.program.err"; then
       record="$record	runs=LLVM rejected the IR: $(grep -m1 'error' "$AUDIT_OUT/$p.program.err" | cut -c1-120)"
     elif ! clang "$AUDIT_OUT/$p.program.o" "$BUILD_DIR/runtime/core/libdao_runtime.a" -o "$AUDIT_OUT/$p.program" 2> "$AUDIT_OUT/$p.program.err"; then
@@ -166,7 +176,13 @@ for p in $PROGRAMS; do
       ( ulimit -v "$LIMIT_KB"; timeout "$LIMIT_S" "$AUDIT_OUT/$p.program" ) > "$AUDIT_OUT/$p.program.run" 2>&1
       run_status=$?
       passed="$(grep -oE '[0-9]+ / [0-9]+ (tests )?passed' "$AUDIT_OUT/$p.program.run" | tail -1)"
-      record="$record	runs=${passed:-exit $run_status}"
+      # A pass line is the suite's word only when the program exited 0
+      # (a suite that passes but fails to write its artifacts exits 1).
+      if [ "$run_status" -eq 0 ]; then
+        record="$record	runs=${passed:-exit 0}"
+      else
+        record="$record	runs=${passed:+$passed, }exit $run_status"
+      fi
     fi
   fi
   earlier="$(grep -m1 -oE "^probe: $p first [a-z]+: .*" "$AUDIT_OUT/probe-$p.log" | sed "s/^probe: $p first //")"

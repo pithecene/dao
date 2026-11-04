@@ -417,6 +417,11 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
       let smsym: i64 = hir_qualified_method_sym(hs, segs)
       if smsym >= 0:
         return hs_add_node(hs, HirNode::HirIdent(sym = smsym, typ = hir_sym_type(hs, smsym), tok = segs.get(to_i64(1))))
+      // `module::name` names that module's member: a reference to its
+      // symbol, as the unqualified name would be.
+      let member: i64 = hir_module_member_sym(hs, segs)
+      if member >= 0:
+        return hs_add_node(hs, HirNode::HirIdent(sym = member, typ = hir_sym_type(hs, member), tok = segs.get(to_i64(1))))
       // Preserve all segment token indices in HIR idx.
       let seg_fl: HirFlush = hir_flush_list(hs, segs)
       return hs_add_node(seg_fl.hs, HirNode::HirQualName(segs_lp = seg_fl.list_pos, seg_count = segs.length(), typ = ti))
@@ -533,6 +538,19 @@ fn hir_names_type(hs: HS, callee: i64): bool
 // methods qualifies: a static one takes its declared parameters, and an
 // instance one takes its receiver as an explicit first argument
 // (`C::get(c)`), as the checker typed it.
+// The member `module::name` names: the use the resolver recorded on
+// its last segment (the overload of the call's arity, for a call), when
+// the head is an imported module; -1 otherwise.
+fn hir_module_member_sym(hs: HS, segs: Vector<i64>): i64
+  if segs.length() != 2:
+    return to_i64(-1)
+  let head_sym: i64 = hir_lookup_use(hs, segs.get(to_i64(0)))
+  if head_sym < 0:
+    return to_i64(-1)
+  if symbol_kind_name(hs.symbols.get(head_sym).kind) != "Module":
+    return to_i64(-1)
+  return hir_lookup_use(hs, segs.get(to_i64(1)))
+
 fn hir_qualified_method_sym(hs: HS, segs: Vector<i64>): i64
   if segs.length() != 2:
     return to_i64(-1)
