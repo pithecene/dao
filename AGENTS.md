@@ -59,6 +59,17 @@ explicit syntax revision task.
 - If a dependency is not available in Conan, escalate — do not
   work around it with system packages.
 
+## Language Discipline
+
+Everything in this project is eventually written in Dao, apart from the
+compiler chain's C++ bootstrap tier, which stays permanently beside the
+self-hosted and fully hosted tiers.  Code in any other language is a stopgap.
+Agents must:
+- write new code in Dao whenever Dao can express it
+- raise any other language before opening the pull request, and name what must
+  exist in Dao to replace it
+- add or update its row in `docs/non_dao_inventory.md` in the same change
+
 ## Repository Discipline
 
 - `docs/contracts/` contains binding contracts only

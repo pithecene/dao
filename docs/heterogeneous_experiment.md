@@ -125,6 +125,13 @@ rewrite evidence for a compiler feature.  If that needs new semantics, the need
 itself names the first real language question.  Deployment,
 distributed retries and scheduling stay out of scope.
 
+## The runner is a stopgap
+
+The Swift runner and its Metal kernels are not Dao, and
+`docs/non_dao_inventory.md` records them.  They exist because Dao cannot yet
+lower a kernel or drive a device, which is the same capability the next
+experiment tests.
+
 ## Differences from the design handoff
 
 - The sketch's `Result<Minutes, Missing>::Ok(...)` does not compile, so the
