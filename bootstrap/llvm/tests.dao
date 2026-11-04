@@ -349,7 +349,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 30
+  let total: i32 = 31
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -827,15 +827,15 @@ fn main(): i32
   else:
     print("FAIL arity_overloads: backend not ok")
 
-  // Test 26: a call of a generic function names a template, which has no
-  // code until an instantiation names it; the backend fails the module
-  // rather than calling a function it never emits.
-  let r26: LlvmTextResult = lower_source_to_llvm_text("fn id<T>(x: T): T -> x\n\nfn main(): i32 -> id(1)\n")
-  if r26.ok == false and contains_substring(diags_text(r26.diags), "generic function 'id' has no concrete code"):
-    print("PASS generic_call_needs_instantiation")
+  // Test 26: a call of a generic function names its specialization
+  // (monomorphization), which the backend emits and the program runs.
+  let r26: LlvmTextResult = lower_source_to_llvm_text("fn id<T>(x: T): T -> x\n\nfn main(): i32 -> id(1) - 1\n")
+  write_failures = write_failures + emit_ir("generic_call_specialized", r26, 0)
+  if r26.ok and check_contains(r26, "id$i32", "generic_call_specialized"):
+    print("PASS generic_call_specialized")
     pass_count = pass_count + 1
   else:
-    print("FAIL generic_call_needs_instantiation: expected the backend to fail naming 'id'; got " + diags_text(r26.diags))
+    print("FAIL generic_call_specialized: " + diags_text(r26.diags))
   // An extern beside a template: the backend's scan for template
   // references reads the extern's (empty) block list, not a stray offset.
   let r26b: LlvmTextResult = lower_source_to_llvm_text("extern fn ext(x: i32): i32\n\nfn id<T>(x: T): T -> x\n\nfn main(): i32 -> 0\n")
@@ -871,6 +871,16 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL field_store_and_break: backend not ok: " + diags_text(r27.diags))
+
+  // Test 32: a specialization whose name LLVM cannot take bare
+  // (`tag$Ptr<i32>`) is quoted, and the module is valid IR.
+  let r32: LlvmTextResult = lower_source_to_llvm_text("fn tag<T>(): i32 -> 0\n\nfn main(): i32 -> tag<Ptr<i32>>()\n")
+  write_failures = write_failures + emit_ir("quoted_specialization_name", r32, 0)
+  if r32.ok and check_contains(r32, "@\"tag$Ptr<i32>\"", "quoted_specialization_name"):
+    print("PASS quoted_specialization_name")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL quoted_specialization_name: " + diags_text(r32.diags))
 
   // -----------------------------------------------------------------
   // Summary
