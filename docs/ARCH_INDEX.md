@@ -139,6 +139,8 @@ Self-hosting compiler subsystems written in Dao.
 - `shared/` — single source of truth for the bootstrap frontend pipeline:
   token model, lexer, AST, parser, module graph (`base.dao`); assembled
   into `*.gen.dao` files via `assemble.sh`
+- `ascii.dao` — `bootstrap::ascii`, the compiler's first real module; every
+  program passes it beside its assembled source
 - `assemble.sh` — concatenates `shared/base.dao` with subsystem sources
   to produce compilable `*.gen.dao` outputs (gitignored build artifacts)
 - `validate_ir.sh` — compiles, links, and runs the IR the LLVM suite

@@ -1,0 +1,26 @@
+module bootstrap::ascii
+// Character classes over ASCII code points, the compiler's first real
+// module: every program passes this file to the compiler beside its
+// assembled source.
+
+fn is_digit(ch: i32): bool
+  if ch >= 48:
+    if ch <= 57:
+      return true
+  return false
+
+fn is_alpha(ch: i32): bool
+  if ch >= 65:
+    if ch <= 90:
+      return true
+  if ch >= 97:
+    if ch <= 122:
+      return true
+  if ch == 95:
+    return true
+  return false
+
+fn is_alnum(ch: i32): bool
+  if is_digit(ch):
+    return true
+  return is_alpha(ch)

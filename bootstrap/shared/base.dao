@@ -1,4 +1,7 @@
 module bootstrap::base
+
+import bootstrap::ascii
+
 // =========================================================================
 // Bootstrap Shared Substrate — Dao compiler self-hosting infrastructure
 // =========================================================================
@@ -131,28 +134,6 @@ class LexResult:
 
 // =========================================================================
 // Section 2: Character classification// =========================================================================
-
-fn is_digit(ch: i32): bool
-  if ch >= 48:
-    if ch <= 57:
-      return true
-  return false
-
-fn is_alpha(ch: i32): bool
-  if ch >= 65:
-    if ch <= 90:
-      return true
-  if ch >= 97:
-    if ch <= 122:
-      return true
-  if ch == 95:
-    return true
-  return false
-
-fn is_alnum(ch: i32): bool
-  if is_digit(ch):
-    return true
-  return is_alpha(ch)
 
 // =========================================================================
 // Section 3: Keyword classification// =========================================================================
@@ -538,21 +519,21 @@ fn lex(src: string): LexResult
 
       // Numbers.
       if handled == false:
-        if is_digit(ch):
+        if ascii::is_digit(ch):
           let num_start: i64 = pos
           while pos < src_len:
-            if is_digit(char_at(src, pos)) == false:
+            if ascii::is_digit(char_at(src, pos)) == false:
               break
             pos = pos + 1
           let is_float: bool = false
           if pos < src_len:
             if char_at(src, pos) == 46:
               if pos + 1 < src_len:
-                if is_digit(char_at(src, pos + 1)):
+                if ascii::is_digit(char_at(src, pos + 1)):
                   is_float = true
                   pos = pos + 1
                   while pos < src_len:
-                    if is_digit(char_at(src, pos)) == false:
+                    if ascii::is_digit(char_at(src, pos)) == false:
                       break
                     pos = pos + 1
           if is_float:
@@ -563,10 +544,10 @@ fn lex(src: string): LexResult
 
       // Identifiers and keywords.
       if handled == false:
-        if is_alpha(ch):
+        if ascii::is_alpha(ch):
           let id_start: i64 = pos
           while pos < src_len:
-            if is_alnum(char_at(src, pos)) == false:
+            if ascii::is_alnum(char_at(src, pos)) == false:
               break
             pos = pos + 1
           let kind: TK = classify_keyword(src, id_start, pos - id_start)

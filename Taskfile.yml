@@ -89,15 +89,10 @@ tasks:
     cmds:
       - bash bootstrap/assemble.sh
     sources:
+      - bootstrap/assemble.sh
       - bootstrap/shared/base.dao
-      - bootstrap/lexer/tests.dao
-      - bootstrap/parser/tests.dao
-      - bootstrap/graph/tests.dao
-      - bootstrap/resolver/impl.dao
-      - bootstrap/typecheck/impl.dao
-      - bootstrap/hir/impl.dao
-      - bootstrap/mir/impl.dao
-      - bootstrap/llvm/impl.dao
+      - bootstrap/*/impl.dao
+      - bootstrap/*/tests.dao
       - bootstrap/driver/main.dao
     generates:
       - bootstrap/lexer/lexer.gen.dao
@@ -114,15 +109,15 @@ tasks:
     desc: Assemble, build, and test all bootstrap subsystems
     deps: [build, bootstrap-assemble]
     cmds:
-      - "{{.BUILD_DIR}}/compiler/driver/daoc build bootstrap/lexer/lexer.gen.dao && ./bootstrap/lexer/lexer.gen"
-      - "{{.BUILD_DIR}}/compiler/driver/daoc build bootstrap/parser/parser.gen.dao && ./bootstrap/parser/parser.gen"
-      - "{{.BUILD_DIR}}/compiler/driver/daoc build bootstrap/graph/graph.gen.dao && ./bootstrap/graph/graph.gen"
-      - "{{.BUILD_DIR}}/compiler/driver/daoc build bootstrap/resolver/resolver.gen.dao && ./bootstrap/resolver/resolver.gen"
-      - "{{.BUILD_DIR}}/compiler/driver/daoc build bootstrap/typecheck/typecheck.gen.dao && ./bootstrap/typecheck/typecheck.gen"
-      - "{{.BUILD_DIR}}/compiler/driver/daoc build bootstrap/hir/hir.gen.dao && ./bootstrap/hir/hir.gen"
-      - "{{.BUILD_DIR}}/compiler/driver/daoc build bootstrap/mir/mir.gen.dao && ./bootstrap/mir/mir.gen"
+      - "{{.BUILD_DIR}}/compiler/driver/daoc build --source bootstrap/lexer/lexer.gen.dao --source bootstrap/ascii.dao && ./bootstrap/lexer/lexer.gen"
+      - "{{.BUILD_DIR}}/compiler/driver/daoc build --source bootstrap/parser/parser.gen.dao --source bootstrap/ascii.dao && ./bootstrap/parser/parser.gen"
+      - "{{.BUILD_DIR}}/compiler/driver/daoc build --source bootstrap/graph/graph.gen.dao --source bootstrap/ascii.dao && ./bootstrap/graph/graph.gen"
+      - "{{.BUILD_DIR}}/compiler/driver/daoc build --source bootstrap/resolver/resolver.gen.dao --source bootstrap/ascii.dao && ./bootstrap/resolver/resolver.gen"
+      - "{{.BUILD_DIR}}/compiler/driver/daoc build --source bootstrap/typecheck/typecheck.gen.dao --source bootstrap/ascii.dao && ./bootstrap/typecheck/typecheck.gen"
+      - "{{.BUILD_DIR}}/compiler/driver/daoc build --source bootstrap/hir/hir.gen.dao --source bootstrap/ascii.dao && ./bootstrap/hir/hir.gen"
+      - "{{.BUILD_DIR}}/compiler/driver/daoc build --source bootstrap/mir/mir.gen.dao --source bootstrap/ascii.dao && ./bootstrap/mir/mir.gen"
       - rm -rf bootstrap/llvm/out && mkdir -p bootstrap/llvm/out
-      - "{{.BUILD_DIR}}/compiler/driver/daoc build bootstrap/llvm/llvm.gen.dao && ./bootstrap/llvm/llvm.gen"
+      - "{{.BUILD_DIR}}/compiler/driver/daoc build --source bootstrap/llvm/llvm.gen.dao --source bootstrap/ascii.dao && ./bootstrap/llvm/llvm.gen"
       - bash bootstrap/validate_ir.sh {{.BUILD_DIR}}
 
   bootstrap-audit:

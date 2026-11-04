@@ -39,7 +39,8 @@ exists), `tokens`, `resolve`, `check`, `hir`, `mir`, `llvm-ir`, `build`.
   the entry module.
 - **Explicit mode** — `--source` names every file; nothing is searched
   and an import outside the set is an error.  The entry module is
-  `--entry a::b`, or the one module declaring `fn main`.
+  `--entry a::b`, or the one module declaring `fn main`.  `build` writes
+  the executable beside the entry module's file, named after it.
 - `--stdlib-root DIR` replaces the default prelude source
   (`<repo>/stdlib`); `stdlib/core` and `stdlib/io` under it form the
   prelude group.

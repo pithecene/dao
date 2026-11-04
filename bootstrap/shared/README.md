@@ -38,6 +38,10 @@ of that composition.
 
 The `*.gen.dao` files are gitignored — they are build artifacts.
 
+A generated program imports `bootstrap::ascii`, a real module that is not
+assembled, so every compile passes `bootstrap/ascii.dao` beside it:
+`daoc build --source bootstrap/lexer/lexer.gen.dao --source bootstrap/ascii.dao`.
+
 ## Editing rules
 
 1. **Edit `base.dao` or subsystem `.dao` sources** — never edit the

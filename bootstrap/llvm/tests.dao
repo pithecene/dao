@@ -172,6 +172,7 @@ class ProbedProgram:
 // checked program: resolve and typecheck report in their own probe, once.
 fn closure_program_checked(name: string, path: string, src: string, report: bool): ProbedProgram
   let inputs: Vector<SourceInput> = closure_prelude_inputs()
+  inputs = inputs.push(SourceInput("bootstrap/ascii.dao", read_file("bootstrap/ascii.dao"), false))
   inputs = inputs.push(SourceInput(path, wrap_test_module(src), false))
   let pg: ProgramGraph = program_graph_empty()
   resource memory graph =>

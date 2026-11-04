@@ -91,6 +91,15 @@ detour=$(build_out --source "$BM/../smoke/app_main.dao" --source "$BM/app_math.d
 [ "$plain" = "$detour" ] || fail "output name changed with path spelling: $plain vs $detour"
 rm -f "$plain"
 
+# The entry module names the executable, even when a library's path sorts
+# ahead of it.
+mkdir -p "$WORK/named"
+printf 'module named::alpha\n\nfn one(): i32 -> 1\n' > "$WORK/named/alpha.dao"
+printf 'module named::zulu\n\nimport named::alpha\n\nfn main(): i32 -> alpha::one() - 1\n' > "$WORK/named/zulu.dao"
+named=$(build_out --source "$WORK/named/alpha.dao" --source "$WORK/named/zulu.dao")
+[ "$(basename "$named")" = "zulu" ] || fail "executable not named after the entry module: $named"
+"$named" || fail "the executable named after the entry module did not run"
+
 # Every command that reports puts its diagnostics in file order, not in
 # the order its phase produced them: `a.dao` imports `b.dao`, so the
 # resolver reaches b first while a reader reaches a first.

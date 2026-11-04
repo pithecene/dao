@@ -56,7 +56,7 @@ The bootstrap lexer matches the C++ lexer on:
 
 ```sh
 # From repository root:
-bash bootstrap/assemble.sh && daoc build bootstrap/lexer/lexer.gen.dao && ./bootstrap/lexer/lexer.gen
+bash bootstrap/assemble.sh && daoc build --source bootstrap/lexer/lexer.gen.dao --source bootstrap/ascii.dao && ./bootstrap/lexer/lexer.gen
 ```
 
 Tests include golden token stream assertions, malformed-input tests,
@@ -110,7 +110,7 @@ rule, the type arguments carried on `CallE` (Task 36); `resource <kind>
 
 ```sh
 # From repository root:
-bash bootstrap/assemble.sh && daoc build bootstrap/parser/parser.gen.dao && ./bootstrap/parser/parser.gen
+bash bootstrap/assemble.sh && daoc build --source bootstrap/parser/parser.gen.dao --source bootstrap/ascii.dao && ./bootstrap/parser/parser.gen
 ```
 
 Tests include golden parse tree assertions, error recovery tests,
@@ -154,7 +154,7 @@ uses map over the bootstrap parser's AST.
 **How to run tests**:
 
 ```sh
-bash bootstrap/assemble.sh && daoc build bootstrap/resolver/resolver.gen.dao && ./bootstrap/resolver/resolver.gen
+bash bootstrap/assemble.sh && daoc build --source bootstrap/resolver/resolver.gen.dao --source bootstrap/ascii.dao && ./bootstrap/resolver/resolver.gen
 ```
 
 ### `typecheck/`
@@ -190,7 +190,7 @@ correctness for Tier A Dao syntax.
 **How to run tests**:
 
 ```sh
-bash bootstrap/assemble.sh && daoc build bootstrap/typecheck/typecheck.gen.dao && ./bootstrap/typecheck/typecheck.gen
+bash bootstrap/assemble.sh && daoc build --source bootstrap/typecheck/typecheck.gen.dao --source bootstrap/ascii.dao && ./bootstrap/typecheck/typecheck.gen
 ```
 
 ### `hir/`
@@ -218,7 +218,7 @@ fn/extern fn/class/enum/type alias declarations, `resource` blocks
 **How to run tests**:
 
 ```sh
-bash bootstrap/assemble.sh && daoc build bootstrap/hir/hir.gen.dao && ./bootstrap/hir/hir.gen
+bash bootstrap/assemble.sh && daoc build --source bootstrap/hir/hir.gen.dao --source bootstrap/ascii.dao && ./bootstrap/hir/hir.gen
 ```
 
 ### `mir/`
@@ -259,7 +259,7 @@ break/continue.
 **How to run tests**:
 
 ```sh
-bash bootstrap/assemble.sh && daoc build bootstrap/mir/mir.gen.dao && ./bootstrap/mir/mir.gen
+bash bootstrap/assemble.sh && daoc build --source bootstrap/mir/mir.gen.dao --source bootstrap/ascii.dao && ./bootstrap/mir/mir.gen
 ```
 
 ### `llvm/`
@@ -318,7 +318,7 @@ which is gitignored, so create it first):
 
 ```sh
 rm -rf bootstrap/llvm/out && mkdir -p bootstrap/llvm/out
-bash bootstrap/assemble.sh && daoc build bootstrap/llvm/llvm.gen.dao && ./bootstrap/llvm/llvm.gen
+bash bootstrap/assemble.sh && daoc build --source bootstrap/llvm/llvm.gen.dao --source bootstrap/ascii.dao && ./bootstrap/llvm/llvm.gen
 bash bootstrap/validate_ir.sh build/debug
 ```
 

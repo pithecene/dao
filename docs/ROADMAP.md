@@ -52,7 +52,7 @@ equivalence.
 | 3 | Bootstrap closure audit | exact list of language features and stdlib instantiations the compiler corpus needs, per pipeline stage |
 | 4 | Tier B core: methods + generics + monomorphization | `Vector<T>`, `HashMap<T>`, compiler methods and generic calls survive HIR → MIR → LLVM |
 | 5 | Compiler-self execution surface | pointers, `mode unsafe`, intrinsics/runtime hooks, plus whichever enum/control-flow pieces the audit proves necessary |
-| 6 | Task 32 + Task 33 convergence | bootstrap sources are real modules; the bootstrap compiler obeys the host's module/prelude/entry rules; the crossing holds over them |
+| 6 | Task 32 + Task 33 convergence, begun by Task 46 (`bootstrap::ascii`) | bootstrap sources are real modules; the bootstrap compiler obeys the host's module/prelude/entry rules; the crossing holds over them |
 | 7 | Stage-2 / Stage-3 bootstrap harness — **ran before order 6 over the assembled source** | host builds A → A builds B → B builds C; tests and outputs reach fixed-point parity |
 | 8 | Remaining Tier B parity | features that were not bootstrap blockers |
 
