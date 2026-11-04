@@ -107,13 +107,10 @@ struct ProgramRequest {
   std::vector<std::filesystem::path> sources; // explicit file-list mode
   ProgramOptions options;
 
-  /// The file that names build outputs: the root, else the source whose
-  /// path sorts first.  Never simply the first source — the same set in
-  /// another order would then produce a differently named executable,
-  /// and §8.4 makes output a function of the set, not of the order.
-  /// The entry module names the program, but the file that carries it
-  /// is not known until the graph is built; the smallest path is a
-  /// stable stand-in that no permutation changes.
+  /// The file that names a build whose entry is a prelude file: the root,
+  /// else the source whose path sorts first.  Never simply the first
+  /// source, because §8.4 makes output a function of the set and not of
+  /// the order.  Any other build is named after its entry module's file.
   [[nodiscard]] auto primary_file() const -> std::filesystem::path {
     if (!root.empty() || sources.empty()) {
       return root;

@@ -227,7 +227,6 @@ void cmd_llvm_ir(const dao::ProgramRequest& request) {
 // Extra link inputs (object files, -l flags, -L flags) are forwarded
 // to the system linker.
 void cmd_build(const dao::ProgramRequest& request, std::span<const std::string> link_extras = {}) {
-  const auto path = request.primary_file();
   // Initialize targets before lowering so the module gets a correct
   // DataLayout for ABI-sensitive struct coercion.
   dao::LlvmBackend::initialize_targets();
@@ -235,6 +234,13 @@ void cmd_build(const dao::ProgramRequest& request, std::span<const std::string> 
   auto mir = dao::run_through_mir(request);
   llvm::LLVMContext llvm_ctx;
   auto llvm_result = dao::lower_to_llvm(mir, llvm_ctx);
+
+  // The entry module names the program, whichever files came with it. A
+  // prelude file's display path is relative to the standard library, so
+  // an entry there is named by what the command line gave.
+  const auto& entry_file = reported_file(mir.hir_result.frontend.program);
+  const auto path = entry_file.is_prelude ? request.primary_file()
+                                          : dao::canonical_or_self(entry_file.display_path);
 
   // A uniquely named object per build: concurrent builds of same-named
   // files (a test suite, two shells) must not overwrite each other's.

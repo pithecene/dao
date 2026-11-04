@@ -51,16 +51,16 @@ if [ -n "${STAGE1:-}" ]; then
   echo "stage 1: $STAGE1"
 else
   echo "stage 1: the host builds the bootstrap compiler"
-  "$DAOC" build bootstrap/driver/driver.gen.dao > "$OUT/stage1.log" 2>&1 || { echo "stage 1 failed (see $OUT/stage1.log)"; exit 1; }
+  "$DAOC" build --source bootstrap/driver/driver.gen.dao --source bootstrap/ascii.dao > "$OUT/stage1.log" 2>&1 || { echo "stage 1 failed (see $OUT/stage1.log)"; exit 1; }
   STAGE1=bootstrap/driver/driver.gen
 fi
 
 echo "stage 2: the bootstrap compiler compiles itself"
-compile_with "$STAGE1" "$OUT/stage2.ll" bootstrap/driver/driver.gen.dao || { echo "stage 2 failed (see $OUT/stage2.ll.log)"; exit 1; }
+compile_with "$STAGE1" "$OUT/stage2.ll" bootstrap/driver/driver.gen.dao bootstrap/ascii.dao || { echo "stage 2 failed (see $OUT/stage2.ll.log)"; exit 1; }
 link "$OUT/stage2.ll" "$OUT/stage2" || { echo "stage 2 does not link (see $OUT/stage2.ll.clang)"; exit 1; }
 
 echo "stage 3: the stage-2 compiler compiles itself"
-compile_with "$OUT/stage2" "$OUT/stage3.ll" bootstrap/driver/driver.gen.dao || { echo "stage 3 failed (see $OUT/stage3.ll.log)"; exit 1; }
+compile_with "$OUT/stage2" "$OUT/stage3.ll" bootstrap/driver/driver.gen.dao bootstrap/ascii.dao || { echo "stage 3 failed (see $OUT/stage3.ll.log)"; exit 1; }
 
 if cmp -s "$OUT/stage2.ll" "$OUT/stage3.ll"; then
   echo "fixed point: stage 2 and stage 3 emit the same module"
@@ -74,7 +74,7 @@ echo "the suites, compiled by the stage-2 compiler"
 rm -rf bootstrap/llvm/out && mkdir -p bootstrap/llvm/out
 failures=0
 for p in lexer parser graph resolver typecheck hir mir llvm; do
-  if ! compile_with "$OUT/stage2" "$OUT/$p.ll" "bootstrap/$p/$p.gen.dao"; then
+  if ! compile_with "$OUT/stage2" "$OUT/$p.ll" "bootstrap/$p/$p.gen.dao" bootstrap/ascii.dao; then
     echo "  $p: did not compile (see $OUT/$p.ll.log)"; failures=$((failures + 1)); continue
   fi
   if ! link "$OUT/$p.ll" "$OUT/$p"; then
