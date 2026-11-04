@@ -4154,6 +4154,7 @@ fn check_variant_construction(ts: TS, node_idx: i64, callee: i64, enum_ti: i64, 
     Option::None:
       // An unknown variant was diagnosed by the callee's own check.
       return r
+  r = record_variant_index(r, callee, vkey)
   if param_count == to_i64(0):
     return ts_add_diag(r, sp, "variant '" + variant_name + "' has no parameters; write it without parentheses")
   // Every payload value is named, once, after a parameter of the

@@ -57,7 +57,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 43
+  let total: i32 = 45
 
   // Test 1: simple_fn
   let src1: string = "fn add(a: i32, b: i32): i32\n  return a + b\n"
@@ -193,26 +193,26 @@ fn main(): i32
   let src8: string = "class Point:\n  x: i32\n  y: i32\nfn main(): i32\n  let p: Point = Point(1, 2)\n  return 0\n"
   let r8: HirResult = lower_to_hir(src8)
   if r8.root >= 0:
-    let found_call8: bool = false
-    let call_has_type8: bool = false
+    let found_construct8: bool = false
+    let construct_has_type8: bool = false
     let i8: i64 = 0
     while i8 < hir_count_nodes(r8):
       let n8: HirNode = r8.hir_nodes.get(i8)
-      if hir_node_kind(n8) == "HirCall":
-        found_call8 = true
+      if hir_node_kind(n8) == "HirConstruct":
+        found_construct8 = true
         match n8:
-          HirNode::HirCall(callee, args_lp, ac, ti):
+          HirNode::HirConstruct(args_lp, ac, ti):
             if ti >= 0:
-              call_has_type8 = true
+              construct_has_type8 = true
       i8 = i8 + 1
-    if found_call8:
-      if call_has_type8:
+    if found_construct8:
+      if construct_has_type8:
         print("PASS struct_constructor")
         pass_count = pass_count + 1
       else:
-        print("FAIL struct_constructor: HirCall has no type")
+        print("FAIL struct_constructor: HirConstruct has no type")
     else:
-      print("FAIL struct_constructor: no HirCall found")
+      print("FAIL struct_constructor: no HirConstruct found")
   else:
     print("FAIL struct_constructor: root < 0")
 
@@ -595,25 +595,20 @@ fn main(): i32
   // -----------------------------------------------------------------
   // Test 24: qualified_variant_lowers — a `Enum::Variant` constructor
   // and a `Enum::Variant` match pattern lower with no diagnostics; the
-  // constructor's callee is a HirQualName.
+  // constructor is an enum construction, as the host's is.
   // -----------------------------------------------------------------
   let src24: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn area(s: Shape): i32\n  match s:\n    Shape::Circle(r):\n      return r\n    Shape::Dot:\n      return 0\n  return 0\n\nfn main(): i32\n  let c: Shape = Shape::Circle(r = 3)\n  return 0\n"
   let r24: HirResult = lower_to_hir(src24)
-  let has_qual: bool = false
-  let qi: i64 = 0
-  while qi < hir_count_nodes(r24):
-    if hir_get_kind_at(r24, qi) == "HirQualName":
-      has_qual = true
-    qi = qi + 1
-  if r24.root >= 0 and has_qual and hir_count_diags(r24) == 0:
+  if r24.root >= 0 and hir_count_kind(r24, "HirEnumConstruct") == 1 and hir_count_kind(r24, "HirQualName") == 0 and hir_count_diags(r24) == 0:
     print("PASS qualified_variant_lowers")
     pass_count = pass_count + 1
   else:
-    print("FAIL qualified_variant_lowers: expected HirQualName nodes and no diagnostics, got " + i64_to_string(hir_count_diags(r24)))
+    print("FAIL qualified_variant_lowers: expected one HirEnumConstruct, no HirQualName, no diagnostics, got " + i64_to_string(hir_count_diags(r24)))
 
   // -----------------------------------------------------------------
   // Test 25: named_construction_in_field_order — arguments given out of
-  // declaration order reach HirCall in declaration order.
+  // declaration order stay in source order, each paired with the field
+  // it fills (the host evaluates them in source order).
   // -----------------------------------------------------------------
   let src25: string = "enum class Pair:\n  Both(a: i64, b: i64)\n\nfn main(): i32\n  let p: Pair = Pair::Both(b = 2, a = 1)\n  return 0\n"
   let r25: HirResult = lower_to_hir(src25)
@@ -621,19 +616,19 @@ fn main(): i32
   let oi: i64 = 0
   while oi < hir_count_nodes(r25):
     match r25.hir_nodes.get(oi):
-      HirNode::HirCall(callee, args_lp, arg_count, ti):
-        if arg_count == 2:
-          let first_arg: i64 = r25.hir_idx.get(args_lp - 2)
-          match r25.hir_nodes.get(first_arg):
+      HirNode::HirEnumConstruct(variant, payload_lp, payload_count, ti):
+        let pairs25: Vector<i64> = read_pairs(r25.hir_idx, payload_lp)
+        if payload_count == 2 and pairs25.get(1) == 1 and pairs25.get(3) == 0:
+          match r25.hir_nodes.get(pairs25.get(0)):
             HirNode::HirIntLit(lit_value, lit_ti):
-              if lit_value == 1:
+              if lit_value == 2:
                 order_ok = true
     oi = oi + 1
   if r25.root >= 0 and order_ok and hir_count_diags(r25) == 0:
     print("PASS named_construction_in_field_order")
     pass_count = pass_count + 1
   else:
-    print("FAIL named_construction_in_field_order: expected the first lowered argument to be the literal 1, no diagnostics (" + i64_to_string(hir_count_diags(r25)) + ")")
+    print("FAIL named_construction_in_field_order: expected (2 → field 1), (1 → field 0), no diagnostics (" + i64_to_string(hir_count_diags(r25)) + ")")
 
   // Test 26: a call the checker typed through a derived conformance is
   // rejected at HIR (no `Type.method` symbol exists; lowering it needs
@@ -912,6 +907,36 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL oversized_literal_reported: got " + i64_to_string(hir_count_diags(r43)) + " and " + i64_to_string(hir_count_diags(r43_ok)) + " diagnostics")
+  // Tests 44–45: construction lowers as the host's does (`daoc hir`): a
+  // class call builds the class, `Box<i32>(3)` its instantiation; a
+  // classification variant is its index; a payload-bearing enum's
+  // variant, with or without payload, is an enum construction.
+  let r44: HirResult = lower_to_hir("class P:\n  x: i32\n  y: i64\n\nclass Box<T>:\n  v: T\n\nfn main(): i32\n  let p: P = P(1, 2)\n  let b: Box<i32> = Box<i32>(3)\n  return 0\n")
+  let construct_types: string = ""
+  let ci44: i64 = 0
+  while ci44 < hir_count_nodes(r44):
+    match r44.hir_nodes.get(ci44):
+      HirNode::HirConstruct(args_lp, arg_count, cti):
+        construct_types = construct_types + hir_type_label(r44, cti) + "/" + i64_to_string(arg_count) + ";"
+    ci44 = ci44 + 1
+  if hir_count_diags(r44) == 0 and construct_types == "P/2;Box<i32>/1;" and hir_count_kind(r44, "HirCall") == 0:
+    print("PASS class_call_constructs")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL class_call_constructs: got '" + construct_types + "', " + i64_to_string(hir_count_kind(r44, "HirCall")) + " calls, " + i64_to_string(hir_count_diags(r44)) + " diagnostics")
+  let r45: HirResult = lower_to_hir("enum Color:\n  Red\n  Green\n\nenum class Shape:\n  Circle(r: i32)\n  Rect(w: i32, h: i32)\n  Empty\n\nfn main(): i32\n  let c: Color = Color::Green\n  let s: Shape = Shape::Rect(h = 2, w = 1)\n  let e: Shape = Shape::Empty\n  return 0\n")
+  let variants45: string = ""
+  let vi45: i64 = 0
+  while vi45 < hir_count_nodes(r45):
+    match r45.hir_nodes.get(vi45):
+      HirNode::HirEnumConstruct(variant, payload_lp, payload_count, eti):
+        variants45 = variants45 + i64_to_string(variant) + "/" + i64_to_string(payload_count) + ";"
+    vi45 = vi45 + 1
+  if hir_count_diags(r45) == 0 and hir_int_lits_of(r45, "Color") == "1;" and variants45 == "1/2;2/0;" and hir_count_kind(r45, "HirQualName") == 0:
+    print("PASS variant_values_construct")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL variant_values_construct: got Color '" + hir_int_lits_of(r45, "Color") + "', constructions '" + variants45 + "', " + i64_to_string(hir_count_diags(r45)) + " diagnostics")
 
   // -----------------------------------------------------------------
   // Summary

@@ -349,7 +349,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 28
+  let total: i32 = 29
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -853,6 +853,15 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL string_comparison_fails_closed: " + diags_text(r29.diags))
+
+  // Test 28: an enum's tag is an integer constant of a type this backend
+  // does not lower; the module fails rather than emitting it untyped.
+  let r28: LlvmTextResult = lower_source_to_llvm_text("enum E:\n  A\n\nfn main(): i32\n  if E::A == E::A:\n    return 1\n  return 0\n")
+  if r28.ok == false:
+    print("PASS enum_constant_fails_closed")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL enum_constant_fails_closed: backend reported ok")
 
   // -----------------------------------------------------------------
   // Summary
