@@ -111,4 +111,14 @@ assemble bootstrap/llvm/llvm.gen.dao \
   "$LLVM" \
   bootstrap/llvm/tests.dao
 
-echo "done — 8 files assembled"
+# The bootstrap compiler itself: every library fragment and the driver
+# that runs the whole pipeline over a manifest's files (Task 45).
+assemble bootstrap/driver/driver.gen.dao \
+  "$RESOLVER" \
+  "$TYPECHECK" \
+  "$HIR" \
+  "$MIR" \
+  "$LLVM" \
+  bootstrap/driver/main.dao
+
+echo "done — 9 files assembled"

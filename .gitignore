@@ -55,3 +55,6 @@ mise.local.toml
 
 # IR emitted by the bootstrap LLVM suite for bootstrap/validate_ir.sh
 bootstrap/llvm/out/
+
+# Manifest, modules and binaries of the bootstrap crossing (bootstrap/stage2.sh)
+bootstrap/driver/out/
