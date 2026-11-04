@@ -10,41 +10,41 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 104380 |
-| `CallExpr` | 35840 |
-| `Callee` | 35840 |
-| `Args` | 31712 |
-| `FieldExpr` | 26316 |
-| `BinaryExpr` | 17020 |
-| `LetStatement` | 13952 |
-| `IntLiteral` | 12239 |
-| `Value` | 10870 |
-| `Target` | 10870 |
-| `Assignment` | 10870 |
-| `Condition` | 9736 |
-| `ReturnStatement` | 8362 |
-| `Then` | 8066 |
-| `IfStatement` | 8066 |
-| `StringLiteral` | 7694 |
-| `QualifiedName` | 7385 |
-| `Param` | 6102 |
-| `BoolLiteral` | 3633 |
-| `Pattern` | 3507 |
-| `Arm` | 3507 |
-| `ReturnType` | 2585 |
-| `FunctionDecl` | 2585 |
-| `WhileStatement` | 1670 |
-| `UnaryExpr` | 1606 |
-| `Else` | 1522 |
-| `Field` | 1458 |
-| `TypeArgs` | 1401 |
+| `Identifier` | 109708 |
+| `CallExpr` | 38056 |
+| `Callee` | 38056 |
+| `Args` | 33569 |
+| `FieldExpr` | 28868 |
+| `BinaryExpr` | 17735 |
+| `LetStatement` | 14581 |
+| `IntLiteral` | 12805 |
+| `Value` | 11415 |
+| `Target` | 11415 |
+| `Assignment` | 11415 |
+| `Condition` | 9999 |
+| `ReturnStatement` | 8650 |
+| `Then` | 8213 |
+| `IfStatement` | 8213 |
+| `StringLiteral` | 7850 |
+| `QualifiedName` | 7684 |
+| `Param` | 6430 |
+| `BoolLiteral` | 3733 |
+| `Pattern` | 3691 |
+| `Arm` | 3691 |
+| `ReturnType` | 2700 |
+| `FunctionDecl` | 2700 |
+| `WhileStatement` | 1786 |
+| `UnaryExpr` | 1674 |
+| `Field` | 1565 |
+| `Else` | 1545 |
+| `TypeArgs` | 1518 |
 | `Variant` | 1268 |
-| `Scrutinee` | 1050 |
-| `MatchStatement` | 1050 |
-| `ExpressionStatement` | 764 |
-| `ClassDecl` | 383 |
+| `Scrutinee` | 1132 |
+| `MatchStatement` | 1132 |
+| `ExpressionStatement` | 791 |
+| `ClassDecl` | 423 |
 | `BreakStatement` | 64 |
-| `ResourceBlock` | 40 |
+| `ResourceBlock` | 41 |
 | `EnumDecl` | 31 |
 | `ExprBody` | 27 |
 | `EnumClassDecl` | 14 |
@@ -66,8 +66,8 @@ bootstrap must compile for itself.
 | `core::vector::Vector.get` | 25 |
 | `core::vector::vec_log_values_new` | 25 |
 | `core::vector::Vector.copy_out` | 21 |
-| `core::vector::Vector.set` | 7 |
-| `core::vector::Vector.log_overwrite` | 7 |
+| `core::vector::Vector.set` | 8 |
+| `core::vector::Vector.log_overwrite` | 8 |
 | `core::range::range` | 5 |
 | `core::builtins::copy_out` | 5 |
 | `core::vector::Vector.snapshot` | 1 |
@@ -231,16 +231,16 @@ one self-compilation attempt through that stage.
 A stage the program never reached reads as —; the last column says where
 it died and why.
 
-| Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | llvm | First blocking diagnostic |
-|---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 77 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2360 | llvm: unknown name 'Vector' |
-| parser | 83 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2612 | llvm: unknown name 'Vector' |
-| graph | 85 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2451 | llvm: unknown name 'Vector' |
-| resolver | 174 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 4768 | llvm: unknown name 'Vector' |
-| typecheck | 701 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 10046 | llvm: unknown name 'Vector' |
-| hir | 918 | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 11475 | llvm: unknown name 'Vector' |
-| mir | 1092 | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 13524 | llvm: unknown name 'Vector' |
-| llvm | 1279 | 4 | 0 | 0 | 0 | 0 | 0 | 0 | 14949 | llvm: unknown name 'Vector' |
+| Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | mono | llvm | First blocking diagnostic |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| lexer | 74 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2360 | llvm: unknown name 'Vector' |
+| parser | 76 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2612 | llvm: unknown name 'Vector' |
+| graph | 68 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 2451 | llvm: unknown name 'Vector' |
+| resolver | 170 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 4768 | llvm: unknown name 'Vector' |
+| typecheck | 988 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 10100 | llvm: unknown name 'Vector' |
+| hir | 1063 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 11559 | llvm: unknown name 'Vector' |
+| mir | 1504 | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 16025 | llvm: unknown name 'Vector' |
+| llvm | 1531 | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 17207 | llvm: unknown name 'Vector' |
 
 ### What each stage rejects
 
@@ -370,10 +370,10 @@ next.  Sites per program against the parse column above:
 | parser | 71 | 0 | 0 |
 | graph | 77 | 0 | 0 |
 | resolver | 126 | 0 | 0 |
-| typecheck | 274 | 0 | 0 |
-| hir | 247 | 4 | 0 |
-| mir | 306 | 8 | 0 |
-| llvm | 332 | 28 | 0 |
+| typecheck | 276 | 0 | 0 |
+| hir | 249 | 4 | 0 |
+| mir | 368 | 8 | 0 |
+| llvm | 383 | 29 | 0 |
 
 ### Closure surfaces: compiler implementation vs test harness
 
@@ -389,25 +389,25 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 
 | Prelude function | Compiler | Harness |
 |---|---:|---:|
-| `to_i64` | 937 | 160 |
-| `print` | 0 | 742 |
-| `new` | 324 | 111 |
-| `i64_to_string` | 107 | 262 |
-| `substring` | 32 | 11 |
-| `length` | 14 | 11 |
+| `to_i64` | 1149 | 161 |
+| `print` | 0 | 768 |
+| `new` | 375 | 122 |
+| `i64_to_string` | 138 | 271 |
+| `substring` | 35 | 11 |
+| `length` | 16 | 11 |
+| `make_error` | 23 | 0 |
 | `char_at` | 23 | 0 |
+| `index_of` | 1 | 22 |
 | `read_file` | 0 | 19 |
-| `make_error` | 18 | 0 |
-| `index_of` | 0 | 16 |
 | `file_exists` | 0 | 16 |
 | `i32_to_string` | 0 | 15 |
 | `eprint` | 0 | 13 |
-| `bool_to_string` | 0 | 6 |
+| `bool_to_string` | 1 | 6 |
 | `starts_with` | 3 | 0 |
 | `write_file` | 1 | 2 |
 | `make_warning` | 0 | 1 |
 | `str_compare` | 1 | 0 |
-| **Total** | **1460** | **1385** |
+| **Total** | **1766** | **1438** |
 
 ## 4. Reading the matrix
 
