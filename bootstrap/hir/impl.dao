@@ -48,7 +48,8 @@ enum class HirNode:
   // rejected at MIR (Tier A) rather than silently erased.
   HirMode(name: i64, body_lp: i64)
   HirYield(value: i64)
-  HirFor(var_name: i64, iter: i64, body_lp: i64)
+  // `for x in it:` — `var_sym` is the loop variable's symbol.
+  HirFor(var_sym: i64, iter: i64, body_lp: i64)
   HirReturn(value: i64)
   HirBreak(tok: i64)
   HirExprStmt(expr: i64)
@@ -717,7 +718,7 @@ fn lower_stmt(hs: HS, node_idx: i64): HirR
       let yr: HirR = lower_expr(hs, val_node)
       return hs_add_node(yr.hs, HirNode::HirYield(value = yr.hir))
     Node::ForS(var_tidx, iter_node, body_lp):
-      return lower_for_stmt(hs, var_tidx, iter_node, body_lp)
+      return lower_for_stmt(hs, node_idx, iter_node, body_lp)
     Node::ReturnS(val_node):
       return lower_return_stmt(hs, val_node)
     Node::BreakS(tidx):
@@ -773,10 +774,16 @@ fn lower_while_stmt(hs: HS, cond: i64, body_lp: i64): HirR
   let body_fl: HirFlush = lower_body_stmts(cr.hs, body_lp)
   return hs_add_node(body_fl.hs, HirNode::HirWhile(cond = cr.hir, body_lp = body_fl.list_pos))
 
-fn lower_for_stmt(hs: HS, var_tidx: i64, iter_node: i64, body_lp: i64): HirR
+// The loop variable is the Local the resolver declared for the `for`
+// statement itself.
+fn lower_for_stmt(hs: HS, for_node: i64, iter_node: i64, body_lp: i64): HirR
+  let var_sym: i64 = member_sym_of(hs.typecheck.lookup.index, hs.unit.module_id, for_node, "Local", "")
   let ir: HirR = lower_expr(hs, iter_node)
-  let body_fl: HirFlush = lower_body_stmts(ir.hs, body_lp)
-  return hs_add_node(body_fl.hs, HirNode::HirFor(var_name = var_tidx, iter = ir.hir, body_lp = body_fl.list_pos))
+  let cur: HS = ir.hs
+  if var_sym < 0:
+    cur = hs_add_diag(cur, Span(to_i64(0), to_i64(1)), "for loop variable has no symbol")
+  let body_fl: HirFlush = lower_body_stmts(cur, body_lp)
+  return hs_add_node(body_fl.hs, HirNode::HirFor(var_sym = var_sym, iter = ir.hir, body_lp = body_fl.list_pos))
 
 fn lower_return_stmt(hs: HS, val_node: i64): HirR
   if val_node < 0:
@@ -1782,7 +1789,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
         return line
       line = line + "\n"
       return line
-    HirNode::HirFor(var_tidx, iter, body_lp):
+    HirNode::HirFor(var_sym, iter, body_lp):
       line = line + "\n"
       line = line + hir_dump_node(hr, iter, indent + 1)
       let body: Vector<i64> = read_list(hr.hir_idx, body_lp)

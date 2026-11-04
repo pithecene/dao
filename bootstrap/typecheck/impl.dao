@@ -4468,7 +4468,7 @@ fn check_stmt(ts: TS, node_idx: i64): TS
             ry = ts_add_diag(ry, ts_node_span(ry, val_node), "yield type " + type_name(ry, yt) + " does not match Generator element type " + type_name(ry, ry.ctx.gen_elem))
       return ry
     Node::ForS(var_tidx, iter_node, body_lp):
-      return check_for_stmt(ts, var_tidx, iter_node, body_lp)
+      return check_for_stmt(ts, node_idx, iter_node, body_lp)
     Node::ReturnS(val_node):
       return check_return_stmt(ts, val_node)
     Node::BreakS(tidx):
@@ -4584,8 +4584,24 @@ fn check_while_stmt(ts: TS, cond: i64, body_lp: i64): TS
   r = ts_dec_loop_depth(r)
   return r
 
-fn check_for_stmt(ts: TS, var_tidx: i64, iter_node: i64, body_lp: i64): TS
+// `for x in it:` iterates a generator: the loop variable (the Local the
+// resolver declared for the statement) takes its element type, as the
+// host's check_for types it; any other iterable is reported.
+fn check_for_stmt(ts: TS, for_node: i64, iter_node: i64, body_lp: i64): TS
   let r: TS = check_expr(ts, iter_node)
+  let iter_ti: i64 = get_expr_type(r, iter_node)
+  if iter_ti >= 0:
+    let iter_t: DaoType = r.types.get(iter_ti)
+    let is_generator: bool = false
+    match iter_t.kind:
+      TypeKind::TGenerator:
+        is_generator = true
+    if is_generator:
+      let var_sym: i64 = member_sym_of(r.reg.index, r.tc.module_id, for_node, "Local", "")
+      if var_sym >= 0:
+        r = ts_set_sym_type(r, var_sym, iter_t.pointee)
+    else:
+      r = ts_add_diag(r, ts_node_span(r, iter_node), "for-in requires Generator<T>, got '" + type_name(r, iter_ti) + "'")
   r = ts_inc_loop_depth(r)
   r = check_body_stmts(r, body_lp)
   r = ts_dec_loop_depth(r)

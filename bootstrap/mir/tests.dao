@@ -88,7 +88,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 32
+  let total: i32 = 36
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -328,13 +328,13 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL mode_block_is_a_region: got " + i64_to_string(mir_count_kind(r15, "MirModeEnter")) + " enters, " + i64_to_string(mir_count_kind(r15, "MirModeExit")) + " exits, " + i64_to_string(r15.diags.length()) + " diagnostics")
-  // Test 16: `yield` has no Tier A lowering; MIR rejects it.
+  // Test 16: `yield` in a generator lowers to MIR yield, as the host's.
   let r16: MirResult = lower_to_mir("fn g(): Generator<i32>\n  yield 1\n  return\n")
-  if mir_diag_mentions(r16, "HirYield") and r16.diags.length() == 1:
-    print("PASS yield_rejected_in_mir")
+  if r16.diags.length() == 0 and mir_count_kind(r16, "MirYield") == 1:
+    print("PASS yield_lowers")
     pass_count = pass_count + 1
   else:
-    print("FAIL yield_rejected_in_mir: expected exactly the diagnostic naming HirYield, got " + i64_to_string(r16.diags.length()) + " diagnostics")
+    print("FAIL yield_lowers: got " + i64_to_string(mir_count_kind(r16, "MirYield")) + " yields, " + i64_to_string(r16.diags.length()) + " diagnostics")
 
   // -----------------------------------------------------------------
   // Summary
@@ -553,6 +553,46 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL generator_escape_rejected: got " + i64_to_string(r29b.diags.length()) + " diagnostics, " + i64_to_string(mir_count_kind(r29b, "MirCall")) + " calls")
+
+  // Tests 30–31: `for` over a generator, as the host's (`daoc mir`):
+  // iter_init, iter_has_next / iter_next per turn, iter_destroy at the
+  // exit; `break` goes to the exit (one destroy), a `return` in the body
+  // destroys the iterator first (two).
+  let gen30: string = "fn count(n: i32): Generator<i32>\n  let i: i32 = 0\n  while i < n:\n    yield i\n    i = i + 1\n\n"
+  let r30: MirResult = lower_to_mir(gen30 + "fn total(): i32\n  let t: i32 = 0\n  for x in count(3):\n    if x > 5:\n      break\n    t = t + x\n  return t\n")
+  if r30.diags.length() == 0 and mir_count_kind(r30, "MirIterInit") == 1 and mir_count_kind(r30, "MirIterHasNext") == 1 and mir_count_kind(r30, "MirIterNext") == 1 and mir_count_kind(r30, "MirIterDestroy") == 1:
+    print("PASS for_over_generator")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL for_over_generator: got " + i64_to_string(mir_count_kind(r30, "MirIterDestroy")) + " destroys, " + i64_to_string(r30.diags.length()) + " diagnostics")
+  let r31: MirResult = lower_to_mir(gen30 + "fn early(): i32\n  for x in count(3):\n    return x\n  return 0\n")
+  if r31.diags.length() == 0 and mir_count_kind(r31, "MirIterDestroy") == 2:
+    print("PASS return_from_for_destroys_iterator")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL return_from_for_destroys_iterator: got " + i64_to_string(mir_count_kind(r31, "MirIterDestroy")) + " destroys, " + i64_to_string(r31.diags.length()) + " diagnostics")
+  // Tests 32–33: the loop variable takes the generator's element type
+  // (its load is `i32`, as the host's); a non-generator iterable is
+  // rejected, as the host rejects it.
+  let r32: MirResult = lower_to_mir("fn f(g: Generator<i32>): i32\n  for x in g:\n    return x\n  return 0\n")
+  let untyped32: i64 = 0
+  let ni32: i64 = 0
+  while ni32 < r32.mir_nodes.length():
+    match r32.mir_nodes.get(ni32):
+      MirNode::MirLoad(local_idx, ti):
+        if ti < 0:
+          untyped32 = untyped32 + 1
+    ni32 = ni32 + 1
+  if r32.diags.length() == 0 and untyped32 == 0:
+    print("PASS loop_variable_typed")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL loop_variable_typed: " + i64_to_string(untyped32) + " untyped loads, " + i64_to_string(r32.diags.length()) + " diagnostics")
+  if mir_diag_mentions(lower_to_mir("fn f(): void\n  for x in 1:\n    break\n"), "for-in requires Generator<T>"):
+    print("PASS non_generator_iterable_rejected")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL non_generator_iterable_rejected: expected the host's diagnostic")
 
   // -----------------------------------------------------------------
   print("")
