@@ -1877,28 +1877,112 @@ fn ll_inst_is_unreachable(inst: LlInst): bool
   return false
 
 // The blocks one block branches to.
-fn mir_block_targets(bs: BS, block_node_idx: i64): Vector<i64>
-  let targets: Vector<i64> = Vector<i64>::new()
-  let mb: MirNode = bs.mir_nodes.get(block_node_idx)
-  match mb:
+// How a block leaves: `br target` (else_block -1), or `cond_br cond,
+// then_block, else_block`; target -1 when it returns.
+class BlockExit:
+  cond: i64
+  target: i64
+  else_block: i64
+
+fn mir_block_exit(bs: BS, block_node_idx: i64): BlockExit
+  let exit: BlockExit = BlockExit(to_i64(-1), to_i64(-1), to_i64(-1))
+  match bs.mir_nodes.get(block_node_idx):
     MirNode::MirBlock(block_id, inst_list_lp, inst_count):
       let insts_raw: Vector<i64> = read_mir_list(bs.mir_idx, inst_list_lp)
       let ii: i64 = to_i64(0)
       while ii < insts_raw.length():
-        let inst: MirNode = bs.mir_nodes.get(insts_raw.get(ii))
-        match inst:
+        match bs.mir_nodes.get(insts_raw.get(ii)):
           MirNode::MirBr(target_block):
-            targets = targets.push(target_block)
+            exit = BlockExit(to_i64(-1), target_block, to_i64(-1))
           MirNode::MirCondBr(cond, then_block, else_block):
-            targets = targets.push(then_block)
-            targets = targets.push(else_block)
+            exit = BlockExit(cond, then_block, else_block)
         ii = ii + to_i64(1)
-  return targets
+  return exit
+
+// One test of a lowered `match` (lower_match_into): the synthesized
+// `==` of the scrutinee local -- or its discriminant -- against variant
+// `variant` of an enum of `variants` variants.  `local` is -1 for any
+// other condition.
+class MatchTest:
+  local: i64
+  variant: i64
+  variants: i64
+
+fn mir_match_test(bs: BS, cond: i64): MatchTest
+  let none: MatchTest = MatchTest(to_i64(-1), to_i64(-1), to_i64(-1))
+  if cond < 0:
+    return none
+  match bs.mir_nodes.get(cond):
+    MirNode::MirBinary(op_tok, lhs, rhs, type_idx):
+      if op_tok != synthesized_equality_op():
+        return none
+      let tested: i64 = lhs
+      match bs.mir_nodes.get(lhs):
+        MirNode::MirEnumDiscriminant(value, dti):
+          tested = value
+      let local: i64 = to_i64(-1)
+      match bs.mir_nodes.get(tested):
+        MirNode::MirLoad(local_idx, path_lp, path_count, lti):
+          if path_count == to_i64(0):
+            local = local_idx
+      if local < 0:
+        return none
+      match bs.mir_nodes.get(rhs):
+        MirNode::MirConstInt(value, cti):
+          if cti >= 0 and cti < bs.types.length():
+            let t: DaoType = bs.types.get(cti)
+            match t.kind:
+              TypeKind::TEnum:
+                return MatchTest(local, value, t.info_count)
+  return none
+
+// What the path into a block has ruled out of one match scrutinee: the
+// variants whose tests it failed, as ",k,...," (`local` -1: nothing).
+class Ruled:
+  local: i64
+  variants: string
+  count: i64
+
+fn ruled_nothing(): Ruled
+  return Ruled(to_i64(-1), ",", to_i64(0))
+
+// The reachable blocks with what each one's paths have ruled out, and
+// the positions still to walk.
+class Reach:
+  blocks: Vector<i64>
+  ruled: Vector<Ruled>
+  queue: Vector<i64>
+
+// `target` reached with `incoming` ruled out.  A block reached a second
+// way keeps only what both ways rule out -- nothing, unless they agree
+// -- and is walked again, since its exits may now be live.
+fn reach_block(r: Reach, target: i64, incoming: Ruled): Reach
+  let at: i64 = to_i64(-1)
+  let i: i64 = to_i64(0)
+  while i < r.blocks.length():
+    if r.blocks.get(i) == target:
+      at = i
+    i = i + to_i64(1)
+  if at < 0:
+    r.queue = r.queue.push(r.blocks.length())
+    r.blocks = r.blocks.push(target)
+    r.ruled = r.ruled.push(incoming)
+    return r
+  let known: Ruled = r.ruled.get(at)
+  if known.local >= 0:
+    if known.local != incoming.local or known.variants != incoming.variants:
+      r.ruled = r.ruled.set(at, ruled_nothing())
+      r.queue = r.queue.push(at)
+  return r
 
 // The blocks a path from the entry block reaches, by walking branches
 // transitively.  Being a branch target is not enough: a merge block no
 // path reaches can still branch on to the next merge block (nested
-// if/else whose arms all return), and that target is dead too.
+// if/else whose arms all return), and that target is dead too.  So is
+// the way out of a `match` whose tests have ruled out every variant of
+// its scrutinee's enum: a match is exhaustive (CONTRACT_SYNTAX_SURFACE.md),
+// and the host's MIR still ends its test chain with a fall-through
+// block, which no value reaches.
 //
 // Size bound: MIR opens a block per arm and merge point of a
 // function's `if`/`while` bodies, so a function has as many blocks as
@@ -1908,20 +1992,32 @@ fn mir_block_targets(bs: BS, block_node_idx: i64): Vector<i64>
 // storage, so an indexed table would cost the same order and allocate
 // per update besides.
 fn mir_reachable_blocks(bs: BS, blocks_raw: Vector<i64>): Vector<i64>
-  let reachable: Vector<i64> = Vector<i64>::new()
+  let r: Reach = Reach(Vector<i64>::new(), Vector<Ruled>::new(), Vector<i64>::new())
   if blocks_raw.length() == to_i64(0):
-    return reachable
-  reachable = reachable.push(blocks_raw.get(to_i64(0)))
+    return r.blocks
+  r = reach_block(r, blocks_raw.get(to_i64(0)), ruled_nothing())
   let next: i64 = to_i64(0)
-  while next < reachable.length():
-    let targets: Vector<i64> = mir_block_targets(bs, reachable.get(next))
-    let ti: i64 = to_i64(0)
-    while ti < targets.length():
-      if i64_vector_contains(reachable, targets.get(ti)) == false:
-        reachable = reachable.push(targets.get(ti))
-      ti = ti + to_i64(1)
+  while next < r.queue.length():
+    let at: i64 = r.queue.get(next)
+    let here: Ruled = r.ruled.get(at)
+    let exit: BlockExit = mir_block_exit(bs, r.blocks.get(at))
+    if exit.target >= 0:
+      r = reach_block(r, exit.target, ruled_nothing())
+    if exit.else_block >= 0:
+      let test: MatchTest = mir_match_test(bs, exit.cond)
+      if test.local < 0:
+        r = reach_block(r, exit.else_block, ruled_nothing())
+      else:
+        let failed: Ruled = Ruled(test.local, ",", to_i64(0))
+        if here.local == test.local:
+          failed = here
+        let tag: string = i64_to_string(test.variant) + ","
+        if index_of(failed.variants, "," + tag) < to_i64(0):
+          failed = Ruled(test.local, failed.variants + tag, failed.count + to_i64(1))
+        if failed.count < test.variants:
+          r = reach_block(r, exit.else_block, failed)
     next = next + to_i64(1)
-  return reachable
+  return r.blocks
 
 fn i64_vector_contains(xs: Vector<i64>, x: i64): bool
   let i: i64 = to_i64(0)

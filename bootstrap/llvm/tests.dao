@@ -374,7 +374,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 39
+  let total: i32 = 40
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -995,6 +995,19 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL generator_runs: " + diags_text(r39.diags))
+
+  // Test 40: a match whose arms name every variant is exhaustive, so the
+  // fall-through after its tests is dead and a non-void function ending
+  // in it is sound: tag(Color::Blue) = 2, and the program exits 0.  A
+  // match missing a variant still falls off the end and is rejected.
+  let r40: LlvmTextResult = lower_source_to_llvm_text("enum class Shape:\n  Dot\n  Box(w: i32)\n\nenum Color:\n  Red\n  Green\n  Blue\n\nfn width(s: Shape): i32\n  match s:\n    Shape::Box(w):\n      return w\n    Shape::Dot:\n      return 0\n\nfn tag(c: Color): i32\n  match c:\n    Color::Red:\n      return 0\n    Color::Green:\n      return 1\n    Color::Blue:\n      return 2\n\nfn main(): i32\n  return tag(Color::Blue) + width(Shape::Box(w = 3)) - 5\n")
+  write_failures = write_failures + emit_ir("exhaustive_match_returns", r40, 0)
+  let r40b: LlvmTextResult = lower_source_to_llvm_text("enum Color:\n  Red\n  Green\n\nfn tag(c: Color): i32\n  match c:\n    Color::Red:\n      return 0\n\nfn main(): i32 -> 0\n")
+  if r40.ok and r40b.ok == false and contains_substring(diags_text(r40b.diags), "without returning a value"):
+    print("PASS exhaustive_match_returns")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL exhaustive_match_returns: exhaustive " + diags_text(r40.diags) + "; partial ok=" + bool_to_string(r40b.ok))
 
   // -----------------------------------------------------------------
   // Summary
