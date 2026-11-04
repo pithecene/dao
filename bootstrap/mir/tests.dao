@@ -33,12 +33,62 @@ fn mir_count_kind(r: MirResult, kind: string): i64
     i = i + to_i64(1)
   return n
 
+// A program of `inputs` resolved, type-checked and lowered to MIR.
+fn mir_of_program(inputs: Vector<SourceInput>): ProgramMir
+  let p: Program = program_from_graph(build_program(inputs))
+  p = program_run_resolve(p)
+  p = program_run_typecheck(p)
+  return program_run_mir(p)
+
+// The MirModule nodes of a MirProgram root, in program order.
+fn mir_modules(r: MirResult): Vector<i64>
+  match r.mir_nodes.get(r.root):
+    MirNode::MirProgram(module_list_lp, module_count):
+      return read_hir_list(r.mir_idx, module_list_lp)
+  return Vector<i64>::new()
+
+// A module's concrete functions (`templates` false) or its templates.
+fn mir_module_fns(r: MirResult, module_node: i64, templates: bool): Vector<i64>
+  match r.mir_nodes.get(module_node):
+    MirNode::MirModule(file_id, fn_list_lp, fn_count, template_list_lp, template_count):
+      if templates:
+        return read_hir_list(r.mir_idx, template_list_lp)
+      return read_hir_list(r.mir_idx, fn_list_lp)
+  return Vector<i64>::new()
+
+// The resolver symbol a MirFunction lowers.
+fn mir_fn_sym(r: MirResult, fn_node: i64): i64
+  match r.mir_nodes.get(fn_node):
+    MirNode::MirFunction(sym, rt, pc, llp, lc, blp, bc, ie):
+      return sym
+  return to_i64(-1)
+
+// The values of the MirConstInt instructions of one function, in order.
+fn mir_fn_int_consts(r: MirResult, fn_node: i64): Vector<i64>
+  let out: Vector<i64> = Vector<i64>::new()
+  match r.mir_nodes.get(fn_node):
+    MirNode::MirFunction(sym, rt, pc, llp, lc, block_list_lp, bc, ie):
+      let blocks: Vector<i64> = read_hir_list(r.mir_idx, block_list_lp)
+      let bi: i64 = 0
+      while bi < blocks.length():
+        match r.mir_nodes.get(blocks.get(bi)):
+          MirNode::MirBlock(bid, inst_list_lp, ic):
+            let insts: Vector<i64> = read_hir_list(r.mir_idx, inst_list_lp)
+            let ii: i64 = 0
+            while ii < insts.length():
+              match r.mir_nodes.get(insts.get(ii)):
+                MirNode::MirConstInt(value, ti):
+                  out = out.push(value)
+              ii = ii + 1
+        bi = bi + 1
+  return out
+
 fn main(): i32
   print("=== bootstrap/mir: Tier A MIR subsystem ===")
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 18
+  let total: i32 = 22
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -290,13 +340,16 @@ fn main(): i32
   // -----------------------------------------------------------------
   // Summary
   // Test 17: a call through a type parameter's bound has no function
-  // until an instantiation names one; MIR rejects it, naming the shape.
+  // until an instantiation names one.  Its generic function is a
+  // template, which carries the call with the member access as its
+  // callee, as the host's template does; nothing is reported.
   let r17: MirResult = lower_to_mir("concept Printable:\n  fn to_string(self): string\n\nfn show<T: Printable>(x: T): string\n  return x.to_string()\n")
-  if mir_diag_mentions(r17, "through a type parameter's bound"):
-    print("PASS bound_call_rejected_in_mir")
+  let r17_templates: Vector<i64> = mir_module_fns(r17, r17.root, true)
+  if r17.diags.length() == 0 and r17_templates.length() == 1 and mir_module_fns(r17, r17.root, false).length() == 0 and mir_contains_kind(r17, "MirFieldAccess") and mir_contains_kind(r17, "MirCall"):
+    print("PASS bound_call_carried_by_template")
     pass_count = pass_count + 1
   else:
-    print("FAIL bound_call_rejected_in_mir: expected a diagnostic naming a call through a bound")
+    print("FAIL bound_call_carried_by_template: expected one template holding the call, no function, no diagnostics; got " + i64_to_string(r17.diags.length()) + " diagnostics, " + i64_to_string(r17_templates.length()) + " templates")
   // Test 18: an expression kind with no Tier A lowering is reported, so
   // a call through a bound beneath it does not vanish with it.
   let r18: MirResult = lower_to_mir("concept Printable:\n  fn to_string(self): string\n\nfn identity(s: string): string -> s\n\nfn show<T: Printable>(x: T): string\n  return x.to_string() |> identity\n")
@@ -305,6 +358,72 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL unsupported_expression_kind_reported_in_mir: expected a diagnostic, got 0")
+
+  // Test 19: a program lowers to one MirModule per module, in program
+  // order; the call in `app::main` names the function `core::util`
+  // declares (a prelude module, so it is called unqualified).
+  let two: Vector<SourceInput> = Vector<SourceInput>::new()
+  two = two.push(SourceInput("core_util.dao", "module core::util\n\nfn add(a: i32, b: i32): i32 -> a + b\n", true))
+  two = two.push(SourceInput("main.dao", "module app::main\n\nfn main(): i32\n  let x: i32 = 7\n  return add(40, 2)\n", false))
+  let pm19: ProgramMir = mir_of_program(two)
+  let r19: MirResult = pm19.mir
+  let mods19: Vector<i64> = mir_modules(r19)
+  let add_sym: i64 = to_i64(-1)
+  let main_fn: i64 = to_i64(-1)
+  if mods19.length() == 2:
+    let util_fns: Vector<i64> = mir_module_fns(r19, mods19.get(0), false)
+    let main_fns: Vector<i64> = mir_module_fns(r19, mods19.get(1), false)
+    if util_fns.length() == 1 and main_fns.length() == 1:
+      add_sym = mir_fn_sym(r19, util_fns.get(0))
+      main_fn = main_fns.get(0)
+  let ref_names_add: bool = false
+  let ni: i64 = 0
+  while ni < r19.mir_nodes.length():
+    match r19.mir_nodes.get(ni):
+      MirNode::MirFnRef(ref_sym, ref_ti):
+        if ref_sym == add_sym and add_sym >= 0:
+          ref_names_add = true
+    ni = ni + 1
+  if r19.diags.length() == 0 and ref_names_add:
+    print("PASS program_lowers_every_module")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL program_lowers_every_module: expected two modules and a call naming add, no diagnostics; got " + i64_to_string(mods19.length()) + " modules, " + i64_to_string(r19.diags.length()) + " diagnostics")
+
+  // Test 20: a literal lowers with its own module's lexeme: `main`'s
+  // constants read 7, 40, 2 from main.dao, not from core_util.dao.
+  let consts20: Vector<i64> = Vector<i64>::new()
+  if main_fn >= 0:
+    consts20 = mir_fn_int_consts(r19, main_fn)
+  if consts20.length() == 3 and consts20.get(0) == 7 and consts20.get(1) == 40 and consts20.get(2) == 2:
+    print("PASS literal_reads_its_module_source")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL literal_reads_its_module_source: expected constants 7, 40, 2, got " + i64_to_string(consts20.length()) + " constants")
+
+  // Test 21: a function with its own type parameters, and a method of a
+  // generic class (its `self` is the head), are templates; a function
+  // beside them is concrete.
+  let r21: MirResult = lower_to_mir("fn id<T>(x: T): T -> x\n\nclass Box<T>:\n  v: T\n\n  fn get(self): T -> self.v\n\nfn one(): i32 -> 1\n")
+  let t21: i64 = mir_module_fns(r21, r21.root, true).length()
+  let f21: i64 = mir_module_fns(r21, r21.root, false).length()
+  if r21.diags.length() == 0 and t21 == 2 and f21 == 1:
+    print("PASS generic_functions_are_templates")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL generic_functions_are_templates: expected 2 templates and 1 function, got " + i64_to_string(t21) + " and " + i64_to_string(f21) + ", " + i64_to_string(r21.diags.length()) + " diagnostics")
+
+  // Test 22: a MIR diagnostic is on the file of the module it came from.
+  let two22: Vector<SourceInput> = Vector<SourceInput>::new()
+  two22 = two22.push(SourceInput("core_util.dao", "module core::util\n\nfn add(a: i32, b: i32): i32 -> a + b\n", true))
+  two22 = two22.push(SourceInput("main.dao", "module app::main\n\nfn main(): i32\n  while true:\n    break\n  return add(1, 2)\n", false))
+  let pm22: ProgramMir = mir_of_program(two22)
+  let d22: Vector<FileDiagnostic> = pm22.program.diags
+  if d22.length() == 1 and d22.get(0).path == "main.dao" and index_of(d22.get(0).diag.message, "HirBreak") >= 0:
+    print("PASS mir_diagnostic_on_its_module_file")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL mir_diagnostic_on_its_module_file: expected one diagnostic naming HirBreak on main.dao, got " + i64_to_string(d22.length()))
 
   // -----------------------------------------------------------------
   print("")

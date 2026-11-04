@@ -903,10 +903,9 @@ stores to places, `break`, `mode` / `resource` regions — one measured
 slice at a time; generic bodies lowered to templates kept out of the
 module, as the host keeps them.
 
-Slice 1 is the program MIR driver: `program_run_hir` publishes its
-arena, `program_run_mir` lowers every module with its own tokens and
-source, and the audit's `mir` column is measured through it with the
-prelude.  Monomorphization is Task 43, program-level LLVM Task 44, the
+Slice 1 is the program MIR driver: the HIR pass keeps its arena,
+`program_run_mir` lowers every module with its own tokens and source,
+and the audit's `mir` column is measured through it with the prelude.  Monomorphization is Task 43, program-level LLVM Task 44, the
 Stage-2 crossing Task 45.
 
 ### Task 14 — Numeric Type Expansion

@@ -1158,6 +1158,23 @@ fn program_run_hir(p: Program): Program
   // duplication on reentrant calls.
   if p.hir.initialized:
     return p
+  return program_lower_hir(p).program
+
+// A program lowered to HIR and the HIR itself: the arena lives beside
+// the program because `HirData` is shared with programs that have no
+// HIR types (shared/base.dao).
+class ProgramHir:
+  program: Program
+  arena: HirArena
+
+// Lower the program to HIR and keep the arena, for a pass that lowers
+// it further (MIR).  The arena exists only in the result, so a program
+// already lowered cannot give it back: that is reported, never answered
+// with an empty arena.
+fn program_lower_hir(p: Program): ProgramHir
+  if p.hir.initialized:
+    let already: Vector<FileDiagnostic> = p.diags.push(FileDiagnostic(to_i64(-1), "", make_error(Span(to_i64(0), to_i64(1)), "program already lowered to HIR; its arena was not kept")))
+    return ProgramHir(Program(p.graph, p.resolve, p.typecheck, p.hir, already), arena_empty())
   let hir_nodes: Vector<HirNode> = Vector<HirNode>::new()
   let hir_idx: Vector<i64> = Vector<i64>::new()
   let module_indices: Vector<i64> = Vector<i64>::new()
@@ -1215,7 +1232,7 @@ fn program_run_hir(p: Program): Program
   hir_nodes = hir_nodes.push(HirNode::HirProgram(module_list_lp = mod_fl.list_pos))
 
   let hd: HirData = HirData(true, prog_idx, hir_nodes.length(), p.graph.topo_order.length())
-  return Program(p.graph, p.resolve, p.typecheck, hd, all_diags)
+  return ProgramHir(Program(p.graph, p.resolve, p.typecheck, hd, all_diags), HirArena(hir_nodes, hir_idx))
 
 // =========================================================================
 // Section 58b: Legacy single-file HIR adapter
