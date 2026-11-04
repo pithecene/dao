@@ -108,8 +108,10 @@ enum class MirNode:
 
   // ---------- effect-producing instructions (no result) ----------
 
-  // Store a value into a local.
-  MirStore(local_idx: i64, value: i64)
+  // Store a value into a place: a local, or the field its field-index
+  // path reaches (`store _0.inner.v`, the host's MirPlace with field
+  // projections).  An empty path stores the whole local.
+  MirStore(local_idx: i64, path_lp: i64, path_count: i64, value: i64)
 
   // ---------- terminators (must be last in a block) ----------
 
@@ -150,6 +152,7 @@ class MS:
   sym_to_local: HashMap<i64> // resolver sym_idx (as string) → local slot index
   next_block_id: i64        // for block.id numbering
   in_template: bool         // lowering a generic function's template
+  loop_exits: Vector<i64>   // exit block of each enclosing loop, innermost last
 
 fn mir_result_empty(): MirResult
   return MirResult(Vector<MirNode>::new(), Vector<i64>::new(), Vector<Diagnostic>::new(), to_i64(-1))
@@ -239,6 +242,7 @@ fn ms_reset_fn_state(ms: MS): MS
   ms.fn_blocks = Vector<i64>::new()
   ms.sym_to_local = HashMap<i64>::new()
   ms.next_block_id = to_i64(0)
+  ms.loop_exits = Vector<i64>::new()
   return ms
 
 // Declare a local slot for the given resolver symbol.  Returns the
@@ -535,18 +539,21 @@ fn mir_lower_stmt(br: BlockR, hir_node_idx: i64): BlockR
       let slot: i64 = dl.mir
       if init >= 0:
         let init_r: ExprR = lower_expr_value(br, init)
-        return emit_effect(init_r.br, MirNode::MirStore(local_idx = slot, value = init_r.value))
+        return emit_store(init_r.br, MirPlace(slot, Vector<i64>::new()), init_r.value)
       return br
     HirNode::HirAssign(target, value):
-      let tgt_node: HirNode = br.ms.hir_nodes.get(target)
-      match tgt_node:
-        HirNode::HirIdent(sym, ti, tok):
-          let slot: i64 = ms_lookup_local(br.ms, sym)
-          if slot >= 0:
-            let val_r: ExprR = lower_expr_value(br, value)
-            return emit_effect(val_r.br, MirNode::MirStore(local_idx = slot, value = val_r.value))
-      br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "unsupported assignment target")
-      return br
+      // The place first, then the value, as the host lowers them.
+      let place: PlaceR = lower_place(br.ms, target)
+      br.ms = place.ms
+      if place.place.local < 0:
+        return br
+      let val_r: ExprR = lower_expr_value(br, value)
+      return emit_store(val_r.br, place.place, val_r.value)
+    HirNode::HirBreak(t):
+      if br.ms.loop_exits.length() == 0:
+        br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "break outside a loop")
+        return br
+      return br_emit_terminator(br, MirNode::MirBr(target_block = br.ms.loop_exits.get(br.ms.loop_exits.length() - 1)))
     HirNode::HirReturn(value):
       if value >= 0:
         let val_r: ExprR = lower_expr_value(br, value)
@@ -575,6 +582,42 @@ fn mir_lower_stmt(br: BlockR, hir_node_idx: i64): BlockR
     "unsupported statement kind in Tier A MIR lowering: " + hir_node_kind(node))
   return br
 
+// A place a store writes: a local slot and the field-index path from it.
+class MirPlace:
+  local: i64
+  path: Vector<i64>
+
+class PlaceR:
+  ms: MS
+  place: MirPlace
+
+// The place an assignment target names: a local, or a field path rooted
+// at one (`o.inner.v`).  Any other target is reported, and its place's
+// local is -1.  A field a template cannot resolve yet (on a type
+// parameter's value) is tolerated there, as the host tolerates it.
+fn lower_place(ms: MS, target: i64): PlaceR
+  let none: MirPlace = MirPlace(to_i64(-1), Vector<i64>::new())
+  match ms.hir_nodes.get(target):
+    HirNode::HirIdent(sym, ti, tok):
+      let slot: i64 = ms_lookup_local(ms, sym)
+      if slot >= 0:
+        return PlaceR(ms, MirPlace(slot, Vector<i64>::new()))
+    HirNode::HirFieldAccess(obj, field_tok, ti):
+      let base: PlaceR = lower_place(ms, obj)
+      if base.place.local < 0:
+        return base
+      let field: i64 = mir_resolve_field_index(base.ms, ms_get_hir_type(base.ms, base.ms.hir_nodes.get(obj)), field_tok)
+      if field < 0 and base.ms.in_template == false:
+        let ft: Token = base.ms.toks.get(field_tok)
+        return PlaceR(ms_add_diag(base.ms, Span(ft.offset, ft.len), "unresolved field '" + substring(base.ms.src, ft.offset, ft.len) + "' in assignment target"), none)
+      return PlaceR(base.ms, MirPlace(base.place.local, base.place.path.push(field)))
+  return PlaceR(ms_add_diag(ms, Span(to_i64(0), to_i64(1)), "unsupported assignment target: " + hir_node_kind(ms.hir_nodes.get(target))), none)
+
+fn emit_store(br: BlockR, place: MirPlace, value: i64): BlockR
+  let fl: MirFlush = mir_flush_list(br.ms, place.path)
+  br.ms = fl.ms
+  return emit_effect(br, MirNode::MirStore(local_idx = place.local, path_lp = fl.list_pos, path_count = place.path.length(), value = value))
+
 // Emit an effect-only instruction (e.g. Store).  Same pattern as
 // br_emit_value but discards the value id.
 fn emit_effect(br: BlockR, node: MirNode): BlockR
@@ -590,6 +633,11 @@ fn lower_stmt_list(br: BlockR, list_pos: i64): BlockR
   let stmts: Vector<i64> = read_hir_list(br.ms.hir_idx, list_pos)
   let i: i64 = to_i64(0)
   while i < stmts.length():
+    // After a terminator (`return`, `break`) the rest of the list is
+    // unreachable; the host's builder drops it, and so does this one,
+    // rather than appending instructions after the block's terminator.
+    if br.sealed == to_i64(1):
+      return br
     br = mir_lower_stmt(br, stmts.get(i))
     i = i + to_i64(1)
   return br
@@ -661,8 +709,12 @@ fn mir_lower_while_stmt(br: BlockR, cond: i64, body_lp: i64): BlockR
   let ms_after_header: MS = block_seal(header_term)
 
   // Body: lower statements, then unconditional br back to header.
+  // A `break` in the body leaves to the exit block.
   let body_br: BlockR = block_open(ms_after_header, body_r.mir)
+  let enclosing_exits: Vector<i64> = body_br.ms.loop_exits
+  body_br.ms.loop_exits = enclosing_exits.push(exit_r.mir)
   let body_after: BlockR = lower_stmt_list(body_br, body_lp)
+  body_after.ms.loop_exits = enclosing_exits
   let body_final: BlockR = body_after
   if body_final.sealed == to_i64(0):
     body_final = br_emit_terminator(body_final, MirNode::MirBr(target_block = header_r.mir))
@@ -908,7 +960,8 @@ fn program_run_mir(p: Program): ProgramMir
     Vector<i64>::new(),
     HashMap<i64>::new(),
     to_i64(0),
-    false)
+    false,
+    Vector<i64>::new())
   let all_diags: Vector<FileDiagnostic> = hp.diags
   let module_nodes: Vector<i64> = Vector<i64>::new()
   if hp.hir.root >= 0 and hp.hir.root < ms.hir_nodes.length():
@@ -1057,7 +1110,7 @@ fn mir_node_kind(n: MirNode): string
       return "MirFnRef"
     MirNode::MirCall(a, b, c, d):
       return "MirCall"
-    MirNode::MirStore(a, b):
+    MirNode::MirStore(a, b, c, d):
       return "MirStore"
     MirNode::MirReturn(a, b):
       return "MirReturn"

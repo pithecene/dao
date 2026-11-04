@@ -531,6 +531,15 @@ fn bs_slot_name_by_index(bs: BS, slot_idx: i64): string
     return ""
   return bs.slot_names.get(slot_idx)
 
+// The MIR type of a local slot, from its MirLocal node.
+fn bs_slot_type_idx(bs: BS, slot_idx: i64): i64
+  if slot_idx < 0 or slot_idx >= bs.slot_keys.length():
+    return to_i64(-1)
+  match bs.mir_nodes.get(bs.slot_keys.get(slot_idx)):
+    MirNode::MirLocal(sym, type_idx, is_param):
+      return type_idx
+  return to_i64(-1)
+
 fn bs_slot_ty_by_index(bs: BS, slot_idx: i64): string
   if slot_idx < 0:
     return ""
@@ -864,16 +873,40 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       bs = bs_set_value(bs, mir_node_idx, result, ty_text)
       return LowerStepR(bs, insts)
 
-    MirNode::MirStore(local_idx, value_node):
+    MirNode::MirStore(local_idx, path_lp, path_count, value_node):
       let slot_name: string = bs_slot_name_by_index(bs, local_idx)
       let slot_ty_text: string = bs_slot_ty_by_index(bs, local_idx)
       if slot_name == "":
         bs = bs_error(bs, "bootstrap llvm backend: MirStore references unknown local slot " + i64_to_string(local_idx))
         return LowerStepR(bs, insts)
       let val_text: string = bs_get_value_text(bs, value_node)
-      // Store uses the slot's type text (already struct-aware).
+      // A field path is walked from the slot, one GEP per field; the
+      // store's type is the last field's.
+      let ptr_name: string = slot_name
+      let stored_ty_text: string = slot_ty_text
+      let path: Vector<i64> = read_mir_list(bs.mir_idx, path_lp)
+      if path.length() > 0:
+        let cur_ti: i64 = bs_slot_type_idx(bs, local_idx)
+        let pi: i64 = to_i64(0)
+        while pi < path.length():
+          let field: i64 = path.get(pi)
+          if cur_ti < 0 or cur_ti >= bs.types.length():
+            bs = bs_error(bs, "bootstrap llvm backend: MirStore field path has no struct type")
+            return LowerStepR(bs, insts)
+          let owner: DaoType = bs.types.get(cur_ti)
+          if field < 0 or field >= owner.info_count:
+            bs = bs_error(bs, "bootstrap llvm backend: MirStore field path leaves struct " + owner.name)
+            return LowerStepR(bs, insts)
+          bs = bs_ensure_struct_def(bs, cur_ti)
+          let fr_gep: FreshR = bs_fresh_value(bs)
+          bs = fr_gep.bs
+          insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = ptr_name, struct_ty_text = bs_type_text(bs.types, cur_ti), field_index = field), fr_gep.name))
+          ptr_name = fr_gep.name
+          cur_ti = bs.type_info.get(owner.info_lp + field * to_i64(2) + to_i64(1))
+          pi = pi + to_i64(1)
+        stored_ty_text = bs_type_text(bs.types, cur_ti)
       let inst: LlInst = LlInst(
-        LlInstKind::LlStore(ptr_name = slot_name, value_text = val_text, value_ty_text = slot_ty_text),
+        LlInstKind::LlStore(ptr_name = ptr_name, value_text = val_text, value_ty_text = stored_ty_text),
         "")
       insts = insts.push(inst)
       return LowerStepR(bs, insts)
