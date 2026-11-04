@@ -51,10 +51,15 @@ fn main(): i32
   if m.output == "" or m.inputs.length() == 0:
     eprint("driver: the manifest names no output or no inputs")
     return 2
-  let result: LlvmTextResult = lower_program_to_llvm_text(m.inputs)
+  let lowered: ProgramLlvm = lower_program_to_llvm(m.inputs)
+  let result: LlvmTextResult = lowered.result
+  let located: Vector<FileDiagnostic> = lowered.program.diags
   let di: i64 = 0
   while di < result.diags.length():
-    eprint("driver: " + result.diags.get(di).message)
+    if di < located.length():
+      eprint("driver: " + located_message(located.get(di), lowered.program.graph.files))
+    else:
+      eprint("driver: " + result.diags.get(di).message)
     di = di + 1
   if result.ok == false:
     eprint("driver: " + i64_to_string(result.diags.length()) + " diagnostic(s); no module written")

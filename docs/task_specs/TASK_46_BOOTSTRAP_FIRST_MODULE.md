@@ -61,13 +61,10 @@ Measured on macOS arm64 (`arm64-apple-darwin25.6.0`), Apple clang
 | Test-only edit, new inputs | regenerated, the edit present |
 | Definition from the call at `driver.gen.dao:525` | `bootstrap/ascii.dao:6:4` |
 | References from the call and from the definition | the same six sites |
-| Host diagnostic in the module | `bootstrap/ascii.dao:10:10` |
+| Diagnostic in the module, host and self-hosted driver | `bootstrap/ascii.dao:10:10` |
 
 ## 6. Known gaps
 
-- The self-hosted driver prints a diagnostic's message with no file or
-  position, because `LlvmTextResult` carries none.  Only the host meets
-  the diagnostic criterion.
 - Navigation starts from the generated file: a call in `base.dao` line
   522 is `driver.gen.dao` line 525.  This ends when `base.dao` is itself a
   module.

@@ -382,7 +382,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 48
+  let total: i32 = 49
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -1097,6 +1097,21 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL extern_main_selects_no_entry: " + diags_text(extern_main.diags))
+
+  // A diagnostic names the file and position it came from, whichever
+  // file of the program holds it, as the host's does.
+  let located_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  located_inputs = located_inputs.push(SourceInput("demo/a.dao", "module demo::a\n\nfn fine(): i32 -> 1\n", false))
+  located_inputs = located_inputs.push(SourceInput("demo/b.dao", "module demo::b\n\nfn wrong(): bool\n  return 1\n\nfn main(): i32 -> 0\n", false))
+  let located: ProgramLlvm = lower_program_to_llvm(located_inputs)
+  let located_text: string = ""
+  if located.program.diags.length() > to_i64(0):
+    located_text = located_message(located.program.diags.get(to_i64(0)), located.program.graph.files)
+  if starts_with(located_text, "demo/b.dao:4:10: "):
+    print("PASS diagnostic_names_its_file_and_position")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL diagnostic_names_its_file_and_position: got '" + located_text + "'")
 
   // Test 46: three modules' `main`s are as ambiguous as two; an extern
   // passing a class by value is refused, not called with the wrong
