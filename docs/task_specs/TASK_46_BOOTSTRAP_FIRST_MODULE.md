@@ -63,10 +63,15 @@ Measured on macOS arm64 (`arm64-apple-darwin25.6.0`), Apple clang
 | References from the call and from the definition | the same six sites |
 | Diagnostic in the module, host and self-hosted driver | `bootstrap/ascii.dao:10:10` |
 
+Measured again on x86-64 Linux, under Rosetta in a container, with clang
+21.1.8.  Stage 2 and stage 3 are byte-identical, every suite passes under stage
+2, and `audit_closure.sh` regenerated `docs/bootstrap_closure.md` with every
+column at zero.  The first attempt exposed a segfault in stage 3 under an
+unlimited stack, and the crossing now bounds its stack at 1 GiB.  A native x86-64
+machine has not run it, so the cause of that segfault stays unconfirmed.
+
 ## 6. Known gaps
 
 - Navigation starts from the generated file: a call in `base.dao` line
   522 is `driver.gen.dao` line 525.  This ends when `base.dao` is itself a
   module.
-- `audit_closure.sh` needs GNU `time` and `timeout`, so its change did not
-  run here, and the Linux x86-64 crossing was not rerun.

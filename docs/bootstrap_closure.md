@@ -10,45 +10,46 @@ A construct absent here is not a bootstrap blocker whatever its Tier B status.
 
 | Construct | Count |
 |---|---|
-| `Identifier` | 112176 |
-| `CallExpr` | 39157 |
-| `Callee` | 39157 |
-| `Args` | 34575 |
-| `FieldExpr` | 29613 |
-| `BinaryExpr` | 18237 |
-| `LetStatement` | 14766 |
-| `IntLiteral` | 13072 |
-| `Value` | 11723 |
-| `Target` | 11723 |
-| `Assignment` | 11723 |
-| `Condition` | 10126 |
-| `ReturnStatement` | 8780 |
-| `Then` | 8324 |
-| `IfStatement` | 8324 |
-| `StringLiteral` | 8319 |
-| `QualifiedName` | 7824 |
-| `Param` | 6529 |
-| `Pattern` | 3753 |
-| `Arm` | 3753 |
-| `BoolLiteral` | 3747 |
-| `ReturnType` | 2735 |
-| `FunctionDecl` | 2735 |
-| `WhileStatement` | 1802 |
-| `UnaryExpr` | 1713 |
-| `Field` | 1598 |
-| `Else` | 1561 |
-| `TypeArgs` | 1558 |
+| `Identifier` | 112527 |
+| `Callee` | 39412 |
+| `CallExpr` | 39412 |
+| `Args` | 34799 |
+| `FieldExpr` | 30318 |
+| `BinaryExpr` | 18310 |
+| `LetStatement` | 14817 |
+| `IntLiteral` | 13071 |
+| `Value` | 11762 |
+| `Target` | 11762 |
+| `Assignment` | 11762 |
+| `Condition` | 10093 |
+| `ReturnStatement` | 8747 |
+| `StringLiteral` | 8415 |
+| `Then` | 8286 |
+| `IfStatement` | 8286 |
+| `QualifiedName` | 7888 |
+| `Param` | 6518 |
+| `Pattern` | 3758 |
+| `Arm` | 3758 |
+| `BoolLiteral` | 3726 |
+| `ReturnType` | 2724 |
+| `FunctionDecl` | 2724 |
+| `WhileStatement` | 1807 |
+| `UnaryExpr` | 1717 |
+| `Field` | 1625 |
+| `Else` | 1568 |
+| `TypeArgs` | 1559 |
 | `Variant` | 1272 |
-| `Scrutinee` | 1157 |
-| `MatchStatement` | 1157 |
-| `ExpressionStatement` | 820 |
-| `ClassDecl` | 432 |
+| `Scrutinee` | 1162 |
+| `MatchStatement` | 1162 |
+| `ExpressionStatement` | 836 |
+| `ClassDecl` | 454 |
 | `BreakStatement` | 64 |
-| `ResourceBlock` | 48 |
+| `ResourceBlock` | 49 |
 | `EnumDecl` | 31 |
 | `ExprBody` | 27 |
 | `EnumClassDecl` | 14 |
 | `Module` | 8 |
+| `Import` | 8 |
 | `File` | 8 |
 
 ## 2. Prelude functions the corpus instantiates
@@ -59,19 +60,19 @@ bootstrap must compile for itself.
 
 | Function | Instantiations |
 |---|---|
+| `core::vector::vec_log_values_new` | 26 |
 | `core::vector::Vector.refreshed` | 26 |
 | `core::vector::Vector.push` | 26 |
 | `core::vector::Vector.new` | 26 |
 | `core::vector::Vector.get` | 26 |
-| `core::vector::vec_log_values_new` | 26 |
 | `core::vector::Vector.length` | 25 |
 | `core::vector::Vector.copy_out` | 21 |
 | `core::vector::Vector.set` | 10 |
 | `core::vector::Vector.log_overwrite` | 10 |
 | `core::range::range` | 5 |
 | `core::builtins::copy_out` | 5 |
-| `core::vector::Vector.snapshot` | 1 |
 | `core::vector::vec_log_head_new` | 1 |
+| `core::vector::Vector.snapshot` | 1 |
 | `core::to_string::i64_to_string` | 1 |
 | `core::to_string::i32_to_string` | 1 |
 | `core::to_string::f64_to_string` | 1 |
@@ -155,6 +156,7 @@ bootstrap must compile for itself.
 | `core::math::abs_f64` | 1 |
 | `core::math::abs` | 1 |
 | `core::hashmap::hash_string` | 1 |
+| `core::hashmap::hash_index` | 1 |
 | `core::hashmap::HashStorage.fresh` | 1 |
 | `core::hashmap::HashStorage.fill` | 1 |
 | `core::hashmap::HashMap.visible_slot` | 1 |
@@ -164,7 +166,6 @@ bootstrap must compile for itself.
 | `core::hashmap::HashMap.copy_out` | 1 |
 | `core::hashmap::HashMap.contains` | 1 |
 | `core::hashmap::HashMap.compacted` | 1 |
-| `core::hashmap::hash_index` | 1 |
 | `core::equatable::u8.eq` | 1 |
 | `core::equatable::u64.eq` | 1 |
 | `core::equatable::u32.eq` | 1 |
@@ -233,14 +234,14 @@ it died and why.
 
 | Program | Peak MiB | Seconds | lex | parse | resolve | typecheck | hir | mir | mono | llvm | runs | First blocking diagnostic |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| lexer | 114 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 105 / 105 passed | — |
-| parser | 120 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 88 / 88 passed | — |
-| graph | 106 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 12 / 12 passed | — |
-| resolver | 175 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 64 / 64 passed | — |
-| typecheck | 884 | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 343 / 343 passed | — |
-| hir | 1150 | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 46 / 46 tests passed | — |
-| mir | 1625 | 4 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 51 / 51 tests passed | — |
-| llvm | 1994 | 5 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 46 / 46 tests passed | — |
+| lexer | 115 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 105 / 105 passed | — |
+| parser | 118 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 88 / 88 passed | — |
+| graph | 107 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 12 / 12 passed | — |
+| resolver | 145 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 64 / 64 passed | — |
+| typecheck | 626 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 343 / 343 passed | — |
+| hir | 850 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 47 / 47 tests passed | — |
+| mir | 1288 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 54 / 54 tests passed | — |
+| llvm | 1661 | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 49 / 49 tests passed | — |
 
 ### What each stage rejects
 
@@ -309,8 +310,8 @@ next.  Sites per program against the parse column above:
 | resolver | 126 | 0 | 0 |
 | typecheck | 276 | 0 | 0 |
 | hir | 249 | 4 | 0 |
-| mir | 369 | 8 | 0 |
-| llvm | 423 | 36 | 0 |
+| mir | 374 | 8 | 0 |
+| llvm | 419 | 37 | 0 |
 
 ### Closure surfaces: compiler implementation vs test harness
 
@@ -326,25 +327,26 @@ or reporting), not by the compiler the Stage-2 crossing runs.
 
 | Prelude function | Compiler | Harness |
 |---|---:|---:|
-| `to_i64` | 1346 | 160 |
-| `print` | 0 | 796 |
-| `new` | 408 | 128 |
-| `i64_to_string` | 172 | 270 |
+| `to_i64` | 1371 | 162 |
+| `print` | 0 | 810 |
+| `new` | 402 | 135 |
+| `i64_to_string` | 185 | 278 |
 | `substring` | 39 | 11 |
-| `length` | 20 | 11 |
-| `index_of` | 6 | 21 |
+| `length` | 21 | 11 |
+| `index_of` | 6 | 23 |
 | `make_error` | 23 | 0 |
-| `char_at` | 22 | 0 |
-| `read_file` | 0 | 19 |
+| `char_at` | 23 | 0 |
+| `read_file` | 0 | 20 |
 | `file_exists` | 0 | 16 |
 | `i32_to_string` | 0 | 15 |
 | `eprint` | 0 | 14 |
 | `bool_to_string` | 1 | 10 |
-| `starts_with` | 4 | 0 |
+| `starts_with` | 4 | 1 |
 | `write_file` | 1 | 2 |
 | `make_warning` | 0 | 1 |
+| `panic` | 1 | 0 |
 | `str_compare` | 1 | 0 |
-| **Total** | **2043** | **1474** |
+| **Total** | **2078** | **1509** |
 
 ## 4. Reading the matrix
 

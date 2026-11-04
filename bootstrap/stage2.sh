@@ -22,8 +22,10 @@ bash bootstrap/assemble.sh > /dev/null || { echo "stage2: assemble failed"; exit
 
 # The recursive-descent passes recurse once per nesting level, and an
 # unoptimized frame is large: a long else-if chain outgrows the default
-# 8 MiB stack.  The limit is this script's own, not the shell's.
-ulimit -s unlimited 2>/dev/null || ulimit -s hard
+# 8 MiB stack.  The limit is this script's own, not the shell's.  It is
+# bounded because the stage-2 compiler segfaulted under an unlimited stack
+# on x86-64 Linux, run through Rosetta, and macOS caps it lower still.
+ulimit -s 1048576 2>/dev/null || ulimit -s hard
 
 # A manifest: where the module goes, the prelude as the host loads it
 # (every module under stdlib/core and stdlib/io, in path order;
