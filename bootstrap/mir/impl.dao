@@ -490,6 +490,13 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       let slot: i64 = ms_lookup_local(br.ms, sym)
       if slot >= 0:
         return br_emit_value(br, MirNode::MirLoad(local_idx = slot, type_idx = type_idx))
+      // A local or parameter always has a slot by the time it is read; one
+      // without is a binding lowering lost, never a function to call.
+      if sym >= 0 and sym < br.ms.symbols.length():
+        let named: Symbol = br.ms.symbols.get(sym)
+        if symbol_kind_name(named.kind) == "Local" or symbol_kind_name(named.kind) == "Param":
+          br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "'" + named.name + "' has no local slot in MIR")
+          return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
       return br_emit_value(br, MirNode::MirFnRef(sym = sym, type_idx = type_idx))
     HirNode::HirBinary(op_tok, left, right, type_idx):
       let lhs_r: ExprR = lower_expr_value(br, left)

@@ -736,19 +736,14 @@ fn lower_stmt(hs: HS, node_idx: i64): HirR
   return hs_add_node(hs, HirNode::HirErrorStmt(tok = to_i64(0)))
 
 fn lower_let_stmt(hs: HS, node_idx: i64, name_tidx: i64, type_node: i64, init_node: i64): HirR
-  // Find the Local symbol for this let binding by matching the
-  // resolver's decl_node back-reference.  Store the sym directly on
-  // HirLet so downstream passes (MIR) can use it without rescanning.
-  let let_sym: i64 = to_i64(-1)
+  // The Local the resolver declared for this `let`, by the program's
+  // declaration index — keyed by module, since a declaration's node index
+  // is only unique within its module.  Stored on HirLet so MIR binds the
+  // slot to the symbol every read and store of the name resolves to.
+  let let_sym: i64 = member_sym_of(hs.typecheck.lookup.index, hs.unit.module_id, node_idx, "Local", "")
   let let_ti: i64 = to_i64(-1)
-  let si: i64 = 0
-  while si < hs.symbols.length():
-    let sym: Symbol = hs.symbols.get(si)
-    if sym.decl_node == node_idx:
-      let_sym = si
-      let_ti = hir_sym_type(hs, si)
-      si = hs.symbols.length()
-    si = si + 1
+  if let_sym >= 0:
+    let_ti = hir_sym_type(hs, let_sym)
   let init_hir: i64 = to_i64(-1)
   let cur: HS = hs
   if init_node >= 0:

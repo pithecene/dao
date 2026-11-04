@@ -88,7 +88,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 36
+  let total: i32 = 37
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -593,6 +593,21 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL non_generator_iterable_rejected: expected the host's diagnostic")
+
+  // Test 34: a `let` binds its own module's symbol.  Two modules of the
+  // same shape declare their `let`s at the same node index; the second's
+  // must not take the first's symbol (its store and reads would then name
+  // a local it never declared).
+  let same: string = "\n\nfn f(): i32\n  let x: i32 = 1\n  x = x + 1\n  return x\n"
+  let in34: Vector<SourceInput> = Vector<SourceInput>::new()
+  in34 = in34.push(SourceInput("a.dao", "module app::a" + same, false))
+  in34 = in34.push(SourceInput("b.dao", "module app::b" + same, false))
+  let r34: MirResult = mir_of_program(in34).mir
+  if r34.diags.length() == 0 and mir_count_kind(r34, "MirFnRef") == 0:
+    print("PASS let_binds_its_module_symbol")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL let_binds_its_module_symbol: got " + i64_to_string(r34.diags.length()) + " diagnostics, " + i64_to_string(mir_count_kind(r34, "MirFnRef")) + " function references")
 
   // -----------------------------------------------------------------
   print("")
