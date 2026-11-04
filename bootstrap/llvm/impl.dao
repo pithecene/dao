@@ -30,13 +30,16 @@ module bootstrap::llvm::impl
 
 // LLVM type.  Tier A primitives (TASK_30 §5.2) + Tier B struct.
 enum LlType:
+  LlI8
+  LlI16
   LlI32
   LlI64
   LlF32
   LlF64
   LlI1
   LlVoid
-  LlPtr              // opaque pointer (Tier A string model — §8.4)
+  LlPtr              // opaque pointer: `Ptr<T>`, a function value
+  LlStr              // `%dao.string = { ptr, i64 }` (the host's string)
   LlStruct           // struct type — name resolved from BS side table
   LlUnsupported      // fail-closed sentinel
 
@@ -82,6 +85,10 @@ enum class LlInstKind:
   LlRet(value_text: string, value_ty_text: string, has_value: i64)
   LlBr(target_label: string)
   LlCondBr(cond_text: string, then_label: string, else_label: string)
+  // An instruction whose right-hand side is already written out
+  // (`insertvalue …`, a conversion): what the named kinds above do not
+  // cover, spelled once where it is made.
+  LlText(rhs: string)
   LlUnreachable
 
 // A single instruction.  `result_name` is "%N" for value-producing
@@ -176,24 +183,62 @@ fn ll_type_from_mir(types: Vector<DaoType>, type_idx: i64): LlType
     TypeKind::TVoid:
       return LlType::LlVoid
     TypeKind::TString:
+      return LlType::LlStr
+    TypeKind::TPointer:
+      return LlType::LlPtr
+    TypeKind::TFunction:
       return LlType::LlPtr
     TypeKind::TStruct:
       return LlType::LlStruct
+    TypeKind::TGenerator:
+      return LlType::LlStruct
     TypeKind::TBuiltin:
-      // See register_builtins in typecheck/impl.dao for the canonical
-      // builtin_id → name mapping: i32=2, i64=3, f32=8, f64=9, bool=10.
-      if t.builtin_id == to_i64(2):
+      // register_builtins (typecheck): i8=0 i16=1 i32=2 i64=3 u8=4 u16=5
+      // u32=6 u64=7 f32=8 f64=9 bool=10; an unsigned integer is its
+      // width's integer (the operation says how it is read).
+      let id: i64 = t.builtin_id
+      if id == to_i64(0) or id == to_i64(4):
+        return LlType::LlI8
+      if id == to_i64(1) or id == to_i64(5):
+        return LlType::LlI16
+      if id == to_i64(2) or id == to_i64(6):
         return LlType::LlI32
-      if t.builtin_id == to_i64(3):
+      if id == to_i64(3) or id == to_i64(7):
         return LlType::LlI64
-      if t.builtin_id == to_i64(8):
+      if id == to_i64(8):
         return LlType::LlF32
-      if t.builtin_id == to_i64(9):
+      if id == to_i64(9):
         return LlType::LlF64
-      if t.builtin_id == to_i64(10):
+      if id == to_i64(10):
         return LlType::LlI1
       return LlType::LlUnsupported
   return LlType::LlUnsupported
+
+// The LLVM type of an enum: a classification enum is its tag, `i32`; one
+// with a payload is `{ i32, [N x iK] }` (the host's layout), which is an
+// aggregate here.
+fn ll_type_of(bs: BS, type_idx: i64): LlType
+  if type_idx >= 0 and type_idx < bs.types.length():
+    let t: DaoType = bs.types.get(type_idx)
+    match t.kind:
+      TypeKind::TEnum:
+        if ll_enum_has_payload(bs.type_info, t):
+          return LlType::LlStruct
+        return LlType::LlI32
+  return ll_type_from_mir(bs.types, type_idx)
+
+// Whether an enum has a variant that carries a payload (per variant:
+// name, payload count, then (name, type) per value).
+fn ll_enum_has_payload(info: Vector<i64>, t: DaoType): bool
+  let at: i64 = t.info_lp
+  let vi: i64 = to_i64(0)
+  while vi < t.info_count:
+    let count: i64 = info.get(at + to_i64(1))
+    if count > to_i64(0):
+      return true
+    at = at + to_i64(2) + count * to_i64(2)
+    vi = vi + to_i64(1)
+  return false
 
 // Serialize an LlType to its textual LLVM form.  Primitive-only
 // by construction: callers must use `bs_type_text(types, type_idx)`
@@ -204,6 +249,12 @@ fn ll_type_from_mir(types: Vector<DaoType>, type_idx: i64): LlType
 // wrong text downstream.
 fn ll_type_text(ty: LlType): string
   match ty:
+    LlType::LlI8:
+      return "i8"
+    LlType::LlI16:
+      return "i16"
+    LlType::LlStr:
+      return "%dao.string"
     LlType::LlI32:
       return "i32"
     LlType::LlI64:
@@ -236,6 +287,10 @@ fn ll_type_is_float(ty: LlType): bool
 
 fn ll_type_is_int(ty: LlType): bool
   match ty:
+    LlType::LlI8:
+      return true
+    LlType::LlI16:
+      return true
     LlType::LlI32:
       return true
     LlType::LlI64:
@@ -294,6 +349,122 @@ fn bs_type_text(types: Vector<DaoType>, type_idx: i64): string
     TypeKind::TStruct:
       return bs_struct_name(t.name, type_idx)
   return ll_type_text(ll_type_from_mir(types, type_idx))
+
+// The LLVM type text of the Dao type at `type_idx`, as the host lowers
+// it: a payload-bearing enum is its named layout struct, a generator
+// `%dao.generator`; everything else as bs_type_text.
+fn bs_ty(bs: BS, type_idx: i64): string
+  if type_idx >= 0 and type_idx < bs.types.length():
+    let t: DaoType = bs.types.get(type_idx)
+    match t.kind:
+      TypeKind::TEnum:
+        if ll_enum_has_payload(bs.type_info, t):
+          return bs_named_type("enum.", t.name, type_idx)
+        return "i32"
+      TypeKind::TGenerator:
+        return "%dao.generator"
+  return bs_type_text(bs.types, type_idx)
+
+// Size and alignment, in bytes, of a value of the Dao type at `ti` as
+// the x86-64 data layout lays it out (what the host reads from LLVM's
+// DataLayout to size an enum's payload).
+class SizeAlign:
+  size: i64
+  align: i64
+
+fn ll_round_up(n: i64, align: i64): i64
+  if align <= to_i64(1):
+    return n
+  return ((n + align - to_i64(1)) / align) * align
+
+fn ll_size_align(bs: BS, ti: i64): SizeAlign
+  if ti < 0 or ti >= bs.types.length():
+    return SizeAlign(to_i64(0), to_i64(1))
+  let t: DaoType = bs.types.get(ti)
+  match t.kind:
+    TypeKind::TString:
+      return SizeAlign(to_i64(16), to_i64(8))
+    TypeKind::TGenerator:
+      return SizeAlign(to_i64(16), to_i64(8))
+    TypeKind::TPointer:
+      return SizeAlign(to_i64(8), to_i64(8))
+    TypeKind::TFunction:
+      return SizeAlign(to_i64(8), to_i64(8))
+    TypeKind::TStruct:
+      let size: i64 = to_i64(0)
+      let align: i64 = to_i64(1)
+      let fi: i64 = to_i64(0)
+      while fi < t.info_count:
+        let f: SizeAlign = ll_size_align(bs, bs.type_info.get(t.info_lp + fi * to_i64(2) + to_i64(1)))
+        size = ll_round_up(size, f.align) + f.size
+        if f.align > align:
+          align = f.align
+        fi = fi + to_i64(1)
+      return SizeAlign(ll_round_up(size, align), align)
+    TypeKind::TEnum:
+      if ll_enum_has_payload(bs.type_info, t) == false:
+        return SizeAlign(to_i64(4), to_i64(4))
+      let payload: SizeAlign = ll_enum_payload_size(bs, t)
+      let size: i64 = ll_round_up(to_i64(4), payload.align) + ll_enum_slots(payload) * payload.align
+      return SizeAlign(ll_round_up(size, payload.align), payload.align)
+  match ll_type_from_mir(bs.types, ti):
+    LlType::LlI8:
+      return SizeAlign(to_i64(1), to_i64(1))
+    LlType::LlI1:
+      return SizeAlign(to_i64(1), to_i64(1))
+    LlType::LlI16:
+      return SizeAlign(to_i64(2), to_i64(2))
+    LlType::LlI32:
+      return SizeAlign(to_i64(4), to_i64(4))
+    LlType::LlF32:
+      return SizeAlign(to_i64(4), to_i64(4))
+    LlType::LlI64:
+      return SizeAlign(to_i64(8), to_i64(8))
+    LlType::LlF64:
+      return SizeAlign(to_i64(8), to_i64(8))
+  return SizeAlign(to_i64(0), to_i64(1))
+
+// The largest variant payload's size, and the largest alignment among
+// them, at least the tag's (the host's enum layout).
+fn ll_enum_payload_size(bs: BS, t: DaoType): SizeAlign
+  let max_size: i64 = to_i64(0)
+  let max_align: i64 = to_i64(4)
+  let at: i64 = t.info_lp
+  let vi: i64 = to_i64(0)
+  while vi < t.info_count:
+    let count: i64 = bs.type_info.get(at + to_i64(1))
+    if count > to_i64(0):
+      let size: i64 = to_i64(0)
+      let align: i64 = to_i64(1)
+      let pi: i64 = to_i64(0)
+      while pi < count:
+        let f: SizeAlign = ll_size_align(bs, bs.type_info.get(at + to_i64(2) + pi * to_i64(2) + to_i64(1)))
+        size = ll_round_up(size, f.align) + f.size
+        if f.align > align:
+          align = f.align
+        pi = pi + to_i64(1)
+      size = ll_round_up(size, align)
+      if size > max_size:
+        max_size = size
+      if align > max_align:
+        max_align = align
+    at = at + to_i64(2) + count * to_i64(2)
+    vi = vi + to_i64(1)
+  return SizeAlign(max_size, max_align)
+
+// How many alignment-sized slots hold the payload (at least one).
+fn ll_enum_slots(payload: SizeAlign): i64
+  let n: i64 = (payload.size + payload.align - to_i64(1)) / payload.align
+  if n == to_i64(0):
+    return to_i64(1)
+  return n
+
+// The LLVM name of a named type, `%<prefix><name>`, quoted with the
+// type's index when the name has characters an identifier cannot hold.
+fn bs_named_type(prefix: string, name: string, type_idx: i64): string
+  if llvm_ident_is_plain(name):
+    return "%" + prefix + name
+  return "%\"" + prefix + name + "#" + i64_to_string(type_idx) + "\""
 
 // =========================================================================
 // Section 83: Symbol mangling (placeholder — TASK_30 §9)
@@ -432,6 +603,11 @@ class BS:
   // functions are being lowered (`toks` / `src` above).
   files: Vector<SourceFile>
 
+  // Allocas a function's body needs beyond its locals (a string passed
+  // by pointer), placed in its entry block so a loop does not grow the
+  // stack.
+  entry_allocas: Vector<LlInst>
+
 // Positions in BS's side tables, by key: a value's and a block label's
 // by MIR node, a slot's by MirLocal node, an extern's and a struct's by
 // name / type index.
@@ -473,7 +649,8 @@ fn bs_new(input: MirBackendInput): BS
     Vector<LlStructDef>::new(),
     to_i64(0),
     bs_index_empty(),
-    input.files)
+    input.files,
+    Vector<LlInst>::new())
 
 fn bs_reset_fn_state(bs: BS): BS
   bs.val_keys = Vector<i64>::new()
@@ -485,6 +662,7 @@ fn bs_reset_fn_state(bs: BS): BS
   bs.block_keys = Vector<i64>::new()
   bs.block_labels = Vector<string>::new()
   bs.next_value = to_i64(0)
+  bs.entry_allocas = Vector<LlInst>::new()
   bs.index = BsIndex(HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), bs.index.externs, bs.index.structs)
   return bs
 
@@ -510,6 +688,14 @@ fn bs_fresh_value(bs: BS): FreshR
   let n: i64 = bs.next_value
   bs.next_value = n + to_i64(1)
   return FreshR(bs, "%" + i64_to_string(n))
+
+// A fresh named value (`%<stem>.<n>`): LLVM requires the unnamed `%N`
+// to be defined in order, so a value placed out of order — an entry-block
+// temporary, a label within a block — takes a name instead.
+fn bs_fresh_named(bs: BS, stem: string): FreshR
+  let n: i64 = bs.next_global
+  bs.next_global = n + to_i64(1)
+  return FreshR(bs, "%" + stem + "." + i64_to_string(n))
 
 fn bs_error(bs: BS, msg: string): BS
   bs.diags = bs.diags.push(make_error(Span(to_i64(0), to_i64(1)), msg))
@@ -618,23 +804,35 @@ fn bs_ensure_struct_def(bs: BS, type_idx: i64): BS
   // registration sees this type as already present and doesn't
   // recurse back into it.
   let t: DaoType = bs.types.get(type_idx)
-  let ll_name: string = bs_struct_name(t.name, type_idx)
+  // The generator handle is a declared type of the module prologue.
+  match t.kind:
+    TypeKind::TGenerator:
+      return bs
+  let ll_name: string = bs_ty(bs, type_idx)
   let slot_idx: i64 = bs.struct_defs.length()
   bs.index.structs = bs.index.structs.set(i64_to_string(type_idx), slot_idx)
   bs.struct_defs = bs.struct_defs.push(LlStructDef(t.name, ll_name, Vector<string>::new(), type_idx))
-  // Walk the struct's field type pairs.  For every field whose
-  // type is another struct, recursively register that struct def
-  // too — otherwise module serialization can emit a reference to
-  // an undefined named type (invalid IR).
+  // An enum's layout: its tag and the payload slots (the host's).
   let field_tys: Vector<string> = Vector<string>::new()
+  let is_enum: bool = false
+  match t.kind:
+    TypeKind::TEnum:
+      is_enum = true
+  if is_enum:
+    let payload: SizeAlign = ll_enum_payload_size(bs, t)
+    field_tys = field_tys.push("i32")
+    field_tys = field_tys.push("[" + i64_to_string(ll_enum_slots(payload)) + " x i" + i64_to_string(payload.align * to_i64(8)) + "]")
+  // A class's fields.  Every field whose type is another aggregate
+  // registers its definition too — otherwise module serialization can
+  // emit a reference to an undefined named type (invalid IR).
   let fi: i64 = to_i64(0)
-  while fi < t.info_count:
+  while is_enum == false and fi < t.info_count:
     let field_type_idx: i64 = bs.type_info.get(t.info_lp + fi * to_i64(2) + to_i64(1))
-    let field_kind: LlType = ll_type_from_mir(bs.types, field_type_idx)
+    let field_kind: LlType = ll_type_of(bs, field_type_idx)
     match field_kind:
       LlType::LlStruct:
         bs = bs_ensure_struct_def(bs, field_type_idx)
-    field_tys = field_tys.push(bs_type_text(bs.types, field_type_idx))
+    field_tys = field_tys.push(bs_ty(bs, field_type_idx))
     fi = fi + to_i64(1)
   // Re-read the placeholder entry and update its field_tys.  The
   // placeholder may have moved if a recursive call pushed more
@@ -769,12 +967,15 @@ fn bs_lower_params(bs: BS, params_raw: Vector<i64>, param_count: i64): ParamsR
     let node: MirNode = bs.mir_nodes.get(local_node_idx)
     match node:
       MirNode::MirLocal(sym, type_idx, is_param):
-        let ty: LlType = ll_type_from_mir(bs.types, type_idx)
+        let ty: LlType = ll_type_of(bs, type_idx)
         bs = bs_check_supported_type(bs, ty, "function parameter")
-        let ty_txt: string = bs_type_text(bs.types, type_idx)
+        let ty_txt: string = bs_ty(bs, type_idx)
         match ty:
           LlType::LlStruct:
             bs = bs_ensure_struct_def(bs, type_idx)
+          LlType::LlStr:
+            // A string is passed by pointer, for the C ABI (the host's).
+            ty_txt = "ptr"
         out = out.push(LlParam("%arg" + i64_to_string(i), ty_txt))
     i = i + to_i64(1)
   return ParamsR(bs, out)
@@ -801,7 +1002,7 @@ class StructCtorR:
   ty_text: string
 
 fn bs_lower_struct_ctor(bs: BS, insts: Vector<LlInst>, type_idx: i64, arg_list_lp: i64): StructCtorR
-  let struct_ty_text: string = bs_type_text(bs.types, type_idx)
+  let struct_ty_text: string = bs_ty(bs, type_idx)
   bs = bs_ensure_struct_def(bs, type_idx)
   let args_raw: Vector<i64> = read_mir_list(bs.mir_idx, arg_list_lp)
   // Alloca for the temp struct.
@@ -870,11 +1071,11 @@ fn bs_place_pointer(bs: BS, insts: Vector<LlInst>, local_idx: i64, path_lp: i64,
     bs = bs_ensure_struct_def(bs, cur_ti)
     let fr_gep: FreshR = bs_fresh_value(bs)
     bs = fr_gep.bs
-    insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = ptr_name, struct_ty_text = bs_type_text(bs.types, cur_ti), field_index = field), fr_gep.name))
+    insts = insts.push(LlInst(LlInstKind::LlGepField(ptr_text = ptr_name, struct_ty_text = bs_ty(bs, cur_ti), field_index = field), fr_gep.name))
     ptr_name = fr_gep.name
     cur_ti = bs.type_info.get(owner.info_lp + field * to_i64(2) + to_i64(1))
     pi = pi + to_i64(1)
-  return PlacePtrR(bs, insts, ptr_name, bs_type_text(bs.types, cur_ti))
+  return PlacePtrR(bs, insts, ptr_name, bs_ty(bs, cur_ti))
 
 class LowerStepR:
   bs: BS
@@ -885,7 +1086,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
   match node:
     // ---------- constants (inlined as operand text) ----------
     MirNode::MirConstInt(value, type_idx):
-      let ty: LlType = ll_type_from_mir(bs.types, type_idx)
+      let ty: LlType = ll_type_of(bs, type_idx)
       // An enum's tag is an integer of a type this backend does not lower.
       bs = bs_check_supported_type(bs, ty, "integer constant")
       bs = bs_set_value(bs, mir_node_idx, i64_to_string(value), ll_type_text(ty))
@@ -898,7 +1099,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       return LowerStepR(bs, insts)
     MirNode::MirConstFloat(tok, type_idx):
       let lex: string = bs_tok_lex(bs, tok)
-      let ty: LlType = ll_type_from_mir(bs.types, type_idx)
+      let ty: LlType = ll_type_of(bs, type_idx)
       bs = bs_set_value(bs, mir_node_idx, lex, ll_type_text(ty))
       return LowerStepR(bs, insts)
     MirNode::MirConstString(tok, type_idx):
@@ -910,14 +1111,15 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       let gname: string = "@.str." + i64_to_string(bs.next_global)
       bs.next_global = bs.next_global + to_i64(1)
       bs.globals = bs.globals.push(LlGlobal(gname, decoded.llvm_payload, nbytes))
-      let fr_gs: FreshR = bs_fresh_value(bs)
-      bs = fr_gs.bs
-      let result: string = fr_gs.name
-      let inst: LlInst = LlInst(
-        LlInstKind::LlGepString(global_name = gname, length = nbytes),
-        result)
-      insts = insts.push(inst)
-      bs = bs_set_value(bs, mir_node_idx, result, "ptr")
+      // A string value is `{ bytes, length }` (the host's %dao.string);
+      // the length leaves out the terminating NUL.
+      let with_ptr: FreshR = bs_fresh_value(bs)
+      bs = with_ptr.bs
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "insertvalue %dao.string undef, ptr " + gname + ", 0"), with_ptr.name))
+      let with_len: FreshR = bs_fresh_value(bs)
+      bs = with_len.bs
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "insertvalue %dao.string " + with_ptr.name + ", i64 " + i64_to_string(nbytes - to_i64(1)) + ", 1"), with_len.name))
+      bs = bs_set_value(bs, mir_node_idx, with_len.name, "%dao.string")
       return LowerStepR(bs, insts)
 
     // ---------- memory ----------
@@ -927,7 +1129,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       insts = at.insts
       if at.ptr_name == "":
         return LowerStepR(bs, insts)
-      let ty_text: string = bs_type_text(bs.types, type_idx)
+      let ty_text: string = bs_ty(bs, type_idx)
       let fr_ld: FreshR = bs_fresh_value(bs)
       bs = fr_ld.bs
       let result: string = fr_ld.name
@@ -961,7 +1163,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
         // A string is a pointer here; comparing the pointers is not
         // comparing the strings (the host calls __dao_eq_string), and
         // this backend has no string comparison, so it fails the module.
-        if operand_ty_text == "ptr":
+        if operand_ty_text == "%dao.string":
           bs = bs_error(bs, "bootstrap llvm backend: comparison of strings is not lowered")
           return LowerStepR(bs, insts)
         let fr_cmp: FreshR = bs_fresh_value(bs)
@@ -1004,7 +1206,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
     MirNode::MirUnary(op_tok, operand, type_idx):
       let tk: Token = bs.toks.get(op_tok)
       let operand_text: string = bs_get_value_text(bs, operand)
-      let ty: LlType = ll_type_from_mir(bs.types, type_idx)
+      let ty: LlType = ll_type_of(bs, type_idx)
       let fr_un: FreshR = bs_fresh_value(bs)
       bs = fr_un.bs
       let result: string = fr_un.name
@@ -1057,8 +1259,8 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       if callee_text == "":
         bs = bs_error(bs, "bootstrap llvm backend: MirCall callee has no mangled name (expected MirFnRef)")
         return LowerStepR(bs, insts)
-      let ret_ty: LlType = ll_type_from_mir(bs.types, type_idx)
-      let ret_ty_text: string = bs_type_text(bs.types, type_idx)
+      let ret_ty: LlType = ll_type_of(bs, type_idx)
+      let ret_ty_text: string = bs_ty(bs, type_idx)
       let args_raw: Vector<i64> = read_mir_list(bs.mir_idx, arg_list_lp)
       let arg_entry: CallArgs = CallArgs(Vector<string>::new(), Vector<string>::new())
       let ai: i64 = to_i64(0)
@@ -1066,6 +1268,15 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
         let a_idx: i64 = args_raw.get(ai)
         let a_text: string = bs_get_value_text(bs, a_idx)
         let a_ty_text: string = bs_get_value_ty(bs, a_idx)
+        // A string argument is passed by pointer (the host's C ABI): kept
+        // in an entry-block temporary for the call.
+        if a_ty_text == "%dao.string":
+          let tmp: FreshR = bs_fresh_named(bs, "str.arg")
+          bs = tmp.bs
+          bs.entry_allocas = bs.entry_allocas.push(LlInst(LlInstKind::LlAlloca(ty_text = "%dao.string"), tmp.name))
+          insts = insts.push(LlInst(LlInstKind::LlStore(ptr_name = tmp.name, value_text = a_text, value_ty_text = a_ty_text), ""))
+          a_text = tmp.name
+          a_ty_text = "ptr"
         arg_entry.arg_texts = arg_entry.arg_texts.push(a_text)
         arg_entry.arg_ty_texts = arg_entry.arg_ty_texts.push(a_ty_text)
         ai = ai + to_i64(1)
@@ -1101,8 +1312,8 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       // at this point.
       let obj_text: string = bs_get_value_text(bs, obj)
       let obj_ty_text: string = bs_get_value_ty(bs, obj)
-      let field_ty: LlType = ll_type_from_mir(bs.types, type_idx)
-      let field_ty_text: string = bs_type_text(bs.types, type_idx)
+      let field_ty: LlType = ll_type_of(bs, type_idx)
+      let field_ty_text: string = bs_ty(bs, type_idx)
       let fr_ev: FreshR = bs_fresh_value(bs)
       bs = fr_ev.bs
       let result: string = fr_ev.name
@@ -1378,9 +1589,9 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
         bs = bs_error(bs, "bootstrap llvm backend cannot mangle anonymous symbol")
         return bs
 
-      let ret_ty: LlType = ll_type_from_mir(bs.types, ret_type)
+      let ret_ty: LlType = ll_type_of(bs, ret_type)
       bs = bs_check_supported_type(bs, ret_ty, "function return type")
-      let ret_ty_text: string = bs_type_text(bs.types, ret_type)
+      let ret_ty_text: string = bs_ty(bs, ret_type)
       // Register struct def if the return type is a struct.
       match ret_ty:
         LlType::LlStruct:
@@ -1417,10 +1628,10 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
         match ln:
           MirNode::MirLocal(lsym, ltype_idx, lis_param):
             let slot_name: string = "%slot" + i64_to_string(li)
-            let slot_ty: LlType = ll_type_from_mir(bs.types, ltype_idx)
+            let slot_ty: LlType = ll_type_of(bs, ltype_idx)
             bs = bs_check_supported_type(bs, slot_ty, "local slot")
             // Use bs_type_text for struct-aware type names.
-            let slot_ty_text: string = bs_type_text(bs.types, ltype_idx)
+            let slot_ty_text: string = bs_ty(bs, ltype_idx)
             // Register struct defs for struct-typed locals.
             match slot_ty:
               LlType::LlStruct:
@@ -1466,6 +1677,12 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
         let slot_name: string = bs_slot_name_by_index(bs, pi)
         let slot_ty_text: string = bs_slot_ty_by_index(bs, pi)
         let arg_name: string = "%arg" + i64_to_string(pi)
+        // A string parameter arrives as a pointer to the string.
+        if slot_ty_text == "%dao.string":
+          let loaded: FreshR = bs_fresh_value(bs)
+          bs = loaded.bs
+          entry_insts = entry_insts.push(LlInst(LlInstKind::LlLoad(ptr_name = arg_name, ty_text = slot_ty_text), loaded.name))
+          arg_name = loaded.name
         let store_inst: LlInst = LlInst(
           LlInstKind::LlStore(ptr_name = slot_name, value_text = arg_name, value_ty_text = slot_ty_text),
           "")
@@ -1513,6 +1730,15 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
             ll_blocks = ll_blocks.push(LlBlock(label, this_insts))
         block_i = block_i + to_i64(1)
 
+      // The body's extra allocas lead the entry block.
+      if bs.entry_allocas.length() > to_i64(0) and ll_blocks.length() > to_i64(0):
+        let entry: LlBlock = ll_blocks.get(to_i64(0))
+        let led: Vector<LlInst> = bs.entry_allocas
+        let ei: i64 = to_i64(0)
+        while ei < entry.insts.length():
+          led = led.push(entry.insts.get(ei))
+          ei = ei + to_i64(1)
+        ll_blocks = ll_blocks.set(to_i64(0), LlBlock(entry.label, led))
       let llfn: LlFunction = LlFunction(name, ret_ty_text, params, ll_blocks, to_i64(0))
       bs.functions = bs.functions.push(llfn)
       return bs
@@ -1651,6 +1877,8 @@ fn serialize_inst(bs: BS, inst: LlInst): string
       rhs = serialize_cond_br(cond, then_label, else_label)
     LlInstKind::LlUnreachable:
       rhs = "unreachable"
+    LlInstKind::LlText(text):
+      rhs = text
   if inst.result_name != "":
     return "  " + inst.result_name + " = " + rhs
   return "  " + rhs
@@ -1691,6 +1919,9 @@ fn serialize_global(g: LlGlobal): string
 
 fn serialize_module(bs: BS): string
   let out: Builder = Builder::new()
+  // The runtime's own types (runtime/core/dao_abi.h): a string, a
+  // generator handle.
+  out = out.push("%dao.string = type { ptr, i64 }\n%dao.generator = type { ptr, ptr }\n\n")
   // Struct type definitions first.
   let si: i64 = to_i64(0)
   while si < bs.struct_defs.length():
