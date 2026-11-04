@@ -1,4 +1,4 @@
-# Repository Constitution — Dao
+# Repository Constitution of Dao
 
 ## 1. Constitutional Order of Authority
 
@@ -93,7 +93,7 @@ Forbidden:
 - Initial host implementation language is C++.
 - The initial compiler must preserve an explicit phase split of lexer → parser → AST → resolve → typecheck → HIR → MIR → LLVM backend → driver, even if some directories remain placeholders at the start.
 - Interactive tooling is a first-class concern. The compiler must preserve enough structure for semantic highlighting, diagnostics, hover, completion, and navigation.
-- The playground is a first-class development surface and long-term web-IDE north star; it must consume compiler analysis rather than bespoke language logic.
+- The playground is a first-class development surface and long-term web-IDE north star. It must consume compiler analysis rather than bespoke language logic.
 - Prefer narrow, explicit contracts over aspirational prose.
 - Do not introduce build tooling, package managers, or dependency ecosystems speculatively.
 

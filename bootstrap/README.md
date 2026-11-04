@@ -1,14 +1,14 @@
-# Bootstrap Compiler — Dao
+# Bootstrap Compiler of Dao
 
 Self-hosting compiler subsystems written in Dao.
 
-This directory contains maintained bootstrap infrastructure — code that
+This directory contains maintained bootstrap infrastructure: code that
 is intended to evolve into the self-hosted Dao compiler.  It is **not**
 a probe or experiment directory.
 
 ## Shared substrate
 
-`shared/base.dao` is the single source of truth for the bootstrap
+The file `shared/base.dao` is the single source of truth for the bootstrap
 frontend pipeline (token model, lexer, AST, parser).  Subsystem
 `.dao` files are assembled from `base.dao` + subsystem `.part.dao`
 fragments via `bash bootstrap/assemble.sh`.  See `shared/README.md`.
@@ -29,8 +29,8 @@ Indentation-aware lexer matching the host compiler's token surface
 - Newline suppression inside parentheses and brackets
 - Error tokens for tabs, inconsistent indentation, unterminated strings,
   and unexpected characters
-- Source span tracking (offset + length) for all tokens
-- Diagnostics as data (`LexResult.diagnostics`) — no inline printing
+- Source location tracking (offset + length) for all tokens
+- Diagnostics as data (`LexResult.diagnostics`), with no inline printing
 
 **Parity with host lexer**:
 
@@ -38,19 +38,19 @@ The bootstrap lexer matches the C++ lexer on:
 
 - Token kind sequences for well-formed source
 - Error-token emission (TK::Error) matching `emit_error()` behavior
-- INDENT/DEDENT spans (`line_begin` position, correct lengths)
-- Comment handling (skipped as trivia, comment-only lines don't
+- INDENT/DEDENT locations (`line_begin` position, correct lengths)
+- Comment handling (skipped as trivia, comment-only lines do not
   affect indentation)
 
 **Known limitations**:
 
-- Single-file only — no imports/modules (Dao limitation, not lexer)
+- Single-file only, with no imports/modules (Dao limitation, not lexer)
 - No hex/octal/binary integer literal support
 - No multiline string literals
 - No raw string literals
 - Escape sequences are consumed but not validated beyond `\\`
 - No Unicode identifier support
-- `vec_pop` is O(n) — rebuilds the vector on every pop
+- `vec_pop` is O(n), because it rebuilds the vector on every pop
 
 **How to run tests**:
 
@@ -85,11 +85,13 @@ slice of Dao syntax.
 - Types: named, generic instantiation (`Vector<Token>`), pointer
   (`*T`)
 
-**Tier B-Bootstrap coverage (added)**: call-site type arguments —
-`Type<Args>::member(args)` and `f<Args>(args)` read with the host's
-rule, the type arguments carried on `CallE` (Task 36); `resource <kind>
-<name> =>` blocks and their suites (Task 37); named call arguments
-(`f(name = expr)`), the names carried on `CallE` beside the arguments
+**Tier B-Bootstrap coverage (added)**:
+
+- Call-site type arguments: `Type<Args>::member(args)` and `f<Args>(args)`
+  read with the host's rule, the type arguments carried on `CallE` (Task 36)
+- `resource <kind> <name> =>` blocks and their suites (Task 37)
+- Named call arguments (`f(name = expr)`), the names carried on `CallE`
+  beside the arguments
 
 **Tier B deferrals** (explicitly not supported yet):
 
@@ -131,14 +133,14 @@ uses map over the bootstrap parser's AST.
 - `IdentE` lookup with `unknown name` diagnostics
 - `QualNameE` first-segment resolution
 - Type name resolution (no diagnostic on unresolved)
-- Builtin type pre-population (i8–u64, f32, f64, bool, string, void)
-- Program scope order builtins → prelude → module (Task 38): the
-  prelude group (`stdlib/core`, `stdlib/io`, loaded as declarations
-  with `is_prelude`) is one shared scope every module's scope hangs
-  from; a module's own declaration shadows a prelude declaration;
-  qualified and unqualified paths reach one symbol; builtin names
-  cannot be redeclared at top level; `__dao_` names and the intrinsic
-  family are the prelude's to declare
+- Builtin type pre-population (i8 to u64, f32, f64, bool, string, void)
+- Program scope order builtins → prelude → module (Task 38):
+  - The prelude group (`stdlib/core`, `stdlib/io`, loaded as declarations
+    with `is_prelude`) is one shared scope every module's scope hangs from.
+  - A module's own declaration shadows a prelude declaration.
+  - Qualified and unqualified paths reach one symbol.
+  - Builtin names cannot be redeclared at top level.
+  - The `__dao_` names and the intrinsic family are the prelude's to declare.
 - Duplicate declaration diagnostics
 - `let` / `for` / lambda / param / field declarations
 - `resource` block bodies in a block scope (Task 37)
@@ -183,7 +185,7 @@ correctness for Tier A Dao syntax.
   concept's self form and `Generator<T>` reads as unresolved)
 - Concept default method bodies (unchecked, as in the host)
 - Lowering a member a concept provides through a derived conformance or
-  a bound (typed; rejected fail-closed at HIR)
+  a bound (typed, and rejected fail-closed at HIR)
 - Lambda contextual typing, list literal inference
 - Try operator, addr-of, index expressions
 
@@ -232,10 +234,10 @@ the host compiler's structure (`compiler/ir/mir/mir.h`).
 
 - Lowers typed HIR → flat `MirNode` arena with `MirModule` root
 - `MirFunction` owns a list of `MirLocal` slots (params first) and a
-  list of `MirBlock` nodes (entry first); per-function state is
-  accumulated on `MS.fn_blocks` / `MS.locals` and flushed on seal
+  list of `MirBlock` nodes (entry first).  Per-function state is
+  accumulated on `MS.func.fn_blocks` / `MS.func.locals` and flushed on seal
 - `BlockR` threads block-local instruction buffers and a `sealed`
-  flag through statement lowering; `block_seal` rewrites each
+  flag through statement lowering, and `block_seal` rewrites each
   `MirBlock` with its instruction list offset and count
 - `ExprR { br, value }` threads expression-level state back to the
   caller because Dao classes are value-copied across function
@@ -249,12 +251,12 @@ constants (int/float/bool/string), binary/unary ops, let/assign,
 calls (with `MirFnRef` callees), returns, field-access reads,
 if/else, while.
 
-**Tier B deferrals**: generators, monomorphization, `resource` blocks
-(rejected with the unsupported-statement diagnostic, fail-closed, until
-the domain is represented in MIR — `CONTRACT_MIR_BOUNDARY.md` §4, Task
-37 §5), `mode` blocks, enum construction/discriminant/payload, lambda
+**Tier B deferrals**: generators, monomorphization, `resource` blocks,
+`mode` blocks, enum construction/discriminant/payload, lambda
 / closures, try operator, for-over-iterable, index expressions,
-break/continue.
+break/continue.  A `resource` block is rejected with the
+unsupported-statement diagnostic, fail-closed, until MIR holds the domain
+(`CONTRACT_MIR_BOUNDARY.md` §4, Task 37 §5).
 
 **How to run tests**:
 
@@ -267,7 +269,7 @@ bash bootstrap/assemble.sh && daoc build --source bootstrap/mir/mir.gen.dao --so
 LLVM backend: lowers bootstrap MIR to deterministic textual LLVM IR
 via a backend-private Dao-side LLVM mini-IR and text serializer.
 
-**Status**: Tier A implemented (Task 30); first Tier B slice
+**Status**: Tier A implemented (Task 30), and first Tier B slice
 (struct field access + construction) implemented.
 
 **What it does**:
@@ -284,14 +286,14 @@ via a backend-private Dao-side LLVM mini-IR and text serializer.
 - Function calls with extern `declare` / non-extern `define`
 - String literals as private module-global constants + GEP
   materialization at use site
-- if/else → `cond_br` + then/else/merge blocks;
+- if/else → `cond_br` + then/else/merge blocks,
   while → header/body/exit blocks with back-edge
-- Struct types: `%struct.Name = type { ... }` definitions emitted
-  at module top; struct construction (`P(1, 2)`) via alloca +
-  per-field GEP stores + load; struct field reads (`p.x`) via
-  `extractvalue` on SSA struct values; struct-typed function
-  parameters and return values serialized with correct
-  `%struct.Name` type text at call and return edges
+- Struct types:
+  - `%struct.Name = type { ... }` definitions emitted at module top
+  - Struct construction (`P(1, 2)`) via alloca + per-field GEP stores + load
+  - Struct field reads (`p.x`) via `extractvalue` on SSA struct values
+  - Struct-typed function parameters and return values serialized with
+    correct `%struct.Name` type text at call and return edges
 - Fail-closed: `MirErrorExpr`, anonymous symbols, unresolved
   `field_index`, and unsupported types produce explicit diagnostics
 
@@ -313,7 +315,7 @@ expressions, break/continue, LLVM C API integration,
 task bootstrap-test   # every suite, then validate_ir over bootstrap/llvm/out
 ```
 
-or by hand (the suite writes its artifacts under `bootstrap/llvm/out`,
+Or by hand (the suite writes its artifacts under `bootstrap/llvm/out`,
 which is gitignored, so create it first):
 
 ```sh
@@ -324,32 +326,32 @@ bash bootstrap/validate_ir.sh build/debug
 
 The suite writes the IR of every fixture it lowers to
 `bootstrap/llvm/out/<test>.ll` (and `<test>.exit` where the program's
-result is known); `validate_ir.sh` compiles each with `clang`, links the
+result is known).  The script `validate_ir.sh` compiles each with `clang`, links the
 ones with an expectation against the runtime, runs them, and compares
 exit codes (Task 30.5).  `task bootstrap-test` runs both steps.
 
 ## Module-system contract parity
 
-`docs/contracts/CONTRACT_MODULE_SYSTEM.md` governs both compilers.
+The contract `docs/contracts/CONTRACT_MODULE_SYSTEM.md` governs both compilers.
 This table mirrors its §12 for the bootstrap side and must move in the
 same change as the bootstrap work that closes a row.
 
 | Contract section | Bootstrap status |
 |---|---|
-| §2 module identity | conforms (Task 25) — explicit file lists only; no path convention |
+| §2 module identity | conforms (Task 25): explicit file lists only, no path convention |
 | §3 imports | conforms (Tasks 25–26) — one-segment binding, module-name-only exposure, cycle rejection |
 | §4 exports, same-module access | conforms (Task 26) |
 | §5 `extend` scoping | conforms (Task 26 §6.5) — module granularity, not imported |
-| §6 qualified forms | `b::f`, `b::T`, `b::E::V` conform (Task 27 D4); `b::C` in conformance positions and `b::T::m` are rejected until the bootstrap has concepts and methods — Task 33 |
-| §7 prelude | partial (Tasks 38, 41) — scope order, shadowing, identity, reserved names, prelude method and `extend` visibility, and derived conformance through the prelude conform; prelude files load partially; the `hir`/`mir`/`llvm` probe columns are not yet measured with the prelude |
-| §8 entry module | not implemented — no driver or entry concept; MIR flattens every function of every module — Task 33 |
-| §9 determinism | graph construction conforms (Task 25 §8; graph tests 7–8); program-level output determinism is unverified — Task 33 |
+| §6 qualified forms | `b::f`, `b::T`, `b::E::V` conform (Task 27 D4). `b::C` in conformance positions and `b::T::m` are rejected until the bootstrap has concepts and methods (Task 33). |
+| §7 prelude | partial (Tasks 38, 41). Scope order, shadowing, identity, reserved names, prelude method and `extend` visibility, and derived conformance through the prelude conform. Prelude files load partially. The `hir`/`mir`/`llvm` probe columns are not yet measured with the prelude. |
+| §8 entry module | not implemented: no driver or entry concept, and MIR flattens every function of every module (Task 33) |
+| §9 determinism | graph construction conforms (Task 25 §8, graph tests 7 and 8). Program-level output determinism is unverified (Task 33). |
 
 ## Relationship to probes
 
 The `examples/bootstrap_probe/` directory contains earlier experimental
 probes that informed the design of these subsystems.  Probes are
-learning artifacts; bootstrap subsystems are maintained code.
+learning artifacts, and bootstrap subsystems are maintained code.
 
 After Task 20, `examples/bootstrap_probe/dao_lexer_v2.dao` is
 superseded by `bootstrap/lexer/lexer.dao`.

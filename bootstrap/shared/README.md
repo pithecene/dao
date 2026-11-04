@@ -4,7 +4,7 @@ Single source of truth for the bootstrap frontend pipeline.
 
 ## What this contains
 
-`base.dao` provides the canonical definitions consumed by all bootstrap
+The file `base.dao` provides the canonical definitions consumed by all bootstrap
 subsystems:
 
 - Token model (`TK` enum, `Token`, `LexResult`)
@@ -32,11 +32,11 @@ graph, resolver, typecheck, hir, mir, llvm).  Each is `base.dao` plus
 the `impl.dao` (library only) of every upstream subsystem it depends
 on, in dependency order, then the subsystem's own `impl.dao`, then its
 own `tests.dao` runner last.  Production code lives in `impl.dao`, the test runner in
-`tests.dao`; the two are separate files and `assemble.sh` composes them
+`tests.dao`.  The two are separate files and `assemble.sh` composes them
 explicitly (no marker slicing).  `assemble.sh` is the exact statement
 of that composition.
 
-The `*.gen.dao` files are gitignored — they are build artifacts.
+The `*.gen.dao` files are gitignored, because they are build artifacts.
 
 A generated program imports `bootstrap::ascii`, a real module that is not
 assembled, so every compile passes `bootstrap/ascii.dao` beside it:
@@ -44,7 +44,7 @@ assembled, so every compile passes `bootstrap/ascii.dao` beside it:
 
 ## Editing rules
 
-1. **Edit `base.dao` or subsystem `.dao` sources** — never edit the
+1. **Edit `base.dao` or subsystem `.dao` sources.**  Never edit the
    `.gen.dao` files directly.
 2. **Run `bash bootstrap/assemble.sh`** after any edit.
 3. **Verify every subsystem** still compiles and passes tests

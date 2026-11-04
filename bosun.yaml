@@ -1,0 +1,17 @@
+# Bosun consumer configuration, following pithecene/bosun/records/contracts/CONFIG.md.
+# The prose gate holds these documents to the prose contract. The contracts and
+# the remaining docs join as each passes, and the task specs are historical records.
+version: 1
+prose:
+  documents:
+    - README.md
+    - AGENTS.md
+    - CLAUDE.md
+    - CHANGELOG.md
+    - bootstrap/README.md
+    - bootstrap/shared/README.md
+    - examples/README.md
+    - docs/building.md
+    - docs/heterogeneous_experiment.md
+    - docs/NON_DAO_INVENTORY.md
+    - docs/task_specs/TASK_46_BOOTSTRAP_FIRST_MODULE.md

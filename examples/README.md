@@ -5,18 +5,18 @@ Keep them small and human-readable.
 
 Every file here is a complete program meant to build with `daoc build`
 and run.  A subdirectory whose files declare one `fn main` between them
-is a single multi-file program instead — `playground_service_test`
+is a single multi-file program instead.  The `playground_service_test` suite
 analyzes each of its files and builds and runs the set together against
 `testdata/examples/<dir>.out`.  A subdirectory whose files each declare
 their own `fn main` is a collection of separate programs and is left
 alone.  The playground lists this directory, and each file is a
 regression input, so a new language feature should land with an
-example that exercises it.  `playground_service_test` compiles and
+example of that feature.  `playground_service_test` compiles and
 runs every file, compares its output with `testdata/examples/<name>.out`
 (`task update-example-goldens` rewrites them), and requires every token
 to be classified.  One file does not build today: `raw_memory.dao`
-trips a MIR concreteness invariant in the host compiler (pre-existing);
-it stays here as the regression input for that fix and is listed in
+trips a MIR concreteness invariant in the host compiler (pre-existing).
+It stays here as the regression input for that fix and is listed in
 `testdata/examples/known_failures.txt` with that diagnostic.
 
 | File | Demonstrates |
@@ -36,7 +36,7 @@ it stays here as the regression input for that fix and is listed in
 | `generators.dao`, `iteration.dao` | `yield`, generators, `for ... in` |
 | `vectors.dao`, `hashmap.dao` | `Vector<T>` and `HashMap<V>` from the prelude |
 | `resource.dao`, `unsafe.dao`, `raw_memory.dao` | `resource memory` domains, `mode unsafe`, pointers and allocation |
-| `astar.dao` | a small search algorithm using several of the above |
+| `astar.dao` | a small search algorithm using several of these features |
 | `ffi/` | calling C from Dao (needs the C helpers alongside) |
 | `modules/` | a multi-file program: `module`, `import`, and names reached through a module binding |
-| `bootstrap_probe/` | historical probes that preceded `bootstrap/`; kept as artifacts |
+| `bootstrap_probe/` | historical probes that preceded `bootstrap/`, kept as artifacts |

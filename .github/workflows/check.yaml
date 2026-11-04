@@ -1,0 +1,31 @@
+# Pithecene's standard Bosun prose check: the prose gate on the documents that
+# bosun.yaml lists and on the pull request's title and body. This repository is
+# public, so the job runs on a hosted runner and checks out no credential.
+name: check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bosun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: ghcr.io/pithecene/bosun:latest
+      credentials: { username: bosun, password: "${{ secrets.BOSUN_REGISTRY_TOKEN }}" }
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      # The event holds the pull request, and a push holds none.
+      - run: bosun check --pull-request "$GITHUB_EVENT_PATH"
