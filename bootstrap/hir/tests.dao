@@ -57,7 +57,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 46
+  let total: i32 = 47
 
   // Test 1: simple_fn
   let src1: string = "fn add(a: i32, b: i32): i32\n  return a + b\n"
@@ -908,6 +908,14 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL oversized_literal_reported: got " + i64_to_string(hir_count_diags(r43)) + " and " + i64_to_string(hir_count_diags(r43_ok)) + " diagnostics")
+  // The digits of the signed minimum do not fit alone, and its negation
+  // does: the literal lowers to the value itself.
+  let min_literal: HirResult = lower_to_hir("fn f(): i64\n  return -9223372036854775808\n")
+  if hir_count_diags(min_literal) == 0 and hir_count_kind(min_literal, "HirUnary") == 0:
+    print("PASS i64_minimum_literal")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL i64_minimum_literal: got " + i64_to_string(hir_count_diags(min_literal)) + " diagnostics")
   // Tests 44–45: construction lowers as the host's does (`daoc hir`): a
   // class call builds the class, `Box<i32>(3)` its instantiation; a
   // classification variant is its index; a payload-bearing enum's

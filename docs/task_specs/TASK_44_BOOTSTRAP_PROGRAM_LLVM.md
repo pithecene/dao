@@ -55,7 +55,7 @@ function cannot afford.
    intrinsics.
 4. **Operators** — checked signed arithmetic, unsigned and float
    operations, comparisons, string equality and concatenation.
-5. **Calls and the C boundary** — string parameters by pointer, the
+5. **Calls and the C boundary:** string parameters by pointer, the
    refusal of a by-value class or enum at an extern, runtime hooks with
    their canonical signatures.
 6. **Regions** — resource and mode enter / exit.

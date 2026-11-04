@@ -383,6 +383,8 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
           bin_ti = hir_expr_type(left_hir)
       return hs_add_node(rr.hs, HirNode::HirBinary(op = op_tidx, left = lr.hir, right = rr.hir, typ = bin_ti))
     Node::UnaryE(op_tidx, operand):
+      if hir_is_i64_min_literal(hs, op_tidx, operand):
+        return hs_add_node(hs, HirNode::HirIntLit(value = i64_min_value(), typ = ti))
       let or2: HirR = lower_expr(hs, operand)
       return hs_add_node(or2.hs, HirNode::HirUnary(op = op_tidx, operand = or2.hir, typ = ti))
     Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
@@ -846,6 +848,22 @@ fn lower_return_stmt(hs: HS, val_node: i64): HirR
     return hs_add_node(hs, HirNode::HirReturn(value = to_i64(-1)))
   let vr: HirR = lower_expr(hs, val_node)
   return hs_add_node(vr.hs, HirNode::HirReturn(value = vr.hir))
+
+// Whether `-` applies to the literal 9223372036854775808.  The parser
+// keeps the sign apart from the digits, and those digits alone do not
+// fit, so this one negation is decided before its operand is lowered.
+fn hir_is_i64_min_literal(hs: HS, op_tidx: i64, operand: i64): bool
+  if hs_tok_name(hs, op_tidx) != "-":
+    return false
+  match hs.unit.nodes.get(operand):
+    Node::IntLitE(tidx):
+      let lexeme: string = hs_tok_name(hs, tidx)
+      return i64_literal_fits(lexeme) == false and i64_literal_fits("-" + lexeme)
+  return false
+
+// The signed 64-bit minimum, built without accumulating its magnitude.
+fn i64_min_value(): i64
+  return to_i64(0) - parse_i64_literal("9223372036854775807") - to_i64(1)
 
 // Whether a decimal literal's value fits a signed 64-bit integer, so
 // parse_i64_literal can accumulate it without overflowing: at most
