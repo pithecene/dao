@@ -1,4 +1,4 @@
-# AGENTS.md — Dao Guardrails
+# Dao Guardrails
 
 This file defines non-negotiable working rules for Dao.
 
@@ -37,7 +37,7 @@ The current frozen surface assumptions are:
 - `enum` declares fieldless closed variants (classification only)
 - `enum class` declares closed structured variants with named fields
   (see `docs/contracts/ADR_ENUM_CLASS.md`)
-- `Ptr<T>` is the only pointer type; pointer operations are the
+- `Ptr<T>` is the only pointer type, and pointer operations are the
   ordinary calls `Ptr<T>::new()`, `get`, `set`, `offset`, `cast<U>`,
   and `is_null`, with no pointer sigils
   (see `docs/contracts/ADR_RAW_POINTER_SURFACE.md`)
@@ -47,17 +47,12 @@ explicit syntax revision task.
 
 ## Dependency Discipline
 
-- Native dependencies are managed via **Conan 2.x** in manifest mode
-  (`conanfile.txt` or `conanfile.py`).  The playground frontend's
-  JavaScript dependencies are declared in its `package.json` and pinned
-  by `package-lock.json`, installed with `npm ci --ignore-scripts`; a
-  dependency the frontend imports must be declared there, never used
-  through hoisting.
+- **Conan 2.x** manages native dependencies in manifest mode
+  (`conanfile.txt` or `conanfile.py`).  The playground frontend declares its JavaScript dependencies in its `package.json` and pins them in `package-lock.json`, and `npm ci --ignore-scripts` installs them.  The frontend must declare every dependency it imports there, and must never use one through hoisting.
 - Agents must **never** install, suggest, or attempt to install system
   packages (e.g. via `zypper`, `apt`, `dnf`, `brew`, or any other
   system package manager). No exceptions.
-- If a dependency is not available in Conan, escalate — do not
-  work around it with system packages.
+- If a dependency is not available in Conan, escalate.  Do not work around it with system packages.
 
 ## Language Discipline
 
@@ -81,80 +76,73 @@ Agents must:
 
 ## Tooling Sync Discipline
 
-Two tables, one owner each (CONTRACT_COMPILER_PHASES.md "Analysis
-Responsibilities"; CONTRACT_LANGUAGE_TOOLING.md "Shared Analysis
+Two tables, one owner each (CONTRACT_COMPILER_PHASES.md "Analysis Responsibilities" and CONTRACT_LANGUAGE_TOOLING.md "Shared Analysis
 Ownership"):
-- `compiler/analysis/tooling_surface.h` — semantic truth: token kinds and
+- `compiler/analysis/tooling_surface.h`, the semantic truth: token kinds and
   groups, lexical categories, diagnostic severities, and the payload
   shapes of the analysis results
-- `tools/playground/compiler_service/service_surface.h` — transport: the
+- `tools/playground/compiler_service/service_surface.h`, the transport: the
   playground's routes, request envelopes, and its own response shapes
 
 Agents must:
-- edit the owning table, not a consumer, when adding a kind, field, or
-  route; a compiler change never edits the service table and a
+- edit the owning table, not a consumer, when adding a kind, field, or route.  A compiler change never edits the service table and a
   transport change never edits the analysis table
 - regenerate `tools/playground/frontend/src/generated/tooling_surface.ts`
   (`task gen-tooling-surface`) in the same change
 - land the frontend side of a new route or kind in the same PR
-- add or update an example under `examples/` when a language feature
-  lands; `playground_service_test` keeps every example runnable and
+- add or update an example under `examples/` when a language feature lands.  The `playground_service_test` suite keeps every example runnable and
   fully classified
 
 ## Code Quality Discipline
 
-Every diff must be evaluated in context of the larger project, not
-in isolation.  Passing tests is necessary but not sufficient.
+Evaluate every diff in context of the larger project, not in isolation.  This evaluation is mandatory.  Passing tests is necessary but not sufficient.
 
-### Pre-commit self-review gate
+### Pre-Commit Self-Review Gate
 
 Before committing, verify:
 
-1. **Readability without history** — a stranger must understand the
+1. **Readability without history.** A stranger must understand the
    code without reading the PR description, task tracker, or commit
    log.  No task numbers in comments (`D1a`, `D3`, `D5` are opaque).
    Names describe what things are, not which ticket introduced them.
-2. **DRY** — if the same pattern appears a third time, stop and
+2. **DRY.** If the same pattern appears a third time, stop and
    extract a helper before writing the third copy.  Check whether
    the pattern already exists elsewhere in the codebase.
-3. **Data structure fitness** — adding a field to a class is a
-   signal to evaluate the design, not a solution.  If a struct has
-   >8 fields, the design is wrong.  If positional constructors
+3. **Data structure fitness.** Adding a field to a class is a
+   signal to evaluate the design, not a solution.  If a struct has more than 8 fields, the design is wrong.  If positional constructors
    exceed 6 arguments, introduce named initialization, a builder,
    or sub-structs.
-4. **Style consistency** — look at how neighboring code handles the
+4. **Style consistency.** Look at how neighboring code handles the
    same problem before inventing a new pattern.  Match the existing
    conventions for naming, error handling, and control flow.
-5. **Workarounds require escalation** — if writing a comment that
+5. **Workarounds require escalation.** If writing a comment that
    says "workaround" or "temporary," that is a flag to escalate to
    the user, not a license to ship it.  Document the root cause,
-   the workaround, and the conditions under which it can be removed
-   — all in one place, not scattered across files.
-6. **No silent regressions** — every function that can fail must
+   the workaround, and the conditions for removing it, all in one place, not scattered across files.
+6. **No silent regressions.** Every function that can fail must
    have an observable failure path (diagnostic, error return, or
    assert).  Returning a valid-looking default (0, nullptr, empty)
    on failure is a bug, not error handling.
-7. **Algorithmic awareness** — O(n²) in a loop over symbols is not
+7. **Algorithmic awareness.** O(n²) in a loop over symbols is not
    acceptable when O(n) or O(1) alternatives exist.  Linear scans
-   are fine for small n with a documented size bound; they are not
+   are fine for small n with a documented size bound, and they are not
    fine as the default lookup strategy.
 
-### Naming rules
+### Naming Rules
 
 - Variables describe what they hold, not their type or scope depth
 - Functions describe what they do, not which pass calls them
 - Test fixtures describe the scenario, not their sequential number
-- Comments explain why, not what — the code shows what
+- Comments explain why, not what, because the code shows what
 
-### Abstraction rules
+### Abstraction Rules
 
 - Every abstraction must earn its keep: if removing it would require
-  copy-pasting code in ≥3 places, it belongs; otherwise it does not
+  copy-pasting code in ≥3 places, it belongs, and otherwise it does not
 - Do not introduce wrappers that add no semantic value
-- Do not duplicate type definitions across subsystems — promote
-  shared types to the appropriate substrate layer
+- Do not duplicate type definitions across subsystems.  Promote shared types to the appropriate substrate layer
 
-### Review posture
+### Review Posture
 
 Agents must review their own output as if they were the reviewer,
 not the author.  The question is not "does this work" but "would I

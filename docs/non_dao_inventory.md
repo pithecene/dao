@@ -1,4 +1,4 @@
-# Non-Dao inventory
+# Non-Dao Inventory
 
 This note is explanatory.  The rule it serves is in `AGENTS.md`, under Language
 Discipline.  It lists every program and build input in this repository not
@@ -28,24 +28,24 @@ Line counts come from `main` at `cb98b0a`, on 2026-11-04.  The table counts
 | The Metal kernels inside that runner | Metal | 1 | 9 | one Dao definition compiled for the CPU and the GPU |
 | `examples/ffi/` | C | 3 | 177 | the C side of an interoperability test, which is foreign by design and goes only if C interoperability does |
 
-## Build and scripts
+## Build and Scripts
 
 | Stopgap | Language | Lines | What replaces it |
 |---|---|---|---|
-| `bootstrap/assemble.sh` | Shell | 124 | real modules, one import boundary at a time, after which assembly is deleted |
+| `bootstrap/assemble.sh` | Shell | 124 | real modules, one import boundary at a time, after which assembly goes away |
 | `bootstrap/stage2.sh`, `audit_closure.sh`, `validate_ir.sh` | Shell | 567 | Dao programs, which need a process API in the standard library |
 | `compiler/driver/multifile_build_test.sh`, `tools/playground/dev.sh` | Shell | 194 | the same process API |
 | `Taskfile.yml` | YAML for Task | 200 | a build tool written in Dao |
 | `CMakeLists.txt` files and `CMakePresets.json` | CMake | 500 | stays with the bootstrap tier, and a Dao build tool serves the other tiers |
 | `conanfile.py`, `profiles/` | Python, Conan | 88 | stays with the bootstrap tier |
 
-## External dependencies
+## External Dependencies
 
 The bootstrap compiler writes LLVM IR as text, and `clang` compiles and links
 it.  LLVM and `clang` are not in this repository.  The fully hosted tier needs
 a native code generator and linker in Dao, and that work is not yet planned.
 
-## Data, not programs
+## Data, Not Programs
 
 These hold no logic and have no replacement to build: the grammar in
 `spec/grammar/`, goldens in `testdata/`, tool configuration such as

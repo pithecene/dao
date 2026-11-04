@@ -1,4 +1,4 @@
-# Heterogeneous computation experiment
+# Heterogeneous Computation Experiment
 
 This note is explanatory.  It records the first test of the proposal that
 Dao could let one computation serve a service, a data pipeline and an
@@ -8,10 +8,10 @@ stays uncommitted by anything here.
 Run it with `./examples/forecast_plans` after building the example, and with
 `task forecast-device` for the GPU measurements.
 
-## The example
+## The Example
 
 The file `examples/forecast_plans.dao` computes one rule: a prediction reads
-the latest forecast revision received by the time it was decided.  Revision r1
+the latest forecast revision received by its decision time.  Revision r1
 arrived at 08:55 with wind 8, and its correction r2 arrived at 09:07 with
 wind 12.  A request decided at 09:00 returns 76 minutes and one decided at 09:10
 returns 89.  Replaying the 09:00 request after r2 arrives still returns 76, and
@@ -21,7 +21,7 @@ A plan is a list of steps, in ordinary Dao.  Its cutoff, archive, model,
 observations and result expression are all derived from those steps, and the
 same steps print for a person and as `record` lines for the device runner.
 
-## Two plans
+## Two Plans
 
 | | Straightforward | Proposed |
 |---|---|---|
@@ -33,14 +33,14 @@ same steps print for a person and as `record` lines for the device runner.
 
 The review accepts this rewrite because every derived fact is unchanged.
 
-## What the review rejects
+## What the Review Rejects
 
 | Rewrite | Finding |
 |---|---|
 | Join against the latest revision now | the cutoff is gone, and the 09:00 request moves from 76 to 89 |
 | Feed the score to both inputs of `adjust` | the result expression changes |
 | Drop the audit callback's score readback | the observation is gone |
-| Reuse a stored result across a model, archive or cutoff | each is refused by name |
+| Reuse a stored result across a model, archive or cutoff | the review refuses each by name |
 
 The audited program can still share its upload, and the review accepts that:
 one upload and two readbacks.
@@ -70,30 +70,29 @@ small.  For a live request the audit's extra wait costs about twice the time,
 far more than the saved transfers return.  One plan is therefore not best for
 every caller, which supports letting each caller choose its own.
 
-### Limits of these numbers
+### Limits of These Numbers
 
 - The M5 has unified memory, while the proposal assumes discrete memory.  The
-  copies are real blits between shared and private buffers, but no bus is
-  crossed, so a discrete GPU should penalize transfers more heavily.
+  copies are real blits between shared and private buffers, but they cross no bus, so a discrete GPU should penalize transfers more heavily.
 - The first version of the runner waited for the device before each upload.
   That added a wait the plan never asked for and doubled the straightforward
-  plan's live time.  It was removed before these figures were taken.
+  plan's live time.  The runner dropped that wait before these measurements.
 - Cold times include library and pipeline creation, the operating system may
   cache compiled pipelines across processes, and the runs have a fixed order.
   The cold column supports no comparison between plans.
 
-## Compared with handwritten glue
+## Comparison with Handwritten Glue
 
 The handwritten function in the runner is 44 lines for one plan, and each
 further plan needs its own.  In the plan-driven version, a new plan is about 10
-lines of data, and the executor is written once.  The runner adds no visible
+lines of data, and one executor serves them all.  The runner adds no visible
 cost: the handwritten function was no faster in the backfill and equal within
 noise for a live request.
 
 The larger difference is checking.  The handwritten function computes the same
 outputs, and nothing in it could report a lost cutoff or a dropped observation.
 
-## Where each finding belongs
+## Where Each Finding Belongs
 
 **No syntax yet.**  Everything here is ordinary functions, classes and enums.
 This example gives no evidence for new syntax.
@@ -102,16 +101,13 @@ This example gives no evidence for new syntax.
 result key work as Dao code today.  A later process adapter could read the same
 `record` lines.
 
-**The gap is in the compiler.**  Three weaknesses here cannot be fixed by a
-library:
+**The gap is in the compiler.**  Three weaknesses here are beyond a library:
 
 1. The Dao `score_v1` and the Metal `score_v1` are separate implementations
-   tied together only by a name and by tests.  A rewrite is checked against
-   the plan, and nothing proves the kernel computes what the reference does.
+   tied together only by a name and by tests.  The review checks a rewrite against the plan, and nothing proves the kernel computes what the reference does.
 2. The plan's `cutoff` is a string, unconnected to the code in `visible_to`.  A
    plan can claim a cutoff the reference does not enforce.
-3. Result expressions are compared as text, so a correct rewrite that reorders
-   an equivalent expression would be rejected.
+3. The review compares result expressions as text, so it would reject a correct rewrite that reorders an equivalent expression.
 
 The compiler already knows these identities and lowers pipes to ordinary calls
 that lose them.  The next experiment should lower one reference function to a
@@ -125,14 +121,14 @@ rewrite evidence for a compiler feature.  If that needs new semantics, the need
 itself names the first real language question.  Deployment,
 distributed retries and scheduling stay out of scope.
 
-## The runner is a stopgap
+## The Runner as a Stopgap
 
 The Swift runner and its Metal kernels are not Dao, and
 `docs/non_dao_inventory.md` records them.  They exist because Dao cannot yet
 lower a kernel or drive a device, which is the same capability the next
 experiment tests.
 
-## Differences from the design handoff
+## Differences from the Design Handoff
 
 - The sketch's `Result<Minutes, Missing>::Ok(...)` does not compile, so the
   example uses the accepted `Result::Ok(value = ...)`.
