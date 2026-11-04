@@ -18,6 +18,8 @@ concurrency:
 
 jobs:
   bosun:
+    # A fork's pull request holds no secrets, so it cannot pull the private image.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container:
