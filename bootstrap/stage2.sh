@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The bootstrap crossing (Task 45): the host compiles the bootstrap
+# The bootstrap crossing: the host compiles the bootstrap
 # compiler (stage 1); that compiler compiles itself (stage 2); the
 # stage-2 compiler compiles itself again (stage 3).  Stage 2 and stage 3
 # must emit the same module -- the fixed point -- and every bootstrap
@@ -23,7 +23,7 @@ bash bootstrap/assemble.sh > /dev/null || { echo "stage2: assemble failed"; exit
 # The recursive-descent passes recurse once per nesting level, and an
 # unoptimized frame is large: a long else-if chain outgrows the default
 # 8 MiB stack.  The limit is this script's own, not the shell's.
-ulimit -s unlimited
+ulimit -s unlimited 2>/dev/null || ulimit -s hard
 
 # A manifest: where the module goes, the prelude as the host loads it
 # (every module under stdlib/core and stdlib/io, in path order;

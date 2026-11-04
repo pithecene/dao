@@ -15,7 +15,7 @@ class DaoConan(ConanFile):
         self.options["llvm-core"].with_z3 = False
         self.options["llvm-core"].exceptions = True
         self.options["llvm-core"].rtti = True
-        self.options["llvm-core"].targets = "X86"
+        self.options["llvm-core"].targets = "AArch64" if self.settings.arch == "armv8" else "X86"
         self.options["llvm-core"].with_ffi = False
         self.options["llvm-core"].with_libedit = False
         self.options["llvm-core"].with_xml2 = False

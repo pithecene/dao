@@ -1,0 +1,14 @@
+[settings]
+arch=armv8
+build_type=Debug
+compiler=clang
+compiler.cppstd=23
+compiler.libcxx=libc++
+compiler.version=21
+os=Macos
+# LLVM in Release: a Debug build of it takes tens of gigabytes and links slowly.
+llvm-core/*:build_type=Release
+
+[conf]
+tools.build:compiler_executables={"c": "clang", "cpp": "clang++"}
+tools.build:jobs={{ os.getenv("DAO_BUILD_JOBS", default="4") }}

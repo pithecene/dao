@@ -187,9 +187,11 @@ static void *root_alloc(int64_t size, int64_t align) {
   if (size <= 0) {
     size = align; // Allocate at least one unit.
   }
-  // aligned_alloc requires size to be a multiple of alignment.
-  size_t rounded = round_up((size_t)size, (size_t)align);
-  void *ptr = aligned_alloc((size_t)align, rounded);
+  // On macOS, aligned_alloc rejects an alignment smaller than a pointer's,
+  // and every platform requires size to be a multiple of alignment.
+  size_t alignment = (size_t)align < sizeof(void *) ? sizeof(void *) : (size_t)align;
+  size_t rounded = round_up((size_t)size, alignment);
+  void *ptr = aligned_alloc(alignment, rounded);
   if (ptr == NULL) {
     trap("allocation failed", size, align);
   }

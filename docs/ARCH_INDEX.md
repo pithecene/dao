@@ -21,8 +21,9 @@ Normative behavior lives in `CLAUDE.md` and `docs/contracts/`.
 
 ## `profiles/`
 
-Conan profiles and their lockfiles (`clang-21-debug`,
-`clang-21-debug.lock`). See `docs/building.md`.
+Conan profiles and their lockfiles (`clang-21-debug` for Linux x86-64,
+`clang-21-debug-macos` for macOS arm64, each with its `.lock`). See
+`docs/building.md`.
 
 ## `docs/`
 

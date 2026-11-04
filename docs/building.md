@@ -15,6 +15,12 @@ task test         # run tests
 task playground   # start playground at http://localhost:8090
 ```
 
+The profile follows the platform: `profiles/clang-21-debug` on Linux
+x86-64 and `profiles/clang-21-debug-macos` on macOS arm64.  The macOS
+profile builds LLVM's AArch64 target, in Release, from source on the first
+run.  `task bootstrap-audit` needs GNU `time` and `timeout`, so it runs on
+Linux only.
+
 ## Driver usage
 
 ```

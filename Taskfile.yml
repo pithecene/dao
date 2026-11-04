@@ -2,7 +2,7 @@ version: "3"
 
 vars:
   BUILD_DIR: build/debug
-  PROFILE: profiles/clang-21-debug
+  PROFILE: profiles/clang-21-debug{{if eq OS "darwin"}}-macos{{end}}
 
 tasks:
   deps:
