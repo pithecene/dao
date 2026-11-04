@@ -880,76 +880,6 @@ fn bs_tok_lex(bs: BS, tok_idx: i64): string
 // operator token.  Task 30 dispatches off that token kind, plus the
 // already-resolved operand type, to pick the correct LLVM op.
 
-fn ll_bin_op_int(tk: TK): string
-  if tk_name(tk) == "Plus":
-    return "add"
-  if tk_name(tk) == "Minus":
-    return "sub"
-  if tk_name(tk) == "Star":
-    return "mul"
-  if tk_name(tk) == "Slash":
-    return "sdiv"
-  if tk_name(tk) == "Percent":
-    return "srem"
-  return ""
-
-fn ll_bin_op_float(tk: TK): string
-  if tk_name(tk) == "Plus":
-    return "fadd"
-  if tk_name(tk) == "Minus":
-    return "fsub"
-  if tk_name(tk) == "Star":
-    return "fmul"
-  if tk_name(tk) == "Slash":
-    return "fdiv"
-  return ""
-
-fn ll_icmp_pred(tk: TK): string
-  if tk_name(tk) == "EqEq":
-    return "eq"
-  if tk_name(tk) == "BangEq":
-    return "ne"
-  if tk_name(tk) == "Lt":
-    return "slt"
-  if tk_name(tk) == "LtEq":
-    return "sle"
-  if tk_name(tk) == "Gt":
-    return "sgt"
-  if tk_name(tk) == "GtEq":
-    return "sge"
-  return ""
-
-fn ll_fcmp_pred(tk: TK): string
-  if tk_name(tk) == "EqEq":
-    return "oeq"
-  if tk_name(tk) == "BangEq":
-    return "one"
-  if tk_name(tk) == "Lt":
-    return "olt"
-  if tk_name(tk) == "LtEq":
-    return "ole"
-  if tk_name(tk) == "Gt":
-    return "ogt"
-  if tk_name(tk) == "GtEq":
-    return "oge"
-  return ""
-
-fn is_comparison_op(tk: TK): bool
-  let n: string = tk_name(tk)
-  if n == "EqEq":
-    return true
-  if n == "BangEq":
-    return true
-  if n == "Lt":
-    return true
-  if n == "LtEq":
-    return true
-  if n == "Gt":
-    return true
-  if n == "GtEq":
-    return true
-  return false
-
 // =========================================================================
 // Section 88: MIR → LlInst lowering
 // =========================================================================
@@ -1162,55 +1092,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       let tk: Token = Token(TK::EqEq, to_i64(0), to_i64(0))
       if op_tok != synthesized_equality_op():
         tk = bs.toks.get(op_tok)
-      let lhs_text: string = bs_get_value_text(bs, lhs)
-      let rhs_text: string = bs_get_value_text(bs, rhs)
-      // Operand type comes from the LHS (MIR ensures lhs/rhs agree).
-      let operand_ty_text: string = bs_get_value_ty(bs, lhs)
-      let operand_ty: LlType = ll_type_text_to_lltype(operand_ty_text)
-
-      if is_comparison_op(tk.kind):
-        // A string is a pointer here; comparing the pointers is not
-        // comparing the strings (the host calls __dao_eq_string), and
-        // this backend has no string comparison, so it fails the module.
-        if operand_ty_text == "%dao.string":
-          bs = bs_error(bs, "bootstrap llvm backend: comparison of strings is not lowered")
-          return LowerStepR(bs, insts)
-        let fr_cmp: FreshR = bs_fresh_value(bs)
-        bs = fr_cmp.bs
-        let result: string = fr_cmp.name
-        if ll_type_is_float(operand_ty):
-          let pred: string = ll_fcmp_pred(tk.kind)
-          let inst: LlInst = LlInst(
-            LlInstKind::LlFCmp(pred = pred, lhs_text = lhs_text, rhs_text = rhs_text, operand_ty = operand_ty),
-            result)
-          insts = insts.push(inst)
-        else:
-          let pred: string = ll_icmp_pred(tk.kind)
-          let inst: LlInst = LlInst(
-            LlInstKind::LlICmp(pred = pred, lhs_text = lhs_text, rhs_text = rhs_text, operand_ty = operand_ty),
-            result)
-          insts = insts.push(inst)
-        bs = bs_set_value(bs, mir_node_idx, result, "i1")
-        return LowerStepR(bs, insts)
-
-      // Arithmetic.
-      let fr_bin: FreshR = bs_fresh_value(bs)
-      bs = fr_bin.bs
-      let result: string = fr_bin.name
-      let op: string = ""
-      if ll_type_is_float(operand_ty):
-        op = ll_bin_op_float(tk.kind)
-      else:
-        op = ll_bin_op_int(tk.kind)
-      if op == "":
-        bs = bs_error(bs, "bootstrap llvm backend: unsupported binary op " + tk_name(tk.kind))
-        return LowerStepR(bs, insts)
-      let inst: LlInst = LlInst(
-        LlInstKind::LlBinOp(op = op, lhs_text = lhs_text, rhs_text = rhs_text, ty = operand_ty),
-        result)
-      insts = insts.push(inst)
-      bs = bs_set_value(bs, mir_node_idx, result, ll_type_text(operand_ty))
-      return LowerStepR(bs, insts)
+      return bs_lower_binary(bs, insts, mir_node_idx, tk_name(tk.kind), lhs, rhs)
 
     MirNode::MirUnary(op_tok, operand, type_idx):
       let tk: Token = bs.toks.get(op_tok)
@@ -1523,6 +1405,196 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
   // vanishing from it.
   bs = bs_error(bs, "bootstrap llvm backend: unsupported MIR instruction " + mir_node_kind(node))
   return LowerStepR(bs, insts)
+
+// A binary operator as the host lowers it (lower_binary): strings
+// through the runtime; floats IEEE; unsigned integers by the unsigned
+// forms; signed `+ - *` checked, trapping on overflow.
+fn bs_lower_binary(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, op: string, lhs: i64, rhs: i64): LowerStepR
+  let lhs_text: string = bs_get_value_text(bs, lhs)
+  let rhs_text: string = bs_get_value_text(bs, rhs)
+  let ty_text: string = bs_get_value_ty(bs, lhs)
+  let operand_ti: i64 = mir_value_type(bs.mir_nodes, lhs)
+  let unsigned: bool = ll_is_unsigned(bs.types, operand_ti)
+  let is_float: bool = ty_text == "float" or ty_text == "double"
+  if ty_text == "%dao.string":
+    return bs_lower_string_binary(bs, insts, mir_node_idx, op, lhs_text, rhs_text)
+  // Comparisons.
+  let pred: string = ll_cmp_pred(op, is_float, unsigned)
+  if pred != "":
+    let result: FreshR = bs_fresh_value(bs)
+    bs = result.bs
+    let cmp: string = "icmp "
+    if is_float:
+      cmp = "fcmp "
+    insts = insts.push(LlInst(LlInstKind::LlText(rhs = cmp + pred + " " + ty_text + " " + lhs_text + ", " + rhs_text), result.name))
+    bs = bs_set_value(bs, mir_node_idx, result.name, "i1")
+    return LowerStepR(bs, insts)
+  // Signed + - * are checked.
+  if is_float == false and unsigned == false and ty_text != "i1":
+    let intrinsic: string = ""
+    if op == "Plus":
+      intrinsic = "sadd"
+    if op == "Minus":
+      intrinsic = "ssub"
+    if op == "Star":
+      intrinsic = "smul"
+    if intrinsic != "":
+      return bs_checked_op(bs, insts, mir_node_idx, intrinsic, ty_text, lhs_text, rhs_text)
+  let instr: string = ll_arith_instr(op, is_float, unsigned)
+  if instr == "":
+    bs = bs_error(bs, "bootstrap llvm backend: unsupported binary op " + op + " on " + ty_text)
+    return LowerStepR(bs, insts)
+  let result: FreshR = bs_fresh_value(bs)
+  bs = result.bs
+  insts = insts.push(LlInst(LlInstKind::LlText(rhs = instr + " " + ty_text + " " + lhs_text + ", " + rhs_text), result.name))
+  bs = bs_set_value(bs, mir_node_idx, result.name, ty_text)
+  return LowerStepR(bs, insts)
+
+// `@llvm.<op>.with.overflow`: the result, and a branch to a trap when it
+// overflowed (the host's emit_checked_signed_op).  The trap and the
+// continuation are labels inside the current block's instruction list.
+fn bs_checked_op(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, op: string, ty: string, lhs: string, rhs: string): LowerStepR
+  let intrinsic: string = "@llvm." + op + ".with.overflow." + ty
+  let two: Vector<string> = Vector<string>::new()
+  two = two.push(ty)
+  two = two.push(ty)
+  bs = bs_declare_hook(bs, intrinsic, "{ " + ty + ", i1 }", two)
+  bs = bs_declare_hook(bs, "@llvm.trap", "void", Vector<string>::new())
+  let pair: FreshR = bs_fresh_value(bs)
+  bs = pair.bs
+  insts = insts.push(LlInst(LlInstKind::LlText(rhs = "call { " + ty + ", i1 } " + intrinsic + "(" + ty + " " + lhs + ", " + ty + " " + rhs + ")"), pair.name))
+  let value: FreshR = bs_fresh_value(bs)
+  bs = value.bs
+  let result: string = value.name
+  insts = insts.push(LlInst(LlInstKind::LlText(rhs = "extractvalue { " + ty + ", i1 } " + pair.name + ", 0"), result))
+  let over: FreshR = bs_fresh_value(bs)
+  bs = over.bs
+  insts = insts.push(LlInst(LlInstKind::LlText(rhs = "extractvalue { " + ty + ", i1 } " + pair.name + ", 1"), over.name))
+  // Labels take no value number (LLVM numbers unnamed values without gaps).
+  let n: string = i64_to_string(bs.next_global)
+  bs.next_global = bs.next_global + to_i64(1)
+  insts = insts.push(LlInst(LlInstKind::LlText(rhs = "br i1 " + over.name + ", label %overflow.trap." + n + ", label %overflow.cont." + n), ""))
+  insts = insts.push(LlInst(LlInstKind::LlText(rhs = "overflow.trap." + n + ":"), ""))
+  insts = insts.push(LlInst(LlInstKind::LlText(rhs = "call void @llvm.trap()"), ""))
+  insts = insts.push(LlInst(LlInstKind::LlText(rhs = "unreachable"), ""))
+  insts = insts.push(LlInst(LlInstKind::LlText(rhs = "overflow.cont." + n + ":"), ""))
+  bs = bs_set_value(bs, mir_node_idx, result, ty)
+  return LowerStepR(bs, insts)
+
+// `==` / `!=` on strings through __dao_eq_string, `+` through
+// __dao_str_concat; both take their strings by pointer.
+fn bs_lower_string_binary(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, op: string, lhs: string, rhs: string): LowerStepR
+  let at_l: FreshR = bs_fresh_named(bs, "str.lhs")
+  bs = at_l.bs
+  let at_r: FreshR = bs_fresh_named(bs, "str.rhs")
+  bs = at_r.bs
+  bs.entry_allocas = bs.entry_allocas.push(LlInst(LlInstKind::LlAlloca(ty_text = "%dao.string"), at_l.name))
+  bs.entry_allocas = bs.entry_allocas.push(LlInst(LlInstKind::LlAlloca(ty_text = "%dao.string"), at_r.name))
+  insts = insts.push(LlInst(LlInstKind::LlStore(ptr_name = at_l.name, value_text = lhs, value_ty_text = "%dao.string"), ""))
+  insts = insts.push(LlInst(LlInstKind::LlStore(ptr_name = at_r.name, value_text = rhs, value_ty_text = "%dao.string"), ""))
+  let two_ptrs: Vector<string> = Vector<string>::new()
+  two_ptrs = two_ptrs.push("ptr")
+  two_ptrs = two_ptrs.push("ptr")
+  let result: FreshR = bs_fresh_value(bs)
+  bs = result.bs
+  if op == "Plus":
+    bs = bs_declare_hook(bs, "@__dao_str_concat", "%dao.string", two_ptrs)
+    insts = insts.push(LlInst(LlInstKind::LlText(rhs = "call %dao.string @__dao_str_concat(ptr " + at_l.name + ", ptr " + at_r.name + ")"), result.name))
+    bs = bs_set_value(bs, mir_node_idx, result.name, "%dao.string")
+    return LowerStepR(bs, insts)
+  if op == "EqEq" or op == "BangEq":
+    bs = bs_declare_hook(bs, "@__dao_eq_string", "i1", two_ptrs)
+    insts = insts.push(LlInst(LlInstKind::LlText(rhs = "call i1 @__dao_eq_string(ptr " + at_l.name + ", ptr " + at_r.name + ")"), result.name))
+    if op == "BangEq":
+      let negated: FreshR = bs_fresh_value(bs)
+      bs = negated.bs
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "xor i1 " + result.name + ", true"), negated.name))
+      bs = bs_set_value(bs, mir_node_idx, negated.name, "i1")
+      return LowerStepR(bs, insts)
+    bs = bs_set_value(bs, mir_node_idx, result.name, "i1")
+    return LowerStepR(bs, insts)
+  bs = bs_error(bs, "unsupported operator on string type")
+  return LowerStepR(bs, insts)
+
+// Whether the Dao type at `ti` is an unsigned integer (u8..u64).
+fn ll_is_unsigned(types: Vector<DaoType>, ti: i64): bool
+  if ti < 0 or ti >= types.length():
+    return false
+  let t: DaoType = types.get(ti)
+  match t.kind:
+    TypeKind::TBuiltin:
+      return t.builtin_id >= to_i64(4) and t.builtin_id <= to_i64(7)
+  return false
+
+// A comparison's predicate (the host's: IEEE `une` for `!=` on floats),
+// or "" for an operator that is no comparison.
+fn ll_cmp_pred(op: string, is_float: bool, unsigned: bool): string
+  if is_float:
+    if op == "EqEq":
+      return "oeq"
+    if op == "BangEq":
+      return "une"
+    if op == "Lt":
+      return "olt"
+    if op == "LtEq":
+      return "ole"
+    if op == "Gt":
+      return "ogt"
+    if op == "GtEq":
+      return "oge"
+    return ""
+  if op == "EqEq":
+    return "eq"
+  if op == "BangEq":
+    return "ne"
+  let sign: string = "s"
+  if unsigned:
+    sign = "u"
+  if op == "Lt":
+    return sign + "lt"
+  if op == "LtEq":
+    return sign + "le"
+  if op == "Gt":
+    return sign + "gt"
+  if op == "GtEq":
+    return sign + "ge"
+  return ""
+
+// The instruction of an arithmetic or logical operator, "" for none.
+fn ll_arith_instr(op: string, is_float: bool, unsigned: bool): string
+  if is_float:
+    if op == "Plus":
+      return "fadd"
+    if op == "Minus":
+      return "fsub"
+    if op == "Star":
+      return "fmul"
+    if op == "Slash":
+      return "fdiv"
+    if op == "Percent":
+      return "frem"
+    return ""
+  if op == "Plus":
+    return "add"
+  if op == "Minus":
+    return "sub"
+  if op == "Star":
+    return "mul"
+  if op == "KwAnd":
+    return "and"
+  if op == "KwOr":
+    return "or"
+  if unsigned:
+    if op == "Slash":
+      return "udiv"
+    if op == "Percent":
+      return "urem"
+    return ""
+  if op == "Slash":
+    return "sdiv"
+  if op == "Percent":
+    return "srem"
+  return ""
 
 // Declare a runtime hook once, with its canonical signature (the host's
 // llvm_runtime_hooks).
