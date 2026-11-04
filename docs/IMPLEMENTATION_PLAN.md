@@ -979,6 +979,16 @@ by the bootstrap, linked with the runtime — passes its whole suite
 crossing (Task 45).  Not chased: the host's C ABI coercion of classes
 passed to externs by value (refused; the corpus passes none).
 
+### Task 45 — The Bootstrap Crossing
+
+Status: **in progress** — `docs/task_specs/TASK_45_BOOTSTRAP_STAGE2.md`.
+Authorized after Task 44.
+
+**Objective**: a bootstrap compiler that compiles itself: the host
+builds it (stage 1), it compiles its own source (stage 2), and that
+compiler does again (stage 3); stage 2 and stage 3 emit the same module,
+and every bootstrap suite compiled by stage 2 passes.
+
 ### Task 14 — Numeric Type Expansion
 
 **Objective**: Implement the numeric semantics frozen in
