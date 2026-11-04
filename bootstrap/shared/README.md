@@ -2,9 +2,9 @@
 
 Single source of truth for the bootstrap frontend pipeline.
 
-## What this contains
+## What This Contains
 
-`base.dao` provides the canonical definitions consumed by all bootstrap
+The file `base.dao` provides the canonical definitions consumed by all bootstrap
 subsystems:
 
 - Token model (`TK` enum, `Token`, `LexResult`)
@@ -15,7 +15,7 @@ subsystems:
 - Parser types (`PS`, `PR`, `FlushResult`, `flush_list`, `flush_pairs`)
 - Full recursive-descent parser (`parse()`)
 
-## How assembly works
+## How Assembly Works
 
 Each bootstrap subsystem has its own `.dao` source containing
 subsystem-specific code (tests, resolver logic, etc.).  The
@@ -32,25 +32,24 @@ graph, resolver, typecheck, hir, mir, llvm).  Each is `base.dao` plus
 the `impl.dao` (library only) of every upstream subsystem it depends
 on, in dependency order, then the subsystem's own `impl.dao`, then its
 own `tests.dao` runner last.  Production code lives in `impl.dao`, the test runner in
-`tests.dao`; the two are separate files and `assemble.sh` composes them
+`tests.dao`.  The two are separate files and `assemble.sh` composes them
 explicitly (no marker slicing).  `assemble.sh` is the exact statement
 of that composition.
 
-The `*.gen.dao` files are gitignored — they are build artifacts.
+Git ignores the `*.gen.dao` files, because they are build artifacts.
 
-A generated program imports `bootstrap::ascii`, a real module that is not
-assembled, so every compile passes `bootstrap/ascii.dao` beside it:
+A generated program imports `bootstrap::ascii`, a real module outside assembly, so every compile passes `bootstrap/ascii.dao` beside it:
 `daoc build --source bootstrap/lexer/lexer.gen.dao --source bootstrap/ascii.dao`.
 
-## Editing rules
+## Editing Rules
 
-1. **Edit `base.dao` or subsystem `.dao` sources** — never edit the
+1. **Edit `base.dao` or subsystem `.dao` sources.**  Never edit the
    `.gen.dao` files directly.
 2. **Run `bash bootstrap/assemble.sh`** after any edit.
 3. **Verify every subsystem** still compiles and passes tests
    (`task bootstrap-test`).
 
-## Why this exists
+## Why This Exists
 
 Dao does not yet support multi-file compilation.  Before consolidation,
 every bootstrap subsystem duplicated the entire token model, lexer, and
@@ -60,5 +59,4 @@ triplicated code.
 This shared base eliminates the duplication at the source level.
 Assembly produces the single-file outputs the compiler requires.
 
-When Dao gains a module system, this concatenation scheme can be
-replaced with proper imports.
+When Dao gains a module system, proper imports can replace this concatenation scheme.

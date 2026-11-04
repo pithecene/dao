@@ -59,3 +59,6 @@ bootstrap/llvm/out/
 
 # Manifest, modules and binaries of the bootstrap crossing (bootstrap/stage2.sh)
 bootstrap/driver/out/
+
+# Bosun's run records
+.bosun/

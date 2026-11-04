@@ -1,0 +1,40 @@
+# Pithecene's standard Bosun prose check, run only as the merge gate: the prose
+# gate on the documents that bosun.yaml lists and on the queued commit's title
+# and body. A required check must also report on the pull request before the
+# pull request can enter the merge queue, so the pull request's job only reports.
+# A contributor runs `bosun check` locally for earlier feedback.
+name: check
+
+on:
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+jobs:
+  # Both jobs report as the required check `bosun`, and only one runs per event.
+  report:
+    name: bosun
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: echo "The merge queue runs this check."
+
+  gate:
+    name: bosun
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      # Pinned, so a new Bosun rule cannot stop this required check's merges.
+      image: ghcr.io/pithecene/bosun:0.4.0
+      credentials: { username: bosun, password: "${{ secrets.BOSUN_REGISTRY_TOKEN }}" }
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      # The event holds the queued commit, whose message is the title and body.
+      - run: bosun check --pull-request "$GITHUB_EVENT_PATH"
