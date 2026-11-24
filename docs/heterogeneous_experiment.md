@@ -1,57 +1,65 @@
 # Heterogeneous Computation Experiment
 
-This note is explanatory.  It records the first test of the proposal that
-Dao could let one computation serve a service, a data pipeline and an
-accelerator, with a reviewer able to see any change of meaning.  The language
-stays uncommitted by anything here.
+This note is explanatory. It records the test that Dao can let one computation
+serve a live service, a historical replay, and an accelerator while rejecting
+rewrites that alter point-in-time meaning, model identity, host observations,
+or buffer lifetimes. The language stays uncommitted by anything here.
 
-Run it with `./examples/forecast_plans` after building the example, and with
-`task forecast-device` for the GPU measurements.
+Run `./examples/forecast_plans` after building the example, and run
+`task forecast-device` on macOS for the Metal measurements.
 
-## The Example
+## Forecast Rule and Semantic Representation
 
-The file `examples/forecast_plans.dao` computes one rule: a prediction reads
-the latest forecast revision received by its decision time.  Revision r1
-arrived at 08:55 with wind 8, and its correction r2 arrived at 09:07 with
-wind 12.  A request decided at 09:00 returns 76 minutes and one decided at 09:10
-returns 89.  Replaying the 09:00 request after r2 arrives still returns 76, and
-a request decided at 08:00 returns an explicit missing result.
+The file `examples/forecast_plans.dao` computes one point-in-time rule: a
+prediction reads the latest forecast revision received by its decision time.
+Revision `r1` arrived at `08:55` with wind `8`, and correction `r2` arrived at
+`09:07` with wind `12`. A request decided at `09:00` returns `76` minutes, and
+one decided at `09:10` returns `89`. Replaying the `09:00` request after `r2`
+arrives still returns `76`, while a request decided at `08:00` or for an absent
+cell returns an explicit `Missing` result.
 
-A plan is a list of steps, in ordinary Dao.  Its cutoff, archive, model,
-observations and result expression are all derived from those steps, and the
-same steps print for a person and as `record` lines for the device runner.
+Each plan is a list of `Step` values lowered by `analyze_plan` into a typed
+`ValueExpr` DAG (`ReadSource`, `UnaryOp`, `BinaryOp`) rather than plan-wide
+mutable strings:
 
-## Two Plans
+- Every `ReadVisible` binds its output to a `ReadSource` carrying `archive`, `cell`, `valid_at`, `decided_at`, and `Visibility`, and records its point-in-time read precondition.
+- Every `Dispatch` and `HostAdjust` binds its output to exact producer node IDs and its own `(operation, model)` pair without string concatenation or substring deduplication.
+- Every `Upload` and `Readback` preserves producer `ValueExpr` identity across host and device bindings while rejecting undefined inputs, duplicate definitions, and use-after-`Release`.
+- Every `Observe` records an ordered list of `(name, value_id)` pairs so both dropped and duplicated host callbacks fail equivalence review.
+- Function `record_line` preserves `archive`, `cell`, `valid_at`, `visibility`, `decided_at`, and `model` in the tab-delimited stream verified by `metal_runner.swift`.
 
-| | Straightforward | Proposed |
+## Accepted Placement Rewrites
+
+| Metric | Straightforward | Proposed |
 |---|---|---|
 | Uploads | 2 | 1 |
 | Readbacks | 2 | 1 |
 | Combine runs on | CPU | GPU |
 | Payload at N = 2 | 16 B each way | 8 B each way |
-| Reply | `adjust(score_v1(wind), high_wind(wind))` | the same |
+| Reply DAG | `adjust@v1(score_v1@v1(read(...)), high_wind@v1(read(...)))` | identical |
 
-The review accepts this rewrite because every derived fact is unchanged.
+The reviewer accepts `straightforward -> proposed` and `audited -> audited_shared`
+because read preconditions, ordered observations, and the reply DAG match
+structurally while every buffer stays live through its final consumer.
 
-## What the Review Rejects
+## Rejected Rewrites and Reuse Counterexamples
 
-| Rewrite | Finding |
+| Case | Rejection reason |
 |---|---|
-| Join against the latest revision now | the cutoff is gone, and the 09:00 request moves from 76 to 89 |
-| Feed the score to both inputs of `adjust` | the result expression changes |
-| Drop the audit callback's score readback | the observation is gone |
-| Reuse a stored result across a model, archive or cutoff | the review refuses each by name |
-
-The audited program can still share its upload, and the review accepts that:
-one upload and two readbacks.
+| `latest_now` | `LatestNow` replaces `AsOfDecision` in both read preconditions and the reply leaf, moving `09:00` from `76` to `89` |
+| `two_read_masked_cutoff` | Reply leaf still references the `LatestNow` read even when a trailing unused `AsOfDecision` read follows |
+| `substring_model_drift` | Changing one stage from `v12` to `v1` fails structural `model` comparison on `UnaryOp` |
+| `miswired` | Feeding `score` into both inputs of `adjust` alters the reply DAG |
+| `audited -> proposed` | Dropping `audit_score` alters the ordered observation vector |
+| `duplicated_audit` | Emitting `audit_score` twice alters observation multiplicity |
+| `premature_release` | Releasing `wind_shared` before `high_wind` dispatches fails liveness validation |
+| `ResultKey` reuse | Keys bind `(operation, model, archive, cell, valid_at, visibility, decided_at)`, rejecting cross-cell (`7` vs `8`), cross-valid-time, cross-visibility, cross-model, cross-archive, and cross-cutoff reuse |
 
 ## Measurements
 
-Measured on an Apple M5 running macOS 26.7.1, through Metal, with Swift
-6.3.3.  Each figure is the median of five processes.  Warm is the median of 200
-live or 40 backfill runs in each process, with the plans interleaved.  Every
-output matched the oracle or the CPU calculation, and every byte count matched
-the plan's prediction.
+Measured on an Apple M5 running macOS, through Metal, over the validated integer
+wind domain `0..1000`. Each figure is the median of five processes, with warm
+medians over `200` live or `40` backfill runs and interleaved plans.
 
 | Mode | Plan | Cold ms | Warm ms | Bytes moved | Waits |
 |---|---|---|---|---|---|
@@ -64,73 +72,32 @@ the plan's prediction.
 | Backfill, N = 1,000,000 | Audited and shared | 2.061 | 1.885 | 12,000,000 | 2 |
 | Backfill, N = 1,000,000 | Handwritten | 1.600 | 1.641 | 8,000,000 | 1 |
 
-The tradeoff differs by caller.  The proposed plan is 2.4 times faster for a
-backfill and about 6 percent faster for one live request, where the copy is
-small.  For a live request the audit's extra wait costs about twice the time,
-far more than the saved transfers return.  One plan is therefore not best for
-every caller, which supports letting each caller choose its own.
+### Measurement Limits
 
-### Limits of These Numbers
-
-- The M5 has unified memory, while the proposal assumes discrete memory.  The
-  copies are real blits between shared and private buffers, but they cross no bus, so a discrete GPU should penalize transfers more heavily.
-- The first version of the runner waited for the device before each upload.
-  That added a wait the plan never asked for and doubled the straightforward
-  plan's live time.  The runner dropped that wait before these measurements.
-- Cold times include library and pipeline creation, the operating system may
-  cache compiled pipelines across processes, and the runs have a fixed order.
-  The cold column supports no comparison between plans.
+- Apple Silicon uses unified memory, whereas discrete GPUs cross PCIe and penalize redundant transfers more heavily.
+- Waiting only when a host step demands a pending readback avoids spurious synchronization.
+- Cold timings include pipeline creation and OS shader caching, so only warm medians compare steady-state plan cost.
 
 ## Comparison with Handwritten Glue
 
-The handwritten function in the runner is 44 lines for one plan, and each
-further plan needs its own.  In the plan-driven version, a new plan is about 10
-lines of data, and one executor serves them all.  The runner adds no visible
-cost: the handwritten function was no faster in the backfill and equal within
-noise for a live request.
+The handwritten Metal function is 40 lines for one fixed plan, and every new
+placement policy needs another copy. Plan data takes roughly 10 lines per plan
+on one shared executor with equal backfill throughput, while catching lost
+cutoffs, model drift, dropped or duplicated callbacks, and premature buffer
+releases that handwritten glue cannot diagnose.
 
-The larger difference is checking.  The handwritten function computes the same
-outputs, and nothing in it could report a lost cutoff or a dropped observation.
+## Architectural Boundary
 
-## Where Each Finding Belongs
+**Ordinary Dao expresses the plan.** Functions, classes, and `enum class` carry
+the typed DAG, equivalence check, and complete cache key without new syntax.
 
-**No syntax yet.**  Everything here is ordinary functions, classes and enums.
-This example gives no evidence for new syntax.
+**Compiler codegen is the remaining gap.** Function `score_v1` in Dao and `score_v1`
+in Metal are still separate bodies tied together by tests and explicit `(kernel, model)`
+records. Generating both CPU code and a device kernel from one verified Dao
+function definition is the next bounded experiment once this semantic model lands.
 
-**A library can hold the plan.**  The step list, derived meaning, review and
-result key work as Dao code today.  A later process adapter could read the same
-`record` lines.
+## Stopgap Runner
 
-**The gap is in the compiler.**  Three weaknesses here are beyond a library:
-
-1. The Dao `score_v1` and the Metal `score_v1` are separate implementations
-   tied together only by a name and by tests.  The review checks a rewrite against the plan, and nothing proves the kernel computes what the reference does.
-2. The plan's `cutoff` is a string, unconnected to the code in `visible_to`.  A
-   plan can claim a cutoff the reference does not enforce.
-3. The review compares result expressions as text, so it would reject a correct rewrite that reorders an equivalent expression.
-
-The compiler already knows these identities and lowers pipes to ordinary calls
-that lose them.  The next experiment should lower one reference function to a
-kernel from a single definition, which addresses the first weakness directly.
-
-## Recommendation
-
-Continue, with that one test as the condition.  One definition that produces
-both the CPU and GPU code and keeps its identity into the plan makes the checked
-rewrite evidence for a compiler feature.  If that needs new semantics, the need
-itself names the first real language question.  Deployment,
-distributed retries and scheduling stay out of scope.
-
-## The Runner as a Stopgap
-
-The Swift runner and its Metal kernels are not Dao, and
-`docs/non_dao_inventory.md` records them.  They exist because Dao cannot yet
-lower a kernel or drive a device, which is the same capability the next
-experiment tests.
-
-## Differences from the Design Handoff
-
-- The sketch's `Result<Minutes, Missing>::Ok(...)` does not compile, so the
-  example uses the accepted `Result::Ok(value = ...)`.
-- The handoff describes a trace simulator for use without hardware.  This
-  experiment had a device available and needed no simulator.
+The Swift runner and its Metal kernels are stopgaps recorded in
+`docs/non_dao_inventory.md` until Dao lowers a kernel and drives a device
+natively.

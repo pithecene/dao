@@ -6,12 +6,8 @@
 //
 //   task forecast-device
 //
-// Each plan comes from the `record` lines on standard input, so this file
-// knows the three kernels and the step vocabulary and nothing about either
-// plan.  An upload or readback is a blit between a shared buffer and a
-// private one, which is a real copy even on unified memory.  The
-// handwritten section solves the same workload without a plan, for the
-// comparison in docs/heterogeneous_experiment.md.
+// Each plan comes from provenance-preserving `record` lines on standard input,
+// carrying archive, query, visibility, and model identities alongside buffers.
 
 import Foundation
 import Metal
@@ -29,8 +25,6 @@ kernel void adjust(device const int* base [[buffer(0)]], device const int* flag 
 }
 """
 
-// The domain over which device arithmetic cannot overflow, so a device run
-// and the checked CPU reference agree on every accepted input.
 let windDomain: ClosedRange<Int32> = 0...1000
 
 enum RunError: Error, CustomStringConvertible {
@@ -48,7 +42,6 @@ enum RunError: Error, CustomStringConvertible {
   }
 }
 
-// Every path checks its input the same way before touching the device.
 func validate(_ winds: [Int32]) throws {
   if winds.isEmpty { throw RunError.emptyBatch }
   if let bad = winds.first(where: { !windDomain.contains($0) }) {
@@ -69,6 +62,7 @@ struct Transfers {
 }
 
 struct Report {
+  var readProvenance: [String] = []
   var eta: [Int32] = []
   var observed: [String: [Int32]] = [:]
   var transfers = Transfers()
@@ -78,19 +72,23 @@ struct Report {
 }
 
 let kernelInputs = ["score_v1": 1, "high_wind": 1, "adjust": 2]
-let stepArguments = ["read": 1, "upload": 2, "dispatch": 4, "readback": 2, "host_adjust": 3, "observe": 2, "reply": 1]
+let stepArguments = ["read": 6, "upload": 2, "dispatch": 5, "readback": 2, "host_adjust": 4, "release": 1, "observe": 2, "reply": 1]
 
-// A record the executor could not run stops here, before anything indexes it.
 func checkShape(_ step: Step) throws {
   guard stepArguments[step.op] == step.args.count else {
     throw RunError.malformed("\(step.op) with \(step.args.count) arguments")
   }
-  guard step.op == "dispatch" else { return }
-  guard let inputs = kernelInputs[step.args[0]] else {
-    throw RunError.malformed("unknown kernel \(step.args[0])")
-  }
-  guard (step.args[2].isEmpty ? 1 : 2) == inputs else {
-    throw RunError.malformed("\(step.args[0]) takes \(inputs) input(s)")
+  if step.op == "read" {
+    guard Int32(step.args[0]) != nil, Int32(step.args[1]) != nil, Int32(step.args[2]) != nil,
+          ["as_of_decision", "latest_now"].contains(step.args[3]), Int32(step.args[4]) != nil, !step.args[5].isEmpty else {
+      throw RunError.malformed("invalid read provenance \(step.args)")
+    }
+  } else if step.op == "dispatch" {
+    guard let inputs = kernelInputs[step.args[0]] else { throw RunError.malformed("unknown kernel \(step.args[0])") }
+    guard step.args[1] == "v1" else { throw RunError.malformed("unsupported device model \(step.args[1])") }
+    guard (step.args[3].isEmpty ? 1 : 2) == inputs else { throw RunError.malformed("\(step.args[0]) takes \(inputs) input(s)") }
+  } else if step.op == "host_adjust" {
+    guard step.args[0] == "v1" else { throw RunError.malformed("unsupported host model \(step.args[0])") }
   }
 }
 
@@ -112,8 +110,6 @@ func readPlans() throws -> (order: [String], steps: [String: [Step]]) {
     try checkShape(step)
     steps[fields[1]]!.append(step)
   }
-  // Standard input also carries the program's report, so only the announced
-  // count can show a lost or mangled record.
   guard announced == seen else {
     throw RunError.malformed("\(seen) records, announced \(announced.map(String.init) ?? "none")")
   }
@@ -154,10 +150,6 @@ func contents(_ buffer: MTLBuffer, _ rows: Int) -> [Int32] {
   Array(UnsafeBufferPointer(start: buffer.contents().bindMemory(to: Int32.self, capacity: rows), count: rows))
 }
 
-// ---------------------------------------------------------------
-// Executing a plan's steps
-// ---------------------------------------------------------------
-
 func execute(_ steps: [Step], winds: [Int32], gpu: Gpu) throws -> Report {
   try validate(winds)
   var report = Report()
@@ -165,6 +157,7 @@ func execute(_ steps: [Step], winds: [Int32], gpu: Gpu) throws -> Report {
   let bytes = rows * MemoryLayout<Int32>.stride
   var hostValues: [String: [Int32]] = [:]
   var deviceBuffers: [String: MTLBuffer] = [:]
+  var releasedBuffers: Set<String> = []
   var staging: [String: MTLBuffer] = [:]
   var pendingHost: [String] = []
   var open: MTLCommandBuffer?
@@ -175,13 +168,29 @@ func execute(_ steps: [Step], winds: [Int32], gpu: Gpu) throws -> Report {
     open = made
     return made
   }
-  func privateBuffer(_ name: String) -> MTLBuffer {
-    if let existing = deviceBuffers[name] { return existing }
+  func bindHost(_ name: String, _ values: [Int32]) throws {
+    if hostValues[name] != nil || staging[name] != nil {
+      throw RunError.malformed("duplicate host binding \(name)")
+    }
+    hostValues[name] = values
+  }
+  func allocateBuffer(_ name: String) throws -> MTLBuffer {
+    if deviceBuffers[name] != nil || releasedBuffers.contains(name) {
+      throw RunError.malformed("duplicate device buffer \(name)")
+    }
     let made = gpu.device.makeBuffer(length: bytes, options: .storageModePrivate)!
     deviceBuffers[name] = made
     return made
   }
-  // A host step needs its values, so finish the device work it depends on.
+  func liveBuffer(_ name: String) throws -> MTLBuffer {
+    if releasedBuffers.contains(name) {
+      throw RunError.malformed("device buffer \(name) used after release")
+    }
+    guard let existing = deviceBuffers[name] else {
+      throw RunError.malformed("undefined device buffer \(name)")
+    }
+    return existing
+  }
   func awaitDevice() {
     guard let running = open else { return }
     running.commit()
@@ -193,8 +202,6 @@ func execute(_ steps: [Step], winds: [Int32], gpu: Gpu) throws -> Report {
     }
     pendingHost = []
   }
-  // A value already on the host waits for nothing: a plan's cost must not
-  // include a synchronization the plan never asked for.
   func hostValue(_ name: String) throws -> [Int32] {
     if pendingHost.contains(name) { awaitDevice() }
     guard let values = hostValues[name] else { throw RunError.malformed("no host value \(name)") }
@@ -205,54 +212,67 @@ func execute(_ steps: [Step], winds: [Int32], gpu: Gpu) throws -> Report {
   for step in steps {
     switch step.op {
     case "read":
-      hostValues[step.args[0]] = winds
+      report.readProvenance.append(step.args[0...4].joined(separator: ":"))
+      try bindHost(step.args[5], winds)
     case "upload":
       let source = try hostValue(step.args[0])
+      let dest = try allocateBuffer(step.args[1])
       let shared = source.withUnsafeBytes { gpu.device.makeBuffer(bytes: $0.baseAddress!, length: bytes, options: .storageModeShared)! }
       let blit = commandBuffer().makeBlitCommandEncoder()!
-      blit.copy(from: shared, sourceOffset: 0, to: privateBuffer(step.args[1]), destinationOffset: 0, size: bytes)
+      blit.copy(from: shared, sourceOffset: 0, to: dest, destinationOffset: 0, size: bytes)
       blit.endEncoding()
       report.transfers.uploads += 1
       report.transfers.uploadBytes += bytes
     case "dispatch":
+      var buffers = [try liveBuffer(step.args[2])]
+      if !step.args[3].isEmpty { buffers.append(try liveBuffer(step.args[3])) }
+      buffers.append(try allocateBuffer(step.args[4]))
       let encoder = commandBuffer().makeComputeCommandEncoder()!
-      var buffers = [privateBuffer(step.args[1])]
-      if !step.args[2].isEmpty { buffers.append(privateBuffer(step.args[2])) }
-      buffers.append(privateBuffer(step.args[3]))
       gpu.dispatch(encoder, step.args[0], buffers, rows)
       encoder.endEncoding()
       report.dispatches += 1
     case "readback":
+      let src = try liveBuffer(step.args[0])
+      if hostValues[step.args[1]] != nil || staging[step.args[1]] != nil {
+        throw RunError.malformed("duplicate host binding \(step.args[1])")
+      }
       let shared = gpu.device.makeBuffer(length: bytes, options: .storageModeShared)!
       let blit = commandBuffer().makeBlitCommandEncoder()!
-      blit.copy(from: privateBuffer(step.args[0]), sourceOffset: 0, to: shared, destinationOffset: 0, size: bytes)
+      blit.copy(from: src, sourceOffset: 0, to: shared, destinationOffset: 0, size: bytes)
       blit.endEncoding()
       staging[step.args[1]] = shared
       pendingHost.append(step.args[1])
       report.transfers.readbacks += 1
       report.transfers.readbackBytes += bytes
     case "host_adjust":
-      let base = try hostValue(step.args[0])
-      let flag = try hostValue(step.args[1])
-      hostValues[step.args[2]] = zip(base, flag).map { $0 &+ 5 &* $1 }
+      let base = try hostValue(step.args[1])
+      let flag = try hostValue(step.args[2])
+      try bindHost(step.args[3], zip(base, flag).map { $0 &+ 5 &* $1 })
+    case "release":
+      let name = step.args[0]
+      if releasedBuffers.contains(name) {
+        throw RunError.malformed("double release of device buffer \(name)")
+      }
+      guard deviceBuffers[name] != nil else {
+        throw RunError.malformed("release of unknown device buffer \(name)")
+      }
+      awaitDevice()
+      deviceBuffers.removeValue(forKey: name)
+      releasedBuffers.insert(name)
     case "observe":
       report.observed[step.args[0]] = try hostValue(step.args[1])
     case "reply":
+      if !report.eta.isEmpty { throw RunError.malformed("plan replies more than once") }
       report.eta = try hostValue(step.args[0])
     default:
       throw RunError.malformed("unknown step \(step.op)")
     }
   }
-  // Work no host step waited for still counts toward the plan's cost.
   awaitDevice()
   report.seconds = Double(DispatchTime.now().uptimeNanoseconds - start) / 1e9
   if report.eta.isEmpty { throw RunError.malformed("the plan never replies") }
   return report
 }
-
-// ---------------------------------------------------------------
-// The same workload written by hand: one upload, three kernels, one readback
-// ---------------------------------------------------------------
 
 // HANDWRITTEN GLUE BEGIN
 func handwritten(winds: [Int32], gpu: Gpu) throws -> Report {
@@ -297,10 +317,6 @@ func handwritten(winds: [Int32], gpu: Gpu) throws -> Report {
 }
 // HANDWRITTEN GLUE END
 
-// ---------------------------------------------------------------
-// Checks and measurements
-// ---------------------------------------------------------------
-
 func expected(_ winds: [Int32]) -> [Int32] {
   winds.map { 60 + 2 * $0 + 5 * ($0 >= 10 ? 1 : 0) }
 }
@@ -312,7 +328,6 @@ func check(_ condition: Bool, _ what: String) {
 }
 
 func milliseconds(_ seconds: Double) -> String { String(format: "%.3f", seconds * 1000) }
-
 func median(_ values: [Double]) -> Double { values.sorted()[values.count / 2] }
 
 let planOrder: [String]
@@ -325,8 +340,6 @@ do {
   print("\(error)")
   exit(2)
 }
-// Without its plans the run would measure only the handwritten code and
-// could still report success.
 for required in ["straightforward", "proposed", "audited_shared"] where plans[required] == nil {
   print("no \(required) plan on standard input: pipe examples/forecast_plans into this runner")
   exit(2)
@@ -334,23 +347,87 @@ for required in ["straightforward", "proposed", "audited_shared"] where plans[re
 print("device\t\(gpu.device.name)\tunified_memory=\(gpu.device.hasUnifiedMemory)\tbackend=Metal")
 print("plans\t\(planOrder.joined(separator: " "))")
 
-// The fixture and the oracle.
 print("\n--- oracle, N = 2, winds [8, 12] ---")
+var provenances = Set<String>()
 for name in planOrder {
   let run = try execute(plans[name]!, winds: [8, 12], gpu: gpu)
+  provenances.insert(run.readProvenance.joined(separator: ","))
   check(run.eta == [76, 89], "\(name) returns \(run.eta)")
   print("     uploads \(run.transfers.uploads) (\(run.transfers.uploadBytes) B), readbacks \(run.transfers.readbacks) (\(run.transfers.readbackBytes) B), dispatches \(run.dispatches), waits \(run.waits)")
 }
+check(provenances == ["1:7:600:as_of_decision:540"], "all device plans carry identical point-in-time read provenance")
 let glue = try handwritten(winds: [8, 12], gpu: gpu)
 check(glue.eta == [76, 89], "handwritten returns \(glue.eta)")
 
-// The observation the audited plan must keep, and when it arrives.
 print("\n--- observation ---")
 let audited = try execute(plans["audited_shared"]!, winds: [8, 12], gpu: gpu)
 check(audited.observed["audit_score"] == [76, 84], "audit_score observed as \(audited.observed["audit_score"] ?? [])")
 check(audited.waits == 2, "the callback forces a wait before the reply: \(audited.waits) waits")
 
-// Both request modes on the error path: no plan touches the device.
+// Verify that malformed provenance records fail closed before touching Metal.
+// Both unrecognized visibility tags and unsupported model versions must fail
+// inside checkShape before any Metal command queue or buffer is touched.
+print("\n--- record provenance checks ---")
+let badRecords: [(Step, String)] = [
+  (Step(op: "read", args: ["1", "7", "600", "unbounded", "540", "wind"]), "invalid read provenance"),
+  (Step(op: "dispatch", args: ["score_v1", "v2", "wind", "", "score"]), "unsupported device model"),
+  (Step(op: "host_adjust", args: ["v2", "score", "flag", "eta"]), "unsupported host model"),
+]
+for (badStep, expectedReason) in badRecords {
+  do {
+    try checkShape(badStep)
+    check(false, "accepted malformed step \(badStep.op)")
+  } catch {
+    check("\(error)".contains(expectedReason), "rejects \(badStep.op): \(error)")
+  }
+}
+
+print("\n--- buffer lifetime checks ---")
+let readStep = Step(op: "read", args: ["1", "7", "600", "as_of_decision", "540", "wind"])
+let validReleased = try execute([
+  readStep,
+  Step(op: "upload", args: ["wind", "wind_shared"]),
+  Step(op: "dispatch", args: ["score_v1", "v1", "wind_shared", "", "score"]),
+  Step(op: "dispatch", args: ["high_wind", "v1", "wind_shared", "", "flag"]),
+  Step(op: "release", args: ["wind_shared"]),
+  Step(op: "dispatch", args: ["adjust", "v1", "score", "flag", "eta"]),
+  Step(op: "release", args: ["score"]),
+  Step(op: "release", args: ["flag"]),
+  Step(op: "readback", args: ["eta", "eta_host"]),
+  Step(op: "release", args: ["eta"]),
+  Step(op: "reply", args: ["eta_host"]),
+], winds: [8, 12], gpu: gpu)
+check(validReleased.eta == [76, 89], "post-consumer buffer releases preserve \(validReleased.eta)")
+
+let lifetimeRejections: [(String, [Step], String)] = [
+  ("premature release", [
+    readStep,
+    Step(op: "upload", args: ["wind", "wind_shared"]),
+    Step(op: "dispatch", args: ["score_v1", "v1", "wind_shared", "", "score"]),
+    Step(op: "release", args: ["wind_shared"]),
+    Step(op: "dispatch", args: ["high_wind", "v1", "wind_shared", "", "flag"]),
+  ], "used after release"),
+  ("unknown release", [readStep, Step(op: "release", args: ["missing"])], "release of unknown device buffer"),
+  ("double release", [
+    readStep,
+    Step(op: "upload", args: ["wind", "wind_shared"]),
+    Step(op: "release", args: ["wind_shared"]),
+    Step(op: "release", args: ["wind_shared"]),
+  ], "double release of device buffer"),
+  ("undefined input", [
+    readStep,
+    Step(op: "dispatch", args: ["score_v1", "v1", "missing", "", "score"]),
+  ], "undefined device buffer"),
+]
+for (label, badPlan, expectedReason) in lifetimeRejections {
+  do {
+    _ = try execute(badPlan, winds: [8, 12], gpu: gpu)
+    check(false, "accepted \(label)")
+  } catch {
+    check("\(error)".contains(expectedReason), "rejects \(label): \(error)")
+  }
+}
+
 print("\n--- error behavior ---")
 for (winds, reason) in [([Int32(8), 2_000_000_000], "outside"), ([], "empty")] {
   for name in planOrder + ["handwritten"] {
@@ -365,8 +442,6 @@ for (winds, reason) in [([Int32(8), 2_000_000_000], "outside"), ([], "empty")] {
   }
 }
 
-// Cold: a fresh library and pipelines, then the first run.  Warm: the plans
-// interleaved so neither always follows the other.
 let modes: [(name: String, rows: Int, repeats: Int)] = [("live", 1, 201), ("backfill", 1_000_000, 41)]
 print("\n--- timings, milliseconds ---")
 print("mode\tN\tplan\tcold\twarm_median\twarm_min\tuploads\treadbacks\tbytes_moved\twaits")

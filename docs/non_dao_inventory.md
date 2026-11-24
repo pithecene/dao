@@ -13,8 +13,8 @@ so a machine with no Dao on it can always rebuild the language:
 | Self-hosted | `bootstrap/`, in Dao | compiles itself, and still uses LLVM and the C runtime |
 | Fully hosted | not yet written | all Dao, with its own runtime and code generation |
 
-Line counts reflect the current branch over `50fd1fe`, on 2026-11-24.  The table counts
-31,971 lines of authored Dao for comparison.
+Line counts reflect the current branch over `d0a18ea`, on 2026-11-24.  The table counts
+32,313 lines of authored Dao for comparison.
 
 ## Programs
 
@@ -24,7 +24,7 @@ Line counts reflect the current branch over `50fd1fe`, on 2026-11-24.  The table
 | `runtime/` allocator, strings, I/O and generators | C | 11 | 1,632 | Dao over `Ptr<T>` and `mode unsafe` in the fully hosted tier, which needs direct system calls from Dao |
 | `tools/playground/compiler_service/` | C++ | 20 | 3,300 | a Dao service, which needs sockets and HTTP in the standard library |
 | `tools/playground/frontend/` | TypeScript, CSS, HTML | 20 | 1,660 | a Dao browser target, which does not exist |
-| `examples/forecast_device/metal_runner.swift` | Swift | 1 | 403 | Dao lowering kernels and driving a device, which needs a GPU target |
+| `examples/forecast_device/metal_runner.swift` | Swift | 1 | 481 | Dao lowering kernels, validating plan provenance and buffer lifetimes, and driving a device over a GPU target |
 | Metal kernels inside that runner | Metal | 1 | 9 | one Dao definition compiled for the CPU and the GPU |
 | `examples/ffi/` | C | 3 | 177 | the C side of an interoperability test, which is foreign by design and goes only if C interoperability does |
 

@@ -2,48 +2,71 @@
 decided 9:00: 76 minutes
 decided 9:10: 89 minutes
 decided 8:00: missing for cell 7 at 10:00
-batch [8, 12]: [76, 89]
+other cell 8 at 9:00: missing for cell 8 at 10:00
+batch [8, 12]: [76, 89], domain 0..1000 exact = true, malformed plans rejected = true
 
 === plans ===
-plan straightforward, reply = adjust(score_v1(wind), high_wind(wind))
-  read wind from archive 1, cutoff decided_at
+plan straightforward, reply = adjust@v1(score_v1@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,as_of_decision)), high_wind@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,as_of_decision)))
+  read wind from archive 1 (cell=7,valid=10:00,decided=9:00, as_of_decision)
   upload wind to wind_a
-  gpu score_v1(wind_a ) to score, model v1
+  gpu score_v1@v1(wind_a ) to score
   readback score to score_host
   upload wind to wind_b
-  gpu high_wind(wind_b ) to flag, model v1
+  gpu high_wind@v1(wind_b ) to flag
   readback flag to flag_host
-  cpu adjust(score_host flag_host) to eta_host
+  cpu adjust@v1(score_host flag_host) to eta_host
   reply eta_host
-plan proposed, reply = adjust(score_v1(wind), high_wind(wind))
-  read wind from archive 1, cutoff decided_at
+plan proposed, reply = adjust@v1(score_v1@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,as_of_decision)), high_wind@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,as_of_decision)))
+  read wind from archive 1 (cell=7,valid=10:00,decided=9:00, as_of_decision)
   upload wind to wind_shared
-  gpu score_v1(wind_shared ) to score, model v1
-  gpu high_wind(wind_shared ) to flag, model v1
-  gpu adjust(score flag) to eta, model v1
+  gpu score_v1@v1(wind_shared ) to score
+  gpu high_wind@v1(wind_shared ) to flag
+  gpu adjust@v1(score flag) to eta
   readback eta to eta_host
   reply eta_host
 
 === reviews ===
 review straightforward -> proposed
-  uploads 2 -> 1; readbacks 2 -> 1
+  uploads 2 -> 1, readbacks 2 -> 1
   bytes at N=2: up 16 -> 8, down 16 -> 8
   meaning unchanged: accepted
 review proposed -> latest_now
-  uploads 1 -> 1; readbacks 1 -> 1
+  uploads 1 -> 1, readbacks 1 -> 1
   bytes at N=2: up 8 -> 8, down 8 -> 8
-  REJECTED: cutoff decided_at became none
+  REJECTED: read preconditions [archive=1:cell=7,valid=10:00,decided=9:00:as_of_decision] became [archive=1:cell=7,valid=10:00,decided=9:00:latest_now]
+  REJECTED: reply adjust@v1(score_v1@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,as_of_decision)), high_wind@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,as_of_decision))) became adjust@v1(score_v1@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,latest_now)), high_wind@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,latest_now)))
   counterexample, decided 9:00: 76 minutes became 89 minutes
-review proposed -> miswired
-  uploads 1 -> 1; readbacks 1 -> 1
+review proposed -> two_read_masked_cutoff
+  uploads 1 -> 1, readbacks 1 -> 1
   bytes at N=2: up 8 -> 8, down 8 -> 8
-  REJECTED: result adjust(score_v1(wind), high_wind(wind)) became adjust(score_v1(wind), score_v1(wind))
+  REJECTED: read preconditions [archive=1:cell=7,valid=10:00,decided=9:00:as_of_decision] became [archive=1:cell=7,valid=10:00,decided=9:00:latest_now, archive=1:cell=7,valid=10:00,decided=9:00:as_of_decision]
+  REJECTED: reply adjust@v1(score_v1@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,as_of_decision)), high_wind@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,as_of_decision))) became adjust@v1(score_v1@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,latest_now)), high_wind@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,latest_now)))
+review model_v12 -> substring_model_drift
+  uploads 1 -> 1, readbacks 1 -> 1
+  bytes at N=2: up 8 -> 8, down 8 -> 8
+  REJECTED: reply adjust@v12(score_v1@v12(read(archive=1,cell=7,valid=10:00,decided=9:00,as_of_decision)), high_wind@v12(read(archive=1,cell=7,valid=10:00,decided=9:00,as_of_decision))) became adjust@v12(score_v1@v12(read(archive=1,cell=7,valid=10:00,decided=9:00,as_of_decision)), high_wind@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,as_of_decision)))
+review proposed -> miswired
+  uploads 1 -> 1, readbacks 1 -> 1
+  bytes at N=2: up 8 -> 8, down 8 -> 8
+  REJECTED: reply adjust@v1(score_v1@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,as_of_decision)), high_wind@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,as_of_decision))) became adjust@v1(score_v1@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,as_of_decision)), score_v1@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,as_of_decision)))
 review audited -> proposed
-  uploads 2 -> 1; readbacks 2 -> 1
+  uploads 2 -> 1, readbacks 2 -> 1
   bytes at N=2: up 16 -> 8, down 16 -> 8
-  REJECTED: observations 'audit_score=score_v1(wind);' became ''
+  REJECTED: observations [audit_score=score_v1@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,as_of_decision))] became []
+review audited -> duplicated_audit
+  uploads 2 -> 1, readbacks 2 -> 2
+  bytes at N=2: up 16 -> 8, down 16 -> 16
+  REJECTED: observations [audit_score=score_v1@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,as_of_decision))] became [audit_score=score_v1@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,as_of_decision)), audit_score=score_v1@v1(read(archive=1,cell=7,valid=10:00,decided=9:00,as_of_decision))]
+review proposed -> premature_release
+  uploads 1 -> 1, readbacks 1 -> 1
+  bytes at N=2: up 8 -> 8, down 8 -> 8
+  REJECTED: candidate plan invalid: device buffer 'wind_shared' used after release
+  REJECTED: candidate plan invalid: undefined device buffer 'flag'
+  REJECTED: candidate plan invalid: undefined device buffer 'eta'
+  REJECTED: candidate plan invalid: undefined host value 'eta_host'
+  REJECTED: candidate plan invalid: plan never replies
 review audited -> audited_shared
-  uploads 2 -> 1; readbacks 2 -> 2
+  uploads 2 -> 1, readbacks 2 -> 2
   bytes at N=2: up 16 -> 8, down 16 -> 16
   meaning unchanged: accepted
 
@@ -51,32 +74,35 @@ review audited -> audited_shared
 same key: reused
 other model: rejected: model v1 is not v2
 other archive: rejected: archive 1 is not 2
+other cell (7=76 min vs 8=missing): rejected: cell 7 is not 8
+other valid_at: rejected: valid_at 10:00 is not 11:00
+other visibility: rejected: visibility as_of_decision is not latest_now
 other cutoff: rejected: cutoff 9:00 is not 9:10
 
 === records ===
 records	25
-record	straightforward	read	wind
+record	straightforward	read	1	7	600	as_of_decision	540	wind
 record	straightforward	upload	wind	wind_a
-record	straightforward	dispatch	score_v1	wind_a		score
+record	straightforward	dispatch	score_v1	v1	wind_a		score
 record	straightforward	readback	score	score_host
 record	straightforward	upload	wind	wind_b
-record	straightforward	dispatch	high_wind	wind_b		flag
+record	straightforward	dispatch	high_wind	v1	wind_b		flag
 record	straightforward	readback	flag	flag_host
-record	straightforward	host_adjust	score_host	flag_host	eta_host
+record	straightforward	host_adjust	v1	score_host	flag_host	eta_host
 record	straightforward	reply	eta_host
-record	proposed	read	wind
+record	proposed	read	1	7	600	as_of_decision	540	wind
 record	proposed	upload	wind	wind_shared
-record	proposed	dispatch	score_v1	wind_shared		score
-record	proposed	dispatch	high_wind	wind_shared		flag
-record	proposed	dispatch	adjust	score	flag	eta
+record	proposed	dispatch	score_v1	v1	wind_shared		score
+record	proposed	dispatch	high_wind	v1	wind_shared		flag
+record	proposed	dispatch	adjust	v1	score	flag	eta
 record	proposed	readback	eta	eta_host
 record	proposed	reply	eta_host
-record	audited_shared	read	wind
+record	audited_shared	read	1	7	600	as_of_decision	540	wind
 record	audited_shared	upload	wind	wind_shared
-record	audited_shared	dispatch	score_v1	wind_shared		score
+record	audited_shared	dispatch	score_v1	v1	wind_shared		score
 record	audited_shared	readback	score	score_host
 record	audited_shared	observe	audit_score	score_host
-record	audited_shared	dispatch	high_wind	wind_shared		flag
-record	audited_shared	dispatch	adjust	score	flag	eta
+record	audited_shared	dispatch	high_wind	v1	wind_shared		flag
+record	audited_shared	dispatch	adjust	v1	score	flag	eta
 record	audited_shared	readback	eta	eta_host
 record	audited_shared	reply	eta_host

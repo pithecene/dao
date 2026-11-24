@@ -1,18 +1,13 @@
 module forecast_plans
-// This example holds one forecast rule, two execution plans for it, and the
-// rewrites a reviewer must see rejected.
+// Point-in-time forecast rule, typed execution plans, structural equivalence
+// checking, and executable counterexamples for unsound rewrites and cache keys.
 //
-// A prediction may read only the forecast revisions received by its decision time.  The reference computes that rule on the CPU.  A plan is
-// a list of steps.  Its meaning (its cutoff, its model, its archive, what it
-// lets the host observe) comes from those steps rather than a declaration, so a
-// rewrite cannot drop a step and keep the claim.
-//
-// Times are minutes after midnight UTC.  The same steps print twice: once
-// for a person, and once as `record` lines that
-// examples/forecast_device/metal_runner.swift executes on a GPU.
+// Times are minutes after midnight UTC. Valid plans print both human-readable
+// summaries and provenance-preserving `record` lines consumed by
+// examples/forecast_device/metal_runner.swift.
 
 // ---------------------------------------------------------------
-// The fixture
+// Point-in-time reference oracle
 // ---------------------------------------------------------------
 
 class Revision:
@@ -39,6 +34,13 @@ enum Visibility:
   AsOfDecision
   LatestNow
 
+fn visibility_name(v: Visibility): string
+  match v:
+    Visibility::AsOfDecision:
+      return "as_of_decision"
+    Visibility::LatestNow:
+      return "latest_now"
+
 fn at(hours: i32, minutes: i32): i32 -> hours * 60 + minutes
 
 fn clock(minutes: i32): string
@@ -48,15 +50,14 @@ fn clock(minutes: i32): string
     padding = "0"
   return i32_to_string(minutes / 60) + ":" + padding + i32_to_string(m)
 
+fn query_text(q: Query): string
+  return "cell=" + i32_to_string(q.cell) + ",valid=" + clock(q.valid_at) + ",decided=" + clock(q.decided_at)
+
 fn fixture_archive(): Archive
   let revisions: Vector<Revision> = Vector<Revision>::new()
   revisions = revisions.push(Revision("r1", 7, at(10, 0), at(8, 55), 8))
   revisions = revisions.push(Revision("r2", 7, at(10, 0), at(9, 7), 12))
   return Archive(1, revisions)
-
-// ---------------------------------------------------------------
-// The reference
-// ---------------------------------------------------------------
 
 fn score_v1(wind: i32): i32 -> 60 + 2 * wind
 
@@ -66,18 +67,6 @@ fn high_wind(wind: i32): i32
   return 0
 
 fn adjust(base: i32, flag: i32): i32 -> base + 5 * flag
-
-// The revision for a cell and valid time with the greatest receipt time a
-// query may see, a stable revision id breaking ties.
-fn latest_visible(archive: Archive, q: Query, visibility: Visibility): Option<Revision>
-  let best: Option<Revision> = Option::None
-  let i: i64 = to_i64(0)
-  while i < archive.revisions.length():
-    let r: Revision = archive.revisions.get(i)
-    if r.cell == q.cell and r.valid_at == q.valid_at and visible_to(r, q, visibility):
-      best = later_of(best, r)
-    i = i + to_i64(1)
-  return best
 
 fn visible_to(r: Revision, q: Query, visibility: Visibility): bool
   match visibility:
@@ -93,9 +82,22 @@ fn later_of(best: Option<Revision>, r: Revision): Option<Revision>
     Option::Some(value):
       if r.received_at > value.received_at:
         return Option::Some(value = r)
-      if r.received_at == value.received_at and str_compare(r.id, value.id) > 0:
-        return Option::Some(value = r)
+      if r.received_at == value.received_at:
+        if str_compare(r.id, value.id) > 0:
+          return Option::Some(value = r)
       return best
+
+fn latest_visible(archive: Archive, q: Query, visibility: Visibility): Option<Revision>
+  let best: Option<Revision> = Option::None
+  let i: i64 = to_i64(0)
+  while i < archive.revisions.length():
+    let r: Revision = archive.revisions.get(i)
+    if r.cell == q.cell:
+      if r.valid_at == q.valid_at:
+        if visible_to(r, q, visibility):
+          best = later_of(best, r)
+    i = i + to_i64(1)
+  return best
 
 fn predict(q: Query, archive: Archive, visibility: Visibility): Result<i32, Missing>
   match latest_visible(archive, q, visibility):
@@ -111,7 +113,6 @@ fn outcome(r: Result<i32, Missing>): string
     Result::Err(error):
       return "missing for cell " + i32_to_string(error.cell) + " at " + clock(error.valid_at)
 
-// The same arithmetic over a batch, stage by stage, as a device would run it.
 fn predict_batch(winds: Vector<i32>): Vector<i32>
   let scores: Vector<i32> = Vector<i32>::new()
   let flags: Vector<i32> = Vector<i32>::new()
@@ -126,16 +127,34 @@ fn predict_batch(winds: Vector<i32>): Vector<i32>
     i = i + to_i64(1)
   return results
 
+// Verify exact integer agreement across the entire bounded wind domain 0..1000.
+fn verify_wind_domain(): bool
+  let winds: Vector<i32> = Vector<i32>::new()
+  let w: i32 = 0
+  while w <= 1000:
+    winds = winds.push(w)
+    w = w + 1
+  let batch: Vector<i32> = predict_batch(winds)
+  let i: i64 = to_i64(0)
+  while i < winds.length():
+    let x: i32 = winds.get(i)
+    let want: i32 = adjust(score_v1(x), high_wind(x))
+    if batch.get(i) != want:
+      return false
+    i = i + to_i64(1)
+  return true
+
 // ---------------------------------------------------------------
-// Plans
+// Plan representation with explicit read, model, and lifetime steps
 // ---------------------------------------------------------------
 
 enum class Step:
-  ReadVisible(archive: i32, cutoff: string, output: string)
+  ReadVisible(archive: i32, query: Query, visibility: Visibility, output: string)
   Upload(input: string, buffer: string)
   Dispatch(kernel: string, model: string, left: string, right: string, output: string)
   Readback(buffer: string, host: string)
-  HostAdjust(left: string, right: string, output: string)
+  HostAdjust(model: string, left: string, right: string, output: string)
+  Release(buffer: string)
   Observe(name: string, host: string)
   Reply(host: string)
 
@@ -143,11 +162,14 @@ class Plan:
   name: string
   steps: Vector<Step>
 
-fn read_as_of_decision(): Step -> Step::ReadVisible(archive = 1, cutoff = "decided_at", output = "wind")
+fn default_query(): Query -> Query(7, at(10, 0), at(9, 0))
+
+fn read_as_of_decision(q: Query): Step
+  return Step::ReadVisible(archive = 1, query = q, visibility = Visibility::AsOfDecision, output = "wind")
 
 fn upload(input: string, buffer: string): Step -> Step::Upload(input = input, buffer = buffer)
 
-fn dispatch(kernel: string, left: string, right: string, output: string): Step
+fn dispatch_v1(kernel: string, left: string, right: string, output: string): Step
   return Step::Dispatch(kernel = kernel, model = "v1", left = left, right = right, output = output)
 
 fn readback(buffer: string, host: string): Step -> Step::Readback(buffer = buffer, host = host)
@@ -156,136 +178,359 @@ fn observe(name: string, host: string): Step -> Step::Observe(name = name, host 
 
 fn reply(host: string): Step -> Step::Reply(host = host)
 
-// Each stage uploads its own copy and returns its own output.
-fn straightforward_plan(): Plan
+fn straightforward_plan(q: Query): Plan
   let s: Vector<Step> = Vector<Step>::new()
-  s = s.push(read_as_of_decision())
+  s = s.push(read_as_of_decision(q))
   s = s.push(upload("wind", "wind_a"))
-  s = s.push(dispatch("score_v1", "wind_a", "", "score"))
+  s = s.push(dispatch_v1("score_v1", "wind_a", "", "score"))
   s = s.push(readback("score", "score_host"))
   s = s.push(upload("wind", "wind_b"))
-  s = s.push(dispatch("high_wind", "wind_b", "", "flag"))
+  s = s.push(dispatch_v1("high_wind", "wind_b", "", "flag"))
   s = s.push(readback("flag", "flag_host"))
-  s = s.push(Step::HostAdjust(left = "score_host", right = "flag_host", output = "eta_host"))
+  s = s.push(Step::HostAdjust(model = "v1", left = "score_host", right = "flag_host", output = "eta_host"))
   s = s.push(reply("eta_host"))
   return Plan("straightforward", s)
 
-// The stages share one read-only upload, and only the final ETAs return.
-fn proposed_plan(): Plan
+fn proposed_plan(q: Query): Plan
   let s: Vector<Step> = Vector<Step>::new()
-  s = s.push(read_as_of_decision())
+  s = s.push(read_as_of_decision(q))
   s = s.push(upload("wind", "wind_shared"))
-  s = s.push(dispatch("score_v1", "wind_shared", "", "score"))
-  s = s.push(dispatch("high_wind", "wind_shared", "", "flag"))
-  s = s.push(dispatch("adjust", "score", "flag", "eta"))
+  s = s.push(dispatch_v1("score_v1", "wind_shared", "", "score"))
+  s = s.push(dispatch_v1("high_wind", "wind_shared", "", "flag"))
+  s = s.push(dispatch_v1("adjust", "score", "flag", "eta"))
   s = s.push(readback("eta", "eta_host"))
   s = s.push(reply("eta_host"))
   return Plan("proposed", s)
 
-// The rewrite the fixture rejects: the same steps, joined against whatever
-// is latest when the plan runs.
-fn latest_now_plan(): Plan
+fn latest_now_plan(q: Query): Plan
   let s: Vector<Step> = Vector<Step>::new()
-  let source: Vector<Step> = proposed_plan().steps
-  s = s.push(Step::ReadVisible(archive = 1, cutoff = "none", output = "wind"))
+  let source: Vector<Step> = proposed_plan(q).steps
+  s = s.push(Step::ReadVisible(archive = 1, query = q, visibility = Visibility::LatestNow, output = "wind"))
   let i: i64 = to_i64(1)
   while i < source.length():
     s = s.push(source.get(i))
     i = i + to_i64(1)
   return Plan("latest_now", s)
 
-// A rewrite that keeps every declared fact and miswires one stage.
-fn miswired_plan(): Plan
+// Counterexample 1 (two-read masked cutoff): reads `wind` with LatestNow,
+// computes the reply from that uncutoff read, then appends an unused
+// AsOfDecision read that would overwrite a plan-wide mutable cutoff field.
+fn two_read_masked_cutoff_plan(q: Query): Plan
   let s: Vector<Step> = Vector<Step>::new()
-  s = s.push(read_as_of_decision())
+  s = s.push(Step::ReadVisible(archive = 1, query = q, visibility = Visibility::LatestNow, output = "wind"))
   s = s.push(upload("wind", "wind_shared"))
-  s = s.push(dispatch("score_v1", "wind_shared", "", "score"))
-  s = s.push(dispatch("high_wind", "wind_shared", "", "flag"))
-  s = s.push(dispatch("adjust", "score", "score", "eta"))
+  s = s.push(dispatch_v1("score_v1", "wind_shared", "", "score"))
+  s = s.push(dispatch_v1("high_wind", "wind_shared", "", "flag"))
+  s = s.push(dispatch_v1("adjust", "score", "flag", "eta"))
+  s = s.push(readback("eta", "eta_host"))
+  s = s.push(Step::ReadVisible(archive = 1, query = q, visibility = Visibility::AsOfDecision, output = "unused_wind"))
+  s = s.push(reply("eta_host"))
+  return Plan("two_read_masked_cutoff", s)
+
+// Counterexample 2 (substring model drift): changes one stage from model
+// "v12" to "v1", which substring deduplication previously hid inside "v12".
+fn model_v12_plan(q: Query): Plan
+  let s: Vector<Step> = Vector<Step>::new()
+  s = s.push(read_as_of_decision(q))
+  s = s.push(upload("wind", "wind_shared"))
+  s = s.push(Step::Dispatch(kernel = "score_v1", model = "v12", left = "wind_shared", right = "", output = "score"))
+  s = s.push(Step::Dispatch(kernel = "high_wind", model = "v12", left = "wind_shared", right = "", output = "flag"))
+  s = s.push(Step::Dispatch(kernel = "adjust", model = "v12", left = "score", right = "flag", output = "eta"))
+  s = s.push(readback("eta", "eta_host"))
+  s = s.push(reply("eta_host"))
+  return Plan("model_v12", s)
+
+fn substring_model_drift_plan(q: Query): Plan
+  let s: Vector<Step> = Vector<Step>::new()
+  s = s.push(read_as_of_decision(q))
+  s = s.push(upload("wind", "wind_shared"))
+  s = s.push(Step::Dispatch(kernel = "score_v1", model = "v12", left = "wind_shared", right = "", output = "score"))
+  s = s.push(Step::Dispatch(kernel = "high_wind", model = "v1", left = "wind_shared", right = "", output = "flag"))
+  s = s.push(Step::Dispatch(kernel = "adjust", model = "v12", left = "score", right = "flag", output = "eta"))
+  s = s.push(readback("eta", "eta_host"))
+  s = s.push(reply("eta_host"))
+  return Plan("substring_model_drift", s)
+
+fn miswired_plan(q: Query): Plan
+  let s: Vector<Step> = Vector<Step>::new()
+  s = s.push(read_as_of_decision(q))
+  s = s.push(upload("wind", "wind_shared"))
+  s = s.push(dispatch_v1("score_v1", "wind_shared", "", "score"))
+  s = s.push(dispatch_v1("high_wind", "wind_shared", "", "flag"))
+  s = s.push(dispatch_v1("adjust", "score", "score", "eta"))
   s = s.push(readback("eta", "eta_host"))
   s = s.push(reply("eta_host"))
   return Plan("miswired", s)
 
-// A host audit callback must see the score before the final result.
-fn audited_plan(): Plan
+fn audited_plan(q: Query): Plan
   let s: Vector<Step> = Vector<Step>::new()
-  s = s.push(read_as_of_decision())
+  s = s.push(read_as_of_decision(q))
   s = s.push(upload("wind", "wind_a"))
-  s = s.push(dispatch("score_v1", "wind_a", "", "score"))
+  s = s.push(dispatch_v1("score_v1", "wind_a", "", "score"))
   s = s.push(readback("score", "score_host"))
   s = s.push(observe("audit_score", "score_host"))
   s = s.push(upload("wind", "wind_b"))
-  s = s.push(dispatch("high_wind", "wind_b", "", "flag"))
+  s = s.push(dispatch_v1("high_wind", "wind_b", "", "flag"))
   s = s.push(readback("flag", "flag_host"))
-  s = s.push(Step::HostAdjust(left = "score_host", right = "flag_host", output = "eta_host"))
+  s = s.push(Step::HostAdjust(model = "v1", left = "score_host", right = "flag_host", output = "eta_host"))
   s = s.push(reply("eta_host"))
   return Plan("audited", s)
 
-// The audited program with the one shared upload it can keep: the score
-// still returns for the callback, so it saves only one transfer.
-fn audited_shared_plan(): Plan
+fn audited_shared_plan(q: Query): Plan
   let s: Vector<Step> = Vector<Step>::new()
-  s = s.push(read_as_of_decision())
+  s = s.push(read_as_of_decision(q))
   s = s.push(upload("wind", "wind_shared"))
-  s = s.push(dispatch("score_v1", "wind_shared", "", "score"))
+  s = s.push(dispatch_v1("score_v1", "wind_shared", "", "score"))
   s = s.push(readback("score", "score_host"))
   s = s.push(observe("audit_score", "score_host"))
-  s = s.push(dispatch("high_wind", "wind_shared", "", "flag"))
-  s = s.push(dispatch("adjust", "score", "flag", "eta"))
+  s = s.push(dispatch_v1("high_wind", "wind_shared", "", "flag"))
+  s = s.push(dispatch_v1("adjust", "score", "flag", "eta"))
   s = s.push(readback("eta", "eta_host"))
   s = s.push(reply("eta_host"))
   return Plan("audited_shared", s)
 
+// Counterexample 3 (duplicated observation): emits `audit_score` twice.
+fn duplicated_audit_plan(q: Query): Plan
+  let s: Vector<Step> = Vector<Step>::new()
+  s = s.push(read_as_of_decision(q))
+  s = s.push(upload("wind", "wind_shared"))
+  s = s.push(dispatch_v1("score_v1", "wind_shared", "", "score"))
+  s = s.push(readback("score", "score_host"))
+  s = s.push(observe("audit_score", "score_host"))
+  s = s.push(observe("audit_score", "score_host"))
+  s = s.push(dispatch_v1("high_wind", "wind_shared", "", "flag"))
+  s = s.push(dispatch_v1("adjust", "score", "flag", "eta"))
+  s = s.push(readback("eta", "eta_host"))
+  s = s.push(reply("eta_host"))
+  return Plan("duplicated_audit", s)
+
+// Counterexample 4 (premature buffer release): releases `wind_shared` before
+// `high_wind` dispatches on it.
+fn premature_release_plan(q: Query): Plan
+  let s: Vector<Step> = Vector<Step>::new()
+  s = s.push(read_as_of_decision(q))
+  s = s.push(upload("wind", "wind_shared"))
+  s = s.push(dispatch_v1("score_v1", "wind_shared", "", "score"))
+  s = s.push(Step::Release(buffer = "wind_shared"))
+  s = s.push(dispatch_v1("high_wind", "wind_shared", "", "flag"))
+  s = s.push(dispatch_v1("adjust", "score", "flag", "eta"))
+  s = s.push(readback("eta", "eta_host"))
+  s = s.push(reply("eta_host"))
+  return Plan("premature_release", s)
+
 // ---------------------------------------------------------------
-// What a plan means, read off its steps
+// Typed semantic DAG, effect sequence, and lifetime validation
 // ---------------------------------------------------------------
 
-class Meaning:
+enum class ValueExpr:
+  ReadSource(archive: i32, cell: i32, valid_at: i32, decided_at: i32, visibility: Visibility)
+  UnaryOp(op: string, model: string, input: i64)
+  BinaryOp(op: string, model: string, left: i64, right: i64)
+
+class ReadEffect:
   archive: i32
-  cutoff: string
-  models: string
-  observations: string
-  result: string
+  query: Query
+  visibility: Visibility
 
-// What a named value computes, spelled out through every buffer it passed
-// through, so two plans agree only if their replies are the same expression.
-fn computed(values: HashMap<string>, name: string): string
-  match values.get(name):
-    Option::Some(value):
-      return value
+class Observation:
+  name: string
+  value_id: i64
+
+class PlanSemantics:
+  nodes: Vector<ValueExpr>
+  reads: Vector<ReadEffect>
+  observations: Vector<Observation>
+  reply_id: i64
+  errors: Vector<string>
+
+fn known_unary_op(op: string): bool -> op == "score_v1" or op == "high_wind"
+
+fn known_binary_op(op: string): bool -> op == "adjust"
+
+fn visibility_eq(a: Visibility, b: Visibility): bool
+  return visibility_name(a) == visibility_name(b)
+
+fn query_eq(a: Query, b: Query): bool
+  return a.cell == b.cell and a.valid_at == b.valid_at and a.decided_at == b.decided_at
+
+fn read_effect_eq(a: ReadEffect, b: ReadEffect): bool
+  return a.archive == b.archive and query_eq(a.query, b.query) and visibility_eq(a.visibility, b.visibility)
+
+fn format_expr(nodes: Vector<ValueExpr>, id: i64): string
+  if id < to_i64(0) or id >= nodes.length():
+    return "<missing>"
+  match nodes.get(id):
+    ValueExpr::ReadSource(archive, cell, valid_at, decided_at, visibility):
+      return "read(archive=" + i32_to_string(archive) + ",cell=" + i32_to_string(cell) + ",valid=" + clock(valid_at) + ",decided=" + clock(decided_at) + "," + visibility_name(visibility) + ")"
+    ValueExpr::UnaryOp(op, model, input):
+      return op + "@" + model + "(" + format_expr(nodes, input) + ")"
+    ValueExpr::BinaryOp(op, model, left, right):
+      return op + "@" + model + "(" + format_expr(nodes, left) + ", " + format_expr(nodes, right) + ")"
+
+fn expr_eq(a_nodes: Vector<ValueExpr>, a_id: i64, b_nodes: Vector<ValueExpr>, b_id: i64): bool
+  if a_id < to_i64(0) or b_id < to_i64(0):
+    return false
+  if a_id >= a_nodes.length() or b_id >= b_nodes.length():
+    return false
+  match a_nodes.get(a_id):
+    ValueExpr::ReadSource(a_arch, a_cell, a_val, a_dec, a_vis):
+      match b_nodes.get(b_id):
+        ValueExpr::ReadSource(b_arch, b_cell, b_val, b_dec, b_vis):
+          return a_arch == b_arch and a_cell == b_cell and a_val == b_val and a_dec == b_dec and visibility_eq(a_vis, b_vis)
+        ValueExpr::UnaryOp(op, model, input):
+          return false
+        ValueExpr::BinaryOp(op, model, left, right):
+          return false
+    ValueExpr::UnaryOp(a_op, a_mod, a_in):
+      match b_nodes.get(b_id):
+        ValueExpr::UnaryOp(b_op, b_mod, b_in):
+          if a_op != b_op or a_mod != b_mod:
+            return false
+          return expr_eq(a_nodes, a_in, b_nodes, b_in)
+        ValueExpr::ReadSource(arch, cell, val, dec, vis):
+          return false
+        ValueExpr::BinaryOp(op, model, left, right):
+          return false
+    ValueExpr::BinaryOp(a_op, a_mod, a_l, a_r):
+      match b_nodes.get(b_id):
+        ValueExpr::BinaryOp(b_op, b_mod, b_l, b_r):
+          if a_op != b_op or a_mod != b_mod:
+            return false
+          if expr_eq(a_nodes, a_l, b_nodes, b_l) == false:
+            return false
+          return expr_eq(a_nodes, a_r, b_nodes, b_r)
+        ValueExpr::ReadSource(arch, cell, val, dec, vis):
+          return false
+        ValueExpr::UnaryOp(op, model, input):
+          return false
+
+fn lookup_live_device(device_env: HashMap<i64>, released: HashMap<i64>, name: string): Result<i64, string>
+  if released.contains(name):
+    return Result::Err(error = "device buffer '" + name + "' used after release")
+  match device_env.get(name):
+    Option::Some(id):
+      return Result::Ok(value = id)
     Option::None:
-      return name
+      return Result::Err(error = "undefined device buffer '" + name + "'")
 
-fn applied(operation: string, values: HashMap<string>, left: string, right: string): string
-  if right == "":
-    return operation + "(" + computed(values, left) + ")"
-  return operation + "(" + computed(values, left) + ", " + computed(values, right) + ")"
+fn lookup_host(host_env: HashMap<i64>, name: string): Result<i64, string>
+  match host_env.get(name):
+    Option::Some(id):
+      return Result::Ok(value = id)
+    Option::None:
+      return Result::Err(error = "undefined host value '" + name + "'")
 
-fn meaning_of(p: Plan): Meaning
-  let m: Meaning = Meaning(-1, "", "", "", "")
-  let values: HashMap<string> = HashMap<string>::new()
+fn analyze_plan(p: Plan): PlanSemantics
+  let nodes: Vector<ValueExpr> = Vector<ValueExpr>::new()
+  let reads: Vector<ReadEffect> = Vector<ReadEffect>::new()
+  let observations: Vector<Observation> = Vector<Observation>::new()
+  let errors: Vector<string> = Vector<string>::new()
+  let host_env: HashMap<i64> = HashMap<i64>::new()
+  let device_env: HashMap<i64> = HashMap<i64>::new()
+  let released: HashMap<i64> = HashMap<i64>::new()
+  let reply_id: i64 = to_i64(-1)
+
   for step in p.steps.iter():
     match step:
-      Step::ReadVisible(archive, cutoff, output):
-        m.archive = archive
-        m.cutoff = cutoff
+      Step::ReadVisible(archive, query, visibility, output):
+        if host_env.contains(output):
+          errors = errors.push("duplicate host binding '" + output + "'")
+        let id: i64 = nodes.length()
+        nodes = nodes.push(ValueExpr::ReadSource(archive = archive, cell = query.cell, valid_at = query.valid_at, decided_at = query.decided_at, visibility = visibility))
+        host_env = host_env.set(output, id)
+        let eff: ReadEffect = ReadEffect(archive, query, visibility)
+        reads = reads.push(eff)
       Step::Upload(input, buffer):
-        values = values.set(buffer, computed(values, input))
+        if device_env.contains(buffer):
+          errors = errors.push("duplicate device buffer '" + buffer + "'")
+        match lookup_host(host_env, input):
+          Result::Ok(id):
+            device_env = device_env.set(buffer, id)
+          Result::Err(err):
+            errors = errors.push(err)
       Step::Dispatch(kernel, model, left, right, output):
-        if kernel != "adjust" and index_of(m.models, model) < to_i64(0):
-          m.models = m.models + model
-        values = values.set(output, applied(kernel, values, left, right))
+        if model == "":
+          errors = errors.push("dispatch '" + kernel + "' lacks a model version")
+        if device_env.contains(output):
+          errors = errors.push("duplicate device buffer '" + output + "'")
+        if right == "":
+          if known_unary_op(kernel) == false:
+            errors = errors.push("unsupported unary kernel '" + kernel + "'")
+          match lookup_live_device(device_env, released, left):
+            Result::Ok(in_id):
+              let id: i64 = nodes.length()
+              nodes = nodes.push(ValueExpr::UnaryOp(op = kernel, model = model, input = in_id))
+              device_env = device_env.set(output, id)
+            Result::Err(err):
+              errors = errors.push(err)
+        else:
+          if known_binary_op(kernel) == false:
+            errors = errors.push("unsupported binary kernel '" + kernel + "'")
+          match lookup_live_device(device_env, released, left):
+            Result::Ok(l_id):
+              match lookup_live_device(device_env, released, right):
+                Result::Ok(r_id):
+                  let id: i64 = nodes.length()
+                  nodes = nodes.push(ValueExpr::BinaryOp(op = kernel, model = model, left = l_id, right = r_id))
+                  device_env = device_env.set(output, id)
+                Result::Err(err):
+                  errors = errors.push(err)
+            Result::Err(err):
+              errors = errors.push(err)
       Step::Readback(buffer, host):
-        values = values.set(host, computed(values, buffer))
-      Step::HostAdjust(left, right, output):
-        values = values.set(output, applied("adjust", values, left, right))
+        if host_env.contains(host):
+          errors = errors.push("duplicate host binding '" + host + "'")
+        match lookup_live_device(device_env, released, buffer):
+          Result::Ok(id):
+            host_env = host_env.set(host, id)
+          Result::Err(err):
+            errors = errors.push(err)
+      Step::HostAdjust(model, left, right, output):
+        if model == "":
+          errors = errors.push("host adjust lacks a model version")
+        if host_env.contains(output):
+          errors = errors.push("duplicate host binding '" + output + "'")
+        match lookup_host(host_env, left):
+          Result::Ok(l_id):
+            match lookup_host(host_env, right):
+              Result::Ok(r_id):
+                let id: i64 = nodes.length()
+                nodes = nodes.push(ValueExpr::BinaryOp(op = "adjust", model = model, left = l_id, right = r_id))
+                host_env = host_env.set(output, id)
+              Result::Err(err):
+                errors = errors.push(err)
+          Result::Err(err):
+            errors = errors.push(err)
+      Step::Release(buffer):
+        if released.contains(buffer):
+          errors = errors.push("double release of device buffer '" + buffer + "'")
+        else if device_env.contains(buffer) == false:
+          errors = errors.push("release of unknown device buffer '" + buffer + "'")
+        else:
+          released = released.set(buffer, to_i64(1))
       Step::Observe(name, host):
-        m.observations = m.observations + name + "=" + computed(values, host) + ";"
+        match lookup_host(host_env, host):
+          Result::Ok(id):
+            observations = observations.push(Observation(name, id))
+          Result::Err(err):
+            errors = errors.push(err)
       Step::Reply(host):
-        m.result = computed(values, host)
-  return m
+        if reply_id >= to_i64(0):
+          errors = errors.push("plan replies more than once")
+        match lookup_host(host_env, host):
+          Result::Ok(id):
+            reply_id = id
+          Result::Err(err):
+            errors = errors.push(err)
 
-// The transfers a plan makes.  Each value is one signed 32-bit integer.
+  if reply_id < to_i64(0):
+    errors = errors.push("plan never replies")
+  return PlanSemantics(nodes, reads, observations, reply_id, errors)
+
+// ---------------------------------------------------------------
+// Transfers, formatting, and semantic equivalence review
+// ---------------------------------------------------------------
+
 class Transfers:
   uploads: i32
   readbacks: i32
@@ -302,42 +547,48 @@ fn transfers_of(p: Plan): Transfers
 
 fn describe(step: Step): string
   match step:
-    Step::ReadVisible(archive, cutoff, output):
-      return "read " + output + " from archive " + i32_to_string(archive) + ", cutoff " + cutoff
+    Step::ReadVisible(archive, query, visibility, output):
+      return "read " + output + " from archive " + i32_to_string(archive) + " (" + query_text(query) + ", " + visibility_name(visibility) + ")"
     Step::Upload(input, buffer):
       return "upload " + input + " to " + buffer
     Step::Dispatch(kernel, model, left, right, output):
-      return "gpu " + kernel + "(" + left + " " + right + ") to " + output + ", model " + model
+      return "gpu " + kernel + "@" + model + "(" + left + " " + right + ") to " + output
     Step::Readback(buffer, host):
       return "readback " + buffer + " to " + host
-    Step::HostAdjust(left, right, output):
-      return "cpu adjust(" + left + " " + right + ") to " + output
+    Step::HostAdjust(model, left, right, output):
+      return "cpu adjust@" + model + "(" + left + " " + right + ") to " + output
+    Step::Release(buffer):
+      return "release " + buffer
     Step::Observe(name, host):
       return "host observes " + host + " as " + name
     Step::Reply(host):
       return "reply " + host
 
-// One tab-separated line per step, for the device runner.
+// Tab-separated execution record preserving archive, query, visibility, and
+// model provenance for the device adapter.
 fn record_line(plan: string, step: Step): string
   let start: string = "record\t" + plan + "\t"
   match step:
-    Step::ReadVisible(archive, cutoff, output):
-      return start + "read\t" + output
+    Step::ReadVisible(archive, query, visibility, output):
+      return start + "read\t" + i32_to_string(archive) + "\t" + i32_to_string(query.cell) + "\t" + i32_to_string(query.valid_at) + "\t" + visibility_name(visibility) + "\t" + i32_to_string(query.decided_at) + "\t" + output
     Step::Upload(input, buffer):
       return start + "upload\t" + input + "\t" + buffer
     Step::Dispatch(kernel, model, left, right, output):
-      return start + "dispatch\t" + kernel + "\t" + left + "\t" + right + "\t" + output
+      return start + "dispatch\t" + kernel + "\t" + model + "\t" + left + "\t" + right + "\t" + output
     Step::Readback(buffer, host):
       return start + "readback\t" + buffer + "\t" + host
-    Step::HostAdjust(left, right, output):
-      return start + "host_adjust\t" + left + "\t" + right + "\t" + output
+    Step::HostAdjust(model, left, right, output):
+      return start + "host_adjust\t" + model + "\t" + left + "\t" + right + "\t" + output
+    Step::Release(buffer):
+      return start + "release\t" + buffer
     Step::Observe(name, host):
       return start + "observe\t" + name + "\t" + host
     Step::Reply(host):
       return start + "reply\t" + host
 
 fn print_plan(p: Plan): void
-  print("plan " + p.name + ", reply = " + meaning_of(p).result)
+  let sem: PlanSemantics = analyze_plan(p)
+  print("plan " + p.name + ", reply = " + format_expr(sem.nodes, sem.reply_id))
   for step in p.steps.iter():
     print("  " + describe(step))
 
@@ -345,108 +596,199 @@ fn print_records(p: Plan): void
   for step in p.steps.iter():
     print(record_line(p.name, step))
 
-// ---------------------------------------------------------------
-// Reviewing a rewrite
-// ---------------------------------------------------------------
+fn reads_summary(reads: Vector<ReadEffect>): string
+  let out: Builder = Builder::new()
+  let i: i64 = to_i64(0)
+  while i < reads.length():
+    if i > to_i64(0):
+      out = out.push(", ")
+    let r: ReadEffect = reads.get(i)
+    out = out.push("archive=" + i32_to_string(r.archive) + ":" + query_text(r.query) + ":" + visibility_name(r.visibility))
+    i = i + to_i64(1)
+  return out.to_string()
 
-// The change between two meanings, one reason per line.  An empty list means
-// the rewrite changes only where the work runs and what it moves.
-fn meaning_changes(before: Meaning, after: Meaning): Vector<string>
-  let changes: Vector<string> = Vector<string>::new()
-  if before.cutoff != after.cutoff:
-    changes = changes.push("cutoff " + before.cutoff + " became " + after.cutoff)
-  if before.archive != after.archive:
-    changes = changes.push("archive " + i32_to_string(before.archive) + " became " + i32_to_string(after.archive))
-  if before.models != after.models:
-    changes = changes.push("model " + before.models + " became " + after.models)
-  if before.observations != after.observations:
-    changes = changes.push("observations '" + before.observations + "' became '" + after.observations + "'")
-  if before.result != after.result:
-    changes = changes.push("result " + before.result + " became " + after.result)
-  return changes
+fn observations_summary(sem: PlanSemantics): string
+  let out: Builder = Builder::new()
+  let i: i64 = to_i64(0)
+  while i < sem.observations.length():
+    if i > to_i64(0):
+      out = out.push(", ")
+    let obs: Observation = sem.observations.get(i)
+    out = out.push(obs.name + "=" + format_expr(sem.nodes, obs.value_id))
+    i = i + to_i64(1)
+  return out.to_string()
 
-fn review(before: Plan, after: Plan, payload_rows: i32): void
+fn semantic_differences(before: PlanSemantics, after: PlanSemantics): Vector<string>
+  let diffs: Vector<string> = Vector<string>::new()
+  for err in before.errors.iter():
+    diffs = diffs.push("source plan invalid: " + err)
+  for err in after.errors.iter():
+    diffs = diffs.push("candidate plan invalid: " + err)
+  if diffs.length() > to_i64(0):
+    return diffs
+
+  let same_reads: bool = before.reads.length() == after.reads.length()
+  if same_reads:
+    let ri: i64 = to_i64(0)
+    while ri < before.reads.length():
+      if read_effect_eq(before.reads.get(ri), after.reads.get(ri)) == false:
+        same_reads = false
+      ri = ri + to_i64(1)
+  if same_reads == false:
+    diffs = diffs.push("read preconditions [" + reads_summary(before.reads) + "] became [" + reads_summary(after.reads) + "]")
+
+  let same_obs: bool = before.observations.length() == after.observations.length()
+  if same_obs:
+    let oi: i64 = to_i64(0)
+    while oi < before.observations.length():
+      let b_obs: Observation = before.observations.get(oi)
+      let a_obs: Observation = after.observations.get(oi)
+      if b_obs.name != a_obs.name or expr_eq(before.nodes, b_obs.value_id, after.nodes, a_obs.value_id) == false:
+        same_obs = false
+      oi = oi + to_i64(1)
+  if same_obs == false:
+    diffs = diffs.push("observations [" + observations_summary(before) + "] became [" + observations_summary(after) + "]")
+
+  if expr_eq(before.nodes, before.reply_id, after.nodes, after.reply_id) == false:
+    diffs = diffs.push("reply " + format_expr(before.nodes, before.reply_id) + " became " + format_expr(after.nodes, after.reply_id))
+
+  return diffs
+
+fn review(before: Plan, after: Plan, payload_rows: i32): bool
   print("review " + before.name + " -> " + after.name)
   let b: Transfers = transfers_of(before)
   let a: Transfers = transfers_of(after)
-  print("  uploads " + i32_to_string(b.uploads) + " -> " + i32_to_string(a.uploads) + "; readbacks " + i32_to_string(b.readbacks) + " -> " + i32_to_string(a.readbacks))
+  print("  uploads " + i32_to_string(b.uploads) + " -> " + i32_to_string(a.uploads) + ", readbacks " + i32_to_string(b.readbacks) + " -> " + i32_to_string(a.readbacks))
   print("  bytes at N=" + i32_to_string(payload_rows) + ": up " + i32_to_string(b.uploads * 4 * payload_rows) + " -> " + i32_to_string(a.uploads * 4 * payload_rows) + ", down " + i32_to_string(b.readbacks * 4 * payload_rows) + " -> " + i32_to_string(a.readbacks * 4 * payload_rows))
-  let changes: Vector<string> = meaning_changes(meaning_of(before), meaning_of(after))
-  if changes.length() == to_i64(0):
+  let diffs: Vector<string> = semantic_differences(analyze_plan(before), analyze_plan(after))
+  if diffs.length() == to_i64(0):
     print("  meaning unchanged: accepted")
-  else:
-    for reason in changes.iter():
-      print("  REJECTED: " + reason)
+    return true
+  for reason in diffs.iter():
+    print("  REJECTED: " + reason)
+  return false
 
 // ---------------------------------------------------------------
-// Reuse of a stored result
+// Complete stored-result identity (cell, valid time, visibility, cutoff)
 // ---------------------------------------------------------------
 
 class ResultKey:
   operation: string
   model: string
   archive: i32
-  cutoff: i32
+  query: Query
+  visibility: Visibility
+
+fn make_result_key(operation: string, model: string, archive: i32, q: Query, visibility: Visibility): ResultKey
+  return ResultKey(operation, model, archive, q, visibility)
 
 fn reuse_verdict(stored: ResultKey, wanted: ResultKey): string
   if stored.operation != wanted.operation:
-    return "rejected: a different operation"
+    return "rejected: operation " + stored.operation + " is not " + wanted.operation
   if stored.model != wanted.model:
     return "rejected: model " + stored.model + " is not " + wanted.model
   if stored.archive != wanted.archive:
     return "rejected: archive " + i32_to_string(stored.archive) + " is not " + i32_to_string(wanted.archive)
-  if stored.cutoff != wanted.cutoff:
-    return "rejected: cutoff " + clock(stored.cutoff) + " is not " + clock(wanted.cutoff)
+  if stored.query.cell != wanted.query.cell:
+    return "rejected: cell " + i32_to_string(stored.query.cell) + " is not " + i32_to_string(wanted.query.cell)
+  if stored.query.valid_at != wanted.query.valid_at:
+    return "rejected: valid_at " + clock(stored.query.valid_at) + " is not " + clock(wanted.query.valid_at)
+  if visibility_eq(stored.visibility, wanted.visibility) == false:
+    return "rejected: visibility " + visibility_name(stored.visibility) + " is not " + visibility_name(wanted.visibility)
+  if stored.query.decided_at != wanted.query.decided_at:
+    return "rejected: cutoff " + clock(stored.query.decided_at) + " is not " + clock(wanted.query.decided_at)
   return "reused"
 
+// Verify malformed plans and unsound dead-read removal fail closed.
+fn verify_invalid_plans(q: Query, missing_q: Query): bool
+  let unknown_in: Vector<Step> = Vector<Step>::new().push(upload("missing_host", "buf")).push(reply("missing_host"))
+  if analyze_plan(Plan("unknown_input", unknown_in)).errors.length() == to_i64(0):
+    return false
+  let dup_def: Vector<Step> = Vector<Step>::new().push(read_as_of_decision(q)).push(read_as_of_decision(q)).push(reply("wind"))
+  if analyze_plan(Plan("duplicate_def", dup_def)).errors.length() == to_i64(0):
+    return false
+  let bad_op: Vector<Step> = Vector<Step>::new().push(read_as_of_decision(q)).push(upload("wind", "w")).push(dispatch_v1("unknown_op", "w", "", "out")).push(readback("out", "h")).push(reply("h"))
+  if analyze_plan(Plan("unsupported_op", bad_op)).errors.length() == to_i64(0):
+    return false
+  let with_dead_read: Vector<Step> = Vector<Step>::new()
+  for step in proposed_plan(q).steps.iter():
+    with_dead_read = with_dead_read.push(step)
+  let dead_read_plan: Vector<Step> = Vector<Step>::new().push(Step::ReadVisible(archive = 1, query = missing_q, visibility = Visibility::AsOfDecision, output = "unused_missing"))
+  for step in with_dead_read.iter():
+    dead_read_plan = dead_read_plan.push(step)
+  return semantic_differences(analyze_plan(Plan("with_failing_read", dead_read_plan)), analyze_plan(proposed_plan(q))).length() > to_i64(0)
+
 // ---------------------------------------------------------------
-// The demonstration
+// Executable demonstration and counterexample assertions
 // ---------------------------------------------------------------
 
 fn main(): i32
   let archive: Archive = fixture_archive()
-  let early: Query = Query(7, at(10, 0), at(9, 0))
+  let early: Query = default_query()
   let late: Query = Query(7, at(10, 0), at(9, 10))
   let before_any: Query = Query(7, at(10, 0), at(8, 0))
+  let other_cell: Query = Query(8, at(10, 0), at(9, 0))
+  let other_valid: Query = Query(7, at(11, 0), at(9, 0))
 
   print("=== reference ===")
   print("decided " + clock(early.decided_at) + ": " + outcome(predict(early, archive, Visibility::AsOfDecision)))
   print("decided " + clock(late.decided_at) + ": " + outcome(predict(late, archive, Visibility::AsOfDecision)))
   print("decided " + clock(before_any.decided_at) + ": " + outcome(predict(before_any, archive, Visibility::AsOfDecision)))
+  print("other cell " + i32_to_string(other_cell.cell) + " at " + clock(early.decided_at) + ": " + outcome(predict(other_cell, archive, Visibility::AsOfDecision)))
   let winds: Vector<i32> = Vector<i32>::new()
   winds = winds.push(8)
   winds = winds.push(12)
   let batch: Vector<i32> = predict_batch(winds)
-  print("batch [8, 12]: [" + i32_to_string(batch.get(to_i64(0))) + ", " + i32_to_string(batch.get(to_i64(1))) + "]")
+  let domain_ok: bool = verify_wind_domain()
+  let invalid_ok: bool = verify_invalid_plans(early, other_cell)
+  print("batch [8, 12]: [" + i32_to_string(batch.get(to_i64(0))) + ", " + i32_to_string(batch.get(to_i64(1))) + "], domain 0..1000 exact = " + bool_to_string(domain_ok) + ", malformed plans rejected = " + bool_to_string(invalid_ok))
 
   print("")
   print("=== plans ===")
-  print_plan(straightforward_plan())
-  print_plan(proposed_plan())
+  print_plan(straightforward_plan(early))
+  print_plan(proposed_plan(early))
 
   print("")
   print("=== reviews ===")
-  review(straightforward_plan(), proposed_plan(), 2)
-  review(proposed_plan(), latest_now_plan(), 2)
+  let ok_prop: bool = review(straightforward_plan(early), proposed_plan(early), 2)
+  let rej_latest: bool = review(proposed_plan(early), latest_now_plan(early), 2) == false
   print("  counterexample, decided " + clock(early.decided_at) + ": " + outcome(predict(early, archive, Visibility::AsOfDecision)) + " became " + outcome(predict(early, archive, Visibility::LatestNow)))
-  review(proposed_plan(), miswired_plan(), 2)
-  review(audited_plan(), proposed_plan(), 2)
-  review(audited_plan(), audited_shared_plan(), 2)
+  let rej_masked: bool = review(proposed_plan(early), two_read_masked_cutoff_plan(early), 2) == false
+  let rej_model: bool = review(model_v12_plan(early), substring_model_drift_plan(early), 2) == false
+  let rej_miswired: bool = review(proposed_plan(early), miswired_plan(early), 2) == false
+  let rej_dropped_obs: bool = review(audited_plan(early), proposed_plan(early), 2) == false
+  let rej_dup_obs: bool = review(audited_plan(early), duplicated_audit_plan(early), 2) == false
+  let rej_release: bool = review(proposed_plan(early), premature_release_plan(early), 2) == false
+  let ok_audited: bool = review(audited_plan(early), audited_shared_plan(early), 2)
 
   print("")
   print("=== reuse ===")
-  let stored: ResultKey = ResultKey("predict", "v1", 1, at(9, 0))
-  print("same key: " + reuse_verdict(stored, ResultKey("predict", "v1", 1, at(9, 0))))
-  print("other model: " + reuse_verdict(stored, ResultKey("predict", "v2", 1, at(9, 0))))
-  print("other archive: " + reuse_verdict(stored, ResultKey("predict", "v1", 2, at(9, 0))))
-  print("other cutoff: " + reuse_verdict(stored, ResultKey("predict", "v1", 1, at(9, 10))))
+  let stored: ResultKey = make_result_key("predict", "v1", 1, early, Visibility::AsOfDecision)
+  let v_same: string = reuse_verdict(stored, make_result_key("predict", "v1", 1, early, Visibility::AsOfDecision))
+  let v_model: string = reuse_verdict(stored, make_result_key("predict", "v2", 1, early, Visibility::AsOfDecision))
+  let v_arch: string = reuse_verdict(stored, make_result_key("predict", "v1", 2, early, Visibility::AsOfDecision))
+  let v_cell: string = reuse_verdict(stored, make_result_key("predict", "v1", 1, other_cell, Visibility::AsOfDecision))
+  let v_valid: string = reuse_verdict(stored, make_result_key("predict", "v1", 1, other_valid, Visibility::AsOfDecision))
+  let v_vis: string = reuse_verdict(stored, make_result_key("predict", "v1", 1, early, Visibility::LatestNow))
+  let v_cut: string = reuse_verdict(stored, make_result_key("predict", "v1", 1, late, Visibility::AsOfDecision))
+  print("same key: " + v_same)
+  print("other model: " + v_model)
+  print("other archive: " + v_arch)
+  print("other cell (7=76 min vs 8=missing): " + v_cell)
+  print("other valid_at: " + v_valid)
+  print("other visibility: " + v_vis)
+  print("other cutoff: " + v_cut)
+
+  if domain_ok == false or invalid_ok == false or ok_prop == false or rej_latest == false or rej_masked == false or rej_model == false or rej_miswired == false or rej_dropped_obs == false or rej_dup_obs == false or rej_release == false or ok_audited == false:
+    return 1
+  if v_same != "reused" or starts_with(v_cell, "rejected:") == false or starts_with(v_valid, "rejected:") == false or starts_with(v_vis, "rejected:") == false:
+    return 1
 
   print("")
   print("=== records ===")
-  // The count lets the runner tell a complete stream from a damaged one.
-  let record_count: i64 = straightforward_plan().steps.length() + proposed_plan().steps.length() + audited_shared_plan().steps.length()
+  let record_count: i64 = straightforward_plan(early).steps.length() + proposed_plan(early).steps.length() + audited_shared_plan(early).steps.length()
   print("records\t" + i64_to_string(record_count))
-  print_records(straightforward_plan())
-  print_records(proposed_plan())
-  print_records(audited_shared_plan())
+  print_records(straightforward_plan(early))
+  print_records(proposed_plan(early))
+  print_records(audited_shared_plan(early))
   return 0
