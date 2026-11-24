@@ -14,7 +14,7 @@ so a machine with no Dao on it can always rebuild the language:
 | Fully hosted | not yet written | all Dao, with its own runtime and code generation |
 
 Line counts reflect the current branch over `50fd1fe`, on 2026-11-24.  The table counts
-31,973 lines of authored Dao for comparison.
+31,971 lines of authored Dao for comparison.
 
 ## Programs
 
@@ -33,7 +33,7 @@ Line counts reflect the current branch over `50fd1fe`, on 2026-11-24.  The table
 | Stopgap | Language | Lines | Replacement |
 |---|---|---|---|
 | `bootstrap/assemble.sh` | Shell | 113 | real modules, one import boundary at a time, after which assembly goes away |
-| `bootstrap/stage2.sh`, `audit_closure.sh`, `validate_ir.sh` | Shell | 983 | Dao programs, which need a process API in the standard library |
+| `bootstrap/stage2.sh`, `audit_closure.sh`, `validate_ir.sh` | Shell | 990 | Dao programs, which need a process API in the standard library |
 | `compiler/driver/multifile_build_test.sh`, `tools/playground/dev.sh` | Shell | 194 | the same process API |
 | `Taskfile.yml` | YAML for Task | 208 | a build tool written in Dao |
 | `CMakeLists.txt` files and `CMakePresets.json` | CMake | 519 | stays with the bootstrap tier, and a Dao build tool serves the other tiers |

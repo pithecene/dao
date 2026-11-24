@@ -295,14 +295,25 @@ fn tk_name(kind: TK): string
       return "Error"
   return "Unknown"
 
-class LexState:
+class ScanCursor:
   pos: i64
   paren_depth: i64
   at_line_start: bool
-  indent_stack: Vector<i64>
-  indent_depth: i64
+
+class IndentStack:
+  levels: Vector<i64>
+  depth: i64
+
+class LexState:
+  cursor: ScanCursor
+  indent: IndentStack
   tokens: Vector<Token>
   diags: Vector<Diagnostic>
+
+fn lex_state_new(): LexState
+  let zero: i64 = to_i64(0)
+  let levels: Vector<i64> = Vector<i64>::new().push(zero)
+  return LexState(ScanCursor(zero, zero, true), IndentStack(levels, to_i64(1)), Vector<Token>::new(), Vector<Diagnostic>::new())
 
 fn emit1(tokens: Vector<Token>, kind: TK, pos: i64): Vector<Token>
   return tokens.push(Token(kind, pos, to_i64(1)))
@@ -311,67 +322,72 @@ fn emit2(tokens: Vector<Token>, kind: TK, pos: i64): Vector<Token>
   return tokens.push(Token(kind, pos, to_i64(2)))
 
 fn indent_top(st: LexState): i64
-  return st.indent_stack.get(st.indent_depth - to_i64(1))
+  return st.indent.levels.get(st.indent.depth - to_i64(1))
 
 fn indent_push(st: LexState, spaces: i64): LexState
-  if st.indent_depth < st.indent_stack.length():
-    st.indent_stack = st.indent_stack.set(st.indent_depth, spaces)
+  let levels: Vector<i64> = st.indent.levels
+  let depth: i64 = st.indent.depth
+  if depth < levels.length():
+    levels = levels.set(depth, spaces)
   else:
-    st.indent_stack = st.indent_stack.push(spaces)
-  st.indent_depth = st.indent_depth + to_i64(1)
+    levels = levels.push(spaces)
+  st.indent = IndentStack(levels, depth + to_i64(1))
   return st
 
 fn indent_pop(st: LexState): LexState
-  st.indent_depth = st.indent_depth - to_i64(1)
+  st.indent = IndentStack(st.indent.levels, st.indent.depth - to_i64(1))
   return st
 
 fn lex_line_start(st: LexState, src: string, src_len: i64): LexState
-  let line_begin: i64 = st.pos
+  let pos: i64 = st.cursor.pos
+  let line_begin: i64 = pos
   let spaces: i64 = to_i64(0)
   let one: i64 = to_i64(1)
   let zero: i64 = to_i64(0)
-  while st.pos < src_len:
-    let lc: i32 = char_at(src, st.pos)
+  while pos < src_len:
+    let lc: i32 = char_at(src, pos)
     if lc == 32:
       spaces = spaces + one
-      st.pos = st.pos + one
+      pos = pos + one
     else if lc == 9:
-      st.diags = st.diags.push(make_error(Span(st.pos, one), "tabs are not allowed in Dao source"))
-      st.tokens = st.tokens.push(Token(TK::Error, st.pos, one))
+      st.diags = st.diags.push(make_error(Span(pos, one), "tabs are not allowed in Dao source"))
+      st.tokens = st.tokens.push(Token(TK::Error, pos, one))
       spaces = spaces + one
-      st.pos = st.pos + one
+      pos = pos + one
     else:
       break
 
-  if st.pos < src_len:
-    let lc: i32 = char_at(src, st.pos)
+  if pos < src_len:
+    let lc: i32 = char_at(src, pos)
     if lc == 10:
-      st.pos = st.pos + one
+      st.cursor = ScanCursor(pos + one, st.cursor.paren_depth, true)
       return st
     if lc == 13:
-      st.pos = st.pos + one
-      if st.pos < src_len:
-        if char_at(src, st.pos) == 10:
-          st.pos = st.pos + one
+      pos = pos + one
+      if pos < src_len:
+        if char_at(src, pos) == 10:
+          pos = pos + one
+      st.cursor = ScanCursor(pos, st.cursor.paren_depth, true)
       return st
     if lc == 47:
-      if st.pos + one < src_len:
-        if char_at(src, st.pos + one) == 47:
-          while st.pos < src_len:
-            if char_at(src, st.pos) == 10:
+      if pos + one < src_len:
+        if char_at(src, pos + one) == 47:
+          while pos < src_len:
+            if char_at(src, pos) == 10:
               break
-            st.pos = st.pos + one
-          if st.pos < src_len:
-            st.pos = st.pos + one
+            pos = pos + one
+          if pos < src_len:
+            pos = pos + one
+          st.cursor = ScanCursor(pos, st.cursor.paren_depth, true)
           return st
 
-  if st.paren_depth == zero:
+  if st.cursor.paren_depth == zero:
     let current_indent: i64 = indent_top(st)
     if spaces > current_indent:
       st = indent_push(st, spaces)
       st.tokens = st.tokens.push(Token(TK::Indent, line_begin, spaces))
     else if spaces < current_indent:
-      while st.indent_depth > one:
+      while st.indent.depth > one:
         if indent_top(st) <= spaces:
           break
         st = indent_pop(st)
@@ -379,122 +395,136 @@ fn lex_line_start(st: LexState, src: string, src_len: i64): LexState
       if indent_top(st) != spaces:
         st.diags = st.diags.push(make_error(Span(line_begin, spaces), "inconsistent indentation"))
         st.tokens = st.tokens.push(Token(TK::Error, line_begin, spaces))
-  st.at_line_start = false
+  st.cursor = ScanCursor(pos, st.cursor.paren_depth, false)
   return st
 
 fn lex_string(st: LexState, src: string, src_len: i64): LexState
   let one: i64 = to_i64(1)
-  let str_start: i64 = st.pos
-  st.pos = st.pos + one
+  let str_start: i64 = st.cursor.pos
+  let pos: i64 = str_start + one
   let terminated: bool = false
   let done: bool = false
-  while st.pos < src_len:
+  while pos < src_len:
     if done:
       break
-    let sc: i32 = char_at(src, st.pos)
+    let sc: i32 = char_at(src, pos)
     if sc == 34:
-      st.pos = st.pos + one
+      pos = pos + one
       done = true
       terminated = true
     else if sc == 92:
-      st.pos = st.pos + one
-      if st.pos < src_len:
-        st.pos = st.pos + one
+      pos = pos + one
+      if pos < src_len:
+        pos = pos + one
     else if sc == 10:
-      st.diags = st.diags.push(make_error(Span(str_start, st.pos - str_start), "unterminated string literal"))
+      st.diags = st.diags.push(make_error(Span(str_start, pos - str_start), "unterminated string literal"))
       done = true
     else:
-      st.pos = st.pos + one
+      pos = pos + one
   if done == false:
-    st.diags = st.diags.push(make_error(Span(str_start, st.pos - str_start), "unterminated string literal"))
+    st.diags = st.diags.push(make_error(Span(str_start, pos - str_start), "unterminated string literal"))
   if terminated:
-    st.tokens = st.tokens.push(Token(TK::StringLiteral, str_start, st.pos - str_start))
+    st.tokens = st.tokens.push(Token(TK::StringLiteral, str_start, pos - str_start))
   else:
-    st.tokens = st.tokens.push(Token(TK::Error, str_start, st.pos - str_start))
+    st.tokens = st.tokens.push(Token(TK::Error, str_start, pos - str_start))
+  st.cursor = ScanCursor(pos, st.cursor.paren_depth, false)
   return st
 
 fn lex_number(st: LexState, src: string, src_len: i64): LexState
   let one: i64 = to_i64(1)
-  let num_start: i64 = st.pos
-  while st.pos < src_len:
-    if ascii::is_digit(char_at(src, st.pos)) == false:
+  let num_start: i64 = st.cursor.pos
+  let pos: i64 = num_start
+  while pos < src_len:
+    if ascii::is_digit(char_at(src, pos)) == false:
       break
-    st.pos = st.pos + one
+    pos = pos + one
   let is_float: bool = false
-  if st.pos < src_len:
-    if char_at(src, st.pos) == 46:
-      if st.pos + one < src_len:
-        if ascii::is_digit(char_at(src, st.pos + one)):
+  if pos < src_len:
+    if char_at(src, pos) == 46:
+      if pos + one < src_len:
+        if ascii::is_digit(char_at(src, pos + one)):
           is_float = true
-          st.pos = st.pos + one
-          while st.pos < src_len:
-            if ascii::is_digit(char_at(src, st.pos)) == false:
+          pos = pos + one
+          while pos < src_len:
+            if ascii::is_digit(char_at(src, pos)) == false:
               break
-            st.pos = st.pos + one
+            pos = pos + one
   if is_float:
-    st.tokens = st.tokens.push(Token(TK::FloatLiteral, num_start, st.pos - num_start))
+    st.tokens = st.tokens.push(Token(TK::FloatLiteral, num_start, pos - num_start))
   else:
-    st.tokens = st.tokens.push(Token(TK::IntLiteral, num_start, st.pos - num_start))
+    st.tokens = st.tokens.push(Token(TK::IntLiteral, num_start, pos - num_start))
+  st.cursor = ScanCursor(pos, st.cursor.paren_depth, false)
   return st
 
 fn lex_ident_or_keyword(st: LexState, src: string, src_len: i64): LexState
   let one: i64 = to_i64(1)
-  let id_start: i64 = st.pos
-  while st.pos < src_len:
-    if ascii::is_alnum(char_at(src, st.pos)) == false:
+  let id_start: i64 = st.cursor.pos
+  let pos: i64 = id_start
+  while pos < src_len:
+    if ascii::is_alnum(char_at(src, pos)) == false:
       break
-    st.pos = st.pos + one
-  let kind: TK = classify_keyword(src, id_start, st.pos - id_start)
-  st.tokens = st.tokens.push(Token(kind, id_start, st.pos - id_start))
+    pos = pos + one
+  let kind: TK = classify_keyword(src, id_start, pos - id_start)
+  st.tokens = st.tokens.push(Token(kind, id_start, pos - id_start))
+  st.cursor = ScanCursor(pos, st.cursor.paren_depth, false)
   return st
 
 fn lex_two_or_one(st: LexState, src: string, src_len: i64, second_ch: i32, two_kind: TK, one_kind: TK): LexState
-  if st.pos + to_i64(1) < src_len:
-    if char_at(src, st.pos + to_i64(1)) == second_ch:
-      st.tokens = emit2(st.tokens, two_kind, st.pos)
-      st.pos = st.pos + to_i64(2)
+  let pos: i64 = st.cursor.pos
+  if pos + to_i64(1) < src_len:
+    if char_at(src, pos + to_i64(1)) == second_ch:
+      st.tokens = emit2(st.tokens, two_kind, pos)
+      st.cursor = ScanCursor(pos + to_i64(2), st.cursor.paren_depth, false)
       return st
-  st.tokens = emit1(st.tokens, one_kind, st.pos)
-  st.pos = st.pos + to_i64(1)
+  st.tokens = emit1(st.tokens, one_kind, pos)
+  st.cursor = ScanCursor(pos + to_i64(1), st.cursor.paren_depth, false)
+  return st
+
+fn lex_single(st: LexState, kind: TK, depth_delta: i64): LexState
+  let pos: i64 = st.cursor.pos
+  let next_depth: i64 = st.cursor.paren_depth + depth_delta
+  if next_depth < to_i64(0):
+    next_depth = to_i64(0)
+  st.tokens = emit1(st.tokens, kind, pos)
+  st.cursor = ScanCursor(pos + to_i64(1), next_depth, false)
   return st
 
 fn lex_token(st: LexState, src: string, src_len: i64): LexState
   let one: i64 = to_i64(1)
   let zero: i64 = to_i64(0)
-  let ch: i32 = char_at(src, st.pos)
+  let pos: i64 = st.cursor.pos
+  let ch: i32 = char_at(src, pos)
 
   if ch == 32:
-    st.pos = st.pos + one
+    st.cursor = ScanCursor(pos + one, st.cursor.paren_depth, false)
     return st
 
   if ch == 10:
-    if st.paren_depth == zero:
-      st.tokens = emit1(st.tokens, TK::Newline, st.pos)
-    st.pos = st.pos + one
-    st.at_line_start = true
+    if st.cursor.paren_depth == zero:
+      st.tokens = emit1(st.tokens, TK::Newline, pos)
+    st.cursor = ScanCursor(pos + one, st.cursor.paren_depth, true)
     return st
 
   if ch == 13:
-    st.pos = st.pos + one
-    if st.pos < src_len:
-      if char_at(src, st.pos) == 10:
-        st.pos = st.pos + one
-    if st.paren_depth == zero:
-      st.tokens = emit1(st.tokens, TK::Newline, st.pos - one)
-    st.at_line_start = true
+    pos = pos + one
+    if pos < src_len:
+      if char_at(src, pos) == 10:
+        pos = pos + one
+    if st.cursor.paren_depth == zero:
+      st.tokens = emit1(st.tokens, TK::Newline, pos - one)
+    st.cursor = ScanCursor(pos, st.cursor.paren_depth, true)
     return st
 
   if ch == 47:
-    if st.pos + one < src_len:
-      if char_at(src, st.pos + one) == 47:
-        while st.pos < src_len:
-          if char_at(src, st.pos) == 10:
+    if pos + one < src_len:
+      if char_at(src, pos + one) == 47:
+        while pos < src_len:
+          if char_at(src, pos) == 10:
             break
-          st.pos = st.pos + one
+          pos = pos + one
+        st.cursor = ScanCursor(pos, st.cursor.paren_depth, false)
         return st
-    st.tokens = emit1(st.tokens, TK::Slash, st.pos)
-    st.pos = st.pos + one
-    return st
+    return lex_single(st, TK::Slash, zero)
 
   if ch == 34:
     return lex_string(st, src, src_len)
@@ -506,19 +536,17 @@ fn lex_token(st: LexState, src: string, src_len: i64): LexState
   if ch == 58:
     return lex_two_or_one(st, src, src_len, 58, TK::ColonColon, TK::Colon)
   if ch == 61:
-    if st.pos + one < src_len:
-      let nx: i32 = char_at(src, st.pos + one)
+    if pos + one < src_len:
+      let nx: i32 = char_at(src, pos + one)
       if nx == 61:
-        st.tokens = emit2(st.tokens, TK::EqEq, st.pos)
-        st.pos = st.pos + to_i64(2)
+        st.tokens = emit2(st.tokens, TK::EqEq, pos)
+        st.cursor = ScanCursor(pos + to_i64(2), st.cursor.paren_depth, false)
         return st
       if nx == 62:
-        st.tokens = emit2(st.tokens, TK::FatArrow, st.pos)
-        st.pos = st.pos + to_i64(2)
+        st.tokens = emit2(st.tokens, TK::FatArrow, pos)
+        st.cursor = ScanCursor(pos + to_i64(2), st.cursor.paren_depth, false)
         return st
-    st.tokens = emit1(st.tokens, TK::Eq, st.pos)
-    st.pos = st.pos + one
-    return st
+    return lex_single(st, TK::Eq, zero)
   if ch == 33:
     return lex_two_or_one(st, src, src_len, 61, TK::BangEq, TK::Bang)
   if ch == 60:
@@ -531,79 +559,49 @@ fn lex_token(st: LexState, src: string, src_len: i64): LexState
     return lex_two_or_one(st, src, src_len, 62, TK::PipeGt, TK::Pipe)
 
   if ch == 43:
-    st.tokens = emit1(st.tokens, TK::Plus, st.pos)
-    st.pos = st.pos + one
-    return st
+    return lex_single(st, TK::Plus, zero)
   if ch == 42:
-    st.tokens = emit1(st.tokens, TK::Star, st.pos)
-    st.pos = st.pos + one
-    return st
+    return lex_single(st, TK::Star, zero)
   if ch == 37:
-    st.tokens = emit1(st.tokens, TK::Percent, st.pos)
-    st.pos = st.pos + one
-    return st
+    return lex_single(st, TK::Percent, zero)
   if ch == 38:
-    st.tokens = emit1(st.tokens, TK::Amp, st.pos)
-    st.pos = st.pos + one
-    return st
+    return lex_single(st, TK::Amp, zero)
   if ch == 46:
-    st.tokens = emit1(st.tokens, TK::Dot, st.pos)
-    st.pos = st.pos + one
-    return st
+    return lex_single(st, TK::Dot, zero)
   if ch == 44:
-    st.tokens = emit1(st.tokens, TK::Comma, st.pos)
-    st.pos = st.pos + one
-    return st
+    return lex_single(st, TK::Comma, zero)
   if ch == 63:
-    st.tokens = emit1(st.tokens, TK::Question, st.pos)
-    st.pos = st.pos + one
-    return st
+    return lex_single(st, TK::Question, zero)
 
   if ch == 40:
-    st.tokens = emit1(st.tokens, TK::LParen, st.pos)
-    st.paren_depth = st.paren_depth + one
-    st.pos = st.pos + one
-    return st
+    return lex_single(st, TK::LParen, one)
   if ch == 41:
-    st.tokens = emit1(st.tokens, TK::RParen, st.pos)
-    if st.paren_depth > zero:
-      st.paren_depth = st.paren_depth - one
-    st.pos = st.pos + one
-    return st
+    return lex_single(st, TK::RParen, to_i64(-1))
   if ch == 91:
-    st.tokens = emit1(st.tokens, TK::LBracket, st.pos)
-    st.paren_depth = st.paren_depth + one
-    st.pos = st.pos + one
-    return st
+    return lex_single(st, TK::LBracket, one)
   if ch == 93:
-    st.tokens = emit1(st.tokens, TK::RBracket, st.pos)
-    if st.paren_depth > zero:
-      st.paren_depth = st.paren_depth - one
-    st.pos = st.pos + one
-    return st
+    return lex_single(st, TK::RBracket, to_i64(-1))
 
-  st.diags = st.diags.push(make_error(Span(st.pos, one), "unexpected character"))
-  st.tokens = emit1(st.tokens, TK::Error, st.pos)
-  st.pos = st.pos + one
+  st.diags = st.diags.push(make_error(Span(pos, one), "unexpected character"))
+  st.tokens = emit1(st.tokens, TK::Error, pos)
+  st.cursor = ScanCursor(pos + one, st.cursor.paren_depth, false)
   return st
 
 fn lex(src: string): LexResult
   let src_len: i64 = length(src)
   let zero: i64 = to_i64(0)
   let one: i64 = to_i64(1)
-  let indent_stack: Vector<i64> = Vector<i64>::new()
-  indent_stack = indent_stack.push(zero)
-  let st: LexState = LexState(zero, zero, true, indent_stack, one, Vector<Token>::new(), Vector<Diagnostic>::new())
+  let st: LexState = lex_state_new()
 
-  while st.pos < src_len:
-    if st.at_line_start:
+  while st.cursor.pos < src_len:
+    if st.cursor.at_line_start:
       st = lex_line_start(st, src, src_len)
     else:
       st = lex_token(st, src, src_len)
 
-  while st.indent_depth > one:
+  while st.indent.depth > one:
     st = indent_pop(st)
-    st.tokens = st.tokens.push(Token(TK::Dedent, st.pos, zero))
+    st.tokens = st.tokens.push(Token(TK::Dedent, st.cursor.pos, zero))
 
-  st.tokens = st.tokens.push(Token(TK::Eof, st.pos, zero))
+  st.tokens = st.tokens.push(Token(TK::Eof, st.cursor.pos, zero))
   return LexResult(st.tokens, st.diags)
