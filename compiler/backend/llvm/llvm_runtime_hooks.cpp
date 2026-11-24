@@ -44,8 +44,10 @@ void LlvmRuntimeHooks::declare_io_hooks() {
   auto& ctx = module_.getContext();
   auto* str_type = types_.string_type();
   auto* str_ptr = llvm::PointerType::getUnqual(str_type);
+  auto* ptr = llvm::PointerType::getUnqual(ctx);
   auto* void_ty = llvm::Type::getVoidTy(ctx);
   auto* i1 = llvm::Type::getInt1Ty(ctx);
+  auto* i64 = llvm::Type::getInt64Ty(ctx);
 
   // __dao_io_write_stdout(msg: *dao.string): void
   ensure_declared(runtime_hooks::kWriteStdout,
@@ -59,6 +61,10 @@ void LlvmRuntimeHooks::declare_io_hooks() {
   ensure_declared(runtime_hooks::kReadFile,
                   llvm::FunctionType::get(str_type, {str_ptr}, false));
 
+  // __dao_io_try_read_file(path: *dao.string, ok_out: *i32): dao.string
+  ensure_declared(runtime_hooks::kTryReadFile,
+                  llvm::FunctionType::get(str_type, {str_ptr, ptr}, false));
+
   // __dao_io_write_file(path: *dao.string, content: *dao.string): bool
   ensure_declared(runtime_hooks::kWriteFile,
                   llvm::FunctionType::get(i1, {str_ptr, str_ptr}, false));
@@ -66,6 +72,14 @@ void LlvmRuntimeHooks::declare_io_hooks() {
   // __dao_io_file_exists(path: *dao.string): bool
   ensure_declared(runtime_hooks::kFileExists,
                   llvm::FunctionType::get(i1, {str_ptr}, false));
+
+  // __dao_io_arg_count(): i64
+  ensure_declared(runtime_hooks::kArgCount,
+                  llvm::FunctionType::get(i64, {}, false));
+
+  // __dao_io_arg_at(index: i64): dao.string
+  ensure_declared(runtime_hooks::kArgAt,
+                  llvm::FunctionType::get(str_type, {i64}, false));
 }
 
 // ---------------------------------------------------------------------------

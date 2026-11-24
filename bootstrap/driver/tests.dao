@@ -1,0 +1,199 @@
+module bootstrap::driver_tests
+// Contract tests for bootstrap driver CLI argument parsing, manifest
+// grammar validation, duplicate detection, and non-trapping file loads.
+
+fn contains_text(haystack: string, needle: string): bool
+  return index_of(haystack, needle) >= to_i64(0)
+
+fn parse_fails_with(listing: string, needle: string): bool
+  match parse_manifest(listing):
+    Result::Ok(spec):
+      return false
+    Result::Err(err):
+      return contains_text(err, needle)
+
+fn load_fails_with(path: string, needle: string): bool
+  match load_manifest(path):
+    Result::Ok(loaded):
+      return false
+    Result::Err(err):
+      return contains_text(err, needle)
+
+fn test_work_dir(): string
+  if arg_count() >= to_i64(2):
+    let dir: string = arg_at(to_i64(1))
+    if dir != "":
+      return dir
+  return "bootstrap/driver/out/driver_tests_work"
+
+fn argv2(a0: string, a1: string): Vector<string>
+  let v: Vector<string> = Vector<string>::new()
+  v = v.push(a0)
+  v = v.push(a1)
+  return v
+
+fn argv3(a0: string, a1: string, a2: string): Vector<string>
+  let v: Vector<string> = argv2(a0, a1)
+  return v.push(a2)
+
+fn main(): i32
+  print("=== bootstrap/driver: manifest and request validation ===")
+  let pass_count: i32 = 0
+  let total: i32 = 12
+
+  // 1. Positional manifest argument resolves cleanly.
+  let ok1: bool = false
+  match resolve_manifest_arg(argv2("driver", "out/run1/stage2.manifest")):
+    Result::Ok(path):
+      ok1 = path == "out/run1/stage2.manifest"
+    Result::Err(err):
+      ok1 = false
+  if ok1:
+    print("PASS cli_positional_manifest_arg")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL cli_positional_manifest_arg")
+
+  // 2. Explicit --manifest flag resolves cleanly.
+  let ok2: bool = false
+  match resolve_manifest_arg(argv3("driver", "--manifest", "out/run2/stage3.manifest")):
+    Result::Ok(path):
+      ok2 = path == "out/run2/stage3.manifest"
+    Result::Err(err):
+      ok2 = false
+  if ok2:
+    print("PASS cli_flag_manifest_arg")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL cli_flag_manifest_arg")
+
+  // 3. Missing, unknown-flag, and extra CLI arguments fail closed.
+  let v_only_prog: Vector<string> = Vector<string>::new()
+  v_only_prog = v_only_prog.push("driver")
+  let bad_none: bool = false
+  match resolve_manifest_arg(v_only_prog):
+    Result::Ok(p):
+      bad_none = false
+    Result::Err(e):
+      bad_none = contains_text(e, "usage:")
+  let bad_flag: bool = false
+  match resolve_manifest_arg(argv2("driver", "--unknown")):
+    Result::Ok(p):
+      bad_flag = false
+    Result::Err(e):
+      bad_flag = contains_text(e, "usage:")
+  let bad_extra: bool = false
+  match resolve_manifest_arg(argv3("driver", "a.manifest", "b.manifest")):
+    Result::Ok(p):
+      bad_extra = false
+    Result::Err(e):
+      bad_extra = contains_text(e, "usage:")
+  if bad_none and bad_flag and bad_extra:
+    print("PASS cli_rejects_malformed_invocations")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL cli_rejects_malformed_invocations")
+
+  // 4. Valid LF and CRLF manifests parse with exact output and role counts.
+  let ok_lf: bool = false
+  match parse_manifest("output build/out.ll\nprelude stdlib/core/option.dao\nsource app/main.dao\nsource app/lib.dao\n"):
+    Result::Ok(spec):
+      if spec.entries.length() == to_i64(3):
+        ok_lf = spec.output == "build/out.ll" and spec.source_count == to_i64(2) and spec.entries.get(to_i64(0)).is_prelude and spec.entries.get(to_i64(1)).is_prelude == false
+    Result::Err(err):
+      ok_lf = false
+  let ok_crlf: bool = false
+  match parse_manifest("output build/crlf.ll\r\nprelude stdlib/core/result.dao\r\nsource app/main.dao\r\n"):
+    Result::Ok(spec):
+      ok_crlf = spec.output == "build/crlf.ll" and spec.entries.length() == to_i64(2) and spec.source_count == to_i64(1)
+    Result::Err(err):
+      ok_crlf = false
+  if ok_lf and ok_crlf:
+    print("PASS parse_valid_lf_and_crlf_manifests")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL parse_valid_lf_and_crlf_manifests")
+
+  // 5. Empty and truncated manifests without a trailing newline fail closed.
+  if parse_fails_with("", "empty") and parse_fails_with("output a.ll\nsource x.dao", "terminating newline") and parse_fails_with("output a.ll\nsour", "terminating newline"):
+    print("PASS parse_rejects_empty_and_truncated_manifests")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL parse_rejects_empty_and_truncated_manifests")
+
+  // 6. Empty lines and embedded carriage returns fail closed.
+  if parse_fails_with("output a.ll\n\nsource x.dao\n", "empty") and parse_fails_with("output a\r.ll\nsource x.dao\n", "carriage return"):
+    print("PASS parse_rejects_blank_lines_and_embedded_cr")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL parse_rejects_blank_lines_and_embedded_cr")
+
+  // 7. Malformed directives and unknown directive keywords fail closed.
+  if parse_fails_with("output\nsource x.dao\n", "<directive> <path>") and parse_fails_with("output \nsource x.dao\n", "empty path") and parse_fails_with("output a.ll\ninclude x.dao\nsource y.dao\n", "unknown directive"):
+    print("PASS parse_rejects_unknown_and_malformed_directives")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL parse_rejects_unknown_and_malformed_directives")
+
+  // 8. Missing output and duplicate output directives fail closed.
+  if parse_fails_with("source x.dao\n", "no output path") and parse_fails_with("output a.ll\noutput b.ll\nsource x.dao\n", "duplicate output"):
+    print("PASS parse_rejects_missing_and_duplicate_output")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL parse_rejects_missing_and_duplicate_output")
+
+  // 9. Manifests truncated after prelude lines with zero source lines fail closed.
+  if parse_fails_with("output a.ll\nprelude stdlib/core/option.dao\n", "no source files"):
+    print("PASS parse_rejects_prelude_only_manifest")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL parse_rejects_prelude_only_manifest")
+
+  // 10. Duplicate input paths and output-vs-input path collisions fail closed.
+  let dup_src: bool = parse_fails_with("output a.ll\nsource x.dao\nsource x.dao\n", "duplicate input path")
+  let dup_pre_src: bool = parse_fails_with("output a.ll\nprelude x.dao\nsource x.dao\n", "duplicate input path")
+  let out_collides: bool = parse_fails_with("output x.dao\nsource x.dao\n", "duplicates an input path")
+  if dup_src and dup_pre_src and out_collides:
+    print("PASS parse_rejects_duplicate_and_colliding_paths")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL parse_rejects_duplicate_and_colliding_paths")
+
+  // 11. File-backed load_manifest reads prelude and source files, including empty files.
+  let work: string = test_work_dir()
+  let pre_path: string = work + "/pre.dao"
+  let src_path: string = work + "/main.dao"
+  let empty_path: string = work + "/empty.dao"
+  let manifest_ok_path: string = work + "/valid.manifest"
+  let wrote_all: bool = write_file(pre_path, "module core::p\n") and write_file(src_path, "module app::m\nfn main(): i32 -> 0\n") and write_file(empty_path, "") and write_file(manifest_ok_path, "output " + work + "/out.ll\nprelude " + pre_path + "\nsource " + src_path + "\nsource " + empty_path + "\n")
+  let loaded_ok: bool = false
+  if wrote_all:
+    match load_manifest(manifest_ok_path):
+      Result::Ok(m):
+        if m.inputs.length() == to_i64(3):
+          loaded_ok = m.output == work + "/out.ll" and m.inputs.get(to_i64(0)).is_prelude and m.inputs.get(to_i64(1)).is_prelude == false and m.inputs.get(to_i64(2)).source_text == ""
+      Result::Err(err):
+        loaded_ok = false
+  if loaded_ok:
+    print("PASS load_manifest_reads_files_on_disk")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL load_manifest_reads_files_on_disk")
+
+  // 12. Missing manifests, missing source files, and directories return Err without trapping.
+  let missing_src_manifest: string = work + "/missing_src.manifest"
+  let dir_src_manifest: string = work + "/dir_src.manifest"
+  let wrote_neg: bool = write_file(missing_src_manifest, "output " + work + "/neg1.ll\nsource " + work + "/no_such_file.dao\n") and write_file(dir_src_manifest, "output " + work + "/neg2.ll\nsource " + work + "\n")
+  let neg_missing_manifest: bool = load_fails_with(work + "/does_not_exist.manifest", "cannot read manifest")
+  let neg_missing_source: bool = wrote_neg and load_fails_with(missing_src_manifest, "cannot read source")
+  let neg_dir_source: bool = wrote_neg and load_fails_with(dir_src_manifest, "directory")
+  if neg_missing_manifest and neg_missing_source and neg_dir_source:
+    print("PASS load_manifest_rejects_unreadable_and_directory_inputs")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL load_manifest_rejects_unreadable_and_directory_inputs")
+
+  print(i32_to_string(pass_count) + " / " + i32_to_string(total) + " passed")
+  if pass_count == total:
+    return 0
+  return 1

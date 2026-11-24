@@ -77,7 +77,7 @@ fn expect_node_count_min(label: string, pr: PR, min_count: i64): bool
 
 // Helper to parse an expression snippet
 fn parse_expr_str(src: string): PR
-  let lr: LexResult = lex(src)
+  let lr: lexer::LexResult = lexer::lex(src)
   let pc: PC = PC(lr.tokens, src)
   let ps: PS = PS(to_i64(0), Vector<Node>::new(), Vector<i64>::new(), lr.diagnostics)
   return parse_expr(pc, ps)

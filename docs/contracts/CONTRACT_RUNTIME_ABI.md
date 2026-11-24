@@ -14,15 +14,15 @@ ownership rules.
 
 This contract covers the **hosted-native** execution path only. It
 defines the minimum runtime surface required for compiler-generated
-binaries to execute using the Dao prelude (`stdlib/core/`) without
-user-written host-language glue.
+binaries to execute using the Dao prelude (`stdlib/core/` and
+`stdlib/io/`) without user-written host-language glue.
 
 Out of scope:
 
 - parallel/GPU execution runtime
 - scheduler/executor architecture
 - allocator design
-- filesystem/network/IO beyond stdout
+- network, directory traversal, and general filesystem management beyond whole-file reads, writes, and process arguments
 
 ## Strategic posture
 
@@ -51,7 +51,7 @@ Domains:
 
 | Domain     | Scope                                      |
 |------------|--------------------------------------------|
-| `io`       | Output, input (currently stdout only)      |
+| `io`       | Console output, whole-file IO, and process arguments |
 | `eq`       | Equality comparison                        |
 | `conv`     | Value-to-value conversion (e.g. to_string) |
 | `gen`      | Generator frame allocation and lifetime    |
@@ -67,8 +67,11 @@ Examples:
 | `__dao_io_write_stdout`   | `(msg: string): void`                |
 | `__dao_io_write_stderr`   | `(msg: string): void`                |
 | `__dao_io_read_file`      | `(path: string): string`             |
+| `__dao_io_try_read_file`  | `(path: string, ok_out: Ptr<i32>): string` |
 | `__dao_io_write_file`     | `(path: string, content: string): bool` |
 | `__dao_io_file_exists`    | `(path: string): bool`               |
+| `__dao_io_arg_count`      | `(): i64`                            |
+| `__dao_io_arg_at`         | `(index: i64): string`               |
 | `__dao_eq_i8`             | `(a: i8, b: i8): bool`              |
 | `__dao_eq_i16`            | `(a: i16, b: i16): bool`            |
 | `__dao_eq_i32`            | `(a: i32, b: i32): bool`            |
@@ -337,7 +340,8 @@ For the current supported hook slice:
 
 6. **String-producing runtime hooks return buffers owned by the
    current domain.**  `__dao_str_concat`, `__dao_str_substring`,
-   `__dao_str_from_bytes`, `__dao_io_read_file`, and all
+   `__dao_str_from_bytes`, `__dao_io_read_file`,
+   `__dao_io_try_read_file`, `__dao_io_arg_at`, and all
    `__dao_conv_*_to_string` hooks return a `dao_string` whose `ptr`
    points to a fresh buffer allocated through `__dao_mem_alloc` —
    never to a static or thread-local buffer, which an earlier
@@ -375,7 +379,7 @@ Implementation must agree:
 
 | Layer                  | Must match contract |
 |------------------------|---------------------|
-| `stdlib/core/*.dao`    | extern declarations |
+| `stdlib/core/*.dao`, `stdlib/io/*.dao` | extern declarations |
 | `runtime/core/`        | C implementations   |
 | LLVM backend hook layer| LLVM declarations   |
 | backend tests          | ABI assertions      |

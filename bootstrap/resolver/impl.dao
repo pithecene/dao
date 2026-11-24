@@ -46,7 +46,7 @@ class ExportTables:
 class RC:
   nodes: Vector<Node>
   idx_data: Vector<i64>
-  toks: Vector<Token>
+  toks: Vector<lexer::Token>
   src: string
   exports: ExportTables
 
@@ -313,11 +313,11 @@ fn read_pairs(idx_data: Vector<i64>, lp: i64): Vector<i64>
 // =========================================================================
 
 fn tok_name(rs: RS, tidx: i64): string
-  let tok: Token = rs.rc.toks.get(tidx)
+  let tok: lexer::Token = rs.rc.toks.get(tidx)
   return substring(rs.rc.src, tok.offset, tok.len)
 
 fn tok_name_span(rs: RS, tidx: i64): Span
-  let tok: Token = rs.rc.toks.get(tidx)
+  let tok: lexer::Token = rs.rc.toks.get(tidx)
   return Span(tok.offset, tok.len)
 
 // =========================================================================
@@ -1315,7 +1315,7 @@ fn resolve_program(pg: ProgramGraph): ProgramResolveResult
 
   // The builtins and prelude scopes are opened once per program; every
   // module's scope hangs from the prelude scope (§7 scope order).
-  let root_rc: RC = RC(Vector<Node>::new(), Vector<i64>::new(), Vector<Token>::new(), "", ExportTables(export_tables))
+  let root_rc: RC = RC(Vector<Node>::new(), Vector<i64>::new(), Vector<lexer::Token>::new(), "", ExportTables(export_tables))
   let root_rs: RS = rs_open_root_scopes(RS(root_rc, all_symbols, all_scopes, rs_uses, Vector<Diagnostic>::new(), to_i64(-1), to_i64(-1)))
   all_symbols = root_rs.symbols
   all_scopes = root_rs.scopes

@@ -7,27 +7,31 @@ a probe or experiment directory.
 
 ## Shared Substrate
 
-The file `shared/base.dao` is the single source of truth for the bootstrap
-frontend pipeline (token model, lexer, AST, parser).  The command `bash bootstrap/assemble.sh` assembles subsystem `.dao` files from `base.dao` + subsystem `.part.dao` fragments.  See `shared/README.md`.
+The file `shared/base.dao` holds the AST, parser, module graph, and
+cross-pass program types for subsystems that still assemble via
+`bash bootstrap/assemble.sh`. `ascii.dao` (`module bootstrap::ascii`) and
+`lexer/impl.dao` (`module bootstrap::lexer`) compile directly as real
+modules without assembly. See `shared/README.md`.
 
 ## Subsystems
 
 ### `lexer/`
 
-Indentation-aware lexer matching the host compiler's token surface
+Indentation-aware lexer (`module bootstrap::lexer` in `lexer/impl.dao`,
+importing `bootstrap::ascii`) matching the host compiler's token surface
 (`compiler/frontend/lexer/`).
 
-**Status**: promoted from probe (Task 20, Phase 7).
+**Status**: real multi-file module compiled directly from authored sources without `assemble.sh`.
 
 **What it supports**:
 
 - All token kinds from `compiler/frontend/lexer/token.h`
-- Indentation-sensitive INDENT/DEDENT emission
+- Indentation-sensitive INDENT/DEDENT emission with `O(1)` stack pops
 - Newline suppression inside parentheses and brackets
 - Error tokens for tabs, inconsistent indentation, unterminated strings,
   and unexpected characters
 - Source location tracking (offset + length) for all tokens
-- Diagnostics as data (`LexResult.diagnostics`), with no inline printing
+- Structured tokenization helpers and diagnostics as data (`LexResult.diagnostics`)
 
 **Parity with host lexer**:
 
@@ -41,24 +45,22 @@ The bootstrap lexer matches the C++ lexer on:
 
 **Known limitations**:
 
-- Single-file only, with no imports/modules (Dao limitation, not lexer)
 - No hex/octal/binary integer literal support
 - No multiline string literals
 - No raw string literals
 - The lexer consumes escape sequences but validates nothing beyond `\\`
 - No Unicode identifier support
-- `vec_pop` is O(n), because it rebuilds the vector on every pop
 
 **How to run tests**:
 
 ```sh
-# From repository root:
-bash bootstrap/assemble.sh && daoc build --source bootstrap/lexer/lexer.gen.dao --source bootstrap/ascii.dao && ./bootstrap/lexer/lexer.gen
+# From repository root (no assemble.sh step required for lexer):
+daoc build --source bootstrap/lexer/tests.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/lexer/tests
 ```
 
 Tests include golden token stream assertions, malformed-input tests,
-a comprehensive Dao snippet regression, and a self-lex smoke test
-(reads and tokenizes its own source file).
+a comprehensive Dao snippet regression, and self-lex tests over
+`bootstrap/lexer/impl.dao` and `bootstrap/lexer/tests.dao`.
 
 ### `parser/`
 
@@ -133,7 +135,7 @@ uses map over the bootstrap parser's AST.
 - Builtin type pre-population (i8 to u64, f32, f64, bool, string, void)
 - Program scope order builtins → prelude → module (Task 38):
   - The prelude group (`stdlib/core`, `stdlib/io`, loaded as declarations
-    with `is_prelude`) is one shared scope every module's scope hangs from.
+    with `is_prelude`) forms one shared parent scope for every module's scope.
   - A module's own declaration shadows a prelude declaration.
   - Qualified and unqualified paths reach one symbol.  - No top-level declaration can reuse a builtin name.
   - The `__dao_` names and the intrinsic family are the prelude's to declare.
@@ -318,9 +320,30 @@ bash bootstrap/validate_ir.sh build/debug
 ```
 
 The suite writes the IR of every fixture it lowers to
-`bootstrap/llvm/out/<test>.ll` (and `<test>.exit` where the suite knows the program's result).  The script `validate_ir.sh` compiles each with `clang`, links the
-ones with an expectation against the runtime, runs them, and compares
-exit codes (Task 30.5).  `task bootstrap-test` runs both steps.
+`bootstrap/llvm/out/<test>.ll` by default, or to `<ir-dir>/<test>.ll`
+when given an explicit output directory argument (and `<test>.exit`
+where the suite knows the program's result).  The script
+`validate_ir.sh` compiles each with `clang`, links the ones with an
+expectation against the runtime, runs them, and checks exit codes and
+minimum fixture counts (Task 30.5).  `task bootstrap-test` runs both steps.
+
+### `driver/`
+
+Bootstrap compiler entry point and manifest request loader.
+
+**Capabilities**:
+
+- Accepts an explicit manifest path on the command line (`<driver> <manifest>` or `<driver> --manifest <manifest>`)
+- Validates newline termination, directive syntax (`output`, `prelude`, `source`), single output path, non-empty source list, and duplicate or colliding paths
+- Loads manifest and source files through `try_read_file` without trapping on missing, unreadable, or directory inputs
+- Runs in isolated per-invocation directories via `bootstrap/stage2.sh`, which links and smoke-tests Stage 3 and emits `<run-dir>/result.json`
+
+**Running tests and crossing**:
+
+```sh
+bash bootstrap/assemble.sh && daoc build --source bootstrap/driver/driver_tests.gen.dao --source bootstrap/ascii.dao && ./bootstrap/driver/driver_tests.gen
+bash bootstrap/stage2.sh build/debug
+```
 
 ## Module-System Contract Parity
 
@@ -349,7 +372,7 @@ After Task 20, `bootstrap/lexer/lexer.dao` supersedes `examples/bootstrap_probe/
 After Task 21, the bootstrap parser supersedes the `expr_parser.dao`
 probe. The probe remains as a historical artifact.
 
-## What Comes Next
+## Next Steps
 
 - Tier B expansion (generics, concepts, extend, mode/resource)
 - Diagnostic formatting integration

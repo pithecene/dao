@@ -137,24 +137,28 @@ Dao standard library surface and future implementation roots.
 Self-hosting compiler subsystems written in Dao.
 
 - `README.md` — scope, parity notes, and subsystem inventory
-- `shared/` — single source of truth for the bootstrap frontend pipeline:
-  token model, lexer, AST, parser, module graph (`base.dao`); assembled
-  into `*.gen.dao` files via `assemble.sh`
-- `ascii.dao` — `bootstrap::ascii`, the compiler's first real module; every
-  program passes it beside its assembled source
-- `assemble.sh` — concatenates `shared/base.dao` with subsystem sources
-  to produce compilable `*.gen.dao` outputs (gitignored build artifacts)
+- `shared/` — shared AST, parser, module graph, and cross-pass program
+  structures (`base.dao`, importing `bootstrap::lexer`); assembled into
+  remaining `*.gen.dao` files via `assemble.sh`
+- `ascii.dao` — `bootstrap::ascii`, character-classification module
+  imported by `bootstrap::lexer`
+- `assemble.sh` — concatenates `shared/base.dao` with remaining subsystem
+  sources to produce `*.gen.dao` outputs under `bootstrap/` or an explicit
+  per-run output root (`lexer` no longer uses assembly)
 - `validate_ir.sh` — compiles, links, and runs the IR the LLVM suite
-  emits under `llvm/out/` (gitignored), comparing exit codes
+  emits under `llvm/out/` or a per-run directory, comparing exit codes
+  and expected fixture counts
 - `audit_closure.sh` — measures the constructs and prelude functions the
   bootstrap corpus needs and where the bootstrap pipeline stops on its own
-  programs; writes `docs/bootstrap_closure.md`
+  programs, writing `docs/bootstrap_closure.md`
 - `stage2.sh` — the bootstrap crossing: the host builds the driver
-  (stage 1), which compiles itself (stage 2) and again (stage 3); checks
-  the stage-2 / stage-3 fixed point and runs every suite compiled by
-  stage 2 (Task 45); its outputs go under `driver/out/` (gitignored)
-- `lexer/` — indentation-aware lexer matching the host compiler's token
-  surface; tests in `tests.dao` (Task 20)
+  (stage 1), which compiles itself (stage 2) and again (stage 3), verifies
+  the stage-2 / stage-3 fixed point, links and smoke-tests stage 3, runs
+  every suite compiled by stage 2 in an isolated run directory under
+  `driver/out/`, and records structured provenance in `result.json`
+- `lexer/` — `bootstrap::lexer` (`impl.dao`, importing `bootstrap::ascii`)
+  and `bootstrap::lexer::tests` (`tests.dao`), compiled directly as real
+  modules without `assemble.sh`
 - `parser/` — recursive-descent parser producing arena-indexed AST for
   Tier A Dao syntax; tests in `tests.dao` (Task 21)
 - `graph/` — module graph construction, cycle detection, and topological
@@ -175,10 +179,10 @@ Self-hosting compiler subsystems written in Dao.
   arithmetic, strings, places, enums, pointers, regions, generators) via
   a backend-private Dao-side LLVM mini-IR and text serializer.  Logic +
   tests in `impl.dao` (Tasks 30, 44)
-- `driver/` — the bootstrap compiler as a program: `main.dao` runs the
-  whole pipeline over the files a manifest names and writes one LLVM
-  module; assembled into `driver.gen.dao` with every library fragment
-  (Task 45)
+- `driver/` — the bootstrap compiler as a program: `impl.dao` validates
+  and loads manifest requests without trapping, `main.dao` lowers the
+  program over an explicit manifest path and writes one LLVM module, and
+  `tests.dao` exercises CLI argument and manifest validation
 
 ## `examples/`
 

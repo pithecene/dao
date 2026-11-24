@@ -60,10 +60,10 @@ fn program_use_of(pg: ProgramGraph, rr: ProgramResolveResult, path: string, name
   while fi < pg.files.length():
     let sf: SourceFile = pg.files.get(fi)
     if sf.path == path:
-      let toks: Vector<Token> = sf.parse_output.toks
+      let toks: Vector<lexer::Token> = sf.parse_output.toks
       let ti: i64 = 0
       while ti < toks.length():
-        let tok: Token = toks.get(ti)
+        let tok: lexer::Token = toks.get(ti)
         if substring(sf.source_text, tok.offset, tok.len) == name:
           let found: Option<i64> = rr.uses.get(uses_key(sf.file_id, ti))
           match found:
