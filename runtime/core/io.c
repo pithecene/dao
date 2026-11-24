@@ -236,10 +236,13 @@ bool __dao_io_file_exists(const struct dao_string *path) {
   return exists;
 }
 
-#if defined(__linux__)
+#if defined(__linux__) && defined(__GLIBC__)
 static int64_t dao_linux_argc = -1;
 static char **dao_linux_argv = NULL;
 
+// glibc passes (argc, argv, envp) to .init_array constructors via _dl_init.
+// Guarded with __GLIBC__ because musl invokes .init_array functions with no
+// arguments, which would otherwise read uninitialized registers.
 __attribute__((constructor)) static void dao_capture_linux_args(int argc,
                                                                 char **argv) {
   if (argc >= 0 && argv != NULL) {
@@ -257,14 +260,14 @@ int64_t __dao_io_arg_count(void) {
     abort();
   }
   return (int64_t)(*argc_ptr);
-#elif defined(__linux__)
+#elif defined(__linux__) && defined(__GLIBC__)
   if (dao_linux_argc < 0 || (dao_linux_argc > 0 && dao_linux_argv == NULL)) {
     fprintf(stderr, "dao: arg_count: Linux process arguments unavailable\n");
     abort();
   }
   return dao_linux_argc;
 #else
-  fprintf(stderr, "dao: arg_count: unsupported host platform\n");
+  fprintf(stderr, "dao: arg_count: unsupported host platform or C runtime\n");
   abort();
 #endif
 }
@@ -285,7 +288,7 @@ struct dao_string __dao_io_arg_at(int64_t index) {
     abort();
   }
   return dao_copy_cstr_to_domain((*argv_ptr)[index]);
-#elif defined(__linux__)
+#elif defined(__linux__) && defined(__GLIBC__)
   if (dao_linux_argv == NULL || dao_linux_argv[index] == NULL) {
     fprintf(stderr, "dao: arg_at: null Linux argument pointer\n");
     abort();
