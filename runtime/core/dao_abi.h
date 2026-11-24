@@ -49,12 +49,26 @@ void __dao_io_write_stderr(const struct dao_string *msg);
 // Traps on error.
 struct dao_string __dao_io_read_file(const struct dao_string *path);
 
+// Read an entire file without trapping. Sets *ok_out to 1 and returns
+// the file contents on success, or sets *ok_out to 0 and returns an
+// error message on failure. Returned strings belong to the current
+// domain. Traps only if ok_out is null.
+struct dao_string __dao_io_try_read_file(const struct dao_string *path,
+                                         int32_t *ok_out);
+
 // Write a string to a file. Returns true on success, false on failure.
 bool __dao_io_write_file(const struct dao_string *path,
                           const struct dao_string *content);
 
 // Check if a file exists.
 bool __dao_io_file_exists(const struct dao_string *path);
+
+// Return the number of command-line arguments passed to the process.
+int64_t __dao_io_arg_count(void);
+
+// Return command-line argument `index` in a fresh buffer owned by the
+// current domain. Traps if `index` is out of bounds.
+struct dao_string __dao_io_arg_at(int64_t index);
 
 // ---------------------------------------------------------------------------
 // Runtime hook declarations — Equality domain

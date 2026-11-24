@@ -33,8 +33,11 @@ namespace runtime_hooks {
 inline constexpr std::string_view kWriteStdout  = "__dao_io_write_stdout";
 inline constexpr std::string_view kWriteStderr  = "__dao_io_write_stderr";
 inline constexpr std::string_view kReadFile     = "__dao_io_read_file";
+inline constexpr std::string_view kTryReadFile  = "__dao_io_try_read_file";
 inline constexpr std::string_view kWriteFile    = "__dao_io_write_file";
 inline constexpr std::string_view kFileExists   = "__dao_io_file_exists";
+inline constexpr std::string_view kArgCount     = "__dao_io_arg_count";
+inline constexpr std::string_view kArgAt        = "__dao_io_arg_at";
 
 // Equality domain
 inline constexpr std::string_view kEqI8     = "__dao_eq_i8";
@@ -163,8 +166,11 @@ inline constexpr std::string_view kAllHooks[] = {
     kWriteStdout,
     kWriteStderr,
     kReadFile,
+    kTryReadFile,
     kWriteFile,
     kFileExists,
+    kArgCount,
+    kArgAt,
     kEqI8,
     kEqI16,
     kEqI32,

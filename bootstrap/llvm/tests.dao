@@ -20,22 +20,33 @@ fn contains_substring(haystack: string, needle: string): bool
     i = i + to_i64(1)
   return false
 
+// Output directory for emitted IR and closure-probe markers: defaults to
+// bootstrap/llvm/out when invoked with no arguments, or uses argv[1] so
+// concurrent crossing runs write into isolated directories.
+fn llvm_out_dir(): string
+  if arg_count() >= to_i64(2):
+    let dir: string = arg_at(to_i64(1))
+    if dir != "":
+      return dir
+  return "bootstrap/llvm/out"
+
 // Write a fixture's IR for bootstrap/validate_ir.sh: the text to
-// bootstrap/llvm/out/<name>.ll, and the exit code the program is
-// expected to produce to <name>.exit when the fixture has a main with a
-// known result (a negative expectation means validate only).  The
-// directory is created by the harness.  Returns the number of artifacts
-// that could not be written, so a failed write fails the suite instead
-// of leaving a stale or missing file for validation to miss.
+// <out>/<name>.ll, and the exit code the program is expected to produce
+// to <out>/<name>.exit when the fixture has a main with a known result
+// (a negative expectation means validate only).  The directory is
+// created by the harness.  Returns the number of artifacts that could
+// not be written, so a failed write fails the suite instead of leaving a
+// stale or missing file for validation to miss.
 fn emit_ir(name: string, result: LlvmTextResult, expected_exit: i32): i32
   if result.ok == false:
     return 0
-  let path: string = "bootstrap/llvm/out/" + name + ".ll"
+  let out_dir: string = llvm_out_dir()
+  let path: string = out_dir + "/" + name + ".ll"
   if write_llvm_text(result, path) == false:
     print("FAIL " + name + ": could not write " + path)
     return 1
   if expected_exit >= 0:
-    let exit_path: string = "bootstrap/llvm/out/" + name + ".exit"
+    let exit_path: string = out_dir + "/" + name + ".exit"
     if write_file(exit_path, expected_exit.to_string()) == false:
       print("FAIL " + name + ": could not write " + exit_path)
       return 1
@@ -133,9 +144,10 @@ fn closure_report_file_diags(name: string, stage: string, diags: Vector<FileDiag
 // (CONTRACT_MODULE_SYSTEM.md §7.1); no list, no prelude.
 fn closure_prelude_inputs(): Vector<SourceInput>
   let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  if file_exists("bootstrap/llvm/out/.closure_prelude") == false:
+  let prelude_file: string = llvm_out_dir() + "/.closure_prelude"
+  if file_exists(prelude_file) == false:
     return inputs
-  let listing: string = read_file("bootstrap/llvm/out/.closure_prelude")
+  let listing: string = read_file(prelude_file)
   let start: i64 = 0
   while start < length(listing):
     let rest: string = substring(listing, start, length(listing) - start)
@@ -270,7 +282,7 @@ fn closure_probe_stage(name: string, path: string, stage: string): string
     closure_report_diags_from(name, "llvm", ll.diags, carried_into_llvm, to_i64(50))
     cols = cols + closure_stage_column(name, "llvm", ll.diags, carried_into_llvm)
     if ll.ok:
-      let ll_path: string = "bootstrap/llvm/out/" + name + ".program.ll"
+      let ll_path: string = llvm_out_dir() + "/" + name + ".program.ll"
       if write_llvm_text(ll, ll_path) == false:
         eprint("probe: " + name + " first llvm: could not write " + ll_path)
   return name + cols + "\n"
@@ -366,17 +378,19 @@ fn closure_probe(marker: string): void
     line = closure_probe_prelude()
   else:
     line = closure_probe_stage(which, "bootstrap/" + which + "/" + which + ".gen.dao", stage)
+  let closure_txt: string = llvm_out_dir() + "/closure.txt"
   let previous: string = ""
-  if file_exists("bootstrap/llvm/out/closure.txt"):
-    previous = read_file("bootstrap/llvm/out/closure.txt")
-  let wrote: bool = write_file("bootstrap/llvm/out/closure.txt", previous + line)
+  if file_exists(closure_txt):
+    previous = read_file(closure_txt)
+  let wrote: bool = write_file(closure_txt, previous + line)
   print(line)
 
 fn main(): i32
   // Opt-in probe (bootstrap/audit_closure.sh): the process does only
   // the probe, so its memory is one stage's and nothing else's.
-  if file_exists("bootstrap/llvm/out/.closure_probe"):
-    closure_probe(read_file("bootstrap/llvm/out/.closure_probe"))
+  let probe_marker: string = llvm_out_dir() + "/.closure_probe"
+  if file_exists(probe_marker):
+    closure_probe(read_file(probe_marker))
     return 0
   print("=== bootstrap/llvm: Tier A LLVM backend ===")
   print("")

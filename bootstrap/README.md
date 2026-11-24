@@ -133,7 +133,7 @@ uses map over the bootstrap parser's AST.
 - Builtin type pre-population (i8 to u64, f32, f64, bool, string, void)
 - Program scope order builtins → prelude → module (Task 38):
   - The prelude group (`stdlib/core`, `stdlib/io`, loaded as declarations
-    with `is_prelude`) is one shared scope every module's scope hangs from.
+    with `is_prelude`) forms one shared parent scope for every module's scope.
   - A module's own declaration shadows a prelude declaration.
   - Qualified and unqualified paths reach one symbol.  - No top-level declaration can reuse a builtin name.
   - The `__dao_` names and the intrinsic family are the prelude's to declare.
@@ -318,9 +318,30 @@ bash bootstrap/validate_ir.sh build/debug
 ```
 
 The suite writes the IR of every fixture it lowers to
-`bootstrap/llvm/out/<test>.ll` (and `<test>.exit` where the suite knows the program's result).  The script `validate_ir.sh` compiles each with `clang`, links the
-ones with an expectation against the runtime, runs them, and compares
-exit codes (Task 30.5).  `task bootstrap-test` runs both steps.
+`bootstrap/llvm/out/<test>.ll` by default, or to `<ir-dir>/<test>.ll`
+when given an explicit output directory argument (and `<test>.exit`
+where the suite knows the program's result).  The script
+`validate_ir.sh` compiles each with `clang`, links the ones with an
+expectation against the runtime, runs them, and checks exit codes and
+minimum fixture counts (Task 30.5).  `task bootstrap-test` runs both steps.
+
+### `driver/`
+
+Bootstrap compiler entry point and manifest request loader.
+
+**Capabilities**:
+
+- Accepts an explicit manifest path on the command line (`<driver> <manifest>` or `<driver> --manifest <manifest>`)
+- Validates newline termination, directive syntax (`output`, `prelude`, `source`), single output path, non-empty source list, and duplicate or colliding paths
+- Loads manifest and source files through `try_read_file` without trapping on missing, unreadable, or directory inputs
+- Runs in isolated per-invocation directories via `bootstrap/stage2.sh`, which links and smoke-tests Stage 3 and emits `<run-dir>/result.json`
+
+**Running tests and crossing**:
+
+```sh
+bash bootstrap/assemble.sh && daoc build --source bootstrap/driver/driver_tests.gen.dao --source bootstrap/ascii.dao && ./bootstrap/driver/driver_tests.gen
+bash bootstrap/stage2.sh build/debug
+```
 
 ## Module-System Contract Parity
 
@@ -349,7 +370,7 @@ After Task 20, `bootstrap/lexer/lexer.dao` supersedes `examples/bootstrap_probe/
 After Task 21, the bootstrap parser supersedes the `expr_parser.dao`
 probe. The probe remains as a historical artifact.
 
-## What Comes Next
+## Next Steps
 
 - Tier B expansion (generics, concepts, extend, mode/resource)
 - Diagnostic formatting integration

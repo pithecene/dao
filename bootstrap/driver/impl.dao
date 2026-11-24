@@ -1,0 +1,138 @@
+module bootstrap::driver
+// Manifest request parsing, validation, and file loading for the
+// bootstrap compiler driver.
+
+class ManifestEntry:
+  path: string
+  is_prelude: bool
+
+class ManifestSpec:
+  output: string
+  entries: Vector<ManifestEntry>
+  source_count: i64
+
+class Manifest:
+  output: string
+  inputs: Vector<SourceInput>
+
+// Resolve the CLI invocation (`<driver> <manifest>` or
+// `<driver> --manifest <manifest>`) to a manifest path.
+fn resolve_manifest_arg(argv: Vector<string>): Result<string, string>
+  if argv.length() == to_i64(2):
+    let path: string = argv.get(to_i64(1))
+    if path != "" and starts_with(path, "-") == false:
+      return Result::Ok(value = path)
+  if argv.length() == to_i64(3):
+    if argv.get(to_i64(1)) == "--manifest":
+      let path: string = argv.get(to_i64(2))
+      if path != "" and starts_with(path, "-") == false:
+        return Result::Ok(value = path)
+  return Result::Err(error = "usage: <driver> [--manifest] <manifest-path>")
+
+// Parse and validate a manifest text. Every record must end with LF or
+// CRLF, use a known directive (`output`, `prelude`, `source`), name one
+// output path and at least one source path, and contain no duplicates.
+fn parse_manifest(listing: string): Result<ManifestSpec, string>
+  let total_len: i64 = length(listing)
+  if total_len == to_i64(0):
+    return Result::Err(error = "manifest is empty")
+
+  let have_output: bool = false
+  let output_path: string = ""
+  let entries: Vector<ManifestEntry> = Vector<ManifestEntry>::new()
+  let seen_inputs: HashMap<i64> = HashMap<i64>::new()
+  let source_count: i64 = to_i64(0)
+  let pos: i64 = to_i64(0)
+  let line_no: i64 = to_i64(0)
+
+  while pos < total_len:
+    line_no = line_no + to_i64(1)
+    let line_start: i64 = pos
+    while pos < total_len:
+      if char_at(listing, pos) == 10:
+        break
+      pos = pos + to_i64(1)
+    if pos >= total_len:
+      return Result::Err(error = "manifest line " + i64_to_string(line_no) + " lacks a terminating newline")
+
+    let line_end: i64 = pos
+    if line_end > line_start:
+      if char_at(listing, line_end - to_i64(1)) == 13:
+        line_end = line_end - to_i64(1)
+    pos = pos + to_i64(1)
+
+    let line: string = substring(listing, line_start, line_end - line_start)
+    if line == "":
+      return Result::Err(error = "manifest line " + i64_to_string(line_no) + " is empty")
+    if index_of(line, "\r") >= to_i64(0):
+      return Result::Err(error = "manifest line " + i64_to_string(line_no) + " contains an embedded carriage return")
+
+    let space: i64 = index_of(line, " ")
+    if space <= to_i64(0):
+      return Result::Err(error = "manifest line " + i64_to_string(line_no) + " must match '<directive> <path>'")
+
+    let kind: string = substring(line, to_i64(0), space)
+    let arg: string = substring(line, space + to_i64(1), length(line) - space - to_i64(1))
+    if arg == "":
+      return Result::Err(error = "manifest line " + i64_to_string(line_no) + " names an empty path")
+
+    if kind == "output":
+      if have_output:
+        return Result::Err(error = "manifest line " + i64_to_string(line_no) + ": duplicate output directive")
+      have_output = true
+      output_path = arg
+    else if kind == "prelude" or kind == "source":
+      if seen_inputs.contains(arg):
+        return Result::Err(error = "manifest line " + i64_to_string(line_no) + ": duplicate input path '" + arg + "'")
+      seen_inputs = seen_inputs.set(arg, line_no)
+      let is_prelude: bool = kind == "prelude"
+      if is_prelude == false:
+        source_count = source_count + to_i64(1)
+      entries = entries.push(ManifestEntry(arg, is_prelude))
+    else:
+      return Result::Err(error = "manifest line " + i64_to_string(line_no) + ": unknown directive '" + kind + "'")
+
+  if have_output == false:
+    return Result::Err(error = "manifest names no output path")
+  if source_count == to_i64(0):
+    return Result::Err(error = "manifest names no source files")
+  if seen_inputs.contains(output_path):
+    return Result::Err(error = "manifest output path '" + output_path + "' duplicates an input path")
+
+  return Result::Ok(value = ManifestSpec(output_path, entries, source_count))
+
+// Read a manifest file and every input file it names without trapping on
+// missing, unreadable, or directory paths.
+fn load_manifest(manifest_path: string): Result<Manifest, string>
+  if manifest_path == "":
+    return Result::Err(error = "manifest path is empty")
+
+  let listing: string = ""
+  match try_read_file(manifest_path):
+    Result::Ok(text):
+      listing = text
+    Result::Err(err):
+      return Result::Err(error = "cannot read manifest '" + manifest_path + "': " + err)
+
+  let spec: ManifestSpec = ManifestSpec("", Vector<ManifestEntry>::new(), to_i64(0))
+  match parse_manifest(listing):
+    Result::Ok(parsed):
+      spec = parsed
+    Result::Err(err):
+      return Result::Err(error = err)
+
+  let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  let i: i64 = to_i64(0)
+  while i < spec.entries.length():
+    let entry: ManifestEntry = spec.entries.get(i)
+    match try_read_file(entry.path):
+      Result::Ok(content):
+        inputs = inputs.push(SourceInput(entry.path, content, entry.is_prelude))
+      Result::Err(err):
+        let role: string = "source"
+        if entry.is_prelude:
+          role = "prelude"
+        return Result::Err(error = "cannot read " + role + " '" + entry.path + "': " + err)
+    i = i + to_i64(1)
+
+  return Result::Ok(value = Manifest(spec.output, inputs))

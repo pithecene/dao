@@ -103,6 +103,7 @@ tasks:
       - bootstrap/hir/hir.gen.dao
       - bootstrap/mir/mir.gen.dao
       - bootstrap/llvm/llvm.gen.dao
+      - bootstrap/driver/driver_tests.gen.dao
       - bootstrap/driver/driver.gen.dao
 
   bootstrap-test:
@@ -119,6 +120,14 @@ tasks:
       - rm -rf bootstrap/llvm/out && mkdir -p bootstrap/llvm/out
       - "{{.BUILD_DIR}}/compiler/driver/daoc build --source bootstrap/llvm/llvm.gen.dao --source bootstrap/ascii.dao && ./bootstrap/llvm/llvm.gen"
       - bash bootstrap/validate_ir.sh {{.BUILD_DIR}}
+      - rm -rf bootstrap/driver/out/driver_tests_work && mkdir -p bootstrap/driver/out/driver_tests_work
+      - "{{.BUILD_DIR}}/compiler/driver/daoc build --source bootstrap/driver/driver_tests.gen.dao --source bootstrap/ascii.dao && ./bootstrap/driver/driver_tests.gen bootstrap/driver/out/driver_tests_work"
+
+  bootstrap-crossing:
+    desc: Run the isolated Stage 1 -> Stage 2 -> Stage 3 crossing and Stage-2 suites
+    deps: [build]
+    cmds:
+      - bash bootstrap/stage2.sh {{.BUILD_DIR}}
 
   bootstrap-audit:
     desc: Measure what the bootstrap corpus needs and where the bootstrap pipeline stops (docs/bootstrap_closure.md)

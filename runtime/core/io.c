@@ -1,9 +1,10 @@
-// io.c — Dao runtime IO hooks.
+// io.c — Dao runtime IO and process-argument hooks.
 //
 // Authority: docs/contracts/CONTRACT_RUNTIME_ABI.md
 
 #include "dao_abi.h"
 
+#include <errno.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -11,17 +12,51 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#ifdef __APPLE__
+#include <crt_externs.h>
+#endif
+
 // Convert a dao_string to a null-terminated C string on the heap.
 // Caller must free() the returned pointer. Returns NULL on allocation
-// failure (does not abort — callers decide their own failure policy).
-static char *dao_string_to_cstr(const struct dao_string *str) {
+// failure or if the dao_string contains an embedded NUL byte.
+static char *dao_string_to_cstr(const struct dao_string *str, bool *has_nul) {
+  if (has_nul != NULL) {
+    *has_nul = false;
+  }
+  if (str == NULL || str->len < 0) {
+    return NULL;
+  }
+  if (str->len > 0 && str->ptr == NULL) {
+    return NULL;
+  }
+  if (str->len > 0 && memchr(str->ptr, '\0', (size_t)str->len) != NULL) {
+    if (has_nul != NULL) {
+      *has_nul = true;
+    }
+    return NULL;
+  }
   char *cstr = (char *)malloc((size_t)str->len + 1);
   if (cstr == NULL) {
     return NULL;
   }
-  memcpy(cstr, str->ptr, (size_t)str->len);
+  if (str->len > 0) {
+    memcpy(cstr, str->ptr, (size_t)str->len);
+  }
   cstr[str->len] = '\0';
   return cstr;
+}
+
+static struct dao_string dao_copy_cstr_to_domain(const char *msg) {
+  if (msg == NULL) {
+    return (struct dao_string){.ptr = NULL, .len = 0};
+  }
+  size_t len = strlen(msg);
+  if (len == 0) {
+    return (struct dao_string){.ptr = NULL, .len = 0};
+  }
+  char *buf = (char *)__dao_mem_alloc((int64_t)len, 1);
+  memcpy(buf, msg, len);
+  return (struct dao_string){.ptr = buf, .len = (int64_t)len};
 }
 
 void __dao_io_write_stdout(const struct dao_string *msg) {
@@ -44,59 +79,61 @@ void __dao_io_write_stderr(const struct dao_string *msg) {
   fputc('\n', stderr);
 }
 
-// Read an entire file into a string owned by the current domain.
-// Traps on error.
-struct dao_string __dao_io_read_file(const struct dao_string *path) {
-  if (path == NULL || path->ptr == NULL || path->len <= 0) {
-    fprintf(stderr, "dao: read_file: empty path\n");
+struct dao_string __dao_io_try_read_file(const struct dao_string *path,
+                                         int32_t *ok_out) {
+  if (ok_out == NULL) {
+    fprintf(stderr, "dao: try_read_file: null status pointer\n");
     abort();
   }
+  *ok_out = 0;
 
-  char *cpath = dao_string_to_cstr(path);
+  if (path == NULL || path->ptr == NULL || path->len <= 0) {
+    return dao_copy_cstr_to_domain("empty path");
+  }
+
+  bool has_nul = false;
+  char *cpath = dao_string_to_cstr(path, &has_nul);
   if (cpath == NULL) {
-    fprintf(stderr, "dao: read_file: allocation failed\n");
-    abort();
+    return dao_copy_cstr_to_domain(
+        has_nul ? "path contains an embedded NUL byte" : "allocation failed");
   }
 
   FILE *file = fopen(cpath, "rb");
   if (file == NULL) {
-    fprintf(stderr, "dao: read_file: cannot open '%s'\n", cpath);
+    int err = errno;
     free(cpath);
-    abort();
+    return dao_copy_cstr_to_domain(strerror(err));
   }
 
-  // Determine file size. For regular files, use fstat (handles >2GB
-  // unlike fseek/ftell which use long). For non-regular files (pipes,
-  // procfs, etc.), fall back to incremental reading since st_size is
-  // unreliable (commonly 0).
+  // Reject directories explicitly, use fstat for regular files with known
+  // byte counts, and read streams incrementally until EOF.
   struct stat file_stat;
   int have_stat = (fstat(fileno(file), &file_stat) == 0);
+  if (have_stat && S_ISDIR(file_stat.st_mode)) {
+    fclose(file);
+    free(cpath);
+    return dao_copy_cstr_to_domain("path names a directory, not a regular file");
+  }
   int is_regular = have_stat && S_ISREG(file_stat.st_mode);
 
   if (is_regular && file_stat.st_size > 0) {
-    // Fast path: known size, single allocation + read.
     int64_t size = (int64_t)file_stat.st_size;
     char *buf = (char *)__dao_mem_alloc(size, 1);
 
     size_t read_bytes = fread(buf, 1, (size_t)size, file);
     int read_err = ferror(file);
     fclose(file);
+    free(cpath);
 
     if (read_err || read_bytes != (size_t)size) {
-      fprintf(stderr, "dao: read_file: read error for '%s' "
-              "(expected %" PRId64 " bytes, got %zu)\n",
-              cpath, size, read_bytes);
       __dao_mem_free(buf);
-      free(cpath);
-      abort();
+      return dao_copy_cstr_to_domain("short or failed file read");
     }
 
-    free(cpath);
+    *ok_out = 1;
     return (struct dao_string){.ptr = buf, .len = (int64_t)read_bytes};
   }
 
-  // Slow path: unknown or zero size (empty regular file, pipe, procfs).
-  // Read in chunks until EOF.
   size_t capacity = 4096;
   size_t length = 0;
   char *buf = (char *)__dao_mem_alloc((int64_t)capacity, 1);
@@ -109,11 +146,10 @@ struct dao_string __dao_io_read_file(const struct dao_string *path) {
     }
     size_t n = fread(buf + length, 1, 4096, file);
     if (ferror(file)) {
-      fprintf(stderr, "dao: read_file: read error for '%s'\n", cpath);
       __dao_mem_free(buf);
       fclose(file);
       free(cpath);
-      abort();
+      return dao_copy_cstr_to_domain("stream read error");
     }
     length += n;
   }
@@ -121,11 +157,31 @@ struct dao_string __dao_io_read_file(const struct dao_string *path) {
   fclose(file);
   free(cpath);
 
+  *ok_out = 1;
   if (length == 0) {
     __dao_mem_free(buf);
     return (struct dao_string){.ptr = NULL, .len = 0};
   }
   return (struct dao_string){.ptr = buf, .len = (int64_t)length};
+}
+
+// Read an entire file into a string owned by the current domain.
+// Traps on error.
+struct dao_string __dao_io_read_file(const struct dao_string *path) {
+  int32_t ok = 0;
+  struct dao_string result = __dao_io_try_read_file(path, &ok);
+  if (ok == 0) {
+    if (path != NULL && path->ptr != NULL && path->len > 0) {
+      fprintf(stderr, "dao: read_file: cannot read '%.*s': %.*s\n",
+              (int)path->len, path->ptr, (int)result.len,
+              result.ptr != NULL ? result.ptr : "error");
+    } else {
+      fprintf(stderr, "dao: read_file: %.*s\n", (int)result.len,
+              result.ptr != NULL ? result.ptr : "empty path");
+    }
+    abort();
+  }
+  return result;
 }
 
 // Write a string to a file. Returns true on success, false on failure.
@@ -135,7 +191,7 @@ bool __dao_io_write_file(const struct dao_string *path,
     return false;
   }
 
-  char *cpath = dao_string_to_cstr(path);
+  char *cpath = dao_string_to_cstr(path, NULL);
   if (cpath == NULL) {
     return false;
   }
@@ -169,7 +225,7 @@ bool __dao_io_file_exists(const struct dao_string *path) {
     return false;
   }
 
-  char *cpath = dao_string_to_cstr(path);
+  char *cpath = dao_string_to_cstr(path, NULL);
   if (cpath == NULL) {
     return false;
   }
@@ -178,4 +234,127 @@ bool __dao_io_file_exists(const struct dao_string *path) {
   bool exists = (stat(cpath, &st) == 0);
   free(cpath);
   return exists;
+}
+
+#if defined(__linux__)
+static struct {
+  bool initialized;
+  int64_t count;
+  char **items;
+  char *raw;
+} dao_linux_args;
+
+static void dao_init_linux_args(void) {
+  if (dao_linux_args.initialized) {
+    return;
+  }
+  dao_linux_args.initialized = true;
+
+  FILE *cmdline = fopen("/proc/self/cmdline", "rb");
+  if (cmdline == NULL) {
+    return;
+  }
+  size_t cap = 4096;
+  size_t len = 0;
+  char *buf = (char *)malloc(cap);
+  if (buf == NULL) {
+    fclose(cmdline);
+    return;
+  }
+  while (!feof(cmdline)) {
+    if (len + 4096 > cap) {
+      size_t grown = cap * 2;
+      char *next = (char *)realloc(buf, grown);
+      if (next == NULL) {
+        free(buf);
+        fclose(cmdline);
+        return;
+      }
+      buf = next;
+      cap = grown;
+    }
+    len += fread(buf + len, 1, 4096, cmdline);
+    if (ferror(cmdline)) {
+      free(buf);
+      fclose(cmdline);
+      return;
+    }
+  }
+  fclose(cmdline);
+  if (len == 0) {
+    free(buf);
+    return;
+  }
+
+  int64_t argc = 0;
+  for (size_t i = 0; i < len; ++i) {
+    if (buf[i] == '\0') {
+      ++argc;
+    }
+  }
+  if (buf[len - 1] != '\0') {
+    char *terminated = (char *)realloc(buf, len + 1);
+    if (terminated == NULL) {
+      free(buf);
+      return;
+    }
+    buf = terminated;
+    buf[len] = '\0';
+    ++argc;
+    ++len;
+  }
+
+  char **items = (char **)malloc((size_t)argc * sizeof(char *));
+  if (items == NULL) {
+    free(buf);
+    return;
+  }
+  int64_t idx = 0;
+  size_t start = 0;
+  for (size_t i = 0; i < len && idx < argc; ++i) {
+    if (buf[i] == '\0') {
+      items[idx++] = buf + start;
+      start = i + 1;
+    }
+  }
+  dao_linux_args.raw = buf;
+  dao_linux_args.items = items;
+  dao_linux_args.count = idx;
+}
+#endif
+
+int64_t __dao_io_arg_count(void) {
+#ifdef __APPLE__
+  int *argc_ptr = _NSGetArgc();
+  if (argc_ptr == NULL || *argc_ptr < 0) {
+    return 0;
+  }
+  return (int64_t)(*argc_ptr);
+#elif defined(__linux__)
+  dao_init_linux_args();
+  return dao_linux_args.count;
+#else
+  return 0;
+#endif
+}
+
+struct dao_string __dao_io_arg_at(int64_t index) {
+  int64_t count = __dao_io_arg_count();
+  if (index < 0 || index >= count) {
+    fprintf(stderr,
+            "dao: arg_at: index %" PRId64 " out of bounds (argc = %" PRId64
+            ")\n",
+            index, count);
+    abort();
+  }
+#ifdef __APPLE__
+  char ***argv_ptr = _NSGetArgv();
+  const char *arg =
+      (argv_ptr != NULL && *argv_ptr != NULL) ? (*argv_ptr)[index] : NULL;
+  return dao_copy_cstr_to_domain(arg);
+#elif defined(__linux__)
+  return dao_copy_cstr_to_domain(dao_linux_args.items[index]);
+#else
+  abort();
+#endif
 }

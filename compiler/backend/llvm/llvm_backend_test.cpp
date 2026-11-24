@@ -1673,6 +1673,24 @@ suite<"runtime_abi"> runtime_abi = [] {
     expect(exists_fn != nullptr) << "file_exists declared";
     expect(exists_fn->getReturnType()->isIntegerTy(1)) << "returns bool";
 
+    auto* try_read_fn = module->getFunction("__dao_io_try_read_file");
+    expect(try_read_fn != nullptr) << "try_read_file declared";
+    expect(try_read_fn->getReturnType()->isStructTy()) << "returns dao.string";
+    expect(try_read_fn->arg_size() == 2u) << "path, ok_out";
+    expect(try_read_fn->getArg(0)->getType()->isPointerTy()) << "path ptr";
+    expect(try_read_fn->getArg(1)->getType()->isPointerTy()) << "ok_out ptr";
+
+    auto* arg_count_fn = module->getFunction("__dao_io_arg_count");
+    expect(arg_count_fn != nullptr) << "arg_count declared";
+    expect(arg_count_fn->getReturnType()->isIntegerTy(64)) << "returns i64";
+    expect(arg_count_fn->arg_size() == 0u) << "0 params";
+
+    auto* arg_at_fn = module->getFunction("__dao_io_arg_at");
+    expect(arg_at_fn != nullptr) << "arg_at declared";
+    expect(arg_at_fn->getReturnType()->isStructTy()) << "returns dao.string";
+    expect(arg_at_fn->arg_size() == 1u) << "index param";
+    expect(arg_at_fn->getArg(0)->getType()->isIntegerTy(64)) << "index is i64";
+
     // Domain hooks
     auto* alloc_outer = module->getFunction("__dao_mem_alloc_outer");
     expect(alloc_outer != nullptr) << "mem_alloc_outer declared";
@@ -1767,8 +1785,11 @@ suite<"runtime_abi"> runtime_abi = [] {
     expect(LlvmRuntimeHooks::is_runtime_hook("__dao_io_write_stdout"));
     expect(LlvmRuntimeHooks::is_runtime_hook("__dao_io_write_stderr"));
     expect(LlvmRuntimeHooks::is_runtime_hook("__dao_io_read_file"));
+    expect(LlvmRuntimeHooks::is_runtime_hook("__dao_io_try_read_file"));
     expect(LlvmRuntimeHooks::is_runtime_hook("__dao_io_write_file"));
     expect(LlvmRuntimeHooks::is_runtime_hook("__dao_io_file_exists"));
+    expect(LlvmRuntimeHooks::is_runtime_hook("__dao_io_arg_count"));
+    expect(LlvmRuntimeHooks::is_runtime_hook("__dao_io_arg_at"));
     expect(LlvmRuntimeHooks::is_runtime_hook("__dao_eq_i32"));
     expect(LlvmRuntimeHooks::is_runtime_hook("__dao_eq_f64"));
     expect(LlvmRuntimeHooks::is_runtime_hook("__dao_eq_bool"));
