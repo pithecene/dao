@@ -1,0 +1,609 @@
+module bootstrap::lexer
+
+import bootstrap::ascii
+
+// Canonical token model and indentation-aware lexer for the self-hosted
+// Dao compiler pipeline.
+
+enum TK:
+  // Keywords — control
+  KwModule
+  KwImport
+  KwExtern
+  KwFn
+  KwClass
+  KwEnum
+  KwType
+  KwLet
+  KwIf
+  KwElse
+  KwWhile
+  KwFor
+  KwIn
+  KwReturn
+  KwYield
+  KwBreak
+  KwMatch
+  // Keywords — execution / resource
+  KwMode
+  KwResource
+  // Keywords — literals
+  KwTrue
+  KwFalse
+  // Keywords — logical
+  KwAnd
+  KwOr
+  // Keywords — concepts and conformance
+  KwConcept
+  KwDerived
+  KwAs
+  KwExtend
+  KwDeny
+  KwSelf
+  KwWhere
+  // Operators
+  Colon
+  ColonColon
+  Arrow
+  FatArrow
+  Eq
+  EqEq
+  BangEq
+  Lt
+  LtEq
+  Gt
+  GtEq
+  Plus
+  Minus
+  Star
+  Slash
+  Percent
+  Amp
+  Bang
+  Dot
+  Comma
+  Pipe
+  PipeGt
+  Question
+  // Delimiters
+  LParen
+  RParen
+  LBracket
+  RBracket
+  // Literals
+  IntLiteral
+  FloatLiteral
+  StringLiteral
+  // Identifier
+  Identifier
+  // Synthetic
+  Newline
+  Indent
+  Dedent
+  Eof
+  // Error
+  Error
+
+class Token:
+  kind: TK
+  offset: i64
+  len: i64
+
+class LexResult:
+  tokens: Vector<Token>
+  diagnostics: Vector<Diagnostic>
+
+fn lex_result_empty(): LexResult -> LexResult(Vector<Token>::new(), Vector<Diagnostic>::new())
+
+fn classify_keyword(src: string, start: i64, klen: i64): TK
+  let text: string = substring(src, start, klen)
+  if text == "module":
+    return TK::KwModule
+  if text == "import":
+    return TK::KwImport
+  if text == "extern":
+    return TK::KwExtern
+  if text == "fn":
+    return TK::KwFn
+  if text == "class":
+    return TK::KwClass
+  if text == "enum":
+    return TK::KwEnum
+  if text == "type":
+    return TK::KwType
+  if text == "let":
+    return TK::KwLet
+  if text == "if":
+    return TK::KwIf
+  if text == "else":
+    return TK::KwElse
+  if text == "while":
+    return TK::KwWhile
+  if text == "for":
+    return TK::KwFor
+  if text == "in":
+    return TK::KwIn
+  if text == "return":
+    return TK::KwReturn
+  if text == "yield":
+    return TK::KwYield
+  if text == "break":
+    return TK::KwBreak
+  if text == "match":
+    return TK::KwMatch
+  if text == "mode":
+    return TK::KwMode
+  if text == "resource":
+    return TK::KwResource
+  if text == "true":
+    return TK::KwTrue
+  if text == "false":
+    return TK::KwFalse
+  if text == "and":
+    return TK::KwAnd
+  if text == "or":
+    return TK::KwOr
+  if text == "concept":
+    return TK::KwConcept
+  if text == "derived":
+    return TK::KwDerived
+  if text == "as":
+    return TK::KwAs
+  if text == "extend":
+    return TK::KwExtend
+  if text == "deny":
+    return TK::KwDeny
+  if text == "self":
+    return TK::KwSelf
+  if text == "where":
+    return TK::KwWhere
+  return TK::Identifier
+
+fn tk_name(kind: TK): string
+  match kind:
+    TK::KwModule:
+      return "KwModule"
+    TK::KwImport:
+      return "KwImport"
+    TK::KwExtern:
+      return "KwExtern"
+    TK::KwFn:
+      return "KwFn"
+    TK::KwClass:
+      return "KwClass"
+    TK::KwEnum:
+      return "KwEnum"
+    TK::KwType:
+      return "KwType"
+    TK::KwLet:
+      return "KwLet"
+    TK::KwIf:
+      return "KwIf"
+    TK::KwElse:
+      return "KwElse"
+    TK::KwWhile:
+      return "KwWhile"
+    TK::KwFor:
+      return "KwFor"
+    TK::KwIn:
+      return "KwIn"
+    TK::KwReturn:
+      return "KwReturn"
+    TK::KwYield:
+      return "KwYield"
+    TK::KwBreak:
+      return "KwBreak"
+    TK::KwMatch:
+      return "KwMatch"
+    TK::KwMode:
+      return "KwMode"
+    TK::KwResource:
+      return "KwResource"
+    TK::KwTrue:
+      return "KwTrue"
+    TK::KwFalse:
+      return "KwFalse"
+    TK::KwAnd:
+      return "KwAnd"
+    TK::KwOr:
+      return "KwOr"
+    TK::KwConcept:
+      return "KwConcept"
+    TK::KwDerived:
+      return "KwDerived"
+    TK::KwAs:
+      return "KwAs"
+    TK::KwExtend:
+      return "KwExtend"
+    TK::KwDeny:
+      return "KwDeny"
+    TK::KwSelf:
+      return "KwSelf"
+    TK::KwWhere:
+      return "KwWhere"
+    TK::Colon:
+      return "Colon"
+    TK::ColonColon:
+      return "ColonColon"
+    TK::Arrow:
+      return "Arrow"
+    TK::FatArrow:
+      return "FatArrow"
+    TK::Eq:
+      return "Eq"
+    TK::EqEq:
+      return "EqEq"
+    TK::BangEq:
+      return "BangEq"
+    TK::Lt:
+      return "Lt"
+    TK::LtEq:
+      return "LtEq"
+    TK::Gt:
+      return "Gt"
+    TK::GtEq:
+      return "GtEq"
+    TK::Plus:
+      return "Plus"
+    TK::Minus:
+      return "Minus"
+    TK::Star:
+      return "Star"
+    TK::Slash:
+      return "Slash"
+    TK::Percent:
+      return "Percent"
+    TK::Amp:
+      return "Amp"
+    TK::Bang:
+      return "Bang"
+    TK::Dot:
+      return "Dot"
+    TK::Comma:
+      return "Comma"
+    TK::Pipe:
+      return "Pipe"
+    TK::PipeGt:
+      return "PipeGt"
+    TK::Question:
+      return "Question"
+    TK::LParen:
+      return "LParen"
+    TK::RParen:
+      return "RParen"
+    TK::LBracket:
+      return "LBracket"
+    TK::RBracket:
+      return "RBracket"
+    TK::IntLiteral:
+      return "IntLiteral"
+    TK::FloatLiteral:
+      return "FloatLiteral"
+    TK::StringLiteral:
+      return "StringLiteral"
+    TK::Identifier:
+      return "Identifier"
+    TK::Newline:
+      return "Newline"
+    TK::Indent:
+      return "Indent"
+    TK::Dedent:
+      return "Dedent"
+    TK::Eof:
+      return "Eof"
+    TK::Error:
+      return "Error"
+  return "Unknown"
+
+class LexState:
+  pos: i64
+  paren_depth: i64
+  at_line_start: bool
+  indent_stack: Vector<i64>
+  indent_depth: i64
+  tokens: Vector<Token>
+  diags: Vector<Diagnostic>
+
+fn emit1(tokens: Vector<Token>, kind: TK, pos: i64): Vector<Token>
+  return tokens.push(Token(kind, pos, to_i64(1)))
+
+fn emit2(tokens: Vector<Token>, kind: TK, pos: i64): Vector<Token>
+  return tokens.push(Token(kind, pos, to_i64(2)))
+
+fn indent_top(st: LexState): i64
+  return st.indent_stack.get(st.indent_depth - to_i64(1))
+
+fn indent_push(st: LexState, spaces: i64): LexState
+  if st.indent_depth < st.indent_stack.length():
+    st.indent_stack = st.indent_stack.set(st.indent_depth, spaces)
+  else:
+    st.indent_stack = st.indent_stack.push(spaces)
+  st.indent_depth = st.indent_depth + to_i64(1)
+  return st
+
+fn indent_pop(st: LexState): LexState
+  st.indent_depth = st.indent_depth - to_i64(1)
+  return st
+
+fn lex_line_start(st: LexState, src: string, src_len: i64): LexState
+  let line_begin: i64 = st.pos
+  let spaces: i64 = to_i64(0)
+  let one: i64 = to_i64(1)
+  let zero: i64 = to_i64(0)
+  while st.pos < src_len:
+    let lc: i32 = char_at(src, st.pos)
+    if lc == 32:
+      spaces = spaces + one
+      st.pos = st.pos + one
+    else if lc == 9:
+      st.diags = st.diags.push(make_error(Span(st.pos, one), "tabs are not allowed in Dao source"))
+      st.tokens = st.tokens.push(Token(TK::Error, st.pos, one))
+      spaces = spaces + one
+      st.pos = st.pos + one
+    else:
+      break
+
+  if st.pos < src_len:
+    let lc: i32 = char_at(src, st.pos)
+    if lc == 10:
+      st.pos = st.pos + one
+      return st
+    if lc == 13:
+      st.pos = st.pos + one
+      if st.pos < src_len:
+        if char_at(src, st.pos) == 10:
+          st.pos = st.pos + one
+      return st
+    if lc == 47:
+      if st.pos + one < src_len:
+        if char_at(src, st.pos + one) == 47:
+          while st.pos < src_len:
+            if char_at(src, st.pos) == 10:
+              break
+            st.pos = st.pos + one
+          if st.pos < src_len:
+            st.pos = st.pos + one
+          return st
+
+  if st.paren_depth == zero:
+    let current_indent: i64 = indent_top(st)
+    if spaces > current_indent:
+      st = indent_push(st, spaces)
+      st.tokens = st.tokens.push(Token(TK::Indent, line_begin, spaces))
+    else if spaces < current_indent:
+      while st.indent_depth > one:
+        if indent_top(st) <= spaces:
+          break
+        st = indent_pop(st)
+        st.tokens = st.tokens.push(Token(TK::Dedent, line_begin, zero))
+      if indent_top(st) != spaces:
+        st.diags = st.diags.push(make_error(Span(line_begin, spaces), "inconsistent indentation"))
+        st.tokens = st.tokens.push(Token(TK::Error, line_begin, spaces))
+  st.at_line_start = false
+  return st
+
+fn lex_string(st: LexState, src: string, src_len: i64): LexState
+  let one: i64 = to_i64(1)
+  let str_start: i64 = st.pos
+  st.pos = st.pos + one
+  let terminated: bool = false
+  let done: bool = false
+  while st.pos < src_len:
+    if done:
+      break
+    let sc: i32 = char_at(src, st.pos)
+    if sc == 34:
+      st.pos = st.pos + one
+      done = true
+      terminated = true
+    else if sc == 92:
+      st.pos = st.pos + one
+      if st.pos < src_len:
+        st.pos = st.pos + one
+    else if sc == 10:
+      st.diags = st.diags.push(make_error(Span(str_start, st.pos - str_start), "unterminated string literal"))
+      done = true
+    else:
+      st.pos = st.pos + one
+  if done == false:
+    st.diags = st.diags.push(make_error(Span(str_start, st.pos - str_start), "unterminated string literal"))
+  if terminated:
+    st.tokens = st.tokens.push(Token(TK::StringLiteral, str_start, st.pos - str_start))
+  else:
+    st.tokens = st.tokens.push(Token(TK::Error, str_start, st.pos - str_start))
+  return st
+
+fn lex_number(st: LexState, src: string, src_len: i64): LexState
+  let one: i64 = to_i64(1)
+  let num_start: i64 = st.pos
+  while st.pos < src_len:
+    if ascii::is_digit(char_at(src, st.pos)) == false:
+      break
+    st.pos = st.pos + one
+  let is_float: bool = false
+  if st.pos < src_len:
+    if char_at(src, st.pos) == 46:
+      if st.pos + one < src_len:
+        if ascii::is_digit(char_at(src, st.pos + one)):
+          is_float = true
+          st.pos = st.pos + one
+          while st.pos < src_len:
+            if ascii::is_digit(char_at(src, st.pos)) == false:
+              break
+            st.pos = st.pos + one
+  if is_float:
+    st.tokens = st.tokens.push(Token(TK::FloatLiteral, num_start, st.pos - num_start))
+  else:
+    st.tokens = st.tokens.push(Token(TK::IntLiteral, num_start, st.pos - num_start))
+  return st
+
+fn lex_ident_or_keyword(st: LexState, src: string, src_len: i64): LexState
+  let one: i64 = to_i64(1)
+  let id_start: i64 = st.pos
+  while st.pos < src_len:
+    if ascii::is_alnum(char_at(src, st.pos)) == false:
+      break
+    st.pos = st.pos + one
+  let kind: TK = classify_keyword(src, id_start, st.pos - id_start)
+  st.tokens = st.tokens.push(Token(kind, id_start, st.pos - id_start))
+  return st
+
+fn lex_two_or_one(st: LexState, src: string, src_len: i64, second_ch: i32, two_kind: TK, one_kind: TK): LexState
+  if st.pos + to_i64(1) < src_len:
+    if char_at(src, st.pos + to_i64(1)) == second_ch:
+      st.tokens = emit2(st.tokens, two_kind, st.pos)
+      st.pos = st.pos + to_i64(2)
+      return st
+  st.tokens = emit1(st.tokens, one_kind, st.pos)
+  st.pos = st.pos + to_i64(1)
+  return st
+
+fn lex_token(st: LexState, src: string, src_len: i64): LexState
+  let one: i64 = to_i64(1)
+  let zero: i64 = to_i64(0)
+  let ch: i32 = char_at(src, st.pos)
+
+  if ch == 32:
+    st.pos = st.pos + one
+    return st
+
+  if ch == 10:
+    if st.paren_depth == zero:
+      st.tokens = emit1(st.tokens, TK::Newline, st.pos)
+    st.pos = st.pos + one
+    st.at_line_start = true
+    return st
+
+  if ch == 13:
+    st.pos = st.pos + one
+    if st.pos < src_len:
+      if char_at(src, st.pos) == 10:
+        st.pos = st.pos + one
+    if st.paren_depth == zero:
+      st.tokens = emit1(st.tokens, TK::Newline, st.pos - one)
+    st.at_line_start = true
+    return st
+
+  if ch == 47:
+    if st.pos + one < src_len:
+      if char_at(src, st.pos + one) == 47:
+        while st.pos < src_len:
+          if char_at(src, st.pos) == 10:
+            break
+          st.pos = st.pos + one
+        return st
+    st.tokens = emit1(st.tokens, TK::Slash, st.pos)
+    st.pos = st.pos + one
+    return st
+
+  if ch == 34:
+    return lex_string(st, src, src_len)
+  if ascii::is_digit(ch):
+    return lex_number(st, src, src_len)
+  if ascii::is_alpha(ch):
+    return lex_ident_or_keyword(st, src, src_len)
+
+  if ch == 58:
+    return lex_two_or_one(st, src, src_len, 58, TK::ColonColon, TK::Colon)
+  if ch == 61:
+    if st.pos + one < src_len:
+      let nx: i32 = char_at(src, st.pos + one)
+      if nx == 61:
+        st.tokens = emit2(st.tokens, TK::EqEq, st.pos)
+        st.pos = st.pos + to_i64(2)
+        return st
+      if nx == 62:
+        st.tokens = emit2(st.tokens, TK::FatArrow, st.pos)
+        st.pos = st.pos + to_i64(2)
+        return st
+    st.tokens = emit1(st.tokens, TK::Eq, st.pos)
+    st.pos = st.pos + one
+    return st
+  if ch == 33:
+    return lex_two_or_one(st, src, src_len, 61, TK::BangEq, TK::Bang)
+  if ch == 60:
+    return lex_two_or_one(st, src, src_len, 61, TK::LtEq, TK::Lt)
+  if ch == 62:
+    return lex_two_or_one(st, src, src_len, 61, TK::GtEq, TK::Gt)
+  if ch == 45:
+    return lex_two_or_one(st, src, src_len, 62, TK::Arrow, TK::Minus)
+  if ch == 124:
+    return lex_two_or_one(st, src, src_len, 62, TK::PipeGt, TK::Pipe)
+
+  if ch == 43:
+    st.tokens = emit1(st.tokens, TK::Plus, st.pos)
+    st.pos = st.pos + one
+    return st
+  if ch == 42:
+    st.tokens = emit1(st.tokens, TK::Star, st.pos)
+    st.pos = st.pos + one
+    return st
+  if ch == 37:
+    st.tokens = emit1(st.tokens, TK::Percent, st.pos)
+    st.pos = st.pos + one
+    return st
+  if ch == 38:
+    st.tokens = emit1(st.tokens, TK::Amp, st.pos)
+    st.pos = st.pos + one
+    return st
+  if ch == 46:
+    st.tokens = emit1(st.tokens, TK::Dot, st.pos)
+    st.pos = st.pos + one
+    return st
+  if ch == 44:
+    st.tokens = emit1(st.tokens, TK::Comma, st.pos)
+    st.pos = st.pos + one
+    return st
+  if ch == 63:
+    st.tokens = emit1(st.tokens, TK::Question, st.pos)
+    st.pos = st.pos + one
+    return st
+
+  if ch == 40:
+    st.tokens = emit1(st.tokens, TK::LParen, st.pos)
+    st.paren_depth = st.paren_depth + one
+    st.pos = st.pos + one
+    return st
+  if ch == 41:
+    st.tokens = emit1(st.tokens, TK::RParen, st.pos)
+    if st.paren_depth > zero:
+      st.paren_depth = st.paren_depth - one
+    st.pos = st.pos + one
+    return st
+  if ch == 91:
+    st.tokens = emit1(st.tokens, TK::LBracket, st.pos)
+    st.paren_depth = st.paren_depth + one
+    st.pos = st.pos + one
+    return st
+  if ch == 93:
+    st.tokens = emit1(st.tokens, TK::RBracket, st.pos)
+    if st.paren_depth > zero:
+      st.paren_depth = st.paren_depth - one
+    st.pos = st.pos + one
+    return st
+
+  st.diags = st.diags.push(make_error(Span(st.pos, one), "unexpected character"))
+  st.tokens = emit1(st.tokens, TK::Error, st.pos)
+  st.pos = st.pos + one
+  return st
+
+fn lex(src: string): LexResult
+  let src_len: i64 = length(src)
+  let zero: i64 = to_i64(0)
+  let one: i64 = to_i64(1)
+  let indent_stack: Vector<i64> = Vector<i64>::new()
+  indent_stack = indent_stack.push(zero)
+  let st: LexState = LexState(zero, zero, true, indent_stack, one, Vector<Token>::new(), Vector<Diagnostic>::new())
+
+  while st.pos < src_len:
+    if st.at_line_start:
+      st = lex_line_start(st, src, src_len)
+    else:
+      st = lex_token(st, src, src_len)
+
+  while st.indent_depth > one:
+    st = indent_pop(st)
+    st.tokens = st.tokens.push(Token(TK::Dedent, st.pos, zero))
+
+  st.tokens = st.tokens.push(Token(TK::Eof, st.pos, zero))
+  return LexResult(st.tokens, st.diags)

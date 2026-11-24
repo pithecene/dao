@@ -170,7 +170,7 @@ class MsProgram:
 
 // The current module.
 class MsSource:
-  toks: Vector<Token>
+  toks: Vector<lexer::Token>
   src: string
   file_id: i64              // file id for uses_map lookups (-1 in single-file)
 
@@ -391,7 +391,7 @@ fn mir_resolve_field_index(ms: MS, struct_type_idx: i64, field_tok: i64): i64
   match t.kind:
     TypeKind::TStruct:
       // Extract the field name from the field_tok.
-      let ft: Token = ms.source.toks.get(field_tok)
+      let ft: lexer::Token = ms.source.toks.get(field_tok)
       let field_name: string = substring(ms.source.src, ft.offset, ft.len)
       // Walk the struct's field pairs in type_info; each name slot holds
       // the field's symbol (field_slot_name), readable from any module.
@@ -496,7 +496,7 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       if tok < to_i64(0) or tok >= br.ms.source.toks.length():
         br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)")
         return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
-      let tk: Token = br.ms.source.toks.get(tok)
+      let tk: lexer::Token = br.ms.source.toks.get(tok)
       let lex: string = substring(br.ms.source.src, tk.offset, tk.len)
       let v: i64 = to_i64(0)
       if lex == "true":
@@ -689,7 +689,7 @@ fn lower_place(ms: MS, target: i64): PlaceR
         return base
       let field: i64 = mir_resolve_field_index(base.ms, ms_get_hir_type(base.ms, base.ms.hir.nodes.get(obj)), field_tok)
       if field < 0 and base.ms.func.in_template == false:
-        let ft: Token = base.ms.source.toks.get(field_tok)
+        let ft: lexer::Token = base.ms.source.toks.get(field_tok)
         return PlaceR(ms_add_diag(base.ms, Span(ft.offset, ft.len), "unresolved field '" + substring(base.ms.source.src, ft.offset, ft.len) + "' in assignment target"), none)
       return PlaceR(base.ms, MirPlace(base.place.local, base.place.path.push(field)))
   return PlaceR(ms_add_diag(ms, Span(to_i64(0), to_i64(1)), "unsupported assignment target: " + hir_node_kind(ms.hir.nodes.get(target))), none)
@@ -1015,7 +1015,7 @@ fn mir_local_name(ms: MS, slot: i64): string
 fn mir_tok_text(ms: MS, tok: i64): string
   if tok < 0 or tok >= ms.source.toks.length():
     return ""
-  let t: Token = ms.source.toks.get(tok)
+  let t: lexer::Token = ms.source.toks.get(tok)
   return substring(ms.source.src, t.offset, t.len)
 
 // Whether a value of `ti` owns heap memory, so leaving a domain must copy
@@ -1419,7 +1419,7 @@ fn program_run_mir(p: Program): ProgramMir
   let ms: MS = MS(
     MsHir(ph.arena.nodes, ph.arena.idx),
     MsProgram(hp.typecheck.types, hp.typecheck.type_info, hp.resolve.symbols, hp.typecheck.sym_types, hp.resolve.uses, to_i64(-1)),
-    MsSource(Vector<Token>::new(), "", to_i64(-1)),
+    MsSource(Vector<lexer::Token>::new(), "", to_i64(-1)),
     MsOutput(Vector<MirNode>::new(), Vector<i64>::new(), Vector<Diagnostic>::new()),
     ms_function_empty(),
     flow_empty())
@@ -1811,7 +1811,7 @@ fn mono_fixup_bound_calls(m: Mono, fn_node: i64, module_pos: i64): Mono
         match m.tables.nodes.get(callee):
           MirNode::MirFieldAccess(obj, field_tok, field_index, access_ti):
             let receiver_ti: i64 = mono_value_type(m, obj)
-            let tk: Token = sf.parse_output.toks.get(field_tok)
+            let tk: lexer::Token = sf.parse_output.toks.get(field_tok)
             let member: string = substring(sf.source_text, tk.offset, tk.len)
             let owner_ti: i64 = dispatch_owner(m.tables.ts.types, m.tables.ts.type_info, receiver_ti)
             let method: i64 = find_method_sym_for_receiver(m.tables.ts.reg.methods, sf.module_id, member, receiver_ti, owner_ti)

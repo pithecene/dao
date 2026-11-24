@@ -799,7 +799,7 @@ fn main(): i32
   while i35 < hir_count_nodes(r35):
     match r35.hir_nodes.get(i35):
       HirNode::HirMode(name_tidx, body_lp):
-        let mt35: Token = r35.toks.get(name_tidx)
+        let mt35: lexer::Token = r35.toks.get(name_tidx)
         mode_name35 = substring(r35.src, mt35.offset, mt35.len)
         let body35: Vector<i64> = read_list(r35.hir_idx, body_lp)
         let b35: i64 = 0

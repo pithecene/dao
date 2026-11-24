@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# assemble.sh — Compose each bootstrap program from explicit source
-# files: the shared base, the library fragments a program builds on,
-# and finally that program's own test runner or entry point.
+# assemble.sh — Compose bootstrap programs that still share `base.dao`
+# from explicit source files: `bootstrap/shared/base.dao`, upstream
+# subsystem library fragments, and that program's test runner or entry
+# point.
+#
+# `bootstrap::ascii` and `bootstrap::lexer` are real modules compiled
+# directly from authored sources and are not assembled here.
 #
 # Run from repository root:
 #   bash bootstrap/assemble.sh [output-root]
-#
-# When output-root is omitted, assembled files land under `bootstrap/`
-# (`bootstrap/<sub>/<name>.gen.dao`). Crossing runs pass a per-run
-# directory so concurrent invocations never overwrite shared `.gen.dao`
-# files.
 
 set -euo pipefail
 if command -v git &>/dev/null && git rev-parse --show-toplevel &>/dev/null; then
@@ -21,10 +20,6 @@ fi
 OUT_ROOT="${1:-bootstrap}"
 SHARED=bootstrap/shared/base.dao
 
-# Strip a leading `module <path>` line (plus the blank/comment lines
-# before it) from a file on stdout. Each real input carries its own
-# module declaration, and the generated file gets one synthetic
-# declaration at the top.
 strip_module() {
   awk '
     BEGIN { found = 0 }
@@ -41,8 +36,6 @@ strip_module() {
   ' "$1"
 }
 
-# assemble <out.gen.dao> <input>...
-# The shared base is prepended to every program automatically.
 assemble() {
   local out="$1"
   shift
@@ -61,19 +54,12 @@ assemble() {
   echo "  assembled $out"
 }
 
-# Library fragments, in dependency order. A program lists the fragments
-# it needs, then its own test runner or entry point last.
 RESOLVER=bootstrap/resolver/impl.dao
 TYPECHECK=bootstrap/typecheck/impl.dao
 HIR=bootstrap/hir/impl.dao
 MIR=bootstrap/mir/impl.dao
 LLVM=bootstrap/llvm/impl.dao
 DRIVER=bootstrap/driver/impl.dao
-
-# lexer, parser and graph draw their library entirely from the shared
-# base, so each is just the base plus its own test runner.
-assemble "$OUT_ROOT/lexer/lexer.gen.dao" \
-  bootstrap/lexer/tests.dao
 
 assemble "$OUT_ROOT/parser/parser.gen.dao" \
   bootstrap/parser/tests.dao
@@ -115,8 +101,6 @@ assemble "$OUT_ROOT/driver/driver_tests.gen.dao" \
   "$DRIVER" \
   bootstrap/driver/tests.dao
 
-# The bootstrap compiler itself: every library fragment and the driver
-# that runs the whole pipeline over an explicit manifest's files.
 assemble "$OUT_ROOT/driver/driver.gen.dao" \
   "$RESOLVER" \
   "$TYPECHECK" \
@@ -126,4 +110,4 @@ assemble "$OUT_ROOT/driver/driver.gen.dao" \
   "$DRIVER" \
   bootstrap/driver/main.dao
 
-echo "done — 10 files assembled"
+echo "done — 9 files assembled"

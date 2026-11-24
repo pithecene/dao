@@ -137,14 +137,14 @@ Dao standard library surface and future implementation roots.
 Self-hosting compiler subsystems written in Dao.
 
 - `README.md` — scope, parity notes, and subsystem inventory
-- `shared/` — single source of truth for the bootstrap frontend pipeline:
-  token model, lexer, AST, parser, module graph (`base.dao`); assembled
-  into `*.gen.dao` files via `assemble.sh`
-- `ascii.dao` — `bootstrap::ascii`, the compiler's first real module; every
-  program passes it beside its assembled source
-- `assemble.sh` — concatenates `shared/base.dao` with subsystem sources
-  to produce compilable `*.gen.dao` outputs under `bootstrap/` or an
-  explicit per-run output root
+- `shared/` — shared AST, parser, module graph, and cross-pass program
+  structures (`base.dao`, importing `bootstrap::lexer`); assembled into
+  remaining `*.gen.dao` files via `assemble.sh`
+- `ascii.dao` — `bootstrap::ascii`, character-classification module
+  imported by `bootstrap::lexer`
+- `assemble.sh` — concatenates `shared/base.dao` with remaining subsystem
+  sources to produce `*.gen.dao` outputs under `bootstrap/` or an explicit
+  per-run output root (`lexer` no longer uses assembly)
 - `validate_ir.sh` — compiles, links, and runs the IR the LLVM suite
   emits under `llvm/out/` or a per-run directory, comparing exit codes
   and expected fixture counts
@@ -156,8 +156,9 @@ Self-hosting compiler subsystems written in Dao.
   the stage-2 / stage-3 fixed point, links and smoke-tests stage 3, runs
   every suite compiled by stage 2 in an isolated run directory under
   `driver/out/`, and records structured provenance in `result.json`
-- `lexer/` — indentation-aware lexer matching the host compiler's token
-  surface; tests in `tests.dao` (Task 20)
+- `lexer/` — `bootstrap::lexer` (`impl.dao`, importing `bootstrap::ascii`)
+  and `bootstrap::lexer::tests` (`tests.dao`), compiled directly as real
+  modules without `assemble.sh`
 - `parser/` — recursive-descent parser producing arena-indexed AST for
   Tier A Dao syntax; tests in `tests.dao` (Task 21)
 - `graph/` — module graph construction, cycle detection, and topological

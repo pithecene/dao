@@ -159,7 +159,7 @@ class MirBackendInput:
 // root takes each module's own from `graph`, and `toks` and `src` serve a
 // single-module root.
 class BackendSource:
-  toks: Vector<Token>
+  toks: Vector<lexer::Token>
   src: string
   graph: ProgramGraph
 
@@ -556,7 +556,7 @@ fn is_prelude_intrinsic_name(name: string): bool
 // The module the backend reads tokens from, and the program it belongs to:
 // every module's source and name, and what naming reads off them.
 class BsSource:
-  toks: Vector<Token>
+  toks: Vector<lexer::Token>
   src: string
   program: BsProgram
 
@@ -999,7 +999,7 @@ fn bs_tok_lex(bs: BS, tok_idx: i64): string
     return ""
   if tok_idx >= bs.input.source.toks.length():
     return ""
-  let t: Token = bs.input.source.toks.get(tok_idx)
+  let t: lexer::Token = bs.input.source.toks.get(tok_idx)
   return substring(bs.input.source.src, t.offset, t.len)
 
 // =========================================================================
@@ -1202,19 +1202,19 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
     // ---------- binary / unary ----------
     MirNode::MirBinary(op_tok, lhs, rhs, type_idx):
       // A comparison `match` synthesized has no source token: it is `==`.
-      let tk: Token = Token(TK::EqEq, to_i64(0), to_i64(0))
+      let tk: lexer::Token = lexer::Token(lexer::TK::EqEq, to_i64(0), to_i64(0))
       if op_tok != synthesized_equality_op():
         tk = bs.input.source.toks.get(op_tok)
-      return bs_lower_binary(bs, insts, mir_node_idx, tk_name(tk.kind), lhs, rhs)
+      return bs_lower_binary(bs, insts, mir_node_idx, lexer::tk_name(tk.kind), lhs, rhs)
 
     MirNode::MirUnary(op_tok, operand, type_idx):
-      let tk: Token = bs.input.source.toks.get(op_tok)
+      let tk: lexer::Token = bs.input.source.toks.get(op_tok)
       let operand_text: string = bs_get_value_text(bs, operand)
       let ty: LlType = ll_type_of(bs, type_idx)
       let fr_un: FreshR = bs_fresh_value(bs)
       bs = fr_un.bs
       let result: string = fr_un.name
-      if tk_name(tk.kind) == "Minus":
+      if lexer::tk_name(tk.kind) == "Minus":
         if ll_type_is_float(ty):
           let inst: LlInst = LlInst(
             LlInstKind::LlFNeg(operand_text = operand_text, ty = ty),
@@ -1228,7 +1228,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
           insts = insts.push(inst)
         bs = bs_set_value(bs, mir_node_idx, result, ll_type_text(ty))
         return LowerStepR(bs, insts)
-      if tk_name(tk.kind) == "Bang":
+      if lexer::tk_name(tk.kind) == "Bang":
         // xor %x, true  (on i1)
         let inst: LlInst = LlInst(
           LlInstKind::LlBinOp(op = "xor", lhs_text = operand_text, rhs_text = "true", ty = LlType::LlI1),
@@ -1236,7 +1236,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
         insts = insts.push(inst)
         bs = bs_set_value(bs, mir_node_idx, result, "i1")
         return LowerStepR(bs, insts)
-      bs = bs_error(bs, "bootstrap llvm backend: unsupported unary op " + tk_name(tk.kind))
+      bs = bs_error(bs, "bootstrap llvm backend: unsupported unary op " + lexer::tk_name(tk.kind))
       return LowerStepR(bs, insts)
 
     // ---------- calls ----------
@@ -2826,7 +2826,7 @@ fn lower_program_to_llvm(inputs: Vector<SourceInput>): ProgramLlvm
   let pc: ProgramConcrete = ProgramConcrete(pm.program, pm.mir)
   resource memory mono =>
     pc = program_monomorphize(pt, pm)
-  let input: MirBackendInput = MirBackendInput(pc.mir, pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, BackendSource(Vector<Token>::new(), "", pc.program.graph))
+  let input: MirBackendInput = MirBackendInput(pc.mir, pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, BackendSource(Vector<lexer::Token>::new(), "", pc.program.graph))
   return ProgramLlvm(pc.program, lower_mir_to_llvm_text(input))
 
 // A diagnostic as the host prints it: `path:line:column: message`, or the

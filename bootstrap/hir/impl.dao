@@ -96,7 +96,7 @@ enum class HirNode:
 class HirModule:
   nodes: Vector<Node>
   idx_data: Vector<i64>
-  toks: Vector<Token>
+  toks: Vector<lexer::Token>
   src: string
   module_id: i64                 // module id (used in composite keys)
   file_id: i64                   // file id (used in composite keys)
@@ -124,14 +124,14 @@ fn arena_empty(): HirArena
   return HirArena(Vector<HirNode>::new(), Vector<i64>::new())
 
 fn hir_result_empty(): HirResult
-  return HirResult(Vector<HirNode>::new(), Vector<i64>::new(), Vector<DaoType>::new(), Vector<i64>::new(), Vector<Token>::new(), "", Vector<Diagnostic>::new(), to_i64(-1))
+  return HirResult(Vector<HirNode>::new(), Vector<i64>::new(), Vector<DaoType>::new(), Vector<i64>::new(), Vector<lexer::Token>::new(), "", Vector<Diagnostic>::new(), to_i64(-1))
 
 class HirResult:
   hir_nodes: Vector<HirNode>
   hir_idx: Vector<i64>
   types: Vector<DaoType>
   type_info: Vector<i64>
-  toks: Vector<Token>
+  toks: Vector<lexer::Token>
   src: string
   diags: Vector<Diagnostic>
   root: i64
@@ -158,11 +158,11 @@ fn hs_idx_push(hs: HS, val: i64): HS
   return hs
 
 fn hs_tok_name(hs: HS, tidx: i64): string
-  let tok: Token = hs.unit.toks.get(tidx)
+  let tok: lexer::Token = hs.unit.toks.get(tidx)
   return substring(hs.unit.src, tok.offset, tok.len)
 
 fn hs_tok_span(hs: HS, tidx: i64): Span
-  let tok: Token = hs.unit.toks.get(tidx)
+  let tok: lexer::Token = hs.unit.toks.get(tidx)
   return Span(tok.offset, tok.len)
 
 // =========================================================================
@@ -357,23 +357,23 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
       // infer from the already-lowered HIR children's types.
       let bin_ti: i64 = ti
       if bin_ti < 0:
-        let tok: Token = rr.hs.unit.toks.get(op_tidx)
+        let tok: lexer::Token = rr.hs.unit.toks.get(op_tidx)
         let is_cmp: bool = false
-        if tk_name(tok.kind) == tk_name(TK::EqEq):
+        if lexer::tk_name(tok.kind) == lexer::tk_name(lexer::TK::EqEq):
           is_cmp = true
-        if tk_name(tok.kind) == tk_name(TK::BangEq):
+        if lexer::tk_name(tok.kind) == lexer::tk_name(lexer::TK::BangEq):
           is_cmp = true
-        if tk_name(tok.kind) == tk_name(TK::Lt):
+        if lexer::tk_name(tok.kind) == lexer::tk_name(lexer::TK::Lt):
           is_cmp = true
-        if tk_name(tok.kind) == tk_name(TK::LtEq):
+        if lexer::tk_name(tok.kind) == lexer::tk_name(lexer::TK::LtEq):
           is_cmp = true
-        if tk_name(tok.kind) == tk_name(TK::Gt):
+        if lexer::tk_name(tok.kind) == lexer::tk_name(lexer::TK::Gt):
           is_cmp = true
-        if tk_name(tok.kind) == tk_name(TK::GtEq):
+        if lexer::tk_name(tok.kind) == lexer::tk_name(lexer::TK::GtEq):
           is_cmp = true
-        if tk_name(tok.kind) == tk_name(TK::KwAnd):
+        if lexer::tk_name(tok.kind) == lexer::tk_name(lexer::TK::KwAnd):
           is_cmp = true
-        if tk_name(tok.kind) == tk_name(TK::KwOr):
+        if lexer::tk_name(tok.kind) == lexer::tk_name(lexer::TK::KwOr):
           is_cmp = true
         if is_cmp:
           bin_ti = 10  // bool
@@ -1541,7 +1541,7 @@ fn program_lower_hir(p: Program): ProgramHir
     ti = ti + 1
 
   // Emit HirProgram root. Build a temporary HS to use hir_flush_list.
-  let tmp_hs: HS = HS(HirModule(Vector<Node>::new(), Vector<i64>::new(), Vector<Token>::new(), "", to_i64(-1), to_i64(-1)), Vector<Symbol>::new(), TypeCheckData(false, Vector<DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), program_lookup_empty()), HashMap<i64>::new(), HirArena(hir_nodes, hir_idx), Vector<Diagnostic>::new())
+  let tmp_hs: HS = HS(HirModule(Vector<Node>::new(), Vector<i64>::new(), Vector<lexer::Token>::new(), "", to_i64(-1), to_i64(-1)), Vector<Symbol>::new(), TypeCheckData(false, Vector<DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), program_lookup_empty()), HashMap<i64>::new(), HirArena(hir_nodes, hir_idx), Vector<Diagnostic>::new())
   let mod_fl: HirFlush = hir_flush_list(tmp_hs, module_indices)
   hir_nodes = mod_fl.hs.arena.nodes
   hir_idx = mod_fl.hs.arena.idx
@@ -1704,7 +1704,7 @@ fn hir_tparams_label(hr: HirResult, tparams_lp: i64): string
     let tp_tidx: i64 = hr.hir_idx.get(start + i * 2)
     let tp_ti: i64 = hr.hir_idx.get(start + i * 2 + 1)
     if tp_tidx >= 0:
-      let tp_tok: Token = hr.toks.get(tp_tidx)
+      let tp_tok: lexer::Token = hr.toks.get(tp_tidx)
       line = line + substring(hr.src, tp_tok.offset, tp_tok.len)
     if tp_ti >= 0:
       if tp_ti < hr.types.length():
@@ -1773,7 +1773,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
       return line
     HirNode::HirFunction(fn_sym, tparams_lp, params_lp, ret_ti, body_lp, is_extern, class_owner):
       if class_owner >= 0:
-        let co_tok: Token = hr.toks.get(class_owner)
+        let co_tok: lexer::Token = hr.toks.get(class_owner)
         line = line + " [" + substring(hr.src, co_tok.offset, co_tok.len) + ".]"
       if tparams_lp >= 0:
         line = line + hir_tparams_label(hr, tparams_lp)
@@ -1840,8 +1840,8 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
         bi = bi + 1
       return line
     HirNode::HirResource(kind_tidx, name_tidx, body_lp):
-      let kind_tok: Token = hr.toks.get(kind_tidx)
-      let name_tok: Token = hr.toks.get(name_tidx)
+      let kind_tok: lexer::Token = hr.toks.get(kind_tidx)
+      let name_tok: lexer::Token = hr.toks.get(name_tidx)
       line = line + " " + substring(hr.src, kind_tok.offset, kind_tok.len) + " " + substring(hr.src, name_tok.offset, name_tok.len) + "\n"
       let rbody: Vector<i64> = read_list(hr.hir_idx, body_lp)
       let ri: i64 = 0
@@ -1850,7 +1850,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
         ri = ri + 1
       return line
     HirNode::HirMode(name_tidx, body_lp):
-      let mode_tok: Token = hr.toks.get(name_tidx)
+      let mode_tok: lexer::Token = hr.toks.get(name_tidx)
       line = line + " " + substring(hr.src, mode_tok.offset, mode_tok.len) + "\n"
       let mbody: Vector<i64> = read_list(hr.hir_idx, body_lp)
       let mi: i64 = 0
