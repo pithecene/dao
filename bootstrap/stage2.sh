@@ -26,6 +26,22 @@ CLANG="${CLANG:-clang}"
 REQ_STACK_KB="${STAGE_STACK_KB:-1048576}"
 LIMIT_KB="${STAGE_MEMORY_KB:-8388608}"
 
+is_positive_int() {
+  case "$1" in
+    ''|0|*[!0-9]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+if ! is_positive_int "$REQ_STACK_KB"; then
+  echo "stage2: STAGE_STACK_KB must be a positive integer KiB bound, got '$REQ_STACK_KB'" >&2
+  exit 1
+fi
+if ! is_positive_int "$LIMIT_KB"; then
+  echo "stage2: STAGE_MEMORY_KB must be a positive integer KiB bound, got '$LIMIT_KB'" >&2
+  exit 1
+fi
+
 if ! command -v "$CLANG" > /dev/null 2>&1; then
   echo "stage2: clang not found: $CLANG" >&2
   exit 1
@@ -38,16 +54,22 @@ fi
 mkdir -p bootstrap/driver/out
 if [ -n "${STAGE2_RUN_DIR:-}" ]; then
   RUN_DIR="$STAGE2_RUN_DIR"
-  if [ -e "$RUN_DIR" ] && [ -n "$(find "$RUN_DIR" -mindepth 1 -maxdepth 1 2>/dev/null)" ]; then
+  mkdir -p "$RUN_DIR" || { echo "stage2: cannot create $RUN_DIR" >&2; exit 1; }
+  if ! mkdir "$RUN_DIR/.stage2.lock" 2>/dev/null; then
+    echo "stage2: STAGE2_RUN_DIR is already claimed: $RUN_DIR" >&2
+    exit 1
+  fi
+  if [ -n "$(find "$RUN_DIR" -mindepth 1 -maxdepth 1 ! -name '.stage2.lock' 2>/dev/null)" ]; then
+    rmdir "$RUN_DIR/.stage2.lock" 2>/dev/null || true
     echo "stage2: STAGE2_RUN_DIR must not contain prior artifacts: $RUN_DIR" >&2
     exit 1
   fi
-  mkdir -p "$RUN_DIR" || { echo "stage2: cannot create $RUN_DIR" >&2; exit 1; }
 else
   RUN_DIR="$(mktemp -d bootstrap/driver/out/run.XXXXXX)" && [ -n "$RUN_DIR" ] || {
     echo "stage2: cannot create isolated run directory" >&2
     exit 1
   }
+  mkdir "$RUN_DIR/.stage2.lock" || exit 1
 fi
 
 GEN_DIR="$RUN_DIR/gen"
@@ -68,6 +90,14 @@ sha256_file() {
 
 json_escape() {
   printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+json_limit_value() {
+  case "$1" in
+    ''|null) printf 'null' ;;
+    *[!0-9]*) printf '"%s"' "$(json_escape "$1")" ;;
+    *) printf '%s' "$1" ;;
+  esac
 }
 
 # Apply and verify stack and virtual-memory bounds explicitly so failed
@@ -362,13 +392,13 @@ cat > "$RUN_DIR/result.json" <<EOF
     "source_closure_sha256": "$SOURCE_CLOSURE_SHA"
   },
   "limits": {
-    "requested_stack_kb": $REQ_STACK_KB,
-    "initial_stack_kb": "$(json_escape "$INITIAL_STACK_KB")",
-    "hard_stack_kb": "$(json_escape "$HARD_STACK_KB")",
-    "applied_stack_kb": "$(json_escape "$APPLIED_STACK_KB")",
+    "requested_stack_kb": $(json_limit_value "$REQ_STACK_KB"),
+    "initial_stack_kb": $(json_limit_value "$INITIAL_STACK_KB"),
+    "hard_stack_kb": $(json_limit_value "$HARD_STACK_KB"),
+    "applied_stack_kb": $(json_limit_value "$APPLIED_STACK_KB"),
     "stack_mode": "$STACK_MODE",
-    "requested_vmem_kb": $LIMIT_KB,
-    "applied_vmem_kb": $APPLIED_VMEM_JSON,
+    "requested_vmem_kb": $(json_limit_value "$LIMIT_KB"),
+    "applied_vmem_kb": $(json_limit_value "$APPLIED_VMEM_JSON"),
     "vmem_mode": "$VMEM_MODE"
   },
   "crossing": {

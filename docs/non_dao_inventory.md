@@ -21,7 +21,7 @@ Line counts reflect the current branch over `50fd1fe`, on 2026-11-24.  The table
 | Stopgap | Language | Files | Lines | Replacement |
 |---|---|---|---|---|
 | `compiler/` bootstrap tier and its tests | C++ | 108 | 40,128 | nothing: this tier stays permanently |
-| `runtime/` allocator, strings, I/O and generators | C | 11 | 1,692 | Dao over `Ptr<T>` and `mode unsafe` in the fully hosted tier, which needs direct system calls from Dao |
+| `runtime/` allocator, strings, I/O and generators | C | 11 | 1,629 | Dao over `Ptr<T>` and `mode unsafe` in the fully hosted tier, which needs direct system calls from Dao |
 | `tools/playground/compiler_service/` | C++ | 20 | 3,300 | a Dao service, which needs sockets and HTTP in the standard library |
 | `tools/playground/frontend/` | TypeScript, CSS, HTML | 20 | 1,660 | a Dao browser target, which does not exist |
 | `examples/forecast_device/metal_runner.swift` | Swift | 1 | 403 | Dao lowering kernels and driving a device, which needs a GPU target |
@@ -33,7 +33,7 @@ Line counts reflect the current branch over `50fd1fe`, on 2026-11-24.  The table
 | Stopgap | Language | Lines | Replacement |
 |---|---|---|---|
 | `bootstrap/assemble.sh` | Shell | 129 | real modules, one import boundary at a time, after which assembly goes away |
-| `bootstrap/stage2.sh`, `audit_closure.sh`, `validate_ir.sh` | Shell | 882 | Dao programs, which need a process API in the standard library |
+| `bootstrap/stage2.sh`, `audit_closure.sh`, `validate_ir.sh` | Shell | 912 | Dao programs, which need a process API in the standard library |
 | `compiler/driver/multifile_build_test.sh`, `tools/playground/dev.sh` | Shell | 194 | the same process API |
 | `Taskfile.yml` | YAML for Task | 209 | a build tool written in Dao |
 | `CMakeLists.txt` files and `CMakePresets.json` | CMake | 519 | stays with the bootstrap tier, and a Dao build tool serves the other tiers |

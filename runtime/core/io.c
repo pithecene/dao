@@ -237,89 +237,15 @@ bool __dao_io_file_exists(const struct dao_string *path) {
 }
 
 #if defined(__linux__)
-static struct {
-  bool initialized;
-  int64_t count;
-  char **items;
-  char *raw;
-} dao_linux_args;
+static int64_t dao_linux_argc = -1;
+static char **dao_linux_argv = NULL;
 
-static void dao_init_linux_args(void) {
-  if (dao_linux_args.initialized) {
-    return;
+__attribute__((constructor)) static void dao_capture_linux_args(int argc,
+                                                                char **argv) {
+  if (argc >= 0 && argv != NULL) {
+    dao_linux_argc = (int64_t)argc;
+    dao_linux_argv = argv;
   }
-  dao_linux_args.initialized = true;
-
-  FILE *cmdline = fopen("/proc/self/cmdline", "rb");
-  if (cmdline == NULL) {
-    return;
-  }
-  size_t cap = 4096;
-  size_t len = 0;
-  char *buf = (char *)malloc(cap);
-  if (buf == NULL) {
-    fclose(cmdline);
-    return;
-  }
-  while (!feof(cmdline)) {
-    if (len + 4096 > cap) {
-      size_t grown = cap * 2;
-      char *next = (char *)realloc(buf, grown);
-      if (next == NULL) {
-        free(buf);
-        fclose(cmdline);
-        return;
-      }
-      buf = next;
-      cap = grown;
-    }
-    len += fread(buf + len, 1, 4096, cmdline);
-    if (ferror(cmdline)) {
-      free(buf);
-      fclose(cmdline);
-      return;
-    }
-  }
-  fclose(cmdline);
-  if (len == 0) {
-    free(buf);
-    return;
-  }
-
-  int64_t argc = 0;
-  for (size_t i = 0; i < len; ++i) {
-    if (buf[i] == '\0') {
-      ++argc;
-    }
-  }
-  if (buf[len - 1] != '\0') {
-    char *terminated = (char *)realloc(buf, len + 1);
-    if (terminated == NULL) {
-      free(buf);
-      return;
-    }
-    buf = terminated;
-    buf[len] = '\0';
-    ++argc;
-    ++len;
-  }
-
-  char **items = (char **)malloc((size_t)argc * sizeof(char *));
-  if (items == NULL) {
-    free(buf);
-    return;
-  }
-  int64_t idx = 0;
-  size_t start = 0;
-  for (size_t i = 0; i < len && idx < argc; ++i) {
-    if (buf[i] == '\0') {
-      items[idx++] = buf + start;
-      start = i + 1;
-    }
-  }
-  dao_linux_args.raw = buf;
-  dao_linux_args.items = items;
-  dao_linux_args.count = idx;
 }
 #endif
 
@@ -327,14 +253,19 @@ int64_t __dao_io_arg_count(void) {
 #ifdef __APPLE__
   int *argc_ptr = _NSGetArgc();
   if (argc_ptr == NULL || *argc_ptr < 0) {
-    return 0;
+    fprintf(stderr, "dao: arg_count: Darwin process arguments unavailable\n");
+    abort();
   }
   return (int64_t)(*argc_ptr);
 #elif defined(__linux__)
-  dao_init_linux_args();
-  return dao_linux_args.count;
+  if (dao_linux_argc < 0 || (dao_linux_argc > 0 && dao_linux_argv == NULL)) {
+    fprintf(stderr, "dao: arg_count: Linux process arguments unavailable\n");
+    abort();
+  }
+  return dao_linux_argc;
 #else
-  return 0;
+  fprintf(stderr, "dao: arg_count: unsupported host platform\n");
+  abort();
 #endif
 }
 
@@ -349,11 +280,17 @@ struct dao_string __dao_io_arg_at(int64_t index) {
   }
 #ifdef __APPLE__
   char ***argv_ptr = _NSGetArgv();
-  const char *arg =
-      (argv_ptr != NULL && *argv_ptr != NULL) ? (*argv_ptr)[index] : NULL;
-  return dao_copy_cstr_to_domain(arg);
+  if (argv_ptr == NULL || *argv_ptr == NULL || (*argv_ptr)[index] == NULL) {
+    fprintf(stderr, "dao: arg_at: null Darwin argument pointer\n");
+    abort();
+  }
+  return dao_copy_cstr_to_domain((*argv_ptr)[index]);
 #elif defined(__linux__)
-  return dao_copy_cstr_to_domain(dao_linux_args.items[index]);
+  if (dao_linux_argv == NULL || dao_linux_argv[index] == NULL) {
+    fprintf(stderr, "dao: arg_at: null Linux argument pointer\n");
+    abort();
+  }
+  return dao_copy_cstr_to_domain(dao_linux_argv[index]);
 #else
   abort();
 #endif
