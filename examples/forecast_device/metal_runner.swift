@@ -157,6 +157,7 @@ func execute(_ steps: [Step], winds: [Int32], gpu: Gpu) throws -> Report {
   let bytes = rows * MemoryLayout<Int32>.stride
   var hostValues: [String: [Int32]] = [:]
   var deviceBuffers: [String: MTLBuffer] = [:]
+  var releasedBuffers: Set<String> = []
   var staging: [String: MTLBuffer] = [:]
   var pendingHost: [String] = []
   var open: MTLCommandBuffer?
@@ -167,11 +168,28 @@ func execute(_ steps: [Step], winds: [Int32], gpu: Gpu) throws -> Report {
     open = made
     return made
   }
-  func privateBuffer(_ name: String) -> MTLBuffer {
-    if let existing = deviceBuffers[name] { return existing }
+  func bindHost(_ name: String, _ values: [Int32]) throws {
+    if hostValues[name] != nil || staging[name] != nil {
+      throw RunError.malformed("duplicate host binding \(name)")
+    }
+    hostValues[name] = values
+  }
+  func allocateBuffer(_ name: String) throws -> MTLBuffer {
+    if deviceBuffers[name] != nil || releasedBuffers.contains(name) {
+      throw RunError.malformed("duplicate device buffer \(name)")
+    }
     let made = gpu.device.makeBuffer(length: bytes, options: .storageModePrivate)!
     deviceBuffers[name] = made
     return made
+  }
+  func liveBuffer(_ name: String) throws -> MTLBuffer {
+    if releasedBuffers.contains(name) {
+      throw RunError.malformed("device buffer \(name) used after release")
+    }
+    guard let existing = deviceBuffers[name] else {
+      throw RunError.malformed("undefined device buffer \(name)")
+    }
+    return existing
   }
   func awaitDevice() {
     guard let running = open else { return }
@@ -195,27 +213,32 @@ func execute(_ steps: [Step], winds: [Int32], gpu: Gpu) throws -> Report {
     switch step.op {
     case "read":
       report.readProvenance.append(step.args[0...4].joined(separator: ":"))
-      hostValues[step.args[5]] = winds
+      try bindHost(step.args[5], winds)
     case "upload":
       let source = try hostValue(step.args[0])
+      let dest = try allocateBuffer(step.args[1])
       let shared = source.withUnsafeBytes { gpu.device.makeBuffer(bytes: $0.baseAddress!, length: bytes, options: .storageModeShared)! }
       let blit = commandBuffer().makeBlitCommandEncoder()!
-      blit.copy(from: shared, sourceOffset: 0, to: privateBuffer(step.args[1]), destinationOffset: 0, size: bytes)
+      blit.copy(from: shared, sourceOffset: 0, to: dest, destinationOffset: 0, size: bytes)
       blit.endEncoding()
       report.transfers.uploads += 1
       report.transfers.uploadBytes += bytes
     case "dispatch":
+      var buffers = [try liveBuffer(step.args[2])]
+      if !step.args[3].isEmpty { buffers.append(try liveBuffer(step.args[3])) }
+      buffers.append(try allocateBuffer(step.args[4]))
       let encoder = commandBuffer().makeComputeCommandEncoder()!
-      var buffers = [privateBuffer(step.args[2])]
-      if !step.args[3].isEmpty { buffers.append(privateBuffer(step.args[3])) }
-      buffers.append(privateBuffer(step.args[4]))
       gpu.dispatch(encoder, step.args[0], buffers, rows)
       encoder.endEncoding()
       report.dispatches += 1
     case "readback":
+      let src = try liveBuffer(step.args[0])
+      if hostValues[step.args[1]] != nil || staging[step.args[1]] != nil {
+        throw RunError.malformed("duplicate host binding \(step.args[1])")
+      }
       let shared = gpu.device.makeBuffer(length: bytes, options: .storageModeShared)!
       let blit = commandBuffer().makeBlitCommandEncoder()!
-      blit.copy(from: privateBuffer(step.args[0]), sourceOffset: 0, to: shared, destinationOffset: 0, size: bytes)
+      blit.copy(from: src, sourceOffset: 0, to: shared, destinationOffset: 0, size: bytes)
       blit.endEncoding()
       staging[step.args[1]] = shared
       pendingHost.append(step.args[1])
@@ -224,13 +247,22 @@ func execute(_ steps: [Step], winds: [Int32], gpu: Gpu) throws -> Report {
     case "host_adjust":
       let base = try hostValue(step.args[1])
       let flag = try hostValue(step.args[2])
-      hostValues[step.args[3]] = zip(base, flag).map { $0 &+ 5 &* $1 }
+      try bindHost(step.args[3], zip(base, flag).map { $0 &+ 5 &* $1 })
     case "release":
+      let name = step.args[0]
+      if releasedBuffers.contains(name) {
+        throw RunError.malformed("double release of device buffer \(name)")
+      }
+      guard deviceBuffers[name] != nil else {
+        throw RunError.malformed("release of unknown device buffer \(name)")
+      }
       awaitDevice()
-      deviceBuffers.removeValue(forKey: step.args[0])
+      deviceBuffers.removeValue(forKey: name)
+      releasedBuffers.insert(name)
     case "observe":
       report.observed[step.args[0]] = try hostValue(step.args[1])
     case "reply":
+      if !report.eta.isEmpty { throw RunError.malformed("plan replies more than once") }
       report.eta = try hostValue(step.args[0])
     default:
       throw RunError.malformed("unknown step \(step.op)")
@@ -347,6 +379,52 @@ for (badStep, expectedReason) in badRecords {
     check(false, "accepted malformed step \(badStep.op)")
   } catch {
     check("\(error)".contains(expectedReason), "rejects \(badStep.op): \(error)")
+  }
+}
+
+print("\n--- buffer lifetime checks ---")
+let readStep = Step(op: "read", args: ["1", "7", "600", "as_of_decision", "540", "wind"])
+let validReleased = try execute([
+  readStep,
+  Step(op: "upload", args: ["wind", "wind_shared"]),
+  Step(op: "dispatch", args: ["score_v1", "v1", "wind_shared", "", "score"]),
+  Step(op: "dispatch", args: ["high_wind", "v1", "wind_shared", "", "flag"]),
+  Step(op: "release", args: ["wind_shared"]),
+  Step(op: "dispatch", args: ["adjust", "v1", "score", "flag", "eta"]),
+  Step(op: "release", args: ["score"]),
+  Step(op: "release", args: ["flag"]),
+  Step(op: "readback", args: ["eta", "eta_host"]),
+  Step(op: "release", args: ["eta"]),
+  Step(op: "reply", args: ["eta_host"]),
+], winds: [8, 12], gpu: gpu)
+check(validReleased.eta == [76, 89], "post-consumer buffer releases preserve \(validReleased.eta)")
+
+let lifetimeRejections: [(String, [Step], String)] = [
+  ("premature release", [
+    readStep,
+    Step(op: "upload", args: ["wind", "wind_shared"]),
+    Step(op: "dispatch", args: ["score_v1", "v1", "wind_shared", "", "score"]),
+    Step(op: "release", args: ["wind_shared"]),
+    Step(op: "dispatch", args: ["high_wind", "v1", "wind_shared", "", "flag"]),
+  ], "used after release"),
+  ("unknown release", [readStep, Step(op: "release", args: ["missing"])], "release of unknown device buffer"),
+  ("double release", [
+    readStep,
+    Step(op: "upload", args: ["wind", "wind_shared"]),
+    Step(op: "release", args: ["wind_shared"]),
+    Step(op: "release", args: ["wind_shared"]),
+  ], "double release of device buffer"),
+  ("undefined input", [
+    readStep,
+    Step(op: "dispatch", args: ["score_v1", "v1", "missing", "", "score"]),
+  ], "undefined device buffer"),
+]
+for (label, badPlan, expectedReason) in lifetimeRejections {
+  do {
+    _ = try execute(badPlan, winds: [8, 12], gpu: gpu)
+    check(false, "accepted \(label)")
+  } catch {
+    check("\(error)".contains(expectedReason), "rejects \(label): \(error)")
   }
 }
 
