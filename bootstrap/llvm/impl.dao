@@ -2795,7 +2795,7 @@ fn lower_to_mir_backend_input(src: string): MirBackendInput
     pc = program_monomorphize(pt, pm)
   let r: MirResult = pc.mir
   let sf: SourceFile = program_file_of_module(pc.program, to_i64(0))
-  let po: ParseOutput = sf.parse_output
+  let po: parser::ParseOutput = sf.parse_output
   return MirBackendInput(MirResult(r.mir_nodes, r.mir_idx, r.diags, mir_only_module(r)), pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, BackendSource(po.toks, sf.source_text, pc.program.graph))
 
 // A whole program to LLVM text: every module, checked, lowered to MIR,

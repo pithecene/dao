@@ -137,14 +137,15 @@ Dao standard library surface and future implementation roots.
 Self-hosting compiler subsystems written in Dao.
 
 - `README.md` — scope, parity notes, and subsystem inventory
-- `shared/` — shared AST, parser, module graph, and cross-pass program
-  structures (`base.dao`, importing `bootstrap::lexer`); assembled into
-  remaining `*.gen.dao` files via `assemble.sh`
+- `shared/` — shared module graph, type universe, and cross-pass program
+  structures (`base.dao`, importing `bootstrap::lexer` and
+  `bootstrap::parser`); assembled into remaining `*.gen.dao` files via
+  `assemble.sh`
 - `ascii.dao` — `bootstrap::ascii`, character-classification module
   imported by `bootstrap::lexer`
 - `assemble.sh` — concatenates `shared/base.dao` with remaining subsystem
   sources to produce `*.gen.dao` outputs under `bootstrap/` or an explicit
-  per-run output root (`lexer` no longer uses assembly)
+  per-run output root (`lexer` and `parser` no longer use assembly)
 - `validate_ir.sh` — compiles, links, and runs the IR the LLVM suite
   emits under `llvm/out/` or a per-run directory, comparing exit codes
   and expected fixture counts
@@ -159,8 +160,9 @@ Self-hosting compiler subsystems written in Dao.
 - `lexer/` — `bootstrap::lexer` (`impl.dao`, importing `bootstrap::ascii`)
   and `bootstrap::lexer::tests` (`tests.dao`), compiled directly as real
   modules without `assemble.sh`
-- `parser/` — recursive-descent parser producing arena-indexed AST for
-  Tier A Dao syntax; tests in `tests.dao` (Task 21)
+- `parser/` — `bootstrap::parser` (`impl.dao`, importing
+  `bootstrap::lexer`) and `bootstrap::parser::tests` (`tests.dao`),
+  compiled directly as real modules without `assemble.sh`
 - `graph/` — module graph construction, cycle detection, and topological
   sort for multi-file compilation; tests in `tests.dao` (Task 25)
 - `resolver/` — two-pass name resolver with scope chains, symbol tables,

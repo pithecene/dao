@@ -121,18 +121,18 @@ fn tc_expect_program_errors(label: string, libs: Vector<SourceInput>, main_src: 
 // The node index of the first method a file's first class declares:
 // a program-level test checks that two modules' declarations at one
 // index stay apart.
-fn first_method_decl_index(po: ParseOutput): i64
-  let root: Node = po.nodes.get(po.root)
+fn first_method_decl_index(po: parser::ParseOutput): i64
+  let root: parser::Node = po.nodes.get(po.root)
   match root:
-    Node::FileN(md, ilp, dlp):
-      let decls: Vector<i64> = read_list(po.idx, dlp)
+    parser::Node::FileN(md, ilp, dlp):
+      let decls: Vector<i64> = parser::read_list(po.idx, dlp)
       let i: i64 = 0
       while i < decls.length():
-        let decl: Node = po.nodes.get(decls.get(i))
+        let decl: parser::Node = po.nodes.get(decls.get(i))
         match decl:
-          Node::ClassDeclD(nt, tp, flp, mlp):
+          parser::Node::ClassDeclD(nt, tp, flp, mlp):
             if mlp >= 0:
-              let meths: Vector<i64> = read_list(po.idx, mlp)
+              let meths: Vector<i64> = parser::read_list(po.idx, mlp)
               if meths.length() > 0:
                 return meths.get(to_i64(0))
         i = i + 1
@@ -549,18 +549,18 @@ fn main(): i32
   // Walk the single file's extend decls and verify at least one
   // binding resolves via program_extend_concept_sym.
   let d3_sf: SourceFile = program_file_of_module(d3_p, to_i64(0))
-  let d3_po: ParseOutput = d3_sf.parse_output
+  let d3_po: parser::ParseOutput = d3_sf.parse_output
   let d3_found_binding: bool = false
-  let d3_root: Node = d3_po.nodes.get(d3_po.root)
+  let d3_root: parser::Node = d3_po.nodes.get(d3_po.root)
   match d3_root:
-    Node::FileN(md3, il3, dl3):
-      let d3_decls: Vector<i64> = read_list(d3_po.idx, dl3)
+    parser::Node::FileN(md3, il3, dl3):
+      let d3_decls: Vector<i64> = parser::read_list(d3_po.idx, dl3)
       let d3i: i64 = 0
       while d3i < d3_decls.length():
         let d3_didx: i64 = d3_decls.get(d3i)
-        let d3_node: Node = d3_po.nodes.get(d3_didx)
+        let d3_node: parser::Node = d3_po.nodes.get(d3_didx)
         match d3_node:
-          Node::ExtendDeclD(t3, c3, m3):
+          parser::Node::ExtendDeclD(t3, c3, m3):
             let d3_sym: i64 = program_extend_concept_sym(d3_p, d3_sf.file_id, d3_didx)
             if d3_sym >= 0:
               d3_found_binding = true
@@ -635,13 +635,13 @@ fn main(): i32
   // Run typecheck on the main module (module_id 1 after math at 0).
   let d4_main_mid: i64 = find_module_by_name(d4_p1.graph.modules, "app::main")
   let d4_sf: SourceFile = program_file_of_module(d4_p1, d4_main_mid)
-  let d4_po: ParseOutput = d4_sf.parse_output
+  let d4_po: parser::ParseOutput = d4_sf.parse_output
   let d4_tc: TC = TC(d4_po.nodes, d4_po.idx, d4_po.toks, d4_sf.source_text, d4_p1.resolve.symbols, d4_p1.resolve.scopes, d4_p1.resolve.uses, d4_sf.file_id, d4_p1.resolve.extend_concept_bindings, d4_main_mid, d4_p1.resolve.module_exports)
   let d4_ts: TS = ts_new(d4_tc, d4_p1.typecheck.types, d4_p1.typecheck.type_info, d4_p1.typecheck.sym_types, registry_new(d4_p1.resolve.symbols, d4_p1.graph.modules))
   // Run pass1 on math first (to register the exported function type).
   let d4_math_mid: i64 = find_module_by_name(d4_p1.graph.modules, "app::math")
   let d4_math_sf: SourceFile = program_file_of_module(d4_p1, d4_math_mid)
-  let d4_math_po: ParseOutput = d4_math_sf.parse_output
+  let d4_math_po: parser::ParseOutput = d4_math_sf.parse_output
   let d4_math_tc: TC = TC(d4_math_po.nodes, d4_math_po.idx, d4_math_po.toks, d4_math_sf.source_text, d4_p1.resolve.symbols, d4_p1.resolve.scopes, d4_p1.resolve.uses, d4_math_sf.file_id, d4_p1.resolve.extend_concept_bindings, d4_math_mid, d4_p1.resolve.module_exports)
   let d4_math_ts: TS = ts_new(d4_math_tc, d4_p1.typecheck.types, d4_p1.typecheck.type_info, d4_p1.typecheck.sym_types, registry_new(d4_p1.resolve.symbols, d4_p1.graph.modules))
   d4_math_ts = tc_pass_shells(d4_math_ts, d4_math_po.root)
@@ -677,12 +677,12 @@ fn main(): i32
   d4_p2 = program_init_typecheck(d4_p2)
   let d4_b_mid: i64 = find_module_by_name(d4_p2.graph.modules, "app::b")
   let d4_b_sf: SourceFile = program_file_of_module(d4_p2, d4_b_mid)
-  let d4_b_po: ParseOutput = d4_b_sf.parse_output
+  let d4_b_po: parser::ParseOutput = d4_b_sf.parse_output
   let d4_b_tc: TC = TC(d4_b_po.nodes, d4_b_po.idx, d4_b_po.toks, d4_b_sf.source_text, d4_p2.resolve.symbols, d4_p2.resolve.scopes, d4_p2.resolve.uses, d4_b_sf.file_id, d4_p2.resolve.extend_concept_bindings, d4_b_mid, d4_p2.resolve.module_exports)
   // Run pass1 on lib::a first.
   let d4_a_mid: i64 = find_module_by_name(d4_p2.graph.modules, "lib::a")
   let d4_a_sf: SourceFile = program_file_of_module(d4_p2, d4_a_mid)
-  let d4_a_po: ParseOutput = d4_a_sf.parse_output
+  let d4_a_po: parser::ParseOutput = d4_a_sf.parse_output
   let d4_a_tc: TC = TC(d4_a_po.nodes, d4_a_po.idx, d4_a_po.toks, d4_a_sf.source_text, d4_p2.resolve.symbols, d4_p2.resolve.scopes, d4_p2.resolve.uses, d4_a_sf.file_id, d4_p2.resolve.extend_concept_bindings, d4_a_mid, d4_p2.resolve.module_exports)
   let d4_a_ts: TS = ts_new(d4_a_tc, d4_p2.typecheck.types, d4_p2.typecheck.type_info, d4_p2.typecheck.sym_types, registry_new(d4_p2.resolve.symbols, d4_p2.graph.modules))
   d4_a_ts = tc_pass_shells(d4_a_ts, d4_a_po.root)
@@ -717,7 +717,7 @@ fn main(): i32
   // Run pass1 on lib::colors (registers enum + variants).
   let d4_c_mid: i64 = find_module_by_name(d4_p3.graph.modules, "lib::colors")
   let d4_c_sf: SourceFile = program_file_of_module(d4_p3, d4_c_mid)
-  let d4_c_po: ParseOutput = d4_c_sf.parse_output
+  let d4_c_po: parser::ParseOutput = d4_c_sf.parse_output
   let d4_c_tc: TC = TC(d4_c_po.nodes, d4_c_po.idx, d4_c_po.toks, d4_c_sf.source_text, d4_p3.resolve.symbols, d4_p3.resolve.scopes, d4_p3.resolve.uses, d4_c_sf.file_id, d4_p3.resolve.extend_concept_bindings, d4_c_mid, d4_p3.resolve.module_exports)
   let d4_c_ts: TS = ts_new(d4_c_tc, d4_p3.typecheck.types, d4_p3.typecheck.type_info, d4_p3.typecheck.sym_types, registry_new(d4_p3.resolve.symbols, d4_p3.graph.modules))
   d4_c_ts = tc_pass_shells(d4_c_ts, d4_c_po.root)
@@ -725,7 +725,7 @@ fn main(): i32
   // Run pass1+pass2 on app::d with colors' variant_set.
   let d4_d_mid: i64 = find_module_by_name(d4_p3.graph.modules, "app::d")
   let d4_d_sf: SourceFile = program_file_of_module(d4_p3, d4_d_mid)
-  let d4_d_po: ParseOutput = d4_d_sf.parse_output
+  let d4_d_po: parser::ParseOutput = d4_d_sf.parse_output
   let d4_d_tc: TC = TC(d4_d_po.nodes, d4_d_po.idx, d4_d_po.toks, d4_d_sf.source_text, d4_p3.resolve.symbols, d4_p3.resolve.scopes, d4_p3.resolve.uses, d4_d_sf.file_id, d4_p3.resolve.extend_concept_bindings, d4_d_mid, d4_p3.resolve.module_exports)
   let d4_d_ts: TS = ts_new(d4_d_tc, d4_c_ts.types, d4_c_ts.type_info, d4_c_ts.sym_types, reg_with_variant_set(registry_new(d4_p3.resolve.symbols, d4_p3.graph.modules), d4_c_ts.reg.variant_set))
   d4_d_ts = tc_pass_shells(d4_d_ts, d4_d_po.root)

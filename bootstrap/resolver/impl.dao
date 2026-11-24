@@ -44,7 +44,7 @@ class ExportTables:
   tables: Vector<ExportTable>
 
 class RC:
-  nodes: Vector<Node>
+  nodes: Vector<parser::Node>
   idx_data: Vector<i64>
   toks: Vector<lexer::Token>
   src: string
@@ -253,8 +253,8 @@ fn scope_lookup_call(rs: RS, name: string, arity: i64): i64
 // name's segment is replaced by it.
 fn pick_qualified_overload(rs: RS, callee: i64, arity: i64): RS
   match rs.rc.nodes.get(callee):
-    Node::QualNameE(seg_lp, seg_count):
-      let segs: Vector<i64> = read_list(rs.rc.idx_data, seg_lp)
+    parser::Node::QualNameE(seg_lp, seg_count):
+      let segs: Vector<i64> = parser::read_list(rs.rc.idx_data, seg_lp)
       if segs.length() != 2:
         return rs
       let head: i64 = scope_lookup(rs, tok_name(rs, segs.get(0)))
@@ -414,9 +414,9 @@ fn is_type_symbol(rs: RS, sym_idx: i64): bool
 fn resolve_type_node(rs: RS, node_idx: i64): RS
   if node_idx < 0:
     return rs
-  let node: Node = rs.rc.nodes.get(node_idx)
+  let node: parser::Node = rs.rc.nodes.get(node_idx)
   match node:
-    Node::NamedT(tidx):
+    parser::Node::NamedT(tidx):
       let name: string = tok_name(rs, tidx)
       let sym: i64 = scope_lookup(rs, name)
       if sym >= 0:
@@ -425,23 +425,23 @@ fn resolve_type_node(rs: RS, node_idx: i64): RS
         // Found a non-type symbol — don't record the use, leave unresolved
       // No diagnostic on unresolved type — matches host resolver
       return rs
-    Node::GenericT(name_tidx, args_lp, arg_count):
+    parser::Node::GenericT(name_tidx, args_lp, arg_count):
       let name: string = tok_name(rs, name_tidx)
       let sym: i64 = scope_lookup(rs, name)
       let r: RS = rs
       if sym >= 0:
         if is_type_symbol(r, sym):
           r = rs_add_use(r, name_tidx, sym)
-      let args: Vector<i64> = read_list(r.rc.idx_data, args_lp)
+      let args: Vector<i64> = parser::read_list(r.rc.idx_data, args_lp)
       let i: i64 = 0
       while i < args.length():
         r = resolve_type_node(r, args.get(i))
         i = i + 1
       return r
-    Node::QualNameE(seg_lp, seg_count):
+    parser::Node::QualNameE(seg_lp, seg_count):
       // Qualified type name (e.g. types::Point) — resolve same as expression.
       return resolve_expr(rs, node_idx)
-    Node::ErrorT(t):
+    parser::Node::ErrorT(t):
       return rs
   return rs
 
@@ -452,9 +452,9 @@ fn resolve_type_node(rs: RS, node_idx: i64): RS
 fn resolve_expr(rs: RS, node_idx: i64): RS
   if node_idx < 0:
     return rs
-  let node: Node = rs.rc.nodes.get(node_idx)
+  let node: parser::Node = rs.rc.nodes.get(node_idx)
   match node:
-    Node::IdentE(tidx):
+    parser::Node::IdentE(tidx):
       let name: string = tok_name(rs, tidx)
       let sym: i64 = scope_lookup(rs, name)
       if sym >= 0:
@@ -462,8 +462,8 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
       // Unknown name — emit diagnostic
       let sp: Span = tok_name_span(rs, tidx)
       return rs_add_diag(rs, sp, "unknown name '" + name + "'")
-    Node::QualNameE(seg_lp, seg_count):
-      let segs: Vector<i64> = read_list(rs.rc.idx_data, seg_lp)
+    parser::Node::QualNameE(seg_lp, seg_count):
+      let segs: Vector<i64> = parser::read_list(rs.rc.idx_data, seg_lp)
       if segs.length() > 0:
         let first_tidx: i64 = segs.get(0)
         let name: string = tok_name(rs, first_tidx)
@@ -521,25 +521,25 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
         let sp: Span = tok_name_span(rs, first_tidx)
         return rs_add_diag(rs, sp, "unknown name '" + name + "'")
       return rs
-    Node::BinaryE(op_tidx, left, right):
+    parser::Node::BinaryE(op_tidx, left, right):
       let r: RS = resolve_expr(rs, left)
       return resolve_expr(r, right)
-    Node::UnaryE(op_tidx, operand):
+    parser::Node::UnaryE(op_tidx, operand):
       return resolve_expr(rs, operand)
-    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
+    parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
       // A call of a plain name is resolved by its argument count too,
       // so an overload is chosen by arity (scope_lookup_call).
       let r: RS = rs
       let by_arity: i64 = to_i64(-1)
       match rs.rc.nodes.get(callee):
-        Node::IdentE(ctidx):
+        parser::Node::IdentE(ctidx):
           by_arity = scope_lookup_call(rs, tok_name(rs, ctidx), arg_count)
           if by_arity >= 0:
             r = rs_add_use(rs, ctidx, by_arity)
       if by_arity < 0:
         r = resolve_expr(rs, callee)
         r = pick_qualified_overload(r, callee, arg_count)
-      let args: Vector<i64> = read_list(r.rc.idx_data, args_lp)
+      let args: Vector<i64> = parser::read_list(r.rc.idx_data, args_lp)
       let i: i64 = 0
       while i < args.length():
         r = resolve_expr(r, args.get(i))
@@ -549,36 +549,36 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
       // argument's name is a field of the variant being constructed,
       // the type checker's too.
       if targs_lp >= 0:
-        let targs: Vector<i64> = read_list(r.rc.idx_data, targs_lp)
+        let targs: Vector<i64> = parser::read_list(r.rc.idx_data, targs_lp)
         let ti: i64 = 0
         while ti < targs.length():
           r = resolve_type_node(r, targs.get(ti))
           ti = ti + 1
       return r
-    Node::IndexE(obj, idx_expr):
+    parser::Node::IndexE(obj, idx_expr):
       let r: RS = resolve_expr(rs, obj)
       return resolve_expr(r, idx_expr)
-    Node::FieldE(obj, field_tidx):
+    parser::Node::FieldE(obj, field_tidx):
       // Resolve the object expression; field name needs type info (Tier B)
       return resolve_expr(rs, obj)
-    Node::PipeE(left, right):
+    parser::Node::PipeE(left, right):
       // `x |> g` calls `g` with one argument, so an overloaded `g` is
       // its one-argument overload (host).
       let r: RS = resolve_expr(rs, left)
       match r.rc.nodes.get(right):
-        Node::IdentE(ptidx):
+        parser::Node::IdentE(ptidx):
           let piped: i64 = scope_lookup_call(r, tok_name(r, ptidx), to_i64(1))
           if piped >= 0:
             return rs_add_use(r, ptidx, piped)
       return resolve_expr(r, right)
-    Node::TryE(operand):
+    parser::Node::TryE(operand):
       return resolve_expr(rs, operand)
-    Node::LambdaE(params_lp, param_count, body):
+    parser::Node::LambdaE(params_lp, param_count, body):
       // Create a block scope for the lambda
       let sr: ScopeR = rs_push_scope(rs, ScopeKind::BlockScope)
       let r: RS = sr.rs
       // Declare lambda parameters
-      let param_toks: Vector<i64> = read_list(r.rc.idx_data, params_lp)
+      let param_toks: Vector<i64> = parser::read_list(r.rc.idx_data, params_lp)
       let i: i64 = 0
       while i < param_toks.length():
         let ptidx: i64 = param_toks.get(i)
@@ -589,23 +589,23 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
       // Resolve body expression
       r = resolve_expr(r, body)
       return rs_pop_scope(r)
-    Node::ListLitE(elems_lp, elem_count):
-      let elems: Vector<i64> = read_list(rs.rc.idx_data, elems_lp)
+    parser::Node::ListLitE(elems_lp, elem_count):
+      let elems: Vector<i64> = parser::read_list(rs.rc.idx_data, elems_lp)
       let r: RS = rs
       let i: i64 = 0
       while i < elems.length():
         r = resolve_expr(r, elems.get(i))
         i = i + 1
       return r
-    Node::IntLitE(t):
+    parser::Node::IntLitE(t):
       return rs
-    Node::FloatLitE(t):
+    parser::Node::FloatLitE(t):
       return rs
-    Node::StringLitE(t):
+    parser::Node::StringLitE(t):
       return rs
-    Node::BoolLitE(t):
+    parser::Node::BoolLitE(t):
       return rs
-    Node::ErrorE(t):
+    parser::Node::ErrorE(t):
       return rs
   return rs
 
@@ -616,7 +616,7 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
 fn resolve_body_stmts(rs: RS, list_pos: i64): RS
   if list_pos < 0:
     return rs
-  let stmts: Vector<i64> = read_list(rs.rc.idx_data, list_pos)
+  let stmts: Vector<i64> = parser::read_list(rs.rc.idx_data, list_pos)
   let r: RS = rs
   let i: i64 = 0
   while i < stmts.length():
@@ -645,17 +645,17 @@ fn resolve_match_arm(rs: RS, pat_node: i64, body_lp: i64): RS
   let r: RS = rs
   let binders_lp: i64 = to_i64(-1)
   match r.rc.nodes.get(pat_node):
-    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
+    parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
       // Only a variant reached with `::` takes a value apart, so
       // `Box(x):` is an ordinary call whose `x` is a use.
       match r.rc.nodes.get(callee):
-        Node::QualNameE(seg_lp, seg_count):
+        parser::Node::QualNameE(seg_lp, seg_count):
           binders_lp = args_lp
           r = resolve_expr(r, callee)
           // A pattern's call-site type arguments are types of the
           // enclosing scope, as a call's are.
           if targs_lp >= 0:
-            let targs: Vector<i64> = read_list(r.rc.idx_data, targs_lp)
+            let targs: Vector<i64> = parser::read_list(r.rc.idx_data, targs_lp)
             let ti: i64 = 0
             while ti < targs.length():
               r = resolve_type_node(r, targs.get(ti))
@@ -665,14 +665,14 @@ fn resolve_match_arm(rs: RS, pat_node: i64, body_lp: i64): RS
   let sr: ScopeR = rs_push_scope(r, ScopeKind::BlockScope)
   r = sr.rs
   if binders_lp >= 0:
-    let binders: Vector<i64> = read_list(r.rc.idx_data, binders_lp)
+    let binders: Vector<i64> = parser::read_list(r.rc.idx_data, binders_lp)
     let bi: i64 = 0
     while bi < binders.length():
       let binder: i64 = binders.get(bi)
       // A binding that is not a plain name declares nothing; the
       // type checker diagnoses the pattern.
       match r.rc.nodes.get(binder):
-        Node::IdentE(tidx):
+        parser::Node::IdentE(tidx):
           let name: string = tok_name(r, tidx)
           let bsr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Local, name, binder, r.current_scope, r.owner_module_id))
           r = scope_declare(bsr.rs, name, bsr.sym_idx, tidx)
@@ -683,9 +683,9 @@ fn resolve_match_arm(rs: RS, pat_node: i64, body_lp: i64): RS
 fn resolve_stmt(rs: RS, node_idx: i64): RS
   if node_idx < 0:
     return rs
-  let node: Node = rs.rc.nodes.get(node_idx)
+  let node: parser::Node = rs.rc.nodes.get(node_idx)
   match node:
-    Node::LetS(name_tidx, type_node, init_node):
+    parser::Node::LetS(name_tidx, type_node, init_node):
       // Resolve type and init BEFORE declaring (prevents self-reference)
       let r: RS = resolve_type_node(rs, type_node)
       r = resolve_expr(r, init_node)
@@ -693,29 +693,29 @@ fn resolve_stmt(rs: RS, node_idx: i64): RS
       let name: string = tok_name(r, name_tidx)
       let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Local, name, node_idx, r.current_scope, r.owner_module_id))
       return scope_declare(sr.rs, name, sr.sym_idx, name_tidx)
-    Node::AssignS(target, value):
+    parser::Node::AssignS(target, value):
       let r: RS = resolve_expr(rs, target)
       return resolve_expr(r, value)
-    Node::IfS(cond, then_lp, else_lp):
+    parser::Node::IfS(cond, then_lp, else_lp):
       let r: RS = resolve_expr(rs, cond)
       r = resolve_body_in_new_scope(r, then_lp)
       if else_lp >= 0:
         r = resolve_body_in_new_scope(r, else_lp)
       return r
-    Node::WhileS(cond, body_lp):
+    parser::Node::WhileS(cond, body_lp):
       let r: RS = resolve_expr(rs, cond)
       return resolve_body_in_new_scope(r, body_lp)
-    Node::ResourceS(kind_tidx, name_tidx, body_lp):
+    parser::Node::ResourceS(kind_tidx, name_tidx, body_lp):
       // The domain's name binds nothing in Tier A; its body is a block.
       return resolve_body_in_new_scope(rs, body_lp)
-    Node::ModeS(name_tidx, body_lp):
+    parser::Node::ModeS(name_tidx, body_lp):
       // The mode name binds nothing; its body is a block scope.
       return resolve_body_in_new_scope(rs, body_lp)
-    Node::YieldS(yield_tidx, val_node):
+    parser::Node::YieldS(yield_tidx, val_node):
       if val_node >= 0:
         return resolve_expr(rs, val_node)
       return rs
-    Node::ForS(var_tidx, iter_node, body_lp):
+    parser::Node::ForS(var_tidx, iter_node, body_lp):
       // Resolve iterable in outer scope
       let r: RS = resolve_expr(rs, iter_node)
       // Create block scope for loop body; declare loop variable
@@ -726,13 +726,13 @@ fn resolve_stmt(rs: RS, node_idx: i64): RS
       r = scope_declare(sym_r.rs, var_name, sym_r.sym_idx, var_tidx)
       r = resolve_body_stmts(r, body_lp)
       return rs_pop_scope(r)
-    Node::ReturnS(val_node):
+    parser::Node::ReturnS(val_node):
       if val_node >= 0:
         return resolve_expr(rs, val_node)
       return rs
-    Node::BreakS(tidx):
+    parser::Node::BreakS(tidx):
       return rs
-    Node::MatchS(scrut_node, arms_lp):
+    parser::Node::MatchS(scrut_node, arms_lp):
       let r: RS = resolve_expr(rs, scrut_node)
       // Arms are pairs: [pattern_node, body_list_pos]
       let arms: Vector<i64> = read_pairs(r.rc.idx_data, arms_lp)
@@ -741,9 +741,9 @@ fn resolve_stmt(rs: RS, node_idx: i64): RS
         r = resolve_match_arm(r, arms.get(i), arms.get(i + 1))
         i = i + 2
       return r
-    Node::ExprStmtS(expr_node):
+    parser::Node::ExprStmtS(expr_node):
       return resolve_expr(rs, expr_node)
-    Node::ErrorS(t):
+    parser::Node::ErrorS(t):
       return rs
   return rs
 
@@ -761,7 +761,7 @@ fn resolve_stmt(rs: RS, node_idx: i64): RS
 fn resolve_generic_bounds(rs: RS, bounds_lp: i64): RS
   if bounds_lp < 0:
     return rs
-  let bounds: Vector<i64> = read_list(rs.rc.idx_data, bounds_lp)
+  let bounds: Vector<i64> = parser::read_list(rs.rc.idx_data, bounds_lp)
   let r: RS = rs
   let i: i64 = 0
   while i < bounds.length():
@@ -772,14 +772,14 @@ fn resolve_generic_bounds(rs: RS, bounds_lp: i64): RS
 fn resolve_type_params(rs: RS, tparams_lp: i64, node_idx: i64): RS
   if tparams_lp < 0:
     return rs
-  let tparams: Vector<i64> = read_list(rs.rc.idx_data, tparams_lp)
+  let tparams: Vector<i64> = parser::read_list(rs.rc.idx_data, tparams_lp)
   let r: RS = rs
   let i: i64 = 0
   while i < tparams.length():
     let tp_node_idx: i64 = tparams.get(i)
-    let tp_node: Node = r.rc.nodes.get(tp_node_idx)
+    let tp_node: parser::Node = r.rc.nodes.get(tp_node_idx)
     match tp_node:
-      Node::GenericParamT(tidx, bounds_lp):
+      parser::Node::GenericParamT(tidx, bounds_lp):
         let tname: string = tok_name(r, tidx)
         let sym_r: SymR = rs_add_symbol(r, Symbol(SymbolKind::GenericParam, tname, node_idx, r.current_scope, r.owner_module_id))
         r = scope_declare(sym_r.rs, tname, sym_r.sym_idx, tidx)
@@ -904,15 +904,15 @@ fn resolve_class_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, fi
   // Resolve methods BEFORE popping struct scope, so class type params
   // (e.g. T in class Box<T>) are visible in method signatures/bodies.
   if methods_lp >= 0:
-    let methods: Vector<i64> = read_list(r.rc.idx_data, methods_lp)
+    let methods: Vector<i64> = parser::read_list(r.rc.idx_data, methods_lp)
     let mi: i64 = 0
     while mi < methods.length():
       let meth_idx: i64 = methods.get(mi)
-      let meth_node: Node = r.rc.nodes.get(meth_idx)
+      let meth_node: parser::Node = r.rc.nodes.get(meth_idx)
       match meth_node:
-        Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
+        parser::Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
           r = resolve_fn_decl(r, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp)
-        Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
+        parser::Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
           r = resolve_expr_fn_decl(r, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr)
       mi = mi + 1
 
@@ -936,7 +936,7 @@ fn resolve_enum_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, var
     let v_tidx: i64 = pairs.get(i)
     let payload_lp: i64 = pairs.get(i + 1)
     // Resolve each payload field's type (the list is name, type pairs)
-    let payload_fields: Vector<i64> = read_list(r.rc.idx_data, payload_lp)
+    let payload_fields: Vector<i64> = parser::read_list(r.rc.idx_data, payload_lp)
     let j: i64 = 1
     while j < payload_fields.length():
       r = resolve_type_node(r, payload_fields.get(j))
@@ -956,17 +956,17 @@ fn resolve_concept_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, 
   r = resolve_type_params(r, tparams_lp, node_idx)
   // Resolve method types — signature-only (ExternFnD) or with default body
   if methods_lp >= 0:
-    let methods: Vector<i64> = read_list(r.rc.idx_data, methods_lp)
+    let methods: Vector<i64> = parser::read_list(r.rc.idx_data, methods_lp)
     let mi: i64 = 0
     while mi < methods.length():
       let meth_idx: i64 = methods.get(mi)
-      let meth_node: Node = r.rc.nodes.get(meth_idx)
+      let meth_node: parser::Node = r.rc.nodes.get(meth_idx)
       match meth_node:
-        Node::ExternFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type):
+        parser::Node::ExternFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type):
           r = resolve_extern_fn_decl(r, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type)
-        Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
+        parser::Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
           r = resolve_fn_decl(r, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp)
-        Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
+        parser::Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
           r = resolve_expr_fn_decl(r, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr)
       mi = mi + 1
   return rs_pop_scope(r)
@@ -979,23 +979,23 @@ fn resolve_concept_decl(rs: RS, node_idx: i64, name_tidx: i64, tparams_lp: i64, 
 fn extend_target_name(rs: RS, type_node: i64): string
   if type_node < 0:
     return ""
-  let tnode: Node = rs.rc.nodes.get(type_node)
+  let tnode: parser::Node = rs.rc.nodes.get(type_node)
   match tnode:
-    Node::NamedT(t_tidx):
+    parser::Node::NamedT(t_tidx):
       return tok_name(rs, t_tidx)
-    Node::GenericT(t_name_tidx, t_args_lp, t_arg_count):
+    parser::Node::GenericT(t_name_tidx, t_args_lp, t_arg_count):
       let head: string = tok_name(rs, t_name_tidx)
       // A pointer keeps its pointee: `Ptr<i32>` and `Ptr<i64>` are two
       // targets, as they were when they were written with a sigil.
       // Every other generic target is its head, so one `extend` covers
       // a class however it is instantiated.
       if head == "Ptr":
-        let pargs: Vector<i64> = read_list(rs.rc.idx_data, t_args_lp)
+        let pargs: Vector<i64> = parser::read_list(rs.rc.idx_data, t_args_lp)
         if pargs.length() == 1:
           return "Ptr<" + extend_target_name(rs, pargs.get(0)) + ">"
       return head
-    Node::QualNameE(seg_lp, seg_count):
-      let segs: Vector<i64> = read_list(rs.rc.idx_data, seg_lp)
+    parser::Node::QualNameE(seg_lp, seg_count):
+      let segs: Vector<i64> = parser::read_list(rs.rc.idx_data, seg_lp)
       let spelled: string = ""
       let i: i64 = 0
       while i < segs.length():
@@ -1017,15 +1017,15 @@ fn resolve_extend_decl(rs: RS, node_idx: i64, target_type_node: i64, concept_nam
     r = rs_add_use(r, concept_name_tidx, csym)
   // Resolve each method body
   if methods_lp >= 0:
-    let methods: Vector<i64> = read_list(r.rc.idx_data, methods_lp)
+    let methods: Vector<i64> = parser::read_list(r.rc.idx_data, methods_lp)
     let mi: i64 = 0
     while mi < methods.length():
       let meth_idx: i64 = methods.get(mi)
-      let meth_node: Node = r.rc.nodes.get(meth_idx)
+      let meth_node: parser::Node = r.rc.nodes.get(meth_idx)
       match meth_node:
-        Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
+        parser::Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
           r = resolve_fn_decl(r, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp)
-        Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
+        parser::Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
           r = resolve_expr_fn_decl(r, meth_idx, m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr)
       mi = mi + 1
   return r
@@ -1033,25 +1033,25 @@ fn resolve_extend_decl(rs: RS, node_idx: i64, target_type_node: i64, concept_nam
 fn resolve_decl(rs: RS, node_idx: i64): RS
   if node_idx < 0:
     return rs
-  let node: Node = rs.rc.nodes.get(node_idx)
+  let node: parser::Node = rs.rc.nodes.get(node_idx)
   match node:
-    Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_type, body_lp):
+    parser::Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_type, body_lp):
       return resolve_fn_decl(rs, node_idx, name_tidx, tparams_lp, params_lp, ret_type, body_lp)
-    Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_type, body_expr):
+    parser::Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_type, body_expr):
       return resolve_expr_fn_decl(rs, node_idx, name_tidx, tparams_lp, params_lp, ret_type, body_expr)
-    Node::ExternFnD(name_tidx, tparams_lp, params_lp, ret_type):
+    parser::Node::ExternFnD(name_tidx, tparams_lp, params_lp, ret_type):
       return resolve_extern_fn_decl(rs, node_idx, name_tidx, tparams_lp, params_lp, ret_type)
-    Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
+    parser::Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
       return resolve_class_decl(rs, node_idx, name_tidx, tparams_lp, fields_lp, methods_lp)
-    Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
+    parser::Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
       return resolve_enum_decl(rs, node_idx, name_tidx, tparams_lp, variants_lp)
-    Node::TypeAliasD(name_tidx, target_type):
+    parser::Node::TypeAliasD(name_tidx, target_type):
       return resolve_type_alias_decl(rs, node_idx, name_tidx, target_type)
-    Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
+    parser::Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
       return resolve_concept_decl(rs, node_idx, name_tidx, tparams_lp, methods_lp)
-    Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
+    parser::Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
       return resolve_extend_decl(rs, node_idx, target_type_node, concept_name_tidx, methods_lp)
-    Node::ErrorD(t):
+    parser::Node::ErrorD(t):
       return rs
   return rs
 
@@ -1060,88 +1060,88 @@ fn resolve_decl(rs: RS, node_idx: i64): RS
 // =========================================================================
 
 fn collect_top_level(rs: RS, file_node_idx: i64): RS
-  let file_node: Node = rs.rc.nodes.get(file_node_idx)
+  let file_node: parser::Node = rs.rc.nodes.get(file_node_idx)
   match file_node:
-    Node::FileN(module_decl, imports_lp, decls_lp):
-      let decls: Vector<i64> = read_list(rs.rc.idx_data, decls_lp)
+    parser::Node::FileN(module_decl, imports_lp, decls_lp):
+      let decls: Vector<i64> = parser::read_list(rs.rc.idx_data, decls_lp)
       let r: RS = rs
       let i: i64 = 0
       while i < decls.length():
         let decl_idx: i64 = decls.get(i)
-        let decl_node: Node = r.rc.nodes.get(decl_idx)
+        let decl_node: parser::Node = r.rc.nodes.get(decl_idx)
         match decl_node:
-          Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_type, body_lp):
+          parser::Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_type, body_lp):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, name, decl_idx, r.current_scope, r.owner_module_id))
             r = declare_function(sr.rs, name, read_pairs(r.rc.idx_data, params_lp).length() / 2, false, sr.sym_idx, name_tidx)
-          Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_type, body_expr):
+          parser::Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_type, body_expr):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, name, decl_idx, r.current_scope, r.owner_module_id))
             r = declare_function(sr.rs, name, read_pairs(r.rc.idx_data, params_lp).length() / 2, false, sr.sym_idx, name_tidx)
-          Node::ExternFnD(name_tidx, tparams_lp, params_lp, ret_type):
+          parser::Node::ExternFnD(name_tidx, tparams_lp, params_lp, ret_type):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, name, decl_idx, r.current_scope, r.owner_module_id))
             r = declare_function(sr.rs, name, read_pairs(r.rc.idx_data, params_lp).length() / 2, true, sr.sym_idx, name_tidx)
-          Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
+          parser::Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Type, name, decl_idx, r.current_scope, r.owner_module_id))
             r = declare_top_level(sr.rs, name, sr.sym_idx, name_tidx)
             // Register mangled method symbols in file scope
             if methods_lp >= 0:
-              let meths: Vector<i64> = read_list(r.rc.idx_data, methods_lp)
+              let meths: Vector<i64> = parser::read_list(r.rc.idx_data, methods_lp)
               let mi: i64 = 0
               while mi < meths.length():
                 let meth_idx: i64 = meths.get(mi)
-                let meth_node: Node = r.rc.nodes.get(meth_idx)
+                let meth_node: parser::Node = r.rc.nodes.get(meth_idx)
                 match meth_node:
-                  Node::FnDeclD(m_name_tidx, m_tp, m_plp, m_rt, m_blp):
+                  parser::Node::FnDeclD(m_name_tidx, m_tp, m_plp, m_rt, m_blp):
                     let mname: string = tok_name(r, m_name_tidx)
                     let mangled: string = name + "." + mname
                     // A class's own method: declared with the type, so
                     // the type's identity, not its name, dispatches it.
                     let msr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Method, mangled, meth_idx, r.current_scope, r.owner_module_id))
                     r = declare_top_level(msr.rs, mangled, msr.sym_idx, m_name_tidx)
-                  Node::ExprFnD(e_name_tidx, e_tp, e_plp, e_rt, e_body):
+                  parser::Node::ExprFnD(e_name_tidx, e_tp, e_plp, e_rt, e_body):
                     // An expression-bodied method is a method like any other.
                     let ename: string = tok_name(r, e_name_tidx)
                     let emangled: string = name + "." + ename
                     let esr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Method, emangled, meth_idx, r.current_scope, r.owner_module_id))
                     r = declare_top_level(esr.rs, emangled, esr.sym_idx, e_name_tidx)
                 mi = mi + 1
-          Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
+          parser::Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Type, name, decl_idx, r.current_scope, r.owner_module_id))
             r = declare_top_level(sr.rs, name, sr.sym_idx, name_tidx)
-          Node::TypeAliasD(name_tidx, target_type):
+          parser::Node::TypeAliasD(name_tidx, target_type):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Type, name, decl_idx, r.current_scope, r.owner_module_id))
             r = declare_top_level(sr.rs, name, sr.sym_idx, name_tidx)
-          Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
+          parser::Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
             let name: string = tok_name(r, name_tidx)
             let sr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Type, name, decl_idx, r.current_scope, r.owner_module_id))
             r = declare_top_level(sr.rs, name, sr.sym_idx, name_tidx)
-          Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
+          parser::Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
             // Register mangled method symbols: TargetTypeName.methodName
             if methods_lp >= 0:
               let target_name: string = extend_target_name(r, target_type_node)
-              let meths: Vector<i64> = read_list(r.rc.idx_data, methods_lp)
+              let meths: Vector<i64> = parser::read_list(r.rc.idx_data, methods_lp)
               let mi: i64 = 0
               while mi < meths.length():
                 let meth_idx: i64 = meths.get(mi)
-                let meth_node: Node = r.rc.nodes.get(meth_idx)
+                let meth_node: parser::Node = r.rc.nodes.get(meth_idx)
                 match meth_node:
-                  Node::FnDeclD(m_name_tidx, m_tp, m_plp, m_rt, m_blp):
+                  parser::Node::FnDeclD(m_name_tidx, m_tp, m_plp, m_rt, m_blp):
                     let mname: string = tok_name(r, m_name_tidx)
                     let mangled: string = target_name + "." + mname
                     let msr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, mangled, meth_idx, r.current_scope, r.owner_module_id))
                     r = declare_top_level(msr.rs, mangled, msr.sym_idx, m_name_tidx)
-                  Node::ExprFnD(e_name_tidx, e_tp, e_plp, e_rt, e_body):
+                  parser::Node::ExprFnD(e_name_tidx, e_tp, e_plp, e_rt, e_body):
                     let ename: string = tok_name(r, e_name_tidx)
                     let emangled: string = target_name + "." + ename
                     let esr: SymR = rs_add_symbol(r, Symbol(SymbolKind::Function, emangled, meth_idx, r.current_scope, r.owner_module_id))
                     r = declare_top_level(esr.rs, emangled, esr.sym_idx, e_name_tidx)
                 mi = mi + 1
-          Node::ErrorD(t):
+          parser::Node::ErrorD(t):
             r = r
         i = i + 1
       return r
@@ -1152,10 +1152,10 @@ fn collect_top_level(rs: RS, file_node_idx: i64): RS
 // =========================================================================
 
 fn resolve_bodies(rs: RS, file_node_idx: i64): RS
-  let file_node: Node = rs.rc.nodes.get(file_node_idx)
+  let file_node: parser::Node = rs.rc.nodes.get(file_node_idx)
   match file_node:
-    Node::FileN(module_decl, imports_lp, decls_lp):
-      let decls: Vector<i64> = read_list(rs.rc.idx_data, decls_lp)
+    parser::Node::FileN(module_decl, imports_lp, decls_lp):
+      let decls: Vector<i64> = parser::read_list(rs.rc.idx_data, decls_lp)
       let r: RS = rs
       let i: i64 = 0
       while i < decls.length():
@@ -1170,7 +1170,7 @@ fn resolve_bodies(rs: RS, file_node_idx: i64): RS
 
 fn resolve(src: string): ResolveResult
   // Parse the source
-  let po: ParseOutput = parse(src)
+  let po: parser::ParseOutput = parser::parse(src)
   let file_node_idx: i64 = po.root
 
   // Initialize resolver state
@@ -1217,30 +1217,30 @@ class ProgramResolveResult:
 // top-level declarations (Function, Type), not builtins or import bindings.
 fn build_export_table(rs: RS, file_node_idx: i64): HashMap<i64>
   let exports: HashMap<i64> = HashMap<i64>::new()
-  let file_node: Node = rs.rc.nodes.get(file_node_idx)
+  let file_node: parser::Node = rs.rc.nodes.get(file_node_idx)
   match file_node:
-    Node::FileN(module_decl, imports_lp, decls_lp):
-      let decls: Vector<i64> = read_list(rs.rc.idx_data, decls_lp)
+    parser::Node::FileN(module_decl, imports_lp, decls_lp):
+      let decls: Vector<i64> = parser::read_list(rs.rc.idx_data, decls_lp)
       let i: i64 = 0
       while i < decls.length():
         let decl_idx: i64 = decls.get(i)
-        let decl_node: Node = rs.rc.nodes.get(decl_idx)
+        let decl_node: parser::Node = rs.rc.nodes.get(decl_idx)
         // Extract the name token from each declaration kind.
         let name_tidx: i64 = to_i64(-1)
         match decl_node:
-          Node::FnDeclD(nt, tp, plp, rt, blp):
+          parser::Node::FnDeclD(nt, tp, plp, rt, blp):
             name_tidx = nt
-          Node::ExprFnD(nt, tp, plp, rt, be):
+          parser::Node::ExprFnD(nt, tp, plp, rt, be):
             name_tidx = nt
-          Node::ExternFnD(nt, tp, plp, rt):
+          parser::Node::ExternFnD(nt, tp, plp, rt):
             name_tidx = nt
-          Node::ClassDeclD(nt, tp, flp, mlp):
+          parser::Node::ClassDeclD(nt, tp, flp, mlp):
             name_tidx = nt
-          Node::EnumDeclD(nt, tp, vlp):
+          parser::Node::EnumDeclD(nt, tp, vlp):
             name_tidx = nt
-          Node::TypeAliasD(nt, tt):
+          parser::Node::TypeAliasD(nt, tt):
             name_tidx = nt
-          Node::ConceptDeclD(nt, tp, mlp, dv):
+          parser::Node::ConceptDeclD(nt, tp, mlp, dv):
             name_tidx = nt
         if name_tidx >= 0:
           let name: string = tok_name(rs, name_tidx)
@@ -1251,11 +1251,11 @@ fn build_export_table(rs: RS, file_node_idx: i64): HashMap<i64>
           // is the module's own first overload.
           let fn_arity: i64 = to_i64(-1)
           match decl_node:
-            Node::FnDeclD(fnt, ftp, fplp, frt, fblp):
+            parser::Node::FnDeclD(fnt, ftp, fplp, frt, fblp):
               fn_arity = read_pairs(rs.rc.idx_data, fplp).length() / 2
-            Node::ExprFnD(ent, etp, eplp, ert, ebe):
+            parser::Node::ExprFnD(ent, etp, eplp, ert, ebe):
               fn_arity = read_pairs(rs.rc.idx_data, eplp).length() / 2
-            Node::ExternFnD(xnt, xtp, xplp, xrt):
+            parser::Node::ExternFnD(xnt, xtp, xplp, xrt):
               fn_arity = read_pairs(rs.rc.idx_data, xplp).length() / 2
           if fn_arity >= 0:
             let arity_key: string = name + "/" + i64_to_string(fn_arity)
@@ -1315,7 +1315,7 @@ fn resolve_program(pg: ProgramGraph): ProgramResolveResult
 
   // The builtins and prelude scopes are opened once per program; every
   // module's scope hangs from the prelude scope (§7 scope order).
-  let root_rc: RC = RC(Vector<Node>::new(), Vector<i64>::new(), Vector<lexer::Token>::new(), "", ExportTables(export_tables))
+  let root_rc: RC = RC(Vector<parser::Node>::new(), Vector<i64>::new(), Vector<lexer::Token>::new(), "", ExportTables(export_tables))
   let root_rs: RS = rs_open_root_scopes(RS(root_rc, all_symbols, all_scopes, rs_uses, Vector<Diagnostic>::new(), to_i64(-1), to_i64(-1)))
   all_symbols = root_rs.symbols
   all_scopes = root_rs.scopes
@@ -1333,7 +1333,7 @@ fn resolve_program(pg: ProgramGraph): ProgramResolveResult
     let mid: i64 = pg.topo_order.get(ti)
     let me: ModuleEntry = pg.modules.get(mid)
     let sf: SourceFile = pg.files.get(me.file_id)
-    let po: ParseOutput = sf.parse_output
+    let po: parser::ParseOutput = sf.parse_output
 
     // Snapshot uses length before this module's pass.
     let uses_before: i64 = rs_uses.length()
@@ -1359,19 +1359,19 @@ fn resolve_program(pg: ProgramGraph): ProgramResolveResult
     rs.current_scope = fsr.scope_idx
 
     // Register import bindings as Module symbols.
-    let root_node: Node = po.nodes.get(po.root)
+    let root_node: parser::Node = po.nodes.get(po.root)
     match root_node:
-      Node::FileN(mod_decl, imports_lp, decls_lp):
-        let imps: Vector<i64> = pg_read_list(po.idx, imports_lp)
+      parser::Node::FileN(mod_decl, imports_lp, decls_lp):
+        let imps: Vector<i64> = parser::read_list(po.idx, imports_lp)
         let ii: i64 = 0
         while ii < imps.length():
           let imp_name: string = extract_import_name(po, imps.get(ii))
           let target_mid: i64 = find_module_by_name(pg.modules, imp_name)
           if target_mid >= 0:
             // Bind the last segment of the import path as a Module symbol.
-            let imp_node: Node = po.nodes.get(imps.get(ii))
+            let imp_node: parser::Node = po.nodes.get(imps.get(ii))
             match imp_node:
-              Node::ImportDeclN(path_lp, seg_count):
+              parser::Node::ImportDeclN(path_lp, seg_count):
                 if seg_count > 0:
                   let last_tidx: i64 = po.idx.get(path_lp - 1)
                   let local_name: string = substring(po.src, po.toks.get(last_tidx).offset, po.toks.get(last_tidx).len)
@@ -1412,7 +1412,7 @@ fn resolve_program(pg: ProgramGraph): ProgramResolveResult
     let mid: i64 = pg.topo_order.get(ti)
     let me: ModuleEntry = pg.modules.get(mid)
     let sf: SourceFile = pg.files.get(me.file_id)
-    let po: ParseOutput = sf.parse_output
+    let po: parser::ParseOutput = sf.parse_output
 
     // Snapshot uses length before this module's body resolution.
     let uses_before: i64 = rs_uses.length()
@@ -1440,16 +1440,16 @@ fn resolve_program(pg: ProgramGraph): ProgramResolveResult
     // concept name token during resolve_extend_decl.  Find that use
     // in the per-module delta and store the binding under
     // extend_binding_key(file_id, decl_idx).
-    let root_node_p2: Node = po.nodes.get(po.root)
+    let root_node_p2: parser::Node = po.nodes.get(po.root)
     match root_node_p2:
-      Node::FileN(md2, imp_lp2, dec_lp2):
-        let ext_decls: Vector<i64> = pg_read_list(po.idx, dec_lp2)
+      parser::Node::FileN(md2, imp_lp2, dec_lp2):
+        let ext_decls: Vector<i64> = parser::read_list(po.idx, dec_lp2)
         let edi: i64 = 0
         while edi < ext_decls.length():
           let ext_idx: i64 = ext_decls.get(edi)
-          let ext_node: Node = po.nodes.get(ext_idx)
+          let ext_node: parser::Node = po.nodes.get(ext_idx)
           match ext_node:
-            Node::ExtendDeclD(ttn2, concept_name_tidx, ml2):
+            parser::Node::ExtendDeclD(ttn2, concept_name_tidx, ml2):
               if concept_name_tidx >= 0:
                 let ubi: i64 = uses_before
                 while ubi < rs_uses.length():

@@ -94,7 +94,7 @@ enum class HirNode:
 
 // The module being lowered: its syntax, source, and identity.
 class HirModule:
-  nodes: Vector<Node>
+  nodes: Vector<parser::Node>
   idx_data: Vector<i64>
   toks: Vector<lexer::Token>
   src: string
@@ -117,7 +117,7 @@ class HS:
 // A lowering state over module `mid` of `p`, writing into `arena`.
 fn hs_new(p: Program, mid: i64, arena: HirArena): HS
   let sf: SourceFile = program_file_of_module(p, mid)
-  let po: ParseOutput = sf.parse_output
+  let po: parser::ParseOutput = sf.parse_output
   return HS(HirModule(po.nodes, po.idx, po.toks, sf.source_text, mid, sf.file_id), p.resolve.symbols, p.typecheck, p.resolve.uses, arena, Vector<Diagnostic>::new())
 
 fn arena_empty(): HirArena
@@ -316,10 +316,10 @@ fn hir_find_method_sym(hs: HS, name: string, receiver_ti: i64): i64
 fn lower_expr(hs: HS, node_idx: i64): HirR
   if node_idx < 0:
     return hs_add_node(hs, HirNode::HirErrorExpr(tok = to_i64(0)))
-  let node: Node = hs.unit.nodes.get(node_idx)
+  let node: parser::Node = hs.unit.nodes.get(node_idx)
   let ti: i64 = hir_get_expr_type(hs, node_idx)
   match node:
-    Node::IntLitE(tidx):
+    parser::Node::IntLitE(tidx):
       let int_ti: i64 = ti
       if int_ti < 0:
         int_ti = 2  // default i32
@@ -328,29 +328,29 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
         let wide: HS = hs_add_diag(hs, hs_tok_span(hs, tidx), "integer literal " + lexeme + " does not fit in 64 bits")
         return hs_add_node(wide, HirNode::HirErrorExpr(tok = tidx))
       return hs_add_node(hs, HirNode::HirIntLit(value = parse_i64_literal(lexeme), typ = int_ti))
-    Node::FloatLitE(tidx):
+    parser::Node::FloatLitE(tidx):
       let float_ti: i64 = ti
       if float_ti < 0:
         float_ti = 9  // default f64
       return hs_add_node(hs, HirNode::HirFloatLit(tok = tidx, typ = float_ti))
-    Node::StringLitE(tidx):
+    parser::Node::StringLitE(tidx):
       let str_ti: i64 = ti
       if str_ti < 0:
         str_ti = 12  // default string
       return hs_add_node(hs, HirNode::HirStringLit(tok = tidx, typ = str_ti))
-    Node::BoolLitE(tidx):
+    parser::Node::BoolLitE(tidx):
       let bool_ti: i64 = ti
       if bool_ti < 0:
         bool_ti = 10  // default bool
       return hs_add_node(hs, HirNode::HirBoolLit(tok = tidx, typ = bool_ti))
-    Node::IdentE(tidx):
+    parser::Node::IdentE(tidx):
       let sym_idx: i64 = hir_lookup_use(hs, tidx)
       let ident_ti: i64 = ti
       if ident_ti < 0:
         if sym_idx >= 0:
           ident_ti = hir_sym_type(hs, sym_idx)
       return hs_add_node(hs, HirNode::HirIdent(sym = sym_idx, typ = ident_ti, tok = tidx))
-    Node::BinaryE(op_tidx, left, right):
+    parser::Node::BinaryE(op_tidx, left, right):
       let lr: HirR = lower_expr(hs, left)
       let rr: HirR = lower_expr(lr.hs, right)
       // Fallback: if typechecker didn't record type (value-corruption),
@@ -382,14 +382,14 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
           let left_hir: HirNode = rr.hs.arena.nodes.get(lr.hir)
           bin_ti = hir_expr_type(left_hir)
       return hs_add_node(rr.hs, HirNode::HirBinary(op = op_tidx, left = lr.hir, right = rr.hir, typ = bin_ti))
-    Node::UnaryE(op_tidx, operand):
+    parser::Node::UnaryE(op_tidx, operand):
       if hir_is_i64_min_literal(hs, op_tidx, operand):
         return hs_add_node(hs, HirNode::HirIntLit(value = i64_min_value(), typ = ti))
       let or2: HirR = lower_expr(hs, operand)
       return hs_add_node(or2.hs, HirNode::HirUnary(op = op_tidx, operand = or2.hir, typ = ti))
-    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
+    parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
       return with_call_subst(lower_call_expr(hs, node_idx, callee, args_lp, names_lp, ti), hm_get_or(hs.typecheck.lookup.expr_types, call_subst_key(hs.unit.module_id, node_idx), to_i64(-1)))
-    Node::FieldE(obj, field_tidx):
+    parser::Node::FieldE(obj, field_tidx):
       // A concept-provided member taken as a value has no field to read
       // and no implementation to name (see hir_member_concept).
       if hir_member_concept(hs, node_idx) >= 0:
@@ -403,17 +403,17 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
         return hs_add_node(mcur, HirNode::HirErrorExpr(tok = field_tidx))
       let obj_r: HirR = lower_expr(hs, obj)
       return hs_add_node(obj_r.hs, HirNode::HirFieldAccess(obj = obj_r.hir, field = field_tidx, typ = ti))
-    Node::PipeE(left, right):
+    parser::Node::PipeE(left, right):
       let lr: HirR = lower_expr(hs, left)
       let rr: HirR = lower_expr(lr.hs, right)
       return hs_add_node(rr.hs, HirNode::HirPipe(left = lr.hir, right = rr.hir, typ = ti))
-    Node::QualNameE(seg_lp, seg_count):
+    parser::Node::QualNameE(seg_lp, seg_count):
       // `Enum::Variant` as a value: a classification enum's is its
       // index; a payload-bearing enum's a construction with no payload.
       let named_variant: i64 = hir_named_variant(hs, node_idx)
       if named_variant >= 0:
         return lower_variant_value(hs, named_variant, to_i64(-1), Vector<i64>::new(), ti)
-      let segs: Vector<i64> = read_list(hs.unit.idx_data, seg_lp)
+      let segs: Vector<i64> = parser::read_list(hs.unit.idx_data, seg_lp)
       // `Type::method` as a value names one of the type's own methods:
       // a function reference to its symbol, like a free function's name.
       let smsym: i64 = hir_qualified_method_sym(hs, segs)
@@ -427,20 +427,20 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
       // Preserve all segment token indices in HIR idx.
       let seg_fl: HirFlush = hir_flush_list(hs, segs)
       return hs_add_node(seg_fl.hs, HirNode::HirQualName(segs_lp = seg_fl.list_pos, seg_count = segs.length(), typ = ti))
-    Node::TryE(operand):
+    parser::Node::TryE(operand):
       // Tier B deferral — lower operand, emit error
       let cur: HS = hs_add_diag(hs, Span(to_i64(0), to_i64(1)), "try operator not supported in Tier A HIR")
       return hs_add_node(cur, HirNode::HirErrorExpr(tok = to_i64(0)))
-    Node::LambdaE(params_lp, param_count, body):
+    parser::Node::LambdaE(params_lp, param_count, body):
       let cur: HS = hs_add_diag(hs, Span(to_i64(0), to_i64(1)), "lambda not supported in Tier A HIR")
       return hs_add_node(cur, HirNode::HirErrorExpr(tok = to_i64(0)))
-    Node::ListLitE(elems_lp, elem_count):
+    parser::Node::ListLitE(elems_lp, elem_count):
       let cur: HS = hs_add_diag(hs, Span(to_i64(0), to_i64(1)), "list literal not supported in Tier A HIR")
       return hs_add_node(cur, HirNode::HirErrorExpr(tok = to_i64(0)))
-    Node::IndexE(obj, idx_expr):
+    parser::Node::IndexE(obj, idx_expr):
       let cur: HS = hs_add_diag(hs, Span(to_i64(0), to_i64(1)), "index expression not supported in Tier A HIR")
       return hs_add_node(cur, HirNode::HirErrorExpr(tok = to_i64(0)))
-    Node::ErrorE(t):
+    parser::Node::ErrorE(t):
       return hs_add_node(hs, HirNode::HirErrorExpr(tok = to_i64(0)))
   return hs_add_node(hs, HirNode::HirErrorExpr(tok = to_i64(0)))
 
@@ -460,14 +460,14 @@ fn lower_ptr_op(hs: HS, op: i64, callee: i64, args_lp: i64, ti: i64): HirR
   let cur: HS = hs
   let pointer: i64 = to_i64(-1)
   match cur.unit.nodes.get(callee):
-    Node::FieldE(obj, field_tidx):
+    parser::Node::FieldE(obj, field_tidx):
       let pr: HirR = lower_expr(cur, obj)
       cur = pr.hs
       pointer = pr.hir
   let argument: i64 = to_i64(-1)
   let args: Vector<i64> = Vector<i64>::new()
   if args_lp >= 0:
-    args = read_list(cur.unit.idx_data, args_lp)
+    args = parser::read_list(cur.unit.idx_data, args_lp)
   if args.length() > 0:
     let ar: HirR = lower_expr(cur, args.get(0))
     cur = ar.hs
@@ -490,7 +490,7 @@ fn lower_variant_value(hs: HS, variant: i64, args_lp: i64, hir_args: Vector<i64>
     return hs_add_node(hs, HirNode::HirIntLit(value = variant, typ = ti))
   let args: Vector<i64> = Vector<i64>::new()
   if args_lp >= 0:
-    args = read_list(hs.unit.idx_data, args_lp)
+    args = parser::read_list(hs.unit.idx_data, args_lp)
   let pairs: Vector<i64> = Vector<i64>::new()
   let ai: i64 = 0
   while ai < hir_args.length():
@@ -519,14 +519,14 @@ fn hir_callee_is_class(hs: HS, callee: i64, call_ti: i64): bool
 // module's function it types as a function).
 fn hir_names_type(hs: HS, callee: i64): bool
   match hs.unit.nodes.get(callee):
-    Node::IdentE(ctidx):
+    parser::Node::IdentE(ctidx):
       let csym: i64 = hir_lookup_use(hs, ctidx)
       if csym < 0:
         return false
       match hs.symbols.get(csym).kind:
         SymbolKind::Type:
           return true
-    Node::QualNameE(seg_lp, seg_count):
+    parser::Node::QualNameE(seg_lp, seg_count):
       let callee_ti: i64 = hir_get_expr_type(hs, callee)
       if callee_ti >= 0 and callee_ti < hs.typecheck.types.length():
         match hs.typecheck.types.get(callee_ti).kind:
@@ -576,7 +576,7 @@ fn emit_method_call(hs: HS, msym: i64, callee_tok: i64, receiver: i64, args_lp: 
     let obj_r: HirR = lower_expr(cur, receiver)
     cur = obj_r.hs
     hir_args = hir_args.push(obj_r.hir)
-  let args: Vector<i64> = read_list(cur.unit.idx_data, args_lp)
+  let args: Vector<i64> = parser::read_list(cur.unit.idx_data, args_lp)
   let ai: i64 = 0
   while ai < args.length():
     let ar: HirR = lower_expr(cur, args.get(ai))
@@ -615,7 +615,7 @@ fn lower_bound_call(hs: HS, callee: i64, obj: i64, field_tidx: i64, args_lp: i64
   let access_r: HirR = hs_add_node(obj_r.hs, HirNode::HirFieldAccess(obj = obj_r.hir, field = field_tidx, typ = callee_ti))
   let cur: HS = access_r.hs
   let hir_args: Vector<i64> = Vector<i64>::new()
-  let args: Vector<i64> = read_list(cur.unit.idx_data, args_lp)
+  let args: Vector<i64> = parser::read_list(cur.unit.idx_data, args_lp)
   let ai: i64 = 0
   while ai < args.length():
     let ar: HirR = lower_expr(cur, args.get(ai))
@@ -648,9 +648,9 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
   let ptr_op: i64 = hm_get_or(hs.typecheck.lookup.expr_types, ptr_op_key(hs.unit.module_id, node_idx), to_i64(-1))
   if ptr_op >= 0:
     return lower_ptr_op(hs, ptr_op, callee, args_lp, ti)
-  let callee_node: Node = hs.unit.nodes.get(callee)
+  let callee_node: parser::Node = hs.unit.nodes.get(callee)
   match callee_node:
-    Node::FieldE(mobj, mfield_tidx):
+    parser::Node::FieldE(mobj, mfield_tidx):
       // Check if the type checker resolved the FieldE as a function
       // type.  If not (e.g. it's a concrete field), suppress the
       // desugaring so we don't rewrite a field access as a method call.
@@ -688,12 +688,12 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
         //     → HirCall(HirIdent(msym), [obj, a1, a2])
         if msym >= 0:
           return emit_method_call(hs, msym, mfield_tidx, mobj, args_lp, ti)
-    Node::QualNameE(seg_lp, seg_count):
+    parser::Node::QualNameE(seg_lp, seg_count):
       // `Type::method(...)`: one of the type's own methods, as the
       // checker typed it (check_qualname_expr) — static, or an instance
       // method given its receiver as the first argument.  The call names
       // the method symbol, never a qualified name MIR cannot lower.
-      let qsegs: Vector<i64> = read_list(hs.unit.idx_data, seg_lp)
+      let qsegs: Vector<i64> = parser::read_list(hs.unit.idx_data, seg_lp)
       let smsym: i64 = hir_qualified_method_sym(hs, qsegs)
       if smsym >= 0:
         return emit_method_call(hs, smsym, qsegs.get(to_i64(1)), to_i64(-1), args_lp, ti)
@@ -712,7 +712,7 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
     let callee_r: HirR = lower_expr(hs, callee)
     cur = callee_r.hs
     callee_hir = callee_r.hir
-  let args: Vector<i64> = read_list(cur.unit.idx_data, args_lp)
+  let args: Vector<i64> = parser::read_list(cur.unit.idx_data, args_lp)
   let hir_args: Vector<i64> = Vector<i64>::new()
   let ai: i64 = 0
   while ai < args.length():
@@ -739,9 +739,9 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
           call_ti = ct.ret_type
     // Check if callee is an IdentE resolving to a Type symbol (struct constructor)
     if call_ti < 0:
-      let cn: Node = fl.hs.unit.nodes.get(callee)
+      let cn: parser::Node = fl.hs.unit.nodes.get(callee)
       match cn:
-        Node::IdentE(ctidx):
+        parser::Node::IdentE(ctidx):
           let csym: i64 = hir_lookup_use(fl.hs, ctidx)
           if csym >= 0:
             let sym: Symbol = fl.hs.symbols.get(csym)
@@ -757,44 +757,44 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
 fn lower_stmt(hs: HS, node_idx: i64): HirR
   if node_idx < 0:
     return hs_add_node(hs, HirNode::HirErrorStmt(tok = to_i64(0)))
-  let node: Node = hs.unit.nodes.get(node_idx)
+  let node: parser::Node = hs.unit.nodes.get(node_idx)
   match node:
-    Node::LetS(name_tidx, type_node, init_node):
+    parser::Node::LetS(name_tidx, type_node, init_node):
       return lower_let_stmt(hs, node_idx, name_tidx, type_node, init_node)
-    Node::AssignS(target, value):
+    parser::Node::AssignS(target, value):
       let tr: HirR = lower_expr(hs, target)
       let vr: HirR = lower_expr(tr.hs, value)
       return hs_add_node(vr.hs, HirNode::HirAssign(target = tr.hir, value = vr.hir))
-    Node::IfS(cond, then_lp, else_lp):
+    parser::Node::IfS(cond, then_lp, else_lp):
       return lower_if_stmt(hs, cond, then_lp, else_lp)
-    Node::WhileS(cond, body_lp):
+    parser::Node::WhileS(cond, body_lp):
       return lower_while_stmt(hs, cond, body_lp)
-    Node::ResourceS(kind_tidx, name_tidx, body_lp):
+    parser::Node::ResourceS(kind_tidx, name_tidx, body_lp):
       let body_fl: HirFlush = lower_body_stmts(hs, body_lp)
       return hs_add_node(body_fl.hs, HirNode::HirResource(kind = kind_tidx, name = name_tidx, body_lp = body_fl.list_pos))
-    Node::ModeS(name_tidx, body_lp):
+    parser::Node::ModeS(name_tidx, body_lp):
       let mode_body_fl: HirFlush = lower_body_stmts(hs, body_lp)
       return hs_add_node(mode_body_fl.hs, HirNode::HirMode(name = name_tidx, body_lp = mode_body_fl.list_pos))
-    Node::YieldS(yield_tidx, val_node):
+    parser::Node::YieldS(yield_tidx, val_node):
       if val_node < 0:
         return hs_add_node(hs, HirNode::HirYield(value = to_i64(-1)))
       let yr: HirR = lower_expr(hs, val_node)
       return hs_add_node(yr.hs, HirNode::HirYield(value = yr.hir))
-    Node::ForS(var_tidx, iter_node, body_lp):
+    parser::Node::ForS(var_tidx, iter_node, body_lp):
       return lower_for_stmt(hs, node_idx, iter_node, body_lp)
-    Node::ReturnS(val_node):
+    parser::Node::ReturnS(val_node):
       return lower_return_stmt(hs, val_node)
-    Node::BreakS(tidx):
+    parser::Node::BreakS(tidx):
       return hs_add_node(hs, HirNode::HirBreak(tok = to_i64(0)))
-    Node::MatchS(scrut_node, arms_lp):
+    parser::Node::MatchS(scrut_node, arms_lp):
       // A match is two statements; it lowers into its statement list
       // (lower_stmts_into), never alone.
       let lone: HS = hs_add_diag(hs, Span(to_i64(0), to_i64(1)), "match lowered outside a statement list")
       return hs_add_node(lone, HirNode::HirErrorStmt(tok = to_i64(0)))
-    Node::ExprStmtS(expr_node):
+    parser::Node::ExprStmtS(expr_node):
       let er: HirR = lower_expr(hs, expr_node)
       return hs_add_node(er.hs, HirNode::HirExprStmt(expr = er.hir))
-    Node::ErrorS(t):
+    parser::Node::ErrorS(t):
       return hs_add_node(hs, HirNode::HirErrorStmt(tok = to_i64(0)))
   return hs_add_node(hs, HirNode::HirErrorStmt(tok = to_i64(0)))
 
@@ -856,7 +856,7 @@ fn hir_is_i64_min_literal(hs: HS, op_tidx: i64, operand: i64): bool
   if hs_tok_name(hs, op_tidx) != "-":
     return false
   match hs.unit.nodes.get(operand):
-    Node::IntLitE(tidx):
+    parser::Node::IntLitE(tidx):
       let lexeme: string = hs_tok_name(hs, tidx)
       return i64_literal_fits(lexeme) == false and i64_literal_fits("-" + lexeme)
   return false
@@ -1031,8 +1031,8 @@ fn lower_arm_bindings(hs: HS, pat_node: i64, scrut_sym: i64, scrut_ti: i64, vari
   let lets: Vector<i64> = Vector<i64>::new()
   let cur: HS = hs
   match cur.unit.nodes.get(pat_node):
-    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
-      let binders: Vector<i64> = read_list(cur.unit.idx_data, args_lp)
+    parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
+      let binders: Vector<i64> = parser::read_list(cur.unit.idx_data, args_lp)
       let bi: i64 = 0
       while bi < binders.length():
         let binding_sym: i64 = member_sym_of(cur.typecheck.lookup.index, cur.unit.module_id, binders.get(bi), "Local", "")
@@ -1054,7 +1054,7 @@ fn lower_arm_bindings(hs: HS, pat_node: i64, scrut_sym: i64, scrut_ti: i64, vari
 fn hir_pattern_variant(hs: HS, pat_node: i64): i64
   let named: i64 = pat_node
   match hs.unit.nodes.get(pat_node):
-    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
+    parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
       named = callee
   return hm_get_or(hs.typecheck.lookup.expr_types, variant_index_key(hs.unit.module_id, named), to_i64(-1))
 
@@ -1087,13 +1087,13 @@ fn hir_enum_has_payload(hs: HS, ti: i64): bool
 fn lower_stmts_into(hs: HS, list_pos: i64, prefix: Vector<i64>): HirStmts
   if list_pos < 0:
     return HirStmts(hs, prefix)
-  let stmts: Vector<i64> = read_list(hs.unit.idx_data, list_pos)
+  let stmts: Vector<i64> = parser::read_list(hs.unit.idx_data, list_pos)
   let cur: HirStmts = HirStmts(hs, prefix)
   let i: i64 = 0
   while i < stmts.length():
     let is_match: bool = false
     match cur.hs.unit.nodes.get(stmts.get(i)):
-      Node::MatchS(scrut_node, arms_lp):
+      parser::Node::MatchS(scrut_node, arms_lp):
         is_match = true
         cur = lower_match_into(cur.hs, scrut_node, arms_lp, cur.stmts)
     if is_match == false:
@@ -1121,16 +1121,16 @@ fn lower_type_params(hs: HS, ast_tparams_lp: i64): HirFlush
   if ast_tparams_lp < 0:
     // No type params — return a flush with list_pos = -1
     return HirFlush(hs, to_i64(-1))
-  let tparam_nodes: Vector<i64> = read_list(hs.unit.idx_data, ast_tparams_lp)
+  let tparam_nodes: Vector<i64> = parser::read_list(hs.unit.idx_data, ast_tparams_lp)
   let items: Vector<i64> = Vector<i64>::new()
   let count: i64 = 0
   let i: i64 = 0
   while i < tparam_nodes.length():
     let tp_node_idx: i64 = tparam_nodes.get(i)
     if tp_node_idx >= 0:
-      let tp_node: Node = hs.unit.nodes.get(tp_node_idx)
+      let tp_node: parser::Node = hs.unit.nodes.get(tp_node_idx)
       match tp_node:
-        Node::GenericParamT(tidx, bounds_lp):
+        parser::Node::GenericParamT(tidx, bounds_lp):
           items = items.push(tidx)
           items = items.push(hir_generic_param_type(hs, tidx))
           count = count + 1
@@ -1246,9 +1246,9 @@ fn resolve_type_to_idx(hs: HS, type_node_idx: i64): i64
   let ti: i64 = hir_get_expr_type(hs, type_node_idx)
   if ti >= 0:
     return ti
-  let tn: Node = hs.unit.nodes.get(type_node_idx)
+  let tn: parser::Node = hs.unit.nodes.get(type_node_idx)
   match tn:
-    Node::NamedT(ttidx):
+    parser::Node::NamedT(ttidx):
       let tsym: i64 = hir_lookup_use(hs, ttidx)
       if tsym >= 0:
         return hir_sym_type(hs, tsym)
@@ -1278,12 +1278,12 @@ fn resolve_type_to_idx(hs: HS, type_node_idx: i64): i64
         return 10
       if tname == "string":
         return 12
-    Node::GenericT(name_tidx, args_lp, arg_count):
+    parser::Node::GenericT(name_tidx, args_lp, arg_count):
       // `Ptr<T>` names the pointer the type checker registered for that
       // pointee (ADR_RAW_POINTER_SURFACE.md); every other generic head
       // resolves by its name.
       if hs_tok_name(hs, name_tidx) == "Ptr":
-        let pargs: Vector<i64> = read_list(hs.unit.idx_data, args_lp)
+        let pargs: Vector<i64> = parser::read_list(hs.unit.idx_data, args_lp)
         if pargs.length() == 1:
           let inner_ti: i64 = resolve_type_to_idx(hs, pargs.get(0))
           let pti: i64 = 0
@@ -1312,7 +1312,7 @@ fn lower_enum_decl(hs: HS, decl_idx: i64, name_tidx: i64, tparams_lp: i64, varia
     let ast_payload_lp: i64 = pairs.get(vi + 1)
     // The payload list is (field name token, type node) pairs; HIR keeps
     // the types in declaration order.
-    let payload_fields: Vector<i64> = read_list(cur.unit.idx_data, ast_payload_lp)
+    let payload_fields: Vector<i64> = parser::read_list(cur.unit.idx_data, ast_payload_lp)
     let hir_payload: Vector<i64> = Vector<i64>::new()
     let pi: i64 = 1
     while pi < payload_fields.length():
@@ -1338,28 +1338,28 @@ fn lower_type_alias_decl(hs: HS, decl_idx: i64, name_tidx: i64, target_type_node
   return hs_add_node(hs, HirNode::HirTypeAlias(name = name_tidx, typ = ti))
 
 fn lower_decl(hs: HS, decl_idx: i64): HirR
-  let node: Node = hs.unit.nodes.get(decl_idx)
+  let node: parser::Node = hs.unit.nodes.get(decl_idx)
   match node:
-    Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_type_node, body_lp):
+    parser::Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_type_node, body_lp):
       return lower_fn_decl(hs, decl_idx, name_tidx, tparams_lp, params_lp, ret_type_node, body_lp)
-    Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_type_node, body_expr):
+    parser::Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_type_node, body_expr):
       return lower_expr_fn_decl(hs, decl_idx, name_tidx, tparams_lp, params_lp, ret_type_node, body_expr)
-    Node::ExternFnD(name_tidx, tparams_lp, params_lp, ret_type_node):
+    parser::Node::ExternFnD(name_tidx, tparams_lp, params_lp, ret_type_node):
       return lower_extern_fn_decl(hs, decl_idx, name_tidx, tparams_lp, params_lp, ret_type_node)
-    Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
+    parser::Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
       return lower_class_decl(hs, decl_idx, name_tidx, tparams_lp, fields_lp, methods_lp)
-    Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
+    parser::Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
       return lower_enum_decl(hs, decl_idx, name_tidx, tparams_lp, variants_lp)
-    Node::TypeAliasD(name_tidx, target_type):
+    parser::Node::TypeAliasD(name_tidx, target_type):
       return lower_type_alias_decl(hs, decl_idx, name_tidx, target_type)
-    Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
+    parser::Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
       // Concepts produce no runtime code — emit a no-op.  The derived
       // marker is preserved on the AST; it drives no lowering yet.
       return hs_add_node(hs, HirNode::HirErrorStmt(tok = to_i64(0)))
-    Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
+    parser::Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
       // Extend methods are emitted in lower_file; return a no-op here
       return hs_add_node(hs, HirNode::HirErrorStmt(tok = to_i64(0)))
-    Node::ErrorD(t):
+    parser::Node::ErrorD(t):
       return hs_add_node(hs, HirNode::HirErrorStmt(tok = to_i64(0)))
   return hs_add_node(hs, HirNode::HirErrorStmt(tok = to_i64(0)))
 
@@ -1393,10 +1393,10 @@ fn hir_find_field_sym(hs: HS, decl_idx: i64, field_name: string): i64
 // =========================================================================
 
 fn lower_file(hs: HS, file_node_idx: i64): HirR
-  let node: Node = hs.unit.nodes.get(file_node_idx)
+  let node: parser::Node = hs.unit.nodes.get(file_node_idx)
   match node:
-    Node::FileN(module_decl, imports_lp, decls_lp):
-      let decls: Vector<i64> = read_list(hs.unit.idx_data, decls_lp)
+    parser::Node::FileN(module_decl, imports_lp, decls_lp):
+      let decls: Vector<i64> = parser::read_list(hs.unit.idx_data, decls_lp)
       let cur: HS = hs
       let hir_decls: Vector<i64> = Vector<i64>::new()
       let i: i64 = 0
@@ -1406,45 +1406,45 @@ fn lower_file(hs: HS, file_node_idx: i64): HirR
         hir_decls = hir_decls.push(dr.hir)
         // Emit methods as flat top-level HirFunction nodes with
         // class_owner set to the class name token for mangled identity.
-        let decl_node: Node = hs.unit.nodes.get(decls.get(i))
+        let decl_node: parser::Node = hs.unit.nodes.get(decls.get(i))
         match decl_node:
-          Node::ClassDeclD(cn_tidx, cn_tp, cn_fl, cn_ml):
+          parser::Node::ClassDeclD(cn_tidx, cn_tp, cn_fl, cn_ml):
             if cn_ml >= 0:
-              let methods: Vector<i64> = read_list(cur.unit.idx_data, cn_ml)
+              let methods: Vector<i64> = parser::read_list(cur.unit.idx_data, cn_ml)
               let mi: i64 = 0
               while mi < methods.length():
                 let meth_idx: i64 = methods.get(mi)
-                let meth_node: Node = cur.unit.nodes.get(meth_idx)
+                let meth_node: parser::Node = cur.unit.nodes.get(meth_idx)
                 match meth_node:
-                  Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
+                  parser::Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
                     let mr: HirR = lower_fn_decl_with_owner(cur, meth_idx, m_tparams_lp, m_params_lp, m_body_lp, cn_tidx)
                     cur = mr.hs
                     hir_decls = hir_decls.push(mr.hir)
-                  Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
+                  parser::Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
                     let mer: HirR = lower_expr_fn_decl_with_owner(cur, meth_idx, m_tparams_lp, m_params_lp, m_body_expr, cn_tidx)
                     cur = mer.hs
                     hir_decls = hir_decls.push(mer.hir)
                 mi = mi + 1
-          Node::ExtendDeclD(ext_target, ext_cname, ext_ml):
+          parser::Node::ExtendDeclD(ext_target, ext_cname, ext_ml):
             if ext_ml >= 0:
               // Get target type name token for owner
               let ext_owner_tidx: i64 = to_i64(-1)
               if ext_target >= 0:
-                let tnode: Node = cur.unit.nodes.get(ext_target)
+                let tnode: parser::Node = cur.unit.nodes.get(ext_target)
                 match tnode:
-                  Node::NamedT(t_tidx):
+                  parser::Node::NamedT(t_tidx):
                     ext_owner_tidx = t_tidx
-              let ext_methods: Vector<i64> = read_list(cur.unit.idx_data, ext_ml)
+              let ext_methods: Vector<i64> = parser::read_list(cur.unit.idx_data, ext_ml)
               let emi: i64 = 0
               while emi < ext_methods.length():
                 let emeth_idx: i64 = ext_methods.get(emi)
-                let emeth_node: Node = cur.unit.nodes.get(emeth_idx)
+                let emeth_node: parser::Node = cur.unit.nodes.get(emeth_idx)
                 match emeth_node:
-                  Node::FnDeclD(em_name_tidx, em_tparams_lp, em_params_lp, em_ret_type, em_body_lp):
+                  parser::Node::FnDeclD(em_name_tidx, em_tparams_lp, em_params_lp, em_ret_type, em_body_lp):
                     let emr: HirR = lower_fn_decl_with_owner(cur, emeth_idx, em_tparams_lp, em_params_lp, em_body_lp, ext_owner_tidx)
                     cur = emr.hs
                     hir_decls = hir_decls.push(emr.hir)
-                  Node::ExprFnD(em_name_tidx, em_tparams_lp, em_params_lp, em_ret_type, em_body_expr):
+                  parser::Node::ExprFnD(em_name_tidx, em_tparams_lp, em_params_lp, em_ret_type, em_body_expr):
                     let emer: HirR = lower_expr_fn_decl_with_owner(cur, emeth_idx, em_tparams_lp, em_params_lp, em_body_expr, ext_owner_tidx)
                     cur = emer.hs
                     hir_decls = hir_decls.push(emer.hir)
@@ -1505,7 +1505,7 @@ fn program_lower_hir(p: Program): ProgramHir
   while ti < p.graph.topo_order.length():
     let mid: i64 = p.graph.topo_order.get(ti)
     let sf: SourceFile = program_file_of_module(p, mid)
-    let po: ParseOutput = sf.parse_output
+    let po: parser::ParseOutput = sf.parse_output
     let hs: HS = hs_new(p, mid, HirArena(hir_nodes, hir_idx))
 
     let file_r: HirR = lower_file(hs, po.root)
@@ -1519,13 +1519,13 @@ fn program_lower_hir(p: Program): ProgramHir
         module_decls_lp = dlp
     // Extract module name token from the ModuleDeclN node.
     let mod_name_tok: i64 = to_i64(-1)
-    let root_node: Node = po.nodes.get(po.root)
+    let root_node: parser::Node = po.nodes.get(po.root)
     match root_node:
-      Node::FileN(mod_decl, imp_lp, dec_lp):
+      parser::Node::FileN(mod_decl, imp_lp, dec_lp):
         if mod_decl >= 0:
-          let md_node: Node = po.nodes.get(mod_decl)
+          let md_node: parser::Node = po.nodes.get(mod_decl)
           match md_node:
-            Node::ModuleDeclN(path_lp, seg_count):
+            parser::Node::ModuleDeclN(path_lp, seg_count):
               if seg_count > 0:
                 // First segment token of the module path.
                 mod_name_tok = po.idx.get(path_lp - seg_count)
@@ -1541,7 +1541,7 @@ fn program_lower_hir(p: Program): ProgramHir
     ti = ti + 1
 
   // Emit HirProgram root. Build a temporary HS to use hir_flush_list.
-  let tmp_hs: HS = HS(HirModule(Vector<Node>::new(), Vector<i64>::new(), Vector<lexer::Token>::new(), "", to_i64(-1), to_i64(-1)), Vector<Symbol>::new(), TypeCheckData(false, Vector<DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), program_lookup_empty()), HashMap<i64>::new(), HirArena(hir_nodes, hir_idx), Vector<Diagnostic>::new())
+  let tmp_hs: HS = HS(HirModule(Vector<parser::Node>::new(), Vector<i64>::new(), Vector<lexer::Token>::new(), "", to_i64(-1), to_i64(-1)), Vector<Symbol>::new(), TypeCheckData(false, Vector<DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), program_lookup_empty()), HashMap<i64>::new(), HirArena(hir_nodes, hir_idx), Vector<Diagnostic>::new())
   let mod_fl: HirFlush = hir_flush_list(tmp_hs, module_indices)
   hir_nodes = mod_fl.hs.arena.nodes
   hir_idx = mod_fl.hs.arena.idx
@@ -1577,7 +1577,7 @@ fn lower_to_hir(src: string): HirResult
   // Single module at mid=0.
   let mid: i64 = to_i64(0)
   let sf: SourceFile = program_file_of_module(p, mid)
-  let po: ParseOutput = sf.parse_output
+  let po: parser::ParseOutput = sf.parse_output
   let hs: HS = hs_new(p, mid, arena_empty())
 
   // Lower
@@ -1749,7 +1749,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
   match node:
     HirNode::HirProgram(module_list_lp):
       line = line + "\n"
-      let mods: Vector<i64> = read_list(hr.hir_idx, module_list_lp)
+      let mods: Vector<i64> = parser::read_list(hr.hir_idx, module_list_lp)
       let mi: i64 = 0
       while mi < mods.length():
         line = line + hir_dump_node(hr, mods.get(mi), indent + 1)
@@ -1757,7 +1757,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
       return line
     HirNode::HirModule(name_tok, decl_list_lp, mod_id):
       line = line + " (module_id=" + i64_to_string(mod_id) + ")\n"
-      let decls: Vector<i64> = read_list(hr.hir_idx, decl_list_lp)
+      let decls: Vector<i64> = parser::read_list(hr.hir_idx, decl_list_lp)
       let di: i64 = 0
       while di < decls.length():
         line = line + hir_dump_node(hr, decls.get(di), indent + 1)
@@ -1765,7 +1765,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
       return line
     HirNode::HirFile(decls_lp):
       line = line + "\n"
-      let decls: Vector<i64> = read_list(hr.hir_idx, decls_lp)
+      let decls: Vector<i64> = parser::read_list(hr.hir_idx, decls_lp)
       let di: i64 = 0
       while di < decls.length():
         line = line + hir_dump_node(hr, decls.get(di), indent + 1)
@@ -1781,7 +1781,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
         line = line + " [extern]"
       line = line + " -> " + hir_type_label(hr, ret_ti)
       line = line + "\n"
-      let body: Vector<i64> = read_list(hr.hir_idx, body_lp)
+      let body: Vector<i64> = parser::read_list(hr.hir_idx, body_lp)
       let bi: i64 = 0
       while bi < body.length():
         line = line + hir_dump_node(hr, body.get(bi), indent + 1)
@@ -1789,13 +1789,13 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
       return line
     HirNode::HirStruct(name_tidx, tparams_lp, fields_lp):
       if tparams_lp >= 0:
-        let tps: Vector<i64> = read_list(hr.hir_idx, tparams_lp)
+        let tps: Vector<i64> = parser::read_list(hr.hir_idx, tparams_lp)
         line = line + "<" + i64_to_string(tps.length()) + " params>"
       line = line + "\n"
       return line
     HirNode::HirEnum(name_tidx, tparams_lp, variants_lp):
       if tparams_lp >= 0:
-        let tps: Vector<i64> = read_list(hr.hir_idx, tparams_lp)
+        let tps: Vector<i64> = parser::read_list(hr.hir_idx, tparams_lp)
         line = line + "<" + i64_to_string(tps.length()) + " params>"
       line = line + "\n"
       return line
@@ -1818,13 +1818,13 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
     HirNode::HirIf(cond, then_lp, else_lp):
       line = line + "\n"
       line = line + hir_dump_node(hr, cond, indent + 1)
-      let then_stmts: Vector<i64> = read_list(hr.hir_idx, then_lp)
+      let then_stmts: Vector<i64> = parser::read_list(hr.hir_idx, then_lp)
       let ti2: i64 = 0
       while ti2 < then_stmts.length():
         line = line + hir_dump_node(hr, then_stmts.get(ti2), indent + 1)
         ti2 = ti2 + 1
       if else_lp >= 0:
-        let else_stmts: Vector<i64> = read_list(hr.hir_idx, else_lp)
+        let else_stmts: Vector<i64> = parser::read_list(hr.hir_idx, else_lp)
         let ei: i64 = 0
         while ei < else_stmts.length():
           line = line + hir_dump_node(hr, else_stmts.get(ei), indent + 1)
@@ -1833,7 +1833,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
     HirNode::HirWhile(cond, body_lp):
       line = line + "\n"
       line = line + hir_dump_node(hr, cond, indent + 1)
-      let body: Vector<i64> = read_list(hr.hir_idx, body_lp)
+      let body: Vector<i64> = parser::read_list(hr.hir_idx, body_lp)
       let bi: i64 = 0
       while bi < body.length():
         line = line + hir_dump_node(hr, body.get(bi), indent + 1)
@@ -1843,7 +1843,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
       let kind_tok: lexer::Token = hr.toks.get(kind_tidx)
       let name_tok: lexer::Token = hr.toks.get(name_tidx)
       line = line + " " + substring(hr.src, kind_tok.offset, kind_tok.len) + " " + substring(hr.src, name_tok.offset, name_tok.len) + "\n"
-      let rbody: Vector<i64> = read_list(hr.hir_idx, body_lp)
+      let rbody: Vector<i64> = parser::read_list(hr.hir_idx, body_lp)
       let ri: i64 = 0
       while ri < rbody.length():
         line = line + hir_dump_node(hr, rbody.get(ri), indent + 1)
@@ -1852,7 +1852,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
     HirNode::HirMode(name_tidx, body_lp):
       let mode_tok: lexer::Token = hr.toks.get(name_tidx)
       line = line + " " + substring(hr.src, mode_tok.offset, mode_tok.len) + "\n"
-      let mbody: Vector<i64> = read_list(hr.hir_idx, body_lp)
+      let mbody: Vector<i64> = parser::read_list(hr.hir_idx, body_lp)
       let mi: i64 = 0
       while mi < mbody.length():
         line = line + hir_dump_node(hr, mbody.get(mi), indent + 1)
@@ -1868,7 +1868,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
     HirNode::HirFor(var_sym, iter, body_lp):
       line = line + "\n"
       line = line + hir_dump_node(hr, iter, indent + 1)
-      let body: Vector<i64> = read_list(hr.hir_idx, body_lp)
+      let body: Vector<i64> = parser::read_list(hr.hir_idx, body_lp)
       let bi: i64 = 0
       while bi < body.length():
         line = line + hir_dump_node(hr, body.get(bi), indent + 1)
@@ -1918,7 +1918,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
     HirNode::HirCall(callee, args_lp, arg_count, ti2, subst):
       line = line + " : " + hir_type_label(hr, ti2) + "\n"
       line = line + hir_dump_node(hr, callee, indent + 1)
-      let args: Vector<i64> = read_list(hr.hir_idx, args_lp)
+      let args: Vector<i64> = parser::read_list(hr.hir_idx, args_lp)
       let ai: i64 = 0
       while ai < args.length():
         line = line + hir_dump_node(hr, args.get(ai), indent + 1)
@@ -1946,7 +1946,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
       return line
     HirNode::HirConstruct(args_lp, arg_count, ti2):
       line = line + " : " + hir_type_label(hr, ti2) + "\n"
-      let cargs: Vector<i64> = read_list(hr.hir_idx, args_lp)
+      let cargs: Vector<i64> = parser::read_list(hr.hir_idx, args_lp)
       let ci: i64 = 0
       while ci < cargs.length():
         line = line + hir_dump_node(hr, cargs.get(ci), indent + 1)

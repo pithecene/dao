@@ -194,7 +194,7 @@ else
   fi
   SEED_KIND="host_daoc"
   echo "stage 1: the host builds the bootstrap compiler"
-  "$DAOC" build --source "$GEN_DIR/driver/driver.gen.dao" --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao > "$RUN_DIR/stage1.log" 2>&1 || {
+  "$DAOC" build --source "$GEN_DIR/driver/driver.gen.dao" --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao > "$RUN_DIR/stage1.log" 2>&1 || {
     echo "stage 1 failed (see $RUN_DIR/stage1.log)" >&2
     exit 1
   }
@@ -202,7 +202,7 @@ else
 fi
 
 echo "stage 2: the bootstrap compiler compiles itself"
-compile_with "$STAGE1" "$RUN_DIR/stage2.ll" "$GEN_DIR/driver/driver.gen.dao" bootstrap/lexer/impl.dao bootstrap/ascii.dao || {
+compile_with "$STAGE1" "$RUN_DIR/stage2.ll" "$GEN_DIR/driver/driver.gen.dao" bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao || {
   echo "stage 2 failed (see $RUN_DIR/stage2.ll.log)" >&2
   exit 1
 }
@@ -212,7 +212,7 @@ link "$RUN_DIR/stage2.ll" "$RUN_DIR/stage2" || {
 }
 
 echo "stage 3: the stage-2 compiler compiles itself"
-compile_with "$RUN_DIR/stage2" "$RUN_DIR/stage3.ll" "$GEN_DIR/driver/driver.gen.dao" bootstrap/lexer/impl.dao bootstrap/ascii.dao || {
+compile_with "$RUN_DIR/stage2" "$RUN_DIR/stage3.ll" "$GEN_DIR/driver/driver.gen.dao" bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao || {
   echo "stage 3 failed (see $RUN_DIR/stage3.ll.log)" >&2
   exit 1
 }
@@ -357,13 +357,15 @@ if [ "$neg_mod_missing_rc" -ne 1 ] || [ "$neg_mod_dup_rc" -ne 1 ] || [ "$neg_mod
 fi
 echo "stage 3: linked binary passed smoke, order-determinism, and fail-closed checks"
 
-suite_entry_source() {
+suite_sources() {
   if [ "$1" = "lexer" ]; then
-    echo "bootstrap/lexer/tests.dao"
+    printf '%s\n' bootstrap/lexer/tests.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao
+  elif [ "$1" = "parser" ]; then
+    printf '%s\n' bootstrap/parser/tests.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao
   elif [ "$1" = "driver_tests" ]; then
-    echo "$GEN_DIR/driver/driver_tests.gen.dao"
+    printf '%s\n' "$GEN_DIR/driver/driver_tests.gen.dao" bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao
   else
-    echo "$GEN_DIR/$1/$1.gen.dao"
+    printf '%s\n' "$GEN_DIR/$1/$1.gen.dao" bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao
   fi
 }
 
@@ -371,8 +373,8 @@ echo "the suites, compiled by the stage-2 compiler"
 failures=0
 SUITES_JSON=""
 for p in lexer parser graph resolver typecheck hir mir llvm driver_tests; do
-  src_file="$(suite_entry_source "$p")"
-  if ! compile_with "$RUN_DIR/stage2" "$RUN_DIR/$p.ll" "$src_file" bootstrap/lexer/impl.dao bootstrap/ascii.dao; then
+  # shellcheck disable=SC2046
+  if ! compile_with "$RUN_DIR/stage2" "$RUN_DIR/$p.ll" $(suite_sources "$p"); then
     echo "  $p: did not compile (see $RUN_DIR/$p.ll.log)"
     failures=$((failures + 1))
     SUITES_JSON="${SUITES_JSON}${SUITES_JSON:+, }\"$p\": {\"passed\": 0, \"total\": 0, \"exit_code\": 1, \"ok\": false}"
