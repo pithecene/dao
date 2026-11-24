@@ -185,6 +185,7 @@ class ProbedProgram:
 fn closure_program_checked(name: string, path: string, src: string, report: bool): ProbedProgram
   let inputs: Vector<SourceInput> = closure_prelude_inputs()
   inputs = inputs.push(SourceInput("bootstrap/ascii.dao", read_file("bootstrap/ascii.dao"), false))
+  inputs = inputs.push(SourceInput("bootstrap/lexer/impl.dao", read_file("bootstrap/lexer/impl.dao"), false))
   inputs = inputs.push(SourceInput(path, wrap_test_module(src), false))
   let pg: ProgramGraph = program_graph_empty()
   resource memory graph =>
@@ -213,9 +214,9 @@ fn closure_probe_stage(name: string, path: string, stage: string): string
   let cols: string = ""
   eprint("probe: " + name + " stage=" + stage)
   if stage == "parse":
-    let lexed: LexResult = lex_result_empty()
+    let lexed: lexer::LexResult = lexer::lex_result_empty()
     resource memory lex =>
-      lexed = lex(src)
+      lexed = lexer::lex(src)
     let lex_n: i64 = lexed.diagnostics.length()
     closure_report_diags(name, "lex", lexed.diagnostics, to_i64(50))
     cols = cols + closure_stage_column(name, "lex", lexed.diagnostics, to_i64(0))
@@ -278,7 +279,7 @@ fn closure_probe_stage(name: string, path: string, stage: string): string
     let carried_into_llvm: i64 = pc.mir.diags.length()
     let ll: LlvmTextResult = llvm_text_result_empty()
     resource memory llvm =>
-      ll = lower_mir_to_llvm_text(MirBackendInput(pc.mir, pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, BackendSource(Vector<Token>::new(), "", pc.program.graph)))
+      ll = lower_mir_to_llvm_text(MirBackendInput(pc.mir, pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, BackendSource(Vector<lexer::Token>::new(), "", pc.program.graph)))
     closure_report_diags_from(name, "llvm", ll.diags, carried_into_llvm, to_i64(50))
     cols = cols + closure_stage_column(name, "llvm", ll.diags, carried_into_llvm)
     if ll.ok:
@@ -376,6 +377,8 @@ fn closure_probe(marker: string): void
   let line: string = ""
   if which == "prelude":
     line = closure_probe_prelude()
+  else if which == "lexer":
+    line = closure_probe_stage(which, "bootstrap/lexer/tests.dao", stage)
   else:
     line = closure_probe_stage(which, "bootstrap/" + which + "/" + which + ".gen.dao", stage)
   let closure_txt: string = llvm_out_dir() + "/closure.txt"

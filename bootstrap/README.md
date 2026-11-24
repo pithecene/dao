@@ -7,27 +7,31 @@ a probe or experiment directory.
 
 ## Shared Substrate
 
-The file `shared/base.dao` is the single source of truth for the bootstrap
-frontend pipeline (token model, lexer, AST, parser).  The command `bash bootstrap/assemble.sh` assembles subsystem `.dao` files from `base.dao` + subsystem `.part.dao` fragments.  See `shared/README.md`.
+The file `shared/base.dao` holds the AST, parser, module graph, and
+cross-pass program types for subsystems that still assemble via
+`bash bootstrap/assemble.sh`. `ascii.dao` (`module bootstrap::ascii`) and
+`lexer/impl.dao` (`module bootstrap::lexer`) compile directly as real
+modules without assembly. See `shared/README.md`.
 
 ## Subsystems
 
 ### `lexer/`
 
-Indentation-aware lexer matching the host compiler's token surface
+Indentation-aware lexer (`module bootstrap::lexer` in `lexer/impl.dao`,
+importing `bootstrap::ascii`) matching the host compiler's token surface
 (`compiler/frontend/lexer/`).
 
-**Status**: promoted from probe (Task 20, Phase 7).
+**Status**: real multi-file module compiled directly from authored sources without `assemble.sh`.
 
 **What it supports**:
 
 - All token kinds from `compiler/frontend/lexer/token.h`
-- Indentation-sensitive INDENT/DEDENT emission
+- Indentation-sensitive INDENT/DEDENT emission with `O(1)` stack pops
 - Newline suppression inside parentheses and brackets
 - Error tokens for tabs, inconsistent indentation, unterminated strings,
   and unexpected characters
 - Source location tracking (offset + length) for all tokens
-- Diagnostics as data (`LexResult.diagnostics`), with no inline printing
+- Structured tokenization helpers and diagnostics as data (`LexResult.diagnostics`)
 
 **Parity with host lexer**:
 
@@ -41,24 +45,22 @@ The bootstrap lexer matches the C++ lexer on:
 
 **Known limitations**:
 
-- Single-file only, with no imports/modules (Dao limitation, not lexer)
 - No hex/octal/binary integer literal support
 - No multiline string literals
 - No raw string literals
 - The lexer consumes escape sequences but validates nothing beyond `\\`
 - No Unicode identifier support
-- `vec_pop` is O(n), because it rebuilds the vector on every pop
 
 **How to run tests**:
 
 ```sh
-# From repository root:
-bash bootstrap/assemble.sh && daoc build --source bootstrap/lexer/lexer.gen.dao --source bootstrap/ascii.dao && ./bootstrap/lexer/lexer.gen
+# From repository root (no assemble.sh step required for lexer):
+daoc build --source bootstrap/lexer/tests.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/lexer/tests
 ```
 
 Tests include golden token stream assertions, malformed-input tests,
-a comprehensive Dao snippet regression, and a self-lex smoke test
-(reads and tokenizes its own source file).
+a comprehensive Dao snippet regression, and self-lex tests over
+`bootstrap/lexer/impl.dao` and `bootstrap/lexer/tests.dao`.
 
 ### `parser/`
 

@@ -56,7 +56,7 @@ module bootstrap::typecheck
 class TC:
   nodes: Vector<Node>
   idx_data: Vector<i64>
-  toks: Vector<Token>
+  toks: Vector<lexer::Token>
   src: string
   symbols: Vector<Symbol>
   scopes: Vector<Scope>
@@ -351,11 +351,11 @@ fn ts_push_info_run(ts: TS, records: Vector<i64>): TS
 // =========================================================================
 
 fn ts_tok_name(ts: TS, tidx: i64): string
-  let tok: Token = ts.tc.toks.get(tidx)
+  let tok: lexer::Token = ts.tc.toks.get(tidx)
   return substring(ts.tc.src, tok.offset, tok.len)
 
 fn ts_tok_span(ts: TS, tidx: i64): Span
-  let tok: Token = ts.tc.toks.get(tidx)
+  let tok: lexer::Token = ts.tc.toks.get(tidx)
   return Span(tok.offset, tok.len)
 
 fn ts_node_span(ts: TS, node_idx: i64): Span
@@ -455,7 +455,7 @@ fn program_init_typecheck(p: Program): Program
   let dummy_tc: TC = TC(
     Vector<Node>::new(),
     Vector<i64>::new(),
-    Vector<Token>::new(),
+    Vector<lexer::Token>::new(),
     "",
     Vector<Symbol>::new(),
     Vector<Scope>::new(),
@@ -2170,7 +2170,7 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
                 if impl_type.builtin_id != req_type.builtin_id:
                   let sp_s: Span = Span(to_i64(0), to_i64(1))
                   if concept_name_tidx >= 0:
-                    let tok_s: Token = r.tc.toks.get(concept_name_tidx)
+                    let tok_s: lexer::Token = r.tc.toks.get(concept_name_tidx)
                     sp_s = Span(tok_s.offset, tok_s.len)
                   if req_type.builtin_id == 1:
                     r = ts_add_diag(r, sp_s, "method '" + req_name + "' must take self as concept '" + concept_name + "' requires")
@@ -2180,7 +2180,7 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
                 if impl_type.info_count != req_type.info_count:
                   let sp: Span = Span(to_i64(0), to_i64(1))
                   if concept_name_tidx >= 0:
-                    let tok: Token = r.tc.toks.get(concept_name_tidx)
+                    let tok: lexer::Token = r.tc.toks.get(concept_name_tidx)
                     sp = Span(tok.offset, tok.len)
                   r = ts_add_diag(r, sp, "extend method '" + req_name + "' has " + i64_to_string(impl_type.info_count) + " param(s), concept requires " + i64_to_string(req_type.info_count))
                 else:
@@ -2206,7 +2206,7 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
                       // is also a mismatch when the other side resolved.
                       let sp_p: Span = Span(to_i64(0), to_i64(1))
                       if concept_name_tidx >= 0:
-                        let tok_p: Token = r.tc.toks.get(concept_name_tidx)
+                        let tok_p: lexer::Token = r.tc.toks.get(concept_name_tidx)
                         sp_p = Span(tok_p.offset, tok_p.len)
                       let impl_pname: string = "<unresolved>"
                       if impl_param_ti >= 0:
@@ -2220,7 +2220,7 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
                 if impl_type.ret_type != req_type.ret_type:
                   let sp2: Span = Span(to_i64(0), to_i64(1))
                   if concept_name_tidx >= 0:
-                    let tok2: Token = r.tc.toks.get(concept_name_tidx)
+                    let tok2: lexer::Token = r.tc.toks.get(concept_name_tidx)
                     sp2 = Span(tok2.offset, tok2.len)
                   let impl_rname: string = "<unresolved>"
                   if impl_type.ret_type >= 0:
@@ -2232,7 +2232,7 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
             if found_method == false:
               let sp3: Span = Span(to_i64(0), to_i64(1))
               if concept_name_tidx >= 0:
-                let tok3: Token = r.tc.toks.get(concept_name_tidx)
+                let tok3: lexer::Token = r.tc.toks.get(concept_name_tidx)
                 sp3 = Span(tok3.offset, tok3.len)
               r = ts_add_diag(r, sp3, "extend does not implement required method '" + req_name + "' from concept '" + concept_name + "'")
             req_mi = req_mi + 1
@@ -2615,8 +2615,8 @@ fn check_binary_expr(ts: TS, node_idx: i64, op_tidx: i64, left: i64, right: i64)
       if is_numeric(r, lt):
         r = fit_literal(r, right, lt)
         rt = get_expr_type(r, right)
-  let op_tok: Token = r.tc.toks.get(op_tidx)
-  let op_name_str: string = tk_name(op_tok.kind)
+  let op_tok: lexer::Token = r.tc.toks.get(op_tidx)
+  let op_name_str: string = lexer::tk_name(op_tok.kind)
   if op_name_str == "Plus":
     if is_string_type(r, lt):
       if is_string_type(r, rt):
@@ -2768,8 +2768,8 @@ fn is_lvalue_expr(ts: TS, node_idx: i64): bool
 fn check_unary_expr(ts: TS, node_idx: i64, op_tidx: i64, operand: i64): TS
   let r: TS = check_expr(ts, operand)
   let ot: i64 = get_expr_type(r, operand)
-  let op_tok: Token = r.tc.toks.get(op_tidx)
-  let op_name_str: string = tk_name(op_tok.kind)
+  let op_tok: lexer::Token = r.tc.toks.get(op_tidx)
+  let op_name_str: string = lexer::tk_name(op_tok.kind)
   if op_name_str == "Minus":
     if ot >= 0:
       if is_numeric(r, ot):
@@ -4654,8 +4654,8 @@ fn is_lvalue(ts: TS, node_idx: i64): bool
       return true
     Node::UnaryE(op_tidx, operand):
       // Deref (*ptr = val) is an lvalue — Tier B, accept for now
-      let tok: Token = ts.tc.toks.get(op_tidx)
-      if tok.kind == TK::Star:
+      let tok: lexer::Token = ts.tc.toks.get(op_tidx)
+      if tok.kind == lexer::TK::Star:
         return true
   return false
 

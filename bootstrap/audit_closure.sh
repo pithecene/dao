@@ -54,9 +54,19 @@ trap 'rm -f "$OUT/.closure_probe" "$PRELUDE_LIST" "$AUDIT_OUT/closure.merged"' E
 #    A program the host cannot print is an audit failure, not a smaller
 #    inventory.
 LABELS="$(grep -ohE '"[A-Z][A-Za-z]+' compiler/frontend/ast/ast_printer.cpp compiler/frontend/ast/ast.cpp | tr -d '"' | sort -u)"
+program_sources() {
+  if [ "$1" = "lexer" ]; then
+    printf '%s\n' bootstrap/lexer/impl.dao bootstrap/lexer/tests.dao
+  else
+    printf '%s\n' "bootstrap/$1/$1.gen.dao"
+  fi
+}
+
 : > "$AUDIT_OUT/inventory.ast"
 for p in $PROGRAMS; do
-  "$DAOC" ast "bootstrap/$p/$p.gen.dao" >> "$AUDIT_OUT/inventory.ast" || { echo "audit: daoc ast failed for $p"; exit 1; }
+  for src in $(program_sources "$p"); do
+    "$DAOC" ast "$src" >> "$AUDIT_OUT/inventory.ast" || { echo "audit: daoc ast failed for $src"; exit 1; }
+  done
 done
 INVENTORY="$(awk -v labels="$LABELS" 'BEGIN { n = split(labels, a, "\n"); for (i = 1; i <= n; i++) label[a[i]] = 1 }
   { name = $1; sub(/:$/, "", name); if (name in label) print name }' "$AUDIT_OUT/inventory.ast" | sort | uniq -c | sort -rn)"
@@ -70,10 +80,10 @@ INVENTORY="$(awk -v labels="$LABELS" 'BEGIN { n = split(labels, a, "\n"); for (i
 #    LLVM as a definition -- the host lowers each specialization inline
 #    -- so it is counted from the MIR, where every specialization is a
 #    `fn_ref <name>$<type>`.
-INSTANCES="$("$DAOC" llvm-ir --source bootstrap/llvm/llvm.gen.dao --source bootstrap/ascii.dao 2>/dev/null \
+INSTANCES="$("$DAOC" llvm-ir --source bootstrap/llvm/llvm.gen.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao 2>/dev/null \
   | grep -oE 'define [^@]*@"core::[^"]*"' | sed -E 's/.*@"//; s/"$//; s/\$.*//' | sort | uniq -c | sort -rn)"
 INSTANCES_TABLE="$(echo "$INSTANCES" | awk 'NF {printf "| `%s` | %s |\n", $2, $1}')"
-INTRINSICS="$("$DAOC" mir --source bootstrap/llvm/llvm.gen.dao --source bootstrap/ascii.dao 2>/dev/null \
+INTRINSICS="$("$DAOC" mir --source bootstrap/llvm/llvm.gen.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao 2>/dev/null \
   | grep -oE 'fn_ref (size_of|align_of|ptr_offset)\$[^ ]+' | sed 's/^fn_ref //' | sort -u | sed 's/\$.*//' | uniq -c | sort -rn)"
 INTRINSICS_TABLE="$(echo "$INTRINSICS" | awk 'NF {printf "| `%s` (intrinsic; inlined by the host) | %s |\n", $2, $1}')"
 if [ -z "$INSTANCES_TABLE" ]; then
@@ -100,7 +110,7 @@ LIMIT_KB="${AUDIT_MEMORY_KB:-6291456}"   # 6 GiB
 LIMIT_S="${AUDIT_SECONDS:-600}"
 STAGES="parse typecheck hir mir mono llvm"
 if [ "$REPORT_ONLY" -eq 0 ]; then
-"$DAOC" build --source bootstrap/llvm/llvm.gen.dao --source bootstrap/ascii.dao > /dev/null || { echo "audit: building llvm.gen failed"; exit 1; }
+"$DAOC" build --source bootstrap/llvm/llvm.gen.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao > /dev/null || { echo "audit: building llvm.gen failed"; exit 1; }
 rm -f "$OUT/closure.txt" "$AUDIT_OUT/closure.merged"
 # The prelude alone, once: each file's parse and resolve counts, then
 # its typecheck count, for the document's prelude section.  A probe
@@ -205,10 +215,12 @@ fi
 # stops at `::`.  Counted per assembled program to set against the
 # parse column; the parse column reaches zero when the parser closes it.
 generic_qualified_sites() {
-  grep -o -E '[A-Z][A-Za-z]*<[^;()=]*>::' "bootstrap/$1/$1.gen.dao" 2>/dev/null | wc -l
+  cat $(program_sources "$1") 2>/dev/null | grep -o -E '[A-Z][A-Za-z]*<[^;()=]*>::' | wc -l | tr -d '[:space:]'
 }
 resource_block_sites() {
-  grep -c -E '^[[:space:]]*resource[[:space:]]+[a-z]+[[:space:]]+[A-Za-z_]+[[:space:]]*=>' "bootstrap/$1/$1.gen.dao" 2>/dev/null
+  local count
+  count="$(cat $(program_sources "$1") 2>/dev/null | grep -c -E '^[[:space:]]*resource[[:space:]]+[a-z]+[[:space:]]+[A-Za-z_]+[[:space:]]*=>' || true)"
+  printf '%s' "${count:-0}"
 }
 
 {
