@@ -1,18 +1,15 @@
 #!/usr/bin/env bash
 # assemble.sh — Compose each bootstrap program from explicit source
 # files: the shared base, the library fragments a program builds on,
-# and finally that program's own test runner.
+# and finally that program's own test runner or entry point.
 #
 # Run from repository root:
-#   bash bootstrap/assemble.sh
+#   bash bootstrap/assemble.sh [output-root]
 #
-# Source layout (no marker surgery — every input is a whole file):
-#   bootstrap/shared/base.dao        token model, lexer, AST, parser, module graph
-#   bootstrap/<sub>/impl.dao         a subsystem's library, no test runner
-#   bootstrap/<sub>/tests.dao        a subsystem's test runner, never compiled alone
-#
-# A program includes the library fragments of every earlier phase it
-# depends on, in dependency order, then exactly one test runner.
+# When output-root is omitted, assembled files land under `bootstrap/`
+# (`bootstrap/<sub>/<name>.gen.dao`). Crossing runs pass a per-run
+# directory so concurrent invocations never overwrite shared `.gen.dao`
+# files.
 
 set -euo pipefail
 if command -v git &>/dev/null && git rev-parse --show-toplevel &>/dev/null; then
@@ -21,11 +18,12 @@ else
   cd "$(dirname "$0")/.."
 fi
 
+OUT_ROOT="${1:-bootstrap}"
 SHARED=bootstrap/shared/base.dao
 
 # Strip a leading `module <path>` line (plus the blank/comment lines
-# before it) from a file on stdout.  Each real input carries its own
-# module declaration; the generated file gets exactly one synthetic
+# before it) from a file on stdout. Each real input carries its own
+# module declaration, and the generated file gets one synthetic
 # declaration at the top.
 strip_module() {
   awk '
@@ -48,6 +46,7 @@ strip_module() {
 assemble() {
   local out="$1"
   shift
+  mkdir -p "$(dirname "$out")"
   local gen_module="${out##*/}"
   gen_module="${gen_module%.gen.dao}"
   echo "module bootstrap::${gen_module}::gen" > "$out"
@@ -62,48 +61,49 @@ assemble() {
   echo "  assembled $out"
 }
 
-# Library fragments, in dependency order.  A program lists the fragments
-# it needs, then its own test runner last.
+# Library fragments, in dependency order. A program lists the fragments
+# it needs, then its own test runner or entry point last.
 RESOLVER=bootstrap/resolver/impl.dao
 TYPECHECK=bootstrap/typecheck/impl.dao
 HIR=bootstrap/hir/impl.dao
 MIR=bootstrap/mir/impl.dao
 LLVM=bootstrap/llvm/impl.dao
+DRIVER=bootstrap/driver/impl.dao
 
 # lexer, parser and graph draw their library entirely from the shared
 # base, so each is just the base plus its own test runner.
-assemble bootstrap/lexer/lexer.gen.dao \
+assemble "$OUT_ROOT/lexer/lexer.gen.dao" \
   bootstrap/lexer/tests.dao
 
-assemble bootstrap/parser/parser.gen.dao \
+assemble "$OUT_ROOT/parser/parser.gen.dao" \
   bootstrap/parser/tests.dao
 
-assemble bootstrap/graph/graph.gen.dao \
+assemble "$OUT_ROOT/graph/graph.gen.dao" \
   bootstrap/graph/tests.dao
 
-assemble bootstrap/resolver/resolver.gen.dao \
+assemble "$OUT_ROOT/resolver/resolver.gen.dao" \
   "$RESOLVER" \
   bootstrap/resolver/tests.dao
 
-assemble bootstrap/typecheck/typecheck.gen.dao \
+assemble "$OUT_ROOT/typecheck/typecheck.gen.dao" \
   "$RESOLVER" \
   "$TYPECHECK" \
   bootstrap/typecheck/tests.dao
 
-assemble bootstrap/hir/hir.gen.dao \
+assemble "$OUT_ROOT/hir/hir.gen.dao" \
   "$RESOLVER" \
   "$TYPECHECK" \
   "$HIR" \
   bootstrap/hir/tests.dao
 
-assemble bootstrap/mir/mir.gen.dao \
+assemble "$OUT_ROOT/mir/mir.gen.dao" \
   "$RESOLVER" \
   "$TYPECHECK" \
   "$HIR" \
   "$MIR" \
   bootstrap/mir/tests.dao
 
-assemble bootstrap/llvm/llvm.gen.dao \
+assemble "$OUT_ROOT/llvm/llvm.gen.dao" \
   "$RESOLVER" \
   "$TYPECHECK" \
   "$HIR" \
@@ -111,14 +111,19 @@ assemble bootstrap/llvm/llvm.gen.dao \
   "$LLVM" \
   bootstrap/llvm/tests.dao
 
+assemble "$OUT_ROOT/driver/driver_tests.gen.dao" \
+  "$DRIVER" \
+  bootstrap/driver/tests.dao
+
 # The bootstrap compiler itself: every library fragment and the driver
-# that runs the whole pipeline over a manifest's files.
-assemble bootstrap/driver/driver.gen.dao \
+# that runs the whole pipeline over an explicit manifest's files.
+assemble "$OUT_ROOT/driver/driver.gen.dao" \
   "$RESOLVER" \
   "$TYPECHECK" \
   "$HIR" \
   "$MIR" \
   "$LLVM" \
+  "$DRIVER" \
   bootstrap/driver/main.dao
 
-echo "done — 9 files assembled"
+echo "done — 10 files assembled"

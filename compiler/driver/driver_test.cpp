@@ -721,6 +721,44 @@ suite<"driver_cli"> driver_cli_suite = [] {
     expect(built.exit_code == 0) << built.err;
     expect(exit_status(scratch.output_for(app)) == 0);
   };
+
+  "prelude io exposes process arguments and non-trapping file reads"_test = [] {
+    const Scratch scratch("prelude-io-args-and-try-read");
+    auto sample = scratch.file("sample.txt", "payload");
+    auto app = scratch.file("main.dao",
+                            "module app::main\n\n"
+                            "fn main(): i32\n"
+                            "  let argv: Vector<string> = args()\n"
+                            "  if argv.length() != to_i64(4):\n"
+                            "    return 10\n"
+                            "  match try_read_file(argv.get(to_i64(1))):\n"
+                            "    Result::Ok(value):\n"
+                            "      if value != \"payload\":\n"
+                            "        return 11\n"
+                            "    Result::Err(error):\n"
+                            "      return 12\n"
+                            "  match try_read_file(argv.get(to_i64(2))):\n"
+                            "    Result::Ok(value):\n"
+                            "      return 13\n"
+                            "    Result::Err(error):\n"
+                            "      if length(error) == to_i64(0):\n"
+                            "        return 14\n"
+                            "  match try_read_file(argv.get(to_i64(3))):\n"
+                            "    Result::Ok(value):\n"
+                            "      return 15\n"
+                            "    Result::Err(error):\n"
+                            "      if length(error) == to_i64(0):\n"
+                            "        return 16\n"
+                            "  return 0\n");
+    auto built = run_daoc(scratch, {"build", app.string()});
+    expect(built.exit_code == 0) << built.err;
+    auto exe = scratch.output_for(app).string();
+    auto sample_str = sample.string();
+    auto missing_str = (scratch.dir / "missing.txt").string();
+    auto dir_str = scratch.dir.string();
+    std::vector<llvm::StringRef> run_argv = {exe, sample_str, missing_str, dir_str};
+    expect(llvm::sys::ExecuteAndWait(exe, run_argv) == 0);
+  };
 };
 
 auto main(int argc, const char** argv) -> int {

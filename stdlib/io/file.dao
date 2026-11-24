@@ -1,10 +1,37 @@
 module io::file
 extern fn __dao_io_write_stderr(msg: string): void
 extern fn __dao_io_read_file(path: string): string
+extern fn __dao_io_try_read_file(path: string, ok_out: Ptr<i32>): string
 extern fn __dao_io_write_file(path: string, content: string): bool
 extern fn __dao_io_file_exists(path: string): bool
+extern fn __dao_io_arg_count(): i64
+extern fn __dao_io_arg_at(index: i64): string
 
 fn eprint(msg: string): void -> __dao_io_write_stderr(msg)
 fn read_file(path: string): string -> __dao_io_read_file(path)
 fn write_file(path: string, content: string): bool -> __dao_io_write_file(path, content)
 fn file_exists(path: string): bool -> __dao_io_file_exists(path)
+fn arg_count(): i64 -> __dao_io_arg_count()
+fn arg_at(index: i64): string -> __dao_io_arg_at(index)
+
+fn try_read_file(path: string): Result<string, string>
+  let status: Ptr<i32> = __dao_mem_alloc(size_of<i32>(), align_of<i32>()).cast<i32>()
+  mode unsafe =>
+    status.set(0)
+  let text: string = __dao_io_try_read_file(path, status)
+  let ok: i32 = 0
+  mode unsafe =>
+    ok = status.get()
+  __dao_mem_free(status.cast<void>())
+  if ok != 0:
+    return Result::Ok(value = text)
+  return Result::Err(error = text)
+
+fn args(): Vector<string>
+  let count: i64 = __dao_io_arg_count()
+  let out: Vector<string> = Vector<string>::new()
+  let i: i64 = to_i64(0)
+  while i < count:
+    out = out.push(__dao_io_arg_at(i))
+    i = i + to_i64(1)
+  return out
