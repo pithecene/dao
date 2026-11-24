@@ -23,22 +23,24 @@ fi
 DAOC="$BUILD_DIR/compiler/driver/daoc"
 RUNTIME="$BUILD_DIR/runtime/core/libdao_runtime.a"
 CLANG="${CLANG:-clang}"
-REQ_STACK_KB="${STAGE_STACK_KB:-1048576}"
-LIMIT_KB="${STAGE_MEMORY_KB:-8388608}"
+RAW_REQ_STACK_KB="${STAGE_STACK_KB:-1048576}"
+RAW_LIMIT_KB="${STAGE_MEMORY_KB:-8388608}"
 
-is_positive_int() {
+normalize_positive_int() {
   case "$1" in
-    ''|0|*[!0-9]*) return 1 ;;
-    *) return 0 ;;
+    ''|*[!0-9]*) return 1 ;;
   esac
+  local stripped="${1#"${1%%[!0]*}"}"
+  [ -n "$stripped" ] || return 1
+  printf '%s' "$stripped"
 }
 
-if ! is_positive_int "$REQ_STACK_KB"; then
-  echo "stage2: STAGE_STACK_KB must be a positive integer KiB bound, got '$REQ_STACK_KB'" >&2
+if ! REQ_STACK_KB="$(normalize_positive_int "$RAW_REQ_STACK_KB")"; then
+  echo "stage2: STAGE_STACK_KB must be a positive integer KiB bound, got '$RAW_REQ_STACK_KB'" >&2
   exit 1
 fi
-if ! is_positive_int "$LIMIT_KB"; then
-  echo "stage2: STAGE_MEMORY_KB must be a positive integer KiB bound, got '$LIMIT_KB'" >&2
+if ! LIMIT_KB="$(normalize_positive_int "$RAW_LIMIT_KB")"; then
+  echo "stage2: STAGE_MEMORY_KB must be a positive integer KiB bound, got '$RAW_LIMIT_KB'" >&2
   exit 1
 fi
 
@@ -96,7 +98,10 @@ json_limit_value() {
   case "$1" in
     ''|null) printf 'null' ;;
     *[!0-9]*) printf '"%s"' "$(json_escape "$1")" ;;
-    *) printf '%s' "$1" ;;
+    *)
+      local stripped="${1#"${1%%[!0]*}"}"
+      printf '%s' "${stripped:-0}"
+      ;;
   esac
 }
 
