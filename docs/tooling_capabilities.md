@@ -21,6 +21,7 @@ the file they lie in; token entries inherit the file of the reply.
 | References | `query_references` | `references` | — | `textDocument/references` |
 | Document symbols | `query_document_symbols` | `documentSymbols` | — | `textDocument/documentSymbol` |
 | Completion | `query_completions` | `completions` | — | `textDocument/completion` |
+| Formatting | `format_source` | `format` | `fmt` | `textDocument/formatting` |
 | AST dump | `print_ast` | `analyze` | `ast` | — |
 | HIR dump | `print_hir` | `analyze` | `hir` | — |
 | MIR dump | `print_mir` | `analyze` | `mir` | — |

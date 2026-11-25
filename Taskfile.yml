@@ -182,6 +182,12 @@ tasks:
     cmds:
       - "{{.BUILD_DIR}}/compiler/driver/daoc ast {{.CLI_ARGS}}"
 
+  fmt:
+    desc: "Run daoc fmt on Dao file(s) (usage: task fmt -- [--check|--write] file.dao)"
+    deps: [build]
+    cmds:
+      - "{{.BUILD_DIR}}/compiler/driver/daoc fmt {{.CLI_ARGS}}"
+
   tokens:
     desc: "Run daoc tokens on a file (usage: task tokens -- file.dao)"
     deps: [build]
