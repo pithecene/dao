@@ -67,10 +67,10 @@ Required top-level directories:
 - `examples/`
 - `testdata/`
 - `tools/`
-- `ai/`
 
 Required root files:
 - `README.md`
+- `LICENSE`
 - `CLAUDE.md`
 - `AGENTS.md`
 - `.grove.yaml`

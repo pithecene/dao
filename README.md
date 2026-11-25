@@ -25,7 +25,6 @@ lowers Tier A Dao to textual LLVM IR.
 - `examples/`: small Dao programs and syntax probes
 - `testdata/`: parser/compiler fixtures
 - `tools/`: playground, LSP, formatter, and diagnostics tooling
-- `ai/`: Bonsai governance skills, baselines, outputs
 
 ## Governance Docs
 
@@ -55,3 +54,11 @@ consumers. See `tools/`, `docs/PLAYGROUND_ARCHITECTURE.md`, and
 
 The current reference grammar and lexical notes live under `spec/grammar/`.
 Use `docs/contracts/CONTRACT_SYNTAX_SURFACE.md` for the frozen language-facing syntax guarantees and `spec/syntax_probes/` for parser/readability probes.
+
+
+## License
+
+Dao's compiler, runtime, standard library, and tooling use the Apache License
+2.0 with LLVM Exception (`Apache-2.0 WITH LLVM-exception`). See `LICENSE` for
+the full text and `THIRD_PARTY_NOTICES.md` for separate third-party dependency
+notices.
