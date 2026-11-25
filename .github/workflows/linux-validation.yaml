@@ -1,0 +1,230 @@
+# Native x86-64 Linux compiler, runtime, and bootstrap crossing validation.
+# Complements check.yaml without modifying the Bosun prose merge gate and
+# installs no OS packages: mise supplies Conan and Task, and the pinned
+# upstream LLVM 21.1.8 tarball supplies Clang against the runner's glibc.
+name: linux-validation
+
+on:
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  linux-x86_64:
+    name: linux-x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install mise tools
+        uses: jdx/mise-action@v2
+        with:
+          install: true
+
+      - name: Export mise build environment
+        run: mise env --dotenv >> "$GITHUB_ENV"
+
+      - name: Cache pinned LLVM 21.1.8 toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/dao-llvm-21.1.8
+          key: llvm-21.1.8-linux-x64-b3b7f2801d15
+
+      - name: Provision pinned Clang 21.1.8 tarball
+        run: |
+          set -euo pipefail
+          llvm_dir="$HOME/.cache/dao-llvm-21.1.8"
+          if [ ! -x "$llvm_dir/bin/clang" ]; then
+            rm -rf "$llvm_dir"
+            mkdir -p "$llvm_dir"
+            archive="$RUNNER_TEMP/LLVM-21.1.8-Linux-X64.tar.xz"
+            curl -fsSL --retry 3 \
+              -o "$archive" \
+              "https://github.com/llvm/llvm-project/releases/download/llvmorg-21.1.8/LLVM-21.1.8-Linux-X64.tar.xz"
+            echo "b3b7f2801d15d50736acea3c73982994d025b01c2f035b91ae3b49d1b575732b  $archive" | sha256sum -c -
+            tar -xJf "$archive" -C "$llvm_dir" --strip-components=1
+            rm -f "$archive"
+          fi
+          echo "$llvm_dir/bin" >> "$GITHUB_PATH"
+
+      - name: Verify native x86-64 Linux, glibc, Clang 21, and CMake
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = "Linux"
+          test "$(uname -m)" = "x86_64"
+          glibc_ver="$(getconf GNU_LIBC_VERSION)"
+          echo "Host libc: $glibc_ver"
+          case "$glibc_ver" in
+            glibc\ *) ;;
+            *) echo "expected glibc runtime, got: $glibc_ver" >&2; exit 1 ;;
+          esac
+          clang_ver="$(clang --version | head -1)"
+          echo "Compiler: $clang_ver"
+          case "$clang_ver" in
+            *"clang version 21."*) ;;
+            *) echo "expected Clang 21, got: $clang_ver" >&2; exit 1 ;;
+          esac
+          if ! command -v cmake >/dev/null 2>&1; then
+            mise use -g cmake@3.31.11
+            echo "$HOME/.local/share/mise/shims" >> "$GITHUB_PATH"
+          fi
+          cmake --version | head -1
+          conan --version
+          task --version
+
+      - name: Cache Conan packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.conan2
+          key: conan-linux-x64-${{ hashFiles('conanfile.py', 'profiles/clang-21-debug', 'profiles/clang-21-debug.lock') }}
+          restore-keys: |
+            conan-linux-x64-
+
+      - name: Install Conan dependencies
+        run: |
+          set -euo pipefail
+          conan profile detect --force
+          conan install . \
+            -pr profiles/clang-21-debug \
+            -pr:b profiles/clang-21-debug \
+            --lockfile=profiles/clang-21-debug.lock \
+            --build=missing \
+            -of build/debug
+
+      - name: Configure and build C++ seed compiler and runtime
+        run: |
+          set -euo pipefail
+          cmake --preset debug
+          cmake --build build/debug -- -j"${DAO_BUILD_JOBS:-4}"
+
+      - name: Verify procfs-free ELF constructor argv capture
+        run: |
+          set -euo pipefail
+          io_obj="build/debug/runtime/core/CMakeFiles/dao_runtime.dir/io.c.o"
+          test -f "$io_obj"
+          readelf -S "$io_obj" | grep -q '\.init_array'
+          if strings "$io_obj" | grep -q '/proc/'; then
+            echo "runtime io.c.o unexpectedly references /proc/" >&2
+            exit 1
+          fi
+          ./build/debug/runtime/core/io_test --flag alpha "two words"
+
+      - name: Run CTest suite
+        run: ctest --test-dir build/debug --output-on-failure
+
+      - name: Run host-compiled bootstrap suites and IR validation
+        run: |
+          set -euo pipefail
+          task bootstrap-assemble
+          task bootstrap-test
+
+      - name: Verify resource-limit validation and run cold Stage-2/Stage-3 crossing
+        run: |
+          set -euo pipefail
+          for bad_stack in 0 000 unlimited -1; do
+            if STAGE_STACK_KB="$bad_stack" bash bootstrap/stage2.sh build/debug >/dev/null 2>&1; then
+              echo "accepted invalid STAGE_STACK_KB=$bad_stack" >&2
+              exit 1
+            fi
+          done
+          for bad_mem in 0 0000 unlimited -1; do
+            if STAGE_MEMORY_KB="$bad_mem" bash bootstrap/stage2.sh build/debug >/dev/null 2>&1; then
+              echo "accepted invalid STAGE_MEMORY_KB=$bad_mem" >&2
+              exit 1
+            fi
+          done
+
+          mkdir -p "$RUNNER_TEMP/dao_crossing"
+          STAGE2_RUN_DIR="$RUNNER_TEMP/dao_crossing/cold" \
+            STAGE_STACK_KB=01048576 \
+            STAGE_MEMORY_KB=08388608 \
+            bash bootstrap/stage2.sh build/debug
+
+          jq -e '
+            .ok == true and
+            .host.os == "Linux" and
+            .host.arch == "x86_64" and
+            .crossing.fixed_point == true and
+            .crossing.stage3_smoke_ok == true and
+            .crossing.stage3_negative_checks_ok == true and
+            .limits.stack_mode == "requested" and
+            .limits.requested_stack_kb == 1048576 and
+            .limits.applied_stack_kb == 1048576 and
+            .limits.vmem_mode == "enforced" and
+            .limits.requested_vmem_kb == 8388608 and
+            .limits.applied_vmem_kb == 8388608 and
+            .validate_ir.ok == true and
+            .validate_ir.failures == 0
+          ' "$RUNNER_TEMP/dao_crossing/cold/result.json" > /dev/null
+
+      - name: Verify concurrent isolated crossings and run-directory lock
+        run: |
+          set -euo pipefail
+          stage1_bin="$RUNNER_TEMP/dao_crossing/cold/gen/driver/driver.gen"
+          STAGE1="$stage1_bin" STAGE2_RUN_DIR="$RUNNER_TEMP/dao_crossing/concurrent_a" \
+            bash bootstrap/stage2.sh build/debug > "$RUNNER_TEMP/dao_crossing/concurrent_a.stdout" 2>&1 &
+          pid_a=$!
+          STAGE1="$stage1_bin" STAGE2_RUN_DIR="$RUNNER_TEMP/dao_crossing/concurrent_b" \
+            bash bootstrap/stage2.sh build/debug > "$RUNNER_TEMP/dao_crossing/concurrent_b.stdout" 2>&1 &
+          pid_b=$!
+          wait "$pid_a"
+          wait "$pid_b"
+
+          cmp -s "$RUNNER_TEMP/dao_crossing/cold/stage2.ll" "$RUNNER_TEMP/dao_crossing/concurrent_a/stage2.ll"
+          cmp -s "$RUNNER_TEMP/dao_crossing/concurrent_a/stage2.ll" "$RUNNER_TEMP/dao_crossing/concurrent_b/stage2.ll"
+          jq -e '.ok == true and .crossing.fixed_point == true and .limits.vmem_mode == "enforced"' \
+            "$RUNNER_TEMP/dao_crossing/concurrent_a/result.json" > /dev/null
+          jq -e '.ok == true and .crossing.fixed_point == true and .limits.vmem_mode == "enforced"' \
+            "$RUNNER_TEMP/dao_crossing/concurrent_b/result.json" > /dev/null
+
+          mkdir -p "$RUNNER_TEMP/dao_crossing/locked/.stage2.lock"
+          if STAGE2_RUN_DIR="$RUNNER_TEMP/dao_crossing/locked" bash bootstrap/stage2.sh build/debug >/dev/null 2>&1; then
+            echo "accepted pre-locked STAGE2_RUN_DIR" >&2
+            exit 1
+          fi
+
+      - name: Collect crossing evidence and diagnostic logs
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/dao_evidence"
+          for run_name in cold concurrent_a concurrent_b; do
+            src="$RUNNER_TEMP/dao_crossing/$run_name"
+            if [ -d "$src" ]; then
+              dst="$RUNNER_TEMP/dao_evidence/$run_name"
+              mkdir -p "$dst"
+              for f in "$src/result.json" "$src/source_closure.sha256" "$src"/*.log "$src"/*.clang "$src"/*.run; do
+                [ -f "$f" ] && cp "$f" "$dst/"
+              done
+              if [ -d "$src/smoke" ]; then
+                mkdir -p "$dst/smoke"
+                for f in "$src/smoke"/*.log "$src/smoke"/*.clang; do
+                  [ -f "$f" ] && cp "$f" "$dst/smoke/"
+                done
+              fi
+            fi
+          done
+          for out_log in "$RUNNER_TEMP/dao_crossing"/concurrent_*.stdout; do
+            [ -f "$out_log" ] && cp "$out_log" "$RUNNER_TEMP/dao_evidence/"
+          done
+
+      - name: Upload crossing evidence artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64-crossing-evidence
+          path: ${{ runner.temp }}/dao_evidence
+          if-no-files-found: warn
