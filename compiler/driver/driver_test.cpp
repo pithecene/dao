@@ -117,20 +117,27 @@ struct Output {
   }
 };
 
-auto run_daoc(const Scratch& scratch, const std::vector<std::string>& args) -> Output {
+auto run_daoc_exe(const std::filesystem::path& exe,
+                  const Scratch& scratch,
+                  const std::vector<std::string>& args) -> Output {
+  auto exe_str = exe.string();
   auto out_path = (scratch.dir / "stdout.txt").string();
   auto err_path = (scratch.dir / "stderr.txt").string();
   std::vector<llvm::StringRef> argv;
   argv.reserve(args.size() + 1);
-  argv.emplace_back(DAO_DAOC);
+  argv.emplace_back(exe_str);
   for (const auto& arg : args) {
     argv.emplace_back(arg);
   }
   std::optional<llvm::StringRef> to_out = llvm::StringRef(out_path);
   std::optional<llvm::StringRef> to_err = llvm::StringRef(err_path);
   int status =
-      llvm::sys::ExecuteAndWait(DAO_DAOC, argv, std::nullopt, {std::nullopt, to_out, to_err});
+      llvm::sys::ExecuteAndWait(exe_str, argv, std::nullopt, {std::nullopt, to_out, to_err});
   return {.exit_code = status, .out = dao::read_file(out_path), .err = dao::read_file(err_path)};
+}
+
+auto run_daoc(const Scratch& scratch, const std::vector<std::string>& args) -> Output {
+  return run_daoc_exe(DAO_DAOC, scratch, args);
 }
 
 /// Compile a C snippet with the same `cc` the driver links through, so
@@ -758,6 +765,49 @@ suite<"driver_cli"> driver_cli_suite = [] {
     auto dir_str = scratch.dir.string();
     std::vector<llvm::StringRef> run_argv = {exe, sample_str, missing_str, dir_str};
     expect(llvm::sys::ExecuteAndWait(exe, run_argv) == 0);
+  };
+
+  "installed layout resolves packaged stdlib and runtime outside build tree"_test = [] {
+    const Scratch scratch("installed-layout");
+    auto pkg = scratch.dir / "pkg";
+    auto pkg_daoc = pkg / DAO_INSTALL_BINDIR / std::filesystem::path(DAO_DAOC).filename();
+    auto pkg_runtime = pkg / DAO_INSTALL_LIBDIR / std::filesystem::path(DAO_RUNTIME_LIB).filename();
+    auto pkg_stdlib = pkg / DAO_INSTALL_DATADIR / "dao" / "stdlib";
+
+    std::filesystem::create_directories(pkg_daoc.parent_path());
+    std::filesystem::create_directories(pkg_runtime.parent_path());
+    std::filesystem::create_directories(pkg_stdlib);
+    std::filesystem::copy_file(
+        DAO_DAOC, pkg_daoc, std::filesystem::copy_options::overwrite_existing);
+    std::filesystem::copy_file(
+        DAO_RUNTIME_LIB, pkg_runtime, std::filesystem::copy_options::overwrite_existing);
+    std::filesystem::copy(std::filesystem::path(DAO_SOURCE_DIR) / "stdlib",
+                          pkg_stdlib,
+                          std::filesystem::copy_options::recursive |
+                              std::filesystem::copy_options::overwrite_existing);
+
+    // Add a prelude symbol present only in the staged prefix so compiling
+    // without `--stdlib-root` proves the packaged stdlib was selected.
+    write(pkg_stdlib / "core" / "installed_probe.dao",
+          "module core::installed_probe\n\nfn installed_sentinel(): i32 -> 77\n");
+
+    auto app = scratch.file("app.dao",
+                            "module app::main\n\n"
+                            "fn main(): i32\n"
+                            "  print(\"packaged\")\n"
+                            "  return installed_sentinel() - 77\n");
+
+    auto built = run_daoc_exe(pkg_daoc, scratch, {"build", app.string()});
+    expect(built.exit_code == 0) << built.err;
+    expect(run_and_capture(scratch.output_for(app), scratch.dir / "app_out.txt") == "packaged\n");
+
+    // Corrupting the staged runtime archive must fail the link rather than
+    // silently linking against the build-tree `DAO_RUNTIME_LIB`.
+    write(pkg_runtime, "not a valid static archive\n");
+    auto broken_link = run_daoc_exe(pkg_daoc, scratch, {"build", app.string()});
+    expect(broken_link.exit_code != 0)
+        << "packaged daoc linked the build-tree runtime instead of the staged archive";
+    expect(broken_link.err_says("linking failed")) << broken_link.err;
   };
 };
 

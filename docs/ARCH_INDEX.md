@@ -10,6 +10,8 @@ Normative behavior lives in `CLAUDE.md` and `docs/contracts/`.
 | `CLAUDE.md` | Repo constitution and structural invariants |
 | `AGENTS.md` | Contributor and agent guardrails |
 | `README.md` | Project overview |
+| `LICENSE` | `Apache-2.0 WITH LLVM-exception` license text |
+| `THIRD_PARTY_NOTICES.md` | Separate attribution notices for third-party dependencies |
 | `CHANGELOG.md` | Observable behaviour changes, newest first |
 | `.bonsai.yaml` | Repo-local Bonsai routing hints |
 | `.grove.yaml` | Grove project metadata and consolidation hints |
@@ -238,11 +240,3 @@ Developer-surface tooling built on compiler analysis.
 - `lsp/` — reserved LSP root (not yet implemented; the analysis APIs it will wrap live in `compiler/analysis/`)
 - `formatter/` — reserved canonical formatter root
 - `diagnostics/` — presentation and diagnostics tooling experiments
-
-## `ai/`
-
-Bonsai governance assets.
-
-- `skills/` — repo-local skills
-- `baselines/` — accepted baseline findings / JSON snapshots
-- `out/` — generated Bonsai outputs (git-ignored)
