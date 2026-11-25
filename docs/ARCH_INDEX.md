@@ -66,6 +66,7 @@ Compiler implementation roots only.
 Shared low-level utilities used across compiler subsystems.
 
 - `arena.h` — bump allocator with destructor tracking for compiler-owned object graphs
+- `sha256.h` — dependency-free FIPS 180-4 SHA-256 hex digest helper (`sha256_test`)
 
 ### `compiler/frontend/`
 
@@ -93,6 +94,7 @@ Compiler-internal target-agnostic representations.
 Target-specific lowering.
 
 - `llvm/` — initial backend target: MIR→LLVM IR lowering, type lowering, runtime hook declarations, function/block/instruction emission, x86-64 C ABI struct coercion, textual IR output, native object emission
+- `msl/` — narrow verified MIR→Metal Shading Language (`metal-msl-2.4`) emitter (`MslBackend`, `dao_msl_emit`, `msl_backend_test`) lowering pure scalar elementwise `i32` Dao functions with checked arithmetic traps and structured provenance manifests
 
 ### `compiler/driver/`
 
