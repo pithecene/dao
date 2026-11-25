@@ -1,4 +1,4 @@
-import { programRequest } from "./document";
+import { isActivePrelude, programRequest } from "./document";
 import { EditorView } from "@codemirror/view";
 import { api } from "./api";
 import { getSource } from "./editor";
@@ -9,38 +9,46 @@ let hoverTooltip: HTMLElement | null = null;
 let hoverSeq = 0;
 let hoverTimer: ReturnType<typeof setTimeout> | null = null;
 
-const HOVER_DEBOUNCE_MS = 100;
+const HOVER_DEBOUNCE_MS = 110;
 
 export function initHover(view: EditorView): void {
   const container = view.dom;
 
   container.addEventListener("mousemove", (e: MouseEvent) => {
     if (hoverTimer) clearTimeout(hoverTimer);
-    hoverTimer = setTimeout(() => doHover(view, e), HOVER_DEBOUNCE_MS);
+    hoverTimer = setTimeout(() => void doHover(view, e), HOVER_DEBOUNCE_MS);
   });
 
-  container.addEventListener("mouseleave", hideTooltip);
+  container.addEventListener("mouseleave", hideHoverTooltip);
 }
 
 async function doHover(view: EditorView, e: MouseEvent): Promise<void> {
+  if (isActivePrelude()) {
+    hideHoverTooltip();
+    return;
+  }
+
   const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
   if (pos === null) {
-    hideTooltip();
+    hideHoverTooltip();
     return;
   }
 
   const seq = ++hoverSeq;
 
   try {
-    const data = await api("hover", { ...programRequest(getSource()), offset: pos });
-    if (seq !== hoverSeq) return; // a newer mouse position superseded this
+    const data = await api("hover", {
+      ...programRequest(getSource()),
+      offset: pos,
+    });
+    if (seq !== hoverSeq) return;
     if (!data) {
-      hideTooltip();
+      hideHoverTooltip();
       return;
     }
     showTooltip(e.clientX, e.clientY, data);
   } catch {
-    if (seq === hoverSeq) hideTooltip();
+    if (seq === hoverSeq) hideHoverTooltip();
   }
 }
 
@@ -57,12 +65,13 @@ function showTooltip(x: number, y: number, data: Hover): void {
   }
 
   hoverTooltip.innerHTML = content;
-  hoverTooltip.style.left = `${x + 12}px`;
-  hoverTooltip.style.top = `${y + 12}px`;
+  const maxLeft = Math.max(8, window.innerWidth - 430);
+  hoverTooltip.style.left = `${Math.min(x + 12, maxLeft)}px`;
+  hoverTooltip.style.top = `${y + 14}px`;
   hoverTooltip.style.display = "block";
 }
 
-function hideTooltip(): void {
+export function hideHoverTooltip(): void {
   if (hoverTooltip) {
     hoverTooltip.style.display = "none";
   }

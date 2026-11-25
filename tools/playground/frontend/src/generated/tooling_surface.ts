@@ -235,6 +235,10 @@ export interface ExampleName {
   name: string;
 }
 
+export interface PreludeRequest {
+  path: string;
+}
+
 export interface AnalyzeResponse {
   file: string;
   module: string;
@@ -257,6 +261,7 @@ export interface RunResponse {
 
 export interface ExampleEntry {
   name: string;
+  isMultifile: boolean;
 }
 
 export interface ExamplesList {
@@ -265,7 +270,24 @@ export interface ExamplesList {
 
 export interface ExampleSource {
   name: string;
+  files: SourceInput[];
+  document: string;
   source: string;
+}
+
+export interface PreludeResponse {
+  file: string;
+  module: string;
+  source: string;
+  semanticTokens: SemanticToken[];
+  symbols: DocumentSymbol[];
+}
+
+export interface VersionResponse {
+  commit: string;
+  llvmVersion: string;
+  targetTriple: string;
+  preludeFiles: string[];
 }
 
 export interface ErrorReply {
@@ -282,6 +304,8 @@ export const ROUTES = {
   completions: { method: "POST", path: "/api/completions" },
   examples: { method: "GET", path: "/api/examples" },
   example: { method: "GET", path: "/api/examples/:name" },
+  prelude: { method: "POST", path: "/api/prelude" },
+  version: { method: "GET", path: "/api/version" },
 } as const;
 
 export type RouteName = keyof typeof ROUTES;
@@ -297,4 +321,6 @@ export interface RouteTypes {
   completions: { request: PositionRequest; response: Completion[] };
   examples: { request: void; response: ExamplesList };
   example: { request: ExampleName; response: ExampleSource };
+  prelude: { request: PreludeRequest; response: PreludeResponse };
+  version: { request: void; response: VersionResponse };
 }

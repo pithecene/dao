@@ -1,60 +1,105 @@
-import { StateEffect, StateField } from "@codemirror/state";
-import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
+import type { EditorView } from "@codemirror/view";
 import { api } from "./api";
-import { inDocument, programRequest } from "./document";
+import { inDocument, isActivePrelude, programRequest } from "./document";
+import type { Reference } from "./generated/tooling_surface";
 import { getSource } from "./editor";
+import { setReferenceMarks } from "./highlighting";
 import { showNotice } from "./notice";
+import { navigateToPosition } from "./workspace_ui";
 
-// Alt+click a symbol to highlight every reference to it in the buffer.
-// References in other files of the program are counted in a notice.
-// The highlights clear on the next edit.
-
-const setReferences = StateEffect.define<DecorationSet>();
-
-const useMark = Decoration.mark({ class: "dao-reference" });
-const definitionMark = Decoration.mark({ class: "dao-reference-def" });
-
-export const referenceHighlights = StateField.define<DecorationSet>({
-  create: () => Decoration.none,
-  update(value, tr) {
-    if (tr.docChanged) return Decoration.none;
-    for (const effect of tr.effects) {
-      if (effect.is(setReferences)) return effect.value;
-    }
-    return value;
-  },
-  provide: (field) => EditorView.decorations.from(field),
-});
+let boundView: EditorView | null = null;
 
 export function initReferences(view: EditorView): void {
-  view.dom.addEventListener("click", async (e: MouseEvent) => {
+  boundView = view;
+
+  document
+    .getElementById("close-references-btn")!
+    .addEventListener("click", () => clearReferences());
+
+  view.dom.addEventListener("click", (e: MouseEvent) => {
     if (!e.altKey) return;
     e.preventDefault();
 
     const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
     if (pos === null) return;
-
-    try {
-      const refs = await api("references", { ...programRequest(getSource()), offset: pos });
-      const docLength = view.state.doc.length;
-      const here = refs.filter(
-        (r) => inDocument(r.file) && r.length > 0 && r.offset + r.length <= docLength,
-      );
-      const elsewhere = refs.filter((r) => !inDocument(r.file));
-
-      const marks = here.map((r) =>
-        (r.isDefinition ? definitionMark : useMark).range(r.offset, r.offset + r.length),
-      );
-      view.dispatch({ effects: setReferences.of(Decoration.set(marks, true)) });
-
-      if (refs.length === 0) {
-        showNotice("no references");
-      } else if (elsewhere.length > 0) {
-        const files = [...new Set(elsewhere.map((r) => r.file))].join(", ");
-        showNotice(`${here.length} here, ${elsewhere.length} in ${files}`);
-      }
-    } catch (err) {
-      console.error("references failed:", err);
-    }
+    void findReferencesAtOffset(pos);
   });
+}
+
+export async function findReferencesAtCursor(): Promise<void> {
+  if (!boundView) return;
+  await findReferencesAtOffset(boundView.state.selection.main.head);
+}
+
+export function clearReferences(): void {
+  const drawer = document.getElementById("references-drawer");
+  if (drawer) drawer.hidden = true;
+  if (boundView) {
+    setReferenceMarks(boundView, []);
+  }
+}
+
+async function findReferencesAtOffset(offset: number): Promise<void> {
+  if (!boundView || isActivePrelude()) return;
+
+  try {
+    const refs = await api("references", {
+      ...programRequest(getSource()),
+      offset,
+    });
+    const docLength = boundView.state.doc.length;
+    const here = refs
+      .filter(
+        (r) =>
+          inDocument(r.file) && r.length > 0 && r.offset + r.length <= docLength,
+      )
+      .map((r) => ({
+        from: r.offset,
+        to: r.offset + r.length,
+        isDefinition: r.isDefinition,
+      }));
+
+    setReferenceMarks(boundView, here);
+
+    if (refs.length === 0) {
+      clearReferences();
+      showNotice("No references found");
+      return;
+    }
+
+    renderReferencesDrawer(refs);
+  } catch (err) {
+    console.error("references failed:", err);
+  }
+}
+
+function renderReferencesDrawer(refs: Reference[]): void {
+  const drawer = document.getElementById("references-drawer")!;
+  const title = document.getElementById("references-title")!;
+  const list = document.getElementById("references-list")!;
+
+  const fileCount = new Set(refs.map((r) => r.file)).size;
+  title.textContent = `References (${refs.length} across ${fileCount} ${fileCount === 1 ? "file" : "files"})`;
+
+  const rows = refs.map((ref) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "reference-row";
+
+    const badge = document.createElement("span");
+    badge.className = `ref-badge ${ref.isDefinition ? "def" : "use"}`;
+    badge.textContent = ref.isDefinition ? "def" : "use";
+
+    const loc = document.createElement("span");
+    loc.textContent = `${ref.file}:${ref.line}:${ref.col}`;
+
+    row.append(badge, loc);
+    row.addEventListener("click", () => {
+      void navigateToPosition(ref.file, ref.offset, ref.length);
+    });
+    return row;
+  });
+
+  list.replaceChildren(...rows);
+  drawer.hidden = false;
 }

@@ -1,36 +1,38 @@
 # tools/playground
 
-First-class web playground for Dao.
+Dao product website and multi-file web playground.
 
-This surface is not a disposable demo. It is part of the compiler
-hardening loop and should consume compiler-produced diagnostics,
-semantic tokens, hover payloads, and document symbol information as those
-services come online.
-
-Long-term north star: lightweight web-based IDE.
+This surface consumes compiler-owned semantic tokens, diagnostics, hover, go-to-definition, references, completions, document symbols, IR dumps, and native execution through `service_surface.h` and `tooling_surface.h` (`CONTRACT_LANGUAGE_TOOLING.md`).
 
 ## Quick start
 
-```
-# from repo root, after cmake build:
-build/debug/tools/playground/compiler_service/dao_playground
-
+```sh
+task playground
 # open http://localhost:8090
 ```
 
 Options:
-- `--port N` — listen port (default 8090)
+- `--port N` — listen port (default `8090`)
 - `--root DIR` — repository root (default: compile-time `DAO_SOURCE_DIR`)
+
+For frontend HMR against a live backend:
+
+```sh
+task playground-dev
+```
 
 ## Architecture
 
-- `compiler_service/` — C++ HTTP server (cpp-httplib) wrapping the
-  compiler frontend (lexer, parser, AST printer)
-- `frontend/` — vanilla HTML/CSS/JS with CodeMirror 6 (loaded from CDN)
+- `compiler_service/` — C++ HTTP service (`cpp-httplib`) exposing program-shaped analysis, execution, example discovery, stdlib prelude inspection, and toolchain metadata
+- `frontend/` — TypeScript + Vite bundle with Pithecene design tokens (`src/tokens.css`, dark and light themes), CodeMirror 6 editor, integrated site views (`#overview`, `#getting-started`, `#reference`, `#examples`, `#downloads`, `#playground`), resizable multi-file workspace (`src/document.ts`, `src/workspace_ui.ts`), `localStorage` draft persistence, and compiler-version-stamped snapshots
 
-## API
+## HTTP Routes
 
-- `POST /api/analyze` — accepts `{"source": "..."}`, returns tokens,
-  AST text, and diagnostics
-- `GET /api/examples` — lists `examples/*.dao` files
-- `GET /api/examples/:name` — returns example source
+Declared in `compiler_service/service_surface.h` and generated into `frontend/src/generated/tooling_surface.ts`:
+
+- `POST /api/analyze` — tokens, semantic tokens, AST/HIR/MIR/LLVM IR dumps, and diagnostics for a multi-file `AnalyzeRequest`
+- `POST /api/run` — compile, link against `libdao_runtime.a`, and execute a multi-file `ProgramRequest`
+- `POST /api/hover`, `POST /api/goto-def`, `POST /api/references`, `POST /api/completions`, `POST /api/document-symbols` — cross-file language queries
+- `GET /api/examples` and `GET /api/examples/:name` — single-file and multi-file example programs
+- `POST /api/prelude` — read-only stdlib prelude file source, semantic tokens, and symbol outline
+- `GET /api/version` — compiler commit, LLVM version, target triple, and prelude file list

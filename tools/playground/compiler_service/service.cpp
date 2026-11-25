@@ -4,6 +4,7 @@
 #include "completions.h"
 #include "examples.h"
 #include "navigation.h"
+#include "prelude.h"
 #include "run.h"
 
 #include "service_surface.h"
@@ -35,6 +36,8 @@ constexpr std::array kBindings{
     RouteBinding{"completions", completions},
     RouteBinding{"examples", examples_list},
     RouteBinding{"example", example_source},
+    RouteBinding{"prelude", prelude_source},
+    RouteBinding{"version", service_version},
 };
 
 /// Why `value` does not satisfy `type` (a scalar, a shape, or `Shape[]`),

@@ -1,14 +1,18 @@
 import type { EditorView } from "@codemirror/view";
 import type { DocumentSymbol } from "./generated/tooling_surface";
+import { jumpInEditor } from "./editor";
 
-/** Render the document symbol tree; clicking an entry jumps to it. */
-export function renderOutline(symbols: DocumentSymbol[], view: EditorView): void {
+/** Render the document symbol tree; clicking an entry jumps to its span. */
+export function renderOutline(
+  symbols: DocumentSymbol[],
+  _view: EditorView,
+): void {
   const container = document.getElementById("outline-output")!;
   if (symbols.length === 0) {
     container.replaceChildren(emptyNotice());
     return;
   }
-  container.replaceChildren(symbolList(symbols, view));
+  container.replaceChildren(symbolList(symbols));
 }
 
 function emptyNotice(): HTMLElement {
@@ -18,7 +22,7 @@ function emptyNotice(): HTMLElement {
   return el;
 }
 
-function symbolList(symbols: DocumentSymbol[], view: EditorView): HTMLUListElement {
+function symbolList(symbols: DocumentSymbol[]): HTMLUListElement {
   const list = document.createElement("ul");
   list.className = "outline-list";
   for (const symbol of symbols) {
@@ -26,11 +30,11 @@ function symbolList(symbols: DocumentSymbol[], view: EditorView): HTMLUListEleme
     item.className = "outline-item";
 
     const row = document.createElement("button");
+    row.type = "button";
     row.className = "outline-row";
     row.title = `${symbol.kind} ${symbol.name}`;
     row.addEventListener("click", () => {
-      view.dispatch({ selection: { anchor: symbol.offset }, scrollIntoView: true });
-      view.focus();
+      jumpInEditor(symbol.offset, symbol.length);
     });
 
     const kind = document.createElement("span");
@@ -43,7 +47,7 @@ function symbolList(symbols: DocumentSymbol[], view: EditorView): HTMLUListEleme
     item.append(row);
 
     if (symbol.children.length > 0) {
-      item.append(symbolList(symbol.children, view));
+      item.append(symbolList(symbol.children));
     }
     list.append(item);
   }
