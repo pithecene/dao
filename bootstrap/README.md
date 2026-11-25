@@ -7,12 +7,12 @@ a probe or experiment directory.
 
 ## Shared Substrate
 
-The file `shared/base.dao` holds the module graph and cross-pass program
-types for subsystems that still assemble via `bash bootstrap/assemble.sh`.
+The file `shared/base.dao` holds cross-pass type-universe and program-lookup
+tables for subsystems that still assemble via `bash bootstrap/assemble.sh`.
 The modules `ascii.dao` (`module bootstrap::ascii`), `lexer/impl.dao`
-(`module bootstrap::lexer`), and `parser/impl.dao`
-(`module bootstrap::parser`) compile directly as real modules without
-assembly. See `shared/README.md`.
+(`module bootstrap::lexer`), `parser/impl.dao` (`module bootstrap::parser`),
+and `graph/impl.dao` (`module bootstrap::graph`) compile directly as real
+modules without assembly. See `shared/README.md`.
 
 ## Subsystems
 
@@ -117,6 +117,21 @@ daoc build --source bootstrap/parser/tests.dao --source bootstrap/parser/impl.da
 
 Tests include golden parse tree assertions, error recovery tests,
 and a self-parse smoke test (lexes and parses a real Dao source file).
+
+### `graph/`
+
+Multi-file module graph builder (`module bootstrap::graph` in `graph/impl.dao`,
+importing `bootstrap::lexer` and `bootstrap::parser`) providing deterministic
+file ordering, import-edge extraction, topological sorting, and cycle-path
+diagnostics.
+
+**Status**: real multi-file module compiled directly from authored sources without `assemble.sh`.
+
+**Running tests**:
+
+```sh
+daoc build --source bootstrap/graph/tests.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/graph/tests
+```
 
 ### `resolver/`
 

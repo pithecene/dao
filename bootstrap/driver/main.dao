@@ -13,7 +13,7 @@ fn main(): i32
       eprint("driver: " + err)
       return 2
 
-  let m: Manifest = Manifest("", Vector<SourceInput>::new())
+  let m: Manifest = Manifest("", Vector<graph::SourceInput>::new())
   match load_manifest(manifest_path):
     Result::Ok(loaded):
       m = loaded
@@ -23,11 +23,11 @@ fn main(): i32
 
   let lowered: ProgramLlvm = lower_program_to_llvm(m.inputs)
   let result: LlvmTextResult = lowered.result
-  let located: Vector<FileDiagnostic> = lowered.program.diags
+  let located: Vector<graph::FileDiagnostic> = lowered.program.diags
   let di: i64 = to_i64(0)
   while di < result.diags.length():
     if di < located.length():
-      eprint("driver: " + located_message(located.get(di), lowered.program.graph.files))
+      eprint("driver: " + located_message(located.get(di), lowered.program.module_graph.files))
     else:
       eprint("driver: " + result.diags.get(di).message)
     di = di + to_i64(1)

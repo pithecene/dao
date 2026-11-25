@@ -34,8 +34,8 @@ fn mir_count_kind(r: MirResult, kind: string): i64
   return n
 
 // A program of `inputs` resolved, type-checked and lowered to MIR.
-fn mir_of_program(inputs: Vector<SourceInput>): ProgramMir
-  let p: Program = program_from_graph(build_program(inputs))
+fn mir_of_program(inputs: Vector<graph::SourceInput>): ProgramMir
+  let p: Program = program_from_graph(graph::build_program(inputs))
   p = program_run_resolve(p)
   p = program_run_typecheck(p)
   return program_run_mir(p)
@@ -67,8 +67,8 @@ fn mir_call_substs(pm: ProgramMir): string
   return out
 
 // A program of `inputs` checked, lowered to MIR and monomorphized.
-fn mono_of_program(inputs: Vector<SourceInput>): ProgramConcrete
-  let p: Program = program_from_graph(build_program(inputs))
+fn mono_of_program(inputs: Vector<graph::SourceInput>): ProgramConcrete
+  let p: Program = program_from_graph(graph::build_program(inputs))
   p = program_run_resolve(p)
   let pt: ProgramTyped = program_check(p)
   return program_monomorphize(pt, program_run_mir(pt.program))
@@ -408,9 +408,9 @@ fn main(): i32
   // Test 19: a program lowers to one MirModule per module, in program
   // order; the call in `app::main` names the function `core::util`
   // declares (a prelude module, so it is called unqualified).
-  let two: Vector<SourceInput> = Vector<SourceInput>::new()
-  two = two.push(SourceInput("core_util.dao", "module core::util\n\nfn add(a: i32, b: i32): i32 -> a + b\n", true))
-  two = two.push(SourceInput("main.dao", "module app::main\n\nfn main(): i32\n  let x: i32 = 7\n  return add(40, 2)\n", false))
+  let two: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  two = two.push(graph::SourceInput("core_util.dao", "module core::util\n\nfn add(a: i32, b: i32): i32 -> a + b\n", true))
+  two = two.push(graph::SourceInput("main.dao", "module app::main\n\nfn main(): i32\n  let x: i32 = 7\n  return add(40, 2)\n", false))
   let pm19: ProgramMir = mir_of_program(two)
   let r19: MirResult = pm19.mir
   let mods19: Vector<i64> = mir_modules(r19)
@@ -463,11 +463,11 @@ fn main(): i32
     print("FAIL generic_functions_are_templates: expected 2 templates and 1 function, got " + i64_to_string(t21) + " and " + i64_to_string(f21) + ", " + i64_to_string(r21.diags.length()) + " diagnostics")
 
   // Test 22: a MIR diagnostic is on the file of the module it came from.
-  let two22: Vector<SourceInput> = Vector<SourceInput>::new()
-  two22 = two22.push(SourceInput("core_util.dao", "module core::util\n\nfn add(a: i32, b: i32): i32 -> a + b\n", true))
-  two22 = two22.push(SourceInput("main.dao", "module app::main\n\nclass P:\n  x: i32\n\nfn mk(): P -> P(1)\n\nfn main(): i32\n  mk().x = 2\n  return add(1, 2)\n", false))
+  let two22: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  two22 = two22.push(graph::SourceInput("core_util.dao", "module core::util\n\nfn add(a: i32, b: i32): i32 -> a + b\n", true))
+  two22 = two22.push(graph::SourceInput("main.dao", "module app::main\n\nclass P:\n  x: i32\n\nfn mk(): P -> P(1)\n\nfn main(): i32\n  mk().x = 2\n  return add(1, 2)\n", false))
   let pm22: ProgramMir = mir_of_program(two22)
-  let d22: Vector<FileDiagnostic> = pm22.program.diags
+  let d22: Vector<graph::FileDiagnostic> = pm22.program.diags
   // `mk().x = 2` stores to no local: MIR reports the target.  (`and`
   // evaluates both sides, so the diagnostic is read only when present.)
   let on_main22: bool = false
@@ -513,9 +513,9 @@ fn main(): i32
     print("FAIL construction_lowers_to_construct: got payload '" + placed24 + "', " + i64_to_string(mir_count_kind(r24, "MirConstruct")) + " constructs, " + i64_to_string(r24.diags.length()) + " diagnostics")
   // Test 24b: a class named through its module, `lib::P(1)`, constructs
   // too (host: `construct P(%0)`).
-  let in24b: Vector<SourceInput> = Vector<SourceInput>::new()
-  in24b = in24b.push(SourceInput("lib.dao", "module probe::lib\n\nclass P:\n  x: i32\n", false))
-  in24b = in24b.push(SourceInput("main.dao", "module probe::main\n\nimport probe::lib\n\nfn main(): i32\n  let p: lib::P = lib::P(1)\n  return p.x\n", false))
+  let in24b: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  in24b = in24b.push(graph::SourceInput("lib.dao", "module probe::lib\n\nclass P:\n  x: i32\n", false))
+  in24b = in24b.push(graph::SourceInput("main.dao", "module probe::main\n\nimport probe::lib\n\nfn main(): i32\n  let p: lib::P = lib::P(1)\n  return p.x\n", false))
   let r24b: MirResult = mir_of_program(in24b).mir
   if r24b.diags.length() == 0 and mir_count_kind(r24b, "MirConstruct") == 1 and mir_count_kind(r24b, "MirCall") == 0:
     print("PASS qualified_class_constructs")
@@ -567,19 +567,19 @@ fn main(): i32
   // A string declared outside and stored inside is copied out at the
   // exit when its dirty flag is set; a `return` through the block copies
   // the returned value; a `break` out of a loop leaves a mode opened in it.
-  let prelude27: SourceInput = SourceInput("core_builtins.dao", "module core::builtins\n\nfn copy_out<T>(x: T): T -> x\n", true)
-  let in27: Vector<SourceInput> = Vector<SourceInput>::new()
+  let prelude27: graph::SourceInput = graph::SourceInput("core_builtins.dao", "module core::builtins\n\nfn copy_out<T>(x: T): T -> x\n", true)
+  let in27: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   in27 = in27.push(prelude27)
-  in27 = in27.push(SourceInput("main.dao", "module app::main\n\nfn h(): i32\n  let s: string = \"a\"\n  resource memory scratch =>\n    s = \"b\"\n  return 0\n", false))
+  in27 = in27.push(graph::SourceInput("main.dao", "module app::main\n\nfn h(): i32\n  let s: string = \"a\"\n  resource memory scratch =>\n    s = \"b\"\n  return 0\n", false))
   let r27: MirResult = mir_of_program(in27).mir
   if r27.diags.length() == 0 and mir_count_kind(r27, "MirResourceEnter") == 1 and mir_count_kind(r27, "MirResourceExit") == 1 and mir_count_kind(r27, "MirCondBr") == 1 and mir_count_kind(r27, "MirCall") == 1 and mir_count_kind(r27, "MirConstBool") == 2:
     print("PASS resource_block_copies_escaping_binding")
     pass_count = pass_count + 1
   else:
     print("FAIL resource_block_copies_escaping_binding: got " + i64_to_string(mir_count_kind(r27, "MirCall")) + " calls, " + i64_to_string(mir_count_kind(r27, "MirCondBr")) + " branches, " + i64_to_string(r27.diags.length()) + " diagnostics")
-  let in28: Vector<SourceInput> = Vector<SourceInput>::new()
+  let in28: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   in28 = in28.push(prelude27)
-  in28 = in28.push(SourceInput("main.dao", "module app::main\n\nfn g(): string\n  resource memory r =>\n    return \"x\"\n  return \"y\"\n", false))
+  in28 = in28.push(graph::SourceInput("main.dao", "module app::main\n\nfn g(): string\n  resource memory r =>\n    return \"x\"\n  return \"y\"\n", false))
   let r28: MirResult = mir_of_program(in28).mir
   if r28.diags.length() == 0 and mir_count_kind(r28, "MirResourceExit") == 1 and mir_count_kind(r28, "MirCall") == 1 and mir_count_kind(r28, "MirCondBr") == 0:
     print("PASS return_through_resource_copies_value")
@@ -646,9 +646,9 @@ fn main(): i32
   // must not take the first's symbol (its store and reads would then name
   // a local it never declared).
   let same_shape_body: string = "\n\nfn f(): i32\n  let x: i32 = 1\n  x = x + 1\n  return x\n"
-  let module_collision_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  module_collision_inputs = module_collision_inputs.push(SourceInput("a.dao", "module app::a" + same_shape_body, false))
-  module_collision_inputs = module_collision_inputs.push(SourceInput("b.dao", "module app::b" + same_shape_body, false))
+  let module_collision_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  module_collision_inputs = module_collision_inputs.push(graph::SourceInput("a.dao", "module app::a" + same_shape_body, false))
+  module_collision_inputs = module_collision_inputs.push(graph::SourceInput("b.dao", "module app::b" + same_shape_body, false))
   let module_collision_result: MirResult = mir_of_program(module_collision_inputs).mir
   if module_collision_result.diags.length() == 0 and mir_count_kind(module_collision_result, "MirFnRef") == 0:
     print("PASS let_binds_its_module_symbol")
@@ -707,16 +707,16 @@ fn main(): i32
   // decided of the parameters the callee is generic over — its own
   // (`id(1)`: T is i32), and its class's (`b.get()` on a `Box<i32>`:
   // Box's T is i32) — for monomorphization to name the concrete copy.
-  let in38: Vector<SourceInput> = Vector<SourceInput>::new()
-  in38 = in38.push(SourceInput("main.dao", "module app::main\n\nfn id<T>(x: T): T -> x\n\nfn main(): i32 -> id(1)\n", false))
+  let in38: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  in38 = in38.push(graph::SourceInput("main.dao", "module app::main\n\nfn id<T>(x: T): T -> x\n\nfn main(): i32 -> id(1)\n", false))
   let s38: string = mir_call_substs(mir_of_program(in38))
   if s38 == "i32;":
     print("PASS generic_call_carries_substitution")
     pass_count = pass_count + 1
   else:
     print("FAIL generic_call_carries_substitution: got '" + s38 + "'")
-  let in39: Vector<SourceInput> = Vector<SourceInput>::new()
-  in39 = in39.push(SourceInput("main.dao", "module app::main\n\nclass Box<T>:\n  v: T\n\n  fn get(self): T -> self.v\n\nfn main(): i32\n  let b: Box<i32> = Box<i32>(1)\n  return b.get()\n", false))
+  let in39: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  in39 = in39.push(graph::SourceInput("main.dao", "module app::main\n\nclass Box<T>:\n  v: T\n\n  fn get(self): T -> self.v\n\nfn main(): i32\n  let b: Box<i32> = Box<i32>(1)\n  return b.get()\n", false))
   let s39: string = mir_call_substs(mir_of_program(in39))
   if s39 == "i32;":
     print("PASS method_call_carries_class_substitution")
@@ -729,8 +729,8 @@ fn main(): i32
   // arguments, named `name$args`, cloned concrete; a generic function's
   // own generic calls are specialized through its substitution; a call
   // nothing decides is reported.
-  let in40: Vector<SourceInput> = Vector<SourceInput>::new()
-  in40 = in40.push(SourceInput("main.dao", "module app::main\n\nfn id<T>(x: T): T -> x\n\nfn main(): i32\n  let s: string = id(\"a\")\n  return id(1) + id(2)\n", false))
+  let in40: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  in40 = in40.push(graph::SourceInput("main.dao", "module app::main\n\nfn id<T>(x: T): T -> x\n\nfn main(): i32\n  let s: string = id(\"a\")\n  return id(1) + id(2)\n", false))
   let pc40: ProgramConcrete = mono_of_program(in40)
   let names40: string = mono_fn_names(pc40)
   if pc40.mir.diags.length() == 0 and names40 == "main;id$string;id$i32;":
@@ -738,8 +738,8 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL generic_calls_name_specializations: got '" + names40 + "', " + i64_to_string(pc40.mir.diags.length()) + " diagnostics")
-  let in41: Vector<SourceInput> = Vector<SourceInput>::new()
-  in41 = in41.push(SourceInput("main.dao", "module app::main\n\nfn inner<T>(x: T): T -> x\n\nfn outer<U>(y: U): U -> inner(y)\n\nfn main(): i32 -> outer(1)\n", false))
+  let in41: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  in41 = in41.push(graph::SourceInput("main.dao", "module app::main\n\nfn inner<T>(x: T): T -> x\n\nfn outer<U>(y: U): U -> inner(y)\n\nfn main(): i32 -> outer(1)\n", false))
   let pc41: ProgramConcrete = mono_of_program(in41)
   let names41: string = mono_fn_names(pc41)
   if pc41.mir.diags.length() == 0 and names41 == "main;outer$i32;inner$i32;":
@@ -747,8 +747,8 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL nested_generic_calls_specialize_through: got '" + names41 + "', " + i64_to_string(pc41.mir.diags.length()) + " diagnostics")
-  let in42: Vector<SourceInput> = Vector<SourceInput>::new()
-  in42 = in42.push(SourceInput("main.dao", "module app::main\n\nclass Box<T>:\n  v: T\n\n  fn get(self): T -> self.v\n\nfn main(): i32\n  let b: Box<i32> = Box<i32>(1)\n  return b.get()\n", false))
+  let in42: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  in42 = in42.push(graph::SourceInput("main.dao", "module app::main\n\nclass Box<T>:\n  v: T\n\n  fn get(self): T -> self.v\n\nfn main(): i32\n  let b: Box<i32> = Box<i32>(1)\n  return b.get()\n", false))
   let pc42: ProgramConcrete = mono_of_program(in42)
   let names42: string = mono_fn_names(pc42)
   if pc42.mir.diags.length() == 0 and index_of(names42, "get$i32;") >= 0:
@@ -756,8 +756,8 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL generic_class_method_specializes: got '" + names42 + "', " + i64_to_string(pc42.mir.diags.length()) + " diagnostics")
-  let in43: Vector<SourceInput> = Vector<SourceInput>::new()
-  in43 = in43.push(SourceInput("main.dao", "module app::main\n\nfn id<T>(x: T): T -> x\n\nfn main(): i32\n  let s: string = id(\"a\")\n  return 0\n", false))
+  let in43: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  in43 = in43.push(graph::SourceInput("main.dao", "module app::main\n\nfn id<T>(x: T): T -> x\n\nfn main(): i32\n  let s: string = id(\"a\")\n  return 0\n", false))
   let pc43: ProgramConcrete = mono_of_program(in43)
   let concrete43: bool = true
   let di43: i64 = 0
@@ -787,8 +787,8 @@ fn main(): i32
   // Test 44: a call through a bound, in a specialization, names the
   // method its concrete receiver answers with (host: `call$i32` calls
   // `i32.show` with the receiver as its argument).
-  let in44: Vector<SourceInput> = Vector<SourceInput>::new()
-  in44 = in44.push(SourceInput("main.dao", "module app::main\n\nconcept Shows:\n  fn show(self): i32\n\nextend i32 as Shows:\n  fn show(self): i32 -> self\n\nfn call<T: Shows>(x: T): i32 -> x.show()\n\nfn main(): i32 -> call(5) - 5\n", false))
+  let in44: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  in44 = in44.push(graph::SourceInput("main.dao", "module app::main\n\nconcept Shows:\n  fn show(self): i32\n\nextend i32 as Shows:\n  fn show(self): i32 -> self\n\nfn call<T: Shows>(x: T): i32 -> x.show()\n\nfn main(): i32 -> call(5) - 5\n", false))
   let pc44: ProgramConcrete = mono_of_program(in44)
   let access44: i64 = 0
   let ni44: i64 = 0
@@ -811,9 +811,9 @@ fn main(): i32
   // class without a copier is rebuilt field by field, its string field
   // copied and its integer field taken as it is.
   let hooks45: string = "module core::builtins\n\nfn copy_out<T>(x: T): T -> x\n\nextern fn __dao_str_copy_outer(s: string): string\n\nfn copy_out_string(s: string): string -> __dao_str_copy_outer(s)\n"
-  let in45: Vector<SourceInput> = Vector<SourceInput>::new()
-  in45 = in45.push(SourceInput("core_builtins.dao", hooks45, true))
-  in45 = in45.push(SourceInput("main.dao", "module app::main\n\nfn h(): i32\n  let s: string = \"a\"\n  resource memory scratch =>\n    s = \"b\"\n  return 0\n", false))
+  let in45: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  in45 = in45.push(graph::SourceInput("core_builtins.dao", hooks45, true))
+  in45 = in45.push(graph::SourceInput("main.dao", "module app::main\n\nfn h(): i32\n  let s: string = \"a\"\n  resource memory scratch =>\n    s = \"b\"\n  return 0\n", false))
   let pc45: ProgramConcrete = mono_of_program(in45)
   let names45: string = mono_fn_names(pc45)
   if pc45.mir.diags.length() == 0 and index_of(names45, "copy_out$") < 0:
@@ -821,9 +821,9 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL string_copy_out_expands: got '" + names45 + "', " + i64_to_string(pc45.mir.diags.length()) + " diagnostics")
-  let in46: Vector<SourceInput> = Vector<SourceInput>::new()
-  in46 = in46.push(SourceInput("core_builtins.dao", hooks45, true))
-  in46 = in46.push(SourceInput("main.dao", "module app::main\n\nclass P:\n  name: string\n  n: i32\n\nfn h(): i32\n  let p: P = P(\"a\", 1)\n  resource memory scratch =>\n    p = P(\"b\", 2)\n  return p.n\n", false))
+  let in46: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  in46 = in46.push(graph::SourceInput("core_builtins.dao", hooks45, true))
+  in46 = in46.push(graph::SourceInput("main.dao", "module app::main\n\nclass P:\n  name: string\n  n: i32\n\nfn h(): i32\n  let p: P = P(\"a\", 1)\n  resource memory scratch =>\n    p = P(\"b\", 2)\n  return p.n\n", false))
   let pc46: ProgramConcrete = mono_of_program(in46)
   let names46: string = mono_fn_names(pc46)
   if pc46.mir.diags.length() == 0 and index_of(names46, "copy_out$") < 0 and mir_count_kind(pc46.mir, "MirConstruct") >= 3:
@@ -836,13 +836,13 @@ fn main(): i32
   // the class's copy: the class is rebuilt field by field (host); and a
   // generator reached through a pointer field is rejected, once, rather
   // than expanded without end.
-  let in46b: Vector<SourceInput> = Vector<SourceInput>::new()
-  in46b = in46b.push(SourceInput("core_builtins.dao", hooks45, true))
-  in46b = in46b.push(SourceInput("main.dao", "module app::main\n\nclass Label:\n  text: string\n\n  fn copy_out(value: Label): Label -> Label(\"wrong\")\n\nfn f(x: Label): Label -> copy_out(x)\n", false))
+  let in46b: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  in46b = in46b.push(graph::SourceInput("core_builtins.dao", hooks45, true))
+  in46b = in46b.push(graph::SourceInput("main.dao", "module app::main\n\nclass Label:\n  text: string\n\n  fn copy_out(value: Label): Label -> Label(\"wrong\")\n\nfn f(x: Label): Label -> copy_out(x)\n", false))
   let pc46b: ProgramConcrete = mono_of_program(in46b)
-  let in46c: Vector<SourceInput> = Vector<SourceInput>::new()
-  in46c = in46c.push(SourceInput("core_builtins.dao", hooks45, true))
-  in46c = in46c.push(SourceInput("main.dao", "module app::main\n\nclass Box:\n  data: Ptr<Generator<i32>>\n\nfn f(x: Box): Box -> copy_out(x)\n", false))
+  let in46c: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  in46c = in46c.push(graph::SourceInput("core_builtins.dao", hooks45, true))
+  in46c = in46c.push(graph::SourceInput("main.dao", "module app::main\n\nclass Box:\n  data: Ptr<Generator<i32>>\n\nfn f(x: Box): Box -> copy_out(x)\n", false))
   let pc46c: ProgramConcrete = mono_of_program(in46c)
   if pc46b.mir.diags.length() == 0 and mir_count_kind(pc46b.mir, "MirConstruct") >= 2 and mir_diag_mentions(pc46c.mir, "a generator cannot be copied out") and pc46c.mir.diags.length() == 1:
     print("PASS copier_shape_and_generator_storage")
@@ -862,13 +862,13 @@ fn main(): i32
   // A generic class's `copy_out` that returns another instantiation, or
   // is generic over its own parameter, is no copier: the expansion rebuilds the class field by field and never
   // calls the method.
-  let other_instance_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  other_instance_inputs = other_instance_inputs.push(SourceInput("core_builtins.dao", hooks45, true))
-  other_instance_inputs = other_instance_inputs.push(SourceInput("main.dao", "module app::main\n\nclass Wrap<T>:\n  v: T\n\n  fn copy_out(self): Wrap<i32> -> Wrap<i32>(1)\n\nfn f(x: Wrap<string>): Wrap<string> -> copy_out(x)\n", false))
+  let other_instance_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  other_instance_inputs = other_instance_inputs.push(graph::SourceInput("core_builtins.dao", hooks45, true))
+  other_instance_inputs = other_instance_inputs.push(graph::SourceInput("main.dao", "module app::main\n\nclass Wrap<T>:\n  v: T\n\n  fn copy_out(self): Wrap<i32> -> Wrap<i32>(1)\n\nfn f(x: Wrap<string>): Wrap<string> -> copy_out(x)\n", false))
   let other_instance: ProgramConcrete = mono_of_program(other_instance_inputs)
-  let own_generic_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  own_generic_inputs = own_generic_inputs.push(SourceInput("core_builtins.dao", hooks45, true))
-  own_generic_inputs = own_generic_inputs.push(SourceInput("main.dao", "module app::main\n\nclass Gen:\n  text: string\n\n  fn copy_out<U>(self): Gen -> self\n\nfn f(x: Gen): Gen -> copy_out(x)\n", false))
+  let own_generic_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  own_generic_inputs = own_generic_inputs.push(graph::SourceInput("core_builtins.dao", hooks45, true))
+  own_generic_inputs = own_generic_inputs.push(graph::SourceInput("main.dao", "module app::main\n\nclass Gen:\n  text: string\n\n  fn copy_out<U>(self): Gen -> self\n\nfn f(x: Gen): Gen -> copy_out(x)\n", false))
   let own_generic: ProgramConcrete = mono_of_program(own_generic_inputs)
   if other_instance.mir.diags.length() == 0 and index_of(mono_fn_names(other_instance), "copy_out$") < 0 and own_generic.mir.diags.length() == 0 and index_of(mono_fn_names(own_generic), "copy_out$") < 0:
     print("PASS copier_is_exactly_self_to_self")
@@ -878,15 +878,15 @@ fn main(): i32
 
   // Monomorphization rejects a generator leaving a memory domain through an
   // enum, a stored pointer, and a returned aggregate alike.
-  let enum_generator_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  enum_generator_inputs = enum_generator_inputs.push(SourceInput("core_builtins.dao", hooks45, true))
-  enum_generator_inputs = enum_generator_inputs.push(SourceInput("main.dao", "module app::main\n\nenum class Holder:\n  Held(g: Generator<i32>)\n  Empty\n\nfn f(h: Holder): Holder\n  let kept: Holder = h\n  resource memory scratch =>\n    kept = h\n  return kept\n", false))
-  let returned_generator_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  returned_generator_inputs = returned_generator_inputs.push(SourceInput("core_builtins.dao", hooks45, true))
-  returned_generator_inputs = returned_generator_inputs.push(SourceInput("main.dao", "module app::main\n\nclass Box:\n  g: Generator<i32>\n\nfn f(b: Box): Box\n  resource memory scratch =>\n    return b\n  return b\n", false))
-  let pointer_generator_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  pointer_generator_inputs = pointer_generator_inputs.push(SourceInput("core_builtins.dao", hooks45, true))
-  pointer_generator_inputs = pointer_generator_inputs.push(SourceInput("main.dao", "module app::main\n\nclass Box:\n  data: Ptr<Generator<i32>>\n\nfn f(b: Box): Box\n  let kept: Box = b\n  resource memory scratch =>\n    kept = b\n  return kept\n", false))
+  let enum_generator_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  enum_generator_inputs = enum_generator_inputs.push(graph::SourceInput("core_builtins.dao", hooks45, true))
+  enum_generator_inputs = enum_generator_inputs.push(graph::SourceInput("main.dao", "module app::main\n\nenum class Holder:\n  Held(g: Generator<i32>)\n  Empty\n\nfn f(h: Holder): Holder\n  let kept: Holder = h\n  resource memory scratch =>\n    kept = h\n  return kept\n", false))
+  let returned_generator_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  returned_generator_inputs = returned_generator_inputs.push(graph::SourceInput("core_builtins.dao", hooks45, true))
+  returned_generator_inputs = returned_generator_inputs.push(graph::SourceInput("main.dao", "module app::main\n\nclass Box:\n  g: Generator<i32>\n\nfn f(b: Box): Box\n  resource memory scratch =>\n    return b\n  return b\n", false))
+  let pointer_generator_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  pointer_generator_inputs = pointer_generator_inputs.push(graph::SourceInput("core_builtins.dao", hooks45, true))
+  pointer_generator_inputs = pointer_generator_inputs.push(graph::SourceInput("main.dao", "module app::main\n\nclass Box:\n  data: Ptr<Generator<i32>>\n\nfn f(b: Box): Box\n  let kept: Box = b\n  resource memory scratch =>\n    kept = b\n  return kept\n", false))
   let enum_generator: ProgramConcrete = mono_of_program(enum_generator_inputs)
   let returned_generator: ProgramConcrete = mono_of_program(returned_generator_inputs)
   let pointer_generator: ProgramConcrete = mono_of_program(pointer_generator_inputs)

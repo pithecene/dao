@@ -4,8 +4,9 @@
 # subsystem library fragments, and that program's test runner or entry
 # point.
 #
-# `bootstrap::ascii`, `bootstrap::lexer`, and `bootstrap::parser` are real
-# modules compiled directly from authored sources and are not assembled here.
+# `bootstrap::ascii`, `bootstrap::lexer`, `bootstrap::parser`, and
+# `bootstrap::graph` are real modules compiled directly from authored sources
+# and are not assembled here.
 #
 # Run from repository root:
 #   bash bootstrap/assemble.sh [output-root]
@@ -61,9 +62,6 @@ MIR=bootstrap/mir/impl.dao
 LLVM=bootstrap/llvm/impl.dao
 DRIVER=bootstrap/driver/impl.dao
 
-assemble "$OUT_ROOT/graph/graph.gen.dao" \
-  bootstrap/graph/tests.dao
-
 assemble "$OUT_ROOT/resolver/resolver.gen.dao" \
   "$RESOLVER" \
   bootstrap/resolver/tests.dao
@@ -107,4 +105,4 @@ assemble "$OUT_ROOT/driver/driver.gen.dao" \
   "$DRIVER" \
   bootstrap/driver/main.dao
 
-echo "done — 8 files assembled"
+echo "done — 7 files assembled"

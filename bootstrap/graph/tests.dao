@@ -1,4 +1,6 @@
 module bootstrap::graph::tests
+
+import bootstrap::graph
 // =========================================================================
 // Module graph tests
 // =========================================================================
@@ -17,10 +19,10 @@ fn main(): i32
   // -----------------------------------------------------------------
   // Test 1: Two files with one import build correctly
   // -----------------------------------------------------------------
-  let inputs1: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs1 = inputs1.push(SourceInput("a.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
-  inputs1 = inputs1.push(SourceInput("b.dao", "module app::main\nimport app::math\nfn f(): i32 -> 0\n", false))
-  let pg1: ProgramGraph = build_program(inputs1)
+  let inputs1: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  inputs1 = inputs1.push(graph::SourceInput("a.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
+  inputs1 = inputs1.push(graph::SourceInput("b.dao", "module app::main\nimport app::math\nfn f(): i32 -> 0\n", false))
+  let pg1: graph::ProgramGraph = graph::build_program(inputs1)
   if pg1.modules.length() == 2:
     if pg1.diags.length() == 0:
       print("PASS two_files_one_import")
@@ -33,15 +35,15 @@ fn main(): i32
   // -----------------------------------------------------------------
   // Test 2: Three-module chain topo-sorts correctly
   // -----------------------------------------------------------------
-  let inputs2: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs2 = inputs2.push(SourceInput("c.dao", "module app::main\nimport app::mid\nfn f(): i32 -> 0\n", false))
-  inputs2 = inputs2.push(SourceInput("b.dao", "module app::mid\nimport app::base\nfn g(): i32 -> 0\n", false))
-  inputs2 = inputs2.push(SourceInput("a.dao", "module app::base\nfn h(): i32 -> 0\n", false))
-  let pg2: ProgramGraph = build_program(inputs2)
+  let inputs2: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  inputs2 = inputs2.push(graph::SourceInput("c.dao", "module app::main\nimport app::mid\nfn f(): i32 -> 0\n", false))
+  inputs2 = inputs2.push(graph::SourceInput("b.dao", "module app::mid\nimport app::base\nfn g(): i32 -> 0\n", false))
+  inputs2 = inputs2.push(graph::SourceInput("a.dao", "module app::base\nfn h(): i32 -> 0\n", false))
+  let pg2: graph::ProgramGraph = graph::build_program(inputs2)
   if pg2.diags.length() == 0:
     if pg2.topo_order.length() == 3:
       // app::base should come first in topo order (no deps).
-      let first_mod: ModuleEntry = pg2.modules.get(pg2.topo_order.get(to_i64(0)))
+      let first_mod: graph::ModuleEntry = pg2.modules.get(pg2.topo_order.get(to_i64(0)))
       if first_mod.name == "app::base":
         print("PASS three_module_topo_sort")
         pass_count = pass_count + 1
@@ -55,13 +57,13 @@ fn main(): i32
   // -----------------------------------------------------------------
   // Test 3: Missing imported module reports error
   // -----------------------------------------------------------------
-  let inputs3: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs3 = inputs3.push(SourceInput("a.dao", "module app::main\nimport core::fmt\nfn f(): i32 -> 0\n", false))
-  let pg3: ProgramGraph = build_program(inputs3)
+  let inputs3: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  inputs3 = inputs3.push(graph::SourceInput("a.dao", "module app::main\nimport core::fmt\nfn f(): i32 -> 0\n", false))
+  let pg3: graph::ProgramGraph = graph::build_program(inputs3)
   let found_missing: bool = false
   let di3: i64 = 0
   while di3 < pg3.diags.length():
-    let d: FileDiagnostic = pg3.diags.get(di3)
+    let d: graph::FileDiagnostic = pg3.diags.get(di3)
     if d.diag.message == "imported module 'core::fmt' not found in compilation set":
       found_missing = true
     di3 = di3 + 1
@@ -74,14 +76,14 @@ fn main(): i32
   // -----------------------------------------------------------------
   // Test 4: Duplicate module across files reports error
   // -----------------------------------------------------------------
-  let inputs4: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs4 = inputs4.push(SourceInput("a.dao", "module app::math\nfn f(): i32 -> 0\n", false))
-  inputs4 = inputs4.push(SourceInput("b.dao", "module app::math\nfn g(): i32 -> 0\n", false))
-  let pg4: ProgramGraph = build_program(inputs4)
+  let inputs4: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  inputs4 = inputs4.push(graph::SourceInput("a.dao", "module app::math\nfn f(): i32 -> 0\n", false))
+  inputs4 = inputs4.push(graph::SourceInput("b.dao", "module app::math\nfn g(): i32 -> 0\n", false))
+  let pg4: graph::ProgramGraph = graph::build_program(inputs4)
   let found_dup: bool = false
   let di4: i64 = 0
   while di4 < pg4.diags.length():
-    let d4: FileDiagnostic = pg4.diags.get(di4)
+    let d4: graph::FileDiagnostic = pg4.diags.get(di4)
     if diag_starts_with(d4.diag.message, "duplicate module"):
       found_dup = true
     di4 = di4 + 1
@@ -94,13 +96,13 @@ fn main(): i32
   // -----------------------------------------------------------------
   // Test 5: Self-import cycle reports error
   // -----------------------------------------------------------------
-  let inputs5: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs5 = inputs5.push(SourceInput("a.dao", "module app::main\nimport app::main\nfn f(): i32 -> 0\n", false))
-  let pg5: ProgramGraph = build_program(inputs5)
+  let inputs5: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  inputs5 = inputs5.push(graph::SourceInput("a.dao", "module app::main\nimport app::main\nfn f(): i32 -> 0\n", false))
+  let pg5: graph::ProgramGraph = graph::build_program(inputs5)
   let found_self: bool = false
   let di5: i64 = 0
   while di5 < pg5.diags.length():
-    let d5: FileDiagnostic = pg5.diags.get(di5)
+    let d5: graph::FileDiagnostic = pg5.diags.get(di5)
     if d5.diag.message == "module 'app::main' imports itself":
       found_self = true
     di5 = di5 + 1
@@ -113,14 +115,14 @@ fn main(): i32
   // -----------------------------------------------------------------
   // Test 6: Two-node cycle reports error
   // -----------------------------------------------------------------
-  let inputs6: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs6 = inputs6.push(SourceInput("a.dao", "module app::a\nimport app::b\nfn f(): i32 -> 0\n", false))
-  inputs6 = inputs6.push(SourceInput("b.dao", "module app::b\nimport app::a\nfn g(): i32 -> 0\n", false))
-  let pg6: ProgramGraph = build_program(inputs6)
+  let inputs6: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  inputs6 = inputs6.push(graph::SourceInput("a.dao", "module app::a\nimport app::b\nfn f(): i32 -> 0\n", false))
+  inputs6 = inputs6.push(graph::SourceInput("b.dao", "module app::b\nimport app::a\nfn g(): i32 -> 0\n", false))
+  let pg6: graph::ProgramGraph = graph::build_program(inputs6)
   let found_cycle: bool = false
   let di6: i64 = 0
   while di6 < pg6.diags.length():
-    let d6: FileDiagnostic = pg6.diags.get(di6)
+    let d6: graph::FileDiagnostic = pg6.diags.get(di6)
     if diag_starts_with(d6.diag.message, "import cycle"):
       found_cycle = true
     di6 = di6 + 1
@@ -133,18 +135,18 @@ fn main(): i32
   // -----------------------------------------------------------------
   // Test 7: Cycle trace is deterministic
   // -----------------------------------------------------------------
-  let pg6b: ProgramGraph = build_program(inputs6)
+  let pg6b: graph::ProgramGraph = graph::build_program(inputs6)
   let cycle_msg_a: string = ""
   let cycle_msg_b: string = ""
   let di6b: i64 = 0
   while di6b < pg6.diags.length():
-    let d6a: FileDiagnostic = pg6.diags.get(di6b)
+    let d6a: graph::FileDiagnostic = pg6.diags.get(di6b)
     if diag_starts_with(d6a.diag.message, "import cycle"):
       cycle_msg_a = d6a.diag.message
     di6b = di6b + 1
   di6b = 0
   while di6b < pg6b.diags.length():
-    let d6b2: FileDiagnostic = pg6b.diags.get(di6b)
+    let d6b2: graph::FileDiagnostic = pg6b.diags.get(di6b)
     if diag_starts_with(d6b2.diag.message, "import cycle"):
       cycle_msg_b = d6b2.diag.message
     di6b = di6b + 1
@@ -160,16 +162,16 @@ fn main(): i32
   // -----------------------------------------------------------------
   // Test 8: File ordering is deterministic independent of input order
   // -----------------------------------------------------------------
-  let inputs8a: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs8a = inputs8a.push(SourceInput("z.dao", "module app::z\nfn f(): i32 -> 0\n", false))
-  inputs8a = inputs8a.push(SourceInput("a.dao", "module app::a\nfn g(): i32 -> 0\n", false))
-  let pg8a: ProgramGraph = build_program(inputs8a)
-  let inputs8b: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs8b = inputs8b.push(SourceInput("a.dao", "module app::a\nfn g(): i32 -> 0\n", false))
-  inputs8b = inputs8b.push(SourceInput("z.dao", "module app::z\nfn f(): i32 -> 0\n", false))
-  let pg8b: ProgramGraph = build_program(inputs8b)
-  let f8a: SourceFile = pg8a.files.get(to_i64(0))
-  let f8b: SourceFile = pg8b.files.get(to_i64(0))
+  let inputs8a: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  inputs8a = inputs8a.push(graph::SourceInput("z.dao", "module app::z\nfn f(): i32 -> 0\n", false))
+  inputs8a = inputs8a.push(graph::SourceInput("a.dao", "module app::a\nfn g(): i32 -> 0\n", false))
+  let pg8a: graph::ProgramGraph = graph::build_program(inputs8a)
+  let inputs8b: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  inputs8b = inputs8b.push(graph::SourceInput("a.dao", "module app::a\nfn g(): i32 -> 0\n", false))
+  inputs8b = inputs8b.push(graph::SourceInput("z.dao", "module app::z\nfn f(): i32 -> 0\n", false))
+  let pg8b: graph::ProgramGraph = graph::build_program(inputs8b)
+  let f8a: graph::SourceFile = pg8a.files.get(to_i64(0))
+  let f8b: graph::SourceFile = pg8b.files.get(to_i64(0))
   if f8a.path == f8b.path:
     if f8a.path == "a.dao":
       print("PASS file_order_deterministic")
@@ -182,13 +184,13 @@ fn main(): i32
   // -----------------------------------------------------------------
   // Test 9: No-module file produces diagnostic
   // -----------------------------------------------------------------
-  let inputs9: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs9 = inputs9.push(SourceInput("bare.dao", "fn f(): i32 -> 0\n", false))
-  let pg9: ProgramGraph = build_program(inputs9)
+  let inputs9: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  inputs9 = inputs9.push(graph::SourceInput("bare.dao", "fn f(): i32 -> 0\n", false))
+  let pg9: graph::ProgramGraph = graph::build_program(inputs9)
   let found_no_mod: bool = false
   let di9: i64 = 0
   while di9 < pg9.diags.length():
-    let d9: FileDiagnostic = pg9.diags.get(di9)
+    let d9: graph::FileDiagnostic = pg9.diags.get(di9)
     if d9.diag.message == "file 'bare.dao' has no module declaration":
       found_no_mod = true
     di9 = di9 + 1
@@ -201,14 +203,14 @@ fn main(): i32
   // -----------------------------------------------------------------
   // Test 10: Two-file smoke fixture — graph constructed correctly
   // -----------------------------------------------------------------
-  let inputs10: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs10 = inputs10.push(SourceInput("fmt.dao", "module core::fmt\nfn print_line(s: string): void\n  print(s)\n", false))
-  inputs10 = inputs10.push(SourceInput("main.dao", "module app::main\nimport core::fmt\nfn main(): void\n  fmt::print_line(\"hello\")\n", false))
-  let pg10: ProgramGraph = build_program(inputs10)
+  let inputs10: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  inputs10 = inputs10.push(graph::SourceInput("fmt.dao", "module core::fmt\nfn print_line(s: string): void\n  print(s)\n", false))
+  inputs10 = inputs10.push(graph::SourceInput("main.dao", "module app::main\nimport core::fmt\nfn main(): void\n  fmt::print_line(\"hello\")\n", false))
+  let pg10: graph::ProgramGraph = graph::build_program(inputs10)
   if pg10.diags.length() == 0:
     if pg10.modules.length() == 2:
       if pg10.topo_order.length() == 2:
-        let first: ModuleEntry = pg10.modules.get(pg10.topo_order.get(to_i64(0)))
+        let first: graph::ModuleEntry = pg10.modules.get(pg10.topo_order.get(to_i64(0)))
         if first.name == "core::fmt":
           print("PASS two_file_smoke")
           pass_count = pass_count + 1
@@ -226,15 +228,15 @@ fn main(): i32
   // -----------------------------------------------------------------
   // c imports a, a imports b, b imports a.  Only a and b form a cycle;
   // c is an acyclic dependent and must not appear in the cycle trace.
-  let inputs11: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs11 = inputs11.push(SourceInput("a.dao", "module app::a\nimport app::b\nfn f(): i32 -> 0\n", false))
-  inputs11 = inputs11.push(SourceInput("b.dao", "module app::b\nimport app::a\nfn g(): i32 -> 0\n", false))
-  inputs11 = inputs11.push(SourceInput("c.dao", "module app::c\nimport app::a\nfn h(): i32 -> 0\n", false))
-  let pg11: ProgramGraph = build_program(inputs11)
+  let inputs11: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  inputs11 = inputs11.push(graph::SourceInput("a.dao", "module app::a\nimport app::b\nfn f(): i32 -> 0\n", false))
+  inputs11 = inputs11.push(graph::SourceInput("b.dao", "module app::b\nimport app::a\nfn g(): i32 -> 0\n", false))
+  inputs11 = inputs11.push(graph::SourceInput("c.dao", "module app::c\nimport app::a\nfn h(): i32 -> 0\n", false))
+  let pg11: graph::ProgramGraph = graph::build_program(inputs11)
   let cycle_msg_11: string = ""
   let di11a: i64 = 0
   while di11a < pg11.diags.length():
-    let d11a: FileDiagnostic = pg11.diags.get(di11a)
+    let d11a: graph::FileDiagnostic = pg11.diags.get(di11a)
     if diag_starts_with(d11a.diag.message, "import cycle"):
       cycle_msg_11 = d11a.diag.message
     di11a = di11a + 1
@@ -264,7 +266,7 @@ fn main(): i32
   let found_prov: bool = false
   let di11: i64 = 0
   while di11 < pg3.diags.length():
-    let d11: FileDiagnostic = pg3.diags.get(di11)
+    let d11: graph::FileDiagnostic = pg3.diags.get(di11)
     if d11.diag.message == "imported module 'core::fmt' not found in compilation set":
       if d11.path == "a.dao":
         if d11.file_id == 0:

@@ -396,10 +396,10 @@ fn main(): i32
   // -----------------------------------------------------------------
 
   // Test 17: program_run_hir produces HirProgram root with HirModules.
-  let d7_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  d7_inputs = d7_inputs.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
-  d7_inputs = d7_inputs.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
-  let d7_pg: ProgramGraph = build_program(d7_inputs)
+  let d7_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  d7_inputs = d7_inputs.push(graph::SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
+  d7_inputs = d7_inputs.push(graph::SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
+  let d7_pg: graph::ProgramGraph = graph::build_program(d7_inputs)
   let d7_p: Program = program_from_graph(d7_pg)
   d7_p = program_run_resolve(d7_p)
   d7_p = program_run_typecheck(d7_p)
@@ -420,9 +420,9 @@ fn main(): i32
   // Test 18: HirProgram dump includes HirModule nodes.
   // Build an HirResult from the program's accumulated hir_nodes/hir_idx
   // and verify the dump contains the expected node kinds.
-  let d7_inputs2: Vector<SourceInput> = Vector<SourceInput>::new()
-  d7_inputs2 = d7_inputs2.push(SourceInput("a.dao", "module mod_a\nfn fa(): i32 -> 1\n", false))
-  let d7_pg2: ProgramGraph = build_program(d7_inputs2)
+  let d7_inputs2: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  d7_inputs2 = d7_inputs2.push(graph::SourceInput("a.dao", "module mod_a\nfn fa(): i32 -> 1\n", false))
+  let d7_pg2: graph::ProgramGraph = graph::build_program(d7_inputs2)
   let d7_p2: Program = program_from_graph(d7_pg2)
   d7_p2 = program_run_resolve(d7_p2)
   d7_p2 = program_run_typecheck(d7_p2)
@@ -448,11 +448,11 @@ fn main(): i32
   let hir_smoke_base: string = "testdata/bootstrap/multifile/smoke/"
   let hir_smoke_ok: bool = false
   if file_exists(hir_smoke_base + "core_fmt.dao"):
-    let hs_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-    hs_inputs = hs_inputs.push(SourceInput("core_fmt.dao", read_file(hir_smoke_base + "core_fmt.dao"), false))
-    hs_inputs = hs_inputs.push(SourceInput("app_math.dao", read_file(hir_smoke_base + "app_math.dao"), false))
-    hs_inputs = hs_inputs.push(SourceInput("app_main.dao", read_file(hir_smoke_base + "app_main.dao"), false))
-    let hs_pg: ProgramGraph = build_program(hs_inputs)
+    let hs_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+    hs_inputs = hs_inputs.push(graph::SourceInput("core_fmt.dao", read_file(hir_smoke_base + "core_fmt.dao"), false))
+    hs_inputs = hs_inputs.push(graph::SourceInput("app_math.dao", read_file(hir_smoke_base + "app_math.dao"), false))
+    hs_inputs = hs_inputs.push(graph::SourceInput("app_main.dao", read_file(hir_smoke_base + "app_main.dao"), false))
+    let hs_pg: graph::ProgramGraph = graph::build_program(hs_inputs)
     let hs_p: Program = program_from_graph(hs_pg)
     hs_p = program_run_resolve(hs_p)
     hs_p = program_run_typecheck(hs_p)
@@ -527,10 +527,10 @@ fn main(): i32
   // modules that each declare `class Point` with method `kind(self)`
   // returning a distinct integer.  Both modules must lower cleanly
   // without cross-module symbol contamination.
-  let iso_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  iso_inputs = iso_inputs.push(SourceInput("a.dao", "module iso::a\nclass Point:\n  x: i32\n\n  fn kind(self): i32\n    return 1\n\nfn use_a(): i32\n  let p: Point = Point(0)\n  return p.kind()\n", false))
-  iso_inputs = iso_inputs.push(SourceInput("b.dao", "module iso::b\nclass Point:\n  y: i32\n\n  fn kind(self): i32\n    return 2\n\nfn use_b(): i32\n  let q: Point = Point(0)\n  return q.kind()\n", false))
-  let iso_pg: ProgramGraph = build_program(iso_inputs)
+  let iso_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  iso_inputs = iso_inputs.push(graph::SourceInput("a.dao", "module iso::a\nclass Point:\n  x: i32\n\n  fn kind(self): i32\n    return 1\n\nfn use_a(): i32\n  let p: Point = Point(0)\n  return p.kind()\n", false))
+  iso_inputs = iso_inputs.push(graph::SourceInput("b.dao", "module iso::b\nclass Point:\n  y: i32\n\n  fn kind(self): i32\n    return 2\n\nfn use_b(): i32\n  let q: Point = Point(0)\n  return q.kind()\n", false))
+  let iso_pg: graph::ProgramGraph = graph::build_program(iso_inputs)
   let iso_p: Program = program_from_graph(iso_pg)
   iso_p = program_run_resolve(iso_p)
   iso_p = program_run_typecheck(iso_p)
@@ -731,13 +731,13 @@ fn main(): i32
   // Test 32: a method's parameter and a class's field symbols are found
   // in their own module: two modules' declarations at one index each
   // bind their own (the second module's must not take the first's).
-  let m32_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  m32_inputs = m32_inputs.push(SourceInput("a.dao", "module app::a\nclass Box:\n  x: i32\n  fn get(self): i32 -> self.x\n", false))
-  m32_inputs = m32_inputs.push(SourceInput("b.dao", "module app::b\nclass Box:\n  x: i64\n  fn get(self): i64 -> self.x\n", false))
-  let m32_p: Program = program_from_graph(build_program(m32_inputs))
+  let m32_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  m32_inputs = m32_inputs.push(graph::SourceInput("a.dao", "module app::a\nclass Box:\n  x: i32\n  fn get(self): i32 -> self.x\n", false))
+  m32_inputs = m32_inputs.push(graph::SourceInput("b.dao", "module app::b\nclass Box:\n  x: i64\n  fn get(self): i64 -> self.x\n", false))
+  let m32_p: Program = program_from_graph(graph::build_program(m32_inputs))
   m32_p = program_run_resolve(m32_p)
   m32_p = program_run_typecheck(m32_p)
-  let m32_mid: i64 = find_module_by_name(m32_p.graph.modules, "app::b")
+  let m32_mid: i64 = graph::find_module_by_name(m32_p.module_graph.modules, "app::b")
   let m32_hs: HS = build_module_hs(m32_p, m32_mid)
   let m32_root: parser::Node = m32_hs.unit.nodes.get(program_file_of_module(m32_p, m32_mid).parse_output.root)
   let m32_ok: bool = false

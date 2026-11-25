@@ -1208,7 +1208,7 @@ class ProgramResolveResult:
   symbols: Vector<Symbol>
   scopes: Vector<Scope>
   uses: HashMap<i64>      // keyed by uses_key(file_id, tok_idx) → sym_idx
-  diags: Vector<FileDiagnostic>
+  diags: Vector<graph::FileDiagnostic>
   module_exports: ExportTables
   extend_concept_bindings: HashMap<i64>
 
@@ -1285,7 +1285,7 @@ fn extend_binding_key(file_id: i64, decl_idx: i64): string
 fn uses_key(file_id: i64, tok_idx: i64): string
   return i64_to_string(file_id) + ":" + i64_to_string(tok_idx)
 
-fn resolve_program(pg: ProgramGraph): ProgramResolveResult
+fn resolve_program(pg: graph::ProgramGraph): ProgramResolveResult
   // Shared mutable state across all modules — symbols and scopes
   // accumulate program-wide.  Uses are converted from per-module
   // pairs (tok_idx, sym_idx) to triples (file_id, tok_idx, sym_idx)
@@ -1296,7 +1296,7 @@ fn resolve_program(pg: ProgramGraph): ProgramResolveResult
   // Internal pair-format uses passed to RS; snapshot length before
   // each module to extract the per-module delta.
   let rs_uses: Vector<i64> = Vector<i64>::new()
-  let all_diags: Vector<FileDiagnostic> = Vector<FileDiagnostic>::new()
+  let all_diags: Vector<graph::FileDiagnostic> = Vector<graph::FileDiagnostic>::new()
   let export_tables: Vector<ExportTable> = Vector<ExportTable>::new()
   // D3: concept bindings accumulated during Pass 2 body resolution.
   let all_extend_bindings: HashMap<i64> = HashMap<i64>::new()
@@ -1331,8 +1331,8 @@ fn resolve_program(pg: ProgramGraph): ProgramResolveResult
   let ti: i64 = 0
   while ti < pg.topo_order.length():
     let mid: i64 = pg.topo_order.get(ti)
-    let me: ModuleEntry = pg.modules.get(mid)
-    let sf: SourceFile = pg.files.get(me.file_id)
+    let me: graph::ModuleEntry = pg.modules.get(mid)
+    let sf: graph::SourceFile = pg.files.get(me.file_id)
     let po: parser::ParseOutput = sf.parse_output
 
     // Snapshot uses length before this module's pass.
@@ -1365,8 +1365,8 @@ fn resolve_program(pg: ProgramGraph): ProgramResolveResult
         let imps: Vector<i64> = parser::read_list(po.idx, imports_lp)
         let ii: i64 = 0
         while ii < imps.length():
-          let imp_name: string = extract_import_name(po, imps.get(ii))
-          let target_mid: i64 = find_module_by_name(pg.modules, imp_name)
+          let imp_name: string = graph::extract_import_name(po, imps.get(ii))
+          let target_mid: i64 = graph::find_module_by_name(pg.modules, imp_name)
           if target_mid >= 0:
             // Bind the last segment of the import path as a Module symbol.
             let imp_node: parser::Node = po.nodes.get(imps.get(ii))
@@ -1402,7 +1402,7 @@ fn resolve_program(pg: ProgramGraph): ProgramResolveResult
     // Merge per-file diagnostics with provenance.
     let pdi: i64 = 0
     while pdi < rs.diags.length():
-      all_diags = all_diags.push(FileDiagnostic(sf.file_id, sf.path, rs.diags.get(pdi)))
+      all_diags = all_diags.push(graph::FileDiagnostic(sf.file_id, sf.path, rs.diags.get(pdi)))
       pdi = pdi + 1
     ti = ti + 1
 
@@ -1410,8 +1410,8 @@ fn resolve_program(pg: ProgramGraph): ProgramResolveResult
   ti = 0
   while ti < pg.topo_order.length():
     let mid: i64 = pg.topo_order.get(ti)
-    let me: ModuleEntry = pg.modules.get(mid)
-    let sf: SourceFile = pg.files.get(me.file_id)
+    let me: graph::ModuleEntry = pg.modules.get(mid)
+    let sf: graph::SourceFile = pg.files.get(me.file_id)
     let po: parser::ParseOutput = sf.parse_output
 
     // Snapshot uses length before this module's body resolution.
@@ -1464,7 +1464,7 @@ fn resolve_program(pg: ProgramGraph): ProgramResolveResult
 
     let pdi: i64 = 0
     while pdi < rs.diags.length():
-      all_diags = all_diags.push(FileDiagnostic(sf.file_id, sf.path, rs.diags.get(pdi)))
+      all_diags = all_diags.push(graph::FileDiagnostic(sf.file_id, sf.path, rs.diags.get(pdi)))
       pdi = pdi + 1
     ti = ti + 1
 
@@ -1488,43 +1488,43 @@ fn resolve_program(pg: ProgramGraph): ProgramResolveResult
 // correct home given the current assembly order.
 
 class Program:
-  graph: ProgramGraph
+  module_graph: graph::ProgramGraph
   resolve: ProgramResolveResult
   typecheck: TypeCheckData
   hir: HirData
-  diags: Vector<FileDiagnostic>
+  diags: Vector<graph::FileDiagnostic>
 
 // Construct a `Program` from a graph with empty resolve/typecheck/hir
 // payloads.  Does not run any passes.
-fn program_from_graph(pg: ProgramGraph): Program
+fn program_from_graph(pg: graph::ProgramGraph): Program
   let empty_resolve: ProgramResolveResult = ProgramResolveResult(
     Vector<Symbol>::new(),
     Vector<Scope>::new(),
     HashMap<i64>::new(),
-    Vector<FileDiagnostic>::new(),
+    Vector<graph::FileDiagnostic>::new(),
     ExportTables(Vector<ExportTable>::new()),
     HashMap<i64>::new())
   let empty_tc: TypeCheckData = TypeCheckData(false, Vector<DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), program_lookup_empty())
   let empty_hir: HirData = HirData(false, to_i64(-1), to_i64(0), to_i64(0))
-  return Program(pg, empty_resolve, empty_tc, empty_hir, Vector<FileDiagnostic>::new())
+  return Program(pg, empty_resolve, empty_tc, empty_hir, Vector<graph::FileDiagnostic>::new())
 
 // Run `resolve_program` and fold the result into the `Program`
 // value.  `p.diags` mirrors the resolve pass's diagnostics; later
 // passes append to it.
 fn program_run_resolve(p: Program): Program
-  let rr: ProgramResolveResult = resolve_program(p.graph)
-  return Program(p.graph, rr, p.typecheck, p.hir, rr.diags)
+  let rr: ProgramResolveResult = resolve_program(p.module_graph)
+  return Program(p.module_graph, rr, p.typecheck, p.hir, rr.diags)
 
 // Fetch a module entry by program-wide module id.
-fn program_module(p: Program, mid: i64): ModuleEntry
-  return p.graph.modules.get(mid)
+fn program_module(p: Program, mid: i64): graph::ModuleEntry
+  return p.module_graph.modules.get(mid)
 
 // Fetch the source file owning a module.  Intended access path for
 // later passes (typecheck/HIR) that need a module's tokens/source/AST —
 // goes through here instead of reaching into `p.graph.files` directly.
-fn program_file_of_module(p: Program, mid: i64): SourceFile
-  let m: ModuleEntry = p.graph.modules.get(mid)
-  return p.graph.files.get(m.file_id)
+fn program_file_of_module(p: Program, mid: i64): graph::SourceFile
+  let m: graph::ModuleEntry = p.module_graph.modules.get(mid)
+  return p.module_graph.files.get(m.file_id)
 
 // Fetch a symbol by program-wide sym_idx.
 fn program_symbol(p: Program, sym_idx: i64): Symbol
