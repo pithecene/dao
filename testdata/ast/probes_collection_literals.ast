@@ -1,0 +1,32 @@
+File
+  Module collection_literals
+  ClassDecl Entry
+    Field id: i64
+    Field active: bool
+  FunctionDecl build_levels
+    ReturnType: Vector<i64>
+    LetStatement empty: Vector<i64>
+      ListLiteral
+    LetStatement seeded: Vector<i64>
+      ListLiteral
+        IntLiteral 0
+        IntLiteral 4
+        IntLiteral 8
+    ReturnStatement
+      Identifier seeded
+  FunctionDecl build_entries
+    ReturnType: Vector<Entry>
+    ReturnStatement
+      ListLiteral
+        CallExpr
+          Callee
+            Identifier Entry
+          Args
+            IntLiteral 0
+            BoolLiteral true
+        CallExpr
+          Callee
+            Identifier Entry
+          Args
+            IntLiteral 1
+            BoolLiteral false

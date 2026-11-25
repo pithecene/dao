@@ -1,0 +1,27 @@
+File
+  Module contextual_literals
+  EnumClassDecl Choice<T>
+    Variant Some
+    Variant None
+  FunctionDecl zero
+    ReturnType: i64
+    ExprBody
+      IntLiteral 0
+  FunctionDecl countdown
+    ReturnType: Generator<i64>
+    YieldStatement
+      IntLiteral 2
+    YieldStatement
+      IntLiteral 1
+    YieldStatement
+      IntLiteral 0
+  FunctionDecl sample
+    ReturnType: Choice<i64>
+    LetStatement item: Choice<i64>
+      CallExpr
+        Callee
+          QualifiedName Choice::Some
+        Args
+          IntLiteral 0
+    ReturnStatement
+      Identifier item

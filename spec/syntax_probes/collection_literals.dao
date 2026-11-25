@@ -1,0 +1,13 @@
+module collection_literals
+
+class Entry:
+  id: i64
+  active: bool
+
+fn build_levels(): Vector<i64>
+  let empty: Vector<i64> = []
+  let seeded: Vector<i64> = [0, 4, 8]
+  return seeded
+
+fn build_entries(): Vector<Entry>
+  return [Entry(0, true), Entry(1, false)]

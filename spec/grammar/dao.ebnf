@@ -153,7 +153,14 @@ postfix_op :=
     | "[" expression "]"
 
 arguments :=
-    expression ("," expression)*
+    argument ("," argument)*
+
+# Bare identifiers pun same-named fields in aggregate initialization; explicit
+# `field = expr` binds non-matching or composite expressions (see
+# docs/contracts/ADR_AGGREGATE_INITIALIZATION.md).
+argument :=
+      identifier "=" expression
+    | expression
 
 primary :=
       qualified_name

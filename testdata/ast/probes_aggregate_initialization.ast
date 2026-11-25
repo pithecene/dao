@@ -1,0 +1,46 @@
+File
+  Module aggregate_initialization
+  EnumDecl Operator
+    Variant Add
+    Variant Sub
+  EnumClassDecl Expr
+    Variant Const
+    Variant Binary
+  ClassDecl Point
+    Field x: i64
+    Field y: i64
+    FunctionDecl origin
+      ReturnType: Point
+      ReturnStatement
+        CallExpr
+          Callee
+            Identifier Point
+          Args
+            IntLiteral 0
+            IntLiteral 0
+    FunctionDecl translated
+      Param x: i64
+      Param y: i64
+      Param dx: i64
+      ReturnType: Point
+      ReturnStatement
+        CallExpr
+          Callee
+            Identifier Point
+          Args
+            BinaryExpr +
+              Identifier x
+              Identifier dx
+            Identifier y
+  FunctionDecl make_add
+    Param left: i64
+    Param right: i64
+    ReturnType: Expr
+    ReturnStatement
+      CallExpr
+        Callee
+          QualifiedName Expr::Binary
+        Args
+          QualifiedName Operator::Add
+          Identifier left
+          Identifier right
