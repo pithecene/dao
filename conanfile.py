@@ -1,8 +1,14 @@
+import os
+
 from conan import ConanFile
 from conan.tools.cmake import CMakeDeps, CMakeToolchain
+from conan.tools.files import copy
 
 
 class DaoConan(ConanFile):
+    name = "dao"
+    license = "Apache-2.0 WITH LLVM-exception"
+    exports = "LICENSE", "THIRD_PARTY_NOTICES.md"
     settings = "os", "compiler", "build_type", "arch"
 
     def requirements(self):
@@ -25,3 +31,8 @@ class DaoConan(ConanFile):
         deps.generate()
         tc = CMakeToolchain(self)
         tc.generate()
+
+    def package(self):
+        licenses_dir = os.path.join(self.package_folder, "licenses")
+        copy(self, "LICENSE", self.source_folder, licenses_dir)
+        copy(self, "THIRD_PARTY_NOTICES.md", self.source_folder, licenses_dir)
