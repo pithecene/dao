@@ -1,22 +1,22 @@
 # Bootstrap Shared Substrate
 
-Shared module-graph, type-universe, and cross-pass program definitions for
-subsystems that still assemble through `bootstrap/assemble.sh`.
+Shared type-universe and cross-pass program lookup tables for subsystems
+that still assemble through `bootstrap/assemble.sh`.
 
 ## Contents
 
-The file `base.dao` (`module bootstrap::base`) imports `bootstrap::lexer`
-and `bootstrap::parser` and provides shared definitions for downstream
-subsystems:
+The file `base.dao` (`module bootstrap::base`) imports `bootstrap::lexer`,
+`bootstrap::parser`, and `bootstrap::graph` and provides shared definitions
+for downstream subsystems:
 
-- Module graph construction, cycle detection, and topological ordering (`SourceInput`, `ProgramGraph`, `build_program`)
 - Cross-pass type universe (`TypeKind`, `DaoType`)
 - Cross-pass program lookup and index tables (`ProgramIndex`, `ProgramLookup`, `TypeCheckData`, `HirData`)
 
-AST definitions (`Node`, `ParseOutput`, `read_list`) and recursive-descent
-parsing (`parse`) live in `bootstrap/parser/impl.dao`
+Module-graph construction, topological ordering, and cycle detection live in
+`bootstrap/graph/impl.dao` (`module bootstrap::graph`). AST definitions and
+recursive-descent parsing live in `bootstrap/parser/impl.dao`
 (`module bootstrap::parser`), which imports `bootstrap::lexer`
-(`bootstrap/lexer/impl.dao`), which in turn imports `bootstrap::ascii`
+(`bootstrap/lexer/impl.dao`), which imports `bootstrap::ascii`
 (`bootstrap/ascii.dao`).
 
 ## Assembly
@@ -28,16 +28,15 @@ Subsystems not yet extracted into standalone modules still compose with
 bash bootstrap/assemble.sh
 ```
 
-This produces `<subsystem>.gen.dao` for `graph`, `resolver`, `typecheck`,
-`hir`, `mir`, `llvm`, `driver_tests`, and `driver`. Both `lexer` and
-`parser` compile directly from authored sources without assembly.
+This produces `<subsystem>.gen.dao` for `resolver`, `typecheck`, `hir`, `mir`,
+`llvm`, `driver_tests`, and `driver`. The `lexer`, `parser`, and `graph`
+subsystems compile directly from authored sources without assembly.
 
-Every assembled program imports `bootstrap::parser` and `bootstrap::lexer`,
-which imports `bootstrap::ascii`, so every compile passes all three real
-module files:
+Every assembled program imports `bootstrap::graph`, `bootstrap::parser`, and
+`bootstrap::lexer`, so every compile passes all four real module files:
 
 ```sh
-daoc build --source bootstrap/graph/graph.gen.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao
+daoc build --source bootstrap/resolver/resolver.gen.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao
 ```
 
 Git ignores `*.gen.dao` files because they are build artifacts.
@@ -52,5 +51,5 @@ Git ignores `*.gen.dao` files because they are build artifacts.
 
 The shared file `base.dao` eliminated triplicated frontend code before
 multi-file compilation landed. Real module boundaries (`bootstrap::ascii`,
-`bootstrap::lexer`, and `bootstrap::parser`) are retiring `assemble.sh` one
-phase boundary at a time.
+`bootstrap::lexer`, `bootstrap::parser`, and `bootstrap::graph`) are retiring
+`assemble.sh` one phase boundary at a time.

@@ -114,7 +114,7 @@ class Registry:
 // The registries for a resolved program: the declaration indexes
 // (ProgramIndex) built in one scan of the symbols, every accumulating
 // registry empty.
-fn registry_new(symbols: Vector<Symbol>, modules: Vector<ModuleEntry>): Registry
+fn registry_new(symbols: Vector<Symbol>, modules: Vector<graph::ModuleEntry>): Registry
   let type_syms: HashMap<i64> = HashMap<i64>::new()
   let callables: HashMap<i64> = HashMap<i64>::new()
   let members: HashMap<i64> = HashMap<i64>::new()
@@ -134,7 +134,7 @@ fn registry_new(symbols: Vector<Symbol>, modules: Vector<ModuleEntry>): Registry
   let preludes: HashMap<i64> = HashMap<i64>::new()
   let mi: i64 = 0
   while mi < modules.length():
-    let me: ModuleEntry = modules.get(mi)
+    let me: graph::ModuleEntry = modules.get(mi)
     if me.is_prelude:
       preludes = preludes.set(i64_to_string(me.module_id), to_i64(1))
     mi = mi + 1
@@ -146,7 +146,7 @@ fn conformance_empty(): Conformance
 // The registries with nothing declared: for a state that checks no
 // declarations (builtin seeding).
 fn registry_empty(): Registry
-  return registry_new(Vector<Symbol>::new(), Vector<ModuleEntry>::new())
+  return registry_new(Vector<Symbol>::new(), Vector<graph::ModuleEntry>::new())
 
 fn reg_with_expr_types(rg: Registry, m: HashMap<i64>): Registry
   return Registry(m, rg.variant_set, rg.conform, rg.methods, rg.index, rg.made)
@@ -472,7 +472,7 @@ fn program_init_typecheck(p: Program): Program
     seeded.type_info,
     seeded.sym_types,
     program_lookup_empty())
-  return Program(p.graph, p.resolve, td, p.hir, p.diags)
+  return Program(p.module_graph, p.resolve, td, p.hir, p.diags)
 
 // =========================================================================
 // Section 39: Type query helpers
@@ -1324,8 +1324,8 @@ class AliasGraph:
 fn alias_graph_of(p: Program, acc: TcAccum): AliasGraph
   let g: AliasGraph = AliasGraph(HashMap<i64>::new(), Vector<i64>::new())
   let ti: i64 = 0
-  while ti < p.graph.topo_order.length():
-    let mid: i64 = p.graph.topo_order.get(ti)
+  while ti < p.module_graph.topo_order.length():
+    let mid: i64 = p.module_graph.topo_order.get(ti)
     let ts: TS = ts_new(build_module_tc(p, mid), acc.types, acc.type_info, acc.sym_types, acc.reg)
     let root: parser::Node = ts.tc.nodes.get(program_file_of_module(p, mid).parse_output.root)
     match root:
@@ -5553,7 +5553,7 @@ fn tc_bind_method_bounds(ts: TS, methods_lp: i64): TS
 
 // Helper: build per-module TC from Program state.
 fn build_module_tc(p: Program, mid: i64): TC
-  let sf: SourceFile = program_file_of_module(p, mid)
+  let sf: graph::SourceFile = program_file_of_module(p, mid)
   let po: parser::ParseOutput = sf.parse_output
   return TC(po.nodes, po.idx, po.toks, sf.source_text, p.resolve.symbols, p.resolve.scopes, p.resolve.uses, sf.file_id, p.resolve.extend_concept_bindings, mid, p.resolve.module_exports)
 
@@ -5567,7 +5567,7 @@ class TcAccum:
   type_info: Vector<i64>
   sym_types: Vector<i64>
   reg: Registry
-  diags: Vector<FileDiagnostic>
+  diags: Vector<graph::FileDiagnostic>
 
 // Run one file-level pass over every module in dependency order,
 // threading the accumulated state through and folding each module's
@@ -5575,15 +5575,15 @@ class TcAccum:
 fn run_program_pass(p: Program, acc: TcAccum, pass: TcPass): TcAccum
   let a: TcAccum = acc
   let ti: i64 = 0
-  while ti < p.graph.topo_order.length():
-    let mid: i64 = p.graph.topo_order.get(ti)
-    let sf: SourceFile = program_file_of_module(p, mid)
+  while ti < p.module_graph.topo_order.length():
+    let mid: i64 = p.module_graph.topo_order.get(ti)
+    let sf: graph::SourceFile = program_file_of_module(p, mid)
     let ts: TS = ts_new(build_module_tc(p, mid), a.types, a.type_info, a.sym_types, a.reg)
     ts = tc_file_pass(ts, pass, sf.parse_output.root)
-    let diags: Vector<FileDiagnostic> = a.diags
+    let diags: Vector<graph::FileDiagnostic> = a.diags
     let di: i64 = 0
     while di < ts.diags.length():
-      diags = diags.push(FileDiagnostic(sf.file_id, sf.path, ts.diags.get(di)))
+      diags = diags.push(graph::FileDiagnostic(sf.file_id, sf.path, ts.diags.get(di)))
       di = di + 1
     a = TcAccum(ts.types, ts.type_info, ts.sym_types, ts.reg, diags)
     ti = ti + 1
@@ -5621,7 +5621,7 @@ fn program_check(p: Program): ProgramTyped
   // diagnostics from a prior run. This prevents diagnostic
   // duplication on reentrant calls — same guard pattern as
   // program_init_typecheck's initialized flag.
-  let acc: TcAccum = TcAccum(p.typecheck.types, p.typecheck.type_info, p.typecheck.sym_types, reg_with_expr_types(registry_new(p.resolve.symbols, p.graph.modules), p.typecheck.lookup.expr_types), p.resolve.diags)
+  let acc: TcAccum = TcAccum(p.typecheck.types, p.typecheck.type_info, p.typecheck.sym_types, reg_with_expr_types(registry_new(p.resolve.symbols, p.module_graph.modules), p.typecheck.lookup.expr_types), p.resolve.diags)
   acc = run_program_pass(p, acc, TcPass::Shells)
   acc = tc_resolve_aliases(p, acc)
   acc = run_program_pass(p, acc, TcPass::Declarations)
@@ -5631,7 +5631,7 @@ fn program_check(p: Program): ProgramTyped
   acc = TcAccum(acc.types, acc.type_info, acc.sym_types, derive_program_conformances(acc.reg, index_program_structs(acc.types, acc.type_info)), acc.diags)
   acc = run_program_pass(p, acc, TcPass::Bodies)
   let td: TypeCheckData = TypeCheckData(true, acc.types, acc.type_info, acc.sym_types, ProgramLookup(acc.reg.expr_types, acc.reg.methods, acc.reg.index))
-  return ProgramTyped(Program(p.graph, p.resolve, td, p.hir, acc.diags), acc.reg)
+  return ProgramTyped(Program(p.module_graph, p.resolve, td, p.hir, acc.diags), acc.reg)
 
 // =========================================================================
 // Section 46b: Legacy single-file typecheck adapter
@@ -5648,9 +5648,9 @@ fn typecheck(src: string): TypeCheckResult
   // accumulate into TypeCheckData. Multi-module callers should use
   // program_run_typecheck instead.
   let wrapped: string = wrap_test_module(src)
-  let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs = inputs.push(SourceInput("test.dao", wrapped, false))
-  let pg: ProgramGraph = build_program(inputs)
+  let inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  inputs = inputs.push(graph::SourceInput("test.dao", wrapped, false))
+  let pg: graph::ProgramGraph = graph::build_program(inputs)
   let p: Program = program_from_graph(pg)
   p = program_run_resolve(p)
   p = program_init_typecheck(p)
@@ -5658,9 +5658,9 @@ fn typecheck(src: string): TypeCheckResult
   // Build per-module TC/TS and run the passes directly (one module:
   // one sweep of each).
   let tc: TC = build_module_tc(p, to_i64(0))
-  let sf: SourceFile = program_file_of_module(p, to_i64(0))
+  let sf: graph::SourceFile = program_file_of_module(p, to_i64(0))
   let po: parser::ParseOutput = sf.parse_output
-  let ts: TS = ts_new(tc, p.typecheck.types, p.typecheck.type_info, p.typecheck.sym_types, reg_with_expr_types(registry_new(p.resolve.symbols, p.graph.modules), p.typecheck.lookup.expr_types))
+  let ts: TS = ts_new(tc, p.typecheck.types, p.typecheck.type_info, p.typecheck.sym_types, reg_with_expr_types(registry_new(p.resolve.symbols, p.module_graph.modules), p.typecheck.lookup.expr_types))
 
   // Collect resolve diagnostics into TS.
   let rdi: i64 = 0
@@ -5669,7 +5669,7 @@ fn typecheck(src: string): TypeCheckResult
     rdi = rdi + 1
 
   ts = tc_pass_shells(ts, po.root)
-  let aliased: TcAccum = tc_resolve_aliases(p, TcAccum(ts.types, ts.type_info, ts.sym_types, ts.reg, Vector<FileDiagnostic>::new()))
+  let aliased: TcAccum = tc_resolve_aliases(p, TcAccum(ts.types, ts.type_info, ts.sym_types, ts.reg, Vector<graph::FileDiagnostic>::new()))
   ts.types = aliased.types
   ts.type_info = aliased.type_info
   ts.sym_types = aliased.sym_types

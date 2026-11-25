@@ -55,10 +55,10 @@ fn program_has_message(rr: ProgramResolveResult, message: string): bool
 // The symbol the program resolved for the first token spelled `name`
 // in file `path` that has a use (a declaration's own name token has
 // none), or -1.
-fn program_use_of(pg: ProgramGraph, rr: ProgramResolveResult, path: string, name: string): i64
+fn program_use_of(pg: graph::ProgramGraph, rr: ProgramResolveResult, path: string, name: string): i64
   let fi: i64 = 0
   while fi < pg.files.length():
-    let sf: SourceFile = pg.files.get(fi)
+    let sf: graph::SourceFile = pg.files.get(fi)
     if sf.path == path:
       let toks: Vector<lexer::Token> = sf.parse_output.toks
       let ti: i64 = 0
@@ -77,8 +77,8 @@ fn program_use_of(pg: ProgramGraph, rr: ProgramResolveResult, path: string, name
     fi = fi + 1
   return to_i64(-1)
 
-fn resolve_inputs(inputs: Vector<SourceInput>): ProgramResolveResult
-  return resolve_program(build_program(inputs))
+fn resolve_inputs(inputs: Vector<graph::SourceInput>): ProgramResolveResult
+  return resolve_program(graph::build_program(inputs))
 
 // =========================================================================
 // Section 32: Golden resolve tests
@@ -430,10 +430,10 @@ fn main(): i32
   // -----------------------------------------------------------------
 
   // Test 21: import binds final segment as Module symbol
-  let cf_inputs1: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs1 = cf_inputs1.push(SourceInput("fmt.dao", "module core::fmt\nfn print_line(s: string): void\n  print(s)\n", false))
-  cf_inputs1 = cf_inputs1.push(SourceInput("main.dao", "module app::main\nimport core::fmt\nfn f(): i32 -> 0\n", false))
-  let cf_pg1: ProgramGraph = build_program(cf_inputs1)
+  let cf_inputs1: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  cf_inputs1 = cf_inputs1.push(graph::SourceInput("fmt.dao", "module core::fmt\nfn print_line(s: string): void\n  print(s)\n", false))
+  cf_inputs1 = cf_inputs1.push(graph::SourceInput("main.dao", "module app::main\nimport core::fmt\nfn f(): i32 -> 0\n", false))
+  let cf_pg1: graph::ProgramGraph = graph::build_program(cf_inputs1)
   let cf_r1: ProgramResolveResult = resolve_program(cf_pg1)
   let found_mod_sym: bool = false
   let cfi: i64 = 0
@@ -450,16 +450,16 @@ fn main(): i32
     print("FAIL import_binds_module_symbol")
 
   // Test 22: qualified function call into imported module resolves
-  let cf_inputs2: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs2 = cf_inputs2.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
-  cf_inputs2 = cf_inputs2.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
-  let cf_pg2: ProgramGraph = build_program(cf_inputs2)
+  let cf_inputs2: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  cf_inputs2 = cf_inputs2.push(graph::SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
+  cf_inputs2 = cf_inputs2.push(graph::SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
+  let cf_pg2: graph::ProgramGraph = graph::build_program(cf_inputs2)
   let cf_r2: ProgramResolveResult = resolve_program(cf_pg2)
   // Should have no diagnostics related to resolution
   let cf_r2_errs: i64 = 0
   cfi = 0
   while cfi < cf_r2.diags.length():
-    let fd: FileDiagnostic = cf_r2.diags.get(cfi)
+    let fd: graph::FileDiagnostic = cf_r2.diags.get(cfi)
     if fd.diag.severity == Severity::Error:
       cf_r2_errs = cf_r2_errs + 1
     cfi = cfi + 1
@@ -470,15 +470,15 @@ fn main(): i32
     print("FAIL qualified_call_resolves: got " + i64_to_string(cf_r2_errs) + " errors")
 
   // Test 23: missing imported module symbol diagnoses correctly
-  let cf_inputs3: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs3 = cf_inputs3.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
-  cf_inputs3 = cf_inputs3.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::sub(1, 2)\n", false))
-  let cf_pg3: ProgramGraph = build_program(cf_inputs3)
+  let cf_inputs3: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  cf_inputs3 = cf_inputs3.push(graph::SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
+  cf_inputs3 = cf_inputs3.push(graph::SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::sub(1, 2)\n", false))
+  let cf_pg3: graph::ProgramGraph = graph::build_program(cf_inputs3)
   let cf_r3: ProgramResolveResult = resolve_program(cf_pg3)
   let found_no_export: bool = false
   cfi = 0
   while cfi < cf_r3.diags.length():
-    let fd3: FileDiagnostic = cf_r3.diags.get(cfi)
+    let fd3: graph::FileDiagnostic = cf_r3.diags.get(cfi)
     if fd3.diag.message == "module 'math' has no exported symbol 'sub'":
       found_no_export = true
     cfi = cfi + 1
@@ -489,16 +489,16 @@ fn main(): i32
     print("FAIL missing_export_diagnoses")
 
   // Test 24: duplicate import final segment diagnoses
-  let cf_inputs4: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs4 = cf_inputs4.push(SourceInput("a_fmt.dao", "module a::fmt\nfn f(): i32 -> 0\n", false))
-  cf_inputs4 = cf_inputs4.push(SourceInput("b_fmt.dao", "module b::fmt\nfn g(): i32 -> 0\n", false))
-  cf_inputs4 = cf_inputs4.push(SourceInput("main.dao", "module app::main\nimport a::fmt\nimport b::fmt\nfn h(): i32 -> 0\n", false))
-  let cf_pg4: ProgramGraph = build_program(cf_inputs4)
+  let cf_inputs4: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  cf_inputs4 = cf_inputs4.push(graph::SourceInput("a_fmt.dao", "module a::fmt\nfn f(): i32 -> 0\n", false))
+  cf_inputs4 = cf_inputs4.push(graph::SourceInput("b_fmt.dao", "module b::fmt\nfn g(): i32 -> 0\n", false))
+  cf_inputs4 = cf_inputs4.push(graph::SourceInput("main.dao", "module app::main\nimport a::fmt\nimport b::fmt\nfn h(): i32 -> 0\n", false))
+  let cf_pg4: graph::ProgramGraph = graph::build_program(cf_inputs4)
   let cf_r4: ProgramResolveResult = resolve_program(cf_pg4)
   let found_dup_import: bool = false
   cfi = 0
   while cfi < cf_r4.diags.length():
-    let fd4: FileDiagnostic = cf_r4.diags.get(cfi)
+    let fd4: graph::FileDiagnostic = cf_r4.diags.get(cfi)
     if fd4.diag.message == "duplicate declaration 'fmt'":
       found_dup_import = true
     cfi = cfi + 1
@@ -509,15 +509,15 @@ fn main(): i32
     print("FAIL duplicate_import_binding")
 
   // Test 25: unqualified imported declaration remains unresolved
-  let cf_inputs5: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs5 = cf_inputs5.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
-  cf_inputs5 = cf_inputs5.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return add(1, 2)\n", false))
-  let cf_pg5: ProgramGraph = build_program(cf_inputs5)
+  let cf_inputs5: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  cf_inputs5 = cf_inputs5.push(graph::SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
+  cf_inputs5 = cf_inputs5.push(graph::SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return add(1, 2)\n", false))
+  let cf_pg5: graph::ProgramGraph = graph::build_program(cf_inputs5)
   let cf_r5: ProgramResolveResult = resolve_program(cf_pg5)
   let found_unknown_add: bool = false
   cfi = 0
   while cfi < cf_r5.diags.length():
-    let fd5: FileDiagnostic = cf_r5.diags.get(cfi)
+    let fd5: graph::FileDiagnostic = cf_r5.diags.get(cfi)
     if fd5.diag.message == "unknown name 'add'":
       found_unknown_add = true
     cfi = cfi + 1
@@ -528,14 +528,14 @@ fn main(): i32
     print("FAIL unqualified_import_unresolved")
 
   // Test 26: same-module unqualified access still works
-  let cf_inputs6: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs6 = cf_inputs6.push(SourceInput("math.dao", "module app::math\nfn helper(): i32 -> 42\n\nfn add(a: i32, b: i32): i32\n  return helper()\n", false))
-  let cf_pg6: ProgramGraph = build_program(cf_inputs6)
+  let cf_inputs6: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  cf_inputs6 = cf_inputs6.push(graph::SourceInput("math.dao", "module app::math\nfn helper(): i32 -> 42\n\nfn add(a: i32, b: i32): i32\n  return helper()\n", false))
+  let cf_pg6: graph::ProgramGraph = graph::build_program(cf_inputs6)
   let cf_r6: ProgramResolveResult = resolve_program(cf_pg6)
   let cf_r6_errs: i64 = 0
   cfi = 0
   while cfi < cf_r6.diags.length():
-    let fd6: FileDiagnostic = cf_r6.diags.get(cfi)
+    let fd6: graph::FileDiagnostic = cf_r6.diags.get(cfi)
     if fd6.diag.severity == Severity::Error:
       cf_r6_errs = cf_r6_errs + 1
     cfi = cfi + 1
@@ -546,17 +546,17 @@ fn main(): i32
     print("FAIL same_module_unqualified: " + i64_to_string(cf_r6_errs) + " errors")
 
   // Test 27: imported enum variant resolves via full qualified path
-  let cf_inputs7: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs7 = cf_inputs7.push(SourceInput("colors.dao", "module app::colors\nenum Color:\n  Red\n  Blue\n", false))
-  cf_inputs7 = cf_inputs7.push(SourceInput("main.dao", "module app::main\nimport app::colors\nfn f(): i32\n  let c: i32 = colors::Color::Red\n  return 0\n", false))
-  let cf_pg7: ProgramGraph = build_program(cf_inputs7)
+  let cf_inputs7: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  cf_inputs7 = cf_inputs7.push(graph::SourceInput("colors.dao", "module app::colors\nenum Color:\n  Red\n  Blue\n", false))
+  cf_inputs7 = cf_inputs7.push(graph::SourceInput("main.dao", "module app::main\nimport app::colors\nfn f(): i32\n  let c: i32 = colors::Color::Red\n  return 0\n", false))
+  let cf_pg7: graph::ProgramGraph = graph::build_program(cf_inputs7)
   let cf_r7: ProgramResolveResult = resolve_program(cf_pg7)
   // colors::Color::Red should resolve — 'colors' as Module, 'Color' through
   // exports, 'Red' deferred to typecheck (variant resolution).
   let cf_r7_errs: i64 = 0
   cfi = 0
   while cfi < cf_r7.diags.length():
-    let fd7: FileDiagnostic = cf_r7.diags.get(cfi)
+    let fd7: graph::FileDiagnostic = cf_r7.diags.get(cfi)
     if fd7.diag.severity == Severity::Error:
       cf_r7_errs = cf_r7_errs + 1
     cfi = cfi + 1
@@ -573,15 +573,15 @@ fn main(): i32
 
   // Test 29: topo-order-independent result stability
   // Resolve with different input orders; same diagnostic count.
-  let cf_inputs9a: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs9a = cf_inputs9a.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
-  cf_inputs9a = cf_inputs9a.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
-  let cf_pg9a: ProgramGraph = build_program(cf_inputs9a)
+  let cf_inputs9a: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  cf_inputs9a = cf_inputs9a.push(graph::SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
+  cf_inputs9a = cf_inputs9a.push(graph::SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
+  let cf_pg9a: graph::ProgramGraph = graph::build_program(cf_inputs9a)
   let cf_r9a: ProgramResolveResult = resolve_program(cf_pg9a)
-  let cf_inputs9b: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs9b = cf_inputs9b.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
-  cf_inputs9b = cf_inputs9b.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
-  let cf_pg9b: ProgramGraph = build_program(cf_inputs9b)
+  let cf_inputs9b: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  cf_inputs9b = cf_inputs9b.push(graph::SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
+  cf_inputs9b = cf_inputs9b.push(graph::SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
+  let cf_pg9b: graph::ProgramGraph = graph::build_program(cf_inputs9b)
   let cf_r9b: ProgramResolveResult = resolve_program(cf_pg9b)
   if cf_r9a.diags.length() == cf_r9b.diags.length():
     print("PASS topo_order_stable")
@@ -590,16 +590,16 @@ fn main(): i32
     print("FAIL topo_order_stable: diag counts differ")
 
   // Test 30: three-module chain resolves end-to-end
-  let cf_inputs10: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs10 = cf_inputs10.push(SourceInput("base.dao", "module lib::base\nfn zero(): i32 -> 0\n", false))
-  cf_inputs10 = cf_inputs10.push(SourceInput("mid.dao", "module lib::mid\nimport lib::base\nfn get_zero(): i32\n  return base::zero()\n", false))
-  cf_inputs10 = cf_inputs10.push(SourceInput("top.dao", "module app::top\nimport lib::mid\nfn f(): i32\n  return mid::get_zero()\n", false))
-  let cf_pg10: ProgramGraph = build_program(cf_inputs10)
+  let cf_inputs10: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  cf_inputs10 = cf_inputs10.push(graph::SourceInput("base.dao", "module lib::base\nfn zero(): i32 -> 0\n", false))
+  cf_inputs10 = cf_inputs10.push(graph::SourceInput("mid.dao", "module lib::mid\nimport lib::base\nfn get_zero(): i32\n  return base::zero()\n", false))
+  cf_inputs10 = cf_inputs10.push(graph::SourceInput("top.dao", "module app::top\nimport lib::mid\nfn f(): i32\n  return mid::get_zero()\n", false))
+  let cf_pg10: graph::ProgramGraph = graph::build_program(cf_inputs10)
   let cf_r10: ProgramResolveResult = resolve_program(cf_pg10)
   let cf_r10_errs: i64 = 0
   cfi = 0
   while cfi < cf_r10.diags.length():
-    let fd10: FileDiagnostic = cf_r10.diags.get(cfi)
+    let fd10: graph::FileDiagnostic = cf_r10.diags.get(cfi)
     if fd10.diag.severity == Severity::Error:
       cf_r10_errs = cf_r10_errs + 1
     cfi = cfi + 1
@@ -610,15 +610,15 @@ fn main(): i32
     print("FAIL three_module_chain: " + i64_to_string(cf_r10_errs) + " errors")
 
   // Test 31: imported type in annotation position (qualified type)
-  let cf_inputs11: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs11 = cf_inputs11.push(SourceInput("types.dao", "module app::types\nclass Point:\n  x: i32\n  y: i32\n", false))
-  cf_inputs11 = cf_inputs11.push(SourceInput("main.dao", "module app::main\nimport app::types\nfn f(): i32\n  let p: types::Point = types::Point(1, 2)\n  return p.x\n", false))
-  let cf_pg11: ProgramGraph = build_program(cf_inputs11)
+  let cf_inputs11: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  cf_inputs11 = cf_inputs11.push(graph::SourceInput("types.dao", "module app::types\nclass Point:\n  x: i32\n  y: i32\n", false))
+  cf_inputs11 = cf_inputs11.push(graph::SourceInput("main.dao", "module app::main\nimport app::types\nfn f(): i32\n  let p: types::Point = types::Point(1, 2)\n  return p.x\n", false))
+  let cf_pg11: graph::ProgramGraph = graph::build_program(cf_inputs11)
   let cf_r11: ProgramResolveResult = resolve_program(cf_pg11)
   let cf_r11_errs: i64 = 0
   cfi = 0
   while cfi < cf_r11.diags.length():
-    let fd11: FileDiagnostic = cf_r11.diags.get(cfi)
+    let fd11: graph::FileDiagnostic = cf_r11.diags.get(cfi)
     if fd11.diag.severity == Severity::Error:
       cf_r11_errs = cf_r11_errs + 1
     cfi = cfi + 1
@@ -629,15 +629,15 @@ fn main(): i32
     print("FAIL imported_type_annotation: " + i64_to_string(cf_r11_errs) + " errors")
 
   // Test 32: transitive re-export is blocked (i32 from module A not exported)
-  let cf_inputs12: Vector<SourceInput> = Vector<SourceInput>::new()
-  cf_inputs12 = cf_inputs12.push(SourceInput("a.dao", "module app::a\nfn f(): i32 -> 0\n", false))
-  cf_inputs12 = cf_inputs12.push(SourceInput("b.dao", "module app::b\nimport app::a\nfn g(): i32\n  return a::i32\n", false))
-  let cf_pg12: ProgramGraph = build_program(cf_inputs12)
+  let cf_inputs12: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  cf_inputs12 = cf_inputs12.push(graph::SourceInput("a.dao", "module app::a\nfn f(): i32 -> 0\n", false))
+  cf_inputs12 = cf_inputs12.push(graph::SourceInput("b.dao", "module app::b\nimport app::a\nfn g(): i32\n  return a::i32\n", false))
+  let cf_pg12: graph::ProgramGraph = graph::build_program(cf_inputs12)
   let cf_r12: ProgramResolveResult = resolve_program(cf_pg12)
   let found_no_i32: bool = false
   cfi = 0
   while cfi < cf_r12.diags.length():
-    let fd12: FileDiagnostic = cf_r12.diags.get(cfi)
+    let fd12: graph::FileDiagnostic = cf_r12.diags.get(cfi)
     if fd12.diag.message == "module 'a' has no exported symbol 'i32'":
       found_no_i32 = true
     cfi = cfi + 1
@@ -659,12 +659,12 @@ fn main(): i32
     let main_fid: i64 = to_i64(-1)
     let mfi: i64 = 0
     while mfi < cf_pg2.files.length():
-      let mf: SourceFile = cf_pg2.files.get(mfi)
+      let mf: graph::SourceFile = cf_pg2.files.get(mfi)
       if mf.path == "main.dao":
         main_fid = mf.file_id
       mfi = mfi + 1
     if main_fid >= 0:
-      let main_sf: SourceFile = cf_pg2.files.get(main_fid)
+      let main_sf: graph::SourceFile = cf_pg2.files.get(main_fid)
       let tok_count: i64 = main_sf.parse_output.toks.length()
       let tti: i64 = 0
       while tti < tok_count:
@@ -690,17 +690,17 @@ fn main(): i32
   // data. This is D0's acceptance check — it proves that every
   // typecheck/HIR access path routes through the helpers correctly
   // before those passes are built on top.
-  let p_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  p_inputs = p_inputs.push(SourceInput("fmt.dao", "module core::fmt\nfn print_line(s: string): void\n  print(s)\n", false))
-  p_inputs = p_inputs.push(SourceInput("main.dao", "module app::main\nimport core::fmt\nfn f(): i32\n  return 0\n", false))
-  let p_pg: ProgramGraph = build_program(p_inputs)
+  let p_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  p_inputs = p_inputs.push(graph::SourceInput("fmt.dao", "module core::fmt\nfn print_line(s: string): void\n  print(s)\n", false))
+  p_inputs = p_inputs.push(graph::SourceInput("main.dao", "module app::main\nimport core::fmt\nfn f(): i32\n  return 0\n", false))
+  let p_pg: graph::ProgramGraph = graph::build_program(p_inputs)
   let p0_val: Program = program_from_graph(p_pg)
   let p1_val: Program = program_run_resolve(p0_val)
 
   let d0_ok: bool = true
 
   // program_exported_symbol must find the fmt::print_line export.
-  let fmt_mid: i64 = find_module_by_name(p1_val.graph.modules, "core::fmt")
+  let fmt_mid: i64 = graph::find_module_by_name(p1_val.module_graph.modules, "core::fmt")
   if fmt_mid < 0:
     d0_ok = false
   let print_sym: i64 = program_exported_symbol(p1_val, fmt_mid, "print_line")
@@ -708,10 +708,10 @@ fn main(): i32
     d0_ok = false
 
   // program_module / program_file_of_module must agree on the module.
-  let fmt_mod: ModuleEntry = program_module(p1_val, fmt_mid)
+  let fmt_mod: graph::ModuleEntry = program_module(p1_val, fmt_mid)
   if fmt_mod.name != "core::fmt":
     d0_ok = false
-  let fmt_file: SourceFile = program_file_of_module(p1_val, fmt_mid)
+  let fmt_file: graph::SourceFile = program_file_of_module(p1_val, fmt_mid)
   if fmt_file.file_id != fmt_mod.file_id:
     d0_ok = false
 
@@ -725,12 +725,12 @@ fn main(): i32
   let d0_main_fid: i64 = to_i64(-1)
   let d0_mfi: i64 = 0
   while d0_mfi < p_pg.files.length():
-    let d0_mf: SourceFile = p_pg.files.get(d0_mfi)
+    let d0_mf: graph::SourceFile = p_pg.files.get(d0_mfi)
     if d0_mf.path == "main.dao":
       d0_main_fid = d0_mf.file_id
     d0_mfi = d0_mfi + 1
   if d0_main_fid >= 0:
-    let d0_main_sf: SourceFile = p_pg.files.get(d0_main_fid)
+    let d0_main_sf: graph::SourceFile = p_pg.files.get(d0_main_fid)
     let d0_tok_count: i64 = d0_main_sf.parse_output.toks.length()
     let d0_found_use: bool = false
     let d0_tti: i64 = 0
@@ -775,13 +775,13 @@ fn main(): i32
   // Prelude resolution (CONTRACT_MODULE_SYSTEM.md §7): synthetic
   // prelude modules under stdlib/core/, loaded with `is_prelude`.
   // -----------------------------------------------------------------
-  let greet_prelude: SourceInput = SourceInput("stdlib/core/greet.dao", "module core::greet\nfn greeting(): i32 -> 1\n", true)
+  let greet_prelude: graph::SourceInput = graph::SourceInput("stdlib/core/greet.dao", "module core::greet\nfn greeting(): i32 -> 1\n", true)
 
   // Test 36: prelude_visibility — a prelude declaration is visible
   // unqualified in a module that imports nothing.
-  let pv_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  let pv_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   pv_inputs = pv_inputs.push(greet_prelude)
-  pv_inputs = pv_inputs.push(SourceInput("main.dao", "module app::main\nfn f(): i32\n  return greeting()\n", false))
+  pv_inputs = pv_inputs.push(graph::SourceInput("main.dao", "module app::main\nfn f(): i32\n  return greeting()\n", false))
   let pv_r: ProgramResolveResult = resolve_inputs(pv_inputs)
   if program_error_count(pv_r) == 0:
     print("PASS prelude_visibility")
@@ -791,16 +791,16 @@ fn main(): i32
 
   // Test 37: prelude_shadowing — the module's own `greeting` wins
   // silently; the use resolves to the module's symbol.
-  let ps_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  let ps_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   ps_inputs = ps_inputs.push(greet_prelude)
-  ps_inputs = ps_inputs.push(SourceInput("main.dao", "module app::main\nfn greeting(): i32 -> 2\nfn f(): i32\n  return greeting()\n", false))
-  let ps_pg: ProgramGraph = build_program(ps_inputs)
+  ps_inputs = ps_inputs.push(graph::SourceInput("main.dao", "module app::main\nfn greeting(): i32 -> 2\nfn f(): i32\n  return greeting()\n", false))
+  let ps_pg: graph::ProgramGraph = graph::build_program(ps_inputs)
   let ps_r: ProgramResolveResult = resolve_program(ps_pg)
   let ps_sym: i64 = program_use_of(ps_pg, ps_r, "main.dao", "greeting")
   let ps_ok: bool = false
   if program_error_count(ps_r) == 0:
     if ps_sym >= 0:
-      let ps_main_mid: i64 = find_module_by_name(ps_pg.modules, "app::main")
+      let ps_main_mid: i64 = graph::find_module_by_name(ps_pg.modules, "app::main")
       if ps_r.symbols.get(ps_sym).owner_module_id == ps_main_mid:
         ps_ok = true
   if ps_ok:
@@ -812,9 +812,9 @@ fn main(): i32
   // Test 38: builtin_protection — a builtin's name cannot be declared
   // at top level by a module or by a prelude module (§7.6); locals
   // are not top-level declarations.
-  let bp_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  bp_inputs = bp_inputs.push(SourceInput("stdlib/core/bad.dao", "module core::bad\nfn bool(): i32 -> 0\n", true))
-  bp_inputs = bp_inputs.push(SourceInput("main.dao", "module app::main\nclass string:\n  n: i32\nfn f(): i32\n  let i32: i32 = 1\n  return i32\n", false))
+  let bp_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  bp_inputs = bp_inputs.push(graph::SourceInput("stdlib/core/bad.dao", "module core::bad\nfn bool(): i32 -> 0\n", true))
+  bp_inputs = bp_inputs.push(graph::SourceInput("main.dao", "module app::main\nclass string:\n  n: i32\nfn f(): i32\n  let i32: i32 = 1\n  return i32\n", false))
   let bp_r: ProgramResolveResult = resolve_inputs(bp_inputs)
   let bp_ok: bool = false
   if program_error_count(bp_r) == 2:
@@ -828,8 +828,8 @@ fn main(): i32
     print("FAIL builtin_protection: " + i64_to_string(program_error_count(bp_r)) + " errors")
 
   // `Generator` is predeclared, as in the host: no module declares it.
-  let gp_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  gp_inputs = gp_inputs.push(SourceInput("main.dao", "module app::main\ntype Generator = i64\n", false))
+  let gp_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  gp_inputs = gp_inputs.push(graph::SourceInput("main.dao", "module app::main\ntype Generator = i64\n", false))
   let gp_r: ProgramResolveResult = resolve_inputs(gp_inputs)
   if program_error_count(gp_r) == 1 and program_has_message(gp_r, "duplicate top-level declaration 'Generator'"):
     print("PASS generator_name_predeclared")
@@ -840,13 +840,13 @@ fn main(): i32
   // Test 39: prelude_identity — `greeting()` and `greet::greeting()`
   // after `import core::greet` resolve to one symbol, owned by the
   // prelude module.
-  let pi_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  let pi_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   pi_inputs = pi_inputs.push(greet_prelude)
-  pi_inputs = pi_inputs.push(SourceInput("main.dao", "module app::main\nimport core::greet\nfn f(): i32\n  return greeting() + greet::greeting()\n", false))
-  let pi_pg: ProgramGraph = build_program(pi_inputs)
+  pi_inputs = pi_inputs.push(graph::SourceInput("main.dao", "module app::main\nimport core::greet\nfn f(): i32\n  return greeting() + greet::greeting()\n", false))
+  let pi_pg: graph::ProgramGraph = graph::build_program(pi_inputs)
   let pi_r: ProgramResolveResult = resolve_program(pi_pg)
   let pi_bare: i64 = program_use_of(pi_pg, pi_r, "main.dao", "greeting")
-  let pi_greet_mid: i64 = find_module_by_name(pi_pg.modules, "core::greet")
+  let pi_greet_mid: i64 = graph::find_module_by_name(pi_pg.modules, "core::greet")
   let pi_qualified: i64 = to_i64(-1)
   match pi_r.module_exports.tables.get(pi_greet_mid).entries.get("greeting"):
     Option::Some(s):
@@ -867,9 +867,9 @@ fn main(): i32
 
   // Test 40: prelude_one_namespace — one prelude module uses another's
   // declaration unqualified, importing nothing (§7.3).
-  let pn_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  let pn_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   pn_inputs = pn_inputs.push(greet_prelude)
-  pn_inputs = pn_inputs.push(SourceInput("stdlib/core/twice.dao", "module core::twice\nfn twice(): i32\n  return greeting() + greeting()\n", true))
+  pn_inputs = pn_inputs.push(graph::SourceInput("stdlib/core/twice.dao", "module core::twice\nfn twice(): i32\n  return greeting() + greeting()\n", true))
   let pn_r: ProgramResolveResult = resolve_inputs(pn_inputs)
   if program_error_count(pn_r) == 0:
     print("PASS prelude_one_namespace")
@@ -880,11 +880,11 @@ fn main(): i32
   // Test 41: prelude_module_isolation — with the prelude loaded, an
   // ordinary module's declaration stays unknown in another module
   // (§3), and an import in a prelude module binds there only.
-  let pm_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  let pm_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   pm_inputs = pm_inputs.push(greet_prelude)
-  pm_inputs = pm_inputs.push(SourceInput("stdlib/core/uses_lib.dao", "module core::uses_lib\nimport app::lib\nfn via(): i32\n  return lib::helper()\n", true))
-  pm_inputs = pm_inputs.push(SourceInput("lib.dao", "module app::lib\nfn helper(): i32 -> 3\n", false))
-  pm_inputs = pm_inputs.push(SourceInput("main.dao", "module app::main\nfn f(): i32\n  return helper() + lib::helper()\n", false))
+  pm_inputs = pm_inputs.push(graph::SourceInput("stdlib/core/uses_lib.dao", "module core::uses_lib\nimport app::lib\nfn via(): i32\n  return lib::helper()\n", true))
+  pm_inputs = pm_inputs.push(graph::SourceInput("lib.dao", "module app::lib\nfn helper(): i32 -> 3\n", false))
+  pm_inputs = pm_inputs.push(graph::SourceInput("main.dao", "module app::main\nfn f(): i32\n  return helper() + lib::helper()\n", false))
   let pm_r: ProgramResolveResult = resolve_inputs(pm_inputs)
   let pm_ok: bool = false
   if program_error_count(pm_r) == 2:
@@ -899,13 +899,13 @@ fn main(): i32
 
   // Test 42: prelude_order_independence — the inputs in the other
   // order resolve the same use to the same symbol.
-  let po_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  po_inputs = po_inputs.push(SourceInput("main.dao", "module app::main\nfn f(): i32\n  return greeting()\n", false))
+  let po_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  po_inputs = po_inputs.push(graph::SourceInput("main.dao", "module app::main\nfn f(): i32\n  return greeting()\n", false))
   po_inputs = po_inputs.push(greet_prelude)
-  let po_pg: ProgramGraph = build_program(po_inputs)
+  let po_pg: graph::ProgramGraph = graph::build_program(po_inputs)
   let po_r: ProgramResolveResult = resolve_program(po_pg)
   let po_sym: i64 = program_use_of(po_pg, po_r, "main.dao", "greeting")
-  let pv_pg: ProgramGraph = build_program(pv_inputs)
+  let pv_pg: graph::ProgramGraph = graph::build_program(pv_inputs)
   let pv_sym: i64 = program_use_of(pv_pg, pv_r, "main.dao", "greeting")
   let po_ok: bool = false
   if program_error_count(po_r) == 0:
@@ -920,9 +920,9 @@ fn main(): i32
     print("FAIL prelude_order_independence: sym=" + i64_to_string(po_sym) + " vs " + i64_to_string(pv_sym))
 
   // Test 43: prelude_absence — a name declared nowhere still diagnoses.
-  let pa_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  let pa_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   pa_inputs = pa_inputs.push(greet_prelude)
-  pa_inputs = pa_inputs.push(SourceInput("main.dao", "module app::main\nfn f(): i32\n  return farewell()\n", false))
+  pa_inputs = pa_inputs.push(graph::SourceInput("main.dao", "module app::main\nfn f(): i32\n  return farewell()\n", false))
   let pa_r: ProgramResolveResult = resolve_inputs(pa_inputs)
   if program_has_message(pa_r, "unknown name 'farewell'"):
     print("PASS prelude_absence")
@@ -934,10 +934,10 @@ fn main(): i32
   // are the prelude's to declare at top level (§7.7–§7.8); a class's
   // own `copy_out` method is not such a declaration, nor is an import
   // binding spelled like one (§3).
-  let rn_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  rn_inputs = rn_inputs.push(SourceInput("stdlib/core/hooks.dao", "module core::hooks\nextern fn __dao_x(): i32\nfn size_of(): i32 -> 8\n", true))
-  rn_inputs = rn_inputs.push(SourceInput("copy_out.dao", "module lib::copy_out\nfn f(): i32 -> 0\n", false))
-  rn_inputs = rn_inputs.push(SourceInput("main.dao", "module app::main\nimport lib::copy_out\nfn __dao_y(): i32 -> 0\nfn ptr_offset(): i32 -> 0\nclass Box:\n  n: i32\n  fn copy_out(self): i32 -> self.n\nfn g(): i32 -> copy_out::f()\n", false))
+  let rn_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  rn_inputs = rn_inputs.push(graph::SourceInput("stdlib/core/hooks.dao", "module core::hooks\nextern fn __dao_x(): i32\nfn size_of(): i32 -> 8\n", true))
+  rn_inputs = rn_inputs.push(graph::SourceInput("copy_out.dao", "module lib::copy_out\nfn f(): i32 -> 0\n", false))
+  rn_inputs = rn_inputs.push(graph::SourceInput("main.dao", "module app::main\nimport lib::copy_out\nfn __dao_y(): i32 -> 0\nfn ptr_offset(): i32 -> 0\nclass Box:\n  n: i32\n  fn copy_out(self): i32 -> self.n\nfn g(): i32 -> copy_out::f()\n", false))
   let rn_r: ProgramResolveResult = resolve_inputs(rn_inputs)
   let rn_ok: bool = false
   if program_error_count(rn_r) == 2:
@@ -953,9 +953,9 @@ fn main(): i32
   // Test 45: prelude_import_collision — a prelude module's import
   // binding may not collide with its own top-level declaration
   // (§3.3), although the two live in different scopes.
-  let pc_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  pc_inputs = pc_inputs.push(SourceInput("stdlib/core/two.dao", "module core::two\nfn pair(): i32 -> 2\n", true))
-  pc_inputs = pc_inputs.push(SourceInput("stdlib/core/user.dao", "module core::user\nimport core::two\nfn two(): i32 -> 0\n", true))
+  let pc_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  pc_inputs = pc_inputs.push(graph::SourceInput("stdlib/core/two.dao", "module core::two\nfn pair(): i32 -> 2\n", true))
+  pc_inputs = pc_inputs.push(graph::SourceInput("stdlib/core/user.dao", "module core::user\nimport core::two\nfn two(): i32 -> 0\n", true))
   let pc_r: ProgramResolveResult = resolve_inputs(pc_inputs)
   let pc_ok: bool = false
   if program_error_count(pc_r) == 1:
@@ -970,10 +970,10 @@ fn main(): i32
   // Test 46: prelude_exports_per_module — a qualified path reaches only
   // the owning module's declarations (§7.5): `greet::twice` is not an
   // export of core::greet although `twice` is visible unqualified.
-  let pe_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  let pe_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   pe_inputs = pe_inputs.push(greet_prelude)
-  pe_inputs = pe_inputs.push(SourceInput("stdlib/core/twice.dao", "module core::twice\nfn twice(): i32 -> 2\n", true))
-  pe_inputs = pe_inputs.push(SourceInput("main.dao", "module app::main\nimport core::greet\nfn f(): i32\n  return twice() + greet::twice()\n", false))
+  pe_inputs = pe_inputs.push(graph::SourceInput("stdlib/core/twice.dao", "module core::twice\nfn twice(): i32 -> 2\n", true))
+  pe_inputs = pe_inputs.push(graph::SourceInput("main.dao", "module app::main\nimport core::greet\nfn f(): i32\n  return twice() + greet::twice()\n", false))
   let pe_r: ProgramResolveResult = resolve_inputs(pe_inputs)
   let pe_ok: bool = false
   if program_error_count(pe_r) == 1:
@@ -1100,9 +1100,9 @@ fn main(): i32
 
   // Test 56: a cross-module pattern — the qualified constructor
   // resolves through the import binding, the binders are arm-local.
-  let ma_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  ma_inputs = ma_inputs.push(SourceInput("shapes.dao", "module app::shapes\nenum class E:\n  Both(x: i32, y: i32)\n  None\n", false))
-  ma_inputs = ma_inputs.push(SourceInput("main.dao", "module app::main\nimport app::shapes\nfn f(e: shapes::E): i32\n  match e:\n    shapes::E::Both(a, b):\n      return a + b\n    shapes::E::None:\n      return 0\n  return 0\n", false))
+  let ma_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  ma_inputs = ma_inputs.push(graph::SourceInput("shapes.dao", "module app::shapes\nenum class E:\n  Both(x: i32, y: i32)\n  None\n", false))
+  ma_inputs = ma_inputs.push(graph::SourceInput("main.dao", "module app::main\nimport app::shapes\nfn f(e: shapes::E): i32\n  match e:\n    shapes::E::Both(a, b):\n      return a + b\n    shapes::E::None:\n      return 0\n  return 0\n", false))
   let ma_r: ProgramResolveResult = resolve_inputs(ma_inputs)
   if program_error_count(ma_r) == 0:
     print("PASS match_cross_module_pattern")

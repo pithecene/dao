@@ -88,16 +88,16 @@ fn test_dispatch_index(): HashMap<i64>
 // marked prelude or not) and a main file — and report whether main.dao
 // and report whether the file at `in_path` carries exactly `n` error
 // diagnostics and every other file none, printing them otherwise.
-fn tc_expect_program_errors(label: string, libs: Vector<SourceInput>, main_src: string, in_path: string, n: i64): bool
-  let inputs: Vector<SourceInput> = libs.push(SourceInput("main.dao", main_src, false))
-  let p: Program = program_from_graph(build_program(inputs))
+fn tc_expect_program_errors(label: string, libs: Vector<graph::SourceInput>, main_src: string, in_path: string, n: i64): bool
+  let inputs: Vector<graph::SourceInput> = libs.push(graph::SourceInput("main.dao", main_src, false))
+  let p: Program = program_from_graph(graph::build_program(inputs))
   p = program_run_resolve(p)
   p = program_run_typecheck(p)
   let errs: i64 = 0
   let lib_errs: i64 = 0
   let i: i64 = 0
   while i < p.diags.length():
-    let fd: FileDiagnostic = p.diags.get(i)
+    let fd: graph::FileDiagnostic = p.diags.get(i)
     if fd.diag.severity == Severity::Error:
       if fd.path == in_path:
         errs = errs + 1
@@ -458,9 +458,9 @@ fn main(): i32
   // -----------------------------------------------------------------
 
   // Test d1a_1: program_init_typecheck seeds canonical builtins.
-  let p_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  p_inputs = p_inputs.push(SourceInput("a.dao", "module a\nfn f(): i32 -> 0\n", false))
-  let p_pg: ProgramGraph = build_program(p_inputs)
+  let p_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  p_inputs = p_inputs.push(graph::SourceInput("a.dao", "module a\nfn f(): i32 -> 0\n", false))
+  let p_pg: graph::ProgramGraph = graph::build_program(p_inputs)
   let p_val: Program = program_from_graph(p_pg)
   let p_r: Program = program_run_resolve(p_val)
   let p_tc: Program = program_init_typecheck(p_r)
@@ -488,7 +488,7 @@ fn main(): i32
 
   // Test d1a_1b: double-init is a no-op (preserves accumulated state).
   let td_with_expr: TypeCheckData = tc_set_expr_type(p_tc.typecheck, to_i64(0), to_i64(7), to_i64(2))
-  let p_tc_with_expr: Program = Program(p_tc.graph, p_tc.resolve, td_with_expr, p_tc.hir, p_tc.diags)
+  let p_tc_with_expr: Program = Program(p_tc.module_graph, p_tc.resolve, td_with_expr, p_tc.hir, p_tc.diags)
   let p_tc2: Program = program_init_typecheck(p_tc_with_expr)
   let d1a_1b_ok: bool = true
   // expr_types entry should survive the second init call.
@@ -536,9 +536,9 @@ fn main(): i32
   // satisfaction checking should still produce the expected diagnostic
   // when a required method is missing.
   let d3_src: string = "concept Showable:\n  fn show(self): string\n\nclass Msg:\n  text: string\n\nextend Msg as Showable:\n  fn display(self): string -> self.text\n"
-  let d3_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  d3_inputs = d3_inputs.push(SourceInput("d3.dao", "module d3\n" + d3_src, false))
-  let d3_pg: ProgramGraph = build_program(d3_inputs)
+  let d3_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  d3_inputs = d3_inputs.push(graph::SourceInput("d3.dao", "module d3\n" + d3_src, false))
+  let d3_pg: graph::ProgramGraph = graph::build_program(d3_inputs)
   let d3_p: Program = program_from_graph(d3_pg)
   d3_p = program_run_resolve(d3_p)
   d3_p = program_init_typecheck(d3_p)
@@ -548,7 +548,7 @@ fn main(): i32
   // The binding HashMap should have an entry for the extend decl.
   // Walk the single file's extend decls and verify at least one
   // binding resolves via program_extend_concept_sym.
-  let d3_sf: SourceFile = program_file_of_module(d3_p, to_i64(0))
+  let d3_sf: graph::SourceFile = program_file_of_module(d3_p, to_i64(0))
   let d3_po: parser::ParseOutput = d3_sf.parse_output
   let d3_found_binding: bool = false
   let d3_root: parser::Node = d3_po.nodes.get(d3_po.root)
@@ -625,29 +625,29 @@ fn main(): i32
   // Test d4_1: cross-module function call types correctly through
   // the Program pipeline (build_program → resolve → typecheck).
   // Two modules: math exports `add`, main imports and calls `math::add(1,2)`.
-  let d4_inputs1: Vector<SourceInput> = Vector<SourceInput>::new()
-  d4_inputs1 = d4_inputs1.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
-  d4_inputs1 = d4_inputs1.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
-  let d4_pg1: ProgramGraph = build_program(d4_inputs1)
+  let d4_inputs1: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  d4_inputs1 = d4_inputs1.push(graph::SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
+  d4_inputs1 = d4_inputs1.push(graph::SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
+  let d4_pg1: graph::ProgramGraph = graph::build_program(d4_inputs1)
   let d4_p1: Program = program_from_graph(d4_pg1)
   d4_p1 = program_run_resolve(d4_p1)
   d4_p1 = program_init_typecheck(d4_p1)
   // Run typecheck on the main module (module_id 1 after math at 0).
-  let d4_main_mid: i64 = find_module_by_name(d4_p1.graph.modules, "app::main")
-  let d4_sf: SourceFile = program_file_of_module(d4_p1, d4_main_mid)
+  let d4_main_mid: i64 = graph::find_module_by_name(d4_p1.module_graph.modules, "app::main")
+  let d4_sf: graph::SourceFile = program_file_of_module(d4_p1, d4_main_mid)
   let d4_po: parser::ParseOutput = d4_sf.parse_output
   let d4_tc: TC = TC(d4_po.nodes, d4_po.idx, d4_po.toks, d4_sf.source_text, d4_p1.resolve.symbols, d4_p1.resolve.scopes, d4_p1.resolve.uses, d4_sf.file_id, d4_p1.resolve.extend_concept_bindings, d4_main_mid, d4_p1.resolve.module_exports)
-  let d4_ts: TS = ts_new(d4_tc, d4_p1.typecheck.types, d4_p1.typecheck.type_info, d4_p1.typecheck.sym_types, registry_new(d4_p1.resolve.symbols, d4_p1.graph.modules))
+  let d4_ts: TS = ts_new(d4_tc, d4_p1.typecheck.types, d4_p1.typecheck.type_info, d4_p1.typecheck.sym_types, registry_new(d4_p1.resolve.symbols, d4_p1.module_graph.modules))
   // Run pass1 on math first (to register the exported function type).
-  let d4_math_mid: i64 = find_module_by_name(d4_p1.graph.modules, "app::math")
-  let d4_math_sf: SourceFile = program_file_of_module(d4_p1, d4_math_mid)
+  let d4_math_mid: i64 = graph::find_module_by_name(d4_p1.module_graph.modules, "app::math")
+  let d4_math_sf: graph::SourceFile = program_file_of_module(d4_p1, d4_math_mid)
   let d4_math_po: parser::ParseOutput = d4_math_sf.parse_output
   let d4_math_tc: TC = TC(d4_math_po.nodes, d4_math_po.idx, d4_math_po.toks, d4_math_sf.source_text, d4_p1.resolve.symbols, d4_p1.resolve.scopes, d4_p1.resolve.uses, d4_math_sf.file_id, d4_p1.resolve.extend_concept_bindings, d4_math_mid, d4_p1.resolve.module_exports)
-  let d4_math_ts: TS = ts_new(d4_math_tc, d4_p1.typecheck.types, d4_p1.typecheck.type_info, d4_p1.typecheck.sym_types, registry_new(d4_p1.resolve.symbols, d4_p1.graph.modules))
+  let d4_math_ts: TS = ts_new(d4_math_tc, d4_p1.typecheck.types, d4_p1.typecheck.type_info, d4_p1.typecheck.sym_types, registry_new(d4_p1.resolve.symbols, d4_p1.module_graph.modules))
   d4_math_ts = tc_pass_shells(d4_math_ts, d4_math_po.root)
   d4_math_ts = tc_pass1(d4_math_ts, d4_math_po.root)
   // Now run both passes on main using math's accumulated types/sym_types.
-  d4_ts = ts_new(d4_tc, d4_math_ts.types, d4_math_ts.type_info, d4_math_ts.sym_types, reg_with_variant_set(registry_new(d4_p1.resolve.symbols, d4_p1.graph.modules), d4_math_ts.reg.variant_set))
+  d4_ts = ts_new(d4_tc, d4_math_ts.types, d4_math_ts.type_info, d4_math_ts.sym_types, reg_with_variant_set(registry_new(d4_p1.resolve.symbols, d4_p1.module_graph.modules), d4_math_ts.reg.variant_set))
   d4_ts = tc_pass_shells(d4_ts, d4_po.root)
   d4_ts = tc_pass1(d4_ts, d4_po.root)
   d4_ts = tc_pass2(d4_ts, d4_po.root)
@@ -668,27 +668,27 @@ fn main(): i32
     print("FAIL d4_cross_module_call: got " + i64_to_string(d4_err_count) + " diagnostic(s)")
 
   // Test d4_2: missing export produces a clear diagnostic.
-  let d4_inputs2: Vector<SourceInput> = Vector<SourceInput>::new()
-  d4_inputs2 = d4_inputs2.push(SourceInput("a.dao", "module lib::a\nfn secret(): i32 -> 42\n", false))
-  d4_inputs2 = d4_inputs2.push(SourceInput("b.dao", "module app::b\nimport lib::a\nfn f(): i32\n  return a::nonexistent()\n", false))
-  let d4_pg2: ProgramGraph = build_program(d4_inputs2)
+  let d4_inputs2: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  d4_inputs2 = d4_inputs2.push(graph::SourceInput("a.dao", "module lib::a\nfn secret(): i32 -> 42\n", false))
+  d4_inputs2 = d4_inputs2.push(graph::SourceInput("b.dao", "module app::b\nimport lib::a\nfn f(): i32\n  return a::nonexistent()\n", false))
+  let d4_pg2: graph::ProgramGraph = graph::build_program(d4_inputs2)
   let d4_p2: Program = program_from_graph(d4_pg2)
   d4_p2 = program_run_resolve(d4_p2)
   d4_p2 = program_init_typecheck(d4_p2)
-  let d4_b_mid: i64 = find_module_by_name(d4_p2.graph.modules, "app::b")
-  let d4_b_sf: SourceFile = program_file_of_module(d4_p2, d4_b_mid)
+  let d4_b_mid: i64 = graph::find_module_by_name(d4_p2.module_graph.modules, "app::b")
+  let d4_b_sf: graph::SourceFile = program_file_of_module(d4_p2, d4_b_mid)
   let d4_b_po: parser::ParseOutput = d4_b_sf.parse_output
   let d4_b_tc: TC = TC(d4_b_po.nodes, d4_b_po.idx, d4_b_po.toks, d4_b_sf.source_text, d4_p2.resolve.symbols, d4_p2.resolve.scopes, d4_p2.resolve.uses, d4_b_sf.file_id, d4_p2.resolve.extend_concept_bindings, d4_b_mid, d4_p2.resolve.module_exports)
   // Run pass1 on lib::a first.
-  let d4_a_mid: i64 = find_module_by_name(d4_p2.graph.modules, "lib::a")
-  let d4_a_sf: SourceFile = program_file_of_module(d4_p2, d4_a_mid)
+  let d4_a_mid: i64 = graph::find_module_by_name(d4_p2.module_graph.modules, "lib::a")
+  let d4_a_sf: graph::SourceFile = program_file_of_module(d4_p2, d4_a_mid)
   let d4_a_po: parser::ParseOutput = d4_a_sf.parse_output
   let d4_a_tc: TC = TC(d4_a_po.nodes, d4_a_po.idx, d4_a_po.toks, d4_a_sf.source_text, d4_p2.resolve.symbols, d4_p2.resolve.scopes, d4_p2.resolve.uses, d4_a_sf.file_id, d4_p2.resolve.extend_concept_bindings, d4_a_mid, d4_p2.resolve.module_exports)
-  let d4_a_ts: TS = ts_new(d4_a_tc, d4_p2.typecheck.types, d4_p2.typecheck.type_info, d4_p2.typecheck.sym_types, registry_new(d4_p2.resolve.symbols, d4_p2.graph.modules))
+  let d4_a_ts: TS = ts_new(d4_a_tc, d4_p2.typecheck.types, d4_p2.typecheck.type_info, d4_p2.typecheck.sym_types, registry_new(d4_p2.resolve.symbols, d4_p2.module_graph.modules))
   d4_a_ts = tc_pass_shells(d4_a_ts, d4_a_po.root)
   d4_a_ts = tc_pass1(d4_a_ts, d4_a_po.root)
   // Now typecheck app::b.
-  let d4_b_ts: TS = ts_new(d4_b_tc, d4_a_ts.types, d4_a_ts.type_info, d4_a_ts.sym_types, reg_with_variant_set(registry_new(d4_p2.resolve.symbols, d4_p2.graph.modules), d4_a_ts.reg.variant_set))
+  let d4_b_ts: TS = ts_new(d4_b_tc, d4_a_ts.types, d4_a_ts.type_info, d4_a_ts.sym_types, reg_with_variant_set(registry_new(d4_p2.resolve.symbols, d4_p2.module_graph.modules), d4_a_ts.reg.variant_set))
   d4_b_ts = tc_pass_shells(d4_b_ts, d4_b_po.root)
   d4_b_ts = tc_pass1(d4_b_ts, d4_b_po.root)
   d4_b_ts = tc_pass2(d4_b_ts, d4_b_po.root)
@@ -707,27 +707,27 @@ fn main(): i32
     print("FAIL d4_missing_export_diagnostic")
 
   // Test d4_3: mod::Enum::NotAVariant produces a variant-not-found diagnostic.
-  let d4_inputs3: Vector<SourceInput> = Vector<SourceInput>::new()
-  d4_inputs3 = d4_inputs3.push(SourceInput("c.dao", "module lib::colors\nenum Color:\n  Red\n  Blue\n", false))
-  d4_inputs3 = d4_inputs3.push(SourceInput("d.dao", "module app::d\nimport lib::colors\nfn f(): i32\n  let x: i32 = colors::Color::NotAColor\n  return 0\n", false))
-  let d4_pg3: ProgramGraph = build_program(d4_inputs3)
+  let d4_inputs3: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  d4_inputs3 = d4_inputs3.push(graph::SourceInput("c.dao", "module lib::colors\nenum Color:\n  Red\n  Blue\n", false))
+  d4_inputs3 = d4_inputs3.push(graph::SourceInput("d.dao", "module app::d\nimport lib::colors\nfn f(): i32\n  let x: i32 = colors::Color::NotAColor\n  return 0\n", false))
+  let d4_pg3: graph::ProgramGraph = graph::build_program(d4_inputs3)
   let d4_p3: Program = program_from_graph(d4_pg3)
   d4_p3 = program_run_resolve(d4_p3)
   d4_p3 = program_init_typecheck(d4_p3)
   // Run pass1 on lib::colors (registers enum + variants).
-  let d4_c_mid: i64 = find_module_by_name(d4_p3.graph.modules, "lib::colors")
-  let d4_c_sf: SourceFile = program_file_of_module(d4_p3, d4_c_mid)
+  let d4_c_mid: i64 = graph::find_module_by_name(d4_p3.module_graph.modules, "lib::colors")
+  let d4_c_sf: graph::SourceFile = program_file_of_module(d4_p3, d4_c_mid)
   let d4_c_po: parser::ParseOutput = d4_c_sf.parse_output
   let d4_c_tc: TC = TC(d4_c_po.nodes, d4_c_po.idx, d4_c_po.toks, d4_c_sf.source_text, d4_p3.resolve.symbols, d4_p3.resolve.scopes, d4_p3.resolve.uses, d4_c_sf.file_id, d4_p3.resolve.extend_concept_bindings, d4_c_mid, d4_p3.resolve.module_exports)
-  let d4_c_ts: TS = ts_new(d4_c_tc, d4_p3.typecheck.types, d4_p3.typecheck.type_info, d4_p3.typecheck.sym_types, registry_new(d4_p3.resolve.symbols, d4_p3.graph.modules))
+  let d4_c_ts: TS = ts_new(d4_c_tc, d4_p3.typecheck.types, d4_p3.typecheck.type_info, d4_p3.typecheck.sym_types, registry_new(d4_p3.resolve.symbols, d4_p3.module_graph.modules))
   d4_c_ts = tc_pass_shells(d4_c_ts, d4_c_po.root)
   d4_c_ts = tc_pass1(d4_c_ts, d4_c_po.root)
   // Run pass1+pass2 on app::d with colors' variant_set.
-  let d4_d_mid: i64 = find_module_by_name(d4_p3.graph.modules, "app::d")
-  let d4_d_sf: SourceFile = program_file_of_module(d4_p3, d4_d_mid)
+  let d4_d_mid: i64 = graph::find_module_by_name(d4_p3.module_graph.modules, "app::d")
+  let d4_d_sf: graph::SourceFile = program_file_of_module(d4_p3, d4_d_mid)
   let d4_d_po: parser::ParseOutput = d4_d_sf.parse_output
   let d4_d_tc: TC = TC(d4_d_po.nodes, d4_d_po.idx, d4_d_po.toks, d4_d_sf.source_text, d4_p3.resolve.symbols, d4_p3.resolve.scopes, d4_p3.resolve.uses, d4_d_sf.file_id, d4_p3.resolve.extend_concept_bindings, d4_d_mid, d4_p3.resolve.module_exports)
-  let d4_d_ts: TS = ts_new(d4_d_tc, d4_c_ts.types, d4_c_ts.type_info, d4_c_ts.sym_types, reg_with_variant_set(registry_new(d4_p3.resolve.symbols, d4_p3.graph.modules), d4_c_ts.reg.variant_set))
+  let d4_d_ts: TS = ts_new(d4_d_tc, d4_c_ts.types, d4_c_ts.type_info, d4_c_ts.sym_types, reg_with_variant_set(registry_new(d4_p3.resolve.symbols, d4_p3.module_graph.modules), d4_c_ts.reg.variant_set))
   d4_d_ts = tc_pass_shells(d4_d_ts, d4_d_po.root)
   d4_d_ts = tc_pass1(d4_d_ts, d4_d_po.root)
   d4_d_ts = tc_pass2(d4_d_ts, d4_d_po.root)
@@ -754,10 +754,10 @@ fn main(): i32
   // both — the cross-module call types correctly because math's
   // function type is registered in pass1 before main's body is
   // checked in pass2.
-  let d5_inputs1: Vector<SourceInput> = Vector<SourceInput>::new()
-  d5_inputs1 = d5_inputs1.push(SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
-  d5_inputs1 = d5_inputs1.push(SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
-  let d5_pg1: ProgramGraph = build_program(d5_inputs1)
+  let d5_inputs1: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  d5_inputs1 = d5_inputs1.push(graph::SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
+  d5_inputs1 = d5_inputs1.push(graph::SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
+  let d5_pg1: graph::ProgramGraph = graph::build_program(d5_inputs1)
   let d5_p1: Program = program_from_graph(d5_pg1)
   d5_p1 = program_run_resolve(d5_p1)
   d5_p1 = program_run_typecheck(d5_p1)
@@ -782,10 +782,10 @@ fn main(): i32
   // Test d5_2: Canonical type identity across modules.
   // Both modules reference i32 — the type index should be the same
   // canonical builtin (index 2) in the program type table.
-  let d5_inputs2: Vector<SourceInput> = Vector<SourceInput>::new()
-  d5_inputs2 = d5_inputs2.push(SourceInput("a.dao", "module mod_a\nfn fa(): i32 -> 1\n", false))
-  d5_inputs2 = d5_inputs2.push(SourceInput("b.dao", "module mod_b\nfn fb(): i32 -> 2\n", false))
-  let d5_pg2: ProgramGraph = build_program(d5_inputs2)
+  let d5_inputs2: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  d5_inputs2 = d5_inputs2.push(graph::SourceInput("a.dao", "module mod_a\nfn fa(): i32 -> 1\n", false))
+  d5_inputs2 = d5_inputs2.push(graph::SourceInput("b.dao", "module mod_b\nfn fb(): i32 -> 2\n", false))
+  let d5_pg2: graph::ProgramGraph = graph::build_program(d5_inputs2)
   let d5_p2: Program = program_from_graph(d5_pg2)
   d5_p2 = program_run_resolve(d5_p2)
   d5_p2 = program_run_typecheck(d5_p2)
@@ -808,16 +808,16 @@ fn main(): i32
   // Test d5_3: Program-level expr_types are populated after
   // program_run_typecheck. Verify tc_get_expr_type returns a valid
   // type for an expression node in a typechecked module.
-  let d5_inputs3: Vector<SourceInput> = Vector<SourceInput>::new()
-  d5_inputs3 = d5_inputs3.push(SourceInput("e.dao", "module expr_test\nfn f(): i32 -> 1 + 2\n", false))
-  let d5_pg3: ProgramGraph = build_program(d5_inputs3)
+  let d5_inputs3: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  d5_inputs3 = d5_inputs3.push(graph::SourceInput("e.dao", "module expr_test\nfn f(): i32 -> 1 + 2\n", false))
+  let d5_pg3: graph::ProgramGraph = graph::build_program(d5_inputs3)
   let d5_p3: Program = program_from_graph(d5_pg3)
   d5_p3 = program_run_resolve(d5_p3)
   d5_p3 = program_run_typecheck(d5_p3)
   let d5_3_ok: bool = false
   // Scan all node indices in module 0 for any expression with a type.
   let d5_3_mid: i64 = to_i64(0)
-  let d5_3_sf: SourceFile = program_file_of_module(d5_p3, d5_3_mid)
+  let d5_3_sf: graph::SourceFile = program_file_of_module(d5_p3, d5_3_mid)
   let d5_3_ni: i64 = 0
   while d5_3_ni < d5_3_sf.parse_output.nodes.length():
     let d5_3_ti: i64 = tc_get_expr_type(d5_p3.typecheck, d5_3_mid, d5_3_ni)
@@ -838,18 +838,18 @@ fn main(): i32
   let smoke_base: string = "testdata/bootstrap/multifile/smoke/"
   let smoke_ok: bool = false
   if file_exists(smoke_base + "core_fmt.dao"):
-    let smoke_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-    smoke_inputs = smoke_inputs.push(SourceInput("core_fmt.dao", read_file(smoke_base + "core_fmt.dao"), false))
-    smoke_inputs = smoke_inputs.push(SourceInput("app_math.dao", read_file(smoke_base + "app_math.dao"), false))
-    smoke_inputs = smoke_inputs.push(SourceInput("app_main.dao", read_file(smoke_base + "app_main.dao"), false))
-    let smoke_pg: ProgramGraph = build_program(smoke_inputs)
+    let smoke_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+    smoke_inputs = smoke_inputs.push(graph::SourceInput("core_fmt.dao", read_file(smoke_base + "core_fmt.dao"), false))
+    smoke_inputs = smoke_inputs.push(graph::SourceInput("app_math.dao", read_file(smoke_base + "app_math.dao"), false))
+    smoke_inputs = smoke_inputs.push(graph::SourceInput("app_main.dao", read_file(smoke_base + "app_main.dao"), false))
+    let smoke_pg: graph::ProgramGraph = graph::build_program(smoke_inputs)
     let smoke_p: Program = program_from_graph(smoke_pg)
     smoke_p = program_run_resolve(smoke_p)
     smoke_p = program_run_typecheck(smoke_p)
     // Verify: 3 modules in topo order, types registered beyond builtins,
     // no typecheck-origin diagnostics beyond the resolve baseline.
     let smoke_tc_ok: bool = true
-    if smoke_p.graph.topo_order.length() != 3:
+    if smoke_p.module_graph.topo_order.length() != 3:
       smoke_tc_ok = false
     if smoke_p.typecheck.types.length() <= 13:
       smoke_tc_ok = false
@@ -870,15 +870,15 @@ fn main(): i32
   let enum_base: string = "testdata/bootstrap/multifile/cross_module_enum/"
   let enum_ok: bool = false
   if file_exists(enum_base + "colors.dao"):
-    let enum_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-    enum_inputs = enum_inputs.push(SourceInput("colors.dao", read_file(enum_base + "colors.dao"), false))
-    enum_inputs = enum_inputs.push(SourceInput("user.dao", read_file(enum_base + "user.dao"), false))
-    let enum_pg: ProgramGraph = build_program(enum_inputs)
+    let enum_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+    enum_inputs = enum_inputs.push(graph::SourceInput("colors.dao", read_file(enum_base + "colors.dao"), false))
+    enum_inputs = enum_inputs.push(graph::SourceInput("user.dao", read_file(enum_base + "user.dao"), false))
+    let enum_pg: graph::ProgramGraph = graph::build_program(enum_inputs)
     let enum_p: Program = program_from_graph(enum_pg)
     enum_p = program_run_resolve(enum_p)
     enum_p = program_run_typecheck(enum_p)
     // Verify: 2 modules, no typecheck errors beyond resolve baseline.
-    if enum_p.graph.topo_order.length() == 2:
+    if enum_p.module_graph.topo_order.length() == 2:
       if enum_p.diags.length() <= enum_p.resolve.diags.length():
         enum_ok = true
   if enum_ok:
@@ -905,14 +905,14 @@ fn main(): i32
   let ext_base: string = "testdata/bootstrap/multifile/extend_isolation/"
   let ext_ok: bool = false
   if file_exists(ext_base + "provider.dao"):
-    let ext_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-    ext_inputs = ext_inputs.push(SourceInput("provider.dao", read_file(ext_base + "provider.dao"), false))
-    ext_inputs = ext_inputs.push(SourceInput("consumer.dao", read_file(ext_base + "consumer.dao"), false))
-    let ext_pg: ProgramGraph = build_program(ext_inputs)
+    let ext_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+    ext_inputs = ext_inputs.push(graph::SourceInput("provider.dao", read_file(ext_base + "provider.dao"), false))
+    ext_inputs = ext_inputs.push(graph::SourceInput("consumer.dao", read_file(ext_base + "consumer.dao"), false))
+    let ext_pg: graph::ProgramGraph = graph::build_program(ext_inputs)
     let ext_p: Program = program_from_graph(ext_pg)
     ext_p = program_run_resolve(ext_p)
     ext_p = program_run_typecheck(ext_p)
-    if ext_p.graph.topo_order.length() == 2:
+    if ext_p.module_graph.topo_order.length() == 2:
       if ext_p.diags.length() <= ext_p.resolve.diags.length():
         ext_ok = true
   if ext_ok:
@@ -937,12 +937,12 @@ fn main(): i32
   //      prelude's, visible unqualified everywhere (an import binds
   //      only its module name, CONTRACT_MODULE_SYSTEM.md §3, §7).
   //   3. Multiple builtins extended in one module.
-  let cb_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  cb_inputs = cb_inputs.push(SourceInput("a.dao", "module case_a\n\nconcept Showable:\n  fn show(self): string\n\nextend i32 as Showable:\n  fn show(self): string\n    return \"i32\"\n", false))
-  cb_inputs = cb_inputs.push(SourceInput("stdlib/core/c.dao", "module core::concepts\nconcept Printable:\n  fn to_string(self): string\n", true))
-  cb_inputs = cb_inputs.push(SourceInput("p.dao", "module case_b::impl\n\nextend i64 as Printable:\n  fn to_string(self): string\n    return \"i64\"\n", false))
-  cb_inputs = cb_inputs.push(SourceInput("m.dao", "module case_c\n\nconcept Named:\n  fn name(self): string\n\nextend i32 as Named:\n  fn name(self): string\n    return \"i32\"\n\nextend bool as Named:\n  fn name(self): string\n    return \"bool\"\n\nextend string as Named:\n  fn name(self): string\n    return \"string\"\n", false))
-  let cb_pg: ProgramGraph = build_program(cb_inputs)
+  let cb_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  cb_inputs = cb_inputs.push(graph::SourceInput("a.dao", "module case_a\n\nconcept Showable:\n  fn show(self): string\n\nextend i32 as Showable:\n  fn show(self): string\n    return \"i32\"\n", false))
+  cb_inputs = cb_inputs.push(graph::SourceInput("stdlib/core/c.dao", "module core::concepts\nconcept Printable:\n  fn to_string(self): string\n", true))
+  cb_inputs = cb_inputs.push(graph::SourceInput("p.dao", "module case_b::impl\n\nextend i64 as Printable:\n  fn to_string(self): string\n    return \"i64\"\n", false))
+  cb_inputs = cb_inputs.push(graph::SourceInput("m.dao", "module case_c\n\nconcept Named:\n  fn name(self): string\n\nextend i32 as Named:\n  fn name(self): string\n    return \"i32\"\n\nextend bool as Named:\n  fn name(self): string\n    return \"bool\"\n\nextend string as Named:\n  fn name(self): string\n    return \"string\"\n", false))
+  let cb_pg: graph::ProgramGraph = graph::build_program(cb_inputs)
   let cb_p: Program = program_from_graph(cb_pg)
   cb_p = program_run_resolve(cb_p)
   // Resolve must succeed cleanly.  Without this guard, a resolver
@@ -957,7 +957,7 @@ fn main(): i32
   let cb_found_spurious: bool = false
   let cb_di: i64 = cb_resolve_diags
   while cb_di < cb_p.diags.length():
-    let fd: FileDiagnostic = cb_p.diags.get(cb_di)
+    let fd: graph::FileDiagnostic = cb_p.diags.get(cb_di)
     if fd.diag.message == "extend does not implement required method 'show' from concept 'Showable'":
       cb_found_spurious = true
     cb_di = cb_di + 1
@@ -1103,16 +1103,16 @@ fn main(): i32
   // the type checker still identifies a declaration by node index
   // without file provenance (the closure audit's typecheck frontier),
   // which is not what this test measures.
-  let sb_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  sb_inputs = sb_inputs.push(SourceInput("stdlib/core/box.dao", "module core::box\nclass Box:\n  n: i32\n  fn m(self): bool\n    return true\n", true))
-  sb_inputs = sb_inputs.push(SourceInput("main.dao", "module app::main\nfn pad(): i32 -> 0\nclass Box:\n  n: i32\n  fn m(self): i32\n    return self.n\nfn f(): i32\n  let b: Box = Box(1)\n  return b.m()\n", false))
-  let sb_p: Program = program_from_graph(build_program(sb_inputs))
+  let sb_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  sb_inputs = sb_inputs.push(graph::SourceInput("stdlib/core/box.dao", "module core::box\nclass Box:\n  n: i32\n  fn m(self): bool\n    return true\n", true))
+  sb_inputs = sb_inputs.push(graph::SourceInput("main.dao", "module app::main\nfn pad(): i32 -> 0\nclass Box:\n  n: i32\n  fn m(self): i32\n    return self.n\nfn f(): i32\n  let b: Box = Box(1)\n  return b.m()\n", false))
+  let sb_p: Program = program_from_graph(graph::build_program(sb_inputs))
   sb_p = program_run_resolve(sb_p)
   sb_p = program_run_typecheck(sb_p)
   let sb_errors: i64 = 0
   let sb_i: i64 = 0
   while sb_i < sb_p.diags.length():
-    let sb_fd: FileDiagnostic = sb_p.diags.get(sb_i)
+    let sb_fd: graph::FileDiagnostic = sb_p.diags.get(sb_i)
     if sb_fd.path == "main.dao":
       sb_errors = sb_errors + 1
     sb_i = sb_i + 1
@@ -1129,10 +1129,10 @@ fn main(): i32
   // Test 52: the receiver's type, not its name, picks the method: a
   // value of the prelude's `Box` answers with the prelude's `m` (bool)
   // even where this module declares its own `Box` whose `m` is i32.
-  let qb_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  qb_inputs = qb_inputs.push(SourceInput("stdlib/core/box.dao", "module core::box\nclass Box:\n  n: i32\n  fn m(self): bool\n    return true\n\nfn make_box(): Box\n  return Box(1)\n", true))
-  qb_inputs = qb_inputs.push(SourceInput("main.dao", "module app::main\nfn pad(): i32 -> 0\nclass Box:\n  n: i32\n  fn m(self): i32\n    return self.n\nfn f(): bool\n  return make_box().m()\nfn g(): i32\n  return Box(2).m()\n", false))
-  let qb_p: Program = program_from_graph(build_program(qb_inputs))
+  let qb_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  qb_inputs = qb_inputs.push(graph::SourceInput("stdlib/core/box.dao", "module core::box\nclass Box:\n  n: i32\n  fn m(self): bool\n    return true\n\nfn make_box(): Box\n  return Box(1)\n", true))
+  qb_inputs = qb_inputs.push(graph::SourceInput("main.dao", "module app::main\nfn pad(): i32 -> 0\nclass Box:\n  n: i32\n  fn m(self): i32\n    return self.n\nfn f(): bool\n  return make_box().m()\nfn g(): i32\n  return Box(2).m()\n", false))
+  let qb_p: Program = program_from_graph(graph::build_program(qb_inputs))
   qb_p = program_run_resolve(qb_p)
   qb_p = program_run_typecheck(qb_p)
   let qb_errors: i64 = 0
@@ -1155,10 +1155,10 @@ fn main(): i32
   // prelude extends `Box` with `pick(): bool` and this module extends
   // it with `pick(): i32`, this module's wins (§5, §7.2) — the
   // receiver's owner picks only a method declared with the type.
-  let xb_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  xb_inputs = xb_inputs.push(SourceInput("stdlib/core/box.dao", "module core::box\nconcept PickB:\n  fn pick(self): bool\n\nclass Box:\n  n: i32\n\nfn make_box(): Box\n  return Box(1)\n\nextend Box as PickB:\n  fn pick(self): bool\n    return true\n", true))
-  xb_inputs = xb_inputs.push(SourceInput("main.dao", "module app::main\nconcept PickI:\n  fn pick(self): i32\n\nextend Box as PickI:\n  fn pick(self): i32\n    return 7\n\nfn f(): i32\n  return make_box().pick()\n", false))
-  let xb_p: Program = program_from_graph(build_program(xb_inputs))
+  let xb_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  xb_inputs = xb_inputs.push(graph::SourceInput("stdlib/core/box.dao", "module core::box\nconcept PickB:\n  fn pick(self): bool\n\nclass Box:\n  n: i32\n\nfn make_box(): Box\n  return Box(1)\n\nextend Box as PickB:\n  fn pick(self): bool\n    return true\n", true))
+  xb_inputs = xb_inputs.push(graph::SourceInput("main.dao", "module app::main\nconcept PickI:\n  fn pick(self): i32\n\nextend Box as PickI:\n  fn pick(self): i32\n    return 7\n\nfn f(): i32\n  return make_box().pick()\n", false))
+  let xb_p: Program = program_from_graph(graph::build_program(xb_inputs))
   xb_p = program_run_resolve(xb_p)
   xb_p = program_run_typecheck(xb_p)
   let xb_errors: i64 = 0
@@ -1181,10 +1181,10 @@ fn main(): i32
   // declarations share one freely (these two classes have the same
   // shape, so both methods sit at the same index), and each must keep
   // its own signature rather than the other's.
-  let ci_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  ci_inputs = ci_inputs.push(SourceInput("a.dao", "module app::a\nclass Box:\n  n: i32\n  fn pick(self): i32\n    return self.n\n", false))
-  ci_inputs = ci_inputs.push(SourceInput("b.dao", "module app::b\nclass Cup:\n  n: bool\n  fn pick(self): bool\n    return self.n\n", false))
-  let ci_pg: ProgramGraph = build_program(ci_inputs)
+  let ci_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  ci_inputs = ci_inputs.push(graph::SourceInput("a.dao", "module app::a\nclass Box:\n  n: i32\n  fn pick(self): i32\n    return self.n\n", false))
+  ci_inputs = ci_inputs.push(graph::SourceInput("b.dao", "module app::b\nclass Cup:\n  n: bool\n  fn pick(self): bool\n    return self.n\n", false))
+  let ci_pg: graph::ProgramGraph = graph::build_program(ci_inputs)
   let ci_p: Program = program_from_graph(ci_pg)
   ci_p = program_run_resolve(ci_p)
   ci_p = program_run_typecheck(ci_p)
@@ -1192,7 +1192,7 @@ fn main(): i32
   let ci_b_idx: i64 = to_i64(-1)
   let ci_fi: i64 = 0
   while ci_fi < ci_pg.files.length():
-    let ci_sf: SourceFile = ci_pg.files.get(ci_fi)
+    let ci_sf: graph::SourceFile = ci_pg.files.get(ci_fi)
     if ci_sf.path == "a.dao":
       ci_a_idx = first_method_decl_index(ci_sf.parse_output)
     if ci_sf.path == "b.dao":
@@ -1268,16 +1268,16 @@ fn main(): i32
   // A static `Type::method` reaches only the resolved type's own method:
   // a module-local `Box` with no `make` must not borrow the prelude
   // `Box`'s static `make` through a same-named-mangle match.
-  let shadow_inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  shadow_inputs = shadow_inputs.push(SourceInput("stdlib/core/box.dao", "module core::box\nclass Box:\n  n: i32\n  fn make(): Box\n    return Box(0)\n", true))
-  shadow_inputs = shadow_inputs.push(SourceInput("main.dao", "module app::main\nclass Box:\n  n: i32\nfn f(): i32\n  let b: Box = Box::make()\n  return 0\n", false))
-  let shadow_p: Program = program_from_graph(build_program(shadow_inputs))
+  let shadow_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  shadow_inputs = shadow_inputs.push(graph::SourceInput("stdlib/core/box.dao", "module core::box\nclass Box:\n  n: i32\n  fn make(): Box\n    return Box(0)\n", true))
+  shadow_inputs = shadow_inputs.push(graph::SourceInput("main.dao", "module app::main\nclass Box:\n  n: i32\nfn f(): i32\n  let b: Box = Box::make()\n  return 0\n", false))
+  let shadow_p: Program = program_from_graph(graph::build_program(shadow_inputs))
   shadow_p = program_run_resolve(shadow_p)
   shadow_p = program_run_typecheck(shadow_p)
   let shadow_errors: i64 = 0
   let shadow_i: i64 = 0
   while shadow_i < shadow_p.diags.length():
-    let shadow_fd: FileDiagnostic = shadow_p.diags.get(shadow_i)
+    let shadow_fd: graph::FileDiagnostic = shadow_p.diags.get(shadow_i)
     if shadow_fd.path == "main.dao":
       shadow_errors = shadow_errors + 1
     shadow_i = shadow_i + 1
@@ -1384,25 +1384,25 @@ fn main(): i32
   // any module can read.
   let dc_lib: string = "module app::lib\nderived concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string\n    return \"n\"\n"
   let dc_main: string = "module app::main\nimport app::lib\n\nclass P:\n  x: i32\n\nfn f(p: P): string\n  return p.show()\n"
-  if tc_expect_program_errors("derived_conformance_needs_visible_extend", Vector<SourceInput>::new().push(SourceInput("lib.dao", dc_lib, false)), dc_main, "main.dao", 1):
+  if tc_expect_program_errors("derived_conformance_needs_visible_extend", Vector<graph::SourceInput>::new().push(graph::SourceInput("lib.dao", dc_lib, false)), dc_main, "main.dao", 1):
     pass_count = pass_count + 1
   let dc_prelude: string = "module core::show\nderived concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string\n    return \"n\"\n"
   let dc_user: string = "module app::main\n\nclass P:\n  x: i32\n\nfn f(p: P): string\n  return p.show()\n"
-  if tc_expect_program_errors("derived_conformance_through_prelude_extend", Vector<SourceInput>::new().push(SourceInput("stdlib/core/show.dao", dc_prelude, true)), dc_user, "main.dao", 0):
+  if tc_expect_program_errors("derived_conformance_through_prelude_extend", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/show.dao", dc_prelude, true)), dc_user, "main.dao", 0):
     pass_count = pass_count + 1
   // The prelude's files see one another as one namespace: a class in
   // one prelude file derives through a concept and extend declared in
   // another, whichever is checked first (collection precedes derivation).
   let dc_pre_class: string = "module core::a\n\nclass P:\n  x: i32\n"
   let dc_pre_user: string = "module app::main\n\nfn f(p: P): string\n  return p.show()\n"
-  if tc_expect_program_errors("derived_conformance_across_prelude_files", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", dc_pre_class, true)).push(SourceInput("stdlib/core/z.dao", dc_prelude, true)), dc_pre_user, "main.dao", 0):
+  if tc_expect_program_errors("derived_conformance_across_prelude_files", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/a.dao", dc_pre_class, true)).push(graph::SourceInput("stdlib/core/z.dao", dc_prelude, true)), dc_pre_user, "main.dao", 0):
     pass_count = pass_count + 1
   // Two modules each extending one type as one concept conform it in
   // each of them: a class in either derives.
   let dc_show_only: string = "module core::show\nderived concept Show:\n  fn show(self): string\n"
   let dc_lib_a: string = "module app::a\nextend i32 as Show:\n  fn show(self): string\n    return \"a\"\n\nclass PA:\n  x: i32\n\nfn fa(p: PA): string\n  return p.show()\n"
   let dc_lib_b: string = "module app::b\nextend i32 as Show:\n  fn show(self): string\n    return \"b\"\n\nclass PB:\n  x: i32\n\nfn fb(p: PB): string\n  return p.show()\n"
-  if tc_expect_program_errors("conformance_per_module_extends", Vector<SourceInput>::new().push(SourceInput("stdlib/core/show.dao", dc_show_only, true)).push(SourceInput("a.dao", dc_lib_a, false)).push(SourceInput("b.dao", dc_lib_b, false)), "module app::main\nimport app::a\nimport app::b\n", "main.dao", 0):
+  if tc_expect_program_errors("conformance_per_module_extends", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/show.dao", dc_show_only, true)).push(graph::SourceInput("a.dao", dc_lib_a, false)).push(graph::SourceInput("b.dao", dc_lib_b, false)), "module app::main\nimport app::a\nimport app::b\n", "main.dao", 0):
     pass_count = pass_count + 1
   // Every derivation precedes every body: a body in an earlier prelude
   // file dispatches through a class, concept, and extend declared in a
@@ -1411,35 +1411,35 @@ fn main(): i32
   // type, never through this file's tokens).
   let dc_pre_body: string = "module core::a\n\nfn render(p: P): string\n  return p.show()\n"
   let dc_pre_all: string = "module core::z\nderived concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string\n    return \"n\"\n\nclass P:\n  x: i32\n"
-  if tc_expect_program_errors("derivation_precedes_bodies", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", dc_pre_body, true)).push(SourceInput("stdlib/core/z.dao", dc_pre_all, true)), "module app::main\n", "main.dao", 0):
+  if tc_expect_program_errors("derivation_precedes_bodies", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/a.dao", dc_pre_body, true)).push(graph::SourceInput("stdlib/core/z.dao", dc_pre_all, true)), "module app::main\n", "main.dao", 0):
     pass_count = pass_count + 1
   let dc_pre_extend: string = "module core::a\n\nextend i32 as Show:\n  fn show(self): string\n    return \"n\"\n"
-  if tc_expect_program_errors("satisfaction_across_prelude_files", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", dc_pre_extend, true)).push(SourceInput("stdlib/core/z.dao", dc_show_only, true)), "module app::main\n", "main.dao", 0):
+  if tc_expect_program_errors("satisfaction_across_prelude_files", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/a.dao", dc_pre_extend, true)).push(graph::SourceInput("stdlib/core/z.dao", dc_show_only, true)), "module app::main\n", "main.dao", 0):
     pass_count = pass_count + 1
   // Satisfaction is checked once every module's method tables exist: an
   // extend in an earlier prelude file is held to a concept declared in a
   // later one.
   let dc_pre_bad_extend: string = "module core::a\n\nextend i32 as Show:\n  fn show(self): i64\n    return 1\n"
-  if tc_expect_program_errors("satisfaction_holds_across_prelude_files", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", dc_pre_bad_extend, true)).push(SourceInput("stdlib/core/z.dao", dc_show_only, true)), "module app::main\n", "stdlib/core/a.dao", 1):
+  if tc_expect_program_errors("satisfaction_holds_across_prelude_files", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/a.dao", dc_pre_bad_extend, true)).push(graph::SourceInput("stdlib/core/z.dao", dc_show_only, true)), "module app::main\n", "stdlib/core/a.dao", 1):
     pass_count = pass_count + 1
   // Another module's struct is read through its field symbols: a field
   // access types, and a missing field is diagnosed, across the module
   // boundary.
   let dc_point: string = "module app::lib\n\nclass P:\n  x: i32\n"
-  if tc_expect_program_errors("foreign_field_access_typed", Vector<SourceInput>::new().push(SourceInput("lib.dao", dc_point, false)), "module app::main\nimport app::lib\n\nfn f(p: lib::P): bool\n  return p.x\n", "main.dao", 1):
+  if tc_expect_program_errors("foreign_field_access_typed", Vector<graph::SourceInput>::new().push(graph::SourceInput("lib.dao", dc_point, false)), "module app::main\nimport app::lib\n\nfn f(p: lib::P): bool\n  return p.x\n", "main.dao", 1):
     pass_count = pass_count + 1
-  if tc_expect_program_errors("foreign_field_missing_diagnosed", Vector<SourceInput>::new().push(SourceInput("lib.dao", dc_point, false)), "module app::main\nimport app::lib\n\nfn f(p: lib::P): i32\n  return p.y\n", "main.dao", 1):
+  if tc_expect_program_errors("foreign_field_missing_diagnosed", Vector<graph::SourceInput>::new().push(graph::SourceInput("lib.dao", dc_point, false)), "module app::main\nimport app::lib\n\nfn f(p: lib::P): i32\n  return p.y\n", "main.dao", 1):
     pass_count = pass_count + 1
   // Every identity precedes every alias and signature: an alias and an
   // enum declared in a later prelude file resolve in an earlier one's
   // signatures, so those signatures carry their meaning.
   let dc_alias_user: string = "module core::a\nderived concept Show:\n  fn show(self, n: Number): bool\n\nextend i32 as Show:\n  fn show(self, n: Number): bool\n    return true\n"
   let dc_alias_decl: string = "module core::z\ntype Number = i32\n"
-  if tc_expect_program_errors("alias_across_prelude_files_types_signature", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", dc_alias_user, true)).push(SourceInput("stdlib/core/z.dao", dc_alias_decl, true)), "module app::main\n\nclass P:\n  x: i32\n\nfn f(p: P): bool\n  return p.show(true)\n", "main.dao", 1):
+  if tc_expect_program_errors("alias_across_prelude_files_types_signature", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/a.dao", dc_alias_user, true)).push(graph::SourceInput("stdlib/core/z.dao", dc_alias_decl, true)), "module app::main\n\nclass P:\n  x: i32\n\nfn f(p: P): bool\n  return p.show(true)\n", "main.dao", 1):
     pass_count = pass_count + 1
   let dc_enum_user: string = "module core::a\nfn pick(c: Color): i32\n  return 0\n"
   let dc_enum_decl: string = "module core::z\nenum Color:\n  Red\n  Blue\n"
-  if tc_expect_program_errors("enum_across_prelude_files_types_signature", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", dc_enum_user, true)).push(SourceInput("stdlib/core/z.dao", dc_enum_decl, true)), "module app::main\n\nfn f(): i32\n  return pick(1)\n", "main.dao", 1):
+  if tc_expect_program_errors("enum_across_prelude_files_types_signature", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/a.dao", dc_enum_user, true)).push(graph::SourceInput("stdlib/core/z.dao", dc_enum_decl, true)), "module app::main\n\nfn f(): i32\n  return pick(1)\n", "main.dao", 1):
     pass_count = pass_count + 1
   // A generic concept head is no type either.
   if tc_expect_rejected("generic_concept_annotation_rejected", "derived concept C<T>:\n  fn f(self): bool\n\nextern fn consume(x: C<i32>): bool\n"):
@@ -1449,12 +1449,12 @@ fn main(): i32
   // the same declaration index answers with its own `get`.
   let dc_pre_box: string = "module core::box\nclass Box:\n  n: i32\n  fn get(self): bool\n    return true\n"
   let dc_user_box: string = "module app::main\nclass Box:\n  n: i32\n  fn get(self): i32\n    return 1\n\nfn f(b: Box): i32\n  return b.get()\n"
-  if tc_expect_program_errors("shadowing_class_keeps_its_own_method", Vector<SourceInput>::new().push(SourceInput("stdlib/core/box.dao", dc_pre_box, true)), dc_user_box, "main.dao", 0):
+  if tc_expect_program_errors("shadowing_class_keeps_its_own_method", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/box.dao", dc_pre_box, true)), dc_user_box, "main.dao", 0):
     pass_count = pass_count + 1
   // An extend's `self` is the type its target annotation resolves to in
   // the extend's own module, not a same-named type elsewhere.
   let dc_pre_ext: string = "module core::p\nconcept Show:\n  fn show(self): i32\n\nclass P:\n  x: i32\n\nextend P as Show:\n  fn show(self): i32\n    return self.x\n"
-  if tc_expect_program_errors("extend_self_is_resolved_target", Vector<SourceInput>::new().push(SourceInput("stdlib/core/p.dao", dc_pre_ext, true)), "module app::main\nclass P:\n  x: bool\n", "main.dao", 0):
+  if tc_expect_program_errors("extend_self_is_resolved_target", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/p.dao", dc_pre_ext, true)), "module app::main\nclass P:\n  x: bool\n", "main.dao", 0):
     pass_count = pass_count + 1
   if tc_expect_rejected("concept_in_generic_argument_rejected", "concept C:\n  fn f(self): bool\n\nclass Box<T>:\n  v: T\n\nextern fn consume(x: Box<C>): bool\n"):
     pass_count = pass_count + 1
@@ -1467,7 +1467,7 @@ fn main(): i32
   // extends: main's `P`, deriving `Show`, is not answered by the
   // prelude's `P.show`.
   let dc_pre_pshow: string = "module core::p\nderived concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string\n    return \"n\"\n\nclass P:\n  n: i32\n  fn show(self): bool\n    return true\n"
-  if tc_expect_program_errors("other_type_method_never_answers", Vector<SourceInput>::new().push(SourceInput("stdlib/core/p.dao", dc_pre_pshow, true)), "module app::main\nclass P:\n  x: i32\n\nfn f(p: P): string\n  return p.show()\n", "main.dao", 0):
+  if tc_expect_program_errors("other_type_method_never_answers", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/p.dao", dc_pre_pshow, true)), "module app::main\nclass P:\n  x: i32\n\nfn f(p: P): string\n  return p.show()\n", "main.dao", 0):
     pass_count = pass_count + 1
   // The applied self form keeps its pointer wrappers: `Ptr<C<T>>` is `Ptr<U>`.
   if tc_expect_clean("applied_self_pointer_kept", "concept C<T>:\n  fn same(self, o: Ptr<C<T>>): bool\n\nfn f<U: C<i32>>(x: U, p: Ptr<U>): bool\n  return x.same(p)\n"):
@@ -1475,18 +1475,18 @@ fn main(): i32
   if tc_expect_rejected("applied_self_pointer_not_erased", "concept C<T>:\n  fn same(self, o: Ptr<C<T>>): bool\n\nfn f<U: C<i32>>(x: U): bool\n  return x.same(x)\n"):
     pass_count = pass_count + 1
   // A qualified concept name inside a generic argument is no type.
-  if tc_expect_program_errors("qualified_concept_in_generic_argument_rejected", Vector<SourceInput>::new().push(SourceInput("lib.dao", "module app::lib\nconcept C:\n  fn f(self): bool\n", false)), "module app::main\nimport app::lib\n\nclass Box<T>:\n  v: T\n\nextern fn consume(x: Box<lib::C>): bool\n", "main.dao", 1):
+  if tc_expect_program_errors("qualified_concept_in_generic_argument_rejected", Vector<graph::SourceInput>::new().push(graph::SourceInput("lib.dao", "module app::lib\nconcept C:\n  fn f(self): bool\n", false)), "module app::main\nimport app::lib\n\nclass Box<T>:\n  v: T\n\nextern fn consume(x: Box<lib::C>): bool\n", "main.dao", 1):
     pass_count = pass_count + 1
   // Satisfaction takes the target type's own methods and extends, never
   // a same-named type's: the prelude's `P.required` does not satisfy
   // main's `extend P as C`.
   let dc_pre_req: string = "module core::p\nclass P:\n  n: i32\n  fn required(self): bool\n    return true\n"
-  if tc_expect_program_errors("satisfaction_uses_target_type", Vector<SourceInput>::new().push(SourceInput("stdlib/core/p.dao", dc_pre_req, true)), "module app::main\nconcept C:\n  fn required(self): bool\n\nclass P:\n  x: i32\n\nextend P as C:\n  fn other(self): bool\n    return true\n", "main.dao", 1):
+  if tc_expect_program_errors("satisfaction_uses_target_type", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/p.dao", dc_pre_req, true)), "module app::main\nconcept C:\n  fn required(self): bool\n\nclass P:\n  x: i32\n\nextend P as C:\n  fn other(self): bool\n    return true\n", "main.dao", 1):
     pass_count = pass_count + 1
   // A parameter symbol is found in its own module: two modules' methods
   // at one declaration index each bind their own `self`.
   let dc_pre_get: string = "module core::box\nclass Box:\n  x: i32\n  fn get(self): i32\n    return self.x\n"
-  if tc_expect_program_errors("self_bound_per_module", Vector<SourceInput>::new().push(SourceInput("stdlib/core/box.dao", dc_pre_get, true)), "module app::main\nclass Box:\n  x: i32\n  fn get(self): bool\n    return self.x\n", "main.dao", 1):
+  if tc_expect_program_errors("self_bound_per_module", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/box.dao", dc_pre_get, true)), "module app::main\nclass Box:\n  x: i32\n  fn get(self): bool\n    return self.x\n", "main.dao", 1):
     pass_count = pass_count + 1
   // An extend's method has a receiver (the host's validate_receiver):
   // one without `self` first is diagnosed.
@@ -1532,7 +1532,7 @@ fn main(): i32
   // and across prelude files; a cycle is diagnosed.
   if tc_expect_clean("alias_chain_forward", "type Count = Number\ntype Number = i32\n\nfn f(n: Count): Number\n  return n\n"):
     pass_count = pass_count + 1
-  if tc_expect_program_errors("alias_chain_across_prelude_files", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", "module core::a\ntype Count = Number\n", true)).push(SourceInput("stdlib/core/z.dao", "module core::z\ntype Number = i32\n", true)), "module app::main\n\nfn f(n: Count): i32\n  return n\n", "main.dao", 0):
+  if tc_expect_program_errors("alias_chain_across_prelude_files", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/a.dao", "module core::a\ntype Count = Number\n", true)).push(graph::SourceInput("stdlib/core/z.dao", "module core::z\ntype Number = i32\n", true)), "module app::main\n\nfn f(n: Count): i32\n  return n\n", "main.dao", 0):
     pass_count = pass_count + 1
   if tc_expect_rejected("alias_cycle_rejected", "type A = B\ntype B = A\n"):
     pass_count = pass_count + 1
@@ -1591,7 +1591,7 @@ fn main(): i32
   if tc_expect_diags("consecutive_extends_each_checked", "concept Show:\n  fn show(self): string\n\nextend i32 as Missing:\n  fn show(self): string -> \"n\"\n\nextend i64 as Show:\n  fn other(self): string -> \"m\"\n", 2):
     pass_count = pass_count + 1
   // Extends of two imported, same-named types declare distinct methods.
-  if tc_expect_program_errors("qualified_receiver_extends_distinct", Vector<SourceInput>::new().push(SourceInput("a.dao", "module app::a\nclass P:\n  x: i32\n", false)).push(SourceInput("b.dao", "module app::b\nclass P:\n  x: i32\n", false)), "module app::main\nimport app::a\nimport app::b\n\nconcept Show:\n  fn show(self): string\n\nextend a::P as Show:\n  fn show(self): string -> \"a\"\n\nextend b::P as Show:\n  fn show(self): string -> \"b\"\n", "main.dao", 0):
+  if tc_expect_program_errors("qualified_receiver_extends_distinct", Vector<graph::SourceInput>::new().push(graph::SourceInput("a.dao", "module app::a\nclass P:\n  x: i32\n", false)).push(graph::SourceInput("b.dao", "module app::b\nclass P:\n  x: i32\n", false)), "module app::main\nimport app::a\nimport app::b\n\nconcept Show:\n  fn show(self): string\n\nextend a::P as Show:\n  fn show(self): string -> \"a\"\n\nextend b::P as Show:\n  fn show(self): string -> \"b\"\n", "main.dao", 0):
     pass_count = pass_count + 1
   // A value's name is no namespace: `c::make` with `c` a parameter is
   // diagnosed, called or taken as a value.
@@ -1624,18 +1624,18 @@ fn main(): i32
   // A type's own method registered after an extend of it in an earlier
   // prelude file, written through an alias, conflicts with that extend,
   // whatever the file order: the checker's one diagnostic.
-  if tc_expect_program_errors("inherent_after_prelude_extend_conflicts", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", "module core::a\nconcept C:\n  fn f(self): i32\n\ntype Alias = P\n\nextend Alias as C:\n  fn f(self): i32 -> 2\n", true)).push(SourceInput("stdlib/core/z.dao", "module core::z\nclass P:\n  x: i32\n  fn f(self): i32 -> 1\n", true)), "module app::main\n", "stdlib/core/z.dao", 1):
+  if tc_expect_program_errors("inherent_after_prelude_extend_conflicts", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/a.dao", "module core::a\nconcept C:\n  fn f(self): i32\n\ntype Alias = P\n\nextend Alias as C:\n  fn f(self): i32 -> 2\n", true)).push(graph::SourceInput("stdlib/core/z.dao", "module core::z\nclass P:\n  x: i32\n  fn f(self): i32 -> 1\n", true)), "module app::main\n", "stdlib/core/z.dao", 1):
     pass_count = pass_count + 1
   // Spelled with the type's own name, the two methods share a mangled
   // name in the prelude's namespace: the resolver's duplicate
   // declaration reports it, once.
-  if tc_expect_program_errors("inherent_after_prelude_extend_reported_once", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", "module core::a\nconcept C:\n  fn f(self): i32\n\nextend P as C:\n  fn f(self): i32 -> 2\n", true)).push(SourceInput("stdlib/core/z.dao", "module core::z\nclass P:\n  x: i32\n  fn f(self): i32 -> 1\n", true)), "module app::main\n", "stdlib/core/z.dao", 1):
+  if tc_expect_program_errors("inherent_after_prelude_extend_reported_once", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/a.dao", "module core::a\nconcept C:\n  fn f(self): i32\n\nextend P as C:\n  fn f(self): i32 -> 2\n", true)).push(graph::SourceInput("stdlib/core/z.dao", "module core::z\nclass P:\n  x: i32\n  fn f(self): i32 -> 1\n", true)), "module app::main\n", "stdlib/core/z.dao", 1):
     pass_count = pass_count + 1
   // A module's extend of a prelude class shares the class method's
   // mangled name but shadows it in its own namespace, so the resolver
   // reports nothing: the conflict is the checker's, reported in the
   // module.
-  if tc_expect_program_errors("module_extend_of_prelude_method_conflicts", Vector<SourceInput>::new().push(SourceInput("stdlib/core/z.dao", "module core::z\nclass P:\n  x: i32\n  fn f(self): i32 -> 1\n", true)), "module app::main\nconcept C:\n  fn f(self): i32\n\nextend P as C:\n  fn f(self): i32 -> 2\n", "main.dao", 1):
+  if tc_expect_program_errors("module_extend_of_prelude_method_conflicts", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/z.dao", "module core::z\nclass P:\n  x: i32\n  fn f(self): i32 -> 1\n", true)), "module app::main\nconcept C:\n  fn f(self): i32\n\nextend P as C:\n  fn f(self): i32 -> 2\n", "main.dao", 1):
     pass_count = pass_count + 1
   // A concept is not a receiver type: `extend C as C` is diagnosed and
   // records no conformance.
@@ -1646,13 +1646,13 @@ fn main(): i32
   // diagnosed there.
   let dc_pre_sig: string = "module core::a\n\nextern fn f(x: Eq): bool\n"
   let dc_pre_concept: string = "module core::z\nconcept Eq:\n  fn eq(self, o: Eq): bool\n"
-  if tc_expect_program_errors("concept_is_not_a_type_across_prelude_files", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", dc_pre_sig, true)).push(SourceInput("stdlib/core/z.dao", dc_pre_concept, true)), "module app::main\n", "stdlib/core/a.dao", 1):
+  if tc_expect_program_errors("concept_is_not_a_type_across_prelude_files", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/a.dao", dc_pre_sig, true)).push(graph::SourceInput("stdlib/core/z.dao", dc_pre_concept, true)), "module app::main\n", "stdlib/core/a.dao", 1):
     pass_count = pass_count + 1
   // A class its own module also extends explicitly still derives — the
   // derivation is the type's, visible to a consuming module's class.
   let dc_both: string = "module app::lib\nderived concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string\n    return \"n\"\n\nclass P:\n  x: i32\n\nextend P as Show:\n  fn show(self): string\n    return \"p\"\n"
   let dc_wrap: string = "module app::main\nimport app::lib\n\nclass W:\n  p: lib::P\n\nfn f(w: W): string\n  return w.show()\n"
-  if tc_expect_program_errors("derived_conformance_survives_local_extend", Vector<SourceInput>::new().push(SourceInput("lib.dao", dc_both, false)), dc_wrap, "main.dao", 0):
+  if tc_expect_program_errors("derived_conformance_survives_local_extend", Vector<graph::SourceInput>::new().push(graph::SourceInput("lib.dao", dc_both, false)), dc_wrap, "main.dao", 0):
     pass_count = pass_count + 1
   // `mode` and `yield` carry their contract meaning: a dereference needs
   // an enclosing `mode unsafe =>`; a mode the contract does not define is
@@ -1817,36 +1817,36 @@ fn main(): i32
   // A callee another module declares decides its parameters as a local
   // one does: they are read from its type's record, never from an AST
   // — a local generic at the same declaration index is not consulted.
-  if tc_expect_program_errors("cross_module_generic_call_decides", Vector<SourceInput>::new().push(SourceInput("stdlib/core/id.dao", "module core::id\nfn identity<T>(x: T): T -> x\n", true)), "module app::main\nfn other<Q>(q: Q, n: i32): Q -> q\nfn f(): i32\n  let n: i32 = identity(5)\n  return n\n", "main.dao", 0):
+  if tc_expect_program_errors("cross_module_generic_call_decides", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/id.dao", "module core::id\nfn identity<T>(x: T): T -> x\n", true)), "module app::main\nfn other<Q>(q: Q, n: i32): Q -> q\nfn f(): i32\n  let n: i32 = identity(5)\n  return n\n", "main.dao", 0):
     pass_count = pass_count + 1
   // A generic head another module declares is instantiated, decided,
   // dispatched on, and held to its bounds from this one.
-  if tc_expect_program_errors("cross_module_generic_annotation_is_its_instantiation", Vector<SourceInput>::new().push(SourceInput("stdlib/core/box.dao", "module core::box\nclass Box<T>:\n  value: T\n  fn get(self): T\n    return self.value\n  fn make(v: T): Box<T> -> Box(v)\n", true)), "module app::main\nfn f(): i32\n  let b: Box<i32> = Box(1)\n  let m: Box<i32> = Box<i32>::make(2)\n  let v: i32 = b.get()\n  return v + m.value\n", "main.dao", 0):
+  if tc_expect_program_errors("cross_module_generic_annotation_is_its_instantiation", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/box.dao", "module core::box\nclass Box<T>:\n  value: T\n  fn get(self): T\n    return self.value\n  fn make(v: T): Box<T> -> Box(v)\n", true)), "module app::main\nfn f(): i32\n  let b: Box<i32> = Box(1)\n  let m: Box<i32> = Box<i32>::make(2)\n  let v: i32 = b.get()\n  return v + m.value\n", "main.dao", 0):
     pass_count = pass_count + 1
-  if tc_expect_program_errors("cross_module_generic_annotation_argument_is_held", Vector<SourceInput>::new().push(SourceInput("stdlib/core/box.dao", "module core::box\nclass Box<T>:\n  value: T\n", true)), "module app::main\nfn f(): i32\n  let b: Box<i32> = Box(\"s\")\n  return 0\n", "main.dao", 1):
+  if tc_expect_program_errors("cross_module_generic_annotation_argument_is_held", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/box.dao", "module core::box\nclass Box<T>:\n  value: T\n", true)), "module app::main\nfn f(): i32\n  let b: Box<i32> = Box(\"s\")\n  return 0\n", "main.dao", 1):
     pass_count = pass_count + 1
-  if tc_expect_program_errors("cross_module_call_bound_held", Vector<SourceInput>::new().push(SourceInput("stdlib/core/show.dao", "module core::show\nconcept Show:\n  fn show(self): string\n\nfn need<T: Show>(x: T): string -> x.show()\n", true)), "module app::main\nclass Plain:\n  n: i32\n\nfn f(): string -> need(Plain(1))\n", "main.dao", 1):
+  if tc_expect_program_errors("cross_module_call_bound_held", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/show.dao", "module core::show\nconcept Show:\n  fn show(self): string\n\nfn need<T: Show>(x: T): string -> x.show()\n", true)), "module app::main\nclass Plain:\n  n: i32\n\nfn f(): string -> need(Plain(1))\n", "main.dao", 1):
     pass_count = pass_count + 1
   // Prelude file order changes nothing: a callee's bounds and a head's
   // layout declared in a later file hold for an earlier one.
-  if tc_expect_program_errors("bound_of_a_later_prelude_file_is_held", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", "module core::a\nconcept Show:\n  fn show(self): string\n\nclass Plain:\n  n: i32\n\nfn call_early(): string -> need(Plain(1))\n", true)).push(SourceInput("stdlib/core/z.dao", "module core::z\nfn need<T: Show>(x: T): string -> x.show()\n", true)), "module app::main\n", "stdlib/core/a.dao", 1):
+  if tc_expect_program_errors("bound_of_a_later_prelude_file_is_held", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/a.dao", "module core::a\nconcept Show:\n  fn show(self): string\n\nclass Plain:\n  n: i32\n\nfn call_early(): string -> need(Plain(1))\n", true)).push(graph::SourceInput("stdlib/core/z.dao", "module core::z\nfn need<T: Show>(x: T): string -> x.show()\n", true)), "module app::main\n", "stdlib/core/a.dao", 1):
     pass_count = pass_count + 1
-  if tc_expect_program_errors("layout_of_a_later_prelude_file_is_filled", Vector<SourceInput>::new().push(SourceInput("stdlib/core/a.dao", "module core::a\nclass Holder:\n  box: Box<i32>\n\nfn peek(h: Holder): i32 -> h.box.missing\n", true)).push(SourceInput("stdlib/core/z.dao", "module core::z\nclass Box<T>:\n  value: T\n", true)), "module app::main\n", "stdlib/core/a.dao", 1):
+  if tc_expect_program_errors("layout_of_a_later_prelude_file_is_filled", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/a.dao", "module core::a\nclass Holder:\n  box: Box<i32>\n\nfn peek(h: Holder): i32 -> h.box.missing\n", true)).push(graph::SourceInput("stdlib/core/z.dao", "module core::z\nclass Box<T>:\n  value: T\n", true)), "module app::main\n", "stdlib/core/a.dao", 1):
     pass_count = pass_count + 1
   // An instantiation derives as seen from its head's module: an
   // app-local extend of `i32` is invisible to the prelude's `Box`, so
   // `Box<i32>` does not derive through it; a prelude extend, visible
   // everywhere, lets it.
-  if tc_expect_program_errors("cross_module_instantiation_derives_from_its_head_module", Vector<SourceInput>::new().push(SourceInput("stdlib/core/box.dao", "module core::box\nderived concept Show:\n  fn show(self): string\n\nclass Box<T>:\n  value: T\n", true)), "module app::main\nextend i32 as Show:\n  fn show(self): string -> \"i\"\n\nfn f(): string\n  let b: Box<i32> = Box(1)\n  return b.show()\n", "main.dao", 1):
+  if tc_expect_program_errors("cross_module_instantiation_derives_from_its_head_module", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/box.dao", "module core::box\nderived concept Show:\n  fn show(self): string\n\nclass Box<T>:\n  value: T\n", true)), "module app::main\nextend i32 as Show:\n  fn show(self): string -> \"i\"\n\nfn f(): string\n  let b: Box<i32> = Box(1)\n  return b.show()\n", "main.dao", 1):
     pass_count = pass_count + 1
-  if tc_expect_program_errors("cross_module_instantiation_derives_through_prelude_extend", Vector<SourceInput>::new().push(SourceInput("stdlib/core/box.dao", "module core::box\nderived concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string -> \"i\"\n\nclass Box<T>:\n  value: T\n", true)), "module app::main\nfn f(): string\n  let b: Box<i32> = Box(1)\n  return b.show()\n", "main.dao", 0):
+  if tc_expect_program_errors("cross_module_instantiation_derives_through_prelude_extend", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/box.dao", "module core::box\nderived concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string -> \"i\"\n\nclass Box<T>:\n  value: T\n", true)), "module app::main\nfn f(): string\n  let b: Box<i32> = Box(1)\n  return b.show()\n", "main.dao", 0):
     pass_count = pass_count + 1
   // A method on a receiver instantiated from another module's head is
   // read with what the receiver stands for: `get(self): T` on the
   // prelude's `Box<i32>` is an `i32`.
-  if tc_expect_program_errors("cross_module_receiver_call_decides", Vector<SourceInput>::new().push(SourceInput("stdlib/core/box.dao", "module core::box\nclass Box<T>:\n  value: T\n  fn get(self): T\n    return self.value\n\nclass Holder:\n  box: Box<i32>\n", true)), "module app::main\nfn f(h: Holder): i32 -> h.box.get()\n", "main.dao", 0):
+  if tc_expect_program_errors("cross_module_receiver_call_decides", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/box.dao", "module core::box\nclass Box<T>:\n  value: T\n  fn get(self): T\n    return self.value\n\nclass Holder:\n  box: Box<i32>\n", true)), "module app::main\nfn f(h: Holder): i32 -> h.box.get()\n", "main.dao", 0):
     pass_count = pass_count + 1
-  if tc_expect_program_errors("cross_module_receiver_call_result_is_held", Vector<SourceInput>::new().push(SourceInput("stdlib/core/box.dao", "module core::box\nclass Box<T>:\n  value: T\n  fn get(self): T\n    return self.value\n\nclass Holder:\n  box: Box<i32>\n", true)), "module app::main\nfn f(h: Holder): string -> h.box.get()\n", "main.dao", 1):
+  if tc_expect_program_errors("cross_module_receiver_call_result_is_held", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/box.dao", "module core::box\nclass Box<T>:\n  value: T\n  fn get(self): T\n    return self.value\n\nclass Holder:\n  box: Box<i32>\n", true)), "module app::main\nfn f(h: Holder): string -> h.box.get()\n", "main.dao", 1):
     pass_count = pass_count + 1
 
   // A layout is one run: an annotation that makes an instantiation
@@ -2151,7 +2151,7 @@ fn main(): i32
     pass_count = pass_count + 1
   // A prelude's overloads are overloads from every module: `range(3)`
   // and `range(1, 3)` each name their own.
-  if tc_expect_program_errors("prelude_arity_overloads", Vector<SourceInput>::new().push(SourceInput("stdlib/core/range.dao", "module core::range\nfn range(n: i32): Generator<i32>\n  let i: i32 = 0\n  while i < n:\n    yield i\n    i = i + 1\n  return\n\nfn range(start: i32, end: i32): Generator<i32>\n  let i: i32 = start\n  while i < end:\n    yield i\n    i = i + 1\n  return\n", true)), "module app::main\nfn f(): i32\n  for i in range(3):\n    let x: i32 = i\n  for j in range(1, 3):\n    let y: i32 = j\n  return 0\n", "main.dao", 0):
+  if tc_expect_program_errors("prelude_arity_overloads", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/range.dao", "module core::range\nfn range(n: i32): Generator<i32>\n  let i: i32 = 0\n  while i < n:\n    yield i\n    i = i + 1\n  return\n\nfn range(start: i32, end: i32): Generator<i32>\n  let i: i32 = start\n  while i < end:\n    yield i\n    i = i + 1\n  return\n", true)), "module app::main\nfn f(): i32\n  for i in range(3):\n    let x: i32 = i\n  for j in range(1, 3):\n    let y: i32 = j\n  return 0\n", "main.dao", 0):
     pass_count = pass_count + 1
 
   // An overload set is a module's own, reached qualified by arity; an
@@ -2165,9 +2165,9 @@ fn main(): i32
     pass_count = pass_count + 1
   if tc_expect_clean("pipeline_target_is_the_one_argument_overload", "fn g(a: i32, b: i32): bool -> true\nfn g(a: i32): i32 -> a\n\nfn f(): i32 -> 1 |> g\n"):
     pass_count = pass_count + 1
-  if tc_expect_program_errors("qualified_call_names_the_overload_of_its_arity", Vector<SourceInput>::new().push(SourceInput("lib.dao", "module lib::m\nfn g(a: i32): i32 -> a\nfn g(a: i32, b: i32): i32 -> a + b\n", false)), "module app::main\nimport lib::m\n\nfn f(): i32 -> m::g(1) + m::g(1, 2)\n", "main.dao", 0):
+  if tc_expect_program_errors("qualified_call_names_the_overload_of_its_arity", Vector<graph::SourceInput>::new().push(graph::SourceInput("lib.dao", "module lib::m\nfn g(a: i32): i32 -> a\nfn g(a: i32, b: i32): i32 -> a + b\n", false)), "module app::main\nimport lib::m\n\nfn f(): i32 -> m::g(1) + m::g(1, 2)\n", "main.dao", 0):
     pass_count = pass_count + 1
-  if tc_expect_program_errors("prelude_overload_export_is_its_own_module", Vector<SourceInput>::new().push(SourceInput("stdlib/core/one.dao", "module core::one\nfn g(a: i32): i32 -> a\n", true)).push(SourceInput("stdlib/core/two.dao", "module core::two\nfn g(a: i32, b: i32): i32 -> a + b\n", true)), "module app::main\nimport core::two\n\nfn f(): i32 -> two::g(1)\n", "main.dao", 1):
+  if tc_expect_program_errors("prelude_overload_export_is_its_own_module", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/one.dao", "module core::one\nfn g(a: i32): i32 -> a\n", true)).push(graph::SourceInput("stdlib/core/two.dao", "module core::two\nfn g(a: i32, b: i32): i32 -> a + b\n", true)), "module app::main\nimport core::two\n\nfn f(): i32 -> two::g(1)\n", "main.dao", 1):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------

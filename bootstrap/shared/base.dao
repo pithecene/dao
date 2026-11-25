@@ -2,9 +2,10 @@ module bootstrap::base
 
 import bootstrap::lexer
 import bootstrap::parser
+import bootstrap::graph
 
-// Shared module-graph, type-universe, and cross-pass program definitions
-// for subsystems that still assemble through `bootstrap/assemble.sh`.
+// Shared type-universe and cross-pass program lookup tables for subsystems
+// that still assemble through `bootstrap/assemble.sh`.
 
 // The value `m` holds under `key`, or `dflt` where it holds none.
 fn hm_get_or(m: HashMap<i64>, key: string, dflt: i64): i64
@@ -16,90 +17,7 @@ fn hm_get_or(m: HashMap<i64>, key: string, dflt: i64): i64
       return dflt
   return dflt
 
-// =========================================================================
-// Section 17: Module graph — multi-file compilation substrate
-// =========================================================================
-
-// Extract the canonical module name string ("a::b::c") from a
-// ModuleDeclN node's segment token list.
-fn extract_module_name(po: parser::ParseOutput, mod_node_idx: i64): string
-  let node: parser::Node = po.nodes.get(mod_node_idx)
-  match node:
-    parser::Node::ModuleDeclN(path_lp, seg_count):
-      let result: string = ""
-      let i: i64 = 0
-      while i < seg_count:
-        if i > 0:
-          result = result + "::"
-        let tidx: i64 = po.idx.get(path_lp - seg_count + i)
-        let tok: lexer::Token = po.toks.get(tidx)
-        result = result + substring(po.src, tok.offset, tok.len)
-        i = i + 1
-      return result
-  return ""
-
-// Extract import module name from an ImportDeclN node.
-fn extract_import_name(po: parser::ParseOutput, imp_node_idx: i64): string
-  let node: parser::Node = po.nodes.get(imp_node_idx)
-  match node:
-    parser::Node::ImportDeclN(path_lp, seg_count):
-      let result: Builder = Builder::new()
-      let i: i64 = 0
-      while i < seg_count:
-        if i > 0:
-          result = result.push("::")
-        let tidx: i64 = po.idx.get(path_lp - seg_count + i)
-        let tok: lexer::Token = po.toks.get(tidx)
-        result = result.push(substring(po.src, tok.offset, tok.len))
-        i = i + 1
-      return result.to_string()
-  return ""
-
-// --- Data structures ---
-
-class SourceFile:
-  file_id: i64
-  path: string
-  source_text: string
-  parse_output: parser::ParseOutput
-  module_id: i64          // index into ProgramGraph.modules; -1 until assigned
-
-class ModuleEntry:
-  module_id: i64
-  file_id: i64
-  name: string            // canonical "a::b::c" display form
-  is_prelude: bool        // a prelude module (CONTRACT_MODULE_SYSTEM.md §7)
-
-class FileDiagnostic:
-  file_id: i64            // -1 for graph-level diagnostics
-  path: string            // source file path (empty for graph-level)
-  diag: Diagnostic
-
-fn program_graph_empty(): ProgramGraph
-  return ProgramGraph(Vector<SourceFile>::new(), Vector<ModuleEntry>::new(), Vector<i64>::new(), to_i64(0), Vector<i64>::new(), Vector<FileDiagnostic>::new())
-
-class ProgramGraph:
-  files: Vector<SourceFile>
-  modules: Vector<ModuleEntry>
-  edges: Vector<i64>      // flat pairs: [from_module_id, to_module_id, ...]
-  edge_count: i64
-  topo_order: Vector<i64> // module_ids in dependency order
-  diags: Vector<FileDiagnostic>
-
-class SourceInput:
-  path: string
-  source_text: string
-  is_prelude: bool        // explicit membership in the prelude group; never inferred from the path
-
-// --- Task 27: Type universe (shared across passes) ---
-//
-// `TypeKind` and `DaoType` were originally in `typecheck/impl.dao`.
-// Promoted to `shared/base.dao` in D1a so that `TypeCheckData` can
-// carry `types: Vector<DaoType>` and every pass assembled after
-// `shared/base.dao` can reference the type universe without depending
-// on the typecheck subsystem file.  These types are self-contained —
-// they depend only on primitives.
-
+// Cross-pass semantic type universe.
 enum TypeKind:
   TBuiltin
   TVoid
@@ -122,41 +40,26 @@ class DaoType:
   ret_type: i64     // a function type's result; a struct's stands-for record (typecheck write_stands_for): a head's own parameters, an instantiation's head and arguments; else -1
   pointee: i64      // a pointer type's pointee, a generator's element type; a function type's stands-for record (its own type parameters); else -1
 
-// --- Task 27: Program-level pass payloads ---
-//
-// `TypeCheckData` lives here so the `Program` value (in
-// `bootstrap/resolver/impl.dao`) can reference it.  `HirData` is
-// still a stub; D7 fills it with real fields.
-
-// What the resolved program fixes before any type is registered,
-// indexed once by the type checker (registry_new) for constant-time
-// reads in every later pass: the symbol each declaration introduces,
-// keyed by the declaring module and the file-local declaration index
-// (a declaration index alone is ambiguous across modules).
+// Declaration-to-symbol indexes built once before type registration for
+// constant-time reads in downstream passes, keyed by declaring module and
+// file-local declaration index.
 class ProgramIndex:
-  type_syms: HashMap<i64>       // decl_key(module, decl) → the "Type" symbol declared there
-  callables: HashMap<i64>       // decl_key(module, decl) → the callable symbol declared there
-  members: HashMap<i64>         // member_key(module, decl, kind, name) → a Param / Field symbol; kind "Local" keyed without a name
-  prelude_modules: HashMap<i64> // module id (as text) → 1 for a prelude module
+  type_syms: HashMap<i64>       // decl_key(module, decl) -> the "Type" symbol declared there
+  callables: HashMap<i64>       // decl_key(module, decl) -> the callable symbol declared there
+  members: HashMap<i64>         // member_key(module, decl, kind, name) -> a Param / Field symbol; kind "Local" keyed without a name
+  prelude_modules: HashMap<i64> // module id (as text) -> 1 for a prelude module
 
 fn program_index_empty(): ProgramIndex
   return ProgramIndex(HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new())
 
-// A declaration's identity across the program: its index is file-local,
-// so the owning module is half the key.
 fn decl_key(module_id: i64, decl_idx: i64): string
   return i64_to_string(module_id) + ":" + i64_to_string(decl_idx)
 
-// A member of a declaration: a parameter or field by kind and name, a
-// local by kind alone.
 fn member_key(module_id: i64, decl_idx: i64, kind: string, name: string): string
   return decl_key(module_id, decl_idx) + ":" + kind + ":" + name
 
-// What a program's type check publishes for the later passes beyond
-// the type tables: every expression's type, method dispatch, and the
-// declaration indexes.
 class ProgramLookup:
-  expr_types: HashMap<i64>       // key: expr_type_key(module_id, node_idx)
+  expr_types: HashMap<i64>       // key: expr_id_key(module_id, node_idx)
   methods: HashMap<i64>          // method dispatch by owner type and name (typecheck dispatch_key_*)
   index: ProgramIndex            // the resolved program's declaration indexes
 
@@ -176,28 +79,15 @@ class HirData:
   hir_nodes_count: i64        // total HIR nodes across all modules
   module_count: i64           // number of modules lowered
 
-// --- Task 27: ExprId keying ---
-//
-// Typed composite key for program-wide expression identity. Bootstrap
-// uses stringified keys in HashMaps (the standard bootstrap pattern).
-// Both the typecheck write side and any downstream read side
-// (HIR, future MIR) go through this helper so the key format stays
-// in one place.
-
 fn expr_id_key(module_id: i64, node_idx: i64): string
   return i64_to_string(module_id) + ":" + i64_to_string(node_idx)
 
-// Wrap a source string with a synthetic `module test` declaration
-// unless it already starts with one.  Used by the single-file
-// adapters (`typecheck(src)`, `lower_to_hir(src)`) so callers can
-// pass either a bare snippet OR a complete file with its own module
-// declaration.
+// Wrap a bare snippet with a synthetic `module test` declaration unless it
+// already starts with one.
 fn wrap_test_module(src: string): string
   if starts_with(src, "module "):
     return src
   return "module test\n" + src
-
-// Read helpers for the published expression types.
 
 fn tc_get_expr_type(td: TypeCheckData, module_id: i64, node_idx: i64): i64
   let key: string = expr_id_key(module_id, node_idx)
@@ -212,300 +102,3 @@ fn tc_set_expr_type(td: TypeCheckData, module_id: i64, node_idx: i64, ty: i64): 
   let key: string = expr_id_key(module_id, node_idx)
   td.lookup = ProgramLookup(td.lookup.expr_types.set(key, ty), td.lookup.methods, td.lookup.index)
   return td
-
-// --- Graph construction ---
-
-// Find a module by name in the module list.  Returns module_id or -1.
-fn find_module_by_name(modules: Vector<ModuleEntry>, name: string): i64
-  let i: i64 = 0
-  while i < modules.length():
-    let m: ModuleEntry = modules.get(i)
-    if m.name == name:
-      return m.module_id
-    i = i + 1
-  return to_i64(-1)
-
-// Topological sort via Kahn's algorithm.
-// Returns sorted module_ids, or partial result if cycle detected.
-fn topo_sort(modules: Vector<ModuleEntry>, edges: Vector<i64>, edge_count: i64): Vector<i64>
-  let n: i64 = modules.length()
-  // Compute in-degree for each module.
-  let in_deg: Vector<i64> = Vector<i64>::new()
-  let i: i64 = 0
-  while i < n:
-    in_deg = in_deg.push(to_i64(0))
-    i = i + 1
-  // Count in-degrees from edges.
-  let e: i64 = 0
-  while e < edge_count:
-    let to_id: i64 = edges.get(e * 2 + 1)
-    in_deg = in_deg.set(to_id, in_deg.get(to_id) + 1)
-    e = e + 1
-  // Initialize queue with modules that have in-degree 0.
-  let queue: Vector<i64> = Vector<i64>::new()
-  i = 0
-  while i < n:
-    if in_deg.get(i) == 0:
-      queue = queue.push(i)
-    i = i + 1
-  // Process queue.
-  let result: Vector<i64> = Vector<i64>::new()
-  let head: i64 = 0
-  while head < queue.length():
-    let mid: i64 = queue.get(head)
-    head = head + 1
-    result = result.push(mid)
-    // Decrement in-degree for all dependents.
-    e = 0
-    while e < edge_count:
-      if edges.get(e * 2) == mid:
-        let to_id: i64 = edges.get(e * 2 + 1)
-        in_deg = in_deg.set(to_id, in_deg.get(to_id) - 1)
-        if in_deg.get(to_id) == 0:
-          queue = queue.push(to_id)
-      e = e + 1
-  return result
-
-// Build a module graph from source inputs.
-// Whether input `a` is ordered before `b`: the prelude's files first,
-// as the host orders them, so every prelude module precedes every other
-// module in the dependency order without an import edge (its
-// declarations, extends, and conformances are in every module's
-// environment, CONTRACT_MODULE_SYSTEM.md §7.2); then by path, for
-// deterministic file ids.
-fn input_before(a: SourceInput, b: SourceInput): bool
-  if a.is_prelude != b.is_prelude:
-    return a.is_prelude
-  return str_compare(a.path, b.path) < 0
-
-fn build_program(inputs: Vector<SourceInput>): ProgramGraph
-  // Order the inputs (input_before) for deterministic file_id assignment.
-  // (Simple insertion sort — input counts are small for bootstrap.)
-  let sorted: Vector<SourceInput> = Vector<SourceInput>::new()
-  let si: i64 = 0
-  while si < inputs.length():
-    let inp: SourceInput = inputs.get(si)
-    let insert_at: i64 = sorted.length()
-    let j: i64 = 0
-    while j < sorted.length():
-      let existing: SourceInput = sorted.get(j)
-      if input_before(inp, existing):
-        insert_at = j
-        j = sorted.length()
-      j = j + 1
-    // Insert at position by rebuilding (COW vectors, small N).
-    let new_sorted: Vector<SourceInput> = Vector<SourceInput>::new()
-    j = 0
-    while j < sorted.length() + 1:
-      if j == insert_at:
-        new_sorted = new_sorted.push(inp)
-      if j < sorted.length():
-        new_sorted = new_sorted.push(sorted.get(j))
-      j = j + 1
-    sorted = new_sorted
-    si = si + 1
-
-  // Parse each file and extract module declarations.
-  let files: Vector<SourceFile> = Vector<SourceFile>::new()
-  let modules: Vector<ModuleEntry> = Vector<ModuleEntry>::new()
-  let diags: Vector<FileDiagnostic> = Vector<FileDiagnostic>::new()
-  let fi: i64 = 0
-  while fi < sorted.length():
-    let inp: SourceInput = sorted.get(fi)
-    let po: parser::ParseOutput = parser::parse(inp.source_text)
-    // Merge parse diagnostics with file provenance.
-    let di: i64 = 0
-    while di < po.diags.length():
-      diags = diags.push(FileDiagnostic(fi, inp.path, po.diags.get(di)))
-      di = di + 1
-    // Extract module declaration from FileN root.
-    let mod_name: string = ""
-    let root_node: parser::Node = po.nodes.get(po.root)
-    match root_node:
-      parser::Node::FileN(mod_decl, imports_lp, decls_lp):
-        if mod_decl >= 0:
-          mod_name = extract_module_name(po, mod_decl)
-    if mod_name == "":
-      diags = diags.push(FileDiagnostic(fi, inp.path, make_error(Span(to_i64(0), to_i64(0)), "file '" + inp.path + "' has no module declaration")))
-      files = files.push(SourceFile(fi, inp.path, inp.source_text, po, to_i64(-1)))
-    else:
-      // Check for duplicate module declarations.
-      let existing: i64 = find_module_by_name(modules, mod_name)
-      if existing >= 0:
-        let dup_entry: ModuleEntry = modules.get(existing)
-        let dup_file: SourceFile = files.get(dup_entry.file_id)
-        diags = diags.push(FileDiagnostic(fi, inp.path, make_error(Span(to_i64(0), to_i64(0)), "duplicate module '" + mod_name + "' declared in '" + dup_file.path + "' and '" + inp.path + "'")))
-        files = files.push(SourceFile(fi, inp.path, inp.source_text, po, to_i64(-1)))
-      else:
-        let mid: i64 = modules.length()
-        modules = modules.push(ModuleEntry(mid, fi, mod_name, inp.is_prelude))
-        files = files.push(SourceFile(fi, inp.path, inp.source_text, po, mid))
-    fi = fi + 1
-
-  // Build import edges.
-  let edges: Vector<i64> = Vector<i64>::new()
-  let ec: i64 = 0
-  fi = 0
-  while fi < files.length():
-    let sf: SourceFile = files.get(fi)
-    if sf.module_id >= 0:
-      let root_n: parser::Node = sf.parse_output.nodes.get(sf.parse_output.root)
-      match root_n:
-        parser::Node::FileN(mod_decl, imports_lp, decls_lp):
-          let imps: Vector<i64> = parser::read_list(sf.parse_output.idx, imports_lp)
-          let ii: i64 = 0
-          while ii < imps.length():
-            let imp_name: string = extract_import_name(sf.parse_output, imps.get(ii))
-            let target: i64 = find_module_by_name(modules, imp_name)
-            let sf_mod_name: string = modules.get(sf.module_id).name
-            if target < 0:
-              diags = diags.push(FileDiagnostic(sf.file_id, sf.path, make_error(Span(to_i64(0), to_i64(0)), "imported module '" + imp_name + "' not found in compilation set")))
-            else:
-              if target == sf.module_id:
-                diags = diags.push(FileDiagnostic(sf.file_id, sf.path, make_error(Span(to_i64(0), to_i64(0)), "module '" + sf_mod_name + "' imports itself")))
-              else:
-                // Edge: dependency → dependent (target must come before importer in topo order)
-                edges = edges.push(target)
-                edges = edges.push(sf.module_id)
-                ec = ec + 1
-            ii = ii + 1
-    fi = fi + 1
-
-  // Topological sort.
-  let topo: Vector<i64> = topo_sort(modules, edges, ec)
-
-  // Cycle detection: if topo result is shorter than module count,
-  // there is a cycle.  Find actual cycle members (not just Kahn
-  // leftovers, which include acyclic dependents of cycles) and
-  // trace a concrete import path.
-  if topo.length() < modules.length():
-    // Mark which modules made it into topo order.
-    let in_topo: Vector<i64> = Vector<i64>::new()
-    let ti: i64 = 0
-    while ti < modules.length():
-      in_topo = in_topo.push(to_i64(0))
-      ti = ti + 1
-    ti = 0
-    while ti < topo.length():
-      in_topo = in_topo.set(topo.get(ti), to_i64(1))
-      ti = ti + 1
-    // For each unprocessed node, check if it can reach itself
-    // (i.e. it is actually in a cycle, not just downstream of one).
-    // Collect actual cycle members.
-    let on_cycle: Vector<i64> = Vector<i64>::new()
-    ti = 0
-    while ti < modules.length():
-      on_cycle = on_cycle.push(to_i64(0))
-      ti = ti + 1
-    ti = 0
-    while ti < modules.length():
-      if in_topo.get(ti) == 0:
-        if on_cycle.get(ti) == 0:
-          // DFS from ti following import edges within the unprocessed
-          // set.  Track the path; if we revisit ti, everything on the
-          // path from ti onward is a cycle member.
-          // Use a fixed-size path with a depth pointer (no pop needed).
-          let path: Vector<i64> = Vector<i64>::new()
-          path = path.push(ti)
-          let path_depth: i64 = 1
-          let visited: Vector<i64> = Vector<i64>::new()
-          let vi: i64 = 0
-          while vi < modules.length():
-            visited = visited.push(to_i64(0))
-            vi = vi + 1
-          visited = visited.set(ti, to_i64(1))
-          // Track which edges we've tried from each depth to allow backtracking.
-          // edge_cursor[depth] = next edge index to try from path[depth].
-          let edge_cursor: Vector<i64> = Vector<i64>::new()
-          edge_cursor = edge_cursor.push(to_i64(0))
-          let found: bool = false
-          let walk_done: bool = false
-          while walk_done == false:
-            let cur: i64 = path.get(path_depth - 1)
-            let cursor: i64 = edge_cursor.get(path_depth - 1)
-            // Find next unvisited import target from cur.
-            let next: i64 = to_i64(-1)
-            let ei: i64 = cursor
-            while ei < ec:
-              let from: i64 = edges.get(ei * 2 + 1)
-              let to_mod: i64 = edges.get(ei * 2)
-              if from == cur:
-                if in_topo.get(to_mod) == 0:
-                  if to_mod == ti:
-                    found = true
-                    walk_done = true
-                    next = to_mod
-                    ei = ec
-                  else:
-                    if visited.get(to_mod) == 0:
-                      next = to_mod
-                      // Save cursor past this edge for backtracking.
-                      edge_cursor = edge_cursor.set(path_depth - 1, ei + 1)
-                      ei = ec
-              ei = ei + 1
-            if found:
-              let pi: i64 = 0
-              while pi < path_depth:
-                on_cycle = on_cycle.set(path.get(pi), to_i64(1))
-                pi = pi + 1
-            else:
-              if next < 0:
-                // Dead end — backtrack.
-                path_depth = path_depth - 1
-                if path_depth == 0:
-                  walk_done = true
-              else:
-                visited = visited.set(next, to_i64(1))
-                if path_depth < path.length():
-                  path = path.set(path_depth, next)
-                else:
-                  path = path.push(next)
-                path_depth = path_depth + 1
-                // Initialize cursor for new depth.
-                if path_depth - 1 < edge_cursor.length():
-                  edge_cursor = edge_cursor.set(path_depth - 1, to_i64(0))
-                else:
-                  edge_cursor = edge_cursor.push(to_i64(0))
-      ti = ti + 1
-    // Now trace a concrete cycle path from the first cycle member.
-    let start: i64 = to_i64(-1)
-    ti = 0
-    while ti < modules.length():
-      if on_cycle.get(ti) == 1:
-        if start < 0:
-          start = ti
-      ti = ti + 1
-    if start >= 0:
-      let cycle_path: string = modules.get(start).name
-      let cur_node: i64 = start
-      let trace_done: bool = false
-      let max_steps: i64 = modules.length() + 1
-      let step: i64 = 0
-      while trace_done == false:
-        if step >= max_steps:
-          trace_done = true
-        else:
-          // Follow import edges staying within actual cycle members.
-          let next: i64 = to_i64(-1)
-          let ei: i64 = 0
-          while ei < ec:
-            let from: i64 = edges.get(ei * 2 + 1)
-            let to_mod: i64 = edges.get(ei * 2)
-            if from == cur_node:
-              if on_cycle.get(to_mod) == 1:
-                next = to_mod
-                ei = ec
-            ei = ei + 1
-          if next < 0:
-            trace_done = true
-          else:
-            cycle_path = cycle_path + " -> " + modules.get(next).name
-            if next == start:
-              trace_done = true
-            else:
-              cur_node = next
-          step = step + 1
-      diags = diags.push(FileDiagnostic(to_i64(-1), "", make_error(Span(to_i64(0), to_i64(0)), "import cycle detected: " + cycle_path)))
-
-  return ProgramGraph(files, modules, edges, ec, topo, diags)
-

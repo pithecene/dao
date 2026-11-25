@@ -1381,7 +1381,7 @@ class ModuleLowering:
 // Lower each function of one HIR module, with the module's own tokens
 // and source: concrete functions into the module, generic ones into
 // its templates.
-fn lower_module(ms: MS, sf: SourceFile, decls: Vector<i64>): ModuleLowering
+fn lower_module(ms: MS, sf: graph::SourceFile, decls: Vector<i64>): ModuleLowering
   ms.source.toks = sf.parse_output.toks
   ms.source.src = sf.source_text
   ms.source.file_id = sf.file_id
@@ -1424,7 +1424,7 @@ fn program_run_mir(p: Program): ProgramMir
     ms_function_empty(),
     flow_empty())
   ms.program.copy_out_sym = find_prelude_copy_out(hp, ms)
-  let all_diags: Vector<FileDiagnostic> = hp.diags
+  let all_diags: Vector<graph::FileDiagnostic> = hp.diags
   let module_nodes: Vector<i64> = Vector<i64>::new()
   if hp.hir.root >= 0 and hp.hir.root < ms.hir.nodes.length():
     match ms.hir.nodes.get(hp.hir.root):
@@ -1434,14 +1434,14 @@ fn program_run_mir(p: Program): ProgramMir
         while mi < modules.length():
           match ms.hir.nodes.get(modules.get(mi)):
             HirNode::HirModule(name_tok, decls_lp, module_id):
-              let sf: SourceFile = program_file_of_module(hp, module_id)
+              let sf: graph::SourceFile = program_file_of_module(hp, module_id)
               let before: i64 = ms.out.diags.length()
               let lowered: ModuleLowering = lower_module(ms, sf, read_hir_list(ms.hir.idx, decls_lp))
               ms = lowered.ms
               module_nodes = module_nodes.push(lowered.module_node)
               let di: i64 = before
               while di < ms.out.diags.length():
-                all_diags = all_diags.push(FileDiagnostic(sf.file_id, sf.path, ms.out.diags.get(di)))
+                all_diags = all_diags.push(graph::FileDiagnostic(sf.file_id, sf.path, ms.out.diags.get(di)))
                 di = di + to_i64(1)
           mi = mi + to_i64(1)
   let mod_fl: MirFlush = mir_flush_list(ms, module_nodes)
@@ -1451,7 +1451,7 @@ fn program_run_mir(p: Program): ProgramMir
   while fi < all_diags.length():
     flat = flat.push(all_diags.get(fi).diag)
     fi = fi + to_i64(1)
-  let out: Program = Program(hp.graph, hp.resolve, hp.typecheck, hp.hir, all_diags)
+  let out: Program = Program(hp.module_graph, hp.resolve, hp.typecheck, hp.hir, all_diags)
   return ProgramMir(out, MirResult(root_r.ms.out.nodes, root_r.ms.out.idx, flat, root_r.mir))
 
 // The module a single-source program lowers to: its MirProgram holds
@@ -1469,11 +1469,11 @@ fn mir_only_module(r: MirResult): i64
 // the snippet's MirModule, and the diagnostics every stage's.
 fn lower_to_mir(src: string): MirResult
   let wrapped: string = wrap_test_module(src)
-  let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs = inputs.push(SourceInput("test.dao", wrapped, false))
-  let pg: ProgramGraph = program_graph_empty()
+  let inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  inputs = inputs.push(graph::SourceInput("test.dao", wrapped, false))
+  let pg: graph::ProgramGraph = graph::program_graph_empty()
   resource memory graph =>
-    pg = build_program(inputs)
+    pg = graph::build_program(inputs)
   let p: Program = program_from_graph(pg)
   // Each stage in its own domain: its scratch is reclaimed at the exit and the result is copied out.
   resource memory resolve =>
@@ -1596,8 +1596,8 @@ class ProgramConcrete:
 fn program_monomorphize(pt: ProgramTyped, pm: ProgramMir): ProgramConcrete
   let p: Program = pm.program
   let first_module: i64 = to_i64(0)
-  if p.graph.topo_order.length() > 0:
-    first_module = p.graph.topo_order.get(0)
+  if p.module_graph.topo_order.length() > 0:
+    first_module = p.module_graph.topo_order.get(0)
   // Substitution reads no module's syntax; any module's view will do.
   let shell: TS = ts_new(build_module_tc(p, first_module), p.typecheck.types, p.typecheck.type_info, p.typecheck.sym_types, pt.reg)
   let m: Mono = Mono(
@@ -1645,14 +1645,14 @@ fn program_monomorphize(pt: ProgramTyped, pm: ProgramMir): ProgramConcrete
   let tables: MonoTables = m.tables
   let resolved: ProgramResolveResult = ProgramResolveResult(tables.symbols, p.resolve.scopes, p.resolve.uses, p.resolve.diags, p.resolve.module_exports, p.resolve.extend_concept_bindings)
   let typed: TypeCheckData = TypeCheckData(p.typecheck.initialized, tables.ts.types, tables.ts.type_info, tables.ts.sym_types, p.typecheck.lookup)
-  let all_diags: Vector<FileDiagnostic> = p.diags
+  let all_diags: Vector<graph::FileDiagnostic> = p.diags
   let flat: Vector<Diagnostic> = pm.mir.diags
   let di: i64 = to_i64(0)
   while di < m.diags.length():
-    all_diags = all_diags.push(FileDiagnostic(to_i64(-1), "", m.diags.get(di)))
+    all_diags = all_diags.push(graph::FileDiagnostic(to_i64(-1), "", m.diags.get(di)))
     flat = flat.push(m.diags.get(di))
     di = di + to_i64(1)
-  let out: Program = Program(p.graph, resolved, typed, p.hir, all_diags)
+  let out: Program = Program(p.module_graph, resolved, typed, p.hir, all_diags)
   return ProgramConcrete(out, MirResult(tables.nodes, tables.idx, flat, root))
 
 class MonoFlush:
@@ -1801,7 +1801,7 @@ fn mono_fixup_bound_calls(m: Mono, fn_node: i64, module_pos: i64): Mono
   match m.tables.nodes.get(module_node):
     MirNode::MirModule(fid, fl, fc, tl, tc):
       file_id = fid
-  let sf: SourceFile = m.source.program.graph.files.get(file_id)
+  let sf: graph::SourceFile = m.source.program.module_graph.files.get(file_id)
   let insts: Vector<i64> = mono_fn_insts(m, fn_node)
   let i: i64 = to_i64(0)
   while i < insts.length():
@@ -2343,7 +2343,7 @@ class CopyHooks:
 fn mono_copy_hooks(m: Mono): CopyHooks
   let hooks: CopyHooks = CopyHooks(to_i64(-1), to_i64(-1))
   let symbols: Vector<Symbol> = m.tables.symbols
-  let modules: Vector<ModuleEntry> = m.source.program.graph.modules
+  let modules: Vector<graph::ModuleEntry> = m.source.program.module_graph.modules
   let si: i64 = to_i64(0)
   while si < symbols.length():
     let s: Symbol = symbols.get(si)
