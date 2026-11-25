@@ -2692,10 +2692,46 @@ fn check_compare_binop(ts: TS, node_idx: i64, op_tidx: i64, lt: i64, rt: i64, op
           return ts_add_diag(ts, sp, "'" + op_str + "' requires numeric operands")
   return ts_set_expr_type(ts, node_idx, to_i64(10))
 
+fn enum_base_name(ts: TS, ti: i64): string
+  if ti < 0 or ti >= ts.types.length():
+    return ""
+  let t: DaoType = ts.types.get(ti)
+  let head_ti: i64 = record_head(ts, t)
+  if head_ti >= 0 and head_ti < ts.types.length():
+    return ts.types.get(head_ti).name
+  return t.name
+
+fn enum_has_payload(ts: TS, ti: i64): bool
+  if ti < 0 or ti >= ts.types.length():
+    return false
+  let t: DaoType = ts.types.get(ti)
+  match t.kind:
+    TypeKind::TEnum:
+      let table: DaoType = t
+      let head_ti: i64 = record_head(ts, t)
+      if table.info_lp < 0 and head_ti >= 0 and head_ti < ts.types.length():
+        table = ts.types.get(head_ti)
+      if table.info_lp < 0:
+        return false
+      let pos: i64 = table.info_lp
+      let v: i64 = 0
+      while v < table.info_count:
+        if pos + 1 >= ts.type_info.length():
+          return false
+        let payload_count: i64 = ts.type_info.get(pos + 1)
+        if payload_count > 0:
+          return true
+        pos = pos + 2 + payload_count * 2
+        v = v + 1
+  return false
+
 fn check_equality_binop(ts: TS, node_idx: i64, op_tidx: i64, lt: i64, rt: i64, op_str: string): TS
   if lt >= 0:
     if rt >= 0:
       if types_equal(ts, lt, rt):
+        if enum_has_payload(ts, lt):
+          let sp: Span = ts_node_span(ts, node_idx)
+          return ts_add_diag(ts, sp, "equality comparison is not yet supported for payload-bearing enum '" + enum_base_name(ts, lt) + "'; use match to inspect variants")
         return ts_set_expr_type(ts, node_idx, to_i64(10))
       else:
         let sp: Span = ts_tok_span(ts, op_tidx)
