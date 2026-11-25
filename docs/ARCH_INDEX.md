@@ -128,7 +128,7 @@ Execution support for lowered programs.
 
 Dao standard library surface and future implementation roots.
 
-- `core/` — foundational types/utilities (auto-imported as prelude)
+- `core/` — foundational types and utilities auto-imported as prelude (`Vector<T>`, `HashMap<V>`, `IntMap<V>`, `IntPairMap<V>`, `Option<T>`, `Result<T, E>`, `Builder`, string/range/overflow helpers)
 - `concepts/` — deferred concept definitions not yet auto-imported
 - `numerics/` — compute- and math-oriented surface
 - `io/` — explicit IO-facing surface

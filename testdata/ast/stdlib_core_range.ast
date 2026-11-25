@@ -87,3 +87,98 @@ File
                   BinaryExpr +
                     Identifier i
                     Identifier step
+  FunctionDecl range_i64
+    Param n: i64
+    ReturnType: Generator<i64>
+    LetStatement i: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          Identifier n
+      YieldStatement
+        Identifier i
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            IntLiteral 1
+  FunctionDecl range_i64
+    Param start: i64
+    Param end: i64
+    ReturnType: Generator<i64>
+    LetStatement i: i64
+      Identifier start
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          Identifier end
+      YieldStatement
+        Identifier i
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            IntLiteral 1
+  FunctionDecl range_i64
+    Param start: i64
+    Param end: i64
+    Param step: i64
+    ReturnType: Generator<i64>
+    LetStatement i: i64
+      Identifier start
+    IfStatement
+      Condition
+        BinaryExpr >
+          Identifier step
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 0
+      Then
+        WhileStatement
+          Condition
+            BinaryExpr <
+              Identifier i
+              Identifier end
+          YieldStatement
+            Identifier i
+          Assignment
+            Target
+              Identifier i
+            Value
+              BinaryExpr +
+                Identifier i
+                Identifier step
+      Else
+        IfStatement
+          Condition
+            BinaryExpr <
+              Identifier step
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 0
+          Then
+            WhileStatement
+              Condition
+                BinaryExpr >
+                  Identifier i
+                  Identifier end
+              YieldStatement
+                Identifier i
+              Assignment
+                Target
+                  Identifier i
+                Value
+                  BinaryExpr +
+                    Identifier i
+                    Identifier step

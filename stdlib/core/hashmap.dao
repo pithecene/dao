@@ -106,6 +106,8 @@ class HashMap<V>:
 
   fn length(self): i64 -> self.count
 
+  fn is_empty(self): bool -> self.count == to_i64(0)
+
   // The slot holding `key` as this value sees it: the filled slot with
   // the greatest stamp not past `version`, or -1.  Probing runs to the
   // first empty slot, since a key's newer slots sit past its older ones.
@@ -139,6 +141,14 @@ class HashMap<V>:
       return Option::None
     mode unsafe =>
       return Option::Some(value = self.storage.vals.offset(slot).get())
+    panic("unreachable")
+
+  fn get_or(self, key: string, fallback: V): V
+    let slot: i64 = self.visible_slot(key)
+    if slot < to_i64(0):
+      return fallback
+    mode unsafe =>
+      return self.storage.vals.offset(slot).get()
     panic("unreachable")
 
   fn contains(self, key: string): bool -> self.visible_slot(key) >= to_i64(0)

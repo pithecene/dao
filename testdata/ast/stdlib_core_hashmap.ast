@@ -562,6 +562,18 @@ File
       ExprBody
         FieldExpr .count
           Identifier self
+    FunctionDecl is_empty
+      Param self
+      ReturnType: bool
+      ExprBody
+        BinaryExpr ==
+          FieldExpr .count
+            Identifier self
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 0
     FunctionDecl visible_slot
       Param self
       Param key: string
@@ -754,6 +766,49 @@ File
                               Identifier self
                       Args
                         Identifier slot
+      ExpressionStatement
+        CallExpr
+          Callee
+            Identifier panic
+          Args
+            StringLiteral "unreachable"
+    FunctionDecl get_or
+      Param self
+      Param key: string
+      Param fallback: V
+      ReturnType: V
+      LetStatement slot: i64
+        CallExpr
+          Callee
+            FieldExpr .visible_slot
+              Identifier self
+          Args
+            Identifier key
+      IfStatement
+        Condition
+          BinaryExpr <
+            Identifier slot
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 0
+        Then
+          ReturnStatement
+            Identifier fallback
+      ModeBlock unsafe
+        ReturnStatement
+          CallExpr
+            Callee
+              FieldExpr .get
+                CallExpr
+                  Callee
+                    FieldExpr .offset
+                      FieldExpr .vals
+                        FieldExpr .storage
+                          Identifier self
+                  Args
+                    Identifier slot
       ExpressionStatement
         CallExpr
           Callee

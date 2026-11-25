@@ -1,0 +1,477 @@
+module core::intmap
+// intmap.dao — Deterministic integer-keyed and pair-keyed associative maps.
+//
+// Key semantics:
+//   - `IntMap<V>` accepts every signed 64-bit integer (`i64`, full domain
+//     `[-2^63, 2^63 - 1]`). Slot occupancy is tracked in `stamps` (`0` for
+//     empty, `>= 1` for write stamp), so `0`, `-1`, and `INT64_MIN` require
+//     no sentinel reservation.
+//   - `IntPairMap<V>` maps exact 128-bit `IntPair(first: i64, second: i64)`
+//     keys by structural equality (`first` and `second` compared separately),
+//     eliminating composite `"a:b"` string allocations without lossy 32-bit
+//     integer packing.
+//
+// Collision handling and persistence:
+//   - Open addressing with linear probing bounded at load factor `<= 3/4`
+//     (`(used + 1) * 4 <= cap * 3`), using 64-bit multiplicative mixing folded
+//     across high and low 32-bit halves (`hash_i64`, `hash_int_pair`).
+//   - Version-stamped storage (`version` vs. `meta.gen`): updates on the
+//     latest value append a newer stamped slot in place, while writes on an
+//     older snapshot or full table compact visible entries into fresh storage
+//     so stale snapshots never observe later writes.
+//
+// Deterministic traversal:
+//   - `order` records distinct keys in strict first-insertion order. Updating
+//     an existing key preserves its position in `order`, and compaction copies
+//     `order[0 .. count)` verbatim. `keys`, `iter_keys`, and `entries`
+//     therefore yield entries in deterministic first-insertion order
+//     independent of table capacity, hash values, or resize history.
+//
+// Complexity:
+//   - `new`, `length`, `is_empty`: O(1) time, zero heap allocation on `new`.
+//   - `get`, `get_or`, `contains`: O(1) expected time, O(cap) worst-case probe.
+//   - `set`: O(1) expected time in place on the latest value; O(count) when
+//     compacting on resize or branched snapshot write.
+//   - `keys`, `iter_keys`, `entries`, `copy_out`: O(count) time.
+
+fn hash_i64(key: i64): i64
+  let two32: i64 = 4294967296
+  let two16: i64 = 65536
+  let mul_k: i64 = 2685821657736338717
+  let folded: i64 = wrapping_add_i64(key, key / two32)
+  let mixed: i64 = wrapping_mul_i64(folded, mul_k)
+  let hi_folded: i64 = wrapping_add_i64(mixed, mixed / two32)
+  return wrapping_add_i64(hi_folded, hi_folded / two16)
+
+class IntPair:
+  first: i64
+  second: i64
+
+fn int_pair_eq(a: IntPair, b: IntPair): bool
+  return a.first == b.first and a.second == b.second
+
+fn hash_int_pair(pair: IntPair): i64
+  let mul_p: i64 = 6364136223846793005
+  let add_p: i64 = 1442695040888963407
+  let h1: i64 = hash_i64(pair.first)
+  let h2: i64 = hash_i64(pair.second)
+  let combined: i64 = wrapping_add_i64(
+    wrapping_mul_i64(h1, mul_p),
+    wrapping_add_i64(h2, add_p))
+  return hash_i64(combined)
+
+class IntEntry<V>:
+  key: i64
+  value: V
+
+class IntPairEntry<V>:
+  key: IntPair
+  value: V
+
+class IntMeta:
+  cap: i64
+  used: Ptr<i64>
+  gen: Ptr<i64>
+
+fn int_meta_empty(): IntMeta
+  return IntMeta(to_i64(0), Ptr<i64>::new(), Ptr<i64>::new())
+
+fn int_meta_fresh(cap: i64, outer: bool): IntMeta
+  let used_raw: Ptr<void> = Ptr<void>::new()
+  let gen_raw: Ptr<void> = Ptr<void>::new()
+  if outer:
+    used_raw = __dao_mem_alloc_outer(size_of<i64>(), align_of<i64>())
+    gen_raw = __dao_mem_alloc_outer(size_of<i64>(), align_of<i64>())
+  else:
+    used_raw = __dao_mem_alloc(size_of<i64>(), align_of<i64>())
+    gen_raw = __dao_mem_alloc(size_of<i64>(), align_of<i64>())
+  mode unsafe =>
+    let used: Ptr<i64> = used_raw.cast<i64>()
+    used.set(to_i64(0))
+    let gen: Ptr<i64> = gen_raw.cast<i64>()
+    gen.set(to_i64(0))
+    return IntMeta(cap, used, gen)
+  panic("unreachable")
+
+class IntStorage<V>:
+  keys: Ptr<i64>
+  vals: Ptr<V>
+  stamps: Ptr<i64>
+  order: Ptr<i64>
+  meta: IntMeta
+
+  fn fresh(cap: i64, outer: bool): IntStorage<V>
+    let key_bytes: i64 = size_of<i64>() * cap
+    let val_bytes: i64 = size_of<V>() * cap
+    let key_raw: Ptr<void> = Ptr<void>::new()
+    let val_raw: Ptr<void> = Ptr<void>::new()
+    let stamp_raw: Ptr<void> = Ptr<void>::new()
+    let order_raw: Ptr<void> = Ptr<void>::new()
+    if outer:
+      key_raw = __dao_mem_alloc_outer(key_bytes, align_of<i64>())
+      val_raw = __dao_mem_alloc_outer(val_bytes, align_of<V>())
+      stamp_raw = __dao_mem_alloc_outer(key_bytes, align_of<i64>())
+      order_raw = __dao_mem_alloc_outer(key_bytes, align_of<i64>())
+    else:
+      key_raw = __dao_mem_alloc(key_bytes, align_of<i64>())
+      val_raw = __dao_mem_alloc(val_bytes, align_of<V>())
+      stamp_raw = __dao_mem_alloc(key_bytes, align_of<i64>())
+      order_raw = __dao_mem_alloc(key_bytes, align_of<i64>())
+    let meta: IntMeta = int_meta_fresh(cap, outer)
+    mode unsafe =>
+      let stamps: Ptr<i64> = stamp_raw.cast<i64>()
+      let z: i64 = 0
+      while z < cap:
+        stamps.offset(z).set(to_i64(0))
+        z = z + 1
+      return IntStorage(key_raw.cast<i64>(), val_raw.cast<V>(), stamps, order_raw.cast<i64>(), meta)
+    panic("unreachable")
+
+  fn fill(self, key: i64, value: V): void
+    mode unsafe =>
+      let idx: i64 = hash_index(hash_i64(key), self.meta.cap)
+      while self.stamps.offset(idx).get() != to_i64(0):
+        idx = idx + 1
+        if idx >= self.meta.cap:
+          idx = to_i64(0)
+      let stamp: i64 = self.meta.gen.get() + to_i64(1)
+      self.keys.offset(idx).set(key)
+      self.vals.offset(idx).set(value)
+      self.stamps.offset(idx).set(stamp)
+      self.meta.used.set(self.meta.used.get() + to_i64(1))
+      self.meta.gen.set(stamp)
+
+class IntMap<V>:
+  storage: IntStorage<V>
+  version: i64
+  count: i64
+
+  fn new(): IntMap<V>
+    let none: IntStorage<V> = IntStorage(Ptr<i64>::new(), Ptr<V>::new(), Ptr<i64>::new(), Ptr<i64>::new(), int_meta_empty())
+    return IntMap(none, to_i64(0), to_i64(0))
+
+  fn length(self): i64 -> self.count
+
+  fn is_empty(self): bool -> self.count == to_i64(0)
+
+  fn visible_slot(self, key: i64): i64
+    let s: IntStorage<V> = self.storage
+    if s.meta.cap == to_i64(0):
+      return to_i64(-1)
+    let idx: i64 = hash_index(hash_i64(key), s.meta.cap)
+    let best: i64 = to_i64(-1)
+    let best_stamp: i64 = to_i64(0)
+    mode unsafe =>
+      let probes: i64 = 0
+      while probes < s.meta.cap:
+        let stamp: i64 = s.stamps.offset(idx).get()
+        if stamp == to_i64(0):
+          return best
+        if stamp <= self.version:
+          if s.keys.offset(idx).get() == key:
+            if stamp > best_stamp:
+              best = idx
+              best_stamp = stamp
+        idx = idx + 1
+        if idx >= s.meta.cap:
+          idx = to_i64(0)
+        probes = probes + 1
+    return best
+
+  fn get(self, key: i64): Option<V>
+    let slot: i64 = self.visible_slot(key)
+    if slot < to_i64(0):
+      return Option::None
+    mode unsafe =>
+      return Option::Some(value = self.storage.vals.offset(slot).get())
+    panic("unreachable")
+
+  fn get_or(self, key: i64, fallback: V): V
+    let slot: i64 = self.visible_slot(key)
+    if slot < to_i64(0):
+      return fallback
+    mode unsafe =>
+      return self.storage.vals.offset(slot).get()
+    panic("unreachable")
+
+  fn contains(self, key: i64): bool -> self.visible_slot(key) >= to_i64(0)
+
+  fn compacted(self, cap: i64): IntMap<V>
+    let fresh: IntStorage<V> = IntStorage<V>::fresh(cap, false)
+    let s: IntStorage<V> = self.storage
+    mode unsafe =>
+      let i: i64 = 0
+      while i < self.count:
+        let key: i64 = s.order.offset(i).get()
+        let slot: i64 = self.visible_slot(key)
+        fresh.order.offset(i).set(key)
+        fresh.fill(key, s.vals.offset(slot).get())
+        i = i + 1
+      return IntMap(fresh, fresh.meta.gen.get(), self.count)
+    panic("unreachable")
+
+  fn copy_out(self): IntMap<V>
+    if self.count == to_i64(0):
+      return IntMap<V>::new()
+    let cap: i64 = to_i64(8)
+    while self.count * to_i64(4) > cap * to_i64(3):
+      cap = cap * to_i64(2)
+    let fresh: IntStorage<V> = IntStorage<V>::fresh(cap, true)
+    let s: IntStorage<V> = self.storage
+    mode unsafe =>
+      let i: i64 = 0
+      while i < self.count:
+        let key: i64 = s.order.offset(i).get()
+        let slot: i64 = self.visible_slot(key)
+        fresh.order.offset(i).set(key)
+        fresh.fill(key, copy_out<V>(s.vals.offset(slot).get()))
+        i = i + 1
+      return IntMap(fresh, fresh.meta.gen.get(), self.count)
+    panic("unreachable")
+
+  fn set(self, key: i64, value: V): IntMap<V>
+    let s: IntStorage<V> = self.storage
+    mode unsafe =>
+      if s.meta.cap > to_i64(0):
+        if s.meta.gen.get() == self.version:
+          if (s.meta.used.get() + to_i64(1)) * to_i64(4) <= s.meta.cap * to_i64(3):
+            let known: bool = self.contains(key)
+            s.fill(key, value)
+            let count: i64 = self.count
+            if known == false:
+              s.order.offset(count).set(key)
+              count = count + to_i64(1)
+            return IntMap(s, s.meta.gen.get(), count)
+    let new_cap: i64 = s.meta.cap
+    if new_cap < to_i64(8):
+      new_cap = to_i64(8)
+    while (self.count + to_i64(1)) * to_i64(4) > new_cap * to_i64(3):
+      new_cap = new_cap * to_i64(2)
+    return self.compacted(new_cap).set(key, value)
+
+  fn keys(self): Vector<i64>
+    if self.count == to_i64(0):
+      return Vector<i64>::new()
+    let out: Vector<i64> = Vector<i64>::with_capacity(self.count)
+    mode unsafe =>
+      let i: i64 = 0
+      while i < self.count:
+        out = out.push(self.storage.order.offset(i).get())
+        i = i + 1
+    return out
+
+  fn iter_keys(self): Generator<i64>
+    let i: i64 = 0
+    while i < self.count:
+      let key: i64 = 0
+      mode unsafe =>
+        key = self.storage.order.offset(i).get()
+      yield key
+      i = i + 1
+
+fn int_map_entries<V>(m: IntMap<V>): Vector<IntEntry<V>>
+  if m.count == to_i64(0):
+    return Vector<IntEntry<V>>::new()
+  let out: Vector<IntEntry<V>> = Vector<IntEntry<V>>::with_capacity(m.count)
+  let i: i64 = 0
+  while i < m.count:
+    let key: i64 = 0
+    mode unsafe =>
+      key = m.storage.order.offset(i).get()
+    let slot: i64 = m.visible_slot(key)
+    mode unsafe =>
+      out = out.push(IntEntry(key, m.storage.vals.offset(slot).get()))
+    i = i + 1
+  return out
+
+class IntPairStorage<V>:
+  keys: Ptr<IntPair>
+  vals: Ptr<V>
+  stamps: Ptr<i64>
+  order: Ptr<IntPair>
+  meta: IntMeta
+
+  fn fresh(cap: i64, outer: bool): IntPairStorage<V>
+    let pair_bytes: i64 = size_of<IntPair>() * cap
+    let val_bytes: i64 = size_of<V>() * cap
+    let stamp_bytes: i64 = size_of<i64>() * cap
+    let key_raw: Ptr<void> = Ptr<void>::new()
+    let val_raw: Ptr<void> = Ptr<void>::new()
+    let stamp_raw: Ptr<void> = Ptr<void>::new()
+    let order_raw: Ptr<void> = Ptr<void>::new()
+    if outer:
+      key_raw = __dao_mem_alloc_outer(pair_bytes, align_of<IntPair>())
+      val_raw = __dao_mem_alloc_outer(val_bytes, align_of<V>())
+      stamp_raw = __dao_mem_alloc_outer(stamp_bytes, align_of<i64>())
+      order_raw = __dao_mem_alloc_outer(pair_bytes, align_of<IntPair>())
+    else:
+      key_raw = __dao_mem_alloc(pair_bytes, align_of<IntPair>())
+      val_raw = __dao_mem_alloc(val_bytes, align_of<V>())
+      stamp_raw = __dao_mem_alloc(stamp_bytes, align_of<i64>())
+      order_raw = __dao_mem_alloc(pair_bytes, align_of<IntPair>())
+    let meta: IntMeta = int_meta_fresh(cap, outer)
+    mode unsafe =>
+      let stamps: Ptr<i64> = stamp_raw.cast<i64>()
+      let z: i64 = 0
+      while z < cap:
+        stamps.offset(z).set(to_i64(0))
+        z = z + 1
+      return IntPairStorage(key_raw.cast<IntPair>(), val_raw.cast<V>(), stamps, order_raw.cast<IntPair>(), meta)
+    panic("unreachable")
+
+  fn fill(self, key: IntPair, value: V): void
+    mode unsafe =>
+      let idx: i64 = hash_index(hash_int_pair(key), self.meta.cap)
+      while self.stamps.offset(idx).get() != to_i64(0):
+        idx = idx + 1
+        if idx >= self.meta.cap:
+          idx = to_i64(0)
+      let stamp: i64 = self.meta.gen.get() + to_i64(1)
+      self.keys.offset(idx).set(key)
+      self.vals.offset(idx).set(value)
+      self.stamps.offset(idx).set(stamp)
+      self.meta.used.set(self.meta.used.get() + to_i64(1))
+      self.meta.gen.set(stamp)
+
+class IntPairMap<V>:
+  storage: IntPairStorage<V>
+  version: i64
+  count: i64
+
+  fn new(): IntPairMap<V>
+    let none: IntPairStorage<V> = IntPairStorage(Ptr<IntPair>::new(), Ptr<V>::new(), Ptr<i64>::new(), Ptr<IntPair>::new(), int_meta_empty())
+    return IntPairMap(none, to_i64(0), to_i64(0))
+
+  fn length(self): i64 -> self.count
+
+  fn is_empty(self): bool -> self.count == to_i64(0)
+
+  fn visible_slot(self, key: IntPair): i64
+    let s: IntPairStorage<V> = self.storage
+    if s.meta.cap == to_i64(0):
+      return to_i64(-1)
+    let idx: i64 = hash_index(hash_int_pair(key), s.meta.cap)
+    let best: i64 = to_i64(-1)
+    let best_stamp: i64 = to_i64(0)
+    mode unsafe =>
+      let probes: i64 = 0
+      while probes < s.meta.cap:
+        let stamp: i64 = s.stamps.offset(idx).get()
+        if stamp == to_i64(0):
+          return best
+        if stamp <= self.version:
+          if int_pair_eq(s.keys.offset(idx).get(), key):
+            if stamp > best_stamp:
+              best = idx
+              best_stamp = stamp
+        idx = idx + 1
+        if idx >= s.meta.cap:
+          idx = to_i64(0)
+        probes = probes + 1
+    return best
+
+  fn get(self, key: IntPair): Option<V>
+    let slot: i64 = self.visible_slot(key)
+    if slot < to_i64(0):
+      return Option::None
+    mode unsafe =>
+      return Option::Some(value = self.storage.vals.offset(slot).get())
+    panic("unreachable")
+
+  fn get_or(self, key: IntPair, fallback: V): V
+    let slot: i64 = self.visible_slot(key)
+    if slot < to_i64(0):
+      return fallback
+    mode unsafe =>
+      return self.storage.vals.offset(slot).get()
+    panic("unreachable")
+
+  fn contains(self, key: IntPair): bool -> self.visible_slot(key) >= to_i64(0)
+
+  fn compacted(self, cap: i64): IntPairMap<V>
+    let fresh: IntPairStorage<V> = IntPairStorage<V>::fresh(cap, false)
+    let s: IntPairStorage<V> = self.storage
+    mode unsafe =>
+      let i: i64 = 0
+      while i < self.count:
+        let key: IntPair = s.order.offset(i).get()
+        let slot: i64 = self.visible_slot(key)
+        fresh.order.offset(i).set(key)
+        fresh.fill(key, s.vals.offset(slot).get())
+        i = i + 1
+      return IntPairMap(fresh, fresh.meta.gen.get(), self.count)
+    panic("unreachable")
+
+  fn copy_out(self): IntPairMap<V>
+    if self.count == to_i64(0):
+      return IntPairMap<V>::new()
+    let cap: i64 = to_i64(8)
+    while self.count * to_i64(4) > cap * to_i64(3):
+      cap = cap * to_i64(2)
+    let fresh: IntPairStorage<V> = IntPairStorage<V>::fresh(cap, true)
+    let s: IntPairStorage<V> = self.storage
+    mode unsafe =>
+      let i: i64 = 0
+      while i < self.count:
+        let key: IntPair = s.order.offset(i).get()
+        let slot: i64 = self.visible_slot(key)
+        fresh.order.offset(i).set(key)
+        fresh.fill(key, copy_out<V>(s.vals.offset(slot).get()))
+        i = i + 1
+      return IntPairMap(fresh, fresh.meta.gen.get(), self.count)
+    panic("unreachable")
+
+  fn set(self, key: IntPair, value: V): IntPairMap<V>
+    let s: IntPairStorage<V> = self.storage
+    mode unsafe =>
+      if s.meta.cap > to_i64(0):
+        if s.meta.gen.get() == self.version:
+          if (s.meta.used.get() + to_i64(1)) * to_i64(4) <= s.meta.cap * to_i64(3):
+            let known: bool = self.contains(key)
+            s.fill(key, value)
+            let count: i64 = self.count
+            if known == false:
+              s.order.offset(count).set(key)
+              count = count + to_i64(1)
+            return IntPairMap(s, s.meta.gen.get(), count)
+    let new_cap: i64 = s.meta.cap
+    if new_cap < to_i64(8):
+      new_cap = to_i64(8)
+    while (self.count + to_i64(1)) * to_i64(4) > new_cap * to_i64(3):
+      new_cap = new_cap * to_i64(2)
+    return self.compacted(new_cap).set(key, value)
+
+  fn keys(self): Vector<IntPair>
+    if self.count == to_i64(0):
+      return Vector<IntPair>::new()
+    let out: Vector<IntPair> = Vector<IntPair>::with_capacity(self.count)
+    mode unsafe =>
+      let i: i64 = 0
+      while i < self.count:
+        out = out.push(self.storage.order.offset(i).get())
+        i = i + 1
+    return out
+
+  fn iter_keys(self): Generator<IntPair>
+    let i: i64 = 0
+    while i < self.count:
+      let key: IntPair = IntPair(to_i64(0), to_i64(0))
+      mode unsafe =>
+        key = self.storage.order.offset(i).get()
+      yield key
+      i = i + 1
+
+fn int_pair_map_entries<V>(m: IntPairMap<V>): Vector<IntPairEntry<V>>
+  if m.count == to_i64(0):
+    return Vector<IntPairEntry<V>>::new()
+  let out: Vector<IntPairEntry<V>> = Vector<IntPairEntry<V>>::with_capacity(m.count)
+  let i: i64 = 0
+  while i < m.count:
+    let key: IntPair = IntPair(to_i64(0), to_i64(0))
+    mode unsafe =>
+      key = m.storage.order.offset(i).get()
+    let slot: i64 = m.visible_slot(key)
+    mode unsafe =>
+      out = out.push(IntPairEntry(key, m.storage.vals.offset(slot).get()))
+    i = i + 1
+  return out

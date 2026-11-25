@@ -18,6 +18,36 @@ File
                 Identifier Vector.new
               TypeArgs
                 u8
+    FunctionDecl with_capacity
+      Param cap: i64
+      ReturnType: Builder
+      ReturnStatement
+        CallExpr
+          Callee
+            Identifier Builder
+          Args
+            CallExpr
+              Callee
+                Identifier Vector.with_capacity
+              TypeArgs
+                u8
+              Args
+                Identifier cap
+    FunctionDecl is_empty
+      Param self
+      ReturnType: bool
+      ExprBody
+        BinaryExpr ==
+          CallExpr
+            Callee
+              FieldExpr .length
+                FieldExpr .bytes
+                  Identifier self
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 0
     FunctionDecl push
       Param self
       Param s: string
@@ -98,6 +128,67 @@ File
                         Identifier i32_to_u32
                       Args
                         Identifier c
+    FunctionDecl push_line
+      Param self
+      Param s: string
+      ReturnType: Builder
+      ReturnStatement
+        CallExpr
+          Callee
+            FieldExpr .push_char
+              CallExpr
+                Callee
+                  FieldExpr .push
+                    Identifier self
+                Args
+                  Identifier s
+          Args
+            IntLiteral 10
+    FunctionDecl push_i64
+      Param self
+      Param n: i64
+      ReturnType: Builder
+      ReturnStatement
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier self
+          Args
+            CallExpr
+              Callee
+                Identifier i64_to_string
+              Args
+                Identifier n
+    FunctionDecl push_i32
+      Param self
+      Param n: i32
+      ReturnType: Builder
+      ReturnStatement
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier self
+          Args
+            CallExpr
+              Callee
+                Identifier i32_to_string
+              Args
+                Identifier n
+    FunctionDecl push_bool
+      Param self
+      Param b: bool
+      ReturnType: Builder
+      ReturnStatement
+        CallExpr
+          Callee
+            FieldExpr .push
+              Identifier self
+          Args
+            CallExpr
+              Callee
+                Identifier bool_to_string
+              Args
+                Identifier b
     FunctionDecl length
       Param self
       ReturnType: i64
@@ -125,3 +216,243 @@ File
               Identifier bytes
             FieldExpr .len
               Identifier bytes
+  FunctionDecl join
+    Param parts: Vector<string>
+    Param sep: string
+    ReturnType: string
+    LetStatement count: i64
+      CallExpr
+        Callee
+          FieldExpr .length
+            Identifier parts
+    IfStatement
+      Condition
+        BinaryExpr ==
+          Identifier count
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 0
+      Then
+        ReturnStatement
+          StringLiteral ""
+    IfStatement
+      Condition
+        BinaryExpr ==
+          Identifier count
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 1
+      Then
+        ReturnStatement
+          CallExpr
+            Callee
+              FieldExpr .get
+                Identifier parts
+            Args
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 0
+    LetStatement sep_len: i64
+      CallExpr
+        Callee
+          Identifier length
+        Args
+          Identifier sep
+    LetStatement total: i64
+      BinaryExpr *
+        Identifier sep_len
+        BinaryExpr -
+          Identifier count
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 1
+    LetStatement i: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          Identifier count
+      Assignment
+        Target
+          Identifier total
+        Value
+          BinaryExpr +
+            Identifier total
+            CallExpr
+              Callee
+                Identifier length
+              Args
+                CallExpr
+                  Callee
+                    FieldExpr .get
+                      Identifier parts
+                  Args
+                    Identifier i
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            IntLiteral 1
+    LetStatement out: Builder
+      CallExpr
+        Callee
+          QualifiedName Builder::with_capacity
+        Args
+          Identifier total
+    Assignment
+      Target
+        Identifier i
+      Value
+        CallExpr
+          Callee
+            Identifier to_i64
+          Args
+            IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          Identifier count
+      IfStatement
+        Condition
+          BinaryExpr >
+            Identifier i
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 0
+        Then
+          Assignment
+            Target
+              Identifier out
+            Value
+              CallExpr
+                Callee
+                  FieldExpr .push
+                    Identifier out
+                Args
+                  Identifier sep
+      Assignment
+        Target
+          Identifier out
+        Value
+          CallExpr
+            Callee
+              FieldExpr .push
+                Identifier out
+            Args
+              CallExpr
+                Callee
+                  FieldExpr .get
+                    Identifier parts
+                Args
+                  Identifier i
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            IntLiteral 1
+    ReturnStatement
+      CallExpr
+        Callee
+          FieldExpr .to_string
+            Identifier out
+  FunctionDecl repeat_str
+    Param s: string
+    Param count: i64
+    ReturnType: string
+    IfStatement
+      Condition
+        BinaryExpr <
+          Identifier count
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 0
+      Then
+        ExpressionStatement
+          CallExpr
+            Callee
+              Identifier panic
+            Args
+              StringLiteral "repeat_str: negative count"
+    IfStatement
+      Condition
+        BinaryExpr or
+          BinaryExpr ==
+            Identifier count
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 0
+          BinaryExpr ==
+            CallExpr
+              Callee
+                Identifier length
+              Args
+                Identifier s
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 0
+      Then
+        ReturnStatement
+          StringLiteral ""
+    LetStatement out: Builder
+      CallExpr
+        Callee
+          QualifiedName Builder::with_capacity
+        Args
+          BinaryExpr *
+            CallExpr
+              Callee
+                Identifier length
+              Args
+                Identifier s
+            Identifier count
+    LetStatement i: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          Identifier count
+      Assignment
+        Target
+          Identifier out
+        Value
+          CallExpr
+            Callee
+              FieldExpr .push
+                Identifier out
+            Args
+              Identifier s
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            IntLiteral 1
+    ReturnStatement
+      CallExpr
+        Callee
+          FieldExpr .to_string
+            Identifier out

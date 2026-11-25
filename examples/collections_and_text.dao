@@ -1,0 +1,145 @@
+module collections_and_text
+// collections_and_text.dao — Foundational collections, IntMap/IntPairMap,
+// Option/Result combinators, and string/Builder utilities.
+
+fn check(ok: bool, name: string): void
+  if ok == false:
+    panic("FAIL " + name)
+
+fn test_vector_ops(): void
+  let empty = Vector<i64>::new()
+  check(empty.is_empty(), "empty.is_empty")
+  check(option_is_none(empty.first()), "empty.first")
+  check(option_is_none(empty.last()), "empty.last")
+
+  let flags = Vector<i64>::filled(5, 7)
+  check(flags.length() == 5, "filled.length")
+  check(flags.get(0) == 7 and flags.get(4) == 7, "filled.values")
+
+  // Verify `pop` followed by `push` preserves older snapshots.
+  let v0 = Vector<i64>::new().push(10).push(20).push(30)
+  let v1 = v0.pop()
+  let v2 = v1.push(99)
+  check(v0.length() == 3 and v0.get(2) == 30, "pop_push_snapshot_v0")
+  check(v1.length() == 2 and option_unwrap_or(v1.last(), to_i64(-1)) == 20, "pop_push_snapshot_v1")
+  check(v2.length() == 3 and v2.get(2) == 99, "pop_push_snapshot_v2")
+
+  let rev = v0.reverse()
+  check(rev.get(0) == 30 and rev.get(1) == 20 and rev.get(2) == 10, "reverse")
+
+  let merged = v1.append_all(Vector<i64>::filled(2, 5))
+  check(merged.length() == 4 and sum_i64(merged) == 40, "append_all_and_sum")
+
+  let sub = merged.slice(1, 2)
+  check(sub.length() == 2 and sub.get(0) == 20 and sub.get(1) == 5, "slice")
+
+  let idx_sum: i64 = 0
+  let val_sum: i64 = 0
+  for item in enumerate(v0).iter():
+    idx_sum = idx_sum + item.index
+    val_sum = val_sum + item.value
+  check(idx_sum == 3 and val_sum == 60, "enumerate")
+
+  let neg7: i64 = to_i64(-7)
+  let neg100: i64 = to_i64(-100)
+  let unsorted = Vector<i64>::new().push(42).push(neg7).push(0).push(42).push(neg100).push(19)
+  let sorted = sort_i64(unsorted)
+  check(unsorted.get(0) == 42, "sort_i64_preserves_input")
+  check(sorted.get(0) == neg100 and sorted.get(1) == neg7 and sorted.get(2) == 0 and sorted.get(5) == 42, "sort_i64")
+  check(contains_i64(sorted, neg7) and contains_i64(sorted, 999) == false, "contains_i64")
+
+  let words = Vector<string>::new().push("mir").push("ast").push("llvm").push("hir")
+  let sorted_words = sort_strings(words)
+  check(join(sorted_words, ",") == "ast,hir,llvm,mir", "sort_strings_and_join")
+
+fn test_intmap_and_pairmap(): void
+  let max_i64: i64 = 9223372036854775807
+  let zero_i64: i64 = 0
+  let neg_max: i64 = zero_i64 - max_i64
+  let min_i64: i64 = wrapping_sub_i64(neg_max, 1)
+  let neg1: i64 = to_i64(-1)
+
+  // Boundary keys (0, -1, INT64_MIN, INT64_MAX), updates, branching, and resize.
+  let m = IntMap<string>::new()
+  check(m.is_empty(), "intmap.is_empty")
+  m = m.set(0, "zero")
+  m = m.set(neg1, "minus_one")
+  m = m.set(min_i64, "min")
+  m = m.set(max_i64, "max")
+  let snap = m
+  m = m.set(0, "ZERO")
+  for k in range_i64(1, 25):
+    m = m.set(k * 100, "v" + i64_to_string(k))
+
+  check(snap.length() == 4, "intmap.snapshot.length")
+  check(snap.get_or(0, "") == "zero", "intmap.snapshot.value")
+  check(m.get_or(0, "") == "ZERO", "intmap.updated.value")
+  check(m.get_or(neg1, "") == "minus_one", "intmap.neg_one")
+  check(m.get_or(min_i64, "") == "min", "intmap.min_i64")
+  check(m.get_or(max_i64, "") == "max", "intmap.max_i64")
+  check(option_is_none(m.get(777)), "intmap.missing")
+
+  // Deterministic first-insertion order survives updates and resizes.
+  let ks = m.keys()
+  check(ks.get(0) == 0 and ks.get(1) == neg1 and ks.get(2) == min_i64 and ks.get(3) == max_i64 and ks.get(4) == 100, "intmap.deterministic_order")
+
+  // Domain escape via `copy_out`.
+  let escaped = IntMap<string>::new()
+  resource memory scratch =>
+    let local_map = IntMap<string>::new().set(10, "ten").set(20, "twenty")
+    escaped = copy_out(local_map)
+  check(escaped.length() == 2 and escaped.get_or(20, "") == "twenty", "intmap.copy_out")
+
+  // Exact 128-bit `(i64, i64)` keys with large positive and negative components.
+  let pm = IntPairMap<i64>::new()
+  let k_a = IntPair(min_i64, neg1)
+  let k_b = IntPair(min_i64, 0)
+  let k_c = IntPair(1, 2)
+  let k_d = IntPair(2, 1)
+  pm = pm.set(k_a, 11).set(k_b, 22).set(k_c, 33).set(k_d, 44)
+  check(pm.get_or(k_a, 0) == 11 and pm.get_or(k_b, 0) == 22, "pairmap.high_bits")
+  check(pm.get_or(k_c, 0) == 33 and pm.get_or(k_d, 0) == 44, "pairmap.asymmetry")
+
+  let pair_sum: i64 = 0
+  for entry in int_pair_map_entries(pm).iter():
+    pair_sum = pair_sum + entry.value
+  check(pair_sum == 110, "pairmap.entries")
+
+fn test_option_result_and_strings(): void
+  let some_val: Option<i64> = Option::Some(value = to_i64(12))
+  let none_val: Option<i64> = Option::None
+  check(option_is_some(some_val) and option_is_none(none_val), "option.predicates")
+  check(option_unwrap_or(none_val, to_i64(99)) == 99, "option.unwrap_or")
+
+  let ok_res: Result<i64, string> = option_ok_or(some_val, "missing")
+  let err_res: Result<i64, string> = option_ok_or(none_val, "missing")
+  check(result_is_ok(ok_res) and result_is_err(err_res), "result.predicates")
+  check(result_unwrap_or(err_res, to_i64(5)) == 5, "result.unwrap_or")
+  check(option_unwrap_or(result_err(err_res), "") == "missing", "result.err")
+
+  check(trim("  \t hello dao \r\n ") == "hello dao", "string.trim")
+  check(trim("   \n\t ") == "", "string.trim_blank")
+  let parts = split("a::b::c", "::")
+  check(parts.length() == 3 and join(parts, "/") == "a/b/c", "string.split_join")
+  let ls = lines("alpha\r\nbeta\ngamma\n")
+  check(ls.length() == 3 and ls.get(0) == "alpha" and ls.get(2) == "gamma", "string.lines")
+
+  let max_expected: i64 = 9223372036854775807
+  let zero_exp: i64 = 0
+  let neg_max_expected: i64 = zero_exp - max_expected
+  let min_expected: i64 = wrapping_sub_i64(neg_max_expected, 1)
+  check(option_unwrap_or(parse_i64("-9223372036854775808"), to_i64(0)) == min_expected, "parse_i64.min")
+  check(option_unwrap_or(parse_i64("9223372036854775807"), to_i64(0)) == max_expected, "parse_i64.max")
+  check(option_is_none(parse_i64("9223372036854775808")), "parse_i64.overflow")
+  check(option_is_none(parse_i32("2147483648")), "parse_i32.overflow")
+  check(option_unwrap_or(parse_i32("-2147483648"), 0) == -2147483648, "parse_i32.min")
+
+  let b = Builder::new().push("item=").push_i64(42).push(" ok=").push_bool(true)
+  check(b.to_string() == "item=42 ok=true", "builder.helpers")
+
+fn main(): i32
+  test_vector_ops()
+  test_intmap_and_pairmap()
+  test_option_result_and_strings()
+  print("collections_and_text: all checks passed")
+  return 0
