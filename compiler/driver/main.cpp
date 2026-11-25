@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -223,10 +224,65 @@ void cmd_llvm_ir(const dao::ProgramRequest& request) {
   dao::LlvmBackend::print_ir(std::cout, *llvm_result.module);
 }
 
+void print_usage();
+
+/// Resolve `<prefix>` when `daoc` is invoked from `<prefix>/<DAO_INSTALL_BINDIR>/daoc`.
+auto install_prefix(const char* argv0) -> std::optional<std::filesystem::path> {
+  std::string main_exe =
+      llvm::sys::fs::getMainExecutable(argv0, reinterpret_cast<void*>(&print_usage));
+  if (main_exe.empty()) {
+    return std::nullopt;
+  }
+  const std::filesystem::path bindir(DAO_INSTALL_BINDIR);
+  if (bindir.is_absolute()) {
+    return std::nullopt;
+  }
+  std::vector<std::filesystem::path> parts;
+  for (const auto& part : bindir.lexically_normal()) {
+    if (!part.empty() && part != ".") {
+      parts.push_back(part);
+    }
+  }
+  if (parts.empty()) {
+    return std::nullopt;
+  }
+  auto dir = dao::canonical_or_self(std::filesystem::path(main_exe)).parent_path();
+  for (auto it = parts.rbegin(); it != parts.rend(); ++it) {
+    if (dir.filename() != *it || !dir.has_parent_path()) {
+      return std::nullopt;
+    }
+    dir = dir.parent_path();
+  }
+  return dir;
+}
+
+auto default_stdlib_root(const char* argv0) -> std::filesystem::path {
+  if (auto prefix = install_prefix(argv0)) {
+    auto installed = *prefix / DAO_INSTALL_DATADIR / "dao" / "stdlib";
+    if (std::filesystem::is_directory(installed)) {
+      return installed;
+    }
+  }
+  return std::filesystem::path(DAO_SOURCE_DIR) / "stdlib";
+}
+
+auto default_runtime_lib(const char* argv0) -> std::filesystem::path {
+  if (auto prefix = install_prefix(argv0)) {
+    auto installed =
+        *prefix / DAO_INSTALL_LIBDIR / std::filesystem::path(DAO_RUNTIME_LIB).filename();
+    if (std::filesystem::is_regular_file(installed)) {
+      return installed;
+    }
+  }
+  return std::filesystem::path(DAO_RUNTIME_LIB);
+}
+
 // Compile a .dao file to a native executable.
 // Extra link inputs (object files, -l flags, -L flags) are forwarded
 // to the system linker.
-void cmd_build(const dao::ProgramRequest& request, std::span<const std::string> link_extras = {}) {
+void cmd_build(const dao::ProgramRequest& request,
+               const char* argv0,
+               std::span<const std::string> link_extras = {}) {
   // Initialize targets before lowering so the module gets a correct
   // DataLayout for ABI-sensitive struct coercion.
   dao::LlvmBackend::initialize_targets();
@@ -236,7 +292,8 @@ void cmd_build(const dao::ProgramRequest& request, std::span<const std::string> 
   auto llvm_result = dao::lower_to_llvm(mir, llvm_ctx);
 
   // The entry module names the program, whichever files came with it. A
-  // prelude file's display path is relative to the standard library, so what the command line gave names an entry there.
+  // prelude file's display path is relative to the standard library, so what the command line gave
+  // names an entry there.
   const auto& entry_file = reported_file(mir.hir_result.frontend.program);
   const auto path = entry_file.is_prelude ? request.primary_file()
                                           : dao::canonical_or_self(entry_file.display_path);
@@ -250,8 +307,7 @@ void cmd_build(const dao::ProgramRequest& request, std::span<const std::string> 
   }
   std::filesystem::path obj_path(obj_buffer.str().str());
   std::string emit_error;
-  if (!dao::LlvmBackend::emit_object(*llvm_result.module,
-                                      obj_path.string(), emit_error)) {
+  if (!dao::LlvmBackend::emit_object(*llvm_result.module, obj_path.string(), emit_error)) {
     std::cerr << "error: " << emit_error << "\n";
     std::filesystem::remove(obj_path);
     std::exit(EXIT_FAILURE);
@@ -259,22 +315,28 @@ void cmd_build(const dao::ProgramRequest& request, std::span<const std::string> 
 
   // Link with system cc: object + runtime library -> executable.
   auto output_path = path.parent_path() / path.stem();
+  auto runtime_lib = default_runtime_lib(argv0);
+  if (!std::filesystem::exists(runtime_lib)) {
+    std::cerr << "error: runtime library not found: " << runtime_lib << "\n";
+    std::filesystem::remove(obj_path);
+    std::exit(EXIT_FAILURE);
+  }
 
   auto cc_path = llvm::sys::findProgramByName("cc");
   if (!cc_path) {
-    std::cerr << "error: cannot find 'cc' linker: "
-              << cc_path.getError().message() << "\n";
+    std::cerr << "error: cannot find 'cc' linker: " << cc_path.getError().message() << "\n";
     std::filesystem::remove(obj_path);
     std::exit(EXIT_FAILURE);
   }
 
   // StringRef does not own data -- keep string temporaries alive.
   auto obj_str = obj_path.string();
+  auto runtime_str = runtime_lib.string();
   auto out_str = output_path.string();
   std::vector<llvm::StringRef> args = {
       *cc_path,
       obj_str,
-      DAO_RUNTIME_LIB,
+      runtime_str,
       "-o",
       out_str,
   };
@@ -363,8 +425,7 @@ auto main(int argc, char* argv[]) -> int {
     return EXIT_FAILURE;
   }
 
-  dao::ProgramRequest request{
-      .options = {.stdlib_root = std::filesystem::path(DAO_SOURCE_DIR) / "stdlib"}};
+  dao::ProgramRequest request{.options = {.stdlib_root = default_stdlib_root(argv[0])}};
   std::vector<std::string> extras; // build: link inputs after the sources
   for (int i = 2; i < argc; ++i) {
     std::string_view arg(argv[i]);
@@ -438,7 +499,7 @@ auto main(int argc, char* argv[]) -> int {
     // Building produces an executable, so the program must have an entry
     // point whichever way it was given.
     request.options.entry_policy = dao::EntryPolicy::Required;
-    cmd_build(request, extras);
+    cmd_build(request, argv[0], extras);
     return EXIT_SUCCESS;
   }
   if (!extras.empty()) {

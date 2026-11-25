@@ -13,6 +13,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Werror=reorder-init-list>)
 
 enable_testing()
+include(GNUInstallDirs)
 
 add_subdirectory(compiler/frontend)
 add_subdirectory(compiler/ir)
@@ -21,8 +22,6 @@ add_subdirectory(compiler/analysis)
 add_subdirectory(compiler/driver)
 add_subdirectory(runtime)
 add_subdirectory(tools/playground)
-
-include(GNUInstallDirs)
 
 install(TARGETS daoc
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
