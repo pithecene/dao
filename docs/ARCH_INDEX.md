@@ -34,6 +34,7 @@ Contracts and explanatory material.
 - `ARCH_INDEX.md` — this file
 - `non_dao_inventory.md` — every stopgap not written in Dao, and what replaces it
 - `hygiene_audit.md` — `DAO-H01` corpus repetition measurements, native vs. self-hosted parity matrix, and `DAO-H01`–`DAO-H06` sequencing
+- `ergonomics_design_tests.md` — four-program side-by-side design evaluation (proposed Dao, Rust, Python) across parsing, fallible file IO, lazy collection aggregation, and single-source forecast plans
 - `contracts/` — normative contracts for structure, syntax, the module system, execution contexts, compiler architecture, bootstrap/interop posture, tooling boundaries, runtime ABI, numeric semantics, and C ABI interop, with ADRs for `enum class` and the raw pointer surface
 - `bootstrap_closure_split.md` — measurement separating compiler-implementation closure from bootstrap test-harness closure
 - `ROADMAP.md` — staged implementation plan from frontend skeleton to self-hosting, tooling maturity, and GPU expansion
@@ -53,7 +54,7 @@ Contracts and explanatory material.
 Reference language material.
 
 - `grammar/` — parser-facing reference grammar, lexical surface, and indentation rules
-- `semantics/` — semantic notes and pre-contract language proposals (`aggregate_initialization.md`, `contextual_and_collection_literals.md`) below contract level and above examples
+- `semantics/` — semantic notes and pre-contract language proposals (`aggregate_initialization.md`, `contextual_and_collection_literals.md`, `control_flow_expressions.md`) below contract level and above examples
 - `syntax_probes/` — small snippets used to test readability and parser direction
 - `examples/` — reference examples housed under `spec/examples/`
 

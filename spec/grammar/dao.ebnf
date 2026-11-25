@@ -51,8 +51,12 @@ extern_decl :=
 params :=
     param ("," param)*
 
+# Proposed unified call binding (spec/semantics/aggregate_initialization.md)
+# allows a leading prefix of `_ name: type` positional parameters before
+# named `name: type` parameters (and bare `self` on methods).
 param :=
-    identifier ":" type
+      "self"
+    | "_"? identifier ":" type
 
 
 suite :=
@@ -107,7 +111,28 @@ resource_block :=
 
 
 expression :=
-    pipe_expression
+      if_expression
+    | match_expression
+    | pipe_expression
+
+# Value-producing control-flow proposals live in
+# spec/semantics/control_flow_expressions.md.
+if_expression :=
+      "if" pipe_expression ":" expression "else" ":" expression
+    | "if" pipe_expression ":" expr_suite ("else" "if" pipe_expression ":" expr_suite)* "else" ":" expr_suite
+
+match_expression :=
+    "match" pipe_expression ":" NEWLINE INDENT match_expr_arm+ DEDENT
+
+match_expr_arm :=
+    match_pattern ":" (expression NEWLINE | expr_suite)
+
+match_pattern :=
+      "_"
+    | expression ("as" identifier)?
+
+expr_suite :=
+    NEWLINE INDENT statement* expression NEWLINE DEDENT
 
 pipe_expression :=
     logical_or_expression ("|>" pipe_target)*
@@ -155,9 +180,10 @@ postfix_op :=
 arguments :=
     argument ("," argument)*
 
-# Named field arguments apply to structured variant construction today
-# (docs/contracts/ADR_ENUM_CLASS.md); punned and class field initialization
-# is proposed in spec/semantics/aggregate_initialization.md.
+# Unified call and aggregate arguments
+# (spec/semantics/aggregate_initialization.md): `identifier = expression`
+# labels a slot explicitly; bare `identifier` binds a positional `_` prefix
+# slot by index or elides `ident = ident` in the named region.
 argument :=
       identifier "=" expression
     | expression
