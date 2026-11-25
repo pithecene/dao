@@ -80,15 +80,15 @@ File
     Param source: string
     Param pos: i64
     ReturnType: i64
-    LetStatement cur: i64
+    LetStatement cur
       Identifier pos
-    LetStatement slen: i64
+    LetStatement slen
       CallExpr
         Callee
           Identifier length
         Args
           Identifier source
-    LetStatement done: bool
+    LetStatement done
       BoolLiteral false
     WhileStatement
       Condition
@@ -131,15 +131,15 @@ File
     Param source: string
     Param pos: i64
     ReturnType: i64
-    LetStatement cur: i64
+    LetStatement cur
       Identifier pos
-    LetStatement slen: i64
+    LetStatement slen
       CallExpr
         Callee
           Identifier length
         Args
           Identifier source
-    LetStatement done: bool
+    LetStatement done
       BoolLiteral false
     WhileStatement
       Condition
@@ -183,26 +183,26 @@ File
     ReturnType: i32
     LetStatement pos: i64
       IntLiteral 0
-    LetStatement slen: i64
+    LetStatement slen
       CallExpr
         Callee
           Identifier length
         Args
           Identifier source
-    LetStatement num_idents: i32
+    LetStatement num_idents
       IntLiteral 0
-    LetStatement num_numbers: i32
+    LetStatement num_numbers
       IntLiteral 0
-    LetStatement num_ops: i32
+    LetStatement num_ops
       IntLiteral 0
-    LetStatement num_other: i32
+    LetStatement num_other
       IntLiteral 0
     WhileStatement
       Condition
         BinaryExpr <
           Identifier pos
           Identifier slen
-      LetStatement ch: i32
+      LetStatement ch
         CallExpr
           Callee
             Identifier char_at
@@ -386,7 +386,7 @@ File
         Identifier num_other
   FunctionDecl main
     ReturnType: i32
-    LetStatement source: string
+    LetStatement source
       StringLiteral "fn add(a: i32, b: i32): i32 = a + b"
     ExpressionStatement
       CallExpr
@@ -400,7 +400,7 @@ File
           Identifier print
         Args
           Identifier source
-    LetStatement total: i32
+    LetStatement total
       CallExpr
         Callee
           Identifier count_tokens

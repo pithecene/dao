@@ -26,9 +26,9 @@ fn is_whitespace(ch: i32): bool
 // --- Generic skip-while using indirect call ---
 
 fn skip_while(source: string, pos: i64, pred: fn(i32): bool): i64
-  let cur: i64 = pos
-  let slen: i64 = length(source)
-  let done: bool = false
+  let cur = pos
+  let slen = length(source)
+  let done = false
   while cur < slen and done == false:
     if pred(char_at(source, cur)):
       cur = cur + 1
@@ -89,11 +89,11 @@ fn is_keyword(word: string): bool
 // a token list. A real lexer would need to accumulate tokens.
 
 fn lex_one(source: string, pos: i64): i64
-  let slen: i64 = length(source)
+  let slen = length(source)
   if pos >= slen:
     return pos
 
-  let ch: i32 = char_at(source, pos)
+  let ch = char_at(source, pos)
 
   // Skip whitespace (not newlines).
   if is_whitespace(ch):
@@ -106,8 +106,8 @@ fn lex_one(source: string, pos: i64): i64
 
   // Skip // comments to end of line.
   if ch == 47 and pos + 1 < slen and char_at(source, pos + 1) == 47:
-    let end: i64 = pos + 2
-    let comment_done: bool = false
+    let end = pos + 2
+    let comment_done = false
     while end < slen and comment_done == false:
       if char_at(source, end) == 10:
         comment_done = true
@@ -117,8 +117,8 @@ fn lex_one(source: string, pos: i64): i64
 
   // Identifiers and keywords.
   if is_alpha(ch):
-    let end: i64 = skip_while(source, pos, is_alnum)
-    let word: string = substring(source, pos, end - pos)
+    let end = skip_while(source, pos, is_alnum)
+    let word = substring(source, pos, end - pos)
     if is_keyword(word):
       print("KW " + i64_to_string(pos) + " " + i64_to_string(end - pos) + " " + word)
     else:
@@ -127,14 +127,14 @@ fn lex_one(source: string, pos: i64): i64
 
   // Numbers.
   if is_digit(ch):
-    let end: i64 = skip_while(source, pos, is_digit)
-    let num: string = substring(source, pos, end - pos)
+    let end = skip_while(source, pos, is_digit)
+    let num = substring(source, pos, end - pos)
     print("INT " + i64_to_string(pos) + " " + i64_to_string(end - pos) + " " + num)
     return end
 
   // Two-character operators.
   if pos + 1 < slen:
-    let next: i32 = char_at(source, pos + 1)
+    let next = char_at(source, pos + 1)
     if ch == 61 and next == 61:
       print("OP " + i64_to_string(pos) + " 2 ==")
       return pos + 2
@@ -203,15 +203,15 @@ fn lex_one(source: string, pos: i64): i64
 
   // String literals.
   if ch == 34:
-    let end: i64 = pos + 1
-    let str_done: bool = false
+    let end = pos + 1
+    let str_done = false
     while end < slen and str_done == false:
       if char_at(source, end) == 34:
         str_done = true
       else:
         end = end + 1
     if str_done:
-      let text: string = substring(source, pos, end + 1 - pos)
+      let text = substring(source, pos, end + 1 - pos)
       print("STRING " + i64_to_string(pos) + " " + i64_to_string(end + 1 - pos) + " " + text)
       return end + 1
     else:
@@ -223,10 +223,10 @@ fn lex_one(source: string, pos: i64): i64
 
 fn lex_all(source: string): i32
   let pos: i64 = 0
-  let slen: i64 = length(source)
-  let token_count: i32 = 0
+  let slen = length(source)
+  let token_count = 0
   while pos < slen:
-    let old_pos: i64 = pos
+    let old_pos = pos
     pos = lex_one(source, pos)
     if pos > old_pos and pos <= slen:
       token_count = token_count + 1
@@ -238,12 +238,12 @@ fn lex_all(source: string): i32
 
 fn main(): i32
   // Lex this file itself.
-  let self_path: string = "examples/bootstrap_probe/dao_lexer.dao"
+  let self_path = "examples/bootstrap_probe/dao_lexer.dao"
   if file_exists(self_path):
     print("")
     print("=== self-lex ===")
-    let source: string = read_file(self_path)
-    let self_count: i32 = lex_all(source)
+    let source = read_file(self_path)
+    let self_count = lex_all(source)
     print("tokens: " + i32_to_string(self_count))
     print("bytes: " + i64_to_string(length(source)))
   else:

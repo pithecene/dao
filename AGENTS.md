@@ -130,6 +130,7 @@ Before committing, verify:
 ### Naming Rules
 
 - Variables describe what they hold, not their type or scope depth
+- Omit local `let` type annotations when the initializer directly determines the type (`let ok = false`, `let items = Vector<string>::new()`), and annotate only when contextual typing or disambiguation requires it
 - Functions describe what they do, not which pass calls them
 - Test fixtures describe the scenario, not their sequential number
 - Comments explain why, not what, because the code shows what

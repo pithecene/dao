@@ -8,7 +8,7 @@ File
     Param filename: string
     Param contents: string
     ReturnType: SourceBuffer
-    LetStatement offsets: Vector<i64>
+    LetStatement offsets
       CallExpr
         Callee
           Identifier Vector.new
@@ -28,7 +28,7 @@ File
             Identifier zero
     LetStatement i: i64
       IntLiteral 0
-    LetStatement len: i64
+    LetStatement len
       CallExpr
         Callee
           Identifier length
@@ -98,7 +98,7 @@ File
     ReturnType: LineCol
     LetStatement low: i64
       IntLiteral 0
-    LetStatement high: i64
+    LetStatement high
       CallExpr
         Callee
           FieldExpr .length
@@ -111,7 +111,7 @@ File
             Identifier low
             IntLiteral 1
           Identifier high
-      LetStatement mid: i64
+      LetStatement mid
         BinaryExpr +
           Identifier low
           BinaryExpr /
@@ -165,7 +165,7 @@ File
     Param buf: SourceBuffer
     Param line: i64
     ReturnType: string
-    LetStatement idx: i64
+    LetStatement idx
       BinaryExpr -
         Identifier line
         IntLiteral 1
@@ -189,7 +189,7 @@ File
       Then
         ReturnStatement
           StringLiteral ""
-    LetStatement start: i64
+    LetStatement start
       CallExpr
         Callee
           FieldExpr .get
@@ -197,7 +197,7 @@ File
               Identifier buf
         Args
           Identifier idx
-    LetStatement end: i64
+    LetStatement end
       CallExpr
         Callee
           Identifier length
@@ -303,7 +303,7 @@ File
     Param ch: string
     Param n: i64
     ReturnType: string
-    LetStatement result: string
+    LetStatement result
       StringLiteral ""
     LetStatement i: i64
       IntLiteral 0
@@ -341,7 +341,7 @@ File
           IntLiteral 1
     LetStatement w: i64
       IntLiteral 0
-    LetStatement v: i64
+    LetStatement v
       Identifier n
     WhileStatement
       Condition
@@ -369,7 +369,7 @@ File
     Param diag: Diagnostic
     Param line_offset: i64
     ReturnType: string
-    LetStatement loc: LineCol
+    LetStatement loc
       CallExpr
         Callee
           Identifier sb_line_col
@@ -378,7 +378,7 @@ File
           FieldExpr .offset
             FieldExpr .span
               Identifier diag
-    LetStatement display_line: i64
+    LetStatement display_line
       BinaryExpr -
         FieldExpr .line
           Identifier loc
@@ -395,7 +395,7 @@ File
           Value
             FieldExpr .line
               Identifier loc
-    LetStatement header: string
+    LetStatement header
       BinaryExpr +
         BinaryExpr +
           BinaryExpr +
@@ -429,7 +429,7 @@ File
           StringLiteral ": "
         FieldExpr .message
           Identifier diag
-    LetStatement context: string
+    LetStatement context
       CallExpr
         Callee
           Identifier sb_line_text
@@ -437,13 +437,13 @@ File
           Identifier buf
           FieldExpr .line
             Identifier loc
-    LetStatement gutter_width: i64
+    LetStatement gutter_width
       CallExpr
         Callee
           Identifier digit_width
         Args
           Identifier display_line
-    LetStatement gutter: string
+    LetStatement gutter
       BinaryExpr +
         CallExpr
           Callee
@@ -452,7 +452,7 @@ File
             StringLiteral " "
             Identifier gutter_width
         StringLiteral " | "
-    LetStatement line_gutter: string
+    LetStatement line_gutter
       BinaryExpr +
         CallExpr
           Callee
@@ -460,7 +460,7 @@ File
           Args
             Identifier display_line
         StringLiteral " | "
-    LetStatement caret_padding: string
+    LetStatement caret_padding
       CallExpr
         Callee
           Identifier repeat_char
@@ -470,7 +470,7 @@ File
             FieldExpr .col
               Identifier loc
             IntLiteral 1
-    LetStatement caret_len: i64
+    LetStatement caret_len
       FieldExpr .length
         FieldExpr .span
           Identifier diag
@@ -485,7 +485,7 @@ File
             Identifier caret_len
           Value
             IntLiteral 1
-    LetStatement caret: string
+    LetStatement caret
       CallExpr
         Callee
           Identifier repeat_char
@@ -517,7 +517,7 @@ File
     Param diags: Vector<Diagnostic>
     Param line_offset: i64
     ReturnType: string
-    LetStatement result: string
+    LetStatement result
       StringLiteral ""
     LetStatement i: i64
       IntLiteral 0
@@ -680,11 +680,11 @@ File
           Identifier print
         Args
           StringLiteral ""
-    LetStatement pass_count: i32
+    LetStatement pass_count
       IntLiteral 0
-    LetStatement src: string
+    LetStatement src
       StringLiteral "let x = 1\nlet y = x + 1\nlet z = y * 2\n"
-    LetStatement buf: SourceBuffer
+    LetStatement buf
       CallExpr
         Callee
           Identifier make_source_buffer
@@ -716,7 +716,7 @@ File
             BinaryExpr +
               Identifier pass_count
               IntLiteral 1
-    LetStatement loc0: LineCol
+    LetStatement loc0
       CallExpr
         Callee
           Identifier sb_line_col
@@ -756,7 +756,7 @@ File
               IntLiteral 1
     LetStatement off10: i64
       IntLiteral 10
-    LetStatement loc10: LineCol
+    LetStatement loc10
       CallExpr
         Callee
           Identifier sb_line_col
@@ -796,7 +796,7 @@ File
               IntLiteral 1
     LetStatement off18: i64
       IntLiteral 18
-    LetStatement loc18: LineCol
+    LetStatement loc18
       CallExpr
         Callee
           Identifier sb_line_col
@@ -906,7 +906,7 @@ File
             BinaryExpr +
               Identifier pass_count
               IntLiteral 1
-    LetStatement span_x: Span
+    LetStatement span_x
       CallExpr
         Callee
           Identifier Span
@@ -935,7 +935,7 @@ File
             BinaryExpr +
               Identifier pass_count
               IntLiteral 1
-    LetStatement diag1: Diagnostic
+    LetStatement diag1
       CallExpr
         Callee
           Identifier make_error
@@ -947,7 +947,7 @@ File
               Identifier off18
               Identifier one
           StringLiteral "undefined variable 'x'"
-    LetStatement fmt1: string
+    LetStatement fmt1
       CallExpr
         Callee
           Identifier format_diagnostic
@@ -1008,7 +1008,7 @@ File
               IntLiteral 1
     LetStatement zero: i64
       IntLiteral 0
-    LetStatement diag_warn: Diagnostic
+    LetStatement diag_warn
       CallExpr
         Callee
           Identifier make_warning
@@ -1020,7 +1020,7 @@ File
               Identifier zero
               Identifier three
           StringLiteral "unused variable"
-    LetStatement fmt_warn: string
+    LetStatement fmt_warn
       CallExpr
         Callee
           Identifier format_diagnostic
@@ -1083,7 +1083,7 @@ File
       IntLiteral 24
     LetStatement five: i64
       IntLiteral 5
-    LetStatement diag_wide: Diagnostic
+    LetStatement diag_wide
       CallExpr
         Callee
           Identifier make_error
@@ -1095,7 +1095,7 @@ File
               Identifier off24
               Identifier five
           StringLiteral "type mismatch"
-    LetStatement fmt_wide: string
+    LetStatement fmt_wide
       CallExpr
         Callee
           Identifier format_diagnostic
@@ -1122,7 +1122,7 @@ File
               IntLiteral 1
     LetStatement four: i64
       IntLiteral 4
-    LetStatement diag_first: Diagnostic
+    LetStatement diag_first
       CallExpr
         Callee
           Identifier make_error
@@ -1134,7 +1134,7 @@ File
               Identifier four
               Identifier one
           StringLiteral "unexpected token"
-    LetStatement fmt_first: string
+    LetStatement fmt_first
       CallExpr
         Callee
           Identifier format_diagnostic
@@ -1176,7 +1176,7 @@ File
             BinaryExpr +
               Identifier pass_count
               IntLiteral 1
-    LetStatement diag_last: Diagnostic
+    LetStatement diag_last
       CallExpr
         Callee
           Identifier make_error
@@ -1188,7 +1188,7 @@ File
               Identifier off24
               Identifier one
           StringLiteral "bad expression"
-    LetStatement fmt_last: string
+    LetStatement fmt_last
       CallExpr
         Callee
           Identifier format_diagnostic
@@ -1213,7 +1213,7 @@ File
             BinaryExpr +
               Identifier pass_count
               IntLiteral 1
-    LetStatement diags: Vector<Diagnostic>
+    LetStatement diags
       CallExpr
         Callee
           Identifier Vector.new
@@ -1259,7 +1259,7 @@ File
                     Identifier zero
                     Identifier three
                 StringLiteral "second warning"
-    LetStatement fmt_multi: string
+    LetStatement fmt_multi
       CallExpr
         Callee
           Identifier format_diagnostics
@@ -1301,7 +1301,7 @@ File
             BinaryExpr +
               Identifier pass_count
               IntLiteral 1
-    LetStatement diag_offset: Diagnostic
+    LetStatement diag_offset
       CallExpr
         Callee
           Identifier make_error
@@ -1313,7 +1313,7 @@ File
               Identifier off18
               Identifier one
           StringLiteral "offset test"
-    LetStatement fmt_offset: string
+    LetStatement fmt_offset
       CallExpr
         Callee
           Identifier format_diagnostic
@@ -1338,7 +1338,7 @@ File
             BinaryExpr +
               Identifier pass_count
               IntLiteral 1
-    LetStatement empty_buf: SourceBuffer
+    LetStatement empty_buf
       CallExpr
         Callee
           Identifier make_source_buffer
@@ -1370,7 +1370,7 @@ File
             BinaryExpr +
               Identifier pass_count
               IntLiteral 1
-    LetStatement single_buf: SourceBuffer
+    LetStatement single_buf
       CallExpr
         Callee
           Identifier make_source_buffer
@@ -1472,7 +1472,7 @@ File
               IntLiteral 1
     LetStatement off10b: i64
       IntLiteral 10
-    LetStatement diags_same: Vector<Diagnostic>
+    LetStatement diags_same
       CallExpr
         Callee
           Identifier Vector.new
@@ -1518,7 +1518,7 @@ File
                     Identifier off18
                     Identifier one
                 StringLiteral "second"
-    LetStatement fmt_same: string
+    LetStatement fmt_same
       CallExpr
         Callee
           Identifier format_diagnostics
@@ -1560,7 +1560,7 @@ File
             BinaryExpr +
               Identifier pass_count
               IntLiteral 1
-    LetStatement total: i32
+    LetStatement total
       IntLiteral 28
     ExpressionStatement
       CallExpr

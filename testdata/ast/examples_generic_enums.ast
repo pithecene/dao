@@ -108,7 +108,7 @@ File
           Identifier print
         Args
           StringLiteral "=== Option<T> ==="
-    LetStatement some_val: Option<i64>
+    LetStatement some_val
       CallExpr
         Callee
           QualifiedName Option::Some
@@ -163,7 +163,7 @@ File
                       Args
                         UnaryExpr -
                           IntLiteral 1
-    LetStatement found: Option<i64>
+    LetStatement found
       CallExpr
         Callee
           Identifier find_first_positive
@@ -205,7 +205,7 @@ File
                         Identifier to_i64
                       Args
                         IntLiteral 0
-    LetStatement not_found: Option<i64>
+    LetStatement not_found
       CallExpr
         Callee
           Identifier find_first_positive
@@ -261,7 +261,7 @@ File
           Identifier print
         Args
           StringLiteral "=== Result<T, E> ==="
-    LetStatement ok_result: Result<i64, string>
+    LetStatement ok_result
       CallExpr
         Callee
           Identifier safe_divide
@@ -276,7 +276,7 @@ File
               Identifier to_i64
             Args
               IntLiteral 4
-    LetStatement err_result: Result<i64, string>
+    LetStatement err_result
       CallExpr
         Callee
           Identifier safe_divide
