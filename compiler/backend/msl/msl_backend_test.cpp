@@ -191,6 +191,22 @@ suite<"msl_backend"> msl_backend_suite = [] {
     expect(r6.rejections.empty());
     expect(r6.kernels.size() == 1_ul);
     expect(r6.kernels.front().origin.module_name == "b");
+
+    auto r7 = ambig_pipe.lower({"a::same", "b::same"});
+    expect(r7.bundle_source.empty());
+    expect(r7.rejections.size() == 1_ul);
+    expect(contains(r7.rejections.front().message, "collides across"));
+
+    auto r8 = ambig_pipe.lower({"a::same", "a::same"});
+    expect(r8.bundle_source.empty());
+    expect(r8.rejections.size() == 1_ul);
+    expect(contains(r8.rejections.front().message, "duplicate kernel request"));
+
+    MslTestPipeline alias_req_pipe = MslTestPipeline::single("fn k(x: i32): i32 -> x + 1\n");
+    auto r9 = alias_req_pipe.lower({"k", "test::k"});
+    expect(r9.bundle_source.empty());
+    expect(r9.rejections.size() == 1_ul);
+    expect(contains(r9.rejections.front().message, "resolves to the same function"));
   };
 };
 

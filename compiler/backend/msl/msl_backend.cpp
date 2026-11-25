@@ -707,46 +707,85 @@ auto MslBackend::lower_kernels(const MirModule& mir_module,
     return outcome;
   }
 
+  std::unordered_map<std::string, std::vector<const MirFunction*>> by_short_name;
+  std::unordered_map<std::string, const MirFunction*> by_qualified_name;
+  for (const auto* fn : mir_module.functions) {
+    if (fn == nullptr || fn->symbol == nullptr || in_prelude(*fn, source_map)) {
+      continue;
+    }
+    by_short_name[std::string(fn->symbol->name)].push_back(fn);
+    by_qualified_name.emplace(qualified_fn_name(*fn), fn);
+  }
+
   std::set<std::string> seen_requests;
+  std::set<const MirFunction*> seen_functions;
+  std::unordered_map<std::string, std::string> emitted_entry_names;
   std::ostringstream bundle;
   bundle << checked_msl_preamble();
 
   for (const std::string_view requested : kernel_names) {
-    if (!seen_requests.emplace(requested).second) {
+    const std::string req_str(requested);
+    if (!seen_requests.emplace(req_str).second) {
       outcome.rejections.push_back({.span = mir_module.span,
-                                    .function_name = std::string(requested),
-                                    .message = "duplicate kernel request '" +
-                                               std::string(requested) + "'"});
+                                    .function_name = req_str,
+                                    .message = "duplicate kernel request '" + req_str + "'"});
       continue;
     }
 
-    std::vector<const MirFunction*> matches;
-    for (const auto* fn : mir_module.functions) {
-      if (fn == nullptr || fn->symbol == nullptr || in_prelude(*fn, source_map)) {
-        continue;
+    const MirFunction* resolved_fn = nullptr;
+    if (requested.find("::") != std::string_view::npos) {
+      auto q_it = by_qualified_name.find(req_str);
+      if (q_it != by_qualified_name.end()) {
+        resolved_fn = q_it->second;
       }
-      if (fn->symbol->name == requested || qualified_fn_name(*fn) == requested) {
-        matches.push_back(fn);
+    } else {
+      auto s_it = by_short_name.find(req_str);
+      if (s_it != by_short_name.end()) {
+        if (s_it->second.size() > 1) {
+          outcome.rejections.push_back(
+              {.span = s_it->second.front()->span,
+               .function_name = req_str,
+               .message = "requested kernel '" + req_str +
+                          "' is ambiguous across multiple modules; qualify as module::name"});
+          continue;
+        }
+        resolved_fn = s_it->second.front();
       }
     }
 
-    if (matches.empty()) {
+    if (resolved_fn == nullptr) {
       outcome.rejections.push_back({.span = mir_module.span,
-                                    .function_name = std::string(requested),
-                                    .message = "requested kernel '" + std::string(requested) +
+                                    .function_name = req_str,
+                                    .message = "requested kernel '" + req_str +
                                                "' was not found in user MIR functions"});
       continue;
     }
-    if (matches.size() > 1) {
+
+    const std::string q_name = qualified_fn_name(*resolved_fn);
+    const Span fn_span = (resolved_fn->symbol != nullptr &&
+                          resolved_fn->symbol->decl_span.length > 0)
+                             ? resolved_fn->symbol->decl_span
+                             : resolved_fn->span;
+    if (!seen_functions.insert(resolved_fn).second) {
       outcome.rejections.push_back(
-          {.span = matches.front()->span,
-           .function_name = std::string(requested),
-           .message = "requested kernel '" + std::string(requested) +
-                      "' is ambiguous across multiple modules; qualify as module::name"});
+          {.span = fn_span,
+           .function_name = q_name,
+           .message = "duplicate kernel request resolves to the same function '" + q_name + "'"});
       continue;
     }
 
-    auto lowered = lower_single_kernel(*matches.front(), source_map, outcome.rejections);
+    const std::string entry_name(resolved_fn->symbol->name);
+    auto [entry_it, inserted] = emitted_entry_names.emplace(entry_name, q_name);
+    if (!inserted) {
+      outcome.rejections.push_back(
+          {.span = fn_span,
+           .function_name = q_name,
+           .message = "Metal entry-point name '" + entry_name + "' collides across '" +
+                      entry_it->second + "' and '" + q_name + "'"});
+      continue;
+    }
+
+    auto lowered = lower_single_kernel(*resolved_fn, source_map, outcome.rejections);
     if (lowered.has_value()) {
       bundle << "\n" << lowered->msl_source;
       outcome.kernels.push_back(std::move(*lowered));
