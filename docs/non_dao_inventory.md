@@ -13,7 +13,7 @@ so a machine with no Dao on it can always rebuild the language:
 | Self-hosted | `bootstrap/`, in Dao | compiles itself, and still uses LLVM and the C runtime |
 | Fully hosted | not yet written | all Dao, with its own runtime and code generation |
 
-Line counts reflect the current branch over `d0a18ea`, on 2026-11-24.  The table counts
+Line counts reflect the current branch over `22b02b9`, on 2026-11-24.  The table counts
 32,313 lines of authored Dao for comparison.
 
 ## Programs
@@ -37,7 +37,8 @@ Line counts reflect the current branch over `d0a18ea`, on 2026-11-24.  The table
 | `compiler/driver/multifile_build_test.sh`, `tools/playground/dev.sh` | Shell | 194 | the same process API |
 | `Taskfile.yml` | YAML for Task | 208 | a build tool written in Dao |
 | `CMakeLists.txt` files and `CMakePresets.json` | CMake | 519 | stays with the bootstrap tier, and a Dao build tool serves the other tiers |
-| `conanfile.py`, `profiles/` | Python, Conan | 88 | stays with the bootstrap tier |
+| `conanfile.py`, `profiles/` | Python, Conan | 90 | stays with the bootstrap tier |
+| `.github/workflows/` | YAML for GitHub Actions | 270 | Bosun orchestrating compiler and crossing validation directly |
 
 ## External Dependencies
 
