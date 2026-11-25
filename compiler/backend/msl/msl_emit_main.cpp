@@ -182,7 +182,7 @@ auto main(int argc, char* argv[]) -> int {
     return EXIT_FAILURE;
   }
 
-  const std::string manifest = dao::MslBackend::render_manifest_tsv(outcome.kernels);
+  const std::string manifest = dao::MslBackend::render_manifest_tsv(outcome);
   if (!bundle_out.empty() && !write_output_file(bundle_out, outcome.bundle_source)) {
     return EXIT_FAILURE;
   }

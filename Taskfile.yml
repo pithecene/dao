@@ -148,7 +148,7 @@ tasks:
       - "{{.BUILD_DIR}}/compiler/driver/daoc build examples/forecast_plans.dao"
       - "{{.BUILD_DIR}}/compiler/backend/msl/dao_msl_emit examples/forecast_plans.dao score_v1 high_wind adjust --bundle-out {{.BUILD_DIR}}/forecast_device/forecast_kernels.metal --manifest-out {{.BUILD_DIR}}/forecast_device/forecast_kernels.tsv"
       - swiftc -O examples/forecast_device/metal_runner.swift -o {{.BUILD_DIR}}/forecast_device/metal_runner
-      - "./examples/forecast_plans | {{.BUILD_DIR}}/forecast_device/metal_runner --msl {{.BUILD_DIR}}/forecast_device/forecast_kernels.metal --kernels {{.BUILD_DIR}}/forecast_device/forecast_kernels.tsv"
+      - "./examples/forecast_plans | {{.BUILD_DIR}}/forecast_device/metal_runner --msl {{.BUILD_DIR}}/forecast_device/forecast_kernels.metal --kernels {{.BUILD_DIR}}/forecast_device/forecast_kernels.tsv --cpu-bin ./examples/forecast_plans"
 
   format:
     desc: Run clang-format on all source files

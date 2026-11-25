@@ -14,17 +14,17 @@ so a machine with no Dao on it can always rebuild the language:
 | Fully hosted | not yet written | all Dao, with its own runtime and code generation |
 
 Line counts reflect the current branch over `1d7c3b4`, on 2026-11-24.  The table counts
-32,313 lines of authored Dao for comparison.
+32,437 lines of authored Dao for comparison.
 
 ## Programs
 
 | Stopgap | Language | Files | Lines | Replacement |
 |---|---|---|---|---|
-| `compiler/` bootstrap tier and its tests | C++ | 112 | 41,440 | nothing: this tier stays permanently |
+| `compiler/` bootstrap tier and its tests | C++ | 112 | 41,565 | nothing: this tier stays permanently |
 | `runtime/` allocator, strings, I/O and generators | C | 11 | 1,632 | Dao over `Ptr<T>` and `mode unsafe` in the fully hosted tier, which needs direct system calls from Dao |
 | `tools/playground/compiler_service/` | C++ | 20 | 3,300 | a Dao service, which needs sockets and HTTP in the standard library |
 | `tools/playground/frontend/` | TypeScript, CSS, HTML | 20 | 1,660 | a Dao browser target, which does not exist |
-| `examples/forecast_device/metal_runner.swift` | Swift | 1 | 654 | Dao validating kernel manifests and buffer lifetimes and driving Metal command queues directly |
+| `examples/forecast_device/metal_runner.swift` | Swift | 1 | 977 | Dao validating kernel manifests and buffer lifetimes and driving Metal command queues directly |
 | `examples/ffi/` | C | 3 | 177 | the C side of an interoperability test, which is foreign by design and goes only if C interoperability does |
 
 ## Build and Scripts

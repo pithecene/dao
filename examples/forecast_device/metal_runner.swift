@@ -1,13 +1,15 @@
 // STOPGAP: this host driver is Swift, and docs/non_dao_inventory.md records it.
 // All Metal compute kernels it executes are generated from authored Dao source
 // (`examples/forecast_plans.dao`) by `dao_msl_emit`; zero handwritten Metal
-// shader code remains here.
+// shader code or reimplemented reference formulas remain here.
 //
 //   task forecast-device
 //
 // Reads provenance-preserving `record` lines from standard input alongside the
-// compiler-emitted `--msl <bundle.metal>` and `--kernels <manifest.tsv>` files.
+// compiler-emitted `--msl <bundle.metal>`, `--kernels <manifest.tsv>`, and
+// compiled Dao `--cpu-bin <forecast_plans>` executable.
 
+import CryptoKit
 import Foundation
 import Metal
 
@@ -20,6 +22,7 @@ enum RunError: Error, CustomStringConvertible {
   case outOfDomain(Int32)
   case emptyBatch
   case noDevice
+  case deviceExecutionFailed(String)
   case arithmeticTrap(String)
   case malformed(String)
   var description: String {
@@ -27,6 +30,7 @@ enum RunError: Error, CustomStringConvertible {
     case .outOfDomain(let wind): return "wind \(wind) is outside \(windDomain)"
     case .emptyBatch: return "an empty batch has nothing to run"
     case .noDevice: return "no usable Metal device"
+    case .deviceExecutionFailed(let what): return "Metal command buffer failed: \(what)"
     case .arithmeticTrap(let what): return "checked i32 arithmetic trap on device: \(what)"
     case .malformed(let what): return "malformed plan: \(what)"
     }
@@ -44,9 +48,27 @@ struct KernelSpec: Equatable {
   let effects: String
 }
 
-func parseArgs(_ argv: [String]) throws -> (mslPath: String, manifestPath: String) {
+struct RunnerArgs {
+  let mslPath: String
+  let manifestPath: String
+  let cpuBinPath: String
+}
+
+func sha256Hex(_ text: String) -> String {
+  SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+}
+
+func isValidSha256Hex(_ text: String) -> Bool {
+  guard text.count == 64 else { return false }
+  return text.unicodeScalars.allSatisfy { scalar in
+    (scalar.value >= 48 && scalar.value <= 57) || (scalar.value >= 97 && scalar.value <= 102)
+  }
+}
+
+func parseArgs(_ argv: [String]) throws -> RunnerArgs {
   var mslPath = ""
   var manifestPath = ""
+  var cpuBinPath = ""
   var idx = 1
   while idx < argv.count {
     let arg = argv[idx]
@@ -57,21 +79,36 @@ func parseArgs(_ argv: [String]) throws -> (mslPath: String, manifestPath: Strin
       mslPath = argv[idx + 1]
     } else if arg == "--kernels" {
       manifestPath = argv[idx + 1]
+    } else if arg == "--cpu-bin" {
+      cpuBinPath = argv[idx + 1]
     } else {
       throw RunError.malformed("unknown option \(arg)")
     }
     idx += 2
   }
-  guard !mslPath.isEmpty, !manifestPath.isEmpty else {
-    throw RunError.malformed("usage: metal_runner --msl <bundle.metal> --kernels <manifest.tsv>")
+  guard !mslPath.isEmpty, !manifestPath.isEmpty, !cpuBinPath.isEmpty else {
+    throw RunError.malformed(
+      "usage: metal_runner --msl <bundle.metal> --kernels <manifest.tsv> --cpu-bin <forecast_plans>"
+    )
   }
-  return (mslPath, manifestPath)
+  return RunnerArgs(mslPath: mslPath, manifestPath: manifestPath, cpuBinPath: cpuBinPath)
 }
 
-func parseKernelManifest(_ text: String) throws -> [String: KernelSpec] {
+func parseKernelManifest(_ text: String, expectedBundleSha256: String) throws -> [String: KernelSpec] {
   var specs: [String: KernelSpec] = [:]
+  var manifestDigest: String?
   for rawLine in text.split(whereSeparator: \.isNewline) {
     let fields = rawLine.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+    if fields.first == "bundle_sha256" {
+      guard fields.count == 2, isValidSha256Hex(fields[1]) else {
+        throw RunError.malformed("invalid bundle_sha256 row: \(rawLine)")
+      }
+      if manifestDigest != nil {
+        throw RunError.malformed("duplicate bundle_sha256 row in kernel manifest")
+      }
+      manifestDigest = fields[1]
+      continue
+    }
     guard fields.count == 9, fields[0] == "kernel" else {
       throw RunError.malformed("invalid kernel manifest row: \(rawLine)")
     }
@@ -106,10 +143,188 @@ func parseKernelManifest(_ text: String) throws -> [String: KernelSpec] {
     }
     specs[spec.operation] = spec
   }
+  guard let manifestDigest else {
+    throw RunError.malformed("missing bundle_sha256 header in kernel manifest")
+  }
+  guard manifestDigest == expectedBundleSha256 else {
+    throw RunError.malformed(
+      "kernel manifest bundle_sha256 mismatch: manifest=\(manifestDigest), bundle=\(expectedBundleSha256)"
+    )
+  }
   guard !specs.isEmpty else {
     throw RunError.malformed("empty kernel manifest")
   }
   return specs
+}
+
+func verifyCommandBufferCompletion(
+  status: MTLCommandBufferStatus,
+  errorDescription: String?,
+  context: String
+) throws {
+  if let errorDescription {
+    throw RunError.deviceExecutionFailed("\(context) (status=\(status.rawValue)): \(errorDescription)")
+  }
+  guard status == .completed else {
+    throw RunError.deviceExecutionFailed(
+      "\(context) ended in status \(status.rawValue), expected completed (\(MTLCommandBufferStatus.completed.rawValue))"
+    )
+  }
+}
+
+func verifyCommandBuffer(_ commandBuffer: MTLCommandBuffer, context: String) throws {
+  try verifyCommandBufferCompletion(
+    status: commandBuffer.status,
+    errorDescription: commandBuffer.error?.localizedDescription,
+    context: context
+  )
+}
+
+enum KernelEvalOutcome: Equatable, CustomStringConvertible {
+  case value(Int32)
+  case trapped
+  var description: String {
+    switch self {
+    case .value(let v): return "value(\(v))"
+    case .trapped: return "arithmetic_trap"
+    }
+  }
+}
+
+struct CpuDomainOracle {
+  let sampleEta: [Int32]
+  let sampleAuditScore: [Int32]
+  let domainEta: [Int32]
+}
+
+final class CpuOracle {
+  let executableURL: URL
+
+  init(path: String) throws {
+    let url = URL(fileURLWithPath: path)
+    guard FileManager.default.isExecutableFile(atPath: url.path) else {
+      throw RunError.malformed("compiled Dao CPU binary is not executable: \(path)")
+    }
+    self.executableURL = url
+  }
+
+  private func runProcess(_ arguments: [String]) throws -> (
+    status: Int32,
+    reason: Process.TerminationReason,
+    stdout: String,
+    stderr: String
+  ) {
+    let proc = Process()
+    proc.executableURL = executableURL
+    proc.arguments = arguments
+    let outPipe = Pipe()
+    let errPipe = Pipe()
+    proc.standardOutput = outPipe
+    proc.standardError = errPipe
+    try proc.run()
+    let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+    let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+    proc.waitUntilExit()
+    return (
+      status: proc.terminationStatus,
+      reason: proc.terminationReason,
+      stdout: String(decoding: outData, as: UTF8.self),
+      stderr: String(decoding: errData, as: UTF8.self)
+    )
+  }
+
+  private func parseCsvI32(_ csv: String, context: String) throws -> [Int32] {
+    let parts = csv.split(separator: ",", omittingEmptySubsequences: false)
+    var out: [Int32] = []
+    out.reserveCapacity(parts.count)
+    for part in parts {
+      guard let val = Int32(part) else {
+        throw RunError.malformed("invalid i32 '\(part)' in CPU oracle \(context)")
+      }
+      out.append(val)
+    }
+    return out
+  }
+
+  func loadDomainOracle() throws -> CpuDomainOracle {
+    let res = try runProcess(["--oracle-domain"])
+    guard res.reason == .exit, res.status == 0 else {
+      throw RunError.malformed(
+        "CPU --oracle-domain failed (reason=\(res.reason.rawValue), status=\(res.status)): \(res.stderr)"
+      )
+    }
+    var sampleEta: [Int32]?
+    var sampleAudit: [Int32]?
+    var domainEta: [Int32]?
+    for line in res.stdout.split(whereSeparator: \.isNewline) {
+      let cols = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+      guard cols.count == 2 else {
+        throw RunError.malformed("unexpected CPU --oracle-domain line: \(line)")
+      }
+      switch cols[0] {
+      case "sample_eta":
+        sampleEta = try parseCsvI32(cols[1], context: "sample_eta")
+      case "sample_audit_score":
+        sampleAudit = try parseCsvI32(cols[1], context: "sample_audit_score")
+      case "domain_eta":
+        domainEta = try parseCsvI32(cols[1], context: "domain_eta")
+      default:
+        throw RunError.malformed("unknown CPU --oracle-domain key \(cols[0])")
+      }
+    }
+    guard let sampleEta, sampleEta.count == 2,
+          let sampleAudit, sampleAudit.count == 2,
+          let domainEta, domainEta.count == 1001 else {
+      throw RunError.malformed("incomplete CPU --oracle-domain payload")
+    }
+    return CpuDomainOracle(
+      sampleEta: sampleEta,
+      sampleAuditScore: sampleAudit,
+      domainEta: domainEta
+    )
+  }
+
+  func evaluateCycledBatch(rows: Int) throws -> [Int32] {
+    let tempURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("dao_cpu_oracle_\(ProcessInfo.processInfo.processIdentifier)_\(UUID().uuidString).txt")
+    defer { try? FileManager.default.removeItem(at: tempURL) }
+    let res = try runProcess(["--oracle-cycled", "\(rows)", tempURL.path])
+    guard res.reason == .exit, res.status == 0 else {
+      throw RunError.malformed(
+        "CPU --oracle-cycled \(rows) failed (reason=\(res.reason.rawValue), status=\(res.status)): \(res.stderr)"
+      )
+    }
+    let text = try String(contentsOf: tempURL, encoding: .utf8)
+    var values: [Int32] = []
+    values.reserveCapacity(rows)
+    for line in text.split(whereSeparator: \.isNewline) {
+      guard let v = Int32(line) else {
+        throw RunError.malformed("invalid i32 line '\(line)' from CPU --oracle-cycled")
+      }
+      values.append(v)
+    }
+    guard values.count == rows else {
+      throw RunError.malformed("CPU --oracle-cycled returned \(values.count) rows, expected \(rows)")
+    }
+    return values
+  }
+
+  func evaluateKernel(_ kernel: String, args: [Int32]) throws -> KernelEvalOutcome {
+    let res = try runProcess(["--eval-kernel", kernel] + args.map(String.init))
+    if res.reason == .uncaughtSignal {
+      return .trapped
+    }
+    guard res.reason == .exit, res.status == 0 else {
+      throw RunError.malformed(
+        "CPU --eval-kernel \(kernel) failed unexpectedly (status=\(res.status)): \(res.stderr)"
+      )
+    }
+    let trimmed = res.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let value = Int32(trimmed) else {
+      throw RunError.malformed("non-i32 stdout '\(trimmed)' from CPU --eval-kernel \(kernel)")
+    }
+    return .value(value)
+  }
 }
 
 func validate(_ winds: [Int32]) throws {
@@ -141,7 +356,10 @@ struct Report {
   var seconds = 0.0
 }
 
-let stepArguments = ["read": 6, "upload": 2, "dispatch": 5, "readback": 2, "host_adjust": 4, "release": 1, "observe": 2, "reply": 1]
+let stepArguments = [
+  "read": 6, "upload": 2, "dispatch": 5, "readback": 2,
+  "host_adjust": 4, "release": 1, "observe": 2, "reply": 1,
+]
 
 func checkShape(_ step: Step, kernels: [String: KernelSpec]) throws {
   guard stepArguments[step.op] == step.args.count else {
@@ -149,7 +367,8 @@ func checkShape(_ step: Step, kernels: [String: KernelSpec]) throws {
   }
   if step.op == "read" {
     guard Int32(step.args[0]) != nil, Int32(step.args[1]) != nil, Int32(step.args[2]) != nil,
-          ["as_of_decision", "latest_now"].contains(step.args[3]), Int32(step.args[4]) != nil, !step.args[5].isEmpty else {
+          ["as_of_decision", "latest_now"].contains(step.args[3]), Int32(step.args[4]) != nil,
+          !step.args[5].isEmpty else {
       throw RunError.malformed("invalid read provenance \(step.args)")
     }
   } else if step.op == "dispatch" {
@@ -220,7 +439,11 @@ final class Gpu {
 
   func makeStatusBuffer() -> MTLBuffer {
     var zero: UInt32 = 0
-    return device.makeBuffer(bytes: &zero, length: MemoryLayout<UInt32>.stride, options: .storageModeShared)!
+    return device.makeBuffer(
+      bytes: &zero,
+      length: MemoryLayout<UInt32>.stride,
+      options: .storageModeShared
+    )!
   }
 
   func checkStatus(_ statusBuffer: MTLBuffer, context: String) throws {
@@ -230,7 +453,13 @@ final class Gpu {
     }
   }
 
-  func dispatch(_ encoder: MTLComputeCommandEncoder, _ kernel: String, _ buffers: [MTLBuffer], _ statusBuffer: MTLBuffer, _ rows: Int) {
+  func dispatch(
+    _ encoder: MTLComputeCommandEncoder,
+    _ kernel: String,
+    _ buffers: [MTLBuffer],
+    _ statusBuffer: MTLBuffer,
+    _ rows: Int
+  ) {
     let pipeline = pipelines[kernel]!
     encoder.setComputePipelineState(pipeline)
     for (index, buffer) in buffers.enumerated() {
@@ -293,11 +522,12 @@ func execute(_ steps: [Step], winds: [Int32], gpu: Gpu) throws -> Report {
   }
   func awaitDevice() throws {
     guard let running = open, let status = openStatus else { return }
+    open = nil
+    openStatus = nil
     running.commit()
     running.waitUntilCompleted()
     report.waits += 1
-    open = nil
-    openStatus = nil
+    try verifyCommandBuffer(running, context: "plan dispatch")
     try gpu.checkStatus(status, context: "plan dispatch")
     for name in pendingHost {
       hostValues[name] = contents(staging[name]!, rows)
@@ -320,7 +550,9 @@ func execute(_ steps: [Step], winds: [Int32], gpu: Gpu) throws -> Report {
     case "upload":
       let source = try hostValue(step.args[0])
       let dest = try allocateBuffer(step.args[1])
-      let shared = source.withUnsafeBytes { gpu.device.makeBuffer(bytes: $0.baseAddress!, length: bytes, options: .storageModeShared)! }
+      let shared = source.withUnsafeBytes {
+        gpu.device.makeBuffer(bytes: $0.baseAddress!, length: bytes, options: .storageModeShared)!
+      }
       let (cmd, _) = commandBuffer()
       let blit = cmd.makeBlitCommandEncoder()!
       blit.copy(from: shared, sourceOffset: 0, to: dest, destinationOffset: 0, size: bytes)
@@ -393,7 +625,9 @@ func handwritten(winds: [Int32], gpu: Gpu) throws -> Report {
   let rows = winds.count
   let bytes = rows * MemoryLayout<Int32>.stride
   let start = DispatchTime.now().uptimeNanoseconds
-  let up = winds.withUnsafeBytes { gpu.device.makeBuffer(bytes: $0.baseAddress!, length: bytes, options: .storageModeShared)! }
+  let up = winds.withUnsafeBytes {
+    gpu.device.makeBuffer(bytes: $0.baseAddress!, length: bytes, options: .storageModeShared)!
+  }
   let wind = gpu.device.makeBuffer(length: bytes, options: .storageModePrivate)!
   let score = gpu.device.makeBuffer(length: bytes, options: .storageModePrivate)!
   let flag = gpu.device.makeBuffer(length: bytes, options: .storageModePrivate)!
@@ -418,6 +652,7 @@ func handwritten(winds: [Int32], gpu: Gpu) throws -> Report {
   readback.endEncoding()
   commands.commit()
   commands.waitUntilCompleted()
+  try verifyCommandBuffer(commands, context: "handwritten")
   try gpu.checkStatus(status, context: "handwritten")
   var report = Report()
   report.eta = contents(down, rows)
@@ -432,14 +667,16 @@ func handwritten(winds: [Int32], gpu: Gpu) throws -> Report {
 }
 // HANDWRITTEN GLUE END
 
-// Direct single-kernel dispatch without the 0...1000 domain prefilter so tests
-// can verify that generated Metal kernels trap on signed 32-bit overflow just
-// as CPU Dao does.
+// Direct single-kernel dispatch without the 0...1000 domain prefilter so
+// differential tests can verify that generated Metal kernels match compiled Dao
+// CPU execution across arbitrary i32 inputs and signed overflow traps.
 func rawKernelDispatch(_ kernel: String, inputs: [[Int32]], gpu: Gpu) throws -> [Int32] {
   let rows = inputs[0].count
   let bytes = rows * MemoryLayout<Int32>.stride
   let inBuffers = inputs.map { arr in
-    arr.withUnsafeBytes { gpu.device.makeBuffer(bytes: $0.baseAddress!, length: bytes, options: .storageModeShared)! }
+    arr.withUnsafeBytes {
+      gpu.device.makeBuffer(bytes: $0.baseAddress!, length: bytes, options: .storageModeShared)!
+    }
   }
   let outBuffer = gpu.device.makeBuffer(length: bytes, options: .storageModeShared)!
   let status = gpu.makeStatusBuffer()
@@ -449,12 +686,9 @@ func rawKernelDispatch(_ kernel: String, inputs: [[Int32]], gpu: Gpu) throws -> 
   encoder.endEncoding()
   commands.commit()
   commands.waitUntilCompleted()
+  try verifyCommandBuffer(commands, context: kernel)
   try gpu.checkStatus(status, context: kernel)
   return contents(outBuffer, rows)
-}
-
-func expected(_ winds: [Int32]) -> [Int32] {
-  winds.map { 60 + 2 * $0 + 5 * ($0 >= 10 ? 1 : 0) }
 }
 
 var failures = 0
@@ -466,15 +700,24 @@ func check(_ condition: Bool, _ what: String) {
 func milliseconds(_ seconds: Double) -> String { String(format: "%.3f", seconds * 1000) }
 func median(_ values: [Double]) -> Double { values.sorted()[values.count / 2] }
 
+let runnerArgs: RunnerArgs
+let mslSource: String
+let mslSha256: String
+let manifestText: String
 let planOrder: [String]
 let plans: [String: [Step]]
 let kernelSpecs: [String: KernelSpec]
+let cpuOracle: CpuOracle
+let cpuDomain: CpuDomainOracle
 let gpu: Gpu
 do {
-  let (mslPath, manifestPath) = try parseArgs(CommandLine.arguments)
-  let mslSource = try String(contentsOfFile: mslPath, encoding: .utf8)
-  let manifestText = try String(contentsOfFile: manifestPath, encoding: .utf8)
-  kernelSpecs = try parseKernelManifest(manifestText)
+  runnerArgs = try parseArgs(CommandLine.arguments)
+  mslSource = try String(contentsOfFile: runnerArgs.mslPath, encoding: .utf8)
+  mslSha256 = sha256Hex(mslSource)
+  manifestText = try String(contentsOfFile: runnerArgs.manifestPath, encoding: .utf8)
+  kernelSpecs = try parseKernelManifest(manifestText, expectedBundleSha256: mslSha256)
+  cpuOracle = try CpuOracle(path: runnerArgs.cpuBinPath)
+  cpuDomain = try cpuOracle.loadDomainOracle()
   (planOrder, plans) = try readPlans(kernels: kernelSpecs)
   gpu = try Gpu(mslSource: mslSource, specs: kernelSpecs)
 } catch {
@@ -485,53 +728,113 @@ for required in ["straightforward", "proposed", "audited_shared"] where plans[re
   print("no \(required) plan on standard input: pipe examples/forecast_plans into this runner")
   exit(2)
 }
-print("device\t\(gpu.device.name)\tunified_memory=\(gpu.device.hasUnifiedMemory)\tbackend=Metal\ttarget=\(expectedTarget)")
+print("device\t\(gpu.device.name)\tunified_memory=\(gpu.device.hasUnifiedMemory)\tbackend=Metal\ttarget=\(expectedTarget)\tbundle_sha256=\(mslSha256)")
 print("plans\t\(planOrder.joined(separator: " "))")
 
-print("\n--- compiler-generated kernel provenance ---")
+print("\n--- compiler-generated kernel provenance and bundle binding ---")
+check(isValidSha256Hex(mslSha256), "manifest cryptographically bound to Metal bundle (\(mslSha256))")
 for name in ["score_v1", "high_wind", "adjust"] {
   if let spec = kernelSpecs[name] {
-    check(spec.moduleName == expectedModule && spec.target == expectedTarget && spec.effects == expectedEffects,
-          "\(spec.moduleName)::\(spec.operation) lowered from \(spec.origin) (\(spec.paramTypes.joined(separator: ", ")) -> \(spec.returnType), \(spec.effects))")
+    check(
+      spec.moduleName == expectedModule && spec.target == expectedTarget && spec.effects == expectedEffects,
+      "\(spec.moduleName)::\(spec.operation) lowered from \(spec.origin) (\(spec.paramTypes.joined(separator: ", ")) -> \(spec.returnType), \(spec.effects))"
+    )
   } else {
     check(false, "missing compiler-generated kernel \(name)")
   }
 }
 
-print("\n--- oracle, N = 2, winds [8, 12] ---")
+print("\n--- command-buffer status and error guard checks ---")
+do {
+  try verifyCommandBufferCompletion(status: .completed, errorDescription: nil, context: "unit_ok")
+  check(true, "accepts completed MTLCommandBuffer with nil error")
+} catch {
+  check(false, "rejected valid MTLCommandBuffer completion: \(error)")
+}
+for (badStatus, badErr, label) in [
+  (MTLCommandBufferStatus.error, "GPU hang / fault" as String?, "error status with description"),
+  (MTLCommandBufferStatus.error, nil, "error status with dao_status == 0"),
+  (MTLCommandBufferStatus.notEnqueued, nil, "incomplete status"),
+  (MTLCommandBufferStatus.completed, "driver reported error" as String?, "non-nil error on completed status"),
+] {
+  do {
+    try verifyCommandBufferCompletion(status: badStatus, errorDescription: badErr, context: label)
+    check(false, "accepted failed MTLCommandBuffer (\(label))")
+  } catch {
+    check("\(error)".contains("Metal command buffer failed"), "rejects \(label): \(error)")
+  }
+}
+
+print("\n--- differential CPU oracle, N = 2, winds [8, 12] ---")
 var provenances = Set<String>()
 for name in planOrder {
   let run = try execute(plans[name]!, winds: [8, 12], gpu: gpu)
   provenances.insert(run.readProvenance.joined(separator: ","))
-  check(run.eta == [76, 89], "\(name) returns \(run.eta)")
+  check(run.eta == cpuDomain.sampleEta, "\(name) matches compiled Dao CPU \(cpuDomain.sampleEta)")
   print("     uploads \(run.transfers.uploads) (\(run.transfers.uploadBytes) B), readbacks \(run.transfers.readbacks) (\(run.transfers.readbackBytes) B), dispatches \(run.dispatches), waits \(run.waits)")
 }
 check(provenances == ["1:7:600:as_of_decision:540"], "all device plans carry identical point-in-time read provenance")
 let glue = try handwritten(winds: [8, 12], gpu: gpu)
-check(glue.eta == [76, 89], "handwritten returns \(glue.eta)")
+check(glue.eta == cpuDomain.sampleEta, "handwritten matches compiled Dao CPU \(cpuDomain.sampleEta)")
 
-print("\n--- full bounded domain (0...1000) and checked i32 overflow equivalence ---")
+print("\n--- differential CPU oracle across 0...1000 and signed i32 boundary / trap cases ---")
 let domainWinds = (0...1000).map(Int32.init)
-let domainTruth = expected(domainWinds)
 for name in planOrder + ["handwritten"] {
   let run = name == "handwritten"
     ? try handwritten(winds: domainWinds, gpu: gpu)
     : try execute(plans[name]!, winds: domainWinds, gpu: gpu)
-  check(run.eta == domainTruth, "\(name) matches CPU across all 1001 bounded wind inputs (0...1000)")
+  check(
+    run.eta == cpuDomain.domainEta,
+    "\(name) matches compiled Dao CPU across all 1001 bounded wind inputs (0...1000)"
+  )
 }
-do {
-  _ = try rawKernelDispatch("score_v1", inputs: [[8, 1_500_000_000]], gpu: gpu)
-  check(false, "score_v1 accepted overflowing i32 multiplication 2 * 1_500_000_000")
-} catch {
-  check("\(error)".contains("checked i32 arithmetic trap"), "score_v1 traps on signed i32 overflow: \(error)")
+
+let differentialKernelCases: [(kernel: String, args: [Int32], expectTrap: Bool)] = [
+  ("score_v1", [0], false),
+  ("score_v1", [1000], false),
+  ("score_v1", [1_073_741_793], false),
+  ("score_v1", [1_073_741_794], true),
+  ("score_v1", [1_500_000_000], true),
+  ("score_v1", [-1_073_741_824], false),
+  ("score_v1", [-1_073_741_825], true),
+  ("score_v1", [-1_073_741_854], true),
+  ("high_wind", [9], false),
+  ("high_wind", [10], false),
+  ("adjust", [2_147_483_642, 1], false),
+  ("adjust", [2_147_483_643, 1], true),
+  ("adjust", [-2_147_483_643, -1], false),
+  ("adjust", [-2_147_483_644, -1], true),
+  ("adjust", [0, 429_496_730], true),
+]
+for testCase in differentialKernelCases {
+  let cpuOutcome = try cpuOracle.evaluateKernel(testCase.kernel, args: testCase.args)
+  let gpuOutcome: KernelEvalOutcome
+  do {
+    let out = try rawKernelDispatch(
+      testCase.kernel,
+      inputs: testCase.args.map { [$0] },
+      gpu: gpu
+    )
+    gpuOutcome = .value(out[0])
+  } catch RunError.arithmeticTrap {
+    gpuOutcome = .trapped
+  }
+  let expectedKindOk = testCase.expectTrap ? (cpuOutcome == .trapped) : (cpuOutcome != .trapped)
+  check(
+    cpuOutcome == gpuOutcome && expectedKindOk,
+    "CPU Dao and Metal \(testCase.kernel)(\(testCase.args)) -> \(gpuOutcome)"
+  )
 }
 
 print("\n--- observation ---")
 let audited = try execute(plans["audited_shared"]!, winds: [8, 12], gpu: gpu)
-check(audited.observed["audit_score"] == [76, 84], "audit_score observed as \(audited.observed["audit_score"] ?? [])")
+check(
+  audited.observed["audit_score"] == cpuDomain.sampleAuditScore,
+  "audit_score matches compiled Dao CPU \(cpuDomain.sampleAuditScore)"
+)
 check(audited.waits == 2, "the callback forces a wait before the reply: \(audited.waits) waits")
 
-print("\n--- record and manifest provenance checks ---")
+print("\n--- record, manifest, and bundle SHA-256 checks ---")
 let badRecords: [(Step, String)] = [
   (Step(op: "read", args: ["1", "7", "600", "unbounded", "540", "wind"]), "invalid read provenance"),
   (Step(op: "dispatch", args: ["score_v1", "v2", "wind", "", "score"]), "unsupported device model"),
@@ -548,10 +851,28 @@ for (badStep, expectedReason) in badRecords {
   }
 }
 do {
-  _ = try parseKernelManifest("kernel\tother_mod\tscore_v1\tf.dao:1:1\tmetal-msl-2.4\t1\ti32\ti32\tpure_scalar_elementwise_checked_i32\n")
+  let foreignManifest =
+    "bundle_sha256\t\(mslSha256)\n" +
+    "kernel\tother_mod\tscore_v1\tf.dao:1:1\tmetal-msl-2.4\t1\ti32\ti32\tpure_scalar_elementwise_checked_i32\n"
+  _ = try parseKernelManifest(foreignManifest, expectedBundleSha256: mslSha256)
   check(false, "accepted kernel manifest from foreign module")
 } catch {
   check("\(error)".contains("unexpected kernel module"), "rejects foreign-module kernel manifest: \(error)")
+}
+do {
+  _ = try parseKernelManifest(
+    "kernel\tforecast_plans\tscore_v1\tf.dao:1:1\tmetal-msl-2.4\t1\ti32\ti32\tpure_scalar_elementwise_checked_i32\n",
+    expectedBundleSha256: mslSha256
+  )
+  check(false, "accepted kernel manifest without bundle_sha256")
+} catch {
+  check("\(error)".contains("missing bundle_sha256"), "rejects manifest missing bundle_sha256: \(error)")
+}
+do {
+  _ = try parseKernelManifest(manifestText, expectedBundleSha256: sha256Hex(mslSource + "\n// tampered\n"))
+  check(false, "accepted tampered Metal bundle against manifest SHA-256")
+} catch {
+  check("\(error)".contains("bundle_sha256 mismatch"), "rejects tampered Metal bundle digest: \(error)")
 }
 
 print("\n--- buffer lifetime checks ---")
@@ -569,7 +890,7 @@ let validReleased = try execute([
   Step(op: "release", args: ["eta"]),
   Step(op: "reply", args: ["eta_host"]),
 ], winds: [8, 12], gpu: gpu)
-check(validReleased.eta == [76, 89], "post-consumer buffer releases preserve \(validReleased.eta)")
+check(validReleased.eta == cpuDomain.sampleEta, "post-consumer buffer releases preserve \(validReleased.eta)")
 
 let lifetimeRejections: [(String, [Step], String)] = [
   ("premature release", [
@@ -619,17 +940,17 @@ print("\n--- timings, milliseconds ---")
 print("mode\tN\tplan\tcold\twarm_median\twarm_min\tuploads\treadbacks\tbytes_moved\twaits")
 for mode in modes {
   let winds = (0..<mode.rows).map { Int32($0 % 1001) }
-  let truth = expected(winds)
+  let truth = try cpuOracle.evaluateCycledBatch(rows: mode.rows)
   var cold: [String: Double] = [:]
   for name in planOrder + ["handwritten"] {
     let start = DispatchTime.now().uptimeNanoseconds
-    let freshMsl = try String(contentsOfFile: parseArgs(CommandLine.arguments).mslPath, encoding: .utf8)
+    let freshMsl = try String(contentsOfFile: runnerArgs.mslPath, encoding: .utf8)
     let fresh = try Gpu(mslSource: freshMsl, specs: kernelSpecs)
     let run = name == "handwritten"
       ? try handwritten(winds: winds, gpu: fresh)
       : try execute(plans[name]!, winds: winds, gpu: fresh)
     cold[name] = Double(DispatchTime.now().uptimeNanoseconds - start) / 1e9
-    check(run.eta == truth, "\(mode.name) \(name) matches the CPU calculation")
+    check(run.eta == truth, "\(mode.name) \(name) matches compiled Dao CPU batch (\(mode.rows) rows)")
   }
   var warm: [String: [Double]] = [:]
   var last: [String: Report] = [:]
@@ -644,9 +965,11 @@ for mode in modes {
   }
   for name in planOrder + ["handwritten"] {
     let run = last[name]!
-    print([mode.name, "\(mode.rows)", name, milliseconds(cold[name]!), milliseconds(median(warm[name]!)),
-           milliseconds(warm[name]!.min()!), "\(run.transfers.uploads)", "\(run.transfers.readbacks)",
-           "\(run.transfers.uploadBytes + run.transfers.readbackBytes)", "\(run.waits)"].joined(separator: "\t"))
+    print([
+      mode.name, "\(mode.rows)", name, milliseconds(cold[name]!), milliseconds(median(warm[name]!)),
+      milliseconds(warm[name]!.min()!), "\(run.transfers.uploads)", "\(run.transfers.readbacks)",
+      "\(run.transfers.uploadBytes + run.transfers.readbackBytes)", "\(run.waits)",
+    ].joined(separator: "\t"))
   }
 }
 

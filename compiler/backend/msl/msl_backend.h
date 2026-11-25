@@ -52,6 +52,7 @@ struct MslRejection {
 
 struct MslBackendOutcome {
   std::string bundle_source;
+  std::string bundle_sha256;
   std::vector<MslKernel> kernels;
   std::vector<MslRejection> rejections;
 };
@@ -72,7 +73,9 @@ public:
                             std::span<const std::string_view> kernel_names,
                             const SourceMap* source_map = nullptr) -> MslBackendOutcome;
 
-  static auto render_manifest_tsv(std::span<const MslKernel> kernels) -> std::string;
+  static auto render_manifest_tsv(const MslBackendOutcome& outcome) -> std::string;
+
+  static auto sha256_hex(std::string_view data) -> std::string;
 };
 
 } // namespace dao
