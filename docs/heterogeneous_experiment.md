@@ -58,8 +58,13 @@ structurally while every buffer stays live through its final consumer.
 ## Measurements
 
 Measured on an Apple M5 running macOS, through Metal, over the validated integer
-wind domain `0..1000`. Each figure is the median of five processes, with warm
-medians over `200` live or `40` backfill runs and interleaved plans.
+wind domain `0..1000`. Each figure reports the median across five processes,
+with warm medians over `200` live or `40` backfill runs and interleaved plans.
+
+### Handwritten Unchecked Shader Baseline
+
+Earlier iterations executed handwritten Metal compute shaders without checked
+`i32` status buffers or `MTLCommandBuffer` error guards:
 
 | Mode | Plan | Cold ms | Warm ms | Bytes moved | Waits |
 |---|---|---|---|---|---|
@@ -72,32 +77,61 @@ medians over `200` live or `40` backfill runs and interleaved plans.
 | Backfill, N = 1,000,000 | Audited and shared | 2.061 | 1.885 | 12,000,000 | 2 |
 | Backfill, N = 1,000,000 | Handwritten | 1.600 | 1.641 | 8,000,000 | 1 |
 
+### Compiler-Generated Checked Kernels
+
+Current runs lower `score_v1`, `high_wind`, and `adjust` through `dao_msl_emit`
+with 64-bit range checks, `atomic_uint` trap propagation, SHA-256 bundle
+verification, and `MTLCommandBuffer` completion checks:
+
+| Mode | Plan | Cold ms | Warm ms | Bytes moved | Waits |
+|---|---|---|---|---|---|
+| Live, N = 1 | Straightforward | 1.383 | 0.331 | 16 | 1 |
+| Live, N = 1 | Proposed | 0.957 | 0.309 | 8 | 1 |
+| Live, N = 1 | Audited and shared | 1.387 | 0.626 | 12 | 2 |
+| Live, N = 1 | Handwritten | 0.952 | 0.311 | 8 | 1 |
+| Backfill, N = 1,000,000 | Straightforward | 12.855 | 10.557 | 16,000,000 | 1 |
+| Backfill, N = 1,000,000 | Proposed | 4.620 | 2.549 | 8,000,000 | 1 |
+| Backfill, N = 1,000,000 | Audited and shared | 4.510 | 3.361 | 12,000,000 | 2 |
+| Backfill, N = 1,000,000 | Handwritten | 3.677 | 2.320 | 8,000,000 | 1 |
+
 ### Measurement Limits
 
 - Apple Silicon uses unified memory, whereas discrete GPUs cross PCIe and penalize redundant transfers more heavily.
 - Waiting only when a host step demands a pending readback avoids spurious synchronization.
 - Cold timings include pipeline creation and OS shader caching, so only warm medians compare steady-state plan cost.
+- Checked `Straightforward` runs perform two GPU dispatches, two readbacks, and checked host `i32` arithmetic across a million elements, whereas `Proposed` keeps intermediates on the GPU and runs `4.14x` faster (`2.549` ms vs `10.557` ms).
 
 ## Comparison with Handwritten Glue
 
-The handwritten Metal function is 40 lines for one fixed plan, and every new
-placement policy needs another copy. Plan data takes roughly 10 lines per plan
-on one shared executor with equal backfill throughput, while catching lost
-cutoffs, model drift, dropped or duplicated callbacks, and premature buffer
-releases that handwritten glue cannot diagnose.
+The handwritten host dispatch function takes 46 lines for one fixed plan, and
+every new placement policy needs another copy. Plan data takes roughly 10 lines
+per plan on one shared executor with comparable backfill throughput, while
+catching lost cutoffs, model drift, dropped or duplicated callbacks, and
+premature buffer releases.
 
-## Architectural Boundary
+## Single-Source CPU and Metal Codegen
 
-**Ordinary Dao expresses the plan.** Functions, classes, and `enum class` carry
-the typed DAG, equivalence check, and complete cache key without new syntax.
+Both CPU native code (`daoc build`) and Metal compute kernels (`dao_msl_emit`)
+now lower from the same authored functions (`score_v1`, `high_wind`, and
+`adjust`) in `examples/forecast_plans.dao` without a second kernel body or
+name-based template lookup:
 
-**Compiler codegen is the remaining gap.** Function `score_v1` in Dao and `score_v1`
-in Metal are still separate bodies tied together by tests and explicit `(kernel, model)`
-records. Generating both CPU code and a device kernel from one verified Dao
-function definition is the next bounded experiment once this semantic model lands.
+- Backend `MslBackend` (`compiler/backend/msl/`) consumes `MirModule` over a verified pure scalar elementwise slice (`(i32...) -> i32`, `i32` and `bool` locals, integer and boolean constants, checked unary and binary operators, and acyclic multi-block `MirBr` / `MirCondBr` / `MirReturn` control flow).
+- Signed `i32` arithmetic in generated Metal lowers through 64-bit `long` range checks and an `atomic_uint` status buffer, preserving `CONTRACT_NUMERIC_SEMANTICS.md` overflow traps.
+- Unsupported parameter or return types, calls, raw pointers, `mode` or `resource` blocks, and cyclic control flow fail closed with source coordinates.
+- Manifest output (`forecast_kernels.tsv`) emits a `bundle_sha256` digest alongside module identity, operation name, `file:line:col` origin, target (`metal-msl-2.4`), signature, and effect profile (`pure_scalar_elementwise_checked_i32`).
+- Runner `metal_runner.swift` verifies the SHA-256 digest before `MTLDevice.makeLibrary`, checks `MTLCommandBuffer` `.completed` status and `nil` error before reading result buffers, and compares GPU outputs and overflow traps directly against the compiled `forecast_plans` CPU binary.
+
+### Layer Attribution
+
+This experiment required zero new Dao syntax or execution-mode surface:
+
+- **Ordinary Dao library code** already expresses typed plan steps, point-in-time read provenance, observation vectors, liveness checks, and complete cache keys.
+- **Existing typed MIR** already preserves concrete `i32` and `bool` types, acyclic control flow, and `SourceMap` origins needed to emit verified device kernels.
+- **Target-specific compiler backend (`compiler/backend/msl/`)** owns kernel eligibility validation, checked `i32` status-buffer lowering, and provenance manifests.
 
 ## Stopgap Runner
 
-The Swift runner and its Metal kernels are stopgaps recorded in
-`docs/non_dao_inventory.md` until Dao lowers a kernel and drives a device
-natively.
+The Swift host runner in `examples/forecast_device/metal_runner.swift` remains a
+stopgap in `docs/non_dao_inventory.md` until Dao drives Metal command queues
+directly, while `dao_msl_emit` retires all handwritten Metal shader code.
