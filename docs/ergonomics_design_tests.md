@@ -705,8 +705,8 @@ def parse_nonneg_int(text: str, line: int, field: str) -> int:
         value = int(text)
     except ValueError as exc:
         raise LoadError("format", line, f"invalid {field} '{text}'") from exc
-    if value < 0:
-        raise LoadError("format", line, f"{field} must be non-negative")
+    if value < 0 or value > 9_223_372_036_854_775_807:
+        raise LoadError("format", line, f"{field} must fit in non-negative i64")
     return value
 
 
