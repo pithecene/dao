@@ -270,6 +270,64 @@ suite<"formatter"> formatter_suite = [] {
     expect(formatted.find("(a |> double) + 1") != std::string::npos) << formatted;
   };
 
+  "splits_pipelines_with_parenthesized_lambda_or_pipe_left_operand"_test = [] {
+    const std::string_view src =
+        "module demo::pipe_lhs\n"
+        "\n"
+        "fn f(): i32 -> (|x| -> x) |> foo\n"
+        "\n"
+        "fn g(a: i32): i32 -> (a |> |x| -> x) |> foo\n"
+        "\n"
+        "fn h(a: i32): i32 -> ((a |> b)) |> c\n"
+        "\n"
+        "fn k(a: i32): i32 -> a |> (b |> c)\n"
+        "\n"
+        "fn long_pipe(): i32 -> (|x| -> x + 1) |> alpha_transform_stage |> beta_transform_stage |> "
+        "gamma_transform_stage |> delta_transform_stage\n";
+
+    auto formatted = format_checked(src);
+    expect(formatted.contains("fn f(): i32 -> (|x| -> x) |> foo\n")) << formatted;
+    expect(formatted.contains("fn g(a: i32): i32 -> (a |> |x| -> x) |> foo\n")) << formatted;
+    expect(formatted.contains("fn h(a: i32): i32 -> a |> b |> c\n")) << formatted;
+    expect(formatted.contains("fn k(a: i32): i32 -> a |> (b |> c)\n")) << formatted;
+    expect(
+        formatted.contains("fn long_pipe(): i32 -> (|x| -> x + 1)\n  |> alpha_transform_stage\n"))
+        << formatted;
+  };
+
+  "preserves_comment_order_across_mixed_call_and_parenthesized_comments"_test = [] {
+    const std::string_view src = "module demo::comment_order\n"
+                                 "\n"
+                                 "fn f(): i32\n"
+                                 "  return foo(\n"
+                                 "    1 // argument\n"
+                                 "  ) + (\n"
+                                 "    2 // addend\n"
+                                 "  )\n"
+                                 "\n"
+                                 "fn g(): i32\n"
+                                 "  if foo(\n"
+                                 "    1 // cond_arg\n"
+                                 "  ) + (\n"
+                                 "    // note_one\n"
+                                 "    2 // note_two\n"
+                                 "  ) > 0:\n"
+                                 "    return (\n"
+                                 "      1 // first\n"
+                                 "    ) + foo(\n"
+                                 "      2 // second\n"
+                                 "    ) + (\n"
+                                 "      3 // third\n"
+                                 "    ) // after_return\n"
+                                 "  return 0\n";
+
+    auto formatted = format_checked(src);
+    auto arg_pos = formatted.find("// argument");
+    auto add_pos = formatted.find("// addend");
+    expect(arg_pos != std::string::npos && add_pos != std::string::npos && arg_pos < add_pos)
+        << formatted;
+  };
+
   "formats_concepts_conformances_denials_lists_try_and_pipe_comments"_test = [] {
     const std::string_view src = "module demo::full\n"
                                  "\n"

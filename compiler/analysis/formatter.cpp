@@ -775,18 +775,21 @@ private:
   }
 
   /// Buffer an inline construct (such as a statement or expression-bodied fn)
-  /// so that any stray comments inside parenthesized sub-expressions (not
-  /// already placed inside multiline calls, lists, or pipelines) are hoisted
-  /// cleanly onto lines immediately preceding the construct rather than lost.
+  /// so that stray comments inside parenthesized sub-expressions (not already
+  /// placed inside multiline calls, lists, or pipelines) are never dropped and
+  /// never inverted relative to comments already emitted inside `emit_fn()`.
   template <typename EmitFn>
   void emit_with_hoisted_stray_comments(uint32_t indent_level,
                                         uint32_t next_code_offset,
-                                        EmitFn&& emit_fn) {
+                                        EmitFn&& emit_fn,
+                                        std::optional<uint32_t> after_line_indent = std::nullopt) {
+    uint32_t post_indent = after_line_indent.value_or(indent_level);
     const auto* last_tok = trivia_.last_real_token_before(next_code_offset);
     uint32_t last_tok_end =
         last_tok != nullptr ? last_tok->span.offset + last_tok->span.length : next_code_offset;
     uint32_t last_tok_line = last_tok != nullptr ? trivia_.line_of(last_tok->span.offset) : 0;
 
+    size_t saved_cursor = comment_cursor_;
     std::string saved_out = std::move(out_);
     out_.clear();
     uint32_t saved_col = current_col_;
@@ -799,22 +802,54 @@ private:
     out_ = std::move(saved_out);
     current_col_ = saved_col;
 
-    // Any comment whose offset is < last_tok_end was inside the construct's
-    // tokens (e.g. inside grouping parentheses `(a +\n // note\n b)`) and
-    // was not consumed by a multiline call/list/pipeline. Hoist it cleanly
-    // before the rendered construct so zero comments are ever dropped.
     const auto& comments = trivia_.comments();
-    while (comment_cursor_ < comments.size() && comments[comment_cursor_].offset < last_tok_end) {
-      const auto& stray = comments[comment_cursor_++];
-      write_indent(indent_level);
-      write(stray.text);
-      write_newline();
-      last_source_line_ = stray.line;
+    if (comment_cursor_ == saved_cursor) {
+      // No comments were emitted inside `rendered`, so any stray comments
+      // inside parenthesized sub-expressions precede everything else and can
+      // be hoisted cleanly above the construct.
+      while (comment_cursor_ < comments.size() && comments[comment_cursor_].offset < last_tok_end) {
+        const auto& stray = comments[comment_cursor_++];
+        write_indent(indent_level);
+        write(stray.text);
+        write_newline();
+        last_source_line_ = stray.line;
+      }
+      out_.append(rendered);
+      current_col_ = rendered_col;
+      finish_line_at_source_line(last_tok_line, next_code_offset);
+      return;
     }
 
+    // `rendered` already emitted earlier comments (`saved_cursor .. comment_cursor_ - 1`),
+    // so any remaining unconsumed comments within this construct's tokens must
+    // appear after `rendered` to preserve exact source comment order.
     out_.append(rendered);
     current_col_ = rendered_col;
-    finish_line_at_source_line(last_tok_line, next_code_offset);
+
+    if (comment_cursor_ < comments.size() && comments[comment_cursor_].offset < last_tok_end) {
+      const auto& first_after = comments[comment_cursor_++];
+      write(" ");
+      write(first_after.text);
+      last_source_line_ = first_after.line;
+      write_newline();
+    } else {
+      finish_line_at_source_line(last_tok_line, next_code_offset);
+    }
+
+    while (comment_cursor_ < comments.size()) {
+      const auto& rem = comments[comment_cursor_];
+      bool inside_tokens = rem.offset < last_tok_end;
+      bool on_last_line = last_tok_line > 0 && rem.offset < next_code_offset && rem.is_trailing &&
+                          rem.line == last_tok_line;
+      if (!inside_tokens && !on_last_line) {
+        break;
+      }
+      ++comment_cursor_;
+      write_indent(post_indent);
+      write(rem.text);
+      write_newline();
+      last_source_line_ = rem.line;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -1660,34 +1695,42 @@ private:
               uint32_t orig_indent = trivia_.line_indent_at(stmt.span.offset);
               uint32_t body_start =
                   while_stmt.body.empty() ? next_code_offset : while_stmt.body.front()->span.offset;
-              emit_with_hoisted_stray_comments(indent_level, body_start, [&]() {
-                write_indent(indent_level);
-                write("while ");
-                format_expr(*while_stmt.condition,
-                            indent_level,
-                            /*in_pipe_rhs=*/false,
-                            /*allow_bare_multiline_pipe=*/false,
-                            body_start);
-                write(":");
-              });
+              emit_with_hoisted_stray_comments(
+                  indent_level,
+                  body_start,
+                  [&]() {
+                    write_indent(indent_level);
+                    write("while ");
+                    format_expr(*while_stmt.condition,
+                                indent_level,
+                                /*in_pipe_rhs=*/false,
+                                /*allow_bare_multiline_pipe=*/false,
+                                body_start);
+                    write(":");
+                  },
+                  indent_level + 1);
               format_stmt_list(while_stmt.body, indent_level + 1, orig_indent, next_code_offset);
             },
             [&](const ForStatement& for_stmt) {
               uint32_t orig_indent = trivia_.line_indent_at(stmt.span.offset);
               uint32_t body_start =
                   for_stmt.body.empty() ? next_code_offset : for_stmt.body.front()->span.offset;
-              emit_with_hoisted_stray_comments(indent_level, body_start, [&]() {
-                write_indent(indent_level);
-                write("for ");
-                write(for_stmt.var);
-                write(" in ");
-                format_expr(*for_stmt.iterable,
-                            indent_level,
-                            /*in_pipe_rhs=*/false,
-                            /*allow_bare_multiline_pipe=*/false,
-                            body_start);
-                write(":");
-              });
+              emit_with_hoisted_stray_comments(
+                  indent_level,
+                  body_start,
+                  [&]() {
+                    write_indent(indent_level);
+                    write("for ");
+                    write(for_stmt.var);
+                    write(" in ");
+                    format_expr(*for_stmt.iterable,
+                                indent_level,
+                                /*in_pipe_rhs=*/false,
+                                /*allow_bare_multiline_pipe=*/false,
+                                body_start);
+                    write(":");
+                  },
+                  indent_level + 1);
               format_stmt_list(for_stmt.body, indent_level + 1, orig_indent, next_code_offset);
             },
             [&](const ModeBlock& mode) {
@@ -1789,16 +1832,20 @@ private:
     uint32_t then_start =
         if_stmt.then_body.empty() ? next_code_offset : if_stmt.then_body.front()->span.offset;
 
-    emit_with_hoisted_stray_comments(indent_level, then_start, [&]() {
-      write_indent(indent_level);
-      write(is_else_if ? "else if " : "if ");
-      format_expr(*if_stmt.condition,
-                  indent_level,
-                  /*in_pipe_rhs=*/false,
-                  /*allow_bare_multiline_pipe=*/false,
-                  then_start);
-      write(":");
-    });
+    emit_with_hoisted_stray_comments(
+        indent_level,
+        then_start,
+        [&]() {
+          write_indent(indent_level);
+          write(is_else_if ? "else if " : "if ");
+          format_expr(*if_stmt.condition,
+                      indent_level,
+                      /*in_pipe_rhs=*/false,
+                      /*allow_bare_multiline_pipe=*/false,
+                      then_start);
+          write(":");
+        },
+        indent_level + 1);
 
     if (!if_stmt.has_else()) {
       format_stmt_list(if_stmt.then_body, indent_level + 1, orig_indent, next_code_offset);
@@ -1840,16 +1887,20 @@ private:
     uint32_t first_arm_offset =
         match_stmt.arms.empty() ? next_code_offset : match_stmt.arms.front().pattern->span.offset;
 
-    emit_with_hoisted_stray_comments(indent_level, first_arm_offset, [&]() {
-      write_indent(indent_level);
-      write("match ");
-      format_expr(*match_stmt.scrutinee,
-                  indent_level,
-                  /*in_pipe_rhs=*/false,
-                  /*allow_bare_multiline_pipe=*/false,
-                  first_arm_offset);
-      write(":");
-    });
+    emit_with_hoisted_stray_comments(
+        indent_level,
+        first_arm_offset,
+        [&]() {
+          write_indent(indent_level);
+          write("match ");
+          format_expr(*match_stmt.scrutinee,
+                      indent_level,
+                      /*in_pipe_rhs=*/false,
+                      /*allow_bare_multiline_pipe=*/false,
+                      first_arm_offset);
+          write(":");
+        },
+        indent_level + 1);
 
     for (size_t idx = 0; idx < match_stmt.arms.size(); ++idx) {
       const auto& arm = match_stmt.arms[idx];
@@ -1862,35 +1913,39 @@ private:
 
       emit_item_leading_trivia(arm_offset, indent_level + 1, /*allow_blank=*/idx > 0);
 
-      emit_with_hoisted_stray_comments(indent_level + 1, body_start, [&]() {
-        write_indent(indent_level + 1);
-        format_expr(*arm.pattern,
-                    indent_level + 1,
-                    /*in_pipe_rhs=*/false,
-                    /*allow_bare_multiline_pipe=*/false,
-                    body_start);
-        if (!arm.bindings.empty() || arm.has_rest) {
-          write("(");
-          for (size_t b_idx = 0; b_idx < arm.bindings.size(); ++b_idx) {
-            if (b_idx > 0) {
-              write(", ");
+      emit_with_hoisted_stray_comments(
+          indent_level + 1,
+          body_start,
+          [&]() {
+            write_indent(indent_level + 1);
+            format_expr(*arm.pattern,
+                        indent_level + 1,
+                        /*in_pipe_rhs=*/false,
+                        /*allow_bare_multiline_pipe=*/false,
+                        body_start);
+            if (!arm.bindings.empty() || arm.has_rest) {
+              write("(");
+              for (size_t b_idx = 0; b_idx < arm.bindings.size(); ++b_idx) {
+                if (b_idx > 0) {
+                  write(", ");
+                }
+                write(arm.bindings[b_idx]);
+              }
+              if (arm.has_rest) {
+                if (!arm.bindings.empty()) {
+                  write(", ");
+                }
+                write("..");
+              }
+              write(")");
             }
-            write(arm.bindings[b_idx]);
-          }
-          if (arm.has_rest) {
-            if (!arm.bindings.empty()) {
-              write(", ");
+            if (!arm.as_binding.empty()) {
+              write(" as ");
+              write(arm.as_binding);
             }
-            write("..");
-          }
-          write(")");
-        }
-        if (!arm.as_binding.empty()) {
-          write(" as ");
-          write(arm.as_binding);
-        }
-        write(":");
-      });
+            write(":");
+          },
+          indent_level + 2);
 
       format_stmt_list(arm.body, indent_level + 2, arm_orig_indent, after_arm);
     }
@@ -2033,25 +2088,22 @@ private:
         expr.payload);
   }
 
-  void collect_pipe_stages(const Expr& expr, std::vector<const Expr*>& stages) const {
-    if (expr.is<PipeExpr>()) {
-      const auto& pipe = expr.as<PipeExpr>();
-      if (!needs_parens_on_left(*pipe.left, Prec::Pipe, std::nullopt)) {
-        collect_pipe_stages(*pipe.left, stages);
-        stages.push_back(pipe.right);
-        return;
-      }
+  static void collect_pipe_stages(const PipeExpr& pipe, std::vector<const Expr*>& stages) {
+    if (pipe.left->is<PipeExpr>() && !needs_parens_on_left(*pipe.left, Prec::Pipe, std::nullopt)) {
+      collect_pipe_stages(pipe.left->as<PipeExpr>(), stages);
+    } else {
+      stages.push_back(pipe.left);
     }
-    stages.push_back(&expr);
+    stages.push_back(pipe.right);
   }
 
   void format_pipe_expr(const Expr& outer_expr,
-                        const PipeExpr& /*pipe*/,
+                        const PipeExpr& pipe,
                         uint32_t indent_level,
                         bool allow_bare_multiline_pipe,
                         uint32_t limit_offset) {
     std::vector<const Expr*> stages;
-    collect_pipe_stages(outer_expr, stages);
+    collect_pipe_stages(pipe, stages);
 
     auto single_len = measure_expr(outer_expr, /*in_pipe_rhs=*/false);
     if (single_len.has_value() && current_col_ + *single_len <= options_.max_columns) {

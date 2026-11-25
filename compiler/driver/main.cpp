@@ -13,6 +13,7 @@
 #include <llvm/ADT/SmallString.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Program.h>
+#include <llvm/Support/raw_ostream.h>
 
 #include <algorithm>
 #include <array>
@@ -89,6 +90,54 @@ void cmd_ast(const dao::ProgramRequest& request) {
 
 enum class FmtMode : std::uint8_t { Stdout, Check, Write };
 
+auto write_file_atomically(const std::filesystem::path& path, std::string_view contents) -> bool {
+  std::error_code stat_ec;
+  auto orig_status = std::filesystem::status(path, stat_ec);
+
+  llvm::SmallString<128> tmp_buffer;
+  int tmp_fd = -1;
+  if (auto create_ec =
+          llvm::sys::fs::createUniqueFile(path.string() + ".tmp.%%%%%%", tmp_fd, tmp_buffer)) {
+    std::cerr << "error: failed to create temporary file for " << path.generic_string() << ": "
+              << create_ec.message() << "\n";
+    return false;
+  }
+  std::filesystem::path tmp_path(tmp_buffer.str().str());
+
+  bool write_ok = false;
+  {
+    llvm::raw_fd_ostream out(tmp_fd, /*shouldClose=*/true);
+    out.write(contents.data(), contents.size());
+    out.flush();
+    write_ok = !out.has_error();
+    out.close();
+    write_ok = write_ok && !out.has_error();
+  }
+
+  if (!write_ok) {
+    std::error_code rm_ec;
+    std::filesystem::remove(tmp_path, rm_ec);
+    std::cerr << "error: failed to write formatted output to " << path.generic_string() << "\n";
+    return false;
+  }
+
+  if (!stat_ec) {
+    std::error_code perm_ec;
+    std::filesystem::permissions(tmp_path, orig_status.permissions(), perm_ec);
+  }
+
+  std::error_code ren_ec;
+  std::filesystem::rename(tmp_path, path, ren_ec);
+  if (ren_ec) {
+    std::error_code rm_ec;
+    std::filesystem::remove(tmp_path, rm_ec);
+    std::cerr << "error: failed to replace " << path.generic_string() << ": " << ren_ec.message()
+              << "\n";
+    return false;
+  }
+  return true;
+}
+
 void cmd_fmt_files(std::span<const std::filesystem::path> paths, FmtMode mode) {
   bool any_failed = false;
   for (const auto& path : paths) {
@@ -112,15 +161,8 @@ void cmd_fmt_files(std::span<const std::filesystem::path> paths, FmtMode mode) {
       }
       break;
     case FmtMode::Write:
-      if (result.output != contents) {
-        std::ofstream out(path, std::ios::binary | std::ios::trunc);
-        out << result.output;
-        out.close();
-        if (!out.good()) {
-          std::cerr << "error: failed to write formatted output to " << path.generic_string()
-                    << "\n";
-          any_failed = true;
-        }
+      if (result.output != contents && !write_file_atomically(path, result.output)) {
+        any_failed = true;
       }
       break;
     }

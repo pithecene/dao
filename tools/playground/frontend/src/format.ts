@@ -1,6 +1,6 @@
 import { api } from "./api";
 import { renderDiagnostics } from "./diagnostics";
-import { programRequest } from "./document";
+import { documentFile, programRequest } from "./document";
 import { getSource, setSource } from "./editor";
 
 let formatInFlight = false;
@@ -13,8 +13,20 @@ export async function doFormat(): Promise<void> {
   const btn = document.getElementById("format-btn") as HTMLButtonElement | null;
   if (btn) btn.disabled = true;
 
+  const capturedSource = getSource();
+  const request = programRequest(capturedSource);
+  const capturedDocument = request.document;
+  const capturedFile = documentFile();
+
   try {
-    const data = await api("format", programRequest(getSource()));
+    const data = await api("format", request);
+    if (
+      data.file !== capturedDocument ||
+      documentFile() !== capturedFile ||
+      getSource() !== capturedSource
+    ) {
+      return;
+    }
     if (data.diagnostics.length > 0) {
       renderDiagnostics(data.diagnostics);
       return;

@@ -404,6 +404,23 @@ suite<"driver_cli"> driver_cli_suite = [] {
     auto broken_write = run_daoc(scratch, {"fmt", "--write", broken.string()});
     expect(broken_write.exit_code != 0);
     expect(dao::read_file(broken) == broken_text) << "broken file was modified";
+
+    // Atomic write leaves no sibling `.tmp.` files behind, and if sibling
+    // temp creation fails (read-only directory), the target file is untouched.
+    for (const auto& entry : std::filesystem::directory_iterator(scratch.dir)) {
+      expect(!entry.path().filename().string().contains(".tmp."))
+          << "stray temp file: " << entry.path().string();
+    }
+    auto ro_dir = scratch.dir / "readonly";
+    std::filesystem::create_directories(ro_dir);
+    auto ro_file = ro_dir / "locked.dao";
+    write(ro_file, unformatted);
+    std::filesystem::permissions(
+        ro_dir, std::filesystem::perms::owner_read | std::filesystem::perms::owner_exec);
+    auto ro_write = run_daoc(scratch, {"fmt", "--write", ro_file.string()});
+    std::filesystem::permissions(ro_dir, std::filesystem::perms::owner_all);
+    expect(ro_write.exit_code != 0) << "expected failure in read-only directory";
+    expect(dao::read_file(ro_file) == unformatted) << "target file was damaged on write error";
   };
 
   "link inputs after --source still reach the linker"_test = [] {
