@@ -94,7 +94,7 @@ now lower from the same authored functions (`score_v1`, `high_wind`, and
 name-based template lookup:
 
 - Backend `MslBackend` (`compiler/backend/msl/`) consumes `MirModule` over a verified pure scalar elementwise slice (`(i32...) -> i32`, `i32` and `bool` locals, integer and boolean constants, checked unary and binary operators, and acyclic multi-block `MirBr` / `MirCondBr` / `MirReturn` control flow).
-- Every signed `i32` `+`, `-`, `*`, unary `-`, `/`, and `%` in generated Metal lowers through 64-bit `long` range checks (`dao_add_i32`, `dao_sub_i32`, `dao_mul_i32`, `dao_div_i32`, `dao_rem_i32`, `dao_neg_i32`) backed by an `atomic_uint` status buffer, preserving `CONTRACT_NUMERIC_SEMANTICS.md` overflow traps across CPU and GPU.
+- Signed `i32` arithmetic in generated Metal lowers through 64-bit `long` range checks and an `atomic_uint` status buffer, preserving `CONTRACT_NUMERIC_SEMANTICS.md` overflow traps.
 - Unsupported parameter or return types, calls, raw pointers, `mode` or `resource` blocks, and cyclic control flow fail closed with source coordinates.
 - Manifest output (`forecast_kernels.tsv`) binds module identity, operation name, `file:line:col` origin, target (`metal-msl-2.4`), signature, and effect profile (`pure_scalar_elementwise_checked_i32`), which `metal_runner.swift` validates before pipeline creation and dispatch.
 
@@ -109,5 +109,5 @@ This experiment required zero new Dao syntax or execution-mode surface:
 ## Stopgap Runner
 
 The Swift host runner in `examples/forecast_device/metal_runner.swift` remains a
-stopgap recorded in `docs/non_dao_inventory.md` until Dao drives Metal command
-queues directly, while all handwritten Metal shader code has been retired.
+stopgap in `docs/non_dao_inventory.md` until Dao drives Metal command queues
+directly, while `dao_msl_emit` retires all handwritten Metal shader code.
