@@ -5,6 +5,7 @@ version: 1
 prose:
   documents:
     - README.md
+    - THIRD_PARTY_NOTICES.md
     - AGENTS.md
     - CLAUDE.md
     - CHANGELOG.md

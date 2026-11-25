@@ -72,7 +72,6 @@ Agents must:
 - `spec/` holds grammar fragments, reference examples, and syntax probes
 - `examples/` holds human-readable Dao snippets, not normative law
 - `testdata/` holds fixtures for future parser/compiler tests
-- `ai/skills/` holds Bonsai skills only
 
 ## Tooling Sync Discipline
 

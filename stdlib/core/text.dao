@@ -78,9 +78,9 @@ fn join(parts: Vector<string>, sep: string): string
     i = i + 1
   return out.to_string()
 
-fn repeat_str(s: string, count: i64): string
+fn repeat(s: string, count: i64): string
   if count < to_i64(0):
-    panic("repeat_str: negative count")
+    panic("repeat: negative count")
   if count == to_i64(0) or length(s) == to_i64(0):
     return ""
   let out: Builder = Builder::with_capacity(length(s) * count)

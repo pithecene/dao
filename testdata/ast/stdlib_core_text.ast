@@ -371,7 +371,7 @@ File
         Callee
           FieldExpr .to_string
             Identifier out
-  FunctionDecl repeat_str
+  FunctionDecl repeat
     Param s: string
     Param count: i64
     ReturnType: string
@@ -390,7 +390,7 @@ File
             Callee
               Identifier panic
             Args
-              StringLiteral "repeat_str: negative count"
+              StringLiteral "repeat: negative count"
     IfStatement
       Condition
         BinaryExpr or

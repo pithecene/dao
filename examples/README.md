@@ -32,7 +32,7 @@ It stays here as the regression input for that fix, and `testdata/examples/known
 | `pipelines.dao` | the pipe operator on plain functions |
 | `generators.dao`, `iteration.dao` | `yield`, generators, `for ... in` |
 | `vectors.dao`, `hashmap.dao` | `Vector<T>` and `HashMap<V>` from the prelude |
-| `collections_and_text.dao` | `Vector::filled`/`pop`/`reverse`, `IntMap<V>`, `IntPairMap<V>`, `Option`/`Result` combinators, and string/`Builder` utilities |
+| `collections_and_text.dao` | `Vector::filled`/`pop`/`reverse`/`slice`, stepped ranges, `Builder` helpers, and string/number parsing utilities |
 | `resource.dao`, `unsafe.dao`, `raw_memory.dao` | `resource memory` domains, `mode unsafe`, pointers and allocation |
 | `astar.dao` | a small search algorithm using several of these features |
 | `ffi/` | calling C from Dao (needs the C helpers alongside) |

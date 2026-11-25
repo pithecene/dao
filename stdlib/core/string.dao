@@ -21,10 +21,6 @@ fn starts_with(s: string, prefix: string): bool -> __dao_str_starts_with(s, pref
 fn ends_with(s: string, suffix: string): bool -> __dao_str_ends_with(s, suffix)
 fn str_compare(a: string, b: string): i32 -> __dao_str_compare(a, b)
 
-fn is_empty_str(s: string): bool -> __dao_str_length(s) == to_i64(0)
-
-fn contains_substr(s: string, needle: string): bool -> __dao_str_index_of(s, needle) >= to_i64(0)
-
 fn is_ascii_space(c: i32): bool
   return c == 32 or c == 9 or c == 10 or c == 13
 

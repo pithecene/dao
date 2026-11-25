@@ -18,6 +18,80 @@ File
               BinaryExpr +
                 StringLiteral "FAIL "
                 Identifier name
+  FunctionDecl is_none_i64
+    Param opt: Option<i64>
+    ReturnType: bool
+    MatchStatement
+      Scrutinee
+        Identifier opt
+      Arm
+        Pattern
+          QualifiedName Option::Some
+        ReturnStatement
+          BoolLiteral false
+      Arm
+        Pattern
+          QualifiedName Option::None
+        ReturnStatement
+          BoolLiteral true
+    ReturnStatement
+      BoolLiteral true
+  FunctionDecl unwrap_i64
+    Param opt: Option<i64>
+    Param fallback: i64
+    ReturnType: i64
+    MatchStatement
+      Scrutinee
+        Identifier opt
+      Arm
+        Pattern
+          QualifiedName Option::Some
+        ReturnStatement
+          Identifier v
+      Arm
+        Pattern
+          QualifiedName Option::None
+        ReturnStatement
+          Identifier fallback
+    ReturnStatement
+      Identifier fallback
+  FunctionDecl is_none_i32
+    Param opt: Option<i32>
+    ReturnType: bool
+    MatchStatement
+      Scrutinee
+        Identifier opt
+      Arm
+        Pattern
+          QualifiedName Option::Some
+        ReturnStatement
+          BoolLiteral false
+      Arm
+        Pattern
+          QualifiedName Option::None
+        ReturnStatement
+          BoolLiteral true
+    ReturnStatement
+      BoolLiteral true
+  FunctionDecl unwrap_i32
+    Param opt: Option<i32>
+    Param fallback: i32
+    ReturnType: i32
+    MatchStatement
+      Scrutinee
+        Identifier opt
+      Arm
+        Pattern
+          QualifiedName Option::Some
+        ReturnStatement
+          Identifier v
+      Arm
+        Pattern
+          QualifiedName Option::None
+        ReturnStatement
+          Identifier fallback
+    ReturnStatement
+      Identifier fallback
   FunctionDecl test_vector_ops
     ReturnType: void
     LetStatement empty
@@ -43,7 +117,7 @@ File
         Args
           CallExpr
             Callee
-              Identifier option_is_none
+              Identifier is_none_i64
             Args
               CallExpr
                 Callee
@@ -57,13 +131,60 @@ File
         Args
           CallExpr
             Callee
-              Identifier option_is_none
+              Identifier is_none_i64
             Args
               CallExpr
                 Callee
                   FieldExpr .last
                     Identifier empty
           StringLiteral "empty.last"
+    LetStatement reserved
+      CallExpr
+        Callee
+          FieldExpr .push
+            CallExpr
+              Callee
+                FieldExpr .push
+                  CallExpr
+                    Callee
+                      Identifier Vector.with_capacity
+                    TypeArgs
+                      i64
+                    Args
+                      IntLiteral 16
+              Args
+                IntLiteral 11
+        Args
+          IntLiteral 22
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  FieldExpr .length
+                    Identifier reserved
+              IntLiteral 2
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  Identifier unwrap_i64
+                Args
+                  CallExpr
+                    Callee
+                      FieldExpr .first
+                        Identifier reserved
+                  CallExpr
+                    Callee
+                      Identifier to_i64
+                    Args
+                      UnaryExpr -
+                        IntLiteral 1
+              IntLiteral 11
+          StringLiteral "with_capacity"
     LetStatement flags
       CallExpr
         Callee
@@ -177,7 +298,7 @@ File
             BinaryExpr ==
               CallExpr
                 Callee
-                  Identifier option_unwrap_or
+                  Identifier unwrap_i64
                 Args
                   CallExpr
                     Callee
@@ -212,6 +333,41 @@ File
                   IntLiteral 2
               IntLiteral 99
           StringLiteral "pop_push_snapshot_v2"
+    LetStatement branched
+      CallExpr
+        Callee
+          FieldExpr .pop
+            Identifier v0
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr and
+              BinaryExpr ==
+                CallExpr
+                  Callee
+                    FieldExpr .length
+                      Identifier branched
+                IntLiteral 2
+              BinaryExpr ==
+                CallExpr
+                  Callee
+                    FieldExpr .get
+                      Identifier branched
+                  Args
+                    IntLiteral 0
+                IntLiteral 10
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  FieldExpr .get
+                    Identifier branched
+                Args
+                  IntLiteral 1
+              IntLiteral 20
+          StringLiteral "pop_non_latest"
     LetStatement rev
       CallExpr
         Callee
@@ -263,6 +419,21 @@ File
             Args
               IntLiteral 2
               IntLiteral 5
+    LetStatement total: i64
+      IntLiteral 0
+    ForStatement item
+      Iterable
+        CallExpr
+          Callee
+            FieldExpr .iter
+              Identifier merged
+      Assignment
+        Target
+          Identifier total
+        Value
+          BinaryExpr +
+            Identifier total
+            Identifier item
     ExpressionStatement
       CallExpr
         Callee
@@ -276,13 +447,9 @@ File
                     Identifier merged
               IntLiteral 4
             BinaryExpr ==
-              CallExpr
-                Callee
-                  Identifier sum_i64
-                Args
-                  Identifier merged
+              Identifier total
               IntLiteral 40
-          StringLiteral "append_all_and_sum"
+          StringLiteral "append_all"
     LetStatement sub
       CallExpr
         Callee
@@ -321,229 +488,34 @@ File
                   IntLiteral 1
               IntLiteral 5
           StringLiteral "slice"
-    LetStatement idx_sum: i64
+  FunctionDecl test_ranges
+    ReturnType: void
+    LetStatement acc: i64
       IntLiteral 0
-    LetStatement val_sum: i64
-      IntLiteral 0
-    ForStatement item
+    ForStatement k
       Iterable
         CallExpr
           Callee
-            FieldExpr .iter
-              CallExpr
-                Callee
-                  Identifier enumerate
-                Args
-                  Identifier v0
+            Identifier range_i64
+          Args
+            IntLiteral 1
+            IntLiteral 6
       Assignment
         Target
-          Identifier idx_sum
+          Identifier acc
         Value
           BinaryExpr +
-            Identifier idx_sum
-            FieldExpr .index
-              Identifier item
-      Assignment
-        Target
-          Identifier val_sum
-        Value
-          BinaryExpr +
-            Identifier val_sum
-            FieldExpr .value
-              Identifier item
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          BinaryExpr and
-            BinaryExpr ==
-              Identifier idx_sum
-              IntLiteral 3
-            BinaryExpr ==
-              Identifier val_sum
-              IntLiteral 60
-          StringLiteral "enumerate"
-    LetStatement neg7: i64
-      CallExpr
-        Callee
-          Identifier to_i64
-        Args
-          UnaryExpr -
-            IntLiteral 7
-    LetStatement neg100: i64
-      CallExpr
-        Callee
-          Identifier to_i64
-        Args
-          UnaryExpr -
-            IntLiteral 100
-    LetStatement unsorted
-      CallExpr
-        Callee
-          FieldExpr .push
-            CallExpr
-              Callee
-                FieldExpr .push
-                  CallExpr
-                    Callee
-                      FieldExpr .push
-                        CallExpr
-                          Callee
-                            FieldExpr .push
-                              CallExpr
-                                Callee
-                                  FieldExpr .push
-                                    CallExpr
-                                      Callee
-                                        FieldExpr .push
-                                          CallExpr
-                                            Callee
-                                              Identifier Vector.new
-                                            TypeArgs
-                                              i64
-                                      Args
-                                        IntLiteral 42
-                                Args
-                                  Identifier neg7
-                          Args
-                            IntLiteral 0
-                    Args
-                      IntLiteral 42
-              Args
-                Identifier neg100
-        Args
-          IntLiteral 19
-    LetStatement sorted
-      CallExpr
-        Callee
-          Identifier sort_i64
-        Args
-          Identifier unsorted
+            Identifier acc
+            Identifier k
     ExpressionStatement
       CallExpr
         Callee
           Identifier check
         Args
           BinaryExpr ==
-            CallExpr
-              Callee
-                FieldExpr .get
-                  Identifier unsorted
-              Args
-                IntLiteral 0
-            IntLiteral 42
-          StringLiteral "sort_i64_preserves_input"
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          BinaryExpr and
-            BinaryExpr and
-              BinaryExpr and
-                BinaryExpr ==
-                  CallExpr
-                    Callee
-                      FieldExpr .get
-                        Identifier sorted
-                    Args
-                      IntLiteral 0
-                  Identifier neg100
-                BinaryExpr ==
-                  CallExpr
-                    Callee
-                      FieldExpr .get
-                        Identifier sorted
-                    Args
-                      IntLiteral 1
-                  Identifier neg7
-              BinaryExpr ==
-                CallExpr
-                  Callee
-                    FieldExpr .get
-                      Identifier sorted
-                  Args
-                    IntLiteral 2
-                IntLiteral 0
-            BinaryExpr ==
-              CallExpr
-                Callee
-                  FieldExpr .get
-                    Identifier sorted
-                Args
-                  IntLiteral 5
-              IntLiteral 42
-          StringLiteral "sort_i64"
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          BinaryExpr and
-            CallExpr
-              Callee
-                Identifier contains_i64
-              Args
-                Identifier sorted
-                Identifier neg7
-            BinaryExpr ==
-              CallExpr
-                Callee
-                  Identifier contains_i64
-                Args
-                  Identifier sorted
-                  IntLiteral 999
-              BoolLiteral false
-          StringLiteral "contains_i64"
-    LetStatement words
-      CallExpr
-        Callee
-          FieldExpr .push
-            CallExpr
-              Callee
-                FieldExpr .push
-                  CallExpr
-                    Callee
-                      FieldExpr .push
-                        CallExpr
-                          Callee
-                            FieldExpr .push
-                              CallExpr
-                                Callee
-                                  Identifier Vector.new
-                                TypeArgs
-                                  string
-                          Args
-                            StringLiteral "mir"
-                    Args
-                      StringLiteral "ast"
-              Args
-                StringLiteral "llvm"
-        Args
-          StringLiteral "hir"
-    LetStatement sorted_words
-      CallExpr
-        Callee
-          Identifier sort_strings
-        Args
-          Identifier words
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          BinaryExpr ==
-            CallExpr
-              Callee
-                Identifier join
-              Args
-                Identifier sorted_words
-                StringLiteral ","
-            StringLiteral "ast,hir,llvm,mir"
-          StringLiteral "sort_strings_and_join"
-  FunctionDecl test_intmap_and_pairmap
-    ReturnType: void
+            Identifier acc
+            IntLiteral 15
+          StringLiteral "range_i64.unit"
     LetStatement max_i64: i64
       IntLiteral 9223372036854775807
     LetStatement zero_i64: i64
@@ -559,305 +531,31 @@ File
         Args
           Identifier neg_max
           IntLiteral 1
-    LetStatement neg1: i64
-      CallExpr
-        Callee
-          Identifier to_i64
-        Args
-          UnaryExpr -
-            IntLiteral 1
-    LetStatement m
-      CallExpr
-        Callee
-          Identifier IntMap.new
-        TypeArgs
-          string
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          CallExpr
-            Callee
-              FieldExpr .is_empty
-                Identifier m
-          StringLiteral "intmap.is_empty"
-    Assignment
-      Target
-        Identifier m
-      Value
-        CallExpr
-          Callee
-            FieldExpr .set
-              Identifier m
-          Args
-            IntLiteral 0
-            StringLiteral "zero"
-    Assignment
-      Target
-        Identifier m
-      Value
-        CallExpr
-          Callee
-            FieldExpr .set
-              Identifier m
-          Args
-            Identifier neg1
-            StringLiteral "minus_one"
-    Assignment
-      Target
-        Identifier m
-      Value
-        CallExpr
-          Callee
-            FieldExpr .set
-              Identifier m
-          Args
-            Identifier min_i64
-            StringLiteral "min"
-    Assignment
-      Target
-        Identifier m
-      Value
-        CallExpr
-          Callee
-            FieldExpr .set
-              Identifier m
-          Args
-            Identifier max_i64
-            StringLiteral "max"
-    LetStatement snap
-      Identifier m
-    Assignment
-      Target
-        Identifier m
-      Value
-        CallExpr
-          Callee
-            FieldExpr .set
-              Identifier m
-          Args
-            IntLiteral 0
-            StringLiteral "ZERO"
-    ForStatement k
+    LetStatement pos_step_count: i64
+      IntLiteral 0
+    LetStatement pos_step_val: i64
+      IntLiteral 0
+    ForStatement x
       Iterable
         CallExpr
           Callee
             Identifier range_i64
           Args
             IntLiteral 1
-            IntLiteral 25
+            IntLiteral 10
+            Identifier max_i64
       Assignment
         Target
-          Identifier m
+          Identifier pos_step_count
         Value
-          CallExpr
-            Callee
-              FieldExpr .set
-                Identifier m
-            Args
-              BinaryExpr *
-                Identifier k
-                IntLiteral 100
-              BinaryExpr +
-                StringLiteral "v"
-                CallExpr
-                  Callee
-                    Identifier i64_to_string
-                  Args
-                    Identifier k
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          BinaryExpr ==
-            CallExpr
-              Callee
-                FieldExpr .length
-                  Identifier snap
-            IntLiteral 4
-          StringLiteral "intmap.snapshot.length"
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          BinaryExpr ==
-            CallExpr
-              Callee
-                FieldExpr .get_or
-                  Identifier snap
-              Args
-                IntLiteral 0
-                StringLiteral ""
-            StringLiteral "zero"
-          StringLiteral "intmap.snapshot.value"
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          BinaryExpr ==
-            CallExpr
-              Callee
-                FieldExpr .get_or
-                  Identifier m
-              Args
-                IntLiteral 0
-                StringLiteral ""
-            StringLiteral "ZERO"
-          StringLiteral "intmap.updated.value"
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          BinaryExpr ==
-            CallExpr
-              Callee
-                FieldExpr .get_or
-                  Identifier m
-              Args
-                Identifier neg1
-                StringLiteral ""
-            StringLiteral "minus_one"
-          StringLiteral "intmap.neg_one"
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          BinaryExpr ==
-            CallExpr
-              Callee
-                FieldExpr .get_or
-                  Identifier m
-              Args
-                Identifier min_i64
-                StringLiteral ""
-            StringLiteral "min"
-          StringLiteral "intmap.min_i64"
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          BinaryExpr ==
-            CallExpr
-              Callee
-                FieldExpr .get_or
-                  Identifier m
-              Args
-                Identifier max_i64
-                StringLiteral ""
-            StringLiteral "max"
-          StringLiteral "intmap.max_i64"
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          CallExpr
-            Callee
-              Identifier option_is_none
-            Args
-              CallExpr
-                Callee
-                  FieldExpr .get
-                    Identifier m
-                Args
-                  IntLiteral 777
-          StringLiteral "intmap.missing"
-    LetStatement ks
-      CallExpr
-        Callee
-          FieldExpr .keys
-            Identifier m
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          BinaryExpr and
-            BinaryExpr and
-              BinaryExpr and
-                BinaryExpr and
-                  BinaryExpr ==
-                    CallExpr
-                      Callee
-                        FieldExpr .get
-                          Identifier ks
-                      Args
-                        IntLiteral 0
-                    IntLiteral 0
-                  BinaryExpr ==
-                    CallExpr
-                      Callee
-                        FieldExpr .get
-                          Identifier ks
-                      Args
-                        IntLiteral 1
-                    Identifier neg1
-                BinaryExpr ==
-                  CallExpr
-                    Callee
-                      FieldExpr .get
-                        Identifier ks
-                    Args
-                      IntLiteral 2
-                  Identifier min_i64
-              BinaryExpr ==
-                CallExpr
-                  Callee
-                    FieldExpr .get
-                      Identifier ks
-                  Args
-                    IntLiteral 3
-                Identifier max_i64
-            BinaryExpr ==
-              CallExpr
-                Callee
-                  FieldExpr .get
-                    Identifier ks
-                Args
-                  IntLiteral 4
-              IntLiteral 100
-          StringLiteral "intmap.deterministic_order"
-    LetStatement escaped
-      CallExpr
-        Callee
-          Identifier IntMap.new
-        TypeArgs
-          string
-    ResourceBlock memory scratch
-      LetStatement local_map
-        CallExpr
-          Callee
-            FieldExpr .set
-              CallExpr
-                Callee
-                  FieldExpr .set
-                    CallExpr
-                      Callee
-                        Identifier IntMap.new
-                      TypeArgs
-                        string
-                Args
-                  IntLiteral 10
-                  StringLiteral "ten"
-          Args
-            IntLiteral 20
-            StringLiteral "twenty"
+          BinaryExpr +
+            Identifier pos_step_count
+            IntLiteral 1
       Assignment
         Target
-          Identifier escaped
+          Identifier pos_step_val
         Value
-          CallExpr
-            Callee
-              Identifier copy_out
-            Args
-              Identifier local_map
+          Identifier x
     ExpressionStatement
       CallExpr
         Callee
@@ -865,194 +563,94 @@ File
         Args
           BinaryExpr and
             BinaryExpr ==
-              CallExpr
-                Callee
-                  FieldExpr .length
-                    Identifier escaped
-              IntLiteral 2
+              Identifier pos_step_count
+              IntLiteral 1
             BinaryExpr ==
-              CallExpr
-                Callee
-                  FieldExpr .get_or
-                    Identifier escaped
-                Args
-                  IntLiteral 20
-                  StringLiteral ""
-              StringLiteral "twenty"
-          StringLiteral "intmap.copy_out"
-    LetStatement pm
-      CallExpr
-        Callee
-          Identifier IntPairMap.new
-        TypeArgs
-          i64
-    LetStatement k_a
-      CallExpr
-        Callee
-          Identifier IntPair
-        Args
-          Identifier min_i64
-          Identifier neg1
-    LetStatement k_b
-      CallExpr
-        Callee
-          Identifier IntPair
-        Args
-          Identifier min_i64
-          IntLiteral 0
-    LetStatement k_c
-      CallExpr
-        Callee
-          Identifier IntPair
-        Args
-          IntLiteral 1
-          IntLiteral 2
-    LetStatement k_d
-      CallExpr
-        Callee
-          Identifier IntPair
-        Args
-          IntLiteral 2
-          IntLiteral 1
-    Assignment
-      Target
-        Identifier pm
-      Value
-        CallExpr
-          Callee
-            FieldExpr .set
-              CallExpr
-                Callee
-                  FieldExpr .set
-                    CallExpr
-                      Callee
-                        FieldExpr .set
-                          CallExpr
-                            Callee
-                              FieldExpr .set
-                                Identifier pm
-                            Args
-                              Identifier k_a
-                              IntLiteral 11
-                      Args
-                        Identifier k_b
-                        IntLiteral 22
-                Args
-                  Identifier k_c
-                  IntLiteral 33
-          Args
-            Identifier k_d
-            IntLiteral 44
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          BinaryExpr and
-            BinaryExpr ==
-              CallExpr
-                Callee
-                  FieldExpr .get_or
-                    Identifier pm
-                Args
-                  Identifier k_a
-                  IntLiteral 0
-              IntLiteral 11
-            BinaryExpr ==
-              CallExpr
-                Callee
-                  FieldExpr .get_or
-                    Identifier pm
-                Args
-                  Identifier k_b
-                  IntLiteral 0
-              IntLiteral 22
-          StringLiteral "pairmap.high_bits"
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          BinaryExpr and
-            BinaryExpr ==
-              CallExpr
-                Callee
-                  FieldExpr .get_or
-                    Identifier pm
-                Args
-                  Identifier k_c
-                  IntLiteral 0
-              IntLiteral 33
-            BinaryExpr ==
-              CallExpr
-                Callee
-                  FieldExpr .get_or
-                    Identifier pm
-                Args
-                  Identifier k_d
-                  IntLiteral 0
-              IntLiteral 44
-          StringLiteral "pairmap.asymmetry"
-    LetStatement pair_sum: i64
+              Identifier pos_step_val
+              IntLiteral 1
+          StringLiteral "range_i64.pos_step_overflow"
+    LetStatement neg_step_count: i64
       IntLiteral 0
-    ForStatement entry
+    LetStatement neg_step_val: i64
+      IntLiteral 0
+    ForStatement x
       Iterable
         CallExpr
           Callee
-            FieldExpr .iter
-              CallExpr
-                Callee
-                  Identifier int_pair_map_entries
-                Args
-                  Identifier pm
+            Identifier range_i64
+          Args
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                UnaryExpr -
+                  IntLiteral 1
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                UnaryExpr -
+                  IntLiteral 10
+            Identifier min_i64
       Assignment
         Target
-          Identifier pair_sum
+          Identifier neg_step_count
         Value
           BinaryExpr +
-            Identifier pair_sum
-            FieldExpr .value
-              Identifier entry
+            Identifier neg_step_count
+            IntLiteral 1
+      Assignment
+        Target
+          Identifier neg_step_val
+        Value
+          Identifier x
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr ==
+              Identifier neg_step_count
+              IntLiteral 1
+            BinaryExpr ==
+              Identifier neg_step_val
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  UnaryExpr -
+                    IntLiteral 1
+          StringLiteral "range_i64.neg_step_overflow"
+    LetStatement i32_step_count: i32
+      IntLiteral 0
+    ForStatement x
+      Iterable
+        CallExpr
+          Callee
+            Identifier range
+          Args
+            IntLiteral 1
+            IntLiteral 10
+            IntLiteral 2147483647
+      Assignment
+        Target
+          Identifier i32_step_count
+        Value
+          BinaryExpr +
+            Identifier i32_step_count
+            Identifier x
     ExpressionStatement
       CallExpr
         Callee
           Identifier check
         Args
           BinaryExpr ==
-            Identifier pair_sum
-            IntLiteral 110
-          StringLiteral "pairmap.entries"
-  FunctionDecl test_option_result_and_strings
+            Identifier i32_step_count
+            IntLiteral 1
+          StringLiteral "range.pos_step_overflow"
+  FunctionDecl test_strings_and_builder
     ReturnType: void
-    LetStatement some_val: Option<i64>
-      CallExpr
-        Callee
-          QualifiedName Option::Some
-        Args
-          CallExpr
-            Callee
-              Identifier to_i64
-            Args
-              IntLiteral 12
-    LetStatement none_val: Option<i64>
-      QualifiedName Option::None
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          BinaryExpr and
-            CallExpr
-              Callee
-                Identifier option_is_some
-              Args
-                Identifier some_val
-            CallExpr
-              Callee
-                Identifier option_is_none
-              Args
-                Identifier none_val
-          StringLiteral "option.predicates"
     ExpressionStatement
       CallExpr
         Callee
@@ -1061,47 +659,11 @@ File
           BinaryExpr ==
             CallExpr
               Callee
-                Identifier option_unwrap_or
+                Identifier trim_start
               Args
-                Identifier none_val
-                CallExpr
-                  Callee
-                    Identifier to_i64
-                  Args
-                    IntLiteral 99
-            IntLiteral 99
-          StringLiteral "option.unwrap_or"
-    LetStatement ok_res: Result<i64, string>
-      CallExpr
-        Callee
-          Identifier option_ok_or
-        Args
-          Identifier some_val
-          StringLiteral "missing"
-    LetStatement err_res: Result<i64, string>
-      CallExpr
-        Callee
-          Identifier option_ok_or
-        Args
-          Identifier none_val
-          StringLiteral "missing"
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          BinaryExpr and
-            CallExpr
-              Callee
-                Identifier result_is_ok
-              Args
-                Identifier ok_res
-            CallExpr
-              Callee
-                Identifier result_is_err
-              Args
-                Identifier err_res
-          StringLiteral "result.predicates"
+                StringLiteral "  \thello "
+            StringLiteral "hello "
+          StringLiteral "string.trim_start"
     ExpressionStatement
       CallExpr
         Callee
@@ -1110,34 +672,11 @@ File
           BinaryExpr ==
             CallExpr
               Callee
-                Identifier result_unwrap_or
+                Identifier trim_end
               Args
-                Identifier err_res
-                CallExpr
-                  Callee
-                    Identifier to_i64
-                  Args
-                    IntLiteral 5
-            IntLiteral 5
-          StringLiteral "result.unwrap_or"
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          BinaryExpr ==
-            CallExpr
-              Callee
-                Identifier option_unwrap_or
-              Args
-                CallExpr
-                  Callee
-                    Identifier result_err
-                  Args
-                    Identifier err_res
-                StringLiteral ""
-            StringLiteral "missing"
-          StringLiteral "result.err"
+                StringLiteral " hello\r\n "
+            StringLiteral " hello"
+          StringLiteral "string.trim_end"
     ExpressionStatement
       CallExpr
         Callee
@@ -1245,7 +784,7 @@ File
         Args
           CallExpr
             Callee
-              Identifier repeat_str
+              Identifier repeat
             Args
               StringLiteral "a,"
               IntLiteral 1000
@@ -1348,7 +887,7 @@ File
           BinaryExpr ==
             CallExpr
               Callee
-                Identifier option_unwrap_or
+                Identifier unwrap_i64
               Args
                 CallExpr
                   Callee
@@ -1370,7 +909,7 @@ File
           BinaryExpr ==
             CallExpr
               Callee
-                Identifier option_unwrap_or
+                Identifier unwrap_i64
               Args
                 CallExpr
                   Callee
@@ -1391,7 +930,7 @@ File
         Args
           CallExpr
             Callee
-              Identifier option_is_none
+              Identifier is_none_i64
             Args
               CallExpr
                 Callee
@@ -1406,7 +945,7 @@ File
         Args
           CallExpr
             Callee
-              Identifier option_is_none
+              Identifier is_none_i32
             Args
               CallExpr
                 Callee
@@ -1422,7 +961,7 @@ File
           BinaryExpr ==
             CallExpr
               Callee
-                Identifier option_unwrap_or
+                Identifier unwrap_i32
               Args
                 CallExpr
                   Callee
@@ -1433,148 +972,61 @@ File
             UnaryExpr -
               IntLiteral 2147483648
           StringLiteral "parse_i32.min"
-    LetStatement pos_step_count: i64
-      IntLiteral 0
-    LetStatement pos_step_val: i64
-      IntLiteral 0
-    ForStatement x
-      Iterable
-        CallExpr
-          Callee
-            Identifier range_i64
-          Args
-            IntLiteral 1
-            IntLiteral 10
-            Identifier max_expected
-      Assignment
-        Target
-          Identifier pos_step_count
-        Value
-          BinaryExpr +
-            Identifier pos_step_count
-            IntLiteral 1
-      Assignment
-        Target
-          Identifier pos_step_val
-        Value
-          Identifier x
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          BinaryExpr and
-            BinaryExpr ==
-              Identifier pos_step_count
-              IntLiteral 1
-            BinaryExpr ==
-              Identifier pos_step_val
-              IntLiteral 1
-          StringLiteral "range_i64.pos_step_overflow"
-    LetStatement neg_step_count: i64
-      IntLiteral 0
-    LetStatement neg_step_val: i64
-      IntLiteral 0
-    ForStatement x
-      Iterable
-        CallExpr
-          Callee
-            Identifier range_i64
-          Args
-            CallExpr
-              Callee
-                Identifier to_i64
-              Args
-                UnaryExpr -
-                  IntLiteral 1
-            CallExpr
-              Callee
-                Identifier to_i64
-              Args
-                UnaryExpr -
-                  IntLiteral 10
-            Identifier min_expected
-      Assignment
-        Target
-          Identifier neg_step_count
-        Value
-          BinaryExpr +
-            Identifier neg_step_count
-            IntLiteral 1
-      Assignment
-        Target
-          Identifier neg_step_val
-        Value
-          Identifier x
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          BinaryExpr and
-            BinaryExpr ==
-              Identifier neg_step_count
-              IntLiteral 1
-            BinaryExpr ==
-              Identifier neg_step_val
-              CallExpr
-                Callee
-                  Identifier to_i64
-                Args
-                  UnaryExpr -
-                    IntLiteral 1
-          StringLiteral "range_i64.neg_step_overflow"
-    LetStatement i32_step_count: i32
-      IntLiteral 0
-    ForStatement x
-      Iterable
-        CallExpr
-          Callee
-            Identifier range
-          Args
-            IntLiteral 1
-            IntLiteral 10
-            IntLiteral 2147483647
-      Assignment
-        Target
-          Identifier i32_step_count
-        Value
-          BinaryExpr +
-            Identifier i32_step_count
-            Identifier x
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier check
-        Args
-          BinaryExpr ==
-            Identifier i32_step_count
-            IntLiteral 1
-          StringLiteral "range.pos_step_overflow"
     LetStatement b
       CallExpr
         Callee
-          FieldExpr .push_bool
-            CallExpr
-              Callee
-                FieldExpr .push
-                  CallExpr
-                    Callee
-                      FieldExpr .push_i64
-                        CallExpr
-                          Callee
-                            FieldExpr .push
-                              CallExpr
-                                Callee
-                                  QualifiedName Builder::new
-                          Args
-                            StringLiteral "item="
-                    Args
-                      IntLiteral 42
-              Args
-                StringLiteral " ok="
+          QualifiedName Builder::new
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
         Args
-          BoolLiteral true
+          CallExpr
+            Callee
+              FieldExpr .is_empty
+                Identifier b
+          StringLiteral "builder.is_empty"
+    Assignment
+      Target
+        Identifier b
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push_line
+              CallExpr
+                Callee
+                  FieldExpr .push_bool
+                    CallExpr
+                      Callee
+                        FieldExpr .push
+                          CallExpr
+                            Callee
+                              FieldExpr .push_i32
+                                CallExpr
+                                  Callee
+                                    FieldExpr .push
+                                      CallExpr
+                                        Callee
+                                          FieldExpr .push_i64
+                                            CallExpr
+                                              Callee
+                                                FieldExpr .push
+                                                  Identifier b
+                                              Args
+                                                StringLiteral "item="
+                                        Args
+                                          IntLiteral 42
+                                  Args
+                                    StringLiteral " n="
+                            Args
+                              UnaryExpr -
+                                IntLiteral 3
+                      Args
+                        StringLiteral " ok="
+                Args
+                  BoolLiteral true
+          Args
+            StringLiteral ""
     ExpressionStatement
       CallExpr
         Callee
@@ -1585,7 +1037,7 @@ File
               Callee
                 FieldExpr .to_string
                   Identifier b
-            StringLiteral "item=42 ok=true"
+            StringLiteral "item=42 n=-3 ok=true\n"
           StringLiteral "builder.helpers"
   FunctionDecl main
     ReturnType: i32
@@ -1596,11 +1048,11 @@ File
     ExpressionStatement
       CallExpr
         Callee
-          Identifier test_intmap_and_pairmap
+          Identifier test_ranges
     ExpressionStatement
       CallExpr
         Callee
-          Identifier test_option_result_and_strings
+          Identifier test_strings_and_builder
     ExpressionStatement
       CallExpr
         Callee

@@ -13,14 +13,14 @@ so a machine with no Dao on it can always rebuild the language:
 | Self-hosted | `bootstrap/`, in Dao | compiles itself, and still uses LLVM and the C runtime |
 | Fully hosted | not yet written | all Dao, with its own runtime and code generation |
 
-Line counts reflect the current branch over `b3f17dc`, on 2026-11-25.  The table counts
-33,619 lines of authored Dao for comparison.
+Line counts reflect the current branch over `73e37ba`, on 2026-11-25.  The table counts
+32,863 lines of authored Dao for comparison.
 
 ## Programs
 
 | Stopgap | Language | Files | Lines | Replacement |
 |---|---|---|---|---|
-| `compiler/` bootstrap tier and its tests | C++ | 114 | 41,679 | nothing: this tier stays permanently |
+| `compiler/` bootstrap tier and its tests | C++ | 114 | 41,790 | nothing: this tier stays permanently |
 | `runtime/` allocator, strings, I/O and generators | C | 11 | 1,632 | Dao over `Ptr<T>` and `mode unsafe` in the fully hosted tier, which needs direct system calls from Dao |
 | `tools/playground/compiler_service/` | C++ | 20 | 3,300 | a Dao service, which needs sockets and HTTP in the standard library |
 | `tools/playground/frontend/` | TypeScript, CSS, HTML | 20 | 1,660 | a Dao browser target, which does not exist |
@@ -35,8 +35,8 @@ Line counts reflect the current branch over `b3f17dc`, on 2026-11-25.  The table
 | `bootstrap/stage2.sh`, `audit_closure.sh`, `validate_ir.sh` | Shell | 1,003 | Dao programs, which need a process API in the standard library |
 | `compiler/driver/multifile_build_test.sh`, `tools/playground/dev.sh` | Shell | 194 | the same process API |
 | `Taskfile.yml` | YAML for Task | 207 | a build tool written in Dao |
-| `CMakeLists.txt` files and `CMakePresets.json` | CMake | 573 | stays with the bootstrap tier, and a Dao build tool serves the other tiers |
-| `conanfile.py`, `profiles/` | Python, Conan | 90 | stays with the bootstrap tier |
+| `CMakeLists.txt` files and `CMakePresets.json` | CMake | 603 | stays with the bootstrap tier, and a Dao build tool serves the other tiers |
+| `conanfile.py`, `profiles/` | Python, Conan | 101 | stays with the bootstrap tier |
 | `.github/workflows/` | YAML for GitHub Actions | 270 | Bosun orchestrating compiler and crossing validation directly |
 
 ## External Dependencies

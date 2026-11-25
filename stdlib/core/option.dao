@@ -1,45 +1,4 @@
 module core::option
-
 enum class Option<T>:
   Some(value: T)
   None
-
-fn option_is_some<T>(opt: Option<T>): bool
-  match opt:
-    Option::Some(v):
-      return true
-    Option::None:
-      return false
-  return false
-
-fn option_is_none<T>(opt: Option<T>): bool
-  match opt:
-    Option::Some(v):
-      return false
-    Option::None:
-      return true
-  return true
-
-fn option_unwrap_or<T>(opt: Option<T>, fallback: T): T
-  match opt:
-    Option::Some(v):
-      return v
-    Option::None:
-      return fallback
-  return fallback
-
-fn option_expect<T>(opt: Option<T>, message: string): T
-  match opt:
-    Option::Some(v):
-      return v
-    Option::None:
-      panic(message)
-  panic("unreachable")
-
-fn option_ok_or<T, E>(opt: Option<T>, err: E): Result<T, E>
-  match opt:
-    Option::Some(v):
-      return Result::Ok(value = v)
-    Option::None:
-      return Result::Err(error = err)
-  panic("unreachable")

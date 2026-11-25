@@ -132,38 +132,6 @@ File
         Args
           Identifier a
           Identifier b
-  FunctionDecl is_empty_str
-    Param s: string
-    ReturnType: bool
-    ExprBody
-      BinaryExpr ==
-        CallExpr
-          Callee
-            Identifier __dao_str_length
-          Args
-            Identifier s
-        CallExpr
-          Callee
-            Identifier to_i64
-          Args
-            IntLiteral 0
-  FunctionDecl contains_substr
-    Param s: string
-    Param needle: string
-    ReturnType: bool
-    ExprBody
-      BinaryExpr >=
-        CallExpr
-          Callee
-            Identifier __dao_str_index_of
-          Args
-            Identifier s
-            Identifier needle
-        CallExpr
-          Callee
-            Identifier to_i64
-          Args
-            IntLiteral 0
   FunctionDecl is_ascii_space
     Param c: i32
     ReturnType: bool

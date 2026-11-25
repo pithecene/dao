@@ -15,7 +15,6 @@ Defines the allowed top-level ontology and major subroots for Dao.
 - `examples/`
 - `testdata/`
 - `tools/`
-- `ai/`
 
 ## Required Major Subroots
 
@@ -71,7 +70,6 @@ required.
 - `tools/` owns developer-surface tooling (playground, LSP, formatter,
   diagnostics presentation) that consumes compiler-produced analysis,
   diagnostics, and IR; it must not reimplement language logic.
-- `ai/` owns Bonsai governance artifacts only.
 
 ## Laws
 
@@ -84,4 +82,3 @@ required.
 4. Normative documents must live under `docs/contracts/`.
 5. Non-normative prose must not introduce guarantees not present in a
    contract.
-6. Generated output must not be committed under `ai/out/`.
