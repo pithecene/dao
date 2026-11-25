@@ -59,13 +59,26 @@ File
               Identifier end
           YieldStatement
             Identifier i
-          Assignment
-            Target
-              Identifier i
-            Value
-              BinaryExpr +
-                Identifier i
-                Identifier step
+          MatchStatement
+            Scrutinee
+              CallExpr
+                Callee
+                  Identifier checked_add
+                Args
+                  Identifier i
+                  Identifier step
+            Arm
+              Pattern
+                QualifiedName Option::Some
+              Assignment
+                Target
+                  Identifier i
+                Value
+                  Identifier next_i
+            Arm
+              Pattern
+                QualifiedName Option::None
+              BreakStatement
       Else
         IfStatement
           Condition
@@ -80,13 +93,26 @@ File
                   Identifier end
               YieldStatement
                 Identifier i
-              Assignment
-                Target
-                  Identifier i
-                Value
-                  BinaryExpr +
-                    Identifier i
-                    Identifier step
+              MatchStatement
+                Scrutinee
+                  CallExpr
+                    Callee
+                      Identifier checked_add
+                    Args
+                      Identifier i
+                      Identifier step
+                Arm
+                  Pattern
+                    QualifiedName Option::Some
+                  Assignment
+                    Target
+                      Identifier i
+                    Value
+                      Identifier next_i
+                Arm
+                  Pattern
+                    QualifiedName Option::None
+                  BreakStatement
   FunctionDecl range_i64
     Param n: i64
     ReturnType: Generator<i64>
@@ -150,13 +176,26 @@ File
               Identifier end
           YieldStatement
             Identifier i
-          Assignment
-            Target
-              Identifier i
-            Value
-              BinaryExpr +
-                Identifier i
-                Identifier step
+          MatchStatement
+            Scrutinee
+              CallExpr
+                Callee
+                  Identifier checked_add_i64
+                Args
+                  Identifier i
+                  Identifier step
+            Arm
+              Pattern
+                QualifiedName Option::Some
+              Assignment
+                Target
+                  Identifier i
+                Value
+                  Identifier next_i
+            Arm
+              Pattern
+                QualifiedName Option::None
+              BreakStatement
       Else
         IfStatement
           Condition
@@ -175,10 +214,23 @@ File
                   Identifier end
               YieldStatement
                 Identifier i
-              Assignment
-                Target
-                  Identifier i
-                Value
-                  BinaryExpr +
-                    Identifier i
-                    Identifier step
+              MatchStatement
+                Scrutinee
+                  CallExpr
+                    Callee
+                      Identifier checked_add_i64
+                    Args
+                      Identifier i
+                      Identifier step
+                Arm
+                  Pattern
+                    QualifiedName Option::Some
+                  Assignment
+                    Target
+                      Identifier i
+                    Value
+                      Identifier next_i
+                Arm
+                  Pattern
+                    QualifiedName Option::None
+                  BreakStatement

@@ -1192,6 +1192,103 @@ File
                   StringLiteral "/"
               StringLiteral "a/b/c"
           StringLiteral "string.split_join"
+    LetStatement edge_parts
+      CallExpr
+        Callee
+          Identifier split
+        Args
+          StringLiteral ",a,,b,"
+          StringLiteral ","
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr and
+              BinaryExpr and
+                BinaryExpr ==
+                  CallExpr
+                    Callee
+                      FieldExpr .length
+                        Identifier edge_parts
+                  IntLiteral 5
+                BinaryExpr ==
+                  CallExpr
+                    Callee
+                      FieldExpr .get
+                        Identifier edge_parts
+                    Args
+                      IntLiteral 0
+                  StringLiteral ""
+              BinaryExpr ==
+                CallExpr
+                  Callee
+                    FieldExpr .get
+                      Identifier edge_parts
+                  Args
+                    IntLiteral 2
+                StringLiteral ""
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  FieldExpr .get
+                    Identifier edge_parts
+                Args
+                  IntLiteral 4
+              StringLiteral ""
+          StringLiteral "string.split_edges"
+    LetStatement bulk_parts
+      CallExpr
+        Callee
+          Identifier split
+        Args
+          CallExpr
+            Callee
+              Identifier repeat_str
+            Args
+              StringLiteral "a,"
+              IntLiteral 1000
+          StringLiteral ","
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr and
+              BinaryExpr and
+                BinaryExpr ==
+                  CallExpr
+                    Callee
+                      FieldExpr .length
+                        Identifier bulk_parts
+                  IntLiteral 1001
+                BinaryExpr ==
+                  CallExpr
+                    Callee
+                      FieldExpr .get
+                        Identifier bulk_parts
+                    Args
+                      IntLiteral 0
+                  StringLiteral "a"
+              BinaryExpr ==
+                CallExpr
+                  Callee
+                    FieldExpr .get
+                      Identifier bulk_parts
+                  Args
+                    IntLiteral 999
+                StringLiteral "a"
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  FieldExpr .get
+                    Identifier bulk_parts
+                Args
+                  IntLiteral 1000
+              StringLiteral ""
+          StringLiteral "string.split_linear"
     LetStatement ls
       CallExpr
         Callee
@@ -1336,6 +1433,124 @@ File
             UnaryExpr -
               IntLiteral 2147483648
           StringLiteral "parse_i32.min"
+    LetStatement pos_step_count: i64
+      IntLiteral 0
+    LetStatement pos_step_val: i64
+      IntLiteral 0
+    ForStatement x
+      Iterable
+        CallExpr
+          Callee
+            Identifier range_i64
+          Args
+            IntLiteral 1
+            IntLiteral 10
+            Identifier max_expected
+      Assignment
+        Target
+          Identifier pos_step_count
+        Value
+          BinaryExpr +
+            Identifier pos_step_count
+            IntLiteral 1
+      Assignment
+        Target
+          Identifier pos_step_val
+        Value
+          Identifier x
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr ==
+              Identifier pos_step_count
+              IntLiteral 1
+            BinaryExpr ==
+              Identifier pos_step_val
+              IntLiteral 1
+          StringLiteral "range_i64.pos_step_overflow"
+    LetStatement neg_step_count: i64
+      IntLiteral 0
+    LetStatement neg_step_val: i64
+      IntLiteral 0
+    ForStatement x
+      Iterable
+        CallExpr
+          Callee
+            Identifier range_i64
+          Args
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                UnaryExpr -
+                  IntLiteral 1
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                UnaryExpr -
+                  IntLiteral 10
+            Identifier min_expected
+      Assignment
+        Target
+          Identifier neg_step_count
+        Value
+          BinaryExpr +
+            Identifier neg_step_count
+            IntLiteral 1
+      Assignment
+        Target
+          Identifier neg_step_val
+        Value
+          Identifier x
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr ==
+              Identifier neg_step_count
+              IntLiteral 1
+            BinaryExpr ==
+              Identifier neg_step_val
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  UnaryExpr -
+                    IntLiteral 1
+          StringLiteral "range_i64.neg_step_overflow"
+    LetStatement i32_step_count: i32
+      IntLiteral 0
+    ForStatement x
+      Iterable
+        CallExpr
+          Callee
+            Identifier range
+          Args
+            IntLiteral 1
+            IntLiteral 10
+            IntLiteral 2147483647
+      Assignment
+        Target
+          Identifier i32_step_count
+        Value
+          BinaryExpr +
+            Identifier i32_step_count
+            Identifier x
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr ==
+            Identifier i32_step_count
+            IntLiteral 1
+          StringLiteral "range.pos_step_overflow"
     LetStatement b
       CallExpr
         Callee

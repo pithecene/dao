@@ -394,6 +394,133 @@ File
           BinaryExpr -
             Identifier end
             Identifier start
+  FunctionDecl index_of_from
+    Param s: string
+    Param s_len: i64
+    Param needle: string
+    Param needle_len: i64
+    Param from: i64
+    ReturnType: i64
+    IfStatement
+      Condition
+        BinaryExpr ==
+          Identifier needle_len
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 0
+      Then
+        ReturnStatement
+          Identifier from
+    IfStatement
+      Condition
+        BinaryExpr >
+          Identifier needle_len
+          BinaryExpr -
+            Identifier s_len
+            Identifier from
+      Then
+        ReturnStatement
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              UnaryExpr -
+                IntLiteral 1
+    LetStatement first: i32
+      CallExpr
+        Callee
+          Identifier __dao_str_char_at
+        Args
+          Identifier needle
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 0
+    LetStatement limit: i64
+      BinaryExpr -
+        Identifier s_len
+        Identifier needle_len
+    LetStatement pos: i64
+      Identifier from
+    WhileStatement
+      Condition
+        BinaryExpr <=
+          Identifier pos
+          Identifier limit
+      IfStatement
+        Condition
+          BinaryExpr ==
+            CallExpr
+              Callee
+                Identifier __dao_str_char_at
+              Args
+                Identifier s
+                Identifier pos
+            Identifier first
+        Then
+          LetStatement matched: bool
+            BoolLiteral true
+          LetStatement j: i64
+            IntLiteral 1
+          WhileStatement
+            Condition
+              BinaryExpr <
+                Identifier j
+                Identifier needle_len
+            IfStatement
+              Condition
+                BinaryExpr !=
+                  CallExpr
+                    Callee
+                      Identifier __dao_str_char_at
+                    Args
+                      Identifier s
+                      BinaryExpr +
+                        Identifier pos
+                        Identifier j
+                  CallExpr
+                    Callee
+                      Identifier __dao_str_char_at
+                    Args
+                      Identifier needle
+                      Identifier j
+              Then
+                Assignment
+                  Target
+                    Identifier matched
+                  Value
+                    BoolLiteral false
+                BreakStatement
+            Assignment
+              Target
+                Identifier j
+              Value
+                BinaryExpr +
+                  Identifier j
+                  IntLiteral 1
+          IfStatement
+            Condition
+              Identifier matched
+            Then
+              ReturnStatement
+                Identifier pos
+      Assignment
+        Target
+          Identifier pos
+        Value
+          BinaryExpr +
+            Identifier pos
+            IntLiteral 1
+    ReturnStatement
+      CallExpr
+        Callee
+          Identifier to_i64
+        Args
+          UnaryExpr -
+            IntLiteral 1
   FunctionDecl split
     Param s: string
     Param sep: string
@@ -439,27 +566,20 @@ File
         BinaryExpr <=
           Identifier start
           Identifier n
-      LetStatement rest: string
+      LetStatement match_pos: i64
         CallExpr
           Callee
-            Identifier __dao_str_substring
+            Identifier index_of_from
           Args
             Identifier s
-            Identifier start
-            BinaryExpr -
-              Identifier n
-              Identifier start
-      LetStatement rel: i64
-        CallExpr
-          Callee
-            Identifier __dao_str_index_of
-          Args
-            Identifier rest
+            Identifier n
             Identifier sep
+            Identifier sep_len
+            Identifier start
       IfStatement
         Condition
           BinaryExpr <
-            Identifier rel
+            Identifier match_pos
             CallExpr
               Callee
                 Identifier to_i64
@@ -475,7 +595,15 @@ File
                   FieldExpr .push
                     Identifier out
                 Args
-                  Identifier rest
+                  CallExpr
+                    Callee
+                      Identifier __dao_str_substring
+                    Args
+                      Identifier s
+                      Identifier start
+                      BinaryExpr -
+                        Identifier n
+                        Identifier start
           ReturnStatement
             Identifier out
       Assignment
@@ -493,15 +621,15 @@ File
                 Args
                   Identifier s
                   Identifier start
-                  Identifier rel
+                  BinaryExpr -
+                    Identifier match_pos
+                    Identifier start
       Assignment
         Target
           Identifier start
         Value
           BinaryExpr +
-            BinaryExpr +
-              Identifier start
-              Identifier rel
+            Identifier match_pos
             Identifier sep_len
     ReturnStatement
       Identifier out

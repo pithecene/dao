@@ -58,21 +58,35 @@ fn vec_log_values_new<T>(outer: bool): Ptr<Ptr<T>>
     return cell
   panic("unreachable")
 
+// Shared write-stamp and overwrite-log state for versioned `Vector` values.
+class VecTrack:
+  gen: Ptr<i64>             // the buffer's latest write stamp; shared
+  version: i64              // the stamp this value reads at
+  log: Ptr<VecLogHead>      // overwritten slots: indexes and stamps; shared
+
+fn vec_track_new(outer: bool): VecTrack
+  let raw: Ptr<void> = Ptr<void>::new()
+  if outer:
+    raw = __dao_mem_alloc_outer(size_of<i64>(), align_of<i64>())
+  else:
+    raw = __dao_mem_alloc(size_of<i64>(), align_of<i64>())
+  mode unsafe =>
+    let gen: Ptr<i64> = raw.cast<i64>()
+    gen.set(to_i64(0))
+    return VecTrack(gen, to_i64(0), vec_log_head_new(outer))
+  panic("unreachable")
+
+fn vec_track_at(track: VecTrack, version: i64): VecTrack -> VecTrack(track.gen, version, track.log)
+
 class Vector<T>:
   data: Ptr<T>
   len: i64
   cap: i64
-  gen: Ptr<i64>             // the buffer's latest write stamp; shared
-  version: i64              // the stamp this value reads at
-  log: Ptr<VecLogHead>      // overwritten slots: indexes and stamps; shared
+  track: VecTrack
   log_value: Ptr<Ptr<T>>    // overwritten slots: the values; shared
 
   fn new(): Vector<T>
-    mode unsafe =>
-      let gen: Ptr<i64> = __dao_mem_alloc(size_of<i64>(), align_of<i64>()).cast<i64>()
-      gen.set(to_i64(0))
-      return Vector(Ptr<T>::new(), to_i64(0), to_i64(0), gen, to_i64(0), vec_log_head_new(false), vec_log_values_new<T>(false))
-    panic("unreachable")
+    return vec_fresh<T>(Ptr<T>::new(), to_i64(0), to_i64(0), false)
 
   fn with_capacity(cap: i64): Vector<T>
     if cap < to_i64(0):
@@ -81,9 +95,7 @@ class Vector<T>:
       return Vector<T>::new()
     mode unsafe =>
       let data: Ptr<T> = __dao_mem_alloc(size_of<T>() * cap, align_of<T>()).cast<T>()
-      let gen: Ptr<i64> = __dao_mem_alloc(size_of<i64>(), align_of<i64>()).cast<i64>()
-      gen.set(to_i64(0))
-      return Vector(data, to_i64(0), cap, gen, to_i64(0), vec_log_head_new(false), vec_log_values_new<T>(false))
+      return vec_fresh<T>(data, to_i64(0), cap, false)
     panic("unreachable")
 
   fn filled(count: i64, value: T): Vector<T>
@@ -100,9 +112,7 @@ class Vector<T>:
       while i < count:
         data.offset(i).set(value)
         i = i + 1
-      let gen: Ptr<i64> = __dao_mem_alloc(size_of<i64>(), align_of<i64>()).cast<i64>()
-      gen.set(to_i64(0))
-      return Vector(data, count, cap, gen, to_i64(0), vec_log_head_new(false), vec_log_values_new<T>(false))
+      return vec_fresh<T>(data, count, cap, false)
     panic("unreachable")
 
   fn length(self): i64 -> self.len
@@ -112,7 +122,7 @@ class Vector<T>:
   // Record that slot `index` holds its current value until write `stamp`.
   fn log_overwrite(self, index: i64, stamp: i64): void
     mode unsafe =>
-      let l: VecLogHead = self.log.get()
+      let l: VecLogHead = self.track.log.get()
       let values: Ptr<T> = self.log_value.get()
       // The log lives with the buffer, in the domain that owns it: a
       // set inside a deeper block must not attach storage the block
@@ -155,7 +165,7 @@ class Vector<T>:
       else:
         l.next.offset(tail).set(entry)
       l.last.offset(index).set(entry)
-      self.log.set(VecLogHead(l.stamp, l.next, l.first, l.last, entry + 1, l.cap))
+      self.track.log.set(VecLogHead(l.stamp, l.next, l.first, l.last, entry + 1, l.cap))
 
   // The element at `index` as this value sees it: the buffer's slot,
   // unless a later write overwrote it, in which case the value the
@@ -167,13 +177,13 @@ class Vector<T>:
     if index >= self.len:
       panic("Vector.get: index out of bounds")
     mode unsafe =>
-      if self.gen.get() == self.version:
+      if self.track.gen.get() == self.track.version:
         return self.data.offset(index).get()
-      let l: VecLogHead = self.log.get()
+      let l: VecLogHead = self.track.log.get()
       if l.cap > to_i64(0):
         let k: i64 = l.first.offset(index).get()
         while k >= to_i64(0):
-          if l.stamp.offset(k).get() > self.version:
+          if l.stamp.offset(k).get() > self.track.version:
             return self.log_value.get().offset(k).get()
           k = l.next.offset(k).get()
       return self.data.offset(index).get()
@@ -195,7 +205,7 @@ class Vector<T>:
   fn snapshot(self): Vector<T>
     let latest: bool = false
     mode unsafe =>
-      latest = self.gen.get() == self.version
+      latest = self.track.gen.get() == self.track.version
     if latest:
       return self
     return self.refreshed(self.cap)
@@ -210,20 +220,18 @@ class Vector<T>:
       while i < self.len:
         data.offset(i).set(self.get(i))
         i = i + 1
-      let gen: Ptr<i64> = __dao_mem_alloc(size_of<i64>(), align_of<i64>()).cast<i64>()
-      gen.set(to_i64(0))
-      return Vector(data, self.len, cap, gen, to_i64(0), vec_log_head_new(false), vec_log_values_new<T>(false))
+      return vec_fresh<T>(data, self.len, cap, false)
     panic("unreachable")
 
   fn push(self, elem: T): Vector<T>
     mode unsafe =>
       if self.len < self.cap:
-        if self.gen.get() == self.version:
+        if self.track.gen.get() == self.track.version:
           // Latest with room: write past every older value's length.
           self.data.offset(self.len).set(elem)
-          let stamp: i64 = self.version + 1
-          self.gen.set(stamp)
-          return Vector(self.data, self.len + 1, self.cap, self.gen, stamp, self.log, self.log_value)
+          let stamp: i64 = self.track.version + 1
+          self.track.gen.set(stamp)
+          return Vector(self.data, self.len + 1, self.cap, vec_track_at(self.track, stamp), self.log_value)
       // Grow, or leave a buffer another value wrote to: fresh storage
       // holding what this value sees, then the element.
       let cap: i64 = self.cap
@@ -233,8 +241,8 @@ class Vector<T>:
           cap = 8
       let fresh: Vector<T> = self.refreshed(cap)
       fresh.data.offset(fresh.len).set(elem)
-      fresh.gen.set(to_i64(1))
-      return Vector(fresh.data, fresh.len + 1, fresh.cap, fresh.gen, to_i64(1), fresh.log, fresh.log_value)
+      fresh.track.gen.set(to_i64(1))
+      return Vector(fresh.data, fresh.len + 1, fresh.cap, vec_track_at(fresh.track, to_i64(1)), fresh.log_value)
     panic("unreachable")
 
   fn set(self, index: i64, elem: T): Vector<T>
@@ -243,17 +251,17 @@ class Vector<T>:
     if index >= self.len:
       panic("Vector.set: index out of bounds")
     mode unsafe =>
-      if self.gen.get() == self.version:
+      if self.track.gen.get() == self.track.version:
         // Latest: log what the slot held, then write in place.
-        let stamp: i64 = self.version + 1
+        let stamp: i64 = self.track.version + 1
         self.log_overwrite(index, stamp)
         self.data.offset(index).set(elem)
-        self.gen.set(stamp)
-        return Vector(self.data, self.len, self.cap, self.gen, stamp, self.log, self.log_value)
+        self.track.gen.set(stamp)
+        return Vector(self.data, self.len, self.cap, vec_track_at(self.track, stamp), self.log_value)
       let fresh: Vector<T> = self.refreshed(self.cap)
       fresh.data.offset(index).set(elem)
-      fresh.gen.set(to_i64(1))
-      return Vector(fresh.data, fresh.len, fresh.cap, fresh.gen, to_i64(1), fresh.log, fresh.log_value)
+      fresh.track.gen.set(to_i64(1))
+      return Vector(fresh.data, fresh.len, fresh.cap, vec_track_at(fresh.track, to_i64(1)), fresh.log_value)
     panic("unreachable")
 
   // Return a vector without its last element in O(1) amortized time.
@@ -267,19 +275,17 @@ class Vector<T>:
     if new_len == to_i64(0):
       return Vector<T>::new()
     mode unsafe =>
-      if self.gen.get() == self.version:
-        let stamp: i64 = self.version + 1
+      if self.track.gen.get() == self.track.version:
+        let stamp: i64 = self.track.version + 1
         self.log_overwrite(new_len, stamp)
-        self.gen.set(stamp)
-        return Vector(self.data, new_len, self.cap, self.gen, stamp, self.log, self.log_value)
+        self.track.gen.set(stamp)
+        return Vector(self.data, new_len, self.cap, vec_track_at(self.track, stamp), self.log_value)
       let data: Ptr<T> = __dao_mem_alloc(size_of<T>() * self.cap, align_of<T>()).cast<T>()
       let i: i64 = 0
       while i < new_len:
         data.offset(i).set(self.get(i))
         i = i + 1
-      let gen: Ptr<i64> = __dao_mem_alloc(size_of<i64>(), align_of<i64>()).cast<i64>()
-      gen.set(to_i64(0))
-      return Vector(data, new_len, self.cap, gen, to_i64(0), vec_log_head_new(false), vec_log_values_new<T>(false))
+      return vec_fresh<T>(data, new_len, self.cap, false)
     panic("unreachable")
 
   fn reverse(self): Vector<T>
@@ -291,9 +297,7 @@ class Vector<T>:
       while i < self.len:
         data.offset(i).set(self.get(self.len - to_i64(1) - i))
         i = i + 1
-      let gen: Ptr<i64> = __dao_mem_alloc(size_of<i64>(), align_of<i64>()).cast<i64>()
-      gen.set(to_i64(0))
-      return Vector(data, self.len, self.cap, gen, to_i64(0), vec_log_head_new(false), vec_log_values_new<T>(false))
+      return vec_fresh<T>(data, self.len, self.cap, false)
     panic("unreachable")
 
   fn append_all(self, other: Vector<T>): Vector<T>
@@ -320,9 +324,7 @@ class Vector<T>:
       while i < count:
         data.offset(i).set(self.get(start + i))
         i = i + 1
-      let gen: Ptr<i64> = __dao_mem_alloc(size_of<i64>(), align_of<i64>()).cast<i64>()
-      gen.set(to_i64(0))
-      return Vector(data, count, cap, gen, to_i64(0), vec_log_head_new(false), vec_log_values_new<T>(false))
+      return vec_fresh<T>(data, count, cap, false)
     panic("unreachable")
 
   // A copy of this vector, buffer and elements, in the enclosing
@@ -335,9 +337,7 @@ class Vector<T>:
       while i < self.len:
         data.offset(i).set(copy_out<T>(self.get(i)))
         i = i + 1
-      let gen: Ptr<i64> = __dao_mem_alloc_outer(size_of<i64>(), align_of<i64>()).cast<i64>()
-      gen.set(to_i64(0))
-      return Vector(data, self.len, self.cap, gen, to_i64(0), vec_log_head_new(true), vec_log_values_new<T>(true))
+      return vec_fresh<T>(data, self.len, self.cap, true)
     panic("unreachable")
 
   fn iter(self): Generator<T>
@@ -345,6 +345,9 @@ class Vector<T>:
     while i < self.len:
       yield self.get(i)
       i = i + 1
+
+fn vec_fresh<T>(data: Ptr<T>, len: i64, cap: i64, outer: bool): Vector<T>
+  return Vector(data, len, cap, vec_track_new(outer), vec_log_values_new<T>(outer))
 
 fn enumerate<T>(xs: Vector<T>): Vector<Indexed<T>>
   if xs.len == to_i64(0):
@@ -444,9 +447,7 @@ fn sort_i64(xs: Vector<i64>): Vector<i64>
       a = b
       b = swap
       width = width * to_i64(2)
-    let gen: Ptr<i64> = __dao_mem_alloc(size_of<i64>(), align_of<i64>()).cast<i64>()
-    gen.set(to_i64(0))
-    return Vector(a, n, n, gen, to_i64(0), vec_log_head_new(false), vec_log_values_new<i64>(false))
+    return vec_fresh<i64>(a, n, n, false)
   panic("unreachable")
 
 fn sort_strings(xs: Vector<string>): Vector<string>
@@ -494,7 +495,5 @@ fn sort_strings(xs: Vector<string>): Vector<string>
       a = b
       b = swap
       width = width * to_i64(2)
-    let gen: Ptr<i64> = __dao_mem_alloc(size_of<i64>(), align_of<i64>()).cast<i64>()
-    gen.set(to_i64(0))
-    return Vector(a, n, n, gen, to_i64(0), vec_log_head_new(false), vec_log_values_new<string>(false))
+    return vec_fresh<string>(a, n, n, false)
   panic("unreachable")

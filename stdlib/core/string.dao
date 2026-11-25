@@ -61,6 +61,28 @@ fn trim(s: string): string
     end = end - to_i64(1)
   return __dao_str_substring(s, start, end - start)
 
+fn index_of_from(s: string, s_len: i64, needle: string, needle_len: i64, from: i64): i64
+  if needle_len == to_i64(0):
+    return from
+  if needle_len > s_len - from:
+    return to_i64(-1)
+  let first: i32 = __dao_str_char_at(needle, to_i64(0))
+  let limit: i64 = s_len - needle_len
+  let pos: i64 = from
+  while pos <= limit:
+    if __dao_str_char_at(s, pos) == first:
+      let matched: bool = true
+      let j: i64 = 1
+      while j < needle_len:
+        if __dao_str_char_at(s, pos + j) != __dao_str_char_at(needle, j):
+          matched = false
+          break
+        j = j + 1
+      if matched:
+        return pos
+    pos = pos + 1
+  return to_i64(-1)
+
 fn split(s: string, sep: string): Vector<string>
   let sep_len: i64 = __dao_str_length(sep)
   if sep_len == to_i64(0):
@@ -69,13 +91,12 @@ fn split(s: string, sep: string): Vector<string>
   let n: i64 = __dao_str_length(s)
   let start: i64 = 0
   while start <= n:
-    let rest: string = __dao_str_substring(s, start, n - start)
-    let rel: i64 = __dao_str_index_of(rest, sep)
-    if rel < to_i64(0):
-      out = out.push(rest)
+    let match_pos: i64 = index_of_from(s, n, sep, sep_len, start)
+    if match_pos < to_i64(0):
+      out = out.push(__dao_str_substring(s, start, n - start))
       return out
-    out = out.push(__dao_str_substring(s, start, rel))
-    start = start + rel + sep_len
+    out = out.push(__dao_str_substring(s, start, match_pos - start))
+    start = match_pos + sep_len
   return out
 
 fn lines(s: string): Vector<string>

@@ -17,12 +17,20 @@ fn range(start: i32, end: i32, step: i32): Generator<i32>
   if step > 0:
     while i < end:
       yield i
-      i = i + step
+      match checked_add(i, step):
+        Option::Some(next_i):
+          i = next_i
+        Option::None:
+          break
   else:
     if step < 0:
       while i > end:
         yield i
-        i = i + step
+        match checked_add(i, step):
+          Option::Some(next_i):
+            i = next_i
+          Option::None:
+            break
 
 fn range_i64(n: i64): Generator<i64>
   let i: i64 = 0
@@ -41,9 +49,17 @@ fn range_i64(start: i64, end: i64, step: i64): Generator<i64>
   if step > to_i64(0):
     while i < end:
       yield i
-      i = i + step
+      match checked_add_i64(i, step):
+        Option::Some(next_i):
+          i = next_i
+        Option::None:
+          break
   else:
     if step < to_i64(0):
       while i > end:
         yield i
-        i = i + step
+        match checked_add_i64(i, step):
+          Option::Some(next_i):
+            i = next_i
+          Option::None:
+            break

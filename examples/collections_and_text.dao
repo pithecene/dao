@@ -121,6 +121,10 @@ fn test_option_result_and_strings(): void
   check(trim("   \n\t ") == "", "string.trim_blank")
   let parts = split("a::b::c", "::")
   check(parts.length() == 3 and join(parts, "/") == "a/b/c", "string.split_join")
+  let edge_parts = split(",a,,b,", ",")
+  check(edge_parts.length() == 5 and edge_parts.get(0) == "" and edge_parts.get(2) == "" and edge_parts.get(4) == "", "string.split_edges")
+  let bulk_parts = split(repeat_str("a,", 1000), ",")
+  check(bulk_parts.length() == 1001 and bulk_parts.get(0) == "a" and bulk_parts.get(999) == "a" and bulk_parts.get(1000) == "", "string.split_linear")
   let ls = lines("alpha\r\nbeta\ngamma\n")
   check(ls.length() == 3 and ls.get(0) == "alpha" and ls.get(2) == "gamma", "string.lines")
 
@@ -133,6 +137,26 @@ fn test_option_result_and_strings(): void
   check(option_is_none(parse_i64("9223372036854775808")), "parse_i64.overflow")
   check(option_is_none(parse_i32("2147483648")), "parse_i32.overflow")
   check(option_unwrap_or(parse_i32("-2147483648"), 0) == -2147483648, "parse_i32.min")
+
+  // Stepped ranges near integer limits must terminate cleanly on overflow.
+  let pos_step_count: i64 = 0
+  let pos_step_val: i64 = 0
+  for x in range_i64(1, 10, max_expected):
+    pos_step_count = pos_step_count + 1
+    pos_step_val = x
+  check(pos_step_count == 1 and pos_step_val == 1, "range_i64.pos_step_overflow")
+
+  let neg_step_count: i64 = 0
+  let neg_step_val: i64 = 0
+  for x in range_i64(to_i64(-1), to_i64(-10), min_expected):
+    neg_step_count = neg_step_count + 1
+    neg_step_val = x
+  check(neg_step_count == 1 and neg_step_val == to_i64(-1), "range_i64.neg_step_overflow")
+
+  let i32_step_count: i32 = 0
+  for x in range(1, 10, 2147483647):
+    i32_step_count = i32_step_count + x
+  check(i32_step_count == 1, "range.pos_step_overflow")
 
   let b = Builder::new().push("item=").push_i64(42).push(" ok=").push_bool(true)
   check(b.to_string() == "item=42 ok=true", "builder.helpers")
