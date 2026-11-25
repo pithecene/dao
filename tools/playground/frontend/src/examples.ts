@@ -203,13 +203,13 @@ export async function loadExampleByName(
     const data = await api("example", { name });
     setWorkspaceProgram(data.files, data.document, { exampleName: name });
     select.value = name;
-    if (options?.persistDraft) {
-      saveDraft();
-    }
     if (options?.switchRoute) {
       requestPlaygroundView();
     }
     syncEditorToActiveTab();
+    if (options?.persistDraft) {
+      saveDraft();
+    }
     return true;
   } catch (err) {
     console.error("failed to load example:", err);
@@ -239,9 +239,9 @@ export function openSnippetInPlayground(
   const select = document.getElementById("example-select") as HTMLSelectElement;
   setWorkspaceProgram(files, documentPath, { exampleName: "" });
   select.value = "";
-  saveDraft();
   requestPlaygroundView();
   syncEditorToActiveTab();
+  saveDraft();
   if (runImmediately) {
     void doRun();
   }

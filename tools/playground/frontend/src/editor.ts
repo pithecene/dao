@@ -10,12 +10,14 @@ import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
 import { referenceHighlights, tokenHighlighter } from "./highlighting";
 import { daoCompletions } from "./completions";
 import type { Diagnostic } from "./generated/tooling_surface";
-import { inDocument } from "./document";
+import { inDocument, onWorkspaceLifecycle } from "./document";
 
 let editorInstance: EditorView | null = null;
+let onUserEditCallback: ((source: string) => void) | null = null;
+
 const readOnlyCompartment = new Compartment();
 const programmaticChange = Annotation.define<boolean>();
-const cursorByPath = new Map<string, number>();
+const statesByPath = new Map<string, EditorState>();
 let trackedPath = "";
 
 const setDiagDecorations = StateEffect.define<DecorationSet>();
@@ -105,32 +107,66 @@ const pitheceneEditorTheme = EditorView.theme({
   },
 });
 
+function createTabState(doc: string, readOnly: boolean): EditorState {
+  return EditorState.create({
+    doc,
+    extensions: [
+      basicSetup,
+      pitheceneEditorTheme,
+      readOnlyCompartment.of(EditorState.readOnly.of(readOnly)),
+      tokenHighlighter,
+      daoCompletions,
+      referenceHighlights,
+      diagnosticHighlights,
+      EditorView.updateListener.of((update) => {
+        if (trackedPath) {
+          statesByPath.set(trackedPath, update.state);
+        }
+        if (
+          update.docChanged &&
+          !update.transactions.some((tr) => tr.annotation(programmaticChange))
+        ) {
+          onUserEditCallback?.(update.state.doc.toString());
+        }
+      }),
+    ],
+  });
+}
+
 /**
- * Create and mount the CodeMirror editor.
- * @param onUserDocChange Called only when the user edits an editable document.
+ * Create and mount the CodeMirror editor with isolated per-file EditorState
+ * instances (preserving independent undo/redo history and selection per tab).
  */
-export function createEditor(onUserDocChange: (source: string) => void): EditorView {
+export function createEditor(
+  onUserDocChange: (source: string) => void,
+): EditorView {
+  onUserEditCallback = onUserDocChange;
+
+  onWorkspaceLifecycle({
+    onReset: () => {
+      statesByPath.clear();
+      trackedPath = "";
+    },
+    onDelete: (path) => {
+      statesByPath.delete(path);
+      if (trackedPath === path) {
+        trackedPath = "";
+      }
+    },
+    onRename: (oldPath, newPath) => {
+      const existing = statesByPath.get(oldPath);
+      if (existing) {
+        statesByPath.delete(oldPath);
+        statesByPath.set(newPath, existing);
+      }
+      if (trackedPath === oldPath) {
+        trackedPath = newPath;
+      }
+    },
+  });
+
   const view = new EditorView({
-    state: EditorState.create({
-      doc: "",
-      extensions: [
-        basicSetup,
-        pitheceneEditorTheme,
-        readOnlyCompartment.of(EditorState.readOnly.of(false)),
-        tokenHighlighter,
-        daoCompletions,
-        referenceHighlights,
-        diagnosticHighlights,
-        EditorView.updateListener.of((update) => {
-          if (
-            update.docChanged &&
-            !update.transactions.some((tr) => tr.annotation(programmaticChange))
-          ) {
-            onUserDocChange(update.state.doc.toString());
-          }
-        }),
-      ],
-    }),
+    state: createTabState("", false),
     parent: document.getElementById("editor-container")!,
   });
   editorInstance = view;
@@ -146,7 +182,10 @@ export function getSource(): string {
   return editorInstance?.state.doc.toString() ?? "";
 }
 
-/** Replace the editor buffer programmatically (switching tabs, loading examples). */
+/**
+ * Activate the isolated EditorState for `path` (creating one when first opened
+ * or if `source` changed externally), preserving per-file undo history.
+ */
 export function loadEditorBuffer(
   path: string,
   source: string,
@@ -155,37 +194,40 @@ export function loadEditorBuffer(
 ): void {
   if (!editorInstance) return;
 
-  if (trackedPath) {
-    cursorByPath.set(trackedPath, editorInstance.state.selection.main.head);
+  if (trackedPath && statesByPath.has(trackedPath)) {
+    statesByPath.set(trackedPath, editorInstance.state);
   }
-  trackedPath = path;
 
-  const savedPos = cursorByPath.get(path) ?? 0;
-  const anchor = Math.max(
-    0,
-    Math.min(selection ? selection.offset : savedPos, source.length),
-  );
-  const head = Math.max(
-    anchor,
-    Math.min(
-      selection && selection.length ? anchor + selection.length : anchor,
-      source.length,
-    ),
-  );
+  let nextState = statesByPath.get(path);
+  if (!nextState || nextState.doc.toString() !== source) {
+    nextState = createTabState(source, readOnly);
+  }
+
+  trackedPath = path;
+  statesByPath.set(path, nextState);
+  editorInstance.setState(nextState);
 
   editorInstance.dispatch({
-    changes: {
-      from: 0,
-      to: editorInstance.state.doc.length,
-      insert: source,
-    },
-    selection: { anchor, head },
-    effects: [
-      readOnlyCompartment.reconfigure(EditorState.readOnly.of(readOnly)),
-      EditorView.scrollIntoView(anchor, { y: "center" }),
-    ],
+    effects: readOnlyCompartment.reconfigure(EditorState.readOnly.of(readOnly)),
     annotations: programmaticChange.of(true),
   });
+
+  if (selection) {
+    const anchor = Math.max(0, Math.min(selection.offset, source.length));
+    const head = Math.max(
+      anchor,
+      Math.min(
+        selection.length ? anchor + selection.length : anchor,
+        source.length,
+      ),
+    );
+    editorInstance.dispatch({
+      selection: { anchor, head },
+      effects: EditorView.scrollIntoView(anchor, { y: "center" }),
+      annotations: programmaticChange.of(true),
+    });
+  }
+  statesByPath.set(path, editorInstance.state);
 }
 
 /** Jump cursor/selection inside the currently displayed buffer. */

@@ -35,6 +35,7 @@ const THEME_STORAGE_KEY = "dao.theme";
 let currentRoute: SiteRoute = "overview";
 let activeExampleCategory: "All" | ExampleCategory = "All";
 let exampleSearchQuery = "";
+let routeParamsListener: ((params: URLSearchParams) => void) | null = null;
 
 // ---------------------------------------------------------------------------
 // Curated Runnable Snippets for Overview & Reference
@@ -214,7 +215,12 @@ fn main(): i32
 // ---------------------------------------------------------------------------
 
 export function initTheme(): void {
-  const saved = localStorage.getItem(THEME_STORAGE_KEY);
+  let saved: string | null = null;
+  try {
+    saved = localStorage.getItem(THEME_STORAGE_KEY);
+  } catch {
+    saved = null;
+  }
   const initial = saved === "light" ? "light" : "dark";
   applyTheme(initial);
 
@@ -277,12 +283,17 @@ export function parseLocationRoute(): {
 }
 
 export function ensurePlaygroundRoute(): void {
-  if (currentRoute === "playground") return;
+  const hadQuery = window.location.hash.includes("?");
+  if (currentRoute === "playground" && !hadQuery) return;
   window.history.pushState(null, "", "#playground");
   applyRoute("playground", "");
+  routeParamsListener?.(new URLSearchParams(window.location.search));
 }
 
-export function initSiteRouter(): void {
+export function initSiteRouter(
+  onParamsChange?: (params: URLSearchParams) => void,
+): void {
+  routeParamsListener = onParamsChange ?? null;
   onRequestPlaygroundView(ensurePlaygroundRoute);
   onCatalogChange(() => {
     if (currentRoute === "examples") {
@@ -297,8 +308,9 @@ export function initSiteRouter(): void {
   });
 
   window.addEventListener("hashchange", () => {
-    const { route, subAnchor } = parseLocationRoute();
+    const { route, params, subAnchor } = parseLocationRoute();
     applyRoute(route, subAnchor);
+    onParamsChange?.(params);
   });
 
   const { route, subAnchor } = parseLocationRoute();

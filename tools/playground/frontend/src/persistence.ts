@@ -3,10 +3,8 @@ import {
   getCurrentExampleName,
   getUserFiles,
   getVersionInfo,
-  isActivePrelude,
   setWorkspaceProgram,
 } from "./document";
-import { getSource } from "./editor";
 import type { SourceInput } from "./generated/tooling_surface";
 import { showNotice } from "./notice";
 
@@ -47,12 +45,10 @@ export function scheduleDraftSave(): void {
 }
 
 export function buildCurrentSnapshot(): WorkspaceSnapshotV1 {
-  const liveSource = !isActivePrelude() ? getSource() : undefined;
   const activeDoc = getAnalysisDocumentPath();
   const files = getUserFiles().map((f) => ({
     path: f.path,
-    source:
-      liveSource !== undefined && f.path === activeDoc ? liveSource : f.source,
+    source: f.source,
   }));
   const info = getVersionInfo();
   return {
@@ -69,6 +65,10 @@ export function buildCurrentSnapshot(): WorkspaceSnapshotV1 {
 }
 
 export function saveDraft(): void {
+  if (draftSaveTimer) {
+    clearTimeout(draftSaveTimer);
+    draftSaveTimer = null;
+  }
   try {
     const snap = buildCurrentSnapshot();
     localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(snap));
@@ -79,6 +79,10 @@ export function saveDraft(): void {
 }
 
 export function clearDraft(): void {
+  if (draftSaveTimer) {
+    clearTimeout(draftSaveTimer);
+    draftSaveTimer = null;
+  }
   try {
     localStorage.removeItem(DRAFT_STORAGE_KEY);
     setDraftStatus("");
@@ -273,9 +277,9 @@ export function initSnapshotModal(onSnapshotImported: () => void): void {
         return;
       }
       applySnapshot(parsed);
-      saveDraft();
       modal.hidden = true;
       onSnapshotImported();
+      saveDraft();
     } catch {
       showNotice("Failed to parse snapshot JSON");
     }

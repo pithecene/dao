@@ -3,6 +3,7 @@ import { api, onServiceStatus } from "./api";
 import { initAnalysis, scheduleAnalyze } from "./analysis";
 import { initDiagnostics } from "./diagnostics";
 import {
+  onWorkspaceLifecycle,
   setVersionInfo,
   setWorkspaceProgram,
   updateActiveUserSource,
@@ -65,7 +66,9 @@ initReferences(editor);
 initWorkspaceUi();
 initSplitters();
 initSnapshotModal(() => syncEditorToActiveTab());
-initSiteRouter();
+initSiteRouter((params) => {
+  void hydrateWorkspaceQueryParams(params);
+});
 
 // ---------------------------------------------------------------------------
 // 3. Service Status & Version Metadata
@@ -142,34 +145,88 @@ document.querySelector(".panel-tabs")!.addEventListener("click", (e) => {
 });
 
 // ---------------------------------------------------------------------------
-// 5. Initial Workspace Hydration (Share URL -> ?example= -> Saved Draft -> Default)
+// 5. Initial & Fragment Workspace Hydration (Share URL -> ?example= -> Draft)
 // ---------------------------------------------------------------------------
 
-async function bootstrapWorkspace(): Promise<void> {
-  const versionPromise = loadServiceVersion();
-  const catalogPromise = initExampleCatalog();
+let lastHydratedQueryKey = "";
+let hydratingFromQuery = false;
+let catalogReadyPromise: Promise<void> | null = null;
+let versionReadyPromise: Promise<void> | null = null;
 
-  const { params } = parseLocationRoute();
+onWorkspaceLifecycle({
+  onReset: () => {
+    if (!hydratingFromQuery) {
+      lastHydratedQueryKey = "";
+    }
+  },
+});
+
+function queryHydrationKey(params: URLSearchParams): string {
+  const share = params.get("s") ?? "";
+  const example = params.get("example") ?? "";
+  return share || example ? `s=${share}&example=${example}` : "";
+}
+
+async function hydrateWorkspaceQueryParams(
+  params: URLSearchParams,
+): Promise<boolean> {
+  const key = queryHydrationKey(params);
+  if (key === lastHydratedQueryKey) {
+    return false;
+  }
+  lastHydratedQueryKey = key;
+  if (!key) {
+    return false;
+  }
+
   const shareParam = params.get("s");
   const exampleParam = params.get("example");
 
-  await versionPromise;
-
-  if (shareParam) {
-    const decoded = await decodeShareToken(shareParam);
-    if (decoded) {
-      applySnapshot(decoded);
-      syncEditorToActiveTab();
-      await catalogPromise;
-      return;
+  hydratingFromQuery = true;
+  try {
+    if (versionReadyPromise) {
+      await versionReadyPromise;
     }
+
+    if (shareParam) {
+      const decoded = await decodeShareToken(shareParam);
+      if (decoded) {
+        applySnapshot(decoded);
+        const select = document.getElementById("example-select") as HTMLSelectElement;
+        select.value = decoded.exampleName ?? "";
+        syncEditorToActiveTab();
+        return true;
+      }
+    }
+
+    if (exampleParam) {
+      if (catalogReadyPromise) {
+        await catalogReadyPromise;
+      }
+      const loaded = await loadExampleByName(exampleParam, { persistDraft: false });
+      if (loaded) {
+        return true;
+      }
+    }
+
+    return false;
+  } finally {
+    hydratingFromQuery = false;
+  }
+}
+
+async function bootstrapWorkspace(): Promise<void> {
+  versionReadyPromise = loadServiceVersion();
+  catalogReadyPromise = initExampleCatalog();
+
+  const { params } = parseLocationRoute();
+  const hydratedFromUrl = await hydrateWorkspaceQueryParams(params);
+  if (hydratedFromUrl) {
+    await catalogReadyPromise;
+    return;
   }
 
-  if (exampleParam) {
-    await catalogPromise;
-    const loaded = await loadExampleByName(exampleParam, { persistDraft: false });
-    if (loaded) return;
-  }
+  await versionReadyPromise;
 
   const draft = loadSavedDraft();
   if (draft) {
@@ -177,11 +234,11 @@ async function bootstrapWorkspace(): Promise<void> {
     const select = document.getElementById("example-select") as HTMLSelectElement;
     if (draft.exampleName) select.value = draft.exampleName;
     syncEditorToActiveTab();
-    await catalogPromise;
+    await catalogReadyPromise;
     return;
   }
 
-  await catalogPromise;
+  await catalogReadyPromise;
   const ok = await loadExampleByName("hello.dao", { persistDraft: false });
   if (!ok) {
     setWorkspaceProgram(FALLBACK_FILES, "hello.dao", { exampleName: "hello.dao" });

@@ -14,6 +14,7 @@ import {
   hasUserFile,
   isActivePrelude,
   onWorkspaceChange,
+  onWorkspaceLifecycle,
   openPreludeTab,
   renameUserFile,
   requestPlaygroundView,
@@ -21,6 +22,7 @@ import {
   type PreludeTab,
 } from "./document";
 import { getEditorView, jumpInEditor, loadEditorBuffer } from "./editor";
+import { setTokens } from "./highlighting";
 import { showNotice } from "./notice";
 import { saveDraft } from "./persistence";
 
@@ -29,12 +31,21 @@ let renamingPath: string | null = null;
 let creatingNewFile = false;
 
 export function initWorkspaceUi(): void {
+  onWorkspaceLifecycle({
+    onReset: () => {
+      creatingNewFile = false;
+      renamingPath = null;
+    },
+  });
   onWorkspaceChange(renderWorkspaceChrome);
 
   document.getElementById("add-file-btn")!.addEventListener("click", () => {
+    if (renamingPath !== null) {
+      renamingPath = null;
+      renderFileList(true);
+    }
     creatingNewFile = true;
-    renamingPath = null;
-    renderWorkspaceChrome();
+    renderNewFileSlot(true);
     const input = document.querySelector<HTMLInputElement>(
       "#new-file-slot .file-inline-input",
     );
@@ -53,7 +64,8 @@ export function cancelInlineFileForms(): void {
   if (!creatingNewFile && !renamingPath) return;
   creatingNewFile = false;
   renamingPath = null;
-  renderWorkspaceChrome();
+  renderNewFileSlot(true);
+  renderFileList(true);
 }
 
 /** Sync CodeMirror buffer with the currently active tab and analyze. */
@@ -63,6 +75,10 @@ export function syncEditorToActiveTab(selection?: {
 }): void {
   const path = getActivePath();
   const readOnly = isActivePrelude();
+  const view = getEditorView();
+  if (view && !readOnly) {
+    setTokens([], view);
+  }
   loadEditorBuffer(path, getActiveSource(), readOnly, selection);
   void doAnalyze();
 }
@@ -133,16 +149,23 @@ export async function openPreludeFileAt(
 }
 
 function renderWorkspaceChrome(): void {
-  renderNewFileSlot();
-  renderFileList();
+  renderNewFileSlot(false);
+  renderFileList(false);
   renderPreludeList();
   renderEditorTabs();
 }
 
-function renderNewFileSlot(): void {
+function renderNewFileSlot(forceMount: boolean): void {
   const slot = document.getElementById("new-file-slot")!;
   if (!creatingNewFile) {
-    slot.replaceChildren();
+    if (slot.hasChildNodes()) {
+      slot.replaceChildren();
+    }
+    return;
+  }
+
+  // Preserve in-progress typing across background analysis notifications.
+  if (!forceMount && slot.querySelector(".file-inline-form")) {
     return;
   }
 
@@ -153,17 +176,16 @@ function renderNewFileSlot(): void {
   form.className = "file-inline-form";
   const input = document.createElement("input");
   input.type = "text";
-  input.className = "file-inline-input";
-  input.value = suggested;
-  input.placeholder = "filename.dao";
-  input.setAttribute("aria-label", "New file name");
+  classNameAndAttrs(input, suggested);
 
+  let settled = false;
   const commit = () => {
-    if (!creatingNewFile) return;
+    if (settled || !creatingNewFile) return;
+    settled = true;
     const raw = input.value.trim();
     creatingNewFile = false;
+    slot.replaceChildren();
     if (!raw) {
-      renderWorkspaceChrome();
       return;
     }
     const res = addUserFile(raw);
@@ -172,8 +194,8 @@ function renderNewFileSlot(): void {
       renderWorkspaceChrome();
       return;
     }
-    saveDraft();
     syncEditorToActiveTab();
+    saveDraft();
     getEditorView()?.focus();
   };
 
@@ -184,8 +206,9 @@ function renderNewFileSlot(): void {
   input.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       e.stopPropagation();
+      settled = true;
       creatingNewFile = false;
-      renderWorkspaceChrome();
+      slot.replaceChildren();
     }
   });
   input.addEventListener("blur", commit);
@@ -194,9 +217,56 @@ function renderNewFileSlot(): void {
   slot.replaceChildren(form);
 }
 
-function renderFileList(): void {
+function classNameAndAttrs(input: HTMLInputElement, suggested: string): void {
+  input.className = "file-inline-input";
+  input.value = suggested;
+  input.placeholder = "filename.dao";
+  input.setAttribute("aria-label", "New file name");
+}
+
+function updateFileListMetadataInPlace(list: HTMLElement): void {
+  const active = getActivePath();
+  const diags = getWorkspaceDiagnostics();
+
+  for (const li of list.querySelectorAll<HTMLLIElement>("li.file-item[data-path]")) {
+    const path = li.dataset.path!;
+    li.classList.toggle("active", path === active);
+
+    const badgeSlot = li.querySelector<HTMLElement>(".file-diag-slot");
+    if (!badgeSlot) continue;
+    const fileDiags = diags.filter((d) => d.file === path);
+    const errCount = fileDiags.filter((d) => d.severity === "error").length;
+    const warnCount = fileDiags.filter((d) => d.severity === "warning").length;
+
+    if (errCount > 0 || warnCount > 0) {
+      const countBadge = document.createElement("span");
+      countBadge.className = `file-diag-count ${errCount > 0 ? "error" : "warning"}`;
+      countBadge.textContent = String(errCount > 0 ? errCount : warnCount);
+      badgeSlot.replaceChildren(countBadge);
+    } else {
+      badgeSlot.replaceChildren();
+    }
+  }
+}
+
+function renderFileList(forceRebuild: boolean): void {
   const list = document.getElementById("file-list")!;
   const files = getUserFiles();
+
+  // If an inline rename input is mounted for a file that still exists, update
+  // sibling badges/selection in place so we never blur or clobber user typing.
+  if (renamingPath !== null && !hasUserFile(renamingPath)) {
+    renamingPath = null;
+  }
+  if (
+    !forceRebuild &&
+    renamingPath !== null &&
+    list.querySelector(`[data-renaming="${CSS.escape(renamingPath)}"]`)
+  ) {
+    updateFileListMetadataInPlace(list);
+    return;
+  }
+
   const active = getActivePath();
   const diags = getWorkspaceDiagnostics();
 
@@ -205,6 +275,7 @@ function renderFileList(): void {
     const li = document.createElement("li");
 
     if (renamingPath === file.path) {
+      li.dataset.renaming = file.path;
       const form = document.createElement("form");
       form.className = "file-inline-form";
       const input = document.createElement("input");
@@ -212,22 +283,24 @@ function renderFileList(): void {
       input.className = "file-inline-input";
       input.value = file.path;
 
+      let settled = false;
       const finishRename = () => {
-        if (renamingPath !== file.path) return;
+        if (settled || renamingPath !== file.path) return;
+        settled = true;
         const nextRaw = input.value.trim();
         renamingPath = null;
         if (!nextRaw || nextRaw === file.path) {
-          renderWorkspaceChrome();
+          renderFileList(true);
           return;
         }
         const res = renameUserFile(file.path, nextRaw);
         if (!res.ok) {
           showNotice(res.error);
-          renderWorkspaceChrome();
+          renderFileList(true);
           return;
         }
-        saveDraft();
         syncEditorToActiveTab();
+        saveDraft();
       };
 
       form.addEventListener("submit", (e) => {
@@ -237,8 +310,9 @@ function renderFileList(): void {
       input.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
           e.stopPropagation();
+          settled = true;
           renamingPath = null;
-          renderWorkspaceChrome();
+          renderFileList(true);
         }
       });
       input.addEventListener("blur", finishRename);
@@ -254,17 +328,19 @@ function renderFileList(): void {
     }
 
     li.className = `file-item${file.path === active ? " active" : ""}`;
+    li.dataset.path = file.path;
     li.title = file.path;
     li.addEventListener("click", () => {
       if (file.path === getActivePath()) return;
       selectTab(file.path);
-      saveDraft();
       syncEditorToActiveTab();
+      saveDraft();
     });
     li.addEventListener("dblclick", () => {
-      renamingPath = file.path;
       creatingNewFile = false;
-      renderWorkspaceChrome();
+      renderNewFileSlot(true);
+      renamingPath = file.path;
+      renderFileList(true);
     });
 
     const label = document.createElement("span");
@@ -288,12 +364,15 @@ function renderFileList(): void {
     rightSide.style.alignItems = "center";
     rightSide.style.gap = "4px";
 
+    const badgeSlot = document.createElement("span");
+    badgeSlot.className = "file-diag-slot";
     if (errCount > 0 || warnCount > 0) {
       const countBadge = document.createElement("span");
       countBadge.className = `file-diag-count ${errCount > 0 ? "error" : "warning"}`;
       countBadge.textContent = String(errCount > 0 ? errCount : warnCount);
-      rightSide.append(countBadge);
+      badgeSlot.append(countBadge);
     }
+    rightSide.append(badgeSlot);
 
     const actions = document.createElement("span");
     actions.className = "file-item-actions";
@@ -305,9 +384,10 @@ function renderFileList(): void {
     renameBtn.textContent = "✎";
     renameBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      renamingPath = file.path;
       creatingNewFile = false;
-      renderWorkspaceChrome();
+      renderNewFileSlot(true);
+      renamingPath = file.path;
+      renderFileList(true);
     });
     actions.append(renameBtn);
 
@@ -320,8 +400,8 @@ function renderFileList(): void {
       delBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         if (deleteUserFile(file.path)) {
-          saveDraft();
           syncEditorToActiveTab();
+          saveDraft();
         }
       });
       actions.append(delBtn);
@@ -380,8 +460,8 @@ function renderEditorTabs(): void {
     tab.addEventListener("click", () => {
       if (file.path === getActivePath()) return;
       selectTab(file.path);
-      saveDraft();
       syncEditorToActiveTab();
+      saveDraft();
     });
     buttons.push(tab);
   }

@@ -22,6 +22,12 @@ export interface PreludeTab {
 
 type WorkspaceListener = () => void;
 
+export interface WorkspaceLifecycleHooks {
+  onReset?: () => void;
+  onDelete?: (path: string) => void;
+  onRename?: (oldPath: string, newPath: string) => void;
+}
+
 const DEFAULT_PATH = "main.dao";
 const DEFAULT_SOURCE = `module main
 
@@ -40,10 +46,15 @@ let diagnostics: Diagnostic[] = [];
 let versionInfo: VersionResponse | null = null;
 
 const listeners: WorkspaceListener[] = [];
+const lifecycleHooks: WorkspaceLifecycleHooks[] = [];
 let playgroundViewRequester: (() => void) | null = null;
 
 export function onWorkspaceChange(listener: WorkspaceListener): void {
   listeners.push(listener);
+}
+
+export function onWorkspaceLifecycle(hooks: WorkspaceLifecycleHooks): void {
+  lifecycleHooks.push(hooks);
 }
 
 export function onRequestPlaygroundView(fn: () => void): void {
@@ -160,6 +171,7 @@ export function setWorkspaceProgram(
   }
   moduleByPath.clear();
   diagnostics = [];
+  for (const h of lifecycleHooks) h.onReset?.();
 
   const validDoc = nextFiles.some((f) => f.path === documentPath)
     ? documentPath
@@ -208,6 +220,7 @@ export function openPreludeTab(tab: PreludeTab): void {
 /** Close a read-only prelude tab and return focus to a user file. */
 export function closePreludeTab(path: string): void {
   if (!preludeTabs.delete(path)) return;
+  for (const h of lifecycleHooks) h.onDelete?.(path);
   if (activePath === path) {
     activePath = hasUserFile(lastUserPath) ? lastUserPath : userFiles[0].path;
   }
@@ -260,6 +273,7 @@ export function renameUserFile(
   }
   if (activePath === oldPath) activePath = newPath;
   if (lastUserPath === oldPath) lastUserPath = newPath;
+  for (const h of lifecycleHooks) h.onRename?.(oldPath, newPath);
   notify();
   return { ok: true, path: newPath };
 }
@@ -271,6 +285,7 @@ export function deleteUserFile(path: string): boolean {
   if (idx < 0) return false;
   userFiles.splice(idx, 1);
   moduleByPath.delete(path);
+  for (const h of lifecycleHooks) h.onDelete?.(path);
   if (activePath === path || lastUserPath === path) {
     const fallback = userFiles[Math.min(idx, userFiles.length - 1)].path;
     if (activePath === path) activePath = fallback;

@@ -23,7 +23,7 @@ Line counts reflect the current branch over `73e37ba`, on 2026-11-25.  The table
 | `compiler/` bootstrap tier and its tests | C++ | 114 | 41,790 | nothing: this tier stays permanently |
 | `runtime/` allocator, strings, I/O and generators | C | 11 | 1,632 | Dao over `Ptr<T>` and `mode unsafe` in the fully hosted tier, which needs direct system calls from Dao |
 | `tools/playground/compiler_service/` | C++ | 22 | 3,578 | a Dao service, which needs sockets and HTTP in the standard library |
-| `tools/playground/frontend/` | TypeScript, CSS, HTML | 25 | 6,318 | a Dao browser target, which does not exist |
+| `tools/playground/frontend/` | TypeScript, CSS, HTML | 25 | 6,528 | a Dao browser target, which does not exist |
 | `examples/forecast_device/metal_runner.swift` | Swift | 1 | 977 | Dao validating kernel manifests and buffer lifetimes and driving Metal command queues directly |
 | `examples/ffi/` | C | 3 | 177 | the C side of an interoperability test, which is foreign by design and goes only if C interoperability does |
 
