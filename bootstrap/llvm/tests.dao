@@ -186,6 +186,8 @@ fn closure_program_checked(name: string, path: string, src: string, report: bool
   let inputs: Vector<SourceInput> = closure_prelude_inputs()
   inputs = inputs.push(SourceInput("bootstrap/ascii.dao", read_file("bootstrap/ascii.dao"), false))
   inputs = inputs.push(SourceInput("bootstrap/lexer/impl.dao", read_file("bootstrap/lexer/impl.dao"), false))
+  if name != "lexer":
+    inputs = inputs.push(SourceInput("bootstrap/parser/impl.dao", read_file("bootstrap/parser/impl.dao"), false))
   inputs = inputs.push(SourceInput(path, wrap_test_module(src), false))
   let pg: ProgramGraph = program_graph_empty()
   resource memory graph =>
@@ -220,9 +222,9 @@ fn closure_probe_stage(name: string, path: string, stage: string): string
     let lex_n: i64 = lexed.diagnostics.length()
     closure_report_diags(name, "lex", lexed.diagnostics, to_i64(50))
     cols = cols + closure_stage_column(name, "lex", lexed.diagnostics, to_i64(0))
-    let parsed: ParseOutput = parse_output_empty()
+    let parsed: parser::ParseOutput = parser::parse_output_empty()
     resource memory parse =>
-      parsed = parse(src)
+      parsed = parser::parse(src)
     closure_report_diags_from(name, "parse", parsed.diags, lex_n, to_i64(50))
     cols = cols + closure_stage_column(name, "parse", parsed.diags, lex_n)
   if stage == "typecheck":
@@ -379,6 +381,8 @@ fn closure_probe(marker: string): void
     line = closure_probe_prelude()
   else if which == "lexer":
     line = closure_probe_stage(which, "bootstrap/lexer/tests.dao", stage)
+  else if which == "parser":
+    line = closure_probe_stage(which, "bootstrap/parser/tests.dao", stage)
   else:
     line = closure_probe_stage(which, "bootstrap/" + which + "/" + which + ".gen.dao", stage)
   let closure_txt: string = llvm_out_dir() + "/closure.txt"

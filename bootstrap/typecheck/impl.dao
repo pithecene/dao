@@ -54,7 +54,7 @@ module bootstrap::typecheck
 
 // Immutable parse context — shared, never modified during type checking.
 class TC:
-  nodes: Vector<Node>
+  nodes: Vector<parser::Node>
   idx_data: Vector<i64>
   toks: Vector<lexer::Token>
   src: string
@@ -361,38 +361,38 @@ fn ts_tok_span(ts: TS, tidx: i64): Span
 fn ts_node_span(ts: TS, node_idx: i64): Span
   if node_idx < 0:
     return Span(to_i64(0), to_i64(1))
-  let node: Node = ts.tc.nodes.get(node_idx)
+  let node: parser::Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node::IdentE(tidx):
+    parser::Node::IdentE(tidx):
       return ts_tok_span(ts, tidx)
-    Node::IntLitE(tidx):
+    parser::Node::IntLitE(tidx):
       return ts_tok_span(ts, tidx)
-    Node::FloatLitE(tidx):
+    parser::Node::FloatLitE(tidx):
       return ts_tok_span(ts, tidx)
-    Node::StringLitE(tidx):
+    parser::Node::StringLitE(tidx):
       return ts_tok_span(ts, tidx)
-    Node::BoolLitE(tidx):
+    parser::Node::BoolLitE(tidx):
       return ts_tok_span(ts, tidx)
-    Node::BinaryE(op_tidx, left, right):
+    parser::Node::BinaryE(op_tidx, left, right):
       return ts_tok_span(ts, op_tidx)
-    Node::UnaryE(op_tidx, operand):
+    parser::Node::UnaryE(op_tidx, operand):
       return ts_tok_span(ts, op_tidx)
-    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
+    parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
       return ts_node_span(ts, callee)
-    Node::FieldE(obj, field_tidx):
+    parser::Node::FieldE(obj, field_tidx):
       return ts_tok_span(ts, field_tidx)
-    Node::LetS(name_tidx, type_node, init_node):
+    parser::Node::LetS(name_tidx, type_node, init_node):
       return ts_tok_span(ts, name_tidx)
-    Node::ReturnS(val_node):
+    parser::Node::ReturnS(val_node):
       return Span(to_i64(0), to_i64(1))
-    Node::BreakS(tidx):
+    parser::Node::BreakS(tidx):
       return ts_tok_span(ts, tidx)
-    Node::YieldS(yield_tidx, val_node):
+    parser::Node::YieldS(yield_tidx, val_node):
       return ts_tok_span(ts, yield_tidx)
-    Node::NamedT(tidx):
+    parser::Node::NamedT(tidx):
       return ts_tok_span(ts, tidx)
-    Node::QualNameE(seg_lp, seg_count):
-      let segs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+    parser::Node::QualNameE(seg_lp, seg_count):
+      let segs: Vector<i64> = parser::read_list(ts.tc.idx_data, seg_lp)
       if segs.length() > 0:
         return ts_tok_span(ts, segs.get(0))
       return Span(to_i64(0), to_i64(1))
@@ -453,7 +453,7 @@ fn program_init_typecheck(p: Program): Program
   // TypeCheckData.  This avoids duplicating the builtin registration
   // logic — register_builtins is the single source of truth.
   let dummy_tc: TC = TC(
-    Vector<Node>::new(),
+    Vector<parser::Node>::new(),
     Vector<i64>::new(),
     Vector<lexer::Token>::new(),
     "",
@@ -645,9 +645,9 @@ fn fn_params_walkable(ts: TS, t: DaoType): bool
 fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
   if node_idx < 0:
     return TypeR(ts, to_i64(-1))
-  let node: Node = ts.tc.nodes.get(node_idx)
+  let node: parser::Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node::NamedT(tidx):
+    parser::Node::NamedT(tidx):
       let name: string = ts_tok_name(ts, tidx)
       let bi: i64 = builtin_type_index(name)
       if bi >= 0:
@@ -689,7 +689,7 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
             return TypeR(ts2, tr.type_idx)
         gi = gi + 1
       return TypeR(ts, to_i64(-1))
-    Node::GenericT(name_tidx, args_lp, arg_count):
+    parser::Node::GenericT(name_tidx, args_lp, arg_count):
       // `Generator<T>` is the compiler-provided coroutine type
       // (CONTRACT_SYNTAX_SURFACE.md), declared by no module: it is a type
       // of its own kind whose element is T, so a generator function's
@@ -699,7 +699,7 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
       if is_generator_head(ts, name_tidx):
         if arg_count != 1:
           return TypeR(ts, to_i64(-1))
-        let gargs: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+        let gargs: Vector<i64> = parser::read_list(ts.tc.idx_data, args_lp)
         let elem_r: TypeR = resolve_ast_type(ts, gargs.get(0))
         let gen_r: TypeR = find_or_add_generator_type(elem_r.ts, elem_r.type_idx)
         // Recorded under the annotation node, so HIR reads the generator
@@ -711,7 +711,7 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
       // than deferred: a pointer's pointee is what `get` reads, `set`
       // writes, and `offset` walks.
       if ts_tok_name(ts, name_tidx) == "Ptr":
-        let pargs: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+        let pargs: Vector<i64> = parser::read_list(ts.tc.idx_data, args_lp)
         if pargs.length() == 1:
           let pointee_r: TypeR = resolve_ast_type(ts, pargs.get(0))
           if pointee_r.type_idx < 0:
@@ -731,7 +731,7 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
       let head_ti: i64 = sym_type_at(ts, head_sym)
       if head_ti < 0:
         return TypeR(ts, to_i64(-1))
-      let g_args: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+      let g_args: Vector<i64> = parser::read_list(ts.tc.idx_data, args_lp)
       let resolved_args: Vector<i64> = Vector<i64>::new()
       let r_args: TS = ts
       let ga: i64 = 0
@@ -752,18 +752,18 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
       if made.type_idx < 0:
         return made
       return TypeR(ts_set_expr_type(made.ts, node_idx, made.type_idx), made.type_idx)
-    Node::QualNameE(seg_lp, seg_count):
+    parser::Node::QualNameE(seg_lp, seg_count):
       // A qualified type (`core::Printable`): the resolver bound its last
       // segment; read that symbol's type when it is in this module's
       // `types` (a symbol reached across the module boundary reads as
       // unresolved here, as `sym_type_at` guards).
-      let qsegs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+      let qsegs: Vector<i64> = parser::read_list(ts.tc.idx_data, seg_lp)
       if qsegs.length() > 0:
         let qsym: i64 = lookup_use(ts, qsegs.get(qsegs.length() - 1))
         if qsym >= 0:
           return TypeR(ts, sym_type_at(ts, qsym))
       return TypeR(ts, to_i64(-1))
-    Node::ErrorT(t):
+    parser::Node::ErrorT(t):
       return TypeR(ts, to_i64(-1))
   return TypeR(ts, to_i64(-1))
 
@@ -774,11 +774,11 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
 fn pointer_annotation_pointee(ts: TS, node_idx: i64): i64
   if node_idx < 0:
     return to_i64(-1)
-  let node: Node = ts.tc.nodes.get(node_idx)
+  let node: parser::Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node::GenericT(name_tidx, args_lp, arg_count):
+    parser::Node::GenericT(name_tidx, args_lp, arg_count):
       if ts_tok_name(ts, name_tidx) == "Ptr":
-        let args: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+        let args: Vector<i64> = parser::read_list(ts.tc.idx_data, args_lp)
         if args.length() == 1:
           return args.get(0)
   return to_i64(-1)
@@ -808,13 +808,13 @@ fn generator_spelling_diags(ts: TS, node_idx: i64): TS
   let through_ptr: i64 = pointer_annotation_pointee(ts, node_idx)
   if through_ptr >= 0:
     return generator_spelling_diags(ts, through_ptr)
-  let node: Node = ts.tc.nodes.get(node_idx)
+  let node: parser::Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node::NamedT(tidx):
+    parser::Node::NamedT(tidx):
       if is_generator_head(ts, tidx):
         return ts_add_diag(ts, ts_tok_span(ts, tidx), "Generator requires exactly one type argument")
-    Node::GenericT(name_tidx, args_lp, arg_count):
-      let args: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+    parser::Node::GenericT(name_tidx, args_lp, arg_count):
+      let args: Vector<i64> = parser::read_list(ts.tc.idx_data, args_lp)
       let r: TS = ts
       if is_generator_head(r, name_tidx):
         if arg_count != 1:
@@ -839,22 +839,22 @@ fn unknown_named_type(ts: TS, node_idx: i64): i64
   if through_ptr >= 0:
     return unknown_named_type(ts, through_ptr)
   match ts.tc.nodes.get(node_idx):
-    Node::NamedT(tidx):
+    parser::Node::NamedT(tidx):
       if builtin_type_index(ts_tok_name(ts, tidx)) < 0 and lookup_use(ts, tidx) < 0:
         return tidx
-    Node::GenericT(name_tidx, args_lp, arg_count):
+    parser::Node::GenericT(name_tidx, args_lp, arg_count):
       if is_generator_head(ts, name_tidx) == false and lookup_use(ts, name_tidx) < 0:
         return name_tidx
-      let args: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+      let args: Vector<i64> = parser::read_list(ts.tc.idx_data, args_lp)
       let ai: i64 = 0
       while ai < args.length():
         let in_arg: i64 = unknown_named_type(ts, args.get(ai))
         if in_arg >= 0:
           return in_arg
         ai = ai + 1
-    Node::QualNameE(seg_lp, seg_count):
+    parser::Node::QualNameE(seg_lp, seg_count):
       // The resolver binds a qualified type by its last segment.
-      let qsegs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+      let qsegs: Vector<i64> = parser::read_list(ts.tc.idx_data, seg_lp)
       if qsegs.length() > 0:
         let last: i64 = qsegs.get(qsegs.length() - 1)
         if lookup_use(ts, last) < 0:
@@ -890,21 +890,21 @@ fn annotation_names_concept(ts: TS, node_idx: i64, allowed: i64): i64
   let through_ptr: i64 = pointer_annotation_pointee(ts, node_idx)
   if through_ptr >= 0:
     return annotation_names_concept(ts, through_ptr, allowed)
-  let node: Node = ts.tc.nodes.get(node_idx)
+  let node: parser::Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node::NamedT(tidx):
+    parser::Node::NamedT(tidx):
       return concept_other_than(ts, sym_type_at(ts, lookup_use(ts, tidx)), allowed)
-    Node::QualNameE(seg_lp, seg_count):
+    parser::Node::QualNameE(seg_lp, seg_count):
       // A qualified name (`lib::C`): the resolver bound its last segment.
-      let qsegs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+      let qsegs: Vector<i64> = parser::read_list(ts.tc.idx_data, seg_lp)
       if qsegs.length() == 0:
         return to_i64(-1)
       return concept_other_than(ts, sym_type_at(ts, lookup_use(ts, qsegs.get(qsegs.length() - 1))), allowed)
-    Node::GenericT(name_tidx, args_lp, arg_count):
+    parser::Node::GenericT(name_tidx, args_lp, arg_count):
       let head: i64 = concept_other_than(ts, sym_type_at(ts, lookup_use(ts, name_tidx)), allowed)
       if head >= 0:
         return head
-      let args: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+      let args: Vector<i64> = parser::read_list(ts.tc.idx_data, args_lp)
       let ai: i64 = 0
       while ai < args.length():
         let in_arg: i64 = annotation_names_concept(ts, args.get(ai), allowed)
@@ -942,27 +942,27 @@ fn concept_type_params(ts: TS, concept_ti: i64): Vector<i64>
     return none
   if decl_idx >= ts.tc.nodes.length():
     return none
-  let node: Node = ts.tc.nodes.get(decl_idx)
+  let node: parser::Node = ts.tc.nodes.get(decl_idx)
   match node:
-    Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
+    parser::Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
       if tparams_lp < 0:
         return none
-      return read_list(ts.tc.idx_data, tparams_lp)
+      return parser::read_list(ts.tc.idx_data, tparams_lp)
   return none
 
 // A type parameter's name, from its `GenericParamT` node.
 fn type_param_name(ts: TS, tp_node: i64): string
-  let node: Node = ts.tc.nodes.get(tp_node)
+  let node: parser::Node = ts.tc.nodes.get(tp_node)
   match node:
-    Node::GenericParamT(tidx, bounds_lp):
+    parser::Node::GenericParamT(tidx, bounds_lp):
       return ts_tok_name(ts, tidx)
   return ""
 
 // A type parameter's symbol (the resolver bound its declaring token).
 fn type_param_symbol(ts: TS, tp_node: i64): i64
-  let node: Node = ts.tc.nodes.get(tp_node)
+  let node: parser::Node = ts.tc.nodes.get(tp_node)
   match node:
-    Node::GenericParamT(tidx, bounds_lp):
+    parser::Node::GenericParamT(tidx, bounds_lp):
       return lookup_use(ts, tidx)
   return to_i64(-1)
 
@@ -987,11 +987,11 @@ fn applied_self_matches_params(ts: TS, node_idx: i64, concept_ti: i64): bool
   let through_ptr: i64 = pointer_annotation_pointee(ts, node_idx)
   if through_ptr >= 0:
     return applied_self_matches_params(ts, through_ptr, concept_ti)
-  let node: Node = ts.tc.nodes.get(node_idx)
+  let node: parser::Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node::GenericT(name_tidx, args_lp, arg_count):
+    parser::Node::GenericT(name_tidx, args_lp, arg_count):
       let tparams: Vector<i64> = concept_type_params(ts, concept_ti)
-      let args: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+      let args: Vector<i64> = parser::read_list(ts.tc.idx_data, args_lp)
       if args.length() != tparams.length():
         return false
       let i: i64 = 0
@@ -999,10 +999,10 @@ fn applied_self_matches_params(ts: TS, node_idx: i64, concept_ti: i64): bool
         // By symbol, not spelling: a method's own `T` shadowing the
         // concept's `T` is a different parameter (the resolver bound
         // each declaring token to its symbol).
-        let arg: Node = ts.tc.nodes.get(args.get(i))
+        let arg: parser::Node = ts.tc.nodes.get(args.get(i))
         let matches: bool = false
         match arg:
-          Node::NamedT(tidx):
+          parser::Node::NamedT(tidx):
             let arg_sym: i64 = lookup_use(ts, tidx)
             if arg_sym >= 0:
               matches = arg_sym == type_param_symbol(ts, tparams.get(i))
@@ -1020,9 +1020,9 @@ fn generic_head_concept(ts: TS, node_idx: i64): i64
   let through_ptr: i64 = pointer_annotation_pointee(ts, node_idx)
   if through_ptr >= 0:
     return generic_head_concept(ts, through_ptr)
-  let node: Node = ts.tc.nodes.get(node_idx)
+  let node: parser::Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node::GenericT(name_tidx, args_lp, arg_count):
+    parser::Node::GenericT(name_tidx, args_lp, arg_count):
       return concept_named_by(ts, sym_type_at(ts, lookup_use(ts, name_tidx)))
   return to_i64(-1)
 
@@ -1076,9 +1076,9 @@ fn generator_under_pointers(ts: TS, node_idx: i64): bool
   if through_ptr >= 0:
     return generator_under_pointers(ts, through_ptr)
   match ts.tc.nodes.get(node_idx):
-    Node::NamedT(tidx):
+    parser::Node::NamedT(tidx):
       return is_generator_head(ts, tidx)
-    Node::GenericT(name_tidx, args_lp, arg_count):
+    parser::Node::GenericT(name_tidx, args_lp, arg_count):
       return is_generator_head(ts, name_tidx)
   return false
 
@@ -1096,12 +1096,12 @@ fn resolve_generator_annotation(ts: TS, node_idx: i64, self_concept: i64): TypeR
       return ir
     return find_or_add_pointer_type(ir.ts, ir.type_idx)
   match ts.tc.nodes.get(node_idx):
-    Node::NamedT(tidx):
+    parser::Node::NamedT(tidx):
       return TypeR(ts_add_diag(ts, ts_tok_span(ts, tidx), "Generator requires exactly one type argument"), to_i64(-1))
-    Node::GenericT(name_tidx, args_lp, arg_count):
+    parser::Node::GenericT(name_tidx, args_lp, arg_count):
       if arg_count != 1:
         return TypeR(ts_add_diag(ts, ts_tok_span(ts, name_tidx), "Generator requires exactly one type argument"), to_i64(-1))
-      let elem: i64 = read_list(ts.tc.idx_data, args_lp).get(0)
+      let elem: i64 = parser::read_list(ts.tc.idx_data, args_lp).get(0)
       let diags_before: i64 = ts.diags.length()
       let er: TypeR = resolve_annotation(ts, elem, self_concept)
       let r: TS = er.ts
@@ -1186,14 +1186,14 @@ fn generic_param_type(ts: TS, sym_idx: i64, name: string): TypeR
 // The symbol the resolver bound a bound type node's head name to (a use
 // recorded for its name token), or -1 when the name resolved to nothing.
 fn bound_symbol(ts: TS, b_node: i64): i64
-  let node: Node = ts.tc.nodes.get(b_node)
+  let node: parser::Node = ts.tc.nodes.get(b_node)
   match node:
-    Node::NamedT(tidx):
+    parser::Node::NamedT(tidx):
       return lookup_use(ts, tidx)
-    Node::GenericT(name_tidx, args_lp, arg_count):
+    parser::Node::GenericT(name_tidx, args_lp, arg_count):
       return lookup_use(ts, name_tidx)
-    Node::QualNameE(seg_lp, seg_count):
-      let segs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+    parser::Node::QualNameE(seg_lp, seg_count):
+      let segs: Vector<i64> = parser::read_list(ts.tc.idx_data, seg_lp)
       if segs.length() > 0:
         return lookup_use(ts, segs.get(segs.length() - 1))
       return to_i64(-1)
@@ -1221,12 +1221,12 @@ fn tc_bind_generic_bounds(ts: TS, tparams_lp: i64): TS
   if tparams_lp < 0:
     return ts
   let r: TS = ts
-  let tparams: Vector<i64> = read_list(r.tc.idx_data, tparams_lp)
+  let tparams: Vector<i64> = parser::read_list(r.tc.idx_data, tparams_lp)
   let i: i64 = 0
   while i < tparams.length():
-    let tp_node: Node = r.tc.nodes.get(tparams.get(i))
+    let tp_node: parser::Node = r.tc.nodes.get(tparams.get(i))
     match tp_node:
-      Node::GenericParamT(tidx, bounds_lp):
+      parser::Node::GenericParamT(tidx, bounds_lp):
         let tname: string = ts_tok_name(r, tidx)
         // The resolver bound the declaring token to the parameter's symbol.
         let tsym: i64 = lookup_use(r, tidx)
@@ -1239,7 +1239,7 @@ fn tc_bind_generic_bounds(ts: TS, tparams_lp: i64): TS
           if bounds_lp >= 0:
             let gtr: TypeR = generic_param_type(r, tsym, tname)
             r = gtr.ts
-            let bounds: Vector<i64> = read_list(r.tc.idx_data, bounds_lp)
+            let bounds: Vector<i64> = parser::read_list(r.tc.idx_data, bounds_lp)
             let bound_tis: Vector<i64> = Vector<i64>::new()
             let bi: i64 = 0
             while bi < bounds.length():
@@ -1327,16 +1327,16 @@ fn alias_graph_of(p: Program, acc: TcAccum): AliasGraph
   while ti < p.graph.topo_order.length():
     let mid: i64 = p.graph.topo_order.get(ti)
     let ts: TS = ts_new(build_module_tc(p, mid), acc.types, acc.type_info, acc.sym_types, acc.reg)
-    let root: Node = ts.tc.nodes.get(program_file_of_module(p, mid).parse_output.root)
+    let root: parser::Node = ts.tc.nodes.get(program_file_of_module(p, mid).parse_output.root)
     match root:
-      Node::FileN(module_decl, imports_lp, decls_lp):
-        let decls: Vector<i64> = read_list(ts.tc.idx_data, decls_lp)
+      parser::Node::FileN(module_decl, imports_lp, decls_lp):
+        let decls: Vector<i64> = parser::read_list(ts.tc.idx_data, decls_lp)
         let i: i64 = 0
         while i < decls.length():
           let decl_idx: i64 = decls.get(i)
-          let node: Node = ts.tc.nodes.get(decl_idx)
+          let node: parser::Node = ts.tc.nodes.get(decl_idx)
           match node:
-            Node::TypeAliasD(name_tidx, target_type):
+            parser::Node::TypeAliasD(name_tidx, target_type):
               let sym_idx: i64 = type_sym_of_decl(ts, decl_idx)
               if sym_idx >= 0:
                 let k: string = i64_to_string(sym_idx)
@@ -1390,9 +1390,9 @@ fn bind_alias(p: Program, g: AliasGraph, sym_idx: i64, st: AliasBindR): AliasBin
   let mid: i64 = hm_get_or(g.edges, "m:" + k, to_i64(-1))
   let decl_idx: i64 = hm_get_or(g.edges, "d:" + k, to_i64(-1))
   let ts: TS = ts_new(build_module_tc(p, mid), r.acc.types, r.acc.type_info, r.acc.sym_types, r.acc.reg)
-  let node: Node = ts.tc.nodes.get(decl_idx)
+  let node: parser::Node = ts.tc.nodes.get(decl_idx)
   match node:
-    Node::TypeAliasD(name_tidx, target_type):
+    parser::Node::TypeAliasD(name_tidx, target_type):
       let target_r: TypeR = resolve_ast_type(ts, target_type)
       ts = target_r.ts
       let ti: i64 = to_i64(-1)
@@ -1411,20 +1411,20 @@ fn annotation_symbol_refs(ts: TS, node_idx: i64, out: Vector<i64>): Vector<i64>
   let through_ptr: i64 = pointer_annotation_pointee(ts, node_idx)
   if through_ptr >= 0:
     return annotation_symbol_refs(ts, through_ptr, out)
-  let node: Node = ts.tc.nodes.get(node_idx)
+  let node: parser::Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node::NamedT(tidx):
+    parser::Node::NamedT(tidx):
       return out.push(lookup_use(ts, tidx))
-    Node::GenericT(name_tidx, args_lp, arg_count):
+    parser::Node::GenericT(name_tidx, args_lp, arg_count):
       let acc: Vector<i64> = out.push(lookup_use(ts, name_tidx))
-      let args: Vector<i64> = read_list(ts.tc.idx_data, args_lp)
+      let args: Vector<i64> = parser::read_list(ts.tc.idx_data, args_lp)
       let ai: i64 = 0
       while ai < args.length():
         acc = annotation_symbol_refs(ts, args.get(ai), acc)
         ai = ai + 1
       return acc
-    Node::QualNameE(seg_lp, seg_count):
-      let qsegs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+    parser::Node::QualNameE(seg_lp, seg_count):
+      let qsegs: Vector<i64> = parser::read_list(ts.tc.idx_data, seg_lp)
       if qsegs.length() == 0:
         return out
       return out.push(lookup_use(ts, qsegs.get(qsegs.length() - 1)))
@@ -1438,9 +1438,9 @@ fn tc_check_aliases(ts: TS, decls: Vector<i64>): TS
   let i: i64 = 0
   while i < decls.length():
     let decl_idx: i64 = decls.get(i)
-    let node: Node = r.tc.nodes.get(decl_idx)
+    let node: parser::Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node::TypeAliasD(name_tidx, target_type):
+      parser::Node::TypeAliasD(name_tidx, target_type):
         let sym_idx: i64 = type_sym_of_decl(r, decl_idx)
         // Every alias's target is held to the annotation rules once (the
         // walk bound it without diagnostics: a generator of an invalid
@@ -1459,9 +1459,9 @@ fn tc_register_struct_shells(ts: TS, decls: Vector<i64>): TS
   let i: i64 = 0
   while i < decls.length():
     let decl_idx: i64 = decls.get(i)
-    let node: Node = r.tc.nodes.get(decl_idx)
+    let node: parser::Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
+      parser::Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
         let name: string = ts_tok_name(r, name_tidx)
         // `builtin_id` records the declaring module: a declaration index
         // is file-local, so the type itself must say whose it is.
@@ -1484,9 +1484,9 @@ fn tc_register_enum_shells(ts: TS, decls: Vector<i64>): TS
   let i: i64 = 0
   while i < decls.length():
     let decl_idx: i64 = decls.get(i)
-    let node: Node = r.tc.nodes.get(decl_idx)
+    let node: parser::Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
+      parser::Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
         let tr: TypeR = ts_add_type(r, DaoType(TypeKind::TEnum, r.tc.module_id, ts_tok_name(r, name_tidx), decl_idx, to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
         r = tr.ts
         r = record_own_params(r, tr.type_idx, tparams_lp)
@@ -1503,9 +1503,9 @@ fn tc_fill_enum_variants(ts: TS, decls: Vector<i64>): TS
   let i: i64 = 0
   while i < decls.length():
     let decl_idx: i64 = decls.get(i)
-    let node: Node = r.tc.nodes.get(decl_idx)
+    let node: parser::Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
+      parser::Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
         let enum_sym: i64 = type_sym_of_decl(r, decl_idx)
         let enum_ti: i64 = to_i64(-1)
         if enum_sym >= 0:
@@ -1521,7 +1521,7 @@ fn tc_fill_enum_variants(ts: TS, decls: Vector<i64>): TS
           // The payload list is (field name token, type node) pairs; the
           // enum's type_info keeps, per variant: name, field count, then
           // (field name token, type index) per field.
-          let payload_fields: Vector<i64> = read_list(r.tc.idx_data, payload_lp)
+          let payload_fields: Vector<i64> = parser::read_list(r.tc.idx_data, payload_lp)
           variant_records = variant_records.push(payload_fields.length() / 2)
           let pi: i64 = 0
           while pi < payload_fields.length():
@@ -1578,9 +1578,9 @@ fn tc_fill_struct_fields(ts: TS, decls: Vector<i64>): TS
   let i: i64 = 0
   while i < decls.length():
     let decl_idx: i64 = decls.get(i)
-    let node: Node = r.tc.nodes.get(decl_idx)
+    let node: parser::Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
+      parser::Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
         let pairs: Vector<i64> = read_pairs(r.tc.idx_data, fields_lp)
         let field_records: Vector<i64> = Vector<i64>::new()
         let field_count: i64 = 0
@@ -1667,23 +1667,23 @@ fn tc_register_functions(ts: TS, decls: Vector<i64>): TS
   let i: i64 = 0
   while i < decls.length():
     let decl_idx: i64 = decls.get(i)
-    let node: Node = r.tc.nodes.get(decl_idx)
+    let node: parser::Node = r.tc.nodes.get(decl_idx)
     let is_fn: bool = false
     let fn_name_tidx: i64 = to_i64(-1)
     let fn_params_lp: i64 = to_i64(-1)
     let fn_ret_type: i64 = to_i64(-1)
     match node:
-      Node::FnDeclD(nt, tp, plp, rtn, blp):
+      parser::Node::FnDeclD(nt, tp, plp, rtn, blp):
         is_fn = true
         fn_name_tidx = nt
         fn_params_lp = plp
         fn_ret_type = rtn
-      Node::ExprFnD(nt, tp, plp, rtn, be):
+      parser::Node::ExprFnD(nt, tp, plp, rtn, be):
         is_fn = true
         fn_name_tidx = nt
         fn_params_lp = plp
         fn_ret_type = rtn
-      Node::ExternFnD(nt, tp, plp, rtn):
+      parser::Node::ExternFnD(nt, tp, plp, rtn):
         is_fn = true
         fn_name_tidx = nt
         fn_params_lp = plp
@@ -1710,14 +1710,14 @@ fn tc_register_functions(ts: TS, decls: Vector<i64>): TS
 // type an extend's target annotation resolves to in the extend's
 // module.
 fn method_owner(ts: TS, owner_decl_idx: i64): TypeR
-  let node: Node = ts.tc.nodes.get(owner_decl_idx)
+  let node: parser::Node = ts.tc.nodes.get(owner_decl_idx)
   match node:
-    Node::ClassDeclD(cn_tidx, cn_tparams_lp, cn_fields_lp, cn_methods_lp):
+    parser::Node::ClassDeclD(cn_tidx, cn_tparams_lp, cn_fields_lp, cn_methods_lp):
       let ssym: i64 = type_sym_of_decl(ts, owner_decl_idx)
       if ssym >= 0:
         return TypeR(ts, sym_type_at(ts, ssym))
       return TypeR(ts, to_i64(-1))
-    Node::ExtendDeclD(target_type_node, concept_name_tidx, e_methods_lp):
+    parser::Node::ExtendDeclD(target_type_node, concept_name_tidx, e_methods_lp):
       return resolve_ast_type(ts, target_type_node)
   return TypeR(ts, to_i64(-1))
 
@@ -1746,21 +1746,21 @@ fn tc_register_methods(ts: TS, decls: Vector<i64>): TS
   let i: i64 = 0
   while i < decls.length():
     let decl_idx: i64 = decls.get(i)
-    let node: Node = r.tc.nodes.get(decl_idx)
+    let node: parser::Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
+      parser::Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
         if methods_lp >= 0:
           let own: TypeR = method_owner(r, decl_idx)
           r = own.ts
-          let methods: Vector<i64> = read_list(r.tc.idx_data, methods_lp)
+          let methods: Vector<i64> = parser::read_list(r.tc.idx_data, methods_lp)
           let mi: i64 = 0
           while mi < methods.length():
             let meth_idx: i64 = methods.get(mi)
-            let meth_node: Node = r.tc.nodes.get(meth_idx)
+            let meth_node: parser::Node = r.tc.nodes.get(meth_idx)
             match meth_node:
-              Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
+              parser::Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
                 r = tc_register_method_sig(r, own.type_idx, meth_idx, m_name_tidx, m_params_lp, m_ret_type)
-              Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
+              parser::Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
                 r = tc_register_method_sig(r, own.type_idx, meth_idx, m_name_tidx, m_params_lp, m_ret_type)
             mi = mi + 1
     i = i + 1
@@ -1770,11 +1770,11 @@ fn tc_register_methods(ts: TS, decls: Vector<i64>): TS
 fn extract_type_name(ts: TS, type_node_idx: i64): string
   if type_node_idx < 0:
     return ""
-  let tnode: Node = ts.tc.nodes.get(type_node_idx)
+  let tnode: parser::Node = ts.tc.nodes.get(type_node_idx)
   match tnode:
-    Node::NamedT(t_tidx):
+    parser::Node::NamedT(t_tidx):
       return ts_tok_name(ts, t_tidx)
-    Node::GenericT(t_name_tidx, t_args_lp, t_arg_count):
+    parser::Node::GenericT(t_name_tidx, t_args_lp, t_arg_count):
       return ts_tok_name(ts, t_name_tidx)
   return ""
 
@@ -1793,9 +1793,9 @@ fn tc_register_concept_shells(ts: TS, decls: Vector<i64>): TS
   let i: i64 = 0
   while i < decls.length():
     let decl_idx: i64 = decls.get(i)
-    let node: Node = r.tc.nodes.get(decl_idx)
+    let node: parser::Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
+      parser::Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
         let csym: i64 = type_sym_of_decl(r, decl_idx)
         if csym >= 0:
           let cname: string = ts_tok_name(r, name_tidx)
@@ -1817,9 +1817,9 @@ fn tc_register_concepts(ts: TS, decls: Vector<i64>): TS
   let i: i64 = 0
   while i < decls.length():
     let decl_idx: i64 = decls.get(i)
-    let node: Node = r.tc.nodes.get(decl_idx)
+    let node: parser::Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
+      parser::Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
         let csym: i64 = type_sym_of_decl(r, decl_idx)
         let cti: i64 = to_i64(-1)
         if csym >= 0:
@@ -1833,28 +1833,28 @@ fn tc_register_concepts(ts: TS, decls: Vector<i64>): TS
           let method_pairs: Vector<i64> = Vector<i64>::new()
           let method_count: i64 = 0
           if methods_lp >= 0:
-            let methods: Vector<i64> = read_list(r.tc.idx_data, methods_lp)
+            let methods: Vector<i64> = parser::read_list(r.tc.idx_data, methods_lp)
             let mi: i64 = 0
             while mi < methods.length():
               let meth_idx: i64 = methods.get(mi)
-              let meth_node: Node = r.tc.nodes.get(meth_idx)
+              let meth_node: parser::Node = r.tc.nodes.get(meth_idx)
               // Handle signature-only (ExternFnD) and default-body methods
               let cm_name_tidx: i64 = to_i64(-1)
               let cm_params_lp: i64 = to_i64(-1)
               let cm_ret_type: i64 = to_i64(-1)
               let cm_valid: bool = false
               match meth_node:
-                Node::ExternFnD(mn, mt, mp, mr):
+                parser::Node::ExternFnD(mn, mt, mp, mr):
                   cm_name_tidx = mn
                   cm_params_lp = mp
                   cm_ret_type = mr
                   cm_valid = true
-                Node::FnDeclD(mn, mt, mp, mr, mb):
+                parser::Node::FnDeclD(mn, mt, mp, mr, mb):
                   cm_name_tidx = mn
                   cm_params_lp = mp
                   cm_ret_type = mr
                   cm_valid = true
-                Node::ExprFnD(mn, mt, mp, mr, mb):
+                parser::Node::ExprFnD(mn, mt, mp, mr, mb):
                   cm_name_tidx = mn
                   cm_params_lp = mp
                   cm_ret_type = mr
@@ -2035,9 +2035,9 @@ fn tc_register_extend_methods(ts: TS, decls: Vector<i64>): TS
   let i: i64 = 0
   while i < decls.length():
     let decl_idx: i64 = decls.get(i)
-    let node: Node = r.tc.nodes.get(decl_idx)
+    let node: parser::Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
+      parser::Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
         if methods_lp >= 0:
           // The target is the type the annotation resolves to in this
           // module's scope (a foreign type the orphan rule lets this
@@ -2046,16 +2046,16 @@ fn tc_register_extend_methods(ts: TS, decls: Vector<i64>): TS
           // module-scoped.
           let own: TypeR = method_owner(r, decl_idx)
           r = own.ts
-          let methods: Vector<i64> = read_list(r.tc.idx_data, methods_lp)
+          let methods: Vector<i64> = parser::read_list(r.tc.idx_data, methods_lp)
           let mi: i64 = 0
           while mi < methods.length():
             let meth_idx: i64 = methods.get(mi)
-            let meth_node: Node = r.tc.nodes.get(meth_idx)
+            let meth_node: parser::Node = r.tc.nodes.get(meth_idx)
             match meth_node:
-              Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
+              parser::Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
                 r = tc_require_receiver(r, m_name_tidx, m_params_lp)
                 r = tc_register_method_sig(r, own.type_idx, meth_idx, m_name_tidx, m_params_lp, m_ret_type)
-              Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
+              parser::Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
                 r = tc_require_receiver(r, m_name_tidx, m_params_lp)
                 r = tc_register_method_sig(r, own.type_idx, meth_idx, m_name_tidx, m_params_lp, m_ret_type)
             mi = mi + 1
@@ -2070,9 +2070,9 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
   let i: i64 = 0
   while i < decls.length():
     let decl_idx: i64 = decls.get(i)
-    let node: Node = r.tc.nodes.get(decl_idx)
+    let node: parser::Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
+      parser::Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
         // Look up the concept type via the resolver-bound identity in
         // TC.concept_bindings, NOT by scanning symbols by name.
         // The resolver already bound the concept name to its sym_idx
@@ -2272,20 +2272,20 @@ fn tc_file_pass(ts: TS, pass: TcPass, file_node_idx: i64): TS
 // before any alias or signature anywhere is resolved
 // (tc_resolve_aliases runs between this pass and the next).
 fn tc_pass_shells(ts: TS, file_node_idx: i64): TS
-  let file_node: Node = ts.tc.nodes.get(file_node_idx)
+  let file_node: parser::Node = ts.tc.nodes.get(file_node_idx)
   match file_node:
-    Node::FileN(module_decl, imports_lp, decls_lp):
-      let decls: Vector<i64> = read_list(ts.tc.idx_data, decls_lp)
+    parser::Node::FileN(module_decl, imports_lp, decls_lp):
+      let decls: Vector<i64> = parser::read_list(ts.tc.idx_data, decls_lp)
       let r: TS = tc_register_struct_shells(ts, decls)
       r = tc_register_enum_shells(r, decls)
       return tc_register_concept_shells(r, decls)
   return ts
 
 fn tc_pass1(ts: TS, file_node_idx: i64): TS
-  let file_node: Node = ts.tc.nodes.get(file_node_idx)
+  let file_node: parser::Node = ts.tc.nodes.get(file_node_idx)
   match file_node:
-    Node::FileN(module_decl, imports_lp, decls_lp):
-      let decls: Vector<i64> = read_list(ts.tc.idx_data, decls_lp)
+    parser::Node::FileN(module_decl, imports_lp, decls_lp):
+      let decls: Vector<i64> = parser::read_list(ts.tc.idx_data, decls_lp)
       let r: TS = tc_check_aliases(ts, decls)
       r = tc_fill_struct_fields(r, decls)
       r = tc_fill_enum_variants(r, decls)
@@ -2311,47 +2311,47 @@ fn tc_pass1(ts: TS, file_node_idx: i64): TS
 fn check_expr(ts: TS, node_idx: i64): TS
   if node_idx < 0:
     return ts
-  let node: Node = ts.tc.nodes.get(node_idx)
+  let node: parser::Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node::IntLitE(tidx):
+    parser::Node::IntLitE(tidx):
       return ts_set_expr_type(ts, node_idx, to_i64(2))
-    Node::FloatLitE(tidx):
+    parser::Node::FloatLitE(tidx):
       return ts_set_expr_type(ts, node_idx, to_i64(9))
-    Node::StringLitE(tidx):
+    parser::Node::StringLitE(tidx):
       return ts_set_expr_type(ts, node_idx, to_i64(12))
-    Node::BoolLitE(tidx):
+    parser::Node::BoolLitE(tidx):
       return ts_set_expr_type(ts, node_idx, to_i64(10))
-    Node::IdentE(tidx):
+    parser::Node::IdentE(tidx):
       return check_ident_expr(ts, node_idx, tidx)
-    Node::QualNameE(seg_lp, seg_count):
+    parser::Node::QualNameE(seg_lp, seg_count):
       return check_qualname_expr(ts, node_idx, seg_lp, seg_count)
-    Node::BinaryE(op_tidx, left, right):
+    parser::Node::BinaryE(op_tidx, left, right):
       return check_binary_expr(ts, node_idx, op_tidx, left, right)
-    Node::UnaryE(op_tidx, operand):
+    parser::Node::UnaryE(op_tidx, operand):
       return check_unary_expr(ts, node_idx, op_tidx, operand)
-    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
+    parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
       return check_call_expr(ts, node_idx, callee, args_lp, WrittenTypeArgs(targs_lp, targs_on_type), names_lp)
-    Node::FieldE(obj, field_tidx):
+    parser::Node::FieldE(obj, field_tidx):
       return check_field_expr(ts, node_idx, obj, field_tidx)
-    Node::PipeE(left, right):
+    parser::Node::PipeE(left, right):
       return check_pipe_expr(ts, node_idx, left, right)
-    Node::IndexE(obj, idx_expr):
+    parser::Node::IndexE(obj, idx_expr):
       let r: TS = check_expr(ts, obj)
       r = check_expr(r, idx_expr)
       return r
-    Node::TryE(operand):
+    parser::Node::TryE(operand):
       return check_expr(ts, operand)
-    Node::LambdaE(params_lp, param_count, body):
+    parser::Node::LambdaE(params_lp, param_count, body):
       return check_expr(ts, body)
-    Node::ListLitE(elems_lp, elem_count):
-      let elems: Vector<i64> = read_list(ts.tc.idx_data, elems_lp)
+    parser::Node::ListLitE(elems_lp, elem_count):
+      let elems: Vector<i64> = parser::read_list(ts.tc.idx_data, elems_lp)
       let r: TS = ts
       let ei: i64 = 0
       while ei < elems.length():
         r = check_expr(r, elems.get(ei))
         ei = ei + 1
       return r
-    Node::ErrorE(t):
+    parser::Node::ErrorE(t):
       return ts
   return ts
 
@@ -2381,7 +2381,7 @@ fn tc_export_lookup(ts: TS, target_mid: i64, name: string): i64
   return to_i64(-1)
 
 fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
-  let segs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+  let segs: Vector<i64> = parser::read_list(ts.tc.idx_data, seg_lp)
   if segs.length() == 0:
     return ts
   let first_tidx: i64 = segs.get(0)
@@ -2515,21 +2515,21 @@ fn fit_literal(ts: TS, node_idx: i64, expected_ti: i64): TS
   if fits_open_enum(ts, get_expr_type(ts, node_idx), expected_ti):
     return ts_set_expr_type(ts, node_idx, expected_ti)
   match ts.tc.nodes.get(node_idx):
-    Node::IntLitE(tidx):
+    parser::Node::IntLitE(tidx):
       if is_integer(ts, expected_ti):
         return ts_set_expr_type(ts, node_idx, expected_ti)
-    Node::FloatLitE(tidx):
+    parser::Node::FloatLitE(tidx):
       if is_float(ts, expected_ti):
         return ts_set_expr_type(ts, node_idx, expected_ti)
-    Node::UnaryE(op_tidx, operand):
+    parser::Node::UnaryE(op_tidx, operand):
       // A unary +/- over a numeric literal (`-1`) is still a literal for
       // fitting: adopt the context on the operand and the unary node.
       match ts.tc.nodes.get(operand):
-        Node::IntLitE(t2):
+        parser::Node::IntLitE(t2):
           if is_integer(ts, expected_ti):
             let ri: TS = ts_set_expr_type(ts, operand, expected_ti)
             return ts_set_expr_type(ri, node_idx, expected_ti)
-        Node::FloatLitE(t2):
+        parser::Node::FloatLitE(t2):
           if is_float(ts, expected_ti):
             let rf: TS = ts_set_expr_type(ts, operand, expected_ti)
             return ts_set_expr_type(rf, node_idx, expected_ti)
@@ -2584,15 +2584,15 @@ fn fits_open_enum(ts: TS, value_ti: i64, expected_ti: i64): bool
 
 fn is_literal_node(ts: TS, node_idx: i64): bool
   match ts.tc.nodes.get(node_idx):
-    Node::IntLitE(tidx):
+    parser::Node::IntLitE(tidx):
       return true
-    Node::FloatLitE(tidx):
+    parser::Node::FloatLitE(tidx):
       return true
-    Node::UnaryE(op_tidx, operand):
+    parser::Node::UnaryE(op_tidx, operand):
       match ts.tc.nodes.get(operand):
-        Node::IntLitE(t2):
+        parser::Node::IntLitE(t2):
           return true
-        Node::FloatLitE(t2):
+        parser::Node::FloatLitE(t2):
           return true
   return false
 
@@ -2755,13 +2755,13 @@ fn generator_type(elem_ti: i64, name: string): DaoType
 fn is_lvalue_expr(ts: TS, node_idx: i64): bool
   if node_idx < 0:
     return false
-  let node: Node = ts.tc.nodes.get(node_idx)
+  let node: parser::Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node::IdentE(t):
+    parser::Node::IdentE(t):
       return true
-    Node::FieldE(o, f):
+    parser::Node::FieldE(o, f):
       return true
-    Node::IndexE(o, i):
+    parser::Node::IndexE(o, i):
       return true
   return false
 
@@ -2796,7 +2796,7 @@ fn check_unary_expr(ts: TS, node_idx: i64, op_tidx: i64, operand: i64): TS
 fn read_type_args(ts: TS, targs_lp: i64): Vector<i64>
   if targs_lp < 0:
     return Vector<i64>::new()
-  return read_list(ts.tc.idx_data, targs_lp)
+  return parser::read_list(ts.tc.idx_data, targs_lp)
 
 /// Whether a call names an operation of `Ptr<T>`, with its receiver
 /// checked where it has one — the receiver's type is what says so, and
@@ -2806,9 +2806,9 @@ class PtrShape:
   names_one: bool
 
 fn ptr_call_shape(ts: TS, callee: i64): PtrShape
-  let callee_node: Node = ts.tc.nodes.get(callee)
+  let callee_node: parser::Node = ts.tc.nodes.get(callee)
   match callee_node:
-    Node::FieldE(obj, field_tidx):
+    parser::Node::FieldE(obj, field_tidx):
       let r: TS = check_expr(ts, obj)
       let obj_ti: i64 = get_expr_type(r, obj)
       if obj_ti < 0:
@@ -2819,8 +2819,8 @@ fn ptr_call_shape(ts: TS, callee: i64): PtrShape
         TypeKind::TPointer:
           return PtrShape(r, true)
       return PtrShape(r, false)
-    Node::QualNameE(seg_lp, seg_count):
-      let segs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+    parser::Node::QualNameE(seg_lp, seg_count):
+      let segs: Vector<i64> = parser::read_list(ts.tc.idx_data, seg_lp)
       if segs.length() != 2:
         return PtrShape(ts, false)
       if ts_tok_name(ts, segs.get(0)) == "Ptr":
@@ -2872,10 +2872,10 @@ fn ptr_op_name(op: i64): string
 // `new` of `Ptr<T>::new` — for a diagnostic; "" for any other callee.
 fn ptr_call_member(ts: TS, callee: i64): string
   match ts.tc.nodes.get(callee):
-    Node::FieldE(obj, field_tidx):
+    parser::Node::FieldE(obj, field_tidx):
       return ts_tok_name(ts, field_tidx)
-    Node::QualNameE(seg_lp, seg_count):
-      let segs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+    parser::Node::QualNameE(seg_lp, seg_count):
+      let segs: Vector<i64> = parser::read_list(ts.tc.idx_data, seg_lp)
       if segs.length() == 2:
         return ts_tok_name(ts, segs.get(1))
   return ""
@@ -2893,7 +2893,7 @@ fn check_ptr_method_call(ts: TS, node_idx: i64, callee: i64, args: Vector<i64>, 
   let unhandled: PtrCallR = PtrCallR(ts, false)
   // A pointer's operations take their arguments by position (host).
   if names_lp >= 0:
-    let names: Vector<i64> = read_list(ts.tc.idx_data, names_lp)
+    let names: Vector<i64> = parser::read_list(ts.tc.idx_data, names_lp)
     let ni: i64 = 0
     while ni < names.length():
       if names.get(ni) >= 0:
@@ -2901,9 +2901,9 @@ fn check_ptr_method_call(ts: TS, node_idx: i64, callee: i64, args: Vector<i64>, 
         if op_name != "":
           return PtrCallR(ts_add_diag(ts, ts_tok_span(ts, names.get(ni)), "Ptr." + op_name + " takes its arguments by position"), true)
       ni = ni + 1
-  let callee_node: Node = ts.tc.nodes.get(callee)
+  let callee_node: parser::Node = ts.tc.nodes.get(callee)
   match callee_node:
-    Node::FieldE(obj, field_tidx):
+    parser::Node::FieldE(obj, field_tidx):
       let obj_ti: i64 = get_expr_type(ts, obj)
       if obj_ti < 0:
         return unhandled
@@ -2970,10 +2970,10 @@ fn check_ptr_method_call(ts: TS, node_idx: i64, callee: i64, args: Vector<i64>, 
             return PtrCallR(record_ptr_op(ts_set_expr_type(cast_r.ts, node_idx, cast_r.type_idx), node_idx, ptr_op_cast()), true)
           return PtrCallR(ts_add_diag(ts, sp, "no operation '" + name + "' on " + type_name(ts, obj_ti) + "; a pointer has get, set, offset, cast and is_null"), true)
       return unhandled
-    Node::QualNameE(seg_lp, seg_count):
+    parser::Node::QualNameE(seg_lp, seg_count):
       // `Ptr<T>::new()`: the one way to make a pointer, and the only
       // static of the compiler-standard pointer.
-      let segs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+      let segs: Vector<i64> = parser::read_list(ts.tc.idx_data, seg_lp)
       if segs.length() != 2:
         return unhandled
       if ts_tok_name(ts, segs.get(0)) != "Ptr":
@@ -3205,13 +3205,13 @@ fn decl_param_type_ids(ts: TS, tparams_lp: i64): ParamIds
   if tparams_lp < 0:
     return ParamIds(ts, none)
   let r: TS = ts
-  let tparams: Vector<i64> = read_list(r.tc.idx_data, tparams_lp)
+  let tparams: Vector<i64> = parser::read_list(r.tc.idx_data, tparams_lp)
   let ids: Vector<i64> = Vector<i64>::new()
   let i: i64 = 0
   while i < tparams.length():
-    let tp_node: Node = r.tc.nodes.get(tparams.get(i))
+    let tp_node: parser::Node = r.tc.nodes.get(tparams.get(i))
     match tp_node:
-      Node::GenericParamT(tidx, bounds_lp):
+      parser::Node::GenericParamT(tidx, bounds_lp):
         let tsym: i64 = lookup_use(r, tidx)
         if tsym < 0:
           return ParamIds(r, none)
@@ -3231,9 +3231,9 @@ fn decl_tparams_lp(ts: TS, decl_idx: i64): i64
   if decl_idx >= ts.tc.nodes.length():
     return to_i64(-1)
   match ts.tc.nodes.get(decl_idx):
-    Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
+    parser::Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
       return tparams_lp
-    Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
+    parser::Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
       return tparams_lp
   return to_i64(-1)
 
@@ -3338,11 +3338,11 @@ fn callable_tparams_lp(ts: TS, decl_idx: i64): i64
   if decl_idx >= ts.tc.nodes.length():
     return to_i64(-1)
   match ts.tc.nodes.get(decl_idx):
-    Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_node, body_lp):
+    parser::Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_node, body_lp):
       return tparams_lp
-    Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_node, body):
+    parser::Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_node, body):
       return tparams_lp
-    Node::ExternFnD(name_tidx, tparams_lp, params_lp, ret_node):
+    parser::Node::ExternFnD(name_tidx, tparams_lp, params_lp, ret_node):
       return tparams_lp
   return to_i64(-1)
 
@@ -3450,10 +3450,10 @@ fn callee_symbol(ts: TS, callee: i64): i64
   if callee < 0:
     return to_i64(-1)
   match ts.tc.nodes.get(callee):
-    Node::IdentE(tidx):
+    parser::Node::IdentE(tidx):
       return lookup_use(ts, tidx)
-    Node::QualNameE(seg_lp, seg_count):
-      let segs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+    parser::Node::QualNameE(seg_lp, seg_count):
+      let segs: Vector<i64> = parser::read_list(ts.tc.idx_data, seg_lp)
       if segs.length() == 0:
         return to_i64(-1)
       let last: i64 = lookup_use(ts, segs.get(segs.length() - 1))
@@ -3466,7 +3466,7 @@ fn callee_symbol(ts: TS, callee: i64): i64
       if head_ti < 0:
         return to_i64(-1)
       return find_inherent_method_sym(ts.reg.methods, ts_tok_name(ts, segs.get(1)), head_ti)
-    Node::FieldE(obj, field_tidx):
+    parser::Node::FieldE(obj, field_tidx):
       // A method is found by the receiver's type, the way the access
       // itself was typed, so a generic method decides its parameters
       // like any other callee.
@@ -3482,7 +3482,7 @@ fn callee_symbol(ts: TS, callee: i64): i64
 /// decisions; a receiver that is no instantiation adds none.
 fn receiver_decided(ts: TS, callee: i64, into: HashMap<i64>): Bound
   match ts.tc.nodes.get(callee):
-    Node::FieldE(obj, field_tidx):
+    parser::Node::FieldE(obj, field_tidx):
       return instantiation_decided(ts, get_expr_type(ts, obj), into)
   return Bound(ts, into)
 
@@ -3493,7 +3493,7 @@ fn receiver_fixes(ts: TS, callee: i64, own: Vector<i64>): bool
   if own.length() == 0:
     return false
   match ts.tc.nodes.get(callee):
-    Node::FieldE(obj, field_tidx):
+    parser::Node::FieldE(obj, field_tidx):
       let obj_ti: i64 = get_expr_type(ts, obj)
       if obj_ti < 0:
         return false
@@ -3509,7 +3509,7 @@ fn receiver_fixes(ts: TS, callee: i64, own: Vector<i64>): bool
 /// callee.
 fn member_name(ts: TS, callee: i64): string
   match ts.tc.nodes.get(callee):
-    Node::FieldE(obj, field_tidx):
+    parser::Node::FieldE(obj, field_tidx):
       return ts_tok_name(ts, field_tidx)
   return ""
 
@@ -3603,8 +3603,8 @@ fn qualified_type_head(ts: TS, segs: Vector<i64>): i64
 /// `Box<i32>::zero(0)`; -1 for a call written any other way.
 fn type_args_head(ts: TS, callee: i64): i64
   match ts.tc.nodes.get(callee):
-    Node::QualNameE(seg_lp, seg_count):
-      let head_ti: i64 = qualified_type_head(ts, read_list(ts.tc.idx_data, seg_lp))
+    parser::Node::QualNameE(seg_lp, seg_count):
+      let head_ti: i64 = qualified_type_head(ts, parser::read_list(ts.tc.idx_data, seg_lp))
       if head_ti < 0:
         return to_i64(-1)
       match ts.types.get(head_ti).kind:
@@ -3619,11 +3619,11 @@ fn call_owner_params(ts: TS, callee: i64): ParamIds
   let none: ParamIds = ParamIds(ts, Vector<i64>::new())
   let owner_ti: i64 = to_i64(-1)
   match ts.tc.nodes.get(callee):
-    Node::FieldE(obj, field_tidx):
+    parser::Node::FieldE(obj, field_tidx):
       let obj_ti: i64 = get_expr_type(ts, obj)
       if obj_ti >= 0 and obj_ti < ts.types.length():
         owner_ti = record_head(ts, ts.types.get(obj_ti))
-    Node::QualNameE(seg_lp, seg_count):
+    parser::Node::QualNameE(seg_lp, seg_count):
       owner_ti = type_args_head(ts, callee)
   if owner_ti < 0 or owner_ti >= ts.types.length():
     return none
@@ -3933,7 +3933,7 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
   // is read as a member or a symbol, which would report `get` as a
   // missing field and `Ptr` as an unknown name.
   let named_ptr: PtrShape = ptr_call_shape(ts, callee)
-  let args0: Vector<i64> = read_list(named_ptr.ts.tc.idx_data, args_lp)
+  let args0: Vector<i64> = parser::read_list(named_ptr.ts.tc.idx_data, args_lp)
   if named_ptr.names_one:
     let rp: TS = named_ptr.ts
     let pi: i64 = 0
@@ -3944,7 +3944,7 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
     if ptr_call.handled:
       return ptr_call.ts
   let r: TS = check_expr(named_ptr.ts, callee)
-  let args: Vector<i64> = read_list(r.tc.idx_data, args_lp)
+  let args: Vector<i64> = parser::read_list(r.tc.idx_data, args_lp)
   let ai: i64 = 0
   while ai < args.length():
     r = check_expr(r, args.get(ai))
@@ -3953,14 +3953,14 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
   let callee_ti: i64 = get_expr_type(r, callee)
   if callee_ti < 0:
     // Direct callee resolution (workaround for expr_types loss through call chains)
-    let callee_node: Node = r.tc.nodes.get(callee)
+    let callee_node: parser::Node = r.tc.nodes.get(callee)
     match callee_node:
-      Node::IdentE(ct):
+      parser::Node::IdentE(ct):
         let csym: i64 = lookup_use(r, ct)
         if csym >= 0:
           callee_ti = sym_type_at(r, csym)
-      Node::QualNameE(seg_lp2, seg_count2):
-        let csegs: Vector<i64> = read_list(r.tc.idx_data, seg_lp2)
+      parser::Node::QualNameE(seg_lp2, seg_count2):
+        let csegs: Vector<i64> = parser::read_list(r.tc.idx_data, seg_lp2)
         if csegs.length() > 0:
           let csym: i64 = lookup_use(r, csegs.get(0))
           if csym >= 0:
@@ -3988,21 +3988,21 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
       // A static method reached through a value is a diagnostic — it is
       // called as `Type::m(...)`, and a receiver is no argument of it.
       let is_method: bool = false
-      let callee_node2: Node = r.tc.nodes.get(callee)
+      let callee_node2: parser::Node = r.tc.nodes.get(callee)
       match callee_node2:
-        Node::FieldE(mobj, mfield):
+        parser::Node::FieldE(mobj, mfield):
           if callee_type.builtin_id == 1:
             is_method = true
           else:
             return ts_add_diag(r, ts_tok_span(r, mfield), "static method '" + ts_tok_name(r, mfield) + "' is called through a value; call it as " + type_name(r, get_expr_type(r, mobj)) + "::" + ts_tok_name(r, mfield) + "(...)")
-        Node::QualNameE(q_lp, q_count):
+        parser::Node::QualNameE(q_lp, q_count):
           // A `::` path reaches a type's STATIC methods
           // (CONTRACT_MODULE_SYSTEM.md §6: `b::T::m(...)`).  One that
           // takes `self` is reached on a value instead, so a receiver
           // passed as an ordinary argument is a diagnostic rather than
           // a call that happens to type.
           if callee_type.builtin_id == 1:
-            let q_segs: Vector<i64> = read_list(r.tc.idx_data, q_lp)
+            let q_segs: Vector<i64> = parser::read_list(r.tc.idx_data, q_lp)
             if q_segs.length() > 0:
               let last_tidx: i64 = q_segs.get(q_segs.length() - 1)
               return ts_add_diag(r, ts_tok_span(r, last_tidx), "'" + ts_tok_name(r, last_tidx) + "' is an instance method; it is reached on a value, not through '::'")
@@ -4015,7 +4015,7 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
       // argument belongs to a variant construction
       // (`Enum::Variant(name = value)`, CONTRACT_SYNTAX_SURFACE.md) and
       // is diagnosed here rather than silently taken as positional.
-      let names: Vector<i64> = read_list(r.tc.idx_data, names_lp)
+      let names: Vector<i64> = parser::read_list(r.tc.idx_data, names_lp)
       let ni: i64 = 0
       while ni < names.length():
         if names.get(ni) >= 0:
@@ -4150,7 +4150,7 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
     TypeKind::TStruct:
       // A class is constructed positionally (`Point(1, 2)`); a named
       // argument constructs a variant, never a class.
-      let cnames: Vector<i64> = read_list(r.tc.idx_data, names_lp)
+      let cnames: Vector<i64> = parser::read_list(r.tc.idx_data, names_lp)
       let cni: i64 = 0
       while cni < cnames.length():
         if cnames.get(cni) >= 0:
@@ -4231,14 +4231,14 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
       // namespace; its parameters come from the registry by name, so
       // this works in any module (CONTRACT_SYNTAX_SURFACE.md, enum class).
       let variant_name: string = ""
-      let callee_node3: Node = r.tc.nodes.get(callee)
+      let callee_node3: parser::Node = r.tc.nodes.get(callee)
       match callee_node3:
-        Node::QualNameE(vseg_lp, vseg_count):
-          let vsegs: Vector<i64> = read_list(r.tc.idx_data, vseg_lp)
+        parser::Node::QualNameE(vseg_lp, vseg_count):
+          let vsegs: Vector<i64> = parser::read_list(r.tc.idx_data, vseg_lp)
           if vsegs.length() >= 2:
             variant_name = ts_tok_name(r, vsegs.get(vsegs.length() - 1))
       if variant_name != "":
-        let names: Vector<i64> = read_list(r.tc.idx_data, names_lp)
+        let names: Vector<i64> = parser::read_list(r.tc.idx_data, names_lp)
         return check_variant_construction(r, node_idx, callee, callee_ti, VariantCall(variant_name, args, names, targs))
       return ts_set_expr_type(r, node_idx, callee_ti)
   return r
@@ -4523,17 +4523,17 @@ fn check_pipe_expr(ts: TS, node_idx: i64, left: i64, right: i64): TS
 fn check_stmt(ts: TS, node_idx: i64): TS
   if node_idx < 0:
     return ts
-  let node: Node = ts.tc.nodes.get(node_idx)
+  let node: parser::Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node::LetS(name_tidx, type_node, init_node):
+    parser::Node::LetS(name_tidx, type_node, init_node):
       return check_let_stmt(ts, node_idx, name_tidx, type_node, init_node)
-    Node::AssignS(target, value):
+    parser::Node::AssignS(target, value):
       return check_assign_stmt(ts, node_idx, target, value)
-    Node::IfS(cond, then_lp, else_lp):
+    parser::Node::IfS(cond, then_lp, else_lp):
       return check_if_stmt(ts, cond, then_lp, else_lp)
-    Node::WhileS(cond, body_lp):
+    parser::Node::WhileS(cond, body_lp):
       return check_while_stmt(ts, cond, body_lp)
-    Node::ResourceS(kind_tidx, name_tidx, body_lp):
+    parser::Node::ResourceS(kind_tidx, name_tidx, body_lp):
       // A `resource memory` block is an allocation domain; its body is
       // checked with the domain nesting recorded (a `yield` inside it is
       // rejected — CONTRACT_EXECUTION_CONTEXTS.md, Resources §8).
@@ -4544,7 +4544,7 @@ fn check_stmt(ts: TS, node_idx: i64): TS
         rr.ctx = ctx_with_resource(rr.ctx, rr.ctx.resource_depth - 1)
         return rr
       return check_body_stmts(ts, body_lp)
-    Node::ModeS(name_tidx, body_lp):
+    parser::Node::ModeS(name_tidx, body_lp):
       // `mode <name> =>` enters one of the canonical modes
       // (CONTRACT_EXECUTION_CONTEXTS.md, Modes: `unsafe`, `gpu`,
       // `parallel`) for its body.  `unsafe` is the context a dereference
@@ -4561,7 +4561,7 @@ fn check_stmt(ts: TS, node_idx: i64): TS
       if mode_name == "gpu" or mode_name == "parallel":
         return check_body_stmts(ts, body_lp)
       return check_body_stmts(ts_add_diag(ts, ts_tok_span(ts, name_tidx), "unknown mode '" + mode_name + "'"), body_lp)
-    Node::YieldS(yield_tidx, val_node):
+    parser::Node::YieldS(yield_tidx, val_node):
       // `yield` is legal only in a generator function (declared
       // `Generator<T>`), never inside a `resource memory` block
       // (CONTRACT_EXECUTION_CONTEXTS.md, Resources law 8), and its value
@@ -4586,17 +4586,17 @@ fn check_stmt(ts: TS, node_idx: i64): TS
           if types_equal(ry, yt, ry.ctx.gen_elem) == false:
             ry = ts_add_diag(ry, ts_node_span(ry, val_node), "yield type " + type_name(ry, yt) + " does not match Generator element type " + type_name(ry, ry.ctx.gen_elem))
       return ry
-    Node::ForS(var_tidx, iter_node, body_lp):
+    parser::Node::ForS(var_tidx, iter_node, body_lp):
       return check_for_stmt(ts, node_idx, iter_node, body_lp)
-    Node::ReturnS(val_node):
+    parser::Node::ReturnS(val_node):
       return check_return_stmt(ts, val_node)
-    Node::BreakS(tidx):
+    parser::Node::BreakS(tidx):
       return check_break_stmt(ts, tidx)
-    Node::MatchS(scrut_node, arms_lp):
+    parser::Node::MatchS(scrut_node, arms_lp):
       return check_match_stmt(ts, scrut_node, arms_lp)
-    Node::ExprStmtS(expr_node):
+    parser::Node::ExprStmtS(expr_node):
       return check_expr(ts, expr_node)
-    Node::ErrorS(t):
+    parser::Node::ErrorS(t):
       return ts
   return ts
 
@@ -4644,15 +4644,15 @@ fn check_let_stmt(ts: TS, node_idx: i64, name_tidx: i64, type_node: i64, init_no
 fn is_lvalue(ts: TS, node_idx: i64): bool
   if node_idx < 0:
     return false
-  let node: Node = ts.tc.nodes.get(node_idx)
+  let node: parser::Node = ts.tc.nodes.get(node_idx)
   match node:
-    Node::IdentE(tidx):
+    parser::Node::IdentE(tidx):
       return true
-    Node::FieldE(obj, ftidx):
+    parser::Node::FieldE(obj, ftidx):
       return true
-    Node::IndexE(obj, idx_expr):
+    parser::Node::IndexE(obj, idx_expr):
       return true
-    Node::UnaryE(op_tidx, operand):
+    parser::Node::UnaryE(op_tidx, operand):
       // Deref (*ptr = val) is an lvalue — Tier B, accept for now
       let tok: lexer::Token = ts.tc.toks.get(op_tidx)
       if tok.kind == lexer::TK::Star:
@@ -4766,15 +4766,15 @@ fn check_break_stmt(ts: TS, tidx: i64): TS
 // parameter.  The pattern takes the callee's type.
 fn check_pattern(ts: TS, pat_node: i64): TS
   match ts.tc.nodes.get(pat_node):
-    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
+    parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
       let r: TS = check_expr(ts, callee)
       let callee_ti: i64 = get_expr_type(r, callee)
       if callee_ti < 0:
         return r
       let variant_name: string = ""
       match r.tc.nodes.get(callee):
-        Node::QualNameE(seg_lp, seg_count):
-          let segs: Vector<i64> = read_list(r.tc.idx_data, seg_lp)
+        parser::Node::QualNameE(seg_lp, seg_count):
+          let segs: Vector<i64> = parser::read_list(r.tc.idx_data, seg_lp)
           if segs.length() >= 2:
             variant_name = ts_tok_name(r, segs.get(segs.length() - 1))
       if variant_name != "":
@@ -4784,22 +4784,22 @@ fn check_pattern(ts: TS, pat_node: i64): TS
             let sp: Span = ts_node_span(r, callee)
             if param_count == to_i64(0):
               return ts_add_diag(r, sp, "variant '" + variant_name + "' has no parameters; the pattern is written without parentheses")
-            let names: Vector<i64> = read_list(r.tc.idx_data, names_lp)
+            let names: Vector<i64> = parser::read_list(r.tc.idx_data, names_lp)
             let ni: i64 = 0
             while ni < names.length():
               if names.get(ni) >= 0:
                 let nsp: Span = ts_tok_span(r, names.get(ni))
                 return ts_add_diag(r, nsp, "a pattern binds by position: " + variant_name + "(a, b), never by name")
               ni = ni + 1
-            let bindings: Vector<i64> = read_list(r.tc.idx_data, args_lp)
+            let bindings: Vector<i64> = parser::read_list(r.tc.idx_data, args_lp)
             if bindings.length() != param_count:
               return ts_add_diag(r, sp, "variant '" + variant_name + "' takes " + i64_to_string(param_count) + " parameter(s); the pattern binds " + i64_to_string(bindings.length()))
             let bi: i64 = 0
             while bi < bindings.length():
-              let bound: Node = r.tc.nodes.get(bindings.get(bi))
+              let bound: parser::Node = r.tc.nodes.get(bindings.get(bi))
               let is_name: bool = false
               match bound:
-                Node::IdentE(t2):
+                parser::Node::IdentE(t2):
                   is_name = true
               if is_name == false:
                 let bsp: Span = ts_node_span(r, bindings.get(bi))
@@ -4808,12 +4808,12 @@ fn check_pattern(ts: TS, pat_node: i64): TS
           Option::None:
             return r
       return ts_set_expr_type(r, pat_node, callee_ti)
-    Node::QualNameE(seg_lp, seg_count):
+    parser::Node::QualNameE(seg_lp, seg_count):
       // A bare variant pattern: only a variant without parameters.
       let r: TS = check_expr(ts, pat_node)
       let pat_ti: i64 = get_expr_type(r, pat_node)
       if pat_ti >= 0:
-        let segs: Vector<i64> = read_list(r.tc.idx_data, seg_lp)
+        let segs: Vector<i64> = parser::read_list(r.tc.idx_data, seg_lp)
         if segs.length() >= 2:
           let bare_name: string = ts_tok_name(r, segs.get(segs.length() - 1))
           let bare: Option<i64> = r.reg.variant_set.get(variant_key(r, pat_ti, bare_name))
@@ -4834,14 +4834,14 @@ fn check_pattern(ts: TS, pat_node: i64): TS
 /// place of its parameters.
 fn type_arm_bindings(ts: TS, pat_node: i64, scrut_ti: i64): TS
   match ts.tc.nodes.get(pat_node):
-    Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
+    parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
       let head_ti: i64 = get_expr_type(ts, callee)
       if head_ti < 0:
         return ts
       let variant_name: string = ""
       match ts.tc.nodes.get(callee):
-        Node::QualNameE(seg_lp, seg_count):
-          let segs: Vector<i64> = read_list(ts.tc.idx_data, seg_lp)
+        parser::Node::QualNameE(seg_lp, seg_count):
+          let segs: Vector<i64> = parser::read_list(ts.tc.idx_data, seg_lp)
           if segs.length() >= 2:
             variant_name = ts_tok_name(ts, segs.get(segs.length() - 1))
       if variant_name == "":
@@ -4849,7 +4849,7 @@ fn type_arm_bindings(ts: TS, pat_node: i64, scrut_ti: i64): TS
       let decided: Bound = instantiation_decided(ts, scrut_ti, HashMap<i64>::new())
       let r: TS = decided.ts
       let vkey: string = variant_key(r, head_ti, variant_name)
-      let bindings: Vector<i64> = read_list(r.tc.idx_data, args_lp)
+      let bindings: Vector<i64> = parser::read_list(r.tc.idx_data, args_lp)
       let bi: i64 = 0
       while bi < bindings.length():
         let payload_ti: i64 = hm_get_or(r.reg.variant_set, vkey + ":#" + i64_to_string(bi) + ":type", to_i64(-1))
@@ -4891,7 +4891,7 @@ fn check_match_stmt(ts: TS, scrut_node: i64, arms_lp: i64): TS
 fn check_body_stmts(ts: TS, list_pos: i64): TS
   if list_pos < 0:
     return ts
-  let stmts: Vector<i64> = read_list(ts.tc.idx_data, list_pos)
+  let stmts: Vector<i64> = parser::read_list(ts.tc.idx_data, list_pos)
   let r: TS = ts
   let i: i64 = 0
   while i < stmts.length():
@@ -5268,16 +5268,16 @@ fn tc_collect_conformances(ts: TS, decls: Vector<i64>): TS
   let i: i64 = 0
   while i < decls.length():
     let decl_idx: i64 = decls.get(i)
-    let node: Node = r.tc.nodes.get(decl_idx)
+    let node: parser::Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
+      parser::Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
         if is_derived > 0:
           let csym: i64 = type_sym_of_decl(r, decl_idx)
           if csym >= 0:
             let cti: i64 = sym_type_at(r, csym)
             if cti >= 0:
               r = ts_add_derived_concept(r, cti)
-      Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
+      parser::Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
         let cb_key: string = extend_binding_key(r.tc.file_id, decl_idx)
         let cb_found: Option<i64> = r.tc.concept_bindings.get(cb_key)
         let esym: i64 = to_i64(-1)
@@ -5430,20 +5430,20 @@ fn derive_class(reg: Registry, idx: ClassIndex, k: i64, dcti: i64, queue: Vector
 
 // The conformance-collection pass over a file (tc_collect_conformances).
 fn tc_pass_collect(ts: TS, file_node_idx: i64): TS
-  let file_node: Node = ts.tc.nodes.get(file_node_idx)
+  let file_node: parser::Node = ts.tc.nodes.get(file_node_idx)
   match file_node:
-    Node::FileN(module_decl, imports_lp, decls_lp):
-      return tc_collect_conformances(ts, read_list(ts.tc.idx_data, decls_lp))
+    parser::Node::FileN(module_decl, imports_lp, decls_lp):
+      return tc_collect_conformances(ts, parser::read_list(ts.tc.idx_data, decls_lp))
   return ts
 
 // The concept-satisfaction pass over a file: every extend's methods
 // against the concept's requirements, once every module's signatures
 // and method tables exist.
 fn tc_pass_satisfaction(ts: TS, file_node_idx: i64): TS
-  let file_node: Node = ts.tc.nodes.get(file_node_idx)
+  let file_node: parser::Node = ts.tc.nodes.get(file_node_idx)
   match file_node:
-    Node::FileN(module_decl, imports_lp, decls_lp):
-      return tc_check_concept_satisfaction(ts, read_list(ts.tc.idx_data, decls_lp))
+    parser::Node::FileN(module_decl, imports_lp, decls_lp):
+      return tc_check_concept_satisfaction(ts, parser::read_list(ts.tc.idx_data, decls_lp))
   return ts
 
 // The bodies of a class's or an extend's methods, block- or
@@ -5454,37 +5454,37 @@ fn tc_check_owner_methods(ts: TS, owner_decl_idx: i64, methods_lp: i64): TS
     return ts
   let own: TypeR = method_owner(ts, owner_decl_idx)
   let r: TS = own.ts
-  let meths: Vector<i64> = read_list(r.tc.idx_data, methods_lp)
+  let meths: Vector<i64> = parser::read_list(r.tc.idx_data, methods_lp)
   let mi: i64 = 0
   while mi < meths.length():
     let meth_idx: i64 = meths.get(mi)
-    let meth_node: Node = r.tc.nodes.get(meth_idx)
+    let meth_node: parser::Node = r.tc.nodes.get(meth_idx)
     match meth_node:
-      Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
+      parser::Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
         r = tc_check_method_body(r, own.type_idx, meth_idx, m_name_tidx, m_params_lp, m_body_lp)
-      Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
+      parser::Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
         r = tc_check_method_expr_body(r, own.type_idx, meth_idx, m_name_tidx, m_params_lp, m_body_expr)
     mi = mi + 1
   return r
 
 fn tc_pass2(ts: TS, file_node_idx: i64): TS
-  let file_node: Node = ts.tc.nodes.get(file_node_idx)
+  let file_node: parser::Node = ts.tc.nodes.get(file_node_idx)
   match file_node:
-    Node::FileN(module_decl, imports_lp, decls_lp):
-      let decls: Vector<i64> = read_list(ts.tc.idx_data, decls_lp)
+    parser::Node::FileN(module_decl, imports_lp, decls_lp):
+      let decls: Vector<i64> = parser::read_list(ts.tc.idx_data, decls_lp)
       let r: TS = ts
       let i: i64 = 0
       while i < decls.length():
         let decl_idx: i64 = decls.get(i)
-        let node: Node = r.tc.nodes.get(decl_idx)
+        let node: parser::Node = r.tc.nodes.get(decl_idx)
         match node:
-          Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_type_node, body_lp):
+          parser::Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_type_node, body_lp):
             r = tc_check_fn_body(r, decl_idx, name_tidx, params_lp, ret_type_node, body_lp)
-          Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_type_node, body_expr):
+          parser::Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_type_node, body_expr):
             r = tc_check_expr_fn_body(r, decl_idx, name_tidx, params_lp, ret_type_node, body_expr)
-          Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
+          parser::Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
             r = tc_check_owner_methods(r, decl_idx, methods_lp)
-          Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
+          parser::Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
             r = tc_check_owner_methods(r, decl_idx, methods_lp)
         i = i + 1
       return r
@@ -5498,22 +5498,22 @@ fn tc_bind_module_bounds(ts: TS, decls: Vector<i64>): TS
   let i: i64 = 0
   while i < decls.length():
     let decl_idx: i64 = decls.get(i)
-    let node: Node = r.tc.nodes.get(decl_idx)
+    let node: parser::Node = r.tc.nodes.get(decl_idx)
     match node:
-      Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_type_node, body_lp):
+      parser::Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_type_node, body_lp):
         r = tc_bind_generic_bounds(r, tparams_lp)
-      Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_type_node, body_expr):
+      parser::Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_type_node, body_expr):
         r = tc_bind_generic_bounds(r, tparams_lp)
-      Node::ExternFnD(name_tidx, tparams_lp, params_lp, ret_type_node):
+      parser::Node::ExternFnD(name_tidx, tparams_lp, params_lp, ret_type_node):
         r = tc_bind_generic_bounds(r, tparams_lp)
-      Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
+      parser::Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
         r = tc_bind_generic_bounds(r, tparams_lp)
-      Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
+      parser::Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
         r = tc_bind_generic_bounds(r, tparams_lp)
         r = tc_bind_method_bounds(r, methods_lp)
-      Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
+      parser::Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
         r = tc_bind_method_bounds(r, methods_lp)
-      Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
+      parser::Node::ConceptDeclD(name_tidx, tparams_lp, methods_lp, is_derived):
         r = tc_bind_generic_bounds(r, tparams_lp)
         r = tc_bind_method_bounds(r, methods_lp)
     i = i + 1
@@ -5526,15 +5526,15 @@ fn tc_bind_method_bounds(ts: TS, methods_lp: i64): TS
   if methods_lp < 0:
     return ts
   let r: TS = ts
-  let meths: Vector<i64> = read_list(r.tc.idx_data, methods_lp)
+  let meths: Vector<i64> = parser::read_list(r.tc.idx_data, methods_lp)
   let mi: i64 = 0
   while mi < meths.length():
     match r.tc.nodes.get(meths.get(mi)):
-      Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
+      parser::Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
         r = tc_bind_generic_bounds(r, m_tparams_lp)
-      Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
+      parser::Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
         r = tc_bind_generic_bounds(r, m_tparams_lp)
-      Node::ExternFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type):
+      parser::Node::ExternFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type):
         r = tc_bind_generic_bounds(r, m_tparams_lp)
     mi = mi + 1
   return r
@@ -5554,7 +5554,7 @@ fn tc_bind_method_bounds(ts: TS, methods_lp: i64): TS
 // Helper: build per-module TC from Program state.
 fn build_module_tc(p: Program, mid: i64): TC
   let sf: SourceFile = program_file_of_module(p, mid)
-  let po: ParseOutput = sf.parse_output
+  let po: parser::ParseOutput = sf.parse_output
   return TC(po.nodes, po.idx, po.toks, sf.source_text, p.resolve.symbols, p.resolve.scopes, p.resolve.uses, sf.file_id, p.resolve.extend_concept_bindings, mid, p.resolve.module_exports)
 
 
@@ -5659,7 +5659,7 @@ fn typecheck(src: string): TypeCheckResult
   // one sweep of each).
   let tc: TC = build_module_tc(p, to_i64(0))
   let sf: SourceFile = program_file_of_module(p, to_i64(0))
-  let po: ParseOutput = sf.parse_output
+  let po: parser::ParseOutput = sf.parse_output
   let ts: TS = ts_new(tc, p.typecheck.types, p.typecheck.type_info, p.typecheck.sym_types, reg_with_expr_types(registry_new(p.resolve.symbols, p.graph.modules), p.typecheck.lookup.expr_types))
 
   // Collect resolve diagnostics into TS.
