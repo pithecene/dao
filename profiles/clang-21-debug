@@ -6,6 +6,8 @@ compiler.cppstd=23
 compiler.libcxx=libstdc++11
 compiler.version=21
 os=Linux
+# LLVM in Release: a Debug build of it takes tens of gigabytes and links slowly.
+llvm-core/*:build_type=Release
 
 [conf]
 tools.build:compiler_executables={"c": "clang", "cpp": "clang++"}
