@@ -39,7 +39,8 @@ examples/**
 # Bootstrap: ignore assembled outputs and compiled binaries
 bootstrap/**/*.gen.dao
 bootstrap/**/*.gen
-bootstrap/lexer/tests
+bootstrap/**/tests
+.worktrees/
 
 # Playground frontend
 tools/playground/frontend/node_modules/

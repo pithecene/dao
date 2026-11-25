@@ -13,8 +13,8 @@ so a machine with no Dao on it can always rebuild the language:
 | Self-hosted | `bootstrap/`, in Dao | compiles itself, and still uses LLVM and the C runtime |
 | Fully hosted | not yet written | all Dao, with its own runtime and code generation |
 
-Line counts reflect the current branch over `1451b9a`, on 2026-11-24.  The table counts
-32,236 lines of authored Dao for comparison.
+Line counts reflect the current branch over `65b1481`, on 2026-11-25.  The table counts
+32,301 lines of authored Dao for comparison.
 
 ## Programs
 
@@ -32,10 +32,10 @@ Line counts reflect the current branch over `1451b9a`, on 2026-11-24.  The table
 
 | Stopgap | Language | Lines | Replacement |
 |---|---|---|---|
-| `bootstrap/assemble.sh` | Shell | 108 | real modules, one import boundary at a time, after which assembly goes away |
-| `bootstrap/stage2.sh`, `audit_closure.sh`, `validate_ir.sh` | Shell | 1,003 | Dao programs, which need a process API in the standard library |
+| `bootstrap/assemble.sh` | Shell | 113 | real modules, one import boundary at a time, after which assembly goes away |
+| `bootstrap/stage2.sh`, `audit_closure.sh`, `validate_ir.sh` | Shell | 1,007 | Dao programs, which need a process API in the standard library |
 | `compiler/driver/multifile_build_test.sh`, `tools/playground/dev.sh` | Shell | 194 | the same process API |
-| `Taskfile.yml` | YAML for Task | 206 | a build tool written in Dao |
+| `Taskfile.yml` | YAML for Task | 204 | a build tool written in Dao |
 | `CMakeLists.txt` files and `CMakePresets.json` | CMake | 519 | stays with the bootstrap tier, and a Dao build tool serves the other tiers |
 | `conanfile.py`, `profiles/` | Python, Conan | 90 | stays with the bootstrap tier |
 | `.github/workflows/` | YAML for GitHub Actions | 270 | Bosun orchestrating compiler and crossing validation directly |
