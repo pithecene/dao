@@ -135,7 +135,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 54
+  let total: i32 = 55
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -895,6 +895,20 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL generator_escape_through_container_rejected: got " + i64_to_string(enum_generator.mir.diags.length()) + " / " + i64_to_string(returned_generator.mir.diags.length()) + " / " + i64_to_string(pointer_generator.mir.diags.length()) + " diagnostics")
+
+  // Monomorphization rejects a lambda capturing a generic parameter once
+  // instantiated with a generator or an aggregate holding one.
+  let gen_cap_direct_in: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  gen_cap_direct_in = gen_cap_direct_in.push(graph::SourceInput("main.dao", "module app::main\n\nfn count(n: i32): Generator<i32>\n  yield n\n\nfn capture<T>(x: T): fn(i32): T -> |u| -> x\n\nfn main(): i32\n  let f: fn(i32): Generator<i32> = capture(count(1))\n  return 0\n", false))
+  let gen_cap_wrapped_in: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  gen_cap_wrapped_in = gen_cap_wrapped_in.push(graph::SourceInput("main.dao", "module app::main\n\nclass BoxGen:\n  g: Generator<i32>\n\nfn count(n: i32): Generator<i32>\n  yield n\n\nfn capture<T>(x: T): fn(i32): T -> |u| -> x\n\nfn main(): i32\n  let f: fn(i32): BoxGen = capture(BoxGen(count(1)))\n  return 0\n", false))
+  let gen_cap_direct: ProgramConcrete = mono_of_program(gen_cap_direct_in)
+  let gen_cap_wrapped: ProgramConcrete = mono_of_program(gen_cap_wrapped_in)
+  if mir_diag_mentions(gen_cap_direct.mir, "generator values cannot be captured by value") and mir_diag_mentions(gen_cap_wrapped.mir, "generator values cannot be captured by value"):
+    print("PASS generic_lambda_generator_capture_rejected")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL generic_lambda_generator_capture_rejected: got " + i64_to_string(gen_cap_direct.mir.diags.length()) + " / " + i64_to_string(gen_cap_wrapped.mir.diags.length()) + " diagnostics")
 
   // -----------------------------------------------------------------
   print("")

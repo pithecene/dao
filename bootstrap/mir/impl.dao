@@ -683,6 +683,11 @@ fn mir_lower_lambda(br: BlockR, params_lp: i64, body: i64, type_idx: i64): ExprR
     let csym: i64 = caps.syms.get(ci)
     let cslot: i64 = ms_lookup_local(cur_br.ms, csym)
     let cti: i64 = mir_local_type(cur_br.ms, cslot)
+    if mir_holds_generator(cur_br.ms, cti):
+      let cname: string = "<capture>"
+      if csym >= 0 and csym < cur_br.ms.program.symbols.length():
+        cname = cur_br.ms.program.symbols.get(csym).name
+      cur_br.ms = ms_add_diag(cur_br.ms, Span(to_i64(0), to_i64(1)), "cannot capture '" + cname + "' in a lambda: generator values cannot be captured by value")
     let ld: ExprR = emit_load(cur_br, MirPlace(cslot, Vector<i64>::new()), cti)
     cur_br = ld.br
     cap_vals = cap_vals.push(ld.value)
@@ -1985,6 +1990,7 @@ fn mono_scan_function(m: Mono, wi: i64): Mono
       MirNode::MirLambda(lam_fn, clp, cc, lti):
         if m.work.fn_subst.contains(i64_to_string(fn_node)):
           m.work.fn_subst = m.work.fn_subst.set(i64_to_string(lam_fn), hm_get_or(m.work.fn_subst, i64_to_string(fn_node), to_i64(-1)))
+          m = mono_check_lambda_captures(m, lam_fn, cc)
         m.work.fns = m.work.fns.push(lam_fn)
         m.work.fn_module = m.work.fn_module.push(m.work.fn_module.get(wi))
       MirNode::MirFnRef(ref_sym, ref_ti):
@@ -1992,6 +1998,23 @@ fn mono_scan_function(m: Mono, wi: i64): Mono
         if tmpl >= 0:
           m = mono_specialize_ref(m, inst, ref_sym, ref_ti, tmpl, hm_get_or(call_of, i64_to_string(inst), to_i64(-1)), here, wi)
     ii = ii + to_i64(1)
+  return m
+
+fn mono_check_lambda_captures(m: Mono, lam_fn: i64, cap_count: i64): Mono
+  if cap_count <= to_i64(0):
+    return m
+  match m.tables.nodes.get(lam_fn):
+    MirNode::MirFunction(lsym, lrt, lam_param_count, local_list_lp, lc, blp, bc, ie):
+      let locals: Vector<i64> = read_hir_list(m.tables.idx, local_list_lp)
+      let ci: i64 = to_i64(0)
+      while ci < cap_count:
+        if lam_param_count + ci < locals.length():
+          match m.tables.nodes.get(locals.get(lam_param_count + ci)):
+            MirNode::MirLocal(csym, cti, cis_p):
+              if mono_mentions_param(m, cti) == false:
+                if mono_holds_generator(m, cti, false):
+                  m.diags = m.diags.push(make_error(Span(to_i64(0), to_i64(1)), "cannot capture '" + mono_fn_name(m, csym) + "' in a lambda: generator values cannot be captured by value"))
+        ci = ci + to_i64(1)
   return m
 
 // A template carries a call through a type parameter's bound with a

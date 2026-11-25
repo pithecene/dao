@@ -1704,6 +1704,8 @@ fn bs_lower_binary(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, op: string,
   let is_float: bool = ty_text == "float" or ty_text == "double"
   if ty_text == "%dao.string":
     return bs_lower_string_binary(bs, insts, mir_node_idx, op, lhs_text, rhs_text)
+  if ty_text == "%dao.fn":
+    return bs_lower_fn_binary(bs, insts, mir_node_idx, op, lhs_text, rhs_text)
   // Comparisons.
   let pred: string = ll_cmp_pred(op, is_float, unsigned)
   if pred != "":
@@ -1800,6 +1802,39 @@ fn bs_lower_string_binary(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, op: 
     bs = bs_set_value(bs, mir_node_idx, result.name, "i1")
     return LowerStepR(bs, insts)
   bs = bs_error(bs, "unsupported operator on string type")
+  return LowerStepR(bs, insts)
+
+fn bs_lower_fn_binary(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, op: string, lhs: string, rhs: string): LowerStepR
+  if op == "EqEq" or op == "BangEq":
+    let lc: FreshR = bs_fresh_value(bs)
+    bs = lc.bs
+    insts = insts.push(LlInst(LlInstKind::LlText(rhs = "extractvalue %dao.fn " + lhs + ", 0"), lc.name))
+    let le: FreshR = bs_fresh_value(bs)
+    bs = le.bs
+    insts = insts.push(LlInst(LlInstKind::LlText(rhs = "extractvalue %dao.fn " + lhs + ", 1"), le.name))
+    let rc: FreshR = bs_fresh_value(bs)
+    bs = rc.bs
+    insts = insts.push(LlInst(LlInstKind::LlText(rhs = "extractvalue %dao.fn " + rhs + ", 0"), rc.name))
+    let re: FreshR = bs_fresh_value(bs)
+    bs = re.bs
+    insts = insts.push(LlInst(LlInstKind::LlText(rhs = "extractvalue %dao.fn " + rhs + ", 1"), re.name))
+    let ccmp: FreshR = bs_fresh_value(bs)
+    bs = ccmp.bs
+    let ecmp: FreshR = bs_fresh_value(bs)
+    bs = ecmp.bs
+    let res: FreshR = bs_fresh_value(bs)
+    bs = res.bs
+    if op == "EqEq":
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "icmp eq ptr " + lc.name + ", " + rc.name), ccmp.name))
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "icmp eq ptr " + le.name + ", " + re.name), ecmp.name))
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "and i1 " + ccmp.name + ", " + ecmp.name), res.name))
+    else:
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "icmp ne ptr " + lc.name + ", " + rc.name), ccmp.name))
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "icmp ne ptr " + le.name + ", " + re.name), ecmp.name))
+      insts = insts.push(LlInst(LlInstKind::LlText(rhs = "or i1 " + ccmp.name + ", " + ecmp.name), res.name))
+    bs = bs_set_value(bs, mir_node_idx, res.name, "i1")
+    return LowerStepR(bs, insts)
+  bs = bs_error(bs, "unsupported operator on function type")
   return LowerStepR(bs, insts)
 
 // Whether the Dao type at `ti` is an unsigned integer (u8..u64).
@@ -2607,6 +2642,11 @@ fn bs_scan_fn_refs(bs: BS, blocks_raw: Vector<i64>): BS
             MirNode::MirStore(l, pl, pc, val):
               if fn_refs.contains(i64_to_string(val)):
                 value_refs = value_refs.set(i64_to_string(val), to_i64(1))
+            MirNode::MirBinary(bop, bl, br_node, bti):
+              if fn_refs.contains(i64_to_string(bl)):
+                value_refs = value_refs.set(i64_to_string(bl), to_i64(1))
+              if fn_refs.contains(i64_to_string(br_node)):
+                value_refs = value_refs.set(i64_to_string(br_node), to_i64(1))
             MirNode::MirReturn(val, hv):
               if hv > to_i64(0) and fn_refs.contains(i64_to_string(val)):
                 value_refs = value_refs.set(i64_to_string(val), to_i64(1))
@@ -2677,13 +2717,26 @@ fn bs_get_or_create_fn_thunk(bs: BS, sym: i64, type_idx: i64): FreshR
     pi = pi + to_i64(1)
   let bundle_idx: i64 = bs.decls.call_arg_bundles.length()
   bs.decls.call_arg_bundles = bs.decls.call_arg_bundles.push(arg_entry)
+  let is_ext_fn_ret: bool = false
+  if bs.input.source.program.extern_syms.contains(i64_to_string(sym)):
+    match ll_type_of(bs, ret_ti):
+      LlType::LlFn:
+        is_ext_fn_ret = true
   let t_insts: Vector<LlInst> = Vector<LlInst>::new()
   if ret_ty_text == "void":
     t_insts = t_insts.push(LlInst(LlInstKind::LlCall(callee = target_name, arg_list_lp = bundle_idx, arg_count = ft.info_count, ret_ty_text = "void"), ""))
     t_insts = t_insts.push(LlInst(LlInstKind::LlRet(value_text = "", value_ty_text = "void", has_value = to_i64(0)), ""))
   else:
-    t_insts = t_insts.push(LlInst(LlInstKind::LlCall(callee = target_name, arg_list_lp = bundle_idx, arg_count = ft.info_count, ret_ty_text = ret_ty_text), "%0"))
-    t_insts = t_insts.push(LlInst(LlInstKind::LlRet(value_text = "%0", value_ty_text = ret_ty_text, has_value = to_i64(1)), ""))
+    if is_ext_fn_ret:
+      let adapter: FreshR = bs_get_or_create_c_fn_adapter(bs, ret_ti)
+      bs = adapter.bs
+      t_insts = t_insts.push(LlInst(LlInstKind::LlCall(callee = target_name, arg_list_lp = bundle_idx, arg_count = ft.info_count, ret_ty_text = "ptr"), "%0"))
+      t_insts = t_insts.push(LlInst(LlInstKind::LlText(rhs = "insertvalue %dao.fn undef, ptr " + adapter.name + ", 0"), "%1"))
+      t_insts = t_insts.push(LlInst(LlInstKind::LlText(rhs = "insertvalue %dao.fn %1, ptr %0, 1"), "%2"))
+      t_insts = t_insts.push(LlInst(LlInstKind::LlRet(value_text = "%2", value_ty_text = "%dao.fn", has_value = to_i64(1)), ""))
+    else:
+      t_insts = t_insts.push(LlInst(LlInstKind::LlCall(callee = target_name, arg_list_lp = bundle_idx, arg_count = ft.info_count, ret_ty_text = ret_ty_text), "%0"))
+      t_insts = t_insts.push(LlInst(LlInstKind::LlRet(value_text = "%0", value_ty_text = ret_ty_text, has_value = to_i64(1)), ""))
   let t_blocks: Vector<LlBlock> = Vector<LlBlock>::new()
   bs.out.functions = bs.out.functions.push(LlFunction(thunk_name, ret_ty_text, thunk_params, t_blocks.push(LlBlock("entry", t_insts)), to_i64(0)))
   return FreshR(bs, thunk_name)
@@ -2697,6 +2750,10 @@ fn bs_get_or_create_c_fn_adapter(bs: BS, type_idx: i64): FreshR
   let ret_ti: i64 = ft.ret_type
   bs = bs_define_aggregate(bs, ret_ti)
   let ret_ty_text: string = bs_ty(bs, ret_ti)
+  let returns_c_fn: bool = false
+  match ll_type_of(bs, ret_ti):
+    LlType::LlFn:
+      returns_c_fn = true
   let a_params: Vector<LlParam> = Vector<LlParam>::new()
   a_params = a_params.push(LlParam("%c_fn", "ptr"))
   let arg_entry: CallArgs = CallArgs(Vector<string>::new(), Vector<string>::new())
@@ -2719,8 +2776,16 @@ fn bs_get_or_create_c_fn_adapter(bs: BS, type_idx: i64): FreshR
     a_insts = a_insts.push(LlInst(LlInstKind::LlCall(callee = "%c_fn", arg_list_lp = bundle_idx, arg_count = ft.info_count, ret_ty_text = "void"), ""))
     a_insts = a_insts.push(LlInst(LlInstKind::LlRet(value_text = "", value_ty_text = "void", has_value = to_i64(0)), ""))
   else:
-    a_insts = a_insts.push(LlInst(LlInstKind::LlCall(callee = "%c_fn", arg_list_lp = bundle_idx, arg_count = ft.info_count, ret_ty_text = ret_ty_text), "%0"))
-    a_insts = a_insts.push(LlInst(LlInstKind::LlRet(value_text = "%0", value_ty_text = ret_ty_text, has_value = to_i64(1)), ""))
+    if returns_c_fn:
+      let nested: FreshR = bs_get_or_create_c_fn_adapter(bs, ret_ti)
+      bs = nested.bs
+      a_insts = a_insts.push(LlInst(LlInstKind::LlCall(callee = "%c_fn", arg_list_lp = bundle_idx, arg_count = ft.info_count, ret_ty_text = "ptr"), "%0"))
+      a_insts = a_insts.push(LlInst(LlInstKind::LlText(rhs = "insertvalue %dao.fn undef, ptr " + nested.name + ", 0"), "%1"))
+      a_insts = a_insts.push(LlInst(LlInstKind::LlText(rhs = "insertvalue %dao.fn %1, ptr %0, 1"), "%2"))
+      a_insts = a_insts.push(LlInst(LlInstKind::LlRet(value_text = "%2", value_ty_text = "%dao.fn", has_value = to_i64(1)), ""))
+    else:
+      a_insts = a_insts.push(LlInst(LlInstKind::LlCall(callee = "%c_fn", arg_list_lp = bundle_idx, arg_count = ft.info_count, ret_ty_text = ret_ty_text), "%0"))
+      a_insts = a_insts.push(LlInst(LlInstKind::LlRet(value_text = "%0", value_ty_text = ret_ty_text, has_value = to_i64(1)), ""))
   let a_blocks: Vector<LlBlock> = Vector<LlBlock>::new()
   bs.out.functions = bs.out.functions.push(LlFunction(adapter_name, ret_ty_text, a_params, a_blocks.push(LlBlock("entry", a_insts)), to_i64(0)))
   return FreshR(bs, adapter_name)

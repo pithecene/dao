@@ -850,8 +850,33 @@ suite<"driver_cli"> driver_cli_suite = [] {
         "    streamed = streamed + z\n"
         "  if streamed != 9:\n"
         "    return 6\n"
+        "  let other: fn(i32): i32 = |x| -> x + base\n"
+        "  if (snap == snap) == false or snap == other or (snap != other) == false:\n"
+        "    return 7\n"
         "  return finish(Outcome::Done(total = 0))\n");
     auto built = run_daoc(scratch, {"build", app.string()});
+    expect(built.exit_code == 0) << built.err;
+    expect(exit_status(scratch.output_for(app)) == 0);
+  };
+
+  "cloned lambda in generic function resolves owning module local extend"_test = [] {
+    const Scratch scratch("cloned-lambda-local-extend");
+    auto lib = scratch.file(
+        "fmt.dao",
+        "module lib::fmt\n\n"
+        "concept Show:\n"
+        "  fn show(self): i32\n\n"
+        "extend i32 as Show:\n"
+        "  fn show(self): i32 -> self + 100\n\n"
+        "fn deferred_show<T: Show>(x: T): fn(i32): i32 -> |delta| -> x.show() + delta\n\n"
+        "fn make_shower(x: i32): fn(i32): i32 -> deferred_show(x)\n");
+    auto app = scratch.file("main.dao",
+                            "module app::main\n"
+                            "import lib::fmt\n\n"
+                            "fn main(): i32\n"
+                            "  let f: fn(i32): i32 = fmt::make_shower(7)\n"
+                            "  return f(5) - 112\n");
+    auto built = run_daoc(scratch, {"build", "--source", lib.string(), "--source", app.string()});
     expect(built.exit_code == 0) << built.err;
     expect(exit_status(scratch.output_for(app)) == 0);
   };

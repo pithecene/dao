@@ -48,9 +48,10 @@ class ProgramIndex:
   callables: HashMap<i64>       // decl_key(module, decl) -> the callable symbol declared there
   members: HashMap<i64>         // member_key(module, decl, kind, name) -> a Param / Field symbol; kind "Local" keyed without a name
   prelude_modules: HashMap<i64> // module id (as text) -> 1 for a prelude module
+  extern_fns: HashMap<i64>      // callable symbol index (as text) -> 1 for an extern fn
 
 fn program_index_empty(): ProgramIndex
-  return ProgramIndex(HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new())
+  return ProgramIndex(HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new())
 
 fn decl_key(module_id: i64, decl_idx: i64): string
   return i64_to_string(module_id) + ":" + i64_to_string(decl_idx)

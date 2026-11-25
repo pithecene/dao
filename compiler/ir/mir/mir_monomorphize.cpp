@@ -293,6 +293,7 @@ struct SpecKeyHash {
 struct SpecializationState {
   std::unordered_map<SpecKey, MirFunction*, SpecKeyHash> cache;
   MangledTypeNames names;
+  std::vector<Diagnostic>* diagnostics = nullptr;
 };
 
 // ---------------------------------------------------------------------------
@@ -420,8 +421,11 @@ auto clone_function(const MirFunction* src,
 // mangled extend method, looking it up in the module's function list.
 // ---------------------------------------------------------------------------
 
-void fixup_method_calls(MirFunction* fn, const MirModule& module,
-                        MirContext& ctx, TypeContext& types) {
+void fixup_method_calls(MirFunction* fn,
+                        const MirModule& module,
+                        MirContext& ctx,
+                        TypeContext& types,
+                        const ModuleInfo* owner_module = nullptr) {
   // Build a name → (symbol, function) lookup from the module's functions.
   struct FnEntry {
     const Symbol* symbol;
@@ -439,7 +443,9 @@ void fixup_method_calls(MirFunction* fn, const MirModule& module,
   }
   // The module whose body is being rewritten: an `extend` of another
   // module is not in scope for it.
-  const auto* from_module = fn->symbol == nullptr ? nullptr : fn->symbol->module;
+  const auto* from_module = owner_module != nullptr
+                                ? owner_module
+                                : (fn->symbol == nullptr ? nullptr : fn->symbol->module);
 
   // Build value-type index: MirValueId.id → Type* for O(1) lookups.
   std::unordered_map<uint32_t, const Type*> value_types;
@@ -961,9 +967,25 @@ auto specialize_call_site(MirInst* inst,
   auto* specialized = clone_function(git->second, subst, new_sym, ctx, types, cloned_lambdas);
 
   // Resolve method calls on newly-concrete types.
-  fixup_method_calls(specialized, module, ctx, types);
+  fixup_method_calls(specialized, module, ctx, types, new_sym->module);
   for (auto* lam_fn : cloned_lambdas) {
-    fixup_method_calls(lam_fn, module, ctx, types);
+    size_t param_count = 0;
+    while (param_count < lam_fn->locals.size() && lam_fn->locals[param_count].is_param) {
+      ++param_count;
+    }
+    for (uint32_t ci = 0; ci < lam_fn->capture_count && param_count + ci < lam_fn->locals.size();
+         ++ci) {
+      const auto& cap_local = lam_fn->locals[param_count + ci];
+      if (holds_generator(cap_local.type) && state.diagnostics != nullptr) {
+        std::string cap_name = cap_local.symbol != nullptr ? std::string(cap_local.symbol->name)
+                                                           : std::string("<capture>");
+        state.diagnostics->push_back(
+            Diagnostic::error(lam_fn->span,
+                              "cannot capture '" + cap_name +
+                                  "' in a lambda: generator values cannot be captured by value"));
+      }
+    }
+    fixup_method_calls(lam_fn, module, ctx, types, new_sym->module);
     module.functions.push_back(lam_fn);
   }
 
@@ -1425,7 +1447,7 @@ auto monomorphize(
   // below runs regardless, to catch synthetic residue.
 
   // Specialization cache: (generic fn, type args) → specialized fn.
-  SpecializationState state;
+  SpecializationState state{.cache = {}, .names = {}, .diagnostics = &result.diagnostics};
   const auto copy_out_hooks = find_copy_out_hooks(module, generic_templates);
   if (copy_out_hooks.copy_out_template != nullptr && copy_out_hooks.copy_out_string == nullptr) {
     // A string could not be copied out; say so rather than leave the

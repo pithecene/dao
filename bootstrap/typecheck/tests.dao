@@ -143,7 +143,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 350
+  let total: i32 = 353
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -2186,6 +2186,12 @@ fn main(): i32
   if tc_expect_program_errors("qualified_call_names_the_overload_of_its_arity", Vector<graph::SourceInput>::new().push(graph::SourceInput("lib.dao", "module lib::m\nfn g(a: i32): i32 -> a\nfn g(a: i32, b: i32): i32 -> a + b\n", false)), "module app::main\nimport lib::m\n\nfn f(): i32 -> m::g(1) + m::g(1, 2)\n", "main.dao", 0):
     pass_count = pass_count + 1
   if tc_expect_program_errors("prelude_overload_export_is_its_own_module", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/one.dao", "module core::one\nfn g(a: i32): i32 -> a\n", true)).push(graph::SourceInput("stdlib/core/two.dao", "module core::two\nfn g(a: i32, b: i32): i32 -> a + b\n", true)), "module app::main\nimport core::two\n\nfn f(): i32 -> two::g(1)\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("imported_extern_rejects_lambda_callback", Vector<graph::SourceInput>::new().push(graph::SourceInput("ffi.dao", "module lib::ffi\nextern fn apply(cb: fn(i32): i32, x: i32): i32\n", false)), "module app::main\nimport lib::ffi\n\nfn main(): i32 -> ffi::apply(|x| -> x + 1, 5)\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("imported_extern_rejects_closure_var_callback", Vector<graph::SourceInput>::new().push(graph::SourceInput("ffi.dao", "module lib::ffi\nextern fn apply(cb: fn(i32): i32, x: i32): i32\n", false)), "module app::main\nimport lib::ffi\n\nfn main(): i32\n  let cb: fn(i32): i32 = |x| -> x + 1\n  return ffi::apply(cb, 5)\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("imported_extern_accepts_named_fn_callback", Vector<graph::SourceInput>::new().push(graph::SourceInput("ffi.dao", "module lib::ffi\nextern fn apply(cb: fn(i32): i32, x: i32): i32\n", false)), "module app::main\nimport lib::ffi\n\nfn inc(x: i32): i32 -> x + 1\n\nfn main(): i32 -> ffi::apply(inc, 5)\n", "main.dao", 0):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------

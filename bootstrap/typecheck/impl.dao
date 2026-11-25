@@ -138,7 +138,12 @@ fn registry_new(symbols: Vector<Symbol>, modules: Vector<graph::ModuleEntry>): R
     if me.is_prelude:
       preludes = preludes.set(i64_to_string(me.module_id), to_i64(1))
     mi = mi + 1
-  return Registry(HashMap<i64>::new(), HashMap<i64>::new(), conformance_empty(), HashMap<i64>::new(), ProgramIndex(type_syms, callables, members, preludes), MadeTypes(HashMap<i64>::new(), HashMap<i64>::new(), Vector<i64>::new(), HashMap<i64>::new(), Vector<i64>::new()))
+  return Registry(HashMap<i64>::new(), HashMap<i64>::new(), conformance_empty(), HashMap<i64>::new(), ProgramIndex(type_syms, callables, members, preludes, HashMap<i64>::new()), MadeTypes(HashMap<i64>::new(), HashMap<i64>::new(), Vector<i64>::new(), HashMap<i64>::new(), Vector<i64>::new()))
+
+fn reg_add_extern_fn(rg: Registry, sym_idx: i64): Registry
+  let idx: ProgramIndex = rg.index
+  idx.extern_fns = idx.extern_fns.set(i64_to_string(sym_idx), to_i64(1))
+  return Registry(rg.expr_types, rg.variant_set, rg.conform, rg.methods, idx, rg.made)
 
 fn conformance_empty(): Conformance
   return Conformance(HashMap<i64>::new(), Vector<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new())
@@ -591,7 +596,9 @@ fn make_fn_value_type(ts: TS, param_tis: Vector<i64>, ret_ti: i64): TypeR
   let fname: string = "fn(" + spell_args(ts, param_tis, spelling_depth() - 1) + "): " + spell_type(ts, ret_ti, spelling_depth() - 1)
   let start: i64 = ts.type_info.length()
   let r: TS = ts_push_info_run(ts, param_tis)
-  return ts_add_type(r, DaoType(TypeKind::TFunction, to_i64(0), fname, to_i64(-1), start, param_tis.length(), ret_ti, to_i64(-1)))
+  let base: DaoType = r.types.get(to_i64(0))
+  base.name = fname
+  return ts_add_type(r, fn_type_with(base, start, param_tis.length(), ret_ti))
 
 fn is_generator_kind(t: DaoType): bool
   match t.kind:
@@ -1759,6 +1766,7 @@ fn tc_register_functions(ts: TS, decls: Vector<i64>): TS
     let decl_idx: i64 = decls.get(i)
     let node: parser::Node = r.tc.nodes.get(decl_idx)
     let is_fn: bool = false
+    let is_ext_fn: bool = false
     let fn_name_tidx: i64 = to_i64(-1)
     let fn_params_lp: i64 = to_i64(-1)
     let fn_ret_type: i64 = to_i64(-1)
@@ -1775,6 +1783,7 @@ fn tc_register_functions(ts: TS, decls: Vector<i64>): TS
         fn_ret_type = rtn
       parser::Node::ExternFnD(nt, tp, plp, rtn):
         is_fn = true
+        is_ext_fn = true
         fn_name_tidx = nt
         fn_params_lp = plp
         fn_ret_type = rtn
@@ -1782,6 +1791,9 @@ fn tc_register_functions(ts: TS, decls: Vector<i64>): TS
       let tr: TypeR = tc_register_fn_sig_core(r, decl_idx, fn_name_tidx, fn_params_lp, fn_ret_type, to_i64(-1))
       r = tr.ts
       let fn_sym: i64 = find_callable_sym_by_decl(r, decl_idx)
+      if is_ext_fn:
+        if fn_sym >= 0:
+          r.reg = reg_add_extern_fn(r.reg, fn_sym)
       fn_syms = fn_syms.push(fn_sym)
       fn_type_idxs = fn_type_idxs.push(tr.type_idx)
     i = i + 1
@@ -3644,6 +3656,14 @@ fn callee_symbol(ts: TS, callee: i64): i64
       let last: i64 = lookup_use(ts, segs.get(segs.length() - 1))
       if last >= 0:
         return last
+      if segs.length() >= 2:
+        let head_sym: i64 = lookup_use(ts, segs.get(0))
+        if head_sym >= 0:
+          let head_obj: Symbol = ts.tc.symbols.get(head_sym)
+          if symbol_kind_name(head_obj.kind) == "Module":
+            let exp_sym: i64 = tc_export_lookup(ts, head_obj.decl_node, ts_tok_name(ts, segs.get(1)))
+            if exp_sym >= 0:
+              return exp_sym
       // `Type::method`: the resolver binds the type and leaves the
       // method to the checker, which finds it in the dispatch index as
       // the qualified name itself was typed.
@@ -4131,23 +4151,15 @@ fn is_lambda_expr(ts: TS, node_idx: i64): bool
 
 fn is_extern_callable(ts: TS, callee: i64): bool
   let sym_idx: i64 = callee_symbol(ts, callee)
-  if sym_idx < 0 or sym_idx >= ts.tc.symbols.length():
+  if sym_idx < 0:
     return false
-  let sym: Symbol = ts.tc.symbols.get(sym_idx)
-  if sym.owner_module_id != ts.tc.module_id:
-    return false
-  if sym.decl_node < 0 or sym.decl_node >= ts.tc.nodes.length():
-    return false
-  match ts.tc.nodes.get(sym.decl_node):
-    parser::Node::ExternFnD(n, tp, p, rt):
-      return true
-  return false
+  return ts.reg.index.extern_fns.contains(i64_to_string(sym_idx))
 
 fn is_named_fn_expr(ts: TS, node_idx: i64): bool
   let sym_idx: i64 = callee_symbol(ts, node_idx)
   if sym_idx < 0 or sym_idx >= ts.tc.symbols.length():
     return false
-  return is_method_symbol(ts.tc.symbols.get(sym_idx))
+  return symbol_kind_name(ts.tc.symbols.get(sym_idx).kind) == "Function"
 
 fn check_lambda_no_gen_captures(ts: TS, expr_idx: i64, bound_syms: HashMap<i64>): TS
   if expr_idx < 0 or expr_idx >= ts.tc.nodes.length():
@@ -4451,8 +4463,11 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
           if is_ext_call:
             if param_ti >= 0 and param_ti < r.types.length():
               if is_function_kind(r.types.get(param_ti)):
-                if is_named_fn_expr(r, arg_node) == false:
-                  r = ts_add_diag(r, ts_node_span(r, arg_node), "only named functions can be passed as a C function pointer")
+                if is_lambda_expr(r, arg_node):
+                  r = ts_add_diag(r, ts_node_span(r, arg_node), "lambda cannot be passed as a C function pointer; use a named function instead")
+                else:
+                  if is_named_fn_expr(r, arg_node) == false:
+                    r = ts_add_diag(r, ts_node_span(r, arg_node), "only named functions can be passed as a C function pointer")
           let arg_ti: i64 = get_expr_type(r, arg_node)
           if arg_ti >= 0:
             if param_ti >= 0:

@@ -2112,6 +2112,35 @@ suite<"closures"> closures = [] {
     expect(contains(ir, "call ptr @__dao_mem_alloc(")) << ir;
     expect(contains(ir, "%dao.fn")) << ir;
   };
+
+  "function value equality and inequality compare code and env pointers"_test = [] {
+    LlvmTestPipeline pipe("fn same(a: fn(i32): i32, b: fn(i32): i32): bool -> a == b\n"
+                          "fn diff(a: fn(i32): i32, b: fn(i32): i32): bool -> a != b\n"
+                          "fn inc(x: i32): i32 -> x + 1\n"
+                          "fn main(): i32\n"
+                          "  if same(inc, inc) and diff(inc, |x| -> x + 2):\n"
+                          "    return 0\n"
+                          "  return 1\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << ir;
+    expect(contains(ir, "extractvalue %dao.fn")) << ir;
+    expect(contains(ir, "icmp eq ptr")) << ir;
+    expect(contains(ir, "icmp ne ptr")) << ir;
+  };
+
+  "extern fn returning function pointer used as first-class value adapts result in thunk"_test =
+      [] {
+        LlvmTestPipeline pipe("extern fn get_op(): fn(i32): i32\n"
+                              "fn main(): i32\n"
+                              "  let f: fn(): fn(i32): i32 = get_op\n"
+                              "  let op: fn(i32): i32 = f()\n"
+                              "  return op(41)\n");
+        auto ir = pipe.ir();
+        expect(!pipe.has_errors()) << ir;
+        expect(contains(ir, "define internal %dao.fn @get_op.thunk(ptr %env)")) << ir;
+        expect(contains(ir, "call ptr @get_op()")) << ir;
+        expect(contains(ir, "__dao.c_fn_adapter.")) << ir;
+      };
 };
 
 // NOLINTEND(readability-magic-numbers)

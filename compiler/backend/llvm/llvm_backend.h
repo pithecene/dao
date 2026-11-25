@@ -184,6 +184,10 @@ private:
   auto get_or_create_fn_thunk(const Symbol& sym, const TypeFunction* sem_fn, Span span)
       -> llvm::Function*;
   auto get_or_create_c_fn_adapter(const TypeFunction* sem_fn, Span span) -> llvm::Function*;
+  auto wrap_c_fn_ptr(llvm::IRBuilder<>& builder,
+                     llvm::Value* raw_c_fn,
+                     const TypeFunction* sem_fn,
+                     Span span) -> llvm::Value*;
   auto lower_call(const MirCall& p, const MirInst& inst, FunctionState& state) -> bool;
   auto lower_construct(const MirConstruct& p, const MirInst& inst, FunctionState& state) -> bool;
   auto lower_enum_construct(const MirEnumConstruct& p, const MirInst& inst, FunctionState& state)

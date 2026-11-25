@@ -407,7 +407,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 51
+  let total: i32 = 54
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -1185,6 +1185,44 @@ fn main(): i32
       print("FAIL closure_escape_and_diverging_match: closure escape accepted")
   else:
     print("FAIL closure_escape_and_diverging_match: diverging match rejected " + diags_text(r48a.diags))
+
+  // Test 49: %dao.fn equality and inequality compare both fn_ptr and env_ptr.
+  let r49: LlvmTextResult = lower_source_to_llvm_text("fn same(a: fn(i32): i32, b: fn(i32): i32): bool -> a == b\n\nfn diff(a: fn(i32): i32, b: fn(i32): i32): bool -> a != b\n\nfn inc(x: i32): i32 -> x + 1\n\nfn dec(x: i32): i32 -> x - 1\n\nfn make_adder(k: i32): fn(i32): i32 -> |x| -> x + k\n\nfn main(): i32\n  let c1: fn(i32): i32 = make_adder(5)\n  let c2: fn(i32): i32 = make_adder(5)\n  if same(inc, inc) == false:\n    return 1\n  if diff(inc, dec) == false:\n    return 2\n  if same(c1, c1) == false:\n    return 3\n  if diff(c1, c2) == false:\n    return 4\n  return 0\n")
+  write_failures = write_failures + emit_ir("callable_equality", r49, 0)
+  if r49.ok:
+    print("PASS callable_equality_and_inequality")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL callable_equality_and_inequality: " + diags_text(r49.diags))
+
+  // Test 50: extern fn returning a function pointer used as a first-class value
+  // wraps its raw ptr result with a C function adapter inside the thunk.
+  let r50: LlvmTextResult = lower_source_to_llvm_text("extern fn get_op(): fn(i32): i32\n\nfn take_maker(): fn(): fn(i32): i32 -> get_op\n")
+  write_failures = write_failures + emit_ir("extern_fn_returning_fn_value_thunk", r50, -1)
+  if r50.ok:
+    if check_contains(r50, "get_op.thunk", "extern_fn_returning_fn_value_thunk"):
+      if check_contains(r50, "__dao.c_fn_adapter.", "extern_fn_returning_fn_value_thunk"):
+        print("PASS extern_fn_returning_fn_value_thunk")
+        pass_count = pass_count + 1
+      else:
+        print("FAIL extern_fn_returning_fn_value_thunk: missing C adapter")
+    else:
+      print("FAIL extern_fn_returning_fn_value_thunk: missing thunk")
+  else:
+    print("FAIL extern_fn_returning_fn_value_thunk: " + diags_text(r50.diags))
+
+  // Test 51: a cloned lambda inside a generic function resolves local extend
+  // methods declared in the template's owning module.
+  let prog51: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  prog51 = prog51.push(graph::SourceInput("fmt.dao", "module demo::fmt\n\nconcept Show:\n  fn show(self): i32\n\nextend i32 as Show:\n  fn show(self): i32 -> self + 100\n\nfn deferred_show<T: Show>(x: T): fn(i32): i32 -> |delta| -> x.show() + delta\n\nfn make_shower(x: i32): fn(i32): i32 -> deferred_show(x)\n", false))
+  prog51 = prog51.push(graph::SourceInput("main.dao", "module demo::main\nimport demo::fmt\n\nfn main(): i32\n  let f: fn(i32): i32 = fmt::make_shower(7)\n  return f(5) - 112\n", false))
+  let r51: LlvmTextResult = lower_program_to_llvm_text(prog51)
+  write_failures = write_failures + emit_ir("cloned_lambda_local_extend_dispatch", r51, 0)
+  if r51.ok:
+    print("PASS cloned_lambda_local_extend_dispatch")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL cloned_lambda_local_extend_dispatch: " + diags_text(r51.diags))
 
   // -----------------------------------------------------------------
   // Summary

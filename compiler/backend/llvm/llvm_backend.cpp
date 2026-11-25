@@ -915,6 +915,32 @@ auto LlvmBackend::lower_binary(const MirBinary& p, const MirInst& inst,
     return result != nullptr;
   }
 
+  // Fat-callable (`%dao.fn = { ptr, ptr }`) equality / inequality: compare
+  // both the code pointer and the environment pointer.
+  if ((operand_type != nullptr && operand_type->kind() == TypeKind::Function) ||
+      lhs->getType() == types_.callable_type()) {
+    if (p.op == BinaryOp::EqEq || p.op == BinaryOp::BangEq) {
+      auto* lhs_code = state.builder->CreateExtractValue(lhs, 0, "fn.lhs.code");
+      auto* lhs_env = state.builder->CreateExtractValue(lhs, 1, "fn.lhs.env");
+      auto* rhs_code = state.builder->CreateExtractValue(rhs, 0, "fn.rhs.code");
+      auto* rhs_env = state.builder->CreateExtractValue(rhs, 1, "fn.rhs.env");
+      if (p.op == BinaryOp::EqEq) {
+        auto* code_eq = state.builder->CreateICmpEQ(lhs_code, rhs_code, "fn.code.eq");
+        auto* env_eq = state.builder->CreateICmpEQ(lhs_env, rhs_env, "fn.env.eq");
+        result = state.builder->CreateAnd(code_eq, env_eq, "fn.eq");
+      } else {
+        auto* code_ne = state.builder->CreateICmpNE(lhs_code, rhs_code, "fn.code.ne");
+        auto* env_ne = state.builder->CreateICmpNE(lhs_env, rhs_env, "fn.env.ne");
+        result = state.builder->CreateOr(code_ne, env_ne, "fn.ne");
+      }
+      state.values[inst.result.id] = result;
+      state.value_types[inst.result.id] = inst.type;
+      return true;
+    }
+    emit_diagnostic(inst.span, "unsupported operator on function type");
+    return false;
+  }
+
   switch (p.op) {
   case BinaryOp::Add:
     if (is_float) {
@@ -1489,10 +1515,34 @@ auto LlvmBackend::get_or_create_fn_thunk(const Symbol& sym, const TypeFunction* 
   auto* call = builder.CreateCall(target_fn->getFunctionType(), target_fn, forward_args);
   if (thunk_type->getReturnType()->isVoidTy()) {
     builder.CreateRetVoid();
+  } else if (extern_signatures_.contains(target_fn->getName().str()) &&
+             sem_fn->return_type() != nullptr &&
+             sem_fn->return_type()->kind() == TypeKind::Function &&
+             call->getType()->isPointerTy()) {
+    auto* fat =
+        wrap_c_fn_ptr(builder, call, static_cast<const TypeFunction*>(sem_fn->return_type()), span);
+    if (fat == nullptr) {
+      thunk_fn->eraseFromParent();
+      return nullptr;
+    }
+    builder.CreateRet(fat);
   } else {
     builder.CreateRet(call);
   }
   return thunk_fn;
+}
+
+auto LlvmBackend::wrap_c_fn_ptr(llvm::IRBuilder<>& builder,
+                                llvm::Value* raw_c_fn,
+                                const TypeFunction* sem_fn,
+                                Span span) -> llvm::Value* {
+  auto* adapter = get_or_create_c_fn_adapter(sem_fn, span);
+  if (adapter == nullptr) {
+    return nullptr;
+  }
+  llvm::Value* fat = llvm::UndefValue::get(types_.callable_type());
+  fat = builder.CreateInsertValue(fat, adapter, 0, "c_fn.code");
+  return builder.CreateInsertValue(fat, raw_c_fn, 1, "c_fn.env");
 }
 
 auto LlvmBackend::get_or_create_c_fn_adapter(const TypeFunction* sem_fn, Span span)
@@ -1505,9 +1555,11 @@ auto LlvmBackend::get_or_create_c_fn_adapter(const TypeFunction* sem_fn, Span sp
   if (adapter_type == nullptr) {
     return nullptr;
   }
+  const bool returns_c_fn =
+      sem_fn->return_type() != nullptr && sem_fn->return_type()->kind() == TypeKind::Function;
   std::vector<llvm::Type*> raw_params(adapter_type->param_begin() + 1, adapter_type->param_end());
-  auto* raw_c_type =
-      llvm::FunctionType::get(adapter_type->getReturnType(), raw_params, /*isVarArg=*/false);
+  auto* raw_ret = returns_c_fn ? llvm::PointerType::getUnqual(ctx_) : adapter_type->getReturnType();
+  auto* raw_c_type = llvm::FunctionType::get(raw_ret, raw_params, /*isVarArg=*/false);
 
   auto* adapter_fn = llvm::Function::Create(
       adapter_type, llvm::Function::InternalLinkage, adapter_name, module_.get());
@@ -1526,6 +1578,14 @@ auto LlvmBackend::get_or_create_c_fn_adapter(const TypeFunction* sem_fn, Span sp
   auto* call = builder.CreateCall(raw_c_type, c_fn_ptr, forward_args);
   if (adapter_type->getReturnType()->isVoidTy()) {
     builder.CreateRetVoid();
+  } else if (returns_c_fn) {
+    auto* fat =
+        wrap_c_fn_ptr(builder, call, static_cast<const TypeFunction*>(sem_fn->return_type()), span);
+    if (fat == nullptr) {
+      adapter_fn->eraseFromParent();
+      return nullptr;
+    }
+    builder.CreateRet(fat);
   } else {
     builder.CreateRet(call);
   }
@@ -1881,14 +1941,11 @@ auto LlvmBackend::lower_call(const MirCall& p, const MirInst& inst, FunctionStat
     // invoke it with the uniform fat-callable convention.
     if (callee_is_user_extern && inst.type != nullptr && inst.type->kind() == TypeKind::Function &&
         call->getType()->isPointerTy()) {
-      auto* adapter =
-          get_or_create_c_fn_adapter(static_cast<const TypeFunction*>(inst.type), inst.span);
-      if (adapter == nullptr) {
+      auto* fat = wrap_c_fn_ptr(
+          *state.builder, call, static_cast<const TypeFunction*>(inst.type), inst.span);
+      if (fat == nullptr) {
         return false;
       }
-      llvm::Value* fat = llvm::UndefValue::get(types_.callable_type());
-      fat = state.builder->CreateInsertValue(fat, adapter, 0, "c_fn.code");
-      fat = state.builder->CreateInsertValue(fat, call, 1, "c_fn.env");
       state.values[inst.result.id] = fat;
       state.value_types[inst.result.id] = inst.type;
       return true;
