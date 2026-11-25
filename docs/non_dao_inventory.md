@@ -13,19 +13,18 @@ so a machine with no Dao on it can always rebuild the language:
 | Self-hosted | `bootstrap/`, in Dao | compiles itself, and still uses LLVM and the C runtime |
 | Fully hosted | not yet written | all Dao, with its own runtime and code generation |
 
-Line counts reflect the current branch over `d0a18ea`, on 2026-11-24.  The table counts
+Line counts reflect the current branch over `22b02b9`, on 2026-11-24.  The table counts
 32,313 lines of authored Dao for comparison.
 
 ## Programs
 
 | Stopgap | Language | Files | Lines | Replacement |
 |---|---|---|---|---|
-| `compiler/` bootstrap tier and its tests | C++ | 108 | 40,128 | nothing: this tier stays permanently |
+| `compiler/` bootstrap tier and its tests | C++ | 112 | 41,385 | nothing: this tier stays permanently |
 | `runtime/` allocator, strings, I/O and generators | C | 11 | 1,632 | Dao over `Ptr<T>` and `mode unsafe` in the fully hosted tier, which needs direct system calls from Dao |
 | `tools/playground/compiler_service/` | C++ | 20 | 3,300 | a Dao service, which needs sockets and HTTP in the standard library |
 | `tools/playground/frontend/` | TypeScript, CSS, HTML | 20 | 1,660 | a Dao browser target, which does not exist |
-| `examples/forecast_device/metal_runner.swift` | Swift | 1 | 481 | Dao lowering kernels, validating plan provenance and buffer lifetimes, and driving a device over a GPU target |
-| Metal kernels inside that runner | Metal | 1 | 9 | one Dao definition compiled for the CPU and the GPU |
+| `examples/forecast_device/metal_runner.swift` | Swift | 1 | 654 | Dao validating kernel manifests and buffer lifetimes and driving Metal command queues directly |
 | `examples/ffi/` | C | 3 | 177 | the C side of an interoperability test, which is foreign by design and goes only if C interoperability does |
 
 ## Build and Scripts
@@ -35,8 +34,8 @@ Line counts reflect the current branch over `d0a18ea`, on 2026-11-24.  The table
 | `bootstrap/assemble.sh` | Shell | 113 | real modules, one import boundary at a time, after which assembly goes away |
 | `bootstrap/stage2.sh`, `audit_closure.sh`, `validate_ir.sh` | Shell | 995 | Dao programs, which need a process API in the standard library |
 | `compiler/driver/multifile_build_test.sh`, `tools/playground/dev.sh` | Shell | 194 | the same process API |
-| `Taskfile.yml` | YAML for Task | 208 | a build tool written in Dao |
-| `CMakeLists.txt` files and `CMakePresets.json` | CMake | 519 | stays with the bootstrap tier, and a Dao build tool serves the other tiers |
+| `Taskfile.yml` | YAML for Task | 209 | a build tool written in Dao |
+| `CMakeLists.txt` files and `CMakePresets.json` | CMake | 565 | stays with the bootstrap tier, and a Dao build tool serves the other tiers |
 | `conanfile.py`, `profiles/` | Python, Conan | 88 | stays with the bootstrap tier |
 
 ## External Dependencies

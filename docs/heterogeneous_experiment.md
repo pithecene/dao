@@ -86,18 +86,28 @@ on one shared executor with equal backfill throughput, while catching lost
 cutoffs, model drift, dropped or duplicated callbacks, and premature buffer
 releases that handwritten glue cannot diagnose.
 
-## Architectural Boundary
+## Single-Source CPU and Metal Codegen
 
-**Ordinary Dao expresses the plan.** Functions, classes, and `enum class` carry
-the typed DAG, equivalence check, and complete cache key without new syntax.
+Both CPU native code (`daoc build`) and Metal compute kernels (`dao_msl_emit`)
+now lower from the same authored functions (`score_v1`, `high_wind`, and
+`adjust`) in `examples/forecast_plans.dao` without a second kernel body or
+name-based template lookup:
 
-**Compiler codegen is the remaining gap.** Function `score_v1` in Dao and `score_v1`
-in Metal are still separate bodies tied together by tests and explicit `(kernel, model)`
-records. Generating both CPU code and a device kernel from one verified Dao
-function definition is the next bounded experiment once this semantic model lands.
+- Backend `MslBackend` (`compiler/backend/msl/`) consumes `MirModule` over a verified pure scalar elementwise slice (`(i32...) -> i32`, `i32` and `bool` locals, integer and boolean constants, checked unary and binary operators, and acyclic multi-block `MirBr` / `MirCondBr` / `MirReturn` control flow).
+- Every signed `i32` `+`, `-`, `*`, unary `-`, `/`, and `%` in generated Metal lowers through 64-bit `long` range checks (`dao_add_i32`, `dao_sub_i32`, `dao_mul_i32`, `dao_div_i32`, `dao_rem_i32`, `dao_neg_i32`) backed by an `atomic_uint` status buffer, preserving `CONTRACT_NUMERIC_SEMANTICS.md` overflow traps across CPU and GPU.
+- Unsupported parameter or return types, calls, raw pointers, `mode` or `resource` blocks, and cyclic control flow fail closed with source coordinates.
+- Manifest output (`forecast_kernels.tsv`) binds module identity, operation name, `file:line:col` origin, target (`metal-msl-2.4`), signature, and effect profile (`pure_scalar_elementwise_checked_i32`), which `metal_runner.swift` validates before pipeline creation and dispatch.
+
+### Layer Attribution
+
+This experiment required zero new Dao syntax or execution-mode surface:
+
+- **Ordinary Dao library code** already expresses typed plan steps, point-in-time read provenance, observation vectors, liveness checks, and complete cache keys.
+- **Existing typed MIR** already preserves concrete `i32` and `bool` types, acyclic control flow, and `SourceMap` origins needed to emit verified device kernels.
+- **Target-specific compiler backend (`compiler/backend/msl/`)** owns kernel eligibility validation, checked `i32` status-buffer lowering, and provenance manifests.
 
 ## Stopgap Runner
 
-The Swift runner and its Metal kernels are stopgaps recorded in
-`docs/non_dao_inventory.md` until Dao lowers a kernel and drives a device
-natively.
+The Swift host runner in `examples/forecast_device/metal_runner.swift` remains a
+stopgap recorded in `docs/non_dao_inventory.md` until Dao drives Metal command
+queues directly, while all handwritten Metal shader code has been retired.
