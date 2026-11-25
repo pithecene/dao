@@ -407,7 +407,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 49
+  let total: i32 = 51
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -1152,6 +1152,39 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL entry_and_extern_abi_fail_closed: three mains ok=" + bool_to_string(r46.ok) + ", extern ok=" + bool_to_string(r46b.ok) + " " + diags_text(r46b.diags))
+
+  // Test 47: uniform %dao.fn callables, by-value lexical captures, generic
+  // callbacks with inferred return types, and nominal generic Generator yield.
+  let r47: LlvmTextResult = lower_source_to_llvm_text("class Indexed<T>:\n  index: i64\n  value: T\n\nfn single_indexed<T>(v: T): Generator<Indexed<T>>\n  let zero: i64 = 0\n  yield Indexed(zero, v)\n\nfn apply<T, U>(x: T, f: fn(T): U): U -> f(x)\n\nfn make_adder(k: i32): fn(i32): i32 -> |x| -> x + k\n\nfn main(): i32\n  let base: i32 = 10\n  let snap: fn(i32): i32 = |x| -> x + base\n  base = 99\n  let add5: fn(i32): i32 = make_adder(5)\n  let gsum: i32 = 0\n  for item in single_indexed(4):\n    gsum = gsum + item.value\n  return snap(5) + add5(3) + apply(7, |n| -> n * 2) + gsum - 41\n")
+  write_failures = write_failures + emit_ir("closures_and_generic_callbacks", r47, 0)
+  if r47.ok:
+    if check_contains(r47, "%dao.fn = type { ptr, ptr }", "closures_and_generic_callbacks"):
+      print("PASS closures_and_generic_callbacks")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL closures_and_generic_callbacks: missing %dao.fn type")
+  else:
+    print("FAIL closures_and_generic_callbacks: " + diags_text(r47.diags))
+
+  // Test 48: exhaustive match with a diverging panic arm needs no trailing
+  // return, and closures cannot escape a `resource memory` block.
+  let prog48: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  prog48 = prog48.push(graph::SourceInput("stdlib/core/panic.dao", "module core::panic\nextern fn __dao_panic(msg: string): void\nfn panic(msg: string): void -> __dao_panic(msg)\n", true))
+  prog48 = prog48.push(graph::SourceInput("main.dao", "module demo::main\n\nenum class Outcome:\n  Done(val: i32)\n  Failed\n\nfn unwrap(o: Outcome): i32\n  match o:\n    Outcome::Done(val):\n      return val\n    Outcome::Failed:\n      panic(\"failed\")\n\nfn main(): i32\n  return unwrap(Outcome::Done(val = 9)) - 9\n", false))
+  let r48a: LlvmTextResult = lower_program_to_llvm_text(prog48)
+  write_failures = write_failures + emit_ir("diverging_match_arm", r48a, 0)
+  let r48b: LlvmTextResult = lower_source_to_llvm_text("fn id(x: i32): i32 -> x\n\nfn main(): i32\n  let f: fn(i32): i32 = id\n  resource memory scratch =>\n    let k: i32 = 5\n    f = |x| -> x + k\n  return f(1)\n")
+  if r48a.ok:
+    if r48b.ok == false:
+      if contains_substring(diags_text(r48b.diags), "cannot be copied out"):
+        print("PASS closure_escape_and_diverging_match")
+        pass_count = pass_count + 1
+      else:
+        print("FAIL closure_escape_and_diverging_match: wrong escape diag " + diags_text(r48b.diags))
+    else:
+      print("FAIL closure_escape_and_diverging_match: closure escape accepted")
+  else:
+    print("FAIL closure_escape_and_diverging_match: diverging match rejected " + diags_text(r48a.diags))
 
   // -----------------------------------------------------------------
   // Summary

@@ -9,6 +9,7 @@
 #include "support/variant.h"
 
 #include <string>
+#include <unordered_set>
 
 namespace dao {
 
@@ -231,249 +232,236 @@ void MirBuilder::lower_stmt(const HirStmt& stmt) {
     return; // Dead code after terminator.
   }
 
-  std::visit(overloaded{
-      [&](const HirLet& let_stmt) {
-        auto local_id =
-            declare_local(let_stmt.symbol, let_stmt.type, stmt.span);
+  std::visit(
+      overloaded{
+          [&](const HirLet& let_stmt) {
+            auto local_id = declare_local(let_stmt.symbol, let_stmt.type, stmt.span);
 
-        if (let_stmt.initializer != nullptr) {
-          auto val = lower_expr_value(*let_stmt.initializer);
-          auto* place = ctx_.alloc<MirPlace>();
-          place->local = local_id;
-          emit_effect(stmt.span, MirStore{place, val});
-        }
-      },
-      [&](const HirAssign& assign) {
-        auto place = lower_expr_place(*assign.target);
-        auto val = lower_expr_value(*assign.value);
-        emit_effect(stmt.span,
-                    MirStore{ctx_.alloc<MirPlace>(place), val});
-        // A store rooted at a binding a resource block copies out marks
-        // it dirty for that block: its exit copies only what was stored.
-        for (const auto& region : active_regions_) {
-          for (const auto& escape : region.escapes) {
-            if (escape.binding.id == place.local.id) {
-              auto set = emit_value(types_.bool_type(), stmt.span, MirConstBool{true});
-              auto* flag_place = ctx_.alloc<MirPlace>();
-              flag_place->local = escape.flag;
-              emit_effect(stmt.span, MirStore{flag_place, set});
+            if (let_stmt.initializer != nullptr) {
+              auto val = lower_expr_value(*let_stmt.initializer);
+              auto* place = ctx_.alloc<MirPlace>();
+              place->local = local_id;
+              emit_effect(stmt.span, MirStore{place, val});
             }
-          }
-        }
-      },
-      [&](const HirIf& hir_if) {
-        auto cond_val = lower_expr_value(*hir_if.condition);
+          },
+          [&](const HirAssign& assign) {
+            auto place = lower_expr_place(*assign.target);
+            auto val = lower_expr_value(*assign.value);
+            emit_effect(stmt.span, MirStore{ctx_.alloc<MirPlace>(place), val});
+            // A store rooted at a binding a resource block copies out marks
+            // it dirty for that block: its exit copies only what was stored.
+            for (const auto& region : active_regions_) {
+              for (const auto& escape : region.escapes) {
+                if (escape.binding.id == place.local.id) {
+                  auto set = emit_value(types_.bool_type(), stmt.span, MirConstBool{true});
+                  auto* flag_place = ctx_.alloc<MirPlace>();
+                  flag_place->local = escape.flag;
+                  emit_effect(stmt.span, MirStore{flag_place, set});
+                }
+              }
+            }
+          },
+          [&](const HirIf& hir_if) {
+            auto cond_val = lower_expr_value(*hir_if.condition);
 
-        auto* then_bb = fresh_block();
-        bool has_else = !hir_if.else_body.empty();
-        auto* else_bb = has_else ? fresh_block() : nullptr;
+            auto* then_bb = fresh_block();
+            bool has_else = !hir_if.else_body.empty();
+            auto* else_bb = has_else ? fresh_block() : nullptr;
 
-        MirBlock* merge_bb = nullptr;
-        if (!has_else) {
-          merge_bb = fresh_block();
-          else_bb = merge_bb;
-        }
-
-        emit_terminator(stmt.span,
-                        MirCondBr{cond_val, then_bb->id, else_bb->id});
-
-        // Then block.
-        switch_to_block(then_bb);
-        for (const auto* s : hir_if.then_body) {
-          lower_stmt(*s);
-        }
-        bool then_terminated = block_terminated();
-        if (!then_terminated) {
-          if (merge_bb == nullptr) {
-            merge_bb = fresh_block();
-          }
-          emit_terminator(stmt.span, MirBr{merge_bb->id});
-        }
-
-        // Else block.
-        if (has_else) {
-          switch_to_block(else_bb);
-          for (const auto* s : hir_if.else_body) {
-            lower_stmt(*s);
-          }
-          if (!block_terminated()) {
-            if (merge_bb == nullptr) {
+            MirBlock* merge_bb = nullptr;
+            if (!has_else) {
               merge_bb = fresh_block();
+              else_bb = merge_bb;
             }
-            emit_terminator(stmt.span, MirBr{merge_bb->id});
-          }
-        }
 
-        if (merge_bb != nullptr) {
-          switch_to_block(merge_bb);
-        } else {
-          current_block_ = nullptr;
-        }
+            emit_terminator(stmt.span, MirCondBr{cond_val, then_bb->id, else_bb->id});
+
+            // Then block.
+            switch_to_block(then_bb);
+            for (const auto* s : hir_if.then_body) {
+              lower_stmt(*s);
+            }
+            bool then_terminated = block_terminated();
+            if (!then_terminated) {
+              if (merge_bb == nullptr) {
+                merge_bb = fresh_block();
+              }
+              emit_terminator(stmt.span, MirBr{merge_bb->id});
+            }
+
+            // Else block.
+            if (has_else) {
+              switch_to_block(else_bb);
+              for (const auto* s : hir_if.else_body) {
+                lower_stmt(*s);
+              }
+              if (!block_terminated()) {
+                if (merge_bb == nullptr) {
+                  merge_bb = fresh_block();
+                }
+                emit_terminator(stmt.span, MirBr{merge_bb->id});
+              }
+            }
+
+            if (merge_bb != nullptr) {
+              switch_to_block(merge_bb);
+            } else {
+              current_block_ = nullptr;
+            }
+          },
+          [&](const HirWhile& hir_while) {
+            auto* cond_bb = fresh_block();
+            auto* body_bb = fresh_block();
+            auto* exit_bb = fresh_block();
+
+            emit_terminator(stmt.span, MirBr{cond_bb->id});
+
+            switch_to_block(cond_bb);
+            auto cond_val = lower_expr_value(*hir_while.condition);
+            emit_terminator(stmt.span, MirCondBr{cond_val, body_bb->id, exit_bb->id});
+
+            switch_to_block(body_bb);
+            loop_exit_stack_.push_back({exit_bb->id, active_regions_.size()});
+            for (const auto* s : hir_while.body) {
+              lower_stmt(*s);
+            }
+            loop_exit_stack_.pop_back();
+            if (!block_terminated()) {
+              emit_terminator(stmt.span, MirBr{cond_bb->id});
+            }
+
+            switch_to_block(exit_bb);
+          },
+          [&](const HirFor& hir_for) {
+            auto iter_src = lower_expr_value(*hir_for.iterable);
+            auto iter_val = emit_value(hir_for.iterable->type, stmt.span, MirIterInit{iter_src});
+
+            // Extract element type T from Generator<T>.
+            const Type* var_type = hir_for.iterable->type;
+            if (var_type != nullptr && var_type->kind() == TypeKind::Generator) {
+              var_type = static_cast<const TypeGenerator*>(var_type)->yield_type();
+            }
+            auto var_local = declare_local(hir_for.var_symbol, var_type, stmt.span);
+
+            auto* cond_bb = fresh_block();
+            auto* body_bb = fresh_block();
+            auto* exit_bb = fresh_block();
+
+            emit_terminator(stmt.span, MirBr{cond_bb->id});
+
+            switch_to_block(cond_bb);
+            auto has_next_val = emit_value(types_.bool_type(), stmt.span, MirIterHasNext{iter_val});
+            emit_terminator(stmt.span, MirCondBr{has_next_val, body_bb->id, exit_bb->id});
+
+            switch_to_block(body_bb);
+            auto next_val = emit_value(var_type, stmt.span, MirIterNext{iter_val});
+
+            auto* place = ctx_.alloc<MirPlace>();
+            place->local = var_local;
+            emit_effect(stmt.span, MirStore{place, next_val});
+
+            // Push iterator cleanup so early returns inside the body
+            // emit MirIterDestroy before the return terminator.  A `break`
+            // does not: it branches to the exit block, which destroys the
+            // iterator itself, so the loop's region depth is taken after
+            // this push.
+            active_regions_.push_back(ActiveRegion{MirIterDestroy{iter_val}, stmt.span});
+
+            loop_exit_stack_.push_back({exit_bb->id, active_regions_.size()});
+            for (const auto* s : hir_for.body) {
+              lower_stmt(*s);
+            }
+            loop_exit_stack_.pop_back();
+            if (!block_terminated()) {
+              emit_terminator(stmt.span, MirBr{cond_bb->id});
+            }
+
+            active_regions_.pop_back();
+
+            switch_to_block(exit_bb);
+            // Free the generator frame on the normal loop-exit path.
+            emit_effect(stmt.span, MirIterDestroy{iter_val});
+          },
+          [&](const HirBreak&) {
+            if (!loop_exit_stack_.empty()) {
+              // Leave the regions entered inside the loop (mode/resource
+              // cleanup) before branching out of it.  A region enclosing
+              // the loop is not left: its block continues after the loop.
+              const auto& loop = loop_exit_stack_.back();
+              emit_region_exits_from(loop.region_depth, stmt.span);
+              emit_terminator(stmt.span, MirBr{loop.exit_block});
+            }
+          },
+          [&](const HirYield& yield) {
+            auto val = lower_expr_value(*yield.value);
+            emit_effect(stmt.span, MirYieldInst{val});
+          },
+          [&](const HirReturn& ret) {
+            MirValueId ret_val;
+            bool has_val = ret.value != nullptr;
+            if (has_val) {
+              ret_val = lower_expr_value(*ret.value);
+            }
+            emit_region_exits(stmt.span,
+                              {.value = has_val ? &ret_val : nullptr,
+                               .type = has_val ? current_fn_->return_type : nullptr});
+            emit_terminator(stmt.span, MirReturn{ret_val, has_val});
+          },
+          [&](const HirExprStmt& expr_stmt) { lower_expr_value(*expr_stmt.expr); },
+          [&](const HirMode& mode) {
+            emit_effect(stmt.span, MirModeEnter{mode.mode, mode.mode_name});
+
+            active_regions_.push_back({.exit_payload = MirModeExit{mode.mode}, .span = stmt.span});
+
+            for (const auto* s : mode.body) {
+              lower_stmt(*s);
+            }
+
+            active_regions_.pop_back();
+
+            if (!block_terminated()) {
+              emit_effect(stmt.span, MirModeExit{mode.mode});
+            }
+          },
+          [&](const HirResource& res) {
+            auto domain_handle = emit_value(types_.pointer_to(types_.void_type()),
+                                            stmt.span,
+                                            MirResourceEnter{res.resource_kind, res.resource_name});
+
+            ActiveRegion region{
+                .exit_payload =
+                    MirResourceExit{res.resource_kind, res.resource_name, domain_handle},
+                .span = stmt.span,
+                .escapes = {}};
+            // One dirty flag per escaping binding, clear at entry; every
+            // store rooted at the binding inside the block sets it.
+            for (const auto* symbol : res.escapes) {
+              auto local = symbol_to_local_.find(symbol);
+              if (local == symbol_to_local_.end()) {
+                continue;
+              }
+              const Type* type = current_fn_->locals[local->second.id].type;
+              auto flag = declare_local(nullptr, types_.bool_type(), stmt.span);
+              auto clear = emit_value(types_.bool_type(), stmt.span, MirConstBool{false});
+              auto* flag_place = ctx_.alloc<MirPlace>();
+              flag_place->local = flag;
+              emit_effect(stmt.span, MirStore{flag_place, clear});
+              region.escapes.push_back({.binding = local->second, .type = type, .flag = flag});
+            }
+            active_regions_.push_back(region);
+
+            for (const auto* s : res.body) {
+              lower_stmt(*s);
+            }
+
+            active_regions_.pop_back();
+
+            if (!block_terminated()) {
+              emit_region_exit(region, stmt.span, nullptr);
+            }
+          },
       },
-      [&](const HirWhile& hir_while) {
-        auto* cond_bb = fresh_block();
-        auto* body_bb = fresh_block();
-        auto* exit_bb = fresh_block();
-
-        emit_terminator(stmt.span, MirBr{cond_bb->id});
-
-        switch_to_block(cond_bb);
-        auto cond_val = lower_expr_value(*hir_while.condition);
-        emit_terminator(stmt.span,
-                        MirCondBr{cond_val, body_bb->id, exit_bb->id});
-
-        switch_to_block(body_bb);
-        loop_exit_stack_.push_back({exit_bb->id, active_regions_.size()});
-        for (const auto* s : hir_while.body) {
-          lower_stmt(*s);
-        }
-        loop_exit_stack_.pop_back();
-        if (!block_terminated()) {
-          emit_terminator(stmt.span, MirBr{cond_bb->id});
-        }
-
-        switch_to_block(exit_bb);
-      },
-      [&](const HirFor& hir_for) {
-        auto iter_src = lower_expr_value(*hir_for.iterable);
-        auto iter_val = emit_value(
-            hir_for.iterable->type, stmt.span, MirIterInit{iter_src});
-
-        // Extract element type T from Generator<T>.
-        const Type* var_type = hir_for.iterable->type;
-        if (var_type != nullptr && var_type->kind() == TypeKind::Generator) {
-          var_type =
-              static_cast<const TypeGenerator*>(var_type)->yield_type();
-        }
-        auto var_local =
-            declare_local(hir_for.var_symbol, var_type, stmt.span);
-
-        auto* cond_bb = fresh_block();
-        auto* body_bb = fresh_block();
-        auto* exit_bb = fresh_block();
-
-        emit_terminator(stmt.span, MirBr{cond_bb->id});
-
-        switch_to_block(cond_bb);
-        auto has_next_val = emit_value(
-            types_.bool_type(), stmt.span, MirIterHasNext{iter_val});
-        emit_terminator(stmt.span,
-                        MirCondBr{has_next_val, body_bb->id, exit_bb->id});
-
-        switch_to_block(body_bb);
-        auto next_val = emit_value(
-            var_type, stmt.span, MirIterNext{iter_val});
-
-        auto* place = ctx_.alloc<MirPlace>();
-        place->local = var_local;
-        emit_effect(stmt.span, MirStore{place, next_val});
-
-        // Push iterator cleanup so early returns inside the body
-        // emit MirIterDestroy before the return terminator.  A `break`
-        // does not: it branches to the exit block, which destroys the
-        // iterator itself, so the loop's region depth is taken after
-        // this push.
-        active_regions_.push_back(
-            ActiveRegion{MirIterDestroy{iter_val}, stmt.span});
-
-        loop_exit_stack_.push_back({exit_bb->id, active_regions_.size()});
-        for (const auto* s : hir_for.body) {
-          lower_stmt(*s);
-        }
-        loop_exit_stack_.pop_back();
-        if (!block_terminated()) {
-          emit_terminator(stmt.span, MirBr{cond_bb->id});
-        }
-
-        active_regions_.pop_back();
-
-        switch_to_block(exit_bb);
-        // Free the generator frame on the normal loop-exit path.
-        emit_effect(stmt.span, MirIterDestroy{iter_val});
-      },
-      [&](const HirBreak&) {
-        if (!loop_exit_stack_.empty()) {
-          // Leave the regions entered inside the loop (mode/resource
-          // cleanup) before branching out of it.  A region enclosing
-          // the loop is not left: its block continues after the loop.
-          const auto& loop = loop_exit_stack_.back();
-          emit_region_exits_from(loop.region_depth, stmt.span);
-          emit_terminator(stmt.span, MirBr{loop.exit_block});
-        }
-      },
-      [&](const HirYield& yield) {
-        auto val = lower_expr_value(*yield.value);
-        emit_effect(stmt.span, MirYieldInst{val});
-      },
-      [&](const HirReturn& ret) {
-        MirValueId ret_val;
-        bool has_val = ret.value != nullptr;
-        if (has_val) {
-          ret_val = lower_expr_value(*ret.value);
-        }
-        emit_region_exits(stmt.span,
-                          {.value = has_val ? &ret_val : nullptr,
-                           .type = has_val ? current_fn_->return_type : nullptr});
-        emit_terminator(stmt.span, MirReturn{ret_val, has_val});
-      },
-      [&](const HirExprStmt& expr_stmt) {
-        lower_expr_value(*expr_stmt.expr);
-      },
-      [&](const HirMode& mode) {
-        emit_effect(stmt.span,
-                    MirModeEnter{mode.mode, mode.mode_name});
-
-        active_regions_.push_back(
-            {.exit_payload = MirModeExit{mode.mode},
-             .span = stmt.span});
-
-        for (const auto* s : mode.body) {
-          lower_stmt(*s);
-        }
-
-        active_regions_.pop_back();
-
-        if (!block_terminated()) {
-          emit_effect(stmt.span, MirModeExit{mode.mode});
-        }
-      },
-      [&](const HirResource& res) {
-        auto domain_handle = emit_value(
-            types_.pointer_to(types_.void_type()), stmt.span,
-            MirResourceEnter{res.resource_kind, res.resource_name});
-
-        ActiveRegion region{
-            .exit_payload = MirResourceExit{res.resource_kind, res.resource_name, domain_handle},
-            .span = stmt.span,
-            .escapes = {}};
-        // One dirty flag per escaping binding, clear at entry; every
-        // store rooted at the binding inside the block sets it.
-        for (const auto* symbol : res.escapes) {
-          auto local = symbol_to_local_.find(symbol);
-          if (local == symbol_to_local_.end()) {
-            continue;
-          }
-          const Type* type = current_fn_->locals[local->second.id].type;
-          auto flag = declare_local(nullptr, types_.bool_type(), stmt.span);
-          auto clear = emit_value(types_.bool_type(), stmt.span, MirConstBool{false});
-          auto* flag_place = ctx_.alloc<MirPlace>();
-          flag_place->local = flag;
-          emit_effect(stmt.span, MirStore{flag_place, clear});
-          region.escapes.push_back({.binding = local->second, .type = type, .flag = flag});
-        }
-        active_regions_.push_back(region);
-
-        for (const auto* s : res.body) {
-          lower_stmt(*s);
-        }
-
-        active_regions_.pop_back();
-
-        if (!block_terminated()) {
-          emit_region_exit(region, stmt.span, nullptr);
-        }
-      },
-  }, stmt.payload);
+      stmt.payload);
 }
 
 // ---------------------------------------------------------------------------
@@ -509,260 +497,364 @@ auto MirBuilder::deref_place(const HirExpr& pointer, Span span) -> MirPlace {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 auto MirBuilder::lower_expr_value(const HirExpr& expr) -> MirValueId {
-  return std::visit(overloaded{
-      [&](const HirIntLiteral& lit) -> MirValueId {
-        return emit_value(expr, MirConstInt{lit.value});
-      },
-      [&](const HirFloatLiteral& lit) -> MirValueId {
-        return emit_value(expr, MirConstFloat{lit.value});
-      },
-      [&](const HirBoolLiteral& lit) -> MirValueId {
-        return emit_value(expr, MirConstBool{lit.value});
-      },
-      [&](const HirStringLiteral& lit) -> MirValueId {
-        return emit_value(expr, MirConstString{lit.value});
-      },
-      [&](const HirSymbolRef& ref) -> MirValueId {
-        if (ref.symbol != nullptr) {
-          auto it = symbol_to_local_.find(ref.symbol);
-          if (it != symbol_to_local_.end()) {
-            auto* place = ctx_.alloc<MirPlace>();
-            place->local = it->second;
-            return emit_value(expr, MirLoad{place});
-          }
-        }
-        return emit_value(expr, MirFnRef{ref.symbol});
-      },
-      [&](const HirUnary& un) -> MirValueId {
-        auto val = lower_expr_value(*un.operand);
-        return emit_value(expr, MirUnary{un.op, val});
-      },
-      [&](const HirPtrOp& ptr_op) -> MirValueId {
-        // A read or a write goes through the pointee's place; the other
-        // operations produce a pointer or a flag from the pointer value.
-        if (ptr_op.op == PtrOp::Get) {
-          auto place = deref_place(*ptr_op.pointer, expr.span);
-          return emit_value(expr, MirLoad{ctx_.alloc<MirPlace>(place)});
-        }
-        if (ptr_op.op == PtrOp::Set) {
-          auto place = deref_place(*ptr_op.pointer, expr.span);
-          auto value = lower_expr_value(*ptr_op.argument);
-          emit_effect(expr.span, MirStore{ctx_.alloc<MirPlace>(place), value});
-          return {};
-        }
-        MirValueId pointer;
-        MirValueId argument;
-        if (ptr_op.pointer != nullptr) {
-          pointer = lower_expr_value(*ptr_op.pointer);
-        }
-        if (ptr_op.argument != nullptr) {
-          argument = lower_expr_value(*ptr_op.argument);
-        }
-        return emit_value(expr, MirPtrOp{ptr_op.op, pointer, argument});
-      },
-      [&](const HirBinary& bin) -> MirValueId {
-        auto left = lower_expr_value(*bin.left);
-        auto right = lower_expr_value(*bin.right);
-        return emit_value(expr, MirBinary{bin.op, left, right});
-      },
-      [&](const HirCall& call) -> MirValueId {
-        auto callee_val = lower_expr_value(*call.callee);
-        auto* args = ctx_.alloc<std::vector<MirValueId>>();
-        for (const auto* arg : call.args) {
-          args->push_back(lower_expr_value(*arg));
-        }
-        std::vector<const Type*>* type_args = nullptr;
-        if (!call.explicit_type_args.empty()) {
-          type_args = ctx_.alloc<std::vector<const Type*>>(
-              call.explicit_type_args);
-        }
-        return emit_value(expr, MirCall{callee_val, args, type_args, call.type_args_binder});
-      },
-      [&](const HirConstruct& ctor) -> MirValueId {
-        auto* field_vals = ctx_.alloc<std::vector<MirValueId>>();
-        for (const auto* arg : ctor.args) {
-          field_vals->push_back(lower_expr_value(*arg));
-        }
-        // The expression's own type is the instantiation being built —
-        // `Box(1)` is a `Box<i32>` — while the class's type as declared
-        // still stands on its parameters.  The backend lays out what is
-        // built, so the construction carries its own type.
-        const auto* built = expr.type != nullptr && expr.type->kind() == TypeKind::Struct
-                                ? static_cast<const TypeStruct*>(expr.type)
-                                : ctor.struct_type;
-        return emit_value(expr, MirConstruct{built, field_vals});
-      },
-      [&](const HirEnumConstruct& ctor) -> MirValueId {
-        // Evaluated in the order they were written; placed where their
-        // fields are.
-        auto* payload_vals = ctx_.alloc<std::vector<MirValueId>>();
-        payload_vals->resize(ctor.payload_args.size());
-        for (size_t i = 0; i < ctor.payload_args.size(); ++i) {
-          auto value = lower_expr_value(*ctor.payload_args[i]);
-          const size_t slot = i < ctor.payload_slots.size() ? ctor.payload_slots[i] : i;
-          if (slot < payload_vals->size()) {
-            (*payload_vals)[slot] = value;
-          }
-        }
-        return emit_value(expr, MirEnumConstruct{
-            ctor.enum_type, ctor.variant_index, payload_vals});
-      },
-      [&](const HirEnumDiscriminant& disc) -> MirValueId {
-        auto val = lower_expr_value(*disc.enum_value);
-        return emit_value(expr, MirEnumDiscriminant{val});
-      },
-      [&](const HirEnumPayload& pay) -> MirValueId {
-        auto val = lower_expr_value(*pay.enum_value);
-        return emit_value(expr, MirEnumPayload{
-            val, pay.variant_index, pay.field_index});
-      },
-      [&](const HirTry& try_node) -> MirValueId {
-        // Lower operand (the Result/Option value).
-        auto operand_val = lower_expr_value(*try_node.operand);
-        const auto* enum_type = try_node.enum_type;
-        bool is_result = enum_type != nullptr && enum_type->name() == "Result";
+  return std::visit(
+      overloaded{
+          [&](const HirIntLiteral& lit) -> MirValueId {
+            return emit_value(expr, MirConstInt{lit.value});
+          },
+          [&](const HirFloatLiteral& lit) -> MirValueId {
+            return emit_value(expr, MirConstFloat{lit.value});
+          },
+          [&](const HirBoolLiteral& lit) -> MirValueId {
+            return emit_value(expr, MirConstBool{lit.value});
+          },
+          [&](const HirStringLiteral& lit) -> MirValueId {
+            return emit_value(expr, MirConstString{lit.value});
+          },
+          [&](const HirSymbolRef& ref) -> MirValueId {
+            if (ref.symbol != nullptr) {
+              auto it = symbol_to_local_.find(ref.symbol);
+              if (it != symbol_to_local_.end()) {
+                auto* place = ctx_.alloc<MirPlace>();
+                place->local = it->second;
+                return emit_value(expr, MirLoad{place});
+              }
+            }
+            return emit_value(expr, MirFnRef{ref.symbol});
+          },
+          [&](const HirUnary& un) -> MirValueId {
+            auto val = lower_expr_value(*un.operand);
+            return emit_value(expr, MirUnary{un.op, val});
+          },
+          [&](const HirPtrOp& ptr_op) -> MirValueId {
+            // A read or a write goes through the pointee's place; the other
+            // operations produce a pointer or a flag from the pointer value.
+            if (ptr_op.op == PtrOp::Get) {
+              auto place = deref_place(*ptr_op.pointer, expr.span);
+              return emit_value(expr, MirLoad{ctx_.alloc<MirPlace>(place)});
+            }
+            if (ptr_op.op == PtrOp::Set) {
+              auto place = deref_place(*ptr_op.pointer, expr.span);
+              auto value = lower_expr_value(*ptr_op.argument);
+              emit_effect(expr.span, MirStore{ctx_.alloc<MirPlace>(place), value});
+              return {};
+            }
+            MirValueId pointer;
+            MirValueId argument;
+            if (ptr_op.pointer != nullptr) {
+              pointer = lower_expr_value(*ptr_op.pointer);
+            }
+            if (ptr_op.argument != nullptr) {
+              argument = lower_expr_value(*ptr_op.argument);
+            }
+            return emit_value(expr, MirPtrOp{ptr_op.op, pointer, argument});
+          },
+          [&](const HirBinary& bin) -> MirValueId {
+            auto left = lower_expr_value(*bin.left);
+            auto right = lower_expr_value(*bin.right);
+            return emit_value(expr, MirBinary{bin.op, left, right});
+          },
+          [&](const HirCall& call) -> MirValueId {
+            auto callee_val = lower_expr_value(*call.callee);
+            auto* args = ctx_.alloc<std::vector<MirValueId>>();
+            for (const auto* arg : call.args) {
+              args->push_back(lower_expr_value(*arg));
+            }
+            std::vector<const Type*>* type_args = nullptr;
+            if (!call.explicit_type_args.empty()) {
+              type_args = ctx_.alloc<std::vector<const Type*>>(call.explicit_type_args);
+            }
+            return emit_value(expr, MirCall{callee_val, args, type_args, call.type_args_binder});
+          },
+          [&](const HirConstruct& ctor) -> MirValueId {
+            auto* field_vals = ctx_.alloc<std::vector<MirValueId>>();
+            for (const auto* arg : ctor.args) {
+              field_vals->push_back(lower_expr_value(*arg));
+            }
+            // The expression's own type is the instantiation being built —
+            // `Box(1)` is a `Box<i32>` — while the class's type as declared
+            // still stands on its parameters.  The backend lays out what is
+            // built, so the construction carries its own type.
+            const auto* built = expr.type != nullptr && expr.type->kind() == TypeKind::Struct
+                                    ? static_cast<const TypeStruct*>(expr.type)
+                                    : ctor.struct_type;
+            return emit_value(expr, MirConstruct{built, field_vals});
+          },
+          [&](const HirEnumConstruct& ctor) -> MirValueId {
+            // Evaluated in the order they were written; placed where their
+            // fields are.
+            auto* payload_vals = ctx_.alloc<std::vector<MirValueId>>();
+            payload_vals->resize(ctor.payload_args.size());
+            for (size_t i = 0; i < ctor.payload_args.size(); ++i) {
+              auto value = lower_expr_value(*ctor.payload_args[i]);
+              const size_t slot = i < ctor.payload_slots.size() ? ctor.payload_slots[i] : i;
+              if (slot < payload_vals->size()) {
+                (*payload_vals)[slot] = value;
+              }
+            }
+            return emit_value(expr,
+                              MirEnumConstruct{ctor.enum_type, ctor.variant_index, payload_vals});
+          },
+          [&](const HirEnumDiscriminant& disc) -> MirValueId {
+            auto val = lower_expr_value(*disc.enum_value);
+            return emit_value(expr, MirEnumDiscriminant{val});
+          },
+          [&](const HirEnumPayload& pay) -> MirValueId {
+            auto val = lower_expr_value(*pay.enum_value);
+            return emit_value(expr, MirEnumPayload{val, pay.variant_index, pay.field_index});
+          },
+          [&](const HirTry& try_node) -> MirValueId {
+            // Lower operand (the Result/Option value).
+            auto operand_val = lower_expr_value(*try_node.operand);
+            const auto* enum_type = try_node.enum_type;
+            bool is_result = enum_type != nullptr && enum_type->name() == "Result";
 
-        // Extract discriminant (i32 — matches LLVM enum layout).
-        auto discr = emit_value(types_.builtin(BuiltinKind::I32), expr.span,
-                                MirEnumDiscriminant{operand_val});
+            // Extract discriminant (i32 — matches LLVM enum layout).
+            auto discr = emit_value(
+                types_.builtin(BuiltinKind::I32), expr.span, MirEnumDiscriminant{operand_val});
 
-        // Compare discriminant to 0 (the success variant: Ok/Some).
-        auto zero = emit_value(types_.builtin(BuiltinKind::I32), expr.span,
-                               MirConstInt{0});
-        auto cmp = emit_value(types_.bool_type(), expr.span,
-                              MirBinary{BinaryOp::EqEq, discr, zero});
+            // Compare discriminant to 0 (the success variant: Ok/Some).
+            auto zero = emit_value(types_.builtin(BuiltinKind::I32), expr.span, MirConstInt{0});
+            auto cmp =
+                emit_value(types_.bool_type(), expr.span, MirBinary{BinaryOp::EqEq, discr, zero});
 
-        // Create basic blocks.
-        auto* ok_bb = fresh_block();
-        auto* err_bb = fresh_block();
-        auto* merge_bb = fresh_block();
+            // Create basic blocks.
+            auto* ok_bb = fresh_block();
+            auto* err_bb = fresh_block();
+            auto* merge_bb = fresh_block();
 
-        emit_terminator(expr.span, MirCondBr{cmp, ok_bb->id, err_bb->id});
+            emit_terminator(expr.span, MirCondBr{cmp, ok_bb->id, err_bb->id});
 
-        // Error/None block: propagate the error or None.
-        switch_to_block(err_bb);
-        if (is_result) {
-          // Extract Err payload from variant 1, field 0.
-          auto err_payload = emit_value(
-              enum_type->variants()[1].payload_types[0], expr.span,
-              MirEnumPayload{operand_val, 1, 0});
-          // Construct Result::Err(err_payload) with the function's return type.
-          const auto* ret_enum_type = static_cast<const TypeEnum*>(
-              current_fn_->return_type);
-          auto* err_args = ctx_.alloc<std::vector<MirValueId>>();
-          err_args->push_back(err_payload);
-          auto err_result = emit_value(
-              current_fn_->return_type, expr.span,
-              MirEnumConstruct{ret_enum_type, 1, err_args});
-          emit_region_exits(expr.span, {.value = &err_result, .type = current_fn_->return_type});
-          emit_terminator(expr.span, MirReturn{err_result, true});
-        } else {
-          // Option: construct Option::None (variant 1, no payload).
-          const auto* ret_enum_type = static_cast<const TypeEnum*>(
-              current_fn_->return_type);
-          auto* empty_args = ctx_.alloc<std::vector<MirValueId>>();
-          auto none_result = emit_value(
-              current_fn_->return_type, expr.span,
-              MirEnumConstruct{ret_enum_type, 1, empty_args});
-          emit_region_exits(expr.span, {.value = &none_result, .type = current_fn_->return_type});
-          emit_terminator(expr.span, MirReturn{none_result, true});
-        }
+            // Error/None block: propagate the error or None.
+            switch_to_block(err_bb);
+            if (is_result) {
+              // Extract Err payload from variant 1, field 0.
+              auto err_payload = emit_value(enum_type->variants()[1].payload_types[0],
+                                            expr.span,
+                                            MirEnumPayload{operand_val, 1, 0});
+              // Construct Result::Err(err_payload) with the function's return type.
+              const auto* ret_enum_type = static_cast<const TypeEnum*>(current_fn_->return_type);
+              auto* err_args = ctx_.alloc<std::vector<MirValueId>>();
+              err_args->push_back(err_payload);
+              auto err_result = emit_value(current_fn_->return_type,
+                                           expr.span,
+                                           MirEnumConstruct{ret_enum_type, 1, err_args});
+              emit_region_exits(expr.span,
+                                {.value = &err_result, .type = current_fn_->return_type});
+              emit_terminator(expr.span, MirReturn{err_result, true});
+            } else {
+              // Option: construct Option::None (variant 1, no payload).
+              const auto* ret_enum_type = static_cast<const TypeEnum*>(current_fn_->return_type);
+              auto* empty_args = ctx_.alloc<std::vector<MirValueId>>();
+              auto none_result = emit_value(current_fn_->return_type,
+                                            expr.span,
+                                            MirEnumConstruct{ret_enum_type, 1, empty_args});
+              emit_region_exits(expr.span,
+                                {.value = &none_result, .type = current_fn_->return_type});
+              emit_terminator(expr.span, MirReturn{none_result, true});
+            }
 
-        // Ok/Some block: extract the success payload.
-        switch_to_block(ok_bb);
-        auto ok_payload = emit_value(
-            expr.type, expr.span,
-            MirEnumPayload{operand_val, 0, 0});
-        emit_terminator(expr.span, MirBr{merge_bb->id});
+            // Ok/Some block: extract the success payload.
+            switch_to_block(ok_bb);
+            auto ok_payload = emit_value(expr.type, expr.span, MirEnumPayload{operand_val, 0, 0});
+            emit_terminator(expr.span, MirBr{merge_bb->id});
 
-        // Merge block: the value produced by ? is the ok payload.
-        switch_to_block(merge_bb);
-        return ok_payload;
+            // Merge block: the value produced by ? is the ok payload.
+            switch_to_block(merge_bb);
+            return ok_payload;
+          },
+          [&](const HirPipe& pipe) -> MirValueId {
+            auto left_val = lower_expr_value(*pipe.left);
+            auto callee_val = lower_expr_value(*pipe.right);
+            auto* args = ctx_.alloc<std::vector<MirValueId>>();
+            args->push_back(left_val);
+            return emit_value(expr, MirCall{callee_val, args});
+          },
+          [&](const HirField& field) -> MirValueId {
+            auto obj = lower_expr_value(*field.object);
+            auto field_idx = resolve_field_index(field.object->type, field.field_name);
+            if (!field_idx) {
+              if (lowering_generic_template_) {
+                // Template body: tolerate unresolved field accesses on
+                // generic type parameters (e.g., x.to_string() where
+                // x: T: Printable).  The monomorphizer will clone this
+                // template and substitute concrete types, at which point
+                // the field access resolves normally.
+              } else if (field.object->type != nullptr &&
+                         field.object->type->kind() == TypeKind::Struct) {
+                error(expr.span, "unresolved field '" + std::string(field.field_name) + "'");
+              } else {
+                error(expr.span, "unresolved field '" + std::string(field.field_name) + "'");
+              }
+            }
+            return emit_value(expr, MirFieldAccess{obj, field.field_name, field_idx.value_or(0)});
+          },
+          [&](const HirIndex& idx) -> MirValueId {
+            auto obj = lower_expr_value(*idx.object);
+            MirValueId index_val;
+            if (!idx.indices.empty()) {
+              index_val = lower_expr_value(*idx.indices[0]);
+            }
+            return emit_value(expr, MirIndexAccess{obj, index_val});
+          },
+          [&](const HirLambda& lam) -> MirValueId {
+            // Collect free outer lexical bindings referenced anywhere inside
+            // the lambda (including nested lambdas), in deterministic order.
+            std::unordered_set<const Symbol*> bound_here;
+            for (const auto& param : lam.params) {
+              if (param.symbol != nullptr) {
+                bound_here.insert(param.symbol);
+              }
+            }
+            std::vector<const Symbol*> captured_symbols;
+            std::unordered_set<const Symbol*> captured_seen;
+            auto collect_captures = [&](auto& self,
+                                        const HirExpr* node,
+                                        std::unordered_set<const Symbol*>& local_bound) -> void {
+              if (node == nullptr) {
+                return;
+              }
+              std::visit(
+                  overloaded{
+                      [&](const HirSymbolRef& ref) {
+                        if (ref.symbol != nullptr && !local_bound.contains(ref.symbol) &&
+                            symbol_to_local_.contains(ref.symbol) &&
+                            captured_seen.insert(ref.symbol).second) {
+                          captured_symbols.push_back(ref.symbol);
+                        }
+                      },
+                      [&](const HirUnary& u) { self(self, u.operand, local_bound); },
+                      [&](const HirBinary& b) {
+                        self(self, b.left, local_bound);
+                        self(self, b.right, local_bound);
+                      },
+                      [&](const HirCall& c) {
+                        self(self, c.callee, local_bound);
+                        for (const auto* arg : c.args) {
+                          self(self, arg, local_bound);
+                        }
+                      },
+                      [&](const HirConstruct& c) {
+                        for (const auto* arg : c.args) {
+                          self(self, arg, local_bound);
+                        }
+                      },
+                      [&](const HirEnumConstruct& c) {
+                        for (const auto* arg : c.payload_args) {
+                          self(self, arg, local_bound);
+                        }
+                      },
+                      [&](const HirEnumDiscriminant& d) { self(self, d.enum_value, local_bound); },
+                      [&](const HirEnumPayload& p) { self(self, p.enum_value, local_bound); },
+                      [&](const HirField& f) { self(self, f.object, local_bound); },
+                      [&](const HirIndex& idx) {
+                        self(self, idx.object, local_bound);
+                        for (const auto* item : idx.indices) {
+                          self(self, item, local_bound);
+                        }
+                      },
+                      [&](const HirPipe& p) {
+                        self(self, p.left, local_bound);
+                        self(self, p.right, local_bound);
+                      },
+                      [&](const HirTry& t) { self(self, t.operand, local_bound); },
+                      [&](const HirPtrOp& p) {
+                        self(self, p.pointer, local_bound);
+                        self(self, p.argument, local_bound);
+                      },
+                      [&](const HirLambda& inner) {
+                        auto nested_bound = local_bound;
+                        for (const auto& param : inner.params) {
+                          if (param.symbol != nullptr) {
+                            nested_bound.insert(param.symbol);
+                          }
+                        }
+                        self(self, inner.body, nested_bound);
+                      },
+                      [](const auto&) {},
+                  },
+                  node->payload);
+            };
+            collect_captures(collect_captures, lam.body, bound_here);
+
+            // Snapshot captured values in the enclosing block at lambda
+            // creation time (by-value lexical capture).
+            auto* capture_values = ctx_.alloc<std::vector<MirValueId>>();
+            std::vector<const Type*> capture_types;
+            capture_values->reserve(captured_symbols.size());
+            capture_types.reserve(captured_symbols.size());
+            for (const auto* cap_sym : captured_symbols) {
+              LocalId outer_local = symbol_to_local_.at(cap_sym);
+              const Type* cap_type = current_fn_->locals[outer_local.id].type;
+              auto* place = ctx_.alloc<MirPlace>(MirPlace{outer_local, {}});
+              capture_values->push_back(emit_value(cap_type, expr.span, MirLoad{place}));
+              capture_types.push_back(cap_type);
+            }
+
+            auto* lam_fn = ctx_.alloc<MirFunction>();
+            lam_fn->span = expr.span;
+            lam_fn->capture_count = static_cast<uint32_t>(captured_symbols.size());
+            if (lam.body != nullptr && lam.body->type != nullptr) {
+              lam_fn->return_type = lam.body->type;
+            }
+
+            // Save and reset builder state.
+            auto* saved_fn = current_fn_;
+            auto* saved_block = current_block_;
+            auto saved_value_id = next_value_id_;
+            auto saved_block_id = next_block_id_;
+            auto saved_locals = symbol_to_local_;
+            auto saved_regions = std::move(active_regions_);
+            auto saved_loops = std::move(loop_exit_stack_);
+
+            current_fn_ = lam_fn;
+            current_block_ = nullptr;
+            next_value_id_ = 0;
+            next_block_id_ = 0;
+            symbol_to_local_.clear();
+            active_regions_.clear();
+            loop_exit_stack_.clear();
+
+            for (const auto& param : lam.params) {
+              declare_local(param.symbol,
+                            param.type,
+                            param.span,
+                            /*is_param=*/true);
+            }
+            for (size_t i = 0; i < captured_symbols.size(); ++i) {
+              declare_local(captured_symbols[i],
+                            capture_types[i],
+                            captured_symbols[i]->decl_span,
+                            /*is_param=*/false);
+            }
+
+            auto* entry_bb = fresh_block();
+            switch_to_block(entry_bb);
+
+            if (lam.body != nullptr) {
+              auto body_val = lower_expr_value(*lam.body);
+              emit_terminator(lam.body->span, MirReturn{body_val, true});
+            } else if (!block_terminated()) {
+              emit_terminator(expr.span, MirReturn{{}, false});
+            }
+
+            // Restore builder state.
+            current_fn_ = saved_fn;
+            current_block_ = saved_block;
+            next_value_id_ = saved_value_id;
+            next_block_id_ = saved_block_id;
+            symbol_to_local_ = std::move(saved_locals);
+            active_regions_ = std::move(saved_regions);
+            loop_exit_stack_ = std::move(saved_loops);
+
+            if (current_module_ != nullptr && !lowering_generic_template_) {
+              current_module_->functions.push_back(lam_fn);
+            }
+
+            return emit_value(expr, MirLambdaInst{lam_fn, capture_values});
+          },
       },
-      [&](const HirPipe& pipe) -> MirValueId {
-        auto left_val = lower_expr_value(*pipe.left);
-        auto callee_val = lower_expr_value(*pipe.right);
-        auto* args = ctx_.alloc<std::vector<MirValueId>>();
-        args->push_back(left_val);
-        return emit_value(expr, MirCall{callee_val, args});
-      },
-      [&](const HirField& field) -> MirValueId {
-        auto obj = lower_expr_value(*field.object);
-        auto field_idx = resolve_field_index(field.object->type, field.field_name);
-        if (!field_idx) {
-          if (lowering_generic_template_) {
-            // Template body: tolerate unresolved field accesses on
-            // generic type parameters (e.g., x.to_string() where
-            // x: T: Printable).  The monomorphizer will clone this
-            // template and substitute concrete types, at which point
-            // the field access resolves normally.
-          } else if (field.object->type != nullptr &&
-                     field.object->type->kind() == TypeKind::Struct) {
-            error(expr.span, "unresolved field '" + std::string(field.field_name) + "'");
-          } else {
-            error(expr.span, "unresolved field '" + std::string(field.field_name) + "'");
-          }
-        }
-        return emit_value(expr, MirFieldAccess{
-            obj, field.field_name, field_idx.value_or(0)});
-      },
-      [&](const HirIndex& idx) -> MirValueId {
-        auto obj = lower_expr_value(*idx.object);
-        MirValueId index_val;
-        if (!idx.indices.empty()) {
-          index_val = lower_expr_value(*idx.indices[0]);
-        }
-        return emit_value(expr, MirIndexAccess{obj, index_val});
-      },
-      [&](const HirLambda& lam) -> MirValueId {
-        auto* lam_fn = ctx_.alloc<MirFunction>();
-        lam_fn->span = expr.span;
-        if (lam.body != nullptr && lam.body->type != nullptr) {
-          lam_fn->return_type = lam.body->type;
-        }
-
-        // Save and reset builder state.
-        auto* saved_fn = current_fn_;
-        auto* saved_block = current_block_;
-        auto saved_value_id = next_value_id_;
-        auto saved_block_id = next_block_id_;
-        auto saved_locals = symbol_to_local_;
-
-        current_fn_ = lam_fn;
-        current_block_ = nullptr;
-        next_value_id_ = 0;
-        next_block_id_ = 0;
-        symbol_to_local_.clear();
-
-        for (const auto& param : lam.params) {
-          declare_local(param.symbol, param.type, param.span,
-                        /*is_param=*/true);
-        }
-
-        auto* entry_bb = fresh_block();
-        switch_to_block(entry_bb);
-
-        if (lam.body != nullptr) {
-          auto body_val = lower_expr_value(*lam.body);
-          emit_terminator(lam.body->span, MirReturn{body_val, true});
-        } else if (!block_terminated()) {
-          emit_terminator(expr.span, MirReturn{{}, false});
-        }
-
-        // Restore builder state.
-        current_fn_ = saved_fn;
-        current_block_ = saved_block;
-        next_value_id_ = saved_value_id;
-        next_block_id_ = saved_block_id;
-        symbol_to_local_ = std::move(saved_locals);
-
-        if (current_module_ != nullptr) {
-          current_module_->functions.push_back(lam_fn);
-        }
-
-        return emit_value(expr, MirLambdaInst{lam_fn});
-      },
-  }, expr.payload);
+      expr.payload);
 }
 
 // ---------------------------------------------------------------------------

@@ -170,9 +170,27 @@ auto user_function_filter(const MirModule& user_mir, const ModuleInfo* entry)
   // definition the document contains.
   std::set<std::string, std::less<>> names;
   for (const auto* fn : user_mir.functions) {
-    names.emplace(llvm_function_name(*fn->symbol, entry));
+    if (fn->symbol != nullptr) {
+      names.emplace(llvm_function_name(*fn->symbol, entry));
+    }
   }
   return [names = std::move(names)](std::string_view name) -> bool {
+    constexpr std::string_view thunk_suffix = ".thunk";
+    if (name.ends_with(thunk_suffix)) {
+      name.remove_suffix(thunk_suffix.size());
+    }
+    while (true) {
+      auto pos = name.rfind(".lambda.");
+      if (pos == std::string_view::npos) {
+        break;
+      }
+      auto digits = name.substr(pos + 8);
+      if (digits.empty() ||
+          !std::ranges::all_of(digits, [](char c) { return c >= '0' && c <= '9'; })) {
+        break;
+      }
+      name = name.substr(0, pos);
+    }
     constexpr std::string_view resume_suffix = ".resume";
     if (name.ends_with(resume_suffix)) {
       name.remove_suffix(resume_suffix.size());

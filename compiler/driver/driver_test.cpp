@@ -809,6 +809,52 @@ suite<"driver_cli"> driver_cli_suite = [] {
         << "packaged daoc linked the build-tree runtime instead of the staged archive";
     expect(broken_link.err_says("linking failed")) << broken_link.err;
   };
+
+  "closures capture by value and compose with generic sequence helpers"_test = [] {
+    const Scratch scratch("closures-and-sequence-helpers");
+    auto app = scratch.file(
+        "main.dao",
+        "module app::main\n\n"
+        "enum class Outcome:\n"
+        "  Done(total: i32)\n"
+        "  Failed\n\n"
+        "fn finish(o: Outcome): i32\n"
+        "  match o:\n"
+        "    Outcome::Done(total):\n"
+        "      return total\n"
+        "    Outcome::Failed:\n"
+        "      panic(\"unexpected failure\")\n\n"
+        "fn main(): i32\n"
+        "  let base: i32 = 10\n"
+        "  let snap: fn(i32): i32 = |x| -> x + base\n"
+        "  base = 99\n"
+        "  if snap(5) != 15:\n"
+        "    return 1\n"
+        "  let xs: Vector<i32> = Vector<i32>::new().push(1).push(2).push(3).push(4)\n"
+        "  let ys: Vector<i32> = map_vec(filter_vec(xs, |n| -> n >= 2), |n| -> n * 10)\n"
+        "  let sum: i32 = 0\n"
+        "  for item in enumerate(ys):\n"
+        "    sum = sum + i64_to_i32(item.index) + item.value\n"
+        "  if sum != 93:\n"
+        "    return 2\n"
+        "  if any_vec(xs, |n| -> n == 4) == false or all_vec(xs, |n| -> n > 0) == false:\n"
+        "    return 3\n"
+        "  match find_if(xs, |n| -> n > 2):\n"
+        "    Option::Some(v):\n"
+        "      if v != 3:\n"
+        "        return 4\n"
+        "    Option::None:\n"
+        "      return 5\n"
+        "  let streamed: i32 = 0\n"
+        "  for z in map_gen(filter_gen(xs.iter(), |n| -> n > 2), |n| -> n + 1):\n"
+        "    streamed = streamed + z\n"
+        "  if streamed != 9:\n"
+        "    return 6\n"
+        "  return finish(Outcome::Done(total = 0))\n");
+    auto built = run_daoc(scratch, {"build", app.string()});
+    expect(built.exit_code == 0) << built.err;
+    expect(exit_status(scratch.output_for(app)) == 0);
+  };
 };
 
 auto main(int argc, const char** argv) -> int {

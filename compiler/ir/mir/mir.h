@@ -122,7 +122,10 @@ struct MirModeExit      { HirModeKind mode_kind; };
 struct MirResourceEnter { std::string_view region_kind; std::string_view region_name; };
 struct MirResourceExit  { std::string_view region_kind; std::string_view region_name; MirValueId domain_handle; };
 
-struct MirLambdaInst { MirFunction* fn; };
+struct MirLambdaInst {
+  MirFunction* fn = nullptr;
+  std::vector<MirValueId>* captures = nullptr;
+};
 
 struct MirBr     { BlockId target; };
 struct MirCondBr { MirValueId cond; BlockId then_block; BlockId else_block; };
@@ -179,10 +182,11 @@ struct MirBlock {
 struct MirFunction {
   const Symbol* symbol = nullptr;
   const Type* return_type = nullptr;
-  std::vector<MirLocal> locals; // params first, then let-bindings
+  std::vector<MirLocal> locals;  // params first, then captures, then let-bindings
   std::vector<MirBlock*> blocks; // blocks[0] is entry
   Span span;
   bool is_extern = false;
+  uint32_t capture_count = 0;
 };
 
 // ---------------------------------------------------------------------------

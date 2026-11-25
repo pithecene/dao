@@ -942,7 +942,8 @@ suite<"typecheck_modules"> typecheck_modules = [] {
   "an enum holding itself behind a pointer is accepted"_test = [] {
     auto checked = check_program({
         {"main.dao",
-         "module app\nenum class Chain:\n    Link(next: Ptr<Chain>)\n    End\nfn main(): i32 -> 0\n"},
+         "module app\nenum class Chain:\n    Link(next: Ptr<Chain>)\n    End\nfn main(): i32 -> "
+         "0\n"},
     });
     expect(checked.result.diagnostics.empty()) << all_messages(checked);
   };
@@ -995,7 +996,8 @@ suite<"typecheck_modules"> typecheck_modules = [] {
         // carry the hole behind `inner`.
         constexpr std::string_view kDecls =
             "module app\nclass Base<T>:\n    v: T\nclass Inner<T>:\n    dep: IntBase\n    t: "
-            "T\nclass Outer<T>:\n    inner: Ptr<Inner<T>>\n    t: T\ntype IntBase = Base<i32>\ntype "
+            "T\nclass Outer<T>:\n    inner: Ptr<Inner<T>>\n    t: T\ntype IntBase = "
+            "Base<i32>\ntype "
             "IntOuter = Outer<i32>\n";
         auto bad = check_program({
             {"main.dao",
@@ -1337,21 +1339,19 @@ suite<"typecheck_expr_body"> typecheck_expr_body = [] {
 
 suite<"typecheck_control_flow"> typecheck_control_flow = [] {
   "if with bool condition"_test = [] {
-    auto result = check_source(
-        "fn abs(x: i32): i32\n"
-        "    if x > 0:\n"
-        "        return x\n"
-        "    0 - x\n");
+    auto result = check_source("fn abs(x: i32): i32\n"
+                               "    if x > 0:\n"
+                               "        return x\n"
+                               "    return 0 - x\n");
     expect(is_ok(result));
   };
 
   "while with bool condition"_test = [] {
-    auto result = check_source(
-        "fn countdown(n: i32): i32\n"
-        "    let x = n\n"
-        "    while x > 0:\n"
-        "        x = x - 1\n"
-        "    x\n");
+    auto result = check_source("fn countdown(n: i32): i32\n"
+                               "    let x = n\n"
+                               "    while x > 0:\n"
+                               "        x = x - 1\n"
+                               "    return x\n");
     expect(is_ok(result));
   };
 };
@@ -1978,14 +1978,13 @@ suite<"typecheck_construct"> typecheck_construct = [] {
   };
 
   "construction in let binding"_test = [] {
-    auto result = check_source(
-        "class Point:\n"
-        "    x: i32\n"
-        "    y: i32\n"
-        "\n"
-        "fn make(): i32\n"
-        "    let p: Point = Point(1, 2)\n"
-        "    p.x\n");
+    auto result = check_source("class Point:\n"
+                               "    x: i32\n"
+                               "    y: i32\n"
+                               "\n"
+                               "fn make(): i32\n"
+                               "    let p: Point = Point(1, 2)\n"
+                               "    return p.x\n");
     expect(is_ok(result)) << "let with construction should typecheck";
   };
 
@@ -4238,4 +4237,72 @@ suite<"module_extend_scoping"> module_extend_scoping = [] {
   };
 };
 
-auto main() -> int {} // NOLINT(readability-named-parameter)
+suite<"callable_and_definite_return"> callable_and_definite_return = [] {
+  "lambda infers generic return type from body"_test = [] {
+    auto result = check_source("fn map_one<T, U>(x: T, f: fn(T): U): U -> f(x)\n"
+                               "fn main(): i32 -> map_one(21, |n| -> n * 2)\n");
+    expect(is_ok(result));
+  };
+
+  "closure cannot escape resource memory block via outer assignment"_test = [] {
+    auto result = check_source("fn id(x: i32): i32 -> x\n"
+                               "fn main(): i32\n"
+                               "  let f: fn(i32): i32 = id\n"
+                               "  resource memory scratch =>\n"
+                               "    let k: i32 = 5\n"
+                               "    f = |x| -> x + k\n"
+                               "  return f(1)\n");
+    expect(has_error_containing(result, "cannot be copied out of the block"));
+  };
+
+  "closure cannot return from resource memory block"_test = [] {
+    auto result = check_source("fn leak(k: i32): fn(i32): i32\n"
+                               "  resource memory scratch =>\n"
+                               "    return |x| -> x + k\n");
+    expect(has_error_containing(result, "cannot be copied out of the block"));
+  };
+
+  "exhaustive match and diverging panic satisfy definite return"_test = [] {
+    auto checked = check_modules({
+        {"stdlib/core/panic.dao",
+         "module core::panic\n"
+         "extern fn __dao_panic(msg: string): void\n"
+         "fn panic(msg: string): void -> __dao_panic(msg)\n"},
+        {"app.dao",
+         "module app\n"
+         "enum class Outcome:\n"
+         "  Ok(val: i32)\n"
+         "  Failed\n"
+         "fn unwrap(o: Outcome): i32\n"
+         "  match o:\n"
+         "    Outcome::Ok(v):\n"
+         "      return v\n"
+         "    Outcome::Failed:\n"
+         "      panic(\"failed\")\n"},
+    });
+    expect(is_ok(checked->check_result));
+  };
+
+  "non-exhaustive match missing return is rejected"_test = [] {
+    auto result = check_source("enum Color:\n"
+                               "  Red\n"
+                               "  Green\n"
+                               "fn code(c: Color): i32\n"
+                               "  match c:\n"
+                               "    Color::Red:\n"
+                               "      return 1\n");
+    expect(has_error_containing(result, "without returning a value"));
+  };
+
+  "yield accepts nominal generic class instantiation"_test = [] {
+    auto result = check_source("class Indexed<T>:\n"
+                               "  index: i64\n"
+                               "  value: T\n"
+                               "fn single<T>(v: T): Generator<Indexed<T>>\n"
+                               "  yield Indexed(0, v)\n");
+    expect(is_ok(result));
+  };
+};
+
+auto main() -> int {
+} // NOLINT(readability-named-parameter)

@@ -13,9 +13,9 @@
 #include "frontend/types/type_printer.h"
 
 #include <algorithm>
+#include <format>
 #include <string>
 #include <unordered_map>
-#include <format>
 #include <unordered_set>
 #include <vector>
 
@@ -299,14 +299,18 @@ struct SpecializationState {
 // Clone a MirFunction with type substitution.
 // ---------------------------------------------------------------------------
 
-auto clone_function(const MirFunction* src, const TypeSubst& subst,
-                    const Symbol* new_symbol, MirContext& ctx,
-                    TypeContext& types) -> MirFunction* {
+auto clone_function(const MirFunction* src,
+                    const TypeSubst& subst,
+                    const Symbol* new_symbol,
+                    MirContext& ctx,
+                    TypeContext& types,
+                    std::vector<MirFunction*>& cloned_lambdas) -> MirFunction* {
   auto* dst = ctx.alloc<MirFunction>();
   dst->symbol = new_symbol;
   dst->return_type = substitute_type(src->return_type, subst, types);
   dst->span = src->span;
   dst->is_extern = src->is_extern;
+  dst->capture_count = src->capture_count;
 
   // Clone locals with substituted types.
   dst->locals.reserve(src->locals.size());
@@ -347,6 +351,14 @@ auto clone_function(const MirFunction* src, const TypeSubst& subst,
           }
           call->explicit_type_args = new_ta;
         }
+      } else if (auto* lam = std::get_if<MirLambdaInst>(&dst_inst->payload)) {
+        if (lam->captures != nullptr) {
+          lam->captures = ctx.alloc<std::vector<MirValueId>>(*lam->captures);
+        }
+        if (lam->fn != nullptr) {
+          lam->fn = clone_function(lam->fn, subst, nullptr, ctx, types, cloned_lambdas);
+          cloned_lambdas.push_back(lam->fn);
+        }
       } else if (auto* ctor = std::get_if<MirConstruct>(&dst_inst->payload)) {
         // The instruction's own type is what the construction produces —
         // `Box(made)` inside `fn mapped<U>` is a `Box<U>`, while the
@@ -366,8 +378,7 @@ auto clone_function(const MirFunction* src, const TypeSubst& subst,
               ctx.alloc<std::vector<MirValueId>>(*ctor->field_values);
           ctor->field_values = new_fv;
         }
-      } else if (auto* econ =
-                     std::get_if<MirEnumConstruct>(&dst_inst->payload)) {
+      } else if (auto* econ = std::get_if<MirEnumConstruct>(&dst_inst->payload)) {
         if (econ->enum_type != nullptr) {
           const auto* sub_et =
               substitute_type(econ->enum_type, subst, types);
@@ -946,11 +957,15 @@ auto specialize_call_site(MirInst* inst,
       git->second->symbol->module; // an instantiation belongs to its template's module
 
   // Clone the generic function with type substitution.
-  auto* specialized =
-      clone_function(git->second, subst, new_sym, ctx, types);
+  std::vector<MirFunction*> cloned_lambdas;
+  auto* specialized = clone_function(git->second, subst, new_sym, ctx, types, cloned_lambdas);
 
   // Resolve method calls on newly-concrete types.
   fixup_method_calls(specialized, module, ctx, types);
+  for (auto* lam_fn : cloned_lambdas) {
+    fixup_method_calls(lam_fn, module, ctx, types);
+    module.functions.push_back(lam_fn);
+  }
 
   // Register in cache and add to module.
   state.cache[key] = specialized;
@@ -1243,6 +1258,13 @@ auto expand_copy_out_calls(MirFunction* fn,
         diagnostics.push_back(
             Diagnostic::error(inst->span,
                               "a generator cannot be copied out of a resource block: a '" +
+                                  print_type(type) + "' leaves one through a container"));
+        continue;
+      }
+      if (holds_closure(type)) {
+        diagnostics.push_back(
+            Diagnostic::error(inst->span,
+                              "a function value cannot be copied out of a resource block: a '" +
                                   print_type(type) + "' leaves one through a container"));
         continue;
       }

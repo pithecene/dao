@@ -3,8 +3,8 @@
 #include "frontend/module/module_graph.h"
 
 #include "frontend/typecheck/type_conversion.h"
-#include "frontend/types/type_query.h"
 #include "frontend/types/type_ownership.h"
+#include "frontend/types/type_query.h"
 
 namespace dao {
 
@@ -1481,9 +1481,15 @@ void TypeChecker::check_function(const Decl* decl) {
   auto saved_ctx = ctx_;
   ctx_.return_type = ret_type;
 
+  if (fn.is_extern) {
+    ctx_ = saved_ctx;
+    return;
+  }
+
   if (fn.is_expr_bodied()) {
     // Expression-bodied: -> expr
-    const auto* expr_type = check_expr(fn.expr_body);
+    const auto* expr_type = fn.expr_body->is<LambdaExpr>() ? check_expr(fn.expr_body, ret_type)
+                                                           : check_expr(fn.expr_body);
     if (expr_type != nullptr && ret_type != nullptr && !is_assignable(expr_type, ret_type)) {
       error(fn.expr_body->span,
             "expression body type '" + print_type(expr_type) + "' does not match return type '" +
@@ -1492,7 +1498,17 @@ void TypeChecker::check_function(const Decl* decl) {
   } else {
     // Block-bodied: check statements.
     warn_whole_body_domain(fn);
+    const size_t errs_before = std::ranges::count_if(
+        diagnostics_, [](const Diagnostic& d) { return d.severity == Severity::Error; });
     check_body(fn.body);
+    const size_t errs_after = std::ranges::count_if(
+        diagnostics_, [](const Diagnostic& d) { return d.severity == Severity::Error; });
+    if (errs_after == errs_before && ret_type != nullptr && ret_type->kind() != TypeKind::Void &&
+        ret_type->kind() != TypeKind::Generator && !body_definitely_returns(fn.body)) {
+      error(fn.name_span,
+            "function '" + std::string(fn.name) +
+                "' may reach end of body without returning a value");
+    }
   }
 
   ctx_ = saved_ctx;
@@ -1736,7 +1752,7 @@ void TypeChecker::check_yield(const Stmt* stmt) {
   // The yielded value must match the Generator's element type.
   const auto* gen = static_cast<const TypeGenerator*>(ctx_.return_type);
   const auto* expected = gen->yield_type();
-  if (value_type != nullptr && expected != nullptr && value_type != expected) {
+  if (value_type != nullptr && expected != nullptr && !is_assignable(value_type, expected)) {
     error(yield.value->span,
           "yield type '" + print_type(value_type) + "' does not match Generator element type '" +
               print_type(expected) + "'");
@@ -1908,6 +1924,13 @@ void TypeChecker::check_store_escapes_domain(const Expr* target) {
                 "' and stored to inside it: a generator cannot be copied out of the block");
       return;
     }
+    if (holds_closure(root_type)) {
+      error(target->span,
+            "'" + std::string(root->name) + "' is declared outside resource block '" +
+                std::string(it->name) +
+                "' and stored to inside it: a function value cannot be copied out of the block");
+      return;
+    }
     typed_.add_resource_escape(it->stmt, root);
   }
 }
@@ -1936,6 +1959,11 @@ void TypeChecker::check_return(const Stmt* stmt) {
             "returning a generator from inside resource block '" +
                 std::string(ctx_.resource_blocks.back().name) +
                 "': a generator cannot be copied out of the block");
+    } else if (!ctx_.resource_blocks.empty() && holds_closure(val_type)) {
+      error(ret.value->span,
+            "returning a function value from inside resource block '" +
+                std::string(ctx_.resource_blocks.back().name) +
+                "': a function value cannot be copied out of the block");
     }
   } else {
     // Bare return — valid for void functions and generator functions.
@@ -3235,11 +3263,17 @@ auto TypeChecker::check_call(const Expr* expr) -> const Type* {
     // Lambdas cannot cross the C ABI boundary as closures have no
     // context pointer in a C function pointer representation.
     // (CONTRACT_C_ABI_INTEROP §4.4.5)
-    if (callee_is_extern && params[i] != nullptr && params[i]->kind() == TypeKind::Function &&
-        call.args[i]->is<LambdaExpr>()) {
-      error(call.args[i]->span,
-            "lambda cannot be passed as a C function pointer; "
-            "use a named function instead");
+    if (callee_is_extern && params[i] != nullptr && params[i]->kind() == TypeKind::Function) {
+      if (call.args[i]->is<LambdaExpr>()) {
+        error(call.args[i]->span,
+              "lambda cannot be passed as a C function pointer; "
+              "use a named function instead");
+      } else {
+        const auto* arg_sym = symbol_for_use(call.args[i]);
+        if (arg_sym == nullptr || arg_sym->kind != SymbolKind::Function) {
+          error(call.args[i]->span, "only named functions can be passed as a C function pointer");
+        }
+      }
     }
 
     // With type arguments written at the call, the parameters they
@@ -3251,28 +3285,24 @@ auto TypeChecker::check_call(const Expr* expr) -> const Type* {
     // `U` is and learns `T` from its first argument.
     const bool written_out = !call.type_args.empty();
     const bool type_args_bound_the_type = written_out && call.type_args_name_the_type;
-    const GenericBinding remaining = written_args_fix_the_rest ? kFixedGenerics
-                                     : type_args_bound_the_type
-                                         ? GenericBinding{binding.binder}
-                                         : GenericBinding{binding.owner};
+    const GenericBinding remaining = written_args_fix_the_rest  ? kFixedGenerics
+                                     : type_args_bound_the_type ? GenericBinding{binding.binder}
+                                                                : GenericBinding{binding.owner};
+    const auto argument_binding = ptr_op == PtrOp::Set || receiver_fixes_the_callee ? kFixedGenerics
+                                  : written_out                                     ? remaining
+                                                                                    : binding;
     // Whatever is decided by now applies: the arguments written at the
     // call, and what the arguments before this one bound.  So the second
     // argument of `keep(1, Option::None)` is checked against
     // `Option<i32>` rather than against `Option<T>`.
     const auto* param_type = substitute_generics(params[i], type_bindings);
+    const auto saved_call_binding = active_call_binding_;
+    active_call_binding_ = argument_binding;
     const auto* arg_type = check_expr(call.args[i], param_type);
+    active_call_binding_ = saved_call_binding;
     if (arg_type == nullptr || param_type == nullptr) {
       continue;
     }
-    // `set`'s parameter is the receiver's pointee, already fixed: a type
-    // parameter anywhere inside it names that one type, never a type to
-    // infer, so the value must be of exactly that type.  Every other
-    // parameter belongs to the callee's signature, which this very
-    // argument binds (CONTRACT_TYPECHECKING_BASELINE §§4, 8).
-    const auto argument_binding = ptr_op == PtrOp::Set || receiver_fixes_the_callee
-                                      ? kFixedGenerics
-                                  : written_out ? remaining
-                                                : binding;
     if (!is_assignable(arg_type, param_type, argument_binding)) {
       error(call.args[i]->span,
             "argument type '" + print_type(arg_type) + "' is not assignable to parameter type '" +
@@ -3501,6 +3531,30 @@ auto TypeChecker::check_pipe(const Expr* expr) -> const Type* {
     return nullptr;
   }
 
+  // When the pipe target is an inline lambda (`x |> |v| -> ...`), the
+  // piped LHS supplies its single parameter type and the body determines
+  // the pipe result type.
+  if (pipe.right->is<LambdaExpr>()) {
+    const auto& lam = pipe.right->as<LambdaExpr>();
+    if (lam.params.size() != 1) {
+      error(pipe.right->span,
+            "pipe target lambda must accept 1 parameter, got " + std::to_string(lam.params.size()));
+      return nullptr;
+    }
+    auto decl_it = decl_symbols_.find(lam.params[0].second.offset);
+    if (decl_it != decl_symbols_.end()) {
+      symbol_types_[decl_it->second] = lhs_type;
+    }
+    check_lambda_captures(lam.body, pipe.right->span);
+    const auto* body_type = check_expr(lam.body);
+    if (body_type == nullptr) {
+      return nullptr;
+    }
+    const auto* lam_fn_type = types_.function_type({lhs_type}, body_type);
+    typed_.set_expr_type(pipe.right, lam_fn_type);
+    return body_type;
+  }
+
   // The RHS of a pipe is typically a callable. Check it as an expression.
   const auto* rhs_type = check_expr(pipe.right);
   if (rhs_type == nullptr) {
@@ -3594,6 +3648,11 @@ auto TypeChecker::check_try(const Expr* expr) -> const Type* {
     error(expr->span,
           "'?' inside resource block '" + std::string(ctx_.resource_blocks.back().name) +
               "' would return a generator: a generator cannot be copied out of the block");
+  } else if (!ctx_.resource_blocks.empty() && holds_closure(ctx_.return_type)) {
+    error(
+        expr->span,
+        "'?' inside resource block '" + std::string(ctx_.resource_blocks.back().name) +
+            "' would return a function value: a function value cannot be copied out of the block");
   }
 
   const auto& variants = enum_type->variants();
@@ -4128,22 +4187,216 @@ auto TypeChecker::check_lambda(const Expr* expr, const Type* expected) -> const 
 
   // Bind lambda param types from context and register them.
   for (size_t i = 0; i < lam.params.size(); ++i) {
-    auto use_it = resolve_.uses.find(lam.params[i].second.offset);
-    if (use_it != resolve_.uses.end()) {
-      symbol_types_[use_it->second] = expected_params[i];
+    auto decl_it = decl_symbols_.find(lam.params[i].second.offset);
+    if (decl_it != decl_symbols_.end()) {
+      symbol_types_[decl_it->second] = expected_params[i];
     }
   }
 
-  // Check body expression against expected return type.
-  const auto* body_type = check_expr(lam.body);
-  if (body_type != nullptr && fn_expected->return_type() != nullptr &&
-      !is_assignable(body_type, fn_expected->return_type())) {
+  check_lambda_captures(lam.body, expr->span);
+
+  // Check body expression against expected return type.  When the
+  // expected return type mentions an unbound generic parameter of an
+  // enclosing call (such as `U` in `map_vec(xs, |x| -> x * 2)`), check
+  // the body without forcing `U` as a literal sink and synthesize the
+  // concrete function type so the call can infer `U`.
+  const auto active_binding = active_call_binding_;
+  const auto* expected_ret = fn_expected->return_type();
+  const bool ret_has_unbound_generic =
+      expected_ret != nullptr && ((active_binding.binder != nullptr &&
+                                   type_mentions_param_of(expected_ret, active_binding.binder)) ||
+                                  (active_binding.owner != nullptr &&
+                                   type_mentions_param_of(expected_ret, active_binding.owner)));
+  active_call_binding_ = kFixedGenerics;
+  const auto* body_type =
+      ret_has_unbound_generic ? check_expr(lam.body) : check_expr(lam.body, expected_ret);
+  active_call_binding_ = active_binding;
+
+  if (body_type != nullptr && expected_ret != nullptr &&
+      !is_assignable(body_type, expected_ret, active_binding)) {
     error(lam.body->span,
           "lambda body type '" + print_type(body_type) + "' does not match expected return type '" +
-              print_type(fn_expected->return_type()) + "'");
+              print_type(expected_ret) + "'");
+  }
+
+  if (body_type != nullptr && ret_has_unbound_generic) {
+    return types_.function_type(expected_params, body_type);
   }
 
   return expected;
+}
+
+void TypeChecker::check_lambda_captures(const Expr* expr, Span lambda_span) {
+  if (expr == nullptr) {
+    return;
+  }
+  switch (expr->kind()) {
+  case NodeKind::Identifier: {
+    const auto* sym = symbol_for_use(expr);
+    if (sym != nullptr &&
+        (sym->kind == SymbolKind::Local || sym->kind == SymbolKind::Param ||
+         sym->kind == SymbolKind::LambdaParam) &&
+        sym->decl_span.offset < lambda_span.offset) {
+      const auto* sym_type = resolve_symbol_type(sym);
+      if (sym_type != nullptr && holds_generator(sym_type)) {
+        error(expr->span,
+              "cannot capture '" + std::string(sym->name) +
+                  "' in a lambda: generator values cannot be captured by value");
+      }
+    }
+    break;
+  }
+  case NodeKind::UnaryExpr:
+    check_lambda_captures(expr->as<UnaryExpr>().operand, lambda_span);
+    break;
+  case NodeKind::BinaryExpr:
+    check_lambda_captures(expr->as<BinaryExpr>().left, lambda_span);
+    check_lambda_captures(expr->as<BinaryExpr>().right, lambda_span);
+    break;
+  case NodeKind::CallExpr: {
+    const auto& call = expr->as<CallExpr>();
+    check_lambda_captures(call.callee, lambda_span);
+    for (const auto* arg : call.args) {
+      check_lambda_captures(arg, lambda_span);
+    }
+    break;
+  }
+  case NodeKind::FieldExpr:
+    check_lambda_captures(expr->as<FieldExpr>().object, lambda_span);
+    break;
+  case NodeKind::IndexExpr: {
+    const auto& idx = expr->as<IndexExpr>();
+    check_lambda_captures(idx.object, lambda_span);
+    for (const auto* item : idx.indices) {
+      check_lambda_captures(item, lambda_span);
+    }
+    break;
+  }
+  case NodeKind::PipeExpr:
+    check_lambda_captures(expr->as<PipeExpr>().left, lambda_span);
+    check_lambda_captures(expr->as<PipeExpr>().right, lambda_span);
+    break;
+  case NodeKind::TryExpr:
+    check_lambda_captures(expr->as<TryExpr>().operand, lambda_span);
+    break;
+  case NodeKind::Lambda:
+    check_lambda_captures(expr->as<LambdaExpr>().body, lambda_span);
+    break;
+  case NodeKind::ListLiteral:
+    for (const auto* elem : expr->as<ListLiteral>().elements) {
+      check_lambda_captures(elem, lambda_span);
+    }
+    break;
+  default:
+    break;
+  }
+}
+
+auto TypeChecker::body_definitely_returns(const std::vector<Stmt*>& body) const -> bool {
+  return std::ranges::any_of(body, [&](const Stmt* s) { return stmt_definitely_returns(s); });
+}
+
+auto TypeChecker::stmt_definitely_returns(const Stmt* stmt) const -> bool {
+  if (stmt == nullptr) {
+    return false;
+  }
+  switch (stmt->kind()) {
+  case NodeKind::ReturnStatement:
+    return true;
+  case NodeKind::ExpressionStatement:
+    return expr_diverges(stmt->as<ExpressionStatement>().expr);
+  case NodeKind::IfStatement: {
+    const auto& ifs = stmt->as<IfStatement>();
+    return !ifs.else_body.empty() && body_definitely_returns(ifs.then_body) &&
+           body_definitely_returns(ifs.else_body);
+  }
+  case NodeKind::MatchStatement: {
+    const auto& match = stmt->as<MatchStmt>();
+    return match_is_exhaustive(match) && std::ranges::all_of(match.arms, [&](const MatchArm& arm) {
+             return body_definitely_returns(arm.body);
+           });
+  }
+  case NodeKind::ModeBlock:
+    return body_definitely_returns(stmt->as<ModeBlock>().body);
+  case NodeKind::ResourceBlock:
+    return body_definitely_returns(stmt->as<ResourceBlock>().body);
+  default:
+    return false;
+  }
+}
+
+auto TypeChecker::match_is_exhaustive(const MatchStmt& match) const -> bool {
+  if (match.scrutinee == nullptr || match.arms.empty()) {
+    return false;
+  }
+  const auto* scrutinee_type = typed_.expr_type(match.scrutinee);
+  if (scrutinee_type == nullptr) {
+    return false;
+  }
+  if (scrutinee_type->kind() == TypeKind::Enum) {
+    const auto* enum_type = static_cast<const TypeEnum*>(scrutinee_type);
+    if (enum_type->variants().empty()) {
+      return false;
+    }
+    std::unordered_set<std::string_view> covered;
+    for (const auto& arm : match.arms) {
+      if (arm.pattern != nullptr && arm.pattern->is<QualifiedName>()) {
+        const auto& qn = arm.pattern->as<QualifiedName>();
+        if (qn.segments.size() >= 2) {
+          covered.insert(qn.segments.back());
+        }
+      }
+    }
+    return std::ranges::all_of(enum_type->variants(),
+                               [&](const EnumVariant& v) { return covered.contains(v.name); });
+  }
+  if (scrutinee_type->kind() == TypeKind::Builtin &&
+      static_cast<const TypeBuiltin*>(scrutinee_type)->builtin() == BuiltinKind::Bool) {
+    bool has_true = false;
+    bool has_false = false;
+    for (const auto& arm : match.arms) {
+      if (arm.pattern != nullptr && arm.pattern->is<BoolLiteral>()) {
+        if (arm.pattern->as<BoolLiteral>().value) {
+          has_true = true;
+        } else {
+          has_false = true;
+        }
+      }
+    }
+    return has_true && has_false;
+  }
+  return false;
+}
+
+auto TypeChecker::expr_diverges(const Expr* expr, uint32_t depth) const -> bool {
+  if (expr == nullptr || depth > 4 || !expr->is<CallExpr>()) {
+    return false;
+  }
+  const auto* sym = symbol_for_use(expr->as<CallExpr>().callee);
+  if (sym == nullptr || sym->kind != SymbolKind::Function) {
+    return false;
+  }
+  if (sym->name == "__dao_panic") {
+    return true;
+  }
+  const auto* decl = sym->decl_as_decl();
+  if (decl == nullptr || !decl->is<FunctionDecl>()) {
+    return false;
+  }
+  const auto& fn = decl->as<FunctionDecl>();
+  if (fn.is_extern) {
+    return false;
+  }
+  if (fn.is_expr_bodied()) {
+    return expr_diverges(fn.expr_body, depth + 1);
+  }
+  if (!fn.is_extern && !fn.body.empty()) {
+    return std::ranges::any_of(fn.body, [&](const Stmt* s) {
+      return s != nullptr && s->is<ExpressionStatement>() &&
+             expr_diverges(s->as<ExpressionStatement>().expr, depth + 1);
+    });
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------

@@ -43,6 +43,9 @@ public:
   // Get the LLVM generator representation type: { ptr frame, ptr resume_fn }.
   auto generator_type() -> llvm::StructType*;
 
+  // Get the LLVM first-class callable representation type: { ptr fn_ptr, ptr env_ptr }.
+  auto callable_type() -> llvm::StructType*;
+
   // Access the last lowering error (empty if none).
   [[nodiscard]] auto error() const -> const std::string& { return error_; }
 
@@ -51,6 +54,7 @@ private:
   llvm::Module* module_ = nullptr;
   llvm::StructType* string_type_ = nullptr;
   llvm::StructType* generator_type_ = nullptr;
+  llvm::StructType* callable_type_ = nullptr;
   std::string error_;
 
   // Cache for struct type lowering to break cycles.

@@ -441,6 +441,14 @@ fn resolve_type_node(rs: RS, node_idx: i64): RS
     parser::Node::QualNameE(seg_lp, seg_count):
       // Qualified type name (e.g. types::Point) — resolve same as expression.
       return resolve_expr(rs, node_idx)
+    parser::Node::FnT(fn_tok, params_lp, param_count, ret):
+      let params: Vector<i64> = parser::read_list(rs.rc.idx_data, params_lp)
+      let r: RS = rs
+      let i: i64 = 0
+      while i < params.length():
+        r = resolve_type_node(r, params.get(i))
+        i = i + 1
+      return resolve_type_node(r, ret)
     parser::Node::ErrorT(t):
       return rs
   return rs

@@ -75,6 +75,7 @@ auto LlvmBackend::lower(const MirModule& mir_module,
   // Provide the module to the type lowering layer so it can use DataLayout
   // for enum payload sizing.
   types_.set_module(*module_);
+  next_lambda_id_ = 0;
 
   // Declare runtime hooks with canonical signatures before processing
   // MIR functions. This makes LlvmRuntimeHooks the authoritative source.
@@ -141,6 +142,13 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
       }
       continue;
     }
+    // At the C ABI boundary (`extern fn`), function types are raw C
+    // function pointers (`ptr`), not Dao `{ fn_ptr, env_ptr }` pairs
+    // (CONTRACT_C_ABI_INTEROP.md §4.4.3).
+    if (mir_fn->is_extern && mir_fn->return_type != nullptr &&
+        mir_fn->return_type->kind() == TypeKind::Function) {
+      ret_type = llvm::PointerType::getUnqual(ctx_);
+    }
 
     std::vector<llvm::Type*> param_types;
     for (const auto& local : mir_fn->locals) {
@@ -153,14 +161,12 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
                         "cannot lower param type: " + types_.error());
         break;
       }
+      if (mir_fn->is_extern && local.type != nullptr && local.type->kind() == TypeKind::Function) {
+        param_types.push_back(llvm::PointerType::getUnqual(ctx_));
+        continue;
+      }
       // String params are passed by pointer for C ABI compatibility.
       if (LlvmTypeLowering::is_string_type(local.type)) {
-        lowered_param = llvm::PointerType::getUnqual(lowered_param);
-      }
-      // Function type params: lower to opaque ptr (C function pointer).
-      // llvm::FunctionType is not a first-class type — pointers to
-      // functions are represented as opaque ptr in LLVM IR.
-      if (llvm::isa<llvm::FunctionType>(lowered_param)) {
         lowered_param = llvm::PointerType::getUnqual(lowered_param);
       }
       // For extern fn: struct params need ABI coercion at the C boundary.
@@ -182,11 +188,6 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
       } else {
         param_types.push_back(lowered_param);
       }
-    }
-
-    // Function type return: lower to opaque ptr.
-    if (llvm::isa<llvm::FunctionType>(ret_type)) {
-      ret_type = llvm::PointerType::getUnqual(ret_type);
     }
 
     // For extern fn: struct returns also need ABI coercion.
@@ -277,7 +278,12 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
         }
       }
       for (const auto& local : mir_fn->locals) {
-        if (!local.is_param) break;
+        if (!local.is_param)
+          break;
+        if (local.type != nullptr && local.type->kind() == TypeKind::Function) {
+          arg_idx++;
+          continue;
+        }
         auto* lowered_param = types_.lower(local.type);
         if (lowered_param != nullptr &&
             llvm::isa<llvm::StructType>(lowered_param) &&
@@ -494,23 +500,19 @@ auto LlvmBackend::lower_function(const MirFunction& fn) -> bool {
       emit_diagnostic(local.span, "cannot lower local type: " + types_.error());
       return false;
     }
-    // Function-typed locals are stored as opaque pointers.
-    if (llvm::isa<llvm::FunctionType>(local_type)) {
-      local_type = llvm::PointerType::getUnqual(local_type);
-    }
     // String locals store the struct, not a pointer.
     auto* alloca = builder.CreateAlloca(
         local_type, nullptr,
         local.symbol != nullptr ? std::string(local.symbol->name) : "");
-    state.locals[local.id.id] = alloca;
-    state.local_types[local.id.id] = local.type;
+    state.locals.slots[local.id.id] = alloca;
+    state.locals.types[local.id.id] = local.type;
   }
 
   // Store function parameters into their allocas.
   size_t param_idx = 0;
   for (auto& arg : llvm_fn->args()) {
     if (param_idx < fn.locals.size() && fn.locals[param_idx].is_param) {
-      auto* alloca = state.locals[fn.locals[param_idx].id.id];
+      auto* alloca = state.locals.slots[fn.locals[param_idx].id.id];
       // For string params (passed by pointer), load the struct value.
       if (LlvmTypeLowering::is_string_type(fn.locals[param_idx].type)) {
         auto* loaded = builder.CreateLoad(types_.string_type(), &arg);
@@ -564,103 +566,100 @@ auto LlvmBackend::lower_block(const MirBlock& block,
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 auto LlvmBackend::lower_inst(const MirInst& inst,
                                FunctionState& state) -> bool {
-  return std::visit(overloaded{
-      [&](const MirConstInt& p)    { return lower_const_int(p, inst, state); },
-      [&](const MirConstFloat& p)  { return lower_const_float(p, inst, state); },
-      [&](const MirConstBool& p)   { return lower_const_bool(p, inst, state); },
-      [&](const MirConstString& p) { return lower_const_string(p, inst, state); },
-      [&](const MirUnary& p)       { return lower_unary(p, inst, state); },
-      [&](const MirBinary& p)      { return lower_binary(p, inst, state); },
-      [&](const MirStore& p)       { return lower_store(p, inst, state); },
-      [&](const MirLoad& p)        { return lower_load(p, inst, state); },
-      [&](const MirFnRef& p)       { return lower_fn_ref(p, inst, state); },
-      [&](const MirCall& p)        { return lower_call(p, inst, state); },
-      [&](const MirConstruct& p)         { return lower_construct(p, inst, state); },
-      [&](const MirEnumConstruct& p)    { return lower_enum_construct(p, inst, state); },
-      [&](const MirEnumDiscriminant& p) { return lower_enum_discriminant(p, inst, state); },
-      [&](const MirEnumPayload& p)      { return lower_enum_payload(p, inst, state); },
-      [&](const MirReturn& p)           { return lower_return(p, inst, state); },
-      [&](const MirBr& p)          { return lower_br(p, inst, state); },
-      [&](const MirCondBr& p)      { return lower_cond_br(p, inst, state); },
-      [&](const MirFieldAccess& p) { return lower_field_access(p, inst, state); },
+  return std::visit(
+      overloaded{
+          [&](const MirConstInt& p) { return lower_const_int(p, inst, state); },
+          [&](const MirConstFloat& p) { return lower_const_float(p, inst, state); },
+          [&](const MirConstBool& p) { return lower_const_bool(p, inst, state); },
+          [&](const MirConstString& p) { return lower_const_string(p, inst, state); },
+          [&](const MirUnary& p) { return lower_unary(p, inst, state); },
+          [&](const MirBinary& p) { return lower_binary(p, inst, state); },
+          [&](const MirStore& p) { return lower_store(p, inst, state); },
+          [&](const MirLoad& p) { return lower_load(p, inst, state); },
+          [&](const MirFnRef& p) { return lower_fn_ref(p, inst, state); },
+          [&](const MirCall& p) { return lower_call(p, inst, state); },
+          [&](const MirConstruct& p) { return lower_construct(p, inst, state); },
+          [&](const MirEnumConstruct& p) { return lower_enum_construct(p, inst, state); },
+          [&](const MirEnumDiscriminant& p) { return lower_enum_discriminant(p, inst, state); },
+          [&](const MirEnumPayload& p) { return lower_enum_payload(p, inst, state); },
+          [&](const MirReturn& p) { return lower_return(p, inst, state); },
+          [&](const MirBr& p) { return lower_br(p, inst, state); },
+          [&](const MirCondBr& p) { return lower_cond_br(p, inst, state); },
+          [&](const MirFieldAccess& p) { return lower_field_access(p, inst, state); },
 
-      [&](const MirPtrOp& p) { return lower_ptr_op(p, inst, state); },
+          [&](const MirPtrOp& p) { return lower_ptr_op(p, inst, state); },
 
-      // Mode unsafe — permission semantics enforced upstream; no-op in codegen.
-      [&](const MirModeEnter& p) -> bool {
-        if (p.mode_kind != HirModeKind::Unsafe) {
-          emit_diagnostic(inst.span,
-                           "mode '" + std::string(p.region_name) +
-                           "' lowering not yet supported");
-          return false;
-        }
-        return true;
-      },
-      [&](const MirModeExit& p) -> bool {
-        if (p.mode_kind != HirModeKind::Unsafe) {
-          // Entry already diagnosed; skip duplicate.
-        }
-        return true;
-      },
+          // Mode unsafe — permission semantics enforced upstream; no-op in codegen.
+          [&](const MirModeEnter& p) -> bool {
+            if (p.mode_kind != HirModeKind::Unsafe) {
+              emit_diagnostic(inst.span,
+                              "mode '" + std::string(p.region_name) +
+                                  "' lowering not yet supported");
+              return false;
+            }
+            return true;
+          },
+          [&](const MirModeExit& p) -> bool {
+            if (p.mode_kind != HirModeKind::Unsafe) {
+              // Entry already diagnosed; skip duplicate.
+            }
+            return true;
+          },
 
-      // Resource regions — dispatch by kind.
-      [&](const MirResourceEnter& p) -> bool {
-        if (p.region_kind != "memory") {
-          emit_diagnostic(inst.span,
-                           "resource '" + std::string(p.region_kind) +
-                           "' lowering not yet supported");
-          return false;
-        }
-        auto* enter_fn = module_->getFunction(
-            std::string(runtime_hooks::kMemResourceEnter));
-        if (enter_fn == nullptr) {
-          emit_diagnostic(inst.span, "resource_enter: runtime hook not found");
-          return false;
-        }
-        auto* handle = state.builder->CreateCall(enter_fn, {}, "resource.domain");
-        state.values[inst.result.id] = handle;
-        return true;
-      },
-      [&](const MirResourceExit& p) -> bool {
-        if (p.region_kind != "memory") {
-          // Entry already diagnosed; skip duplicate.
-          return true;
-        }
-        auto* handle = get_value(p.domain_handle, state);
-        if (handle == nullptr) {
-          emit_diagnostic(inst.span, "resource_exit: domain handle not found");
-          return false;
-        }
-        auto* exit_fn = module_->getFunction(
-            std::string(runtime_hooks::kMemResourceExit));
-        if (exit_fn == nullptr) {
-          emit_diagnostic(inst.span, "resource_exit: runtime hook not found");
-          return false;
-        }
-        state.builder->CreateCall(exit_fn, {handle});
-        return true;
-      },
+          // Resource regions — dispatch by kind.
+          [&](const MirResourceEnter& p) -> bool {
+            if (p.region_kind != "memory") {
+              emit_diagnostic(inst.span,
+                              "resource '" + std::string(p.region_kind) +
+                                  "' lowering not yet supported");
+              return false;
+            }
+            auto* enter_fn = module_->getFunction(std::string(runtime_hooks::kMemResourceEnter));
+            if (enter_fn == nullptr) {
+              emit_diagnostic(inst.span, "resource_enter: runtime hook not found");
+              return false;
+            }
+            auto* handle = state.builder->CreateCall(enter_fn, {}, "resource.domain");
+            state.values[inst.result.id] = handle;
+            return true;
+          },
+          [&](const MirResourceExit& p) -> bool {
+            if (p.region_kind != "memory") {
+              // Entry already diagnosed; skip duplicate.
+              return true;
+            }
+            auto* handle = get_value(p.domain_handle, state);
+            if (handle == nullptr) {
+              emit_diagnostic(inst.span, "resource_exit: domain handle not found");
+              return false;
+            }
+            auto* exit_fn = module_->getFunction(std::string(runtime_hooks::kMemResourceExit));
+            if (exit_fn == nullptr) {
+              emit_diagnostic(inst.span, "resource_exit: runtime hook not found");
+              return false;
+            }
+            state.builder->CreateCall(exit_fn, {handle});
+            return true;
+          },
 
-      // Unsupported constructs.
-      [&](const MirIndexAccess&) -> bool {
-        emit_diagnostic(inst.span, "index access lowering not yet implemented");
-        return false;
+          // Unsupported constructs.
+          [&](const MirIndexAccess&) -> bool {
+            emit_diagnostic(inst.span, "index access lowering not yet implemented");
+            return false;
+          },
+          [&](const MirIterInit& p) { return lower_iter_init(p, inst, state); },
+          [&](const MirIterHasNext& p) { return lower_iter_has_next(p, inst, state); },
+          [&](const MirIterNext& p) { return lower_iter_next(p, inst, state); },
+          [&](const MirIterDestroy& p) { return lower_iter_destroy(p, inst, state); },
+          [&](const MirYieldInst&) -> bool {
+            // Yield is handled inline by lower_generator_resume; reaching
+            // this visitor means yield appeared outside a generator context.
+            emit_diagnostic(inst.span, "yield outside generator function");
+            return false;
+          },
+          [&](const MirLambdaInst& p) { return lower_lambda(p, inst, state); },
       },
-      [&](const MirIterInit& p)    { return lower_iter_init(p, inst, state); },
-      [&](const MirIterHasNext& p) { return lower_iter_has_next(p, inst, state); },
-      [&](const MirIterNext& p)    { return lower_iter_next(p, inst, state); },
-      [&](const MirIterDestroy& p) { return lower_iter_destroy(p, inst, state); },
-      [&](const MirYieldInst&) -> bool {
-        // Yield is handled inline by lower_generator_resume; reaching
-        // this visitor means yield appeared outside a generator context.
-        emit_diagnostic(inst.span, "yield outside generator function");
-        return false;
-      },
-      [&](const MirLambdaInst&) -> bool {
-        emit_diagnostic(inst.span, "lambda lowering not yet implemented");
-        return false;
-      },
-  }, inst.payload);
+      inst.payload);
 }
 
 // ---------------------------------------------------------------------------
@@ -671,6 +670,23 @@ auto LlvmBackend::get_value(MirValueId id, FunctionState& state) -> llvm::Value*
   auto it = state.values.find(id.id);
   if (it != state.values.end()) {
     return it->second;
+  }
+  auto fn_it = state.callees.fn_ref_symbols.find(id.id);
+  if (fn_it != state.callees.fn_ref_symbols.end()) {
+    auto type_it = state.value_types.find(id.id);
+    if (type_it == state.value_types.end() || type_it->second == nullptr ||
+        type_it->second->kind() != TypeKind::Function) {
+      return nullptr;
+    }
+    auto* thunk = get_or_create_fn_thunk(
+        *fn_it->second, static_cast<const TypeFunction*>(type_it->second), Span{});
+    if (thunk == nullptr) {
+      return nullptr;
+    }
+    auto* null_env = llvm::ConstantPointerNull::get(llvm::PointerType::getUnqual(ctx_));
+    auto* callable = llvm::ConstantStruct::get(types_.callable_type(), {thunk, null_env});
+    state.values[id.id] = callable;
+    return callable;
   }
   return nullptr;
 }
@@ -1031,11 +1047,7 @@ auto LlvmBackend::pointee_storage_type(const Type* pointee) -> llvm::Type* {
   if (pointee == nullptr || pointee->kind() == TypeKind::Void) {
     return nullptr;
   }
-  auto* lowered = types_.lower(pointee);
-  if (lowered != nullptr && llvm::isa<llvm::FunctionType>(lowered)) {
-    return llvm::PointerType::getUnqual(module_->getContext());
-  }
-  return lowered;
+  return types_.lower(pointee);
 }
 
 auto LlvmBackend::lower_ptr_op(const MirPtrOp& p, const MirInst& inst, FunctionState& state)
@@ -1148,8 +1160,8 @@ auto LlvmBackend::lower_builtin_call(
 // The semantic type a place denotes: its local's type followed through
 // its projections, or null where a step is unknown.
 auto LlvmBackend::place_type(const MirPlace& place, const FunctionState& state) -> const Type* {
-  auto local_type = state.local_types.find(place.local.id);
-  const Type* current = local_type != state.local_types.end() ? local_type->second : nullptr;
+  auto local_type = state.locals.types.find(place.local.id);
+  const Type* current = local_type != state.locals.types.end() ? local_type->second : nullptr;
   for (const auto& proj : place.projections) {
     if (current == nullptr) {
       return nullptr;
@@ -1177,8 +1189,8 @@ auto LlvmBackend::place_type(const MirPlace& place, const FunctionState& state) 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 auto LlvmBackend::resolve_place(const MirPlace& place,
                                  FunctionState& state) -> llvm::Value* {
-  auto it = state.locals.find(place.local.id);
-  if (it == state.locals.end()) {
+  auto it = state.locals.slots.find(place.local.id);
+  if (it == state.locals.slots.end()) {
     return nullptr;
   }
 
@@ -1188,8 +1200,8 @@ auto LlvmBackend::resolve_place(const MirPlace& place,
   // produces a raw loaded pointer we still know the LLVM type for the
   // subsequent Field GEP.
   const Type* current_type = nullptr;
-  auto type_it = state.local_types.find(place.local.id);
-  if (type_it != state.local_types.end()) {
+  auto type_it = state.locals.types.find(place.local.id);
+  if (type_it != state.locals.types.end()) {
     current_type = type_it->second;
   }
 
@@ -1262,8 +1274,8 @@ auto LlvmBackend::lower_store(const MirStore& p, const MirInst& inst,
     return false;
   }
 
-  auto it = state.locals.find(p.place->local.id);
-  if (it == state.locals.end()) {
+  auto it = state.locals.slots.find(p.place->local.id);
+  if (it == state.locals.slots.end()) {
     emit_diagnostic(inst.span, "store target local not found");
     return false;
   }
@@ -1294,8 +1306,8 @@ auto LlvmBackend::lower_load(const MirLoad& p, const MirInst& inst,
     return false;
   }
 
-  auto it = state.locals.find(p.place->local.id);
-  if (it == state.locals.end()) {
+  auto it = state.locals.slots.find(p.place->local.id);
+  if (it == state.locals.slots.end()) {
     emit_diagnostic(inst.span, "load source local not found");
     return false;
   }
@@ -1323,10 +1335,6 @@ auto LlvmBackend::lower_load(const MirLoad& p, const MirInst& inst,
   if (local_type == nullptr) {
     emit_diagnostic(inst.span, "cannot lower load type: " + types_.error());
     return false;
-  }
-  // Function-typed loads: the alloca stores a ptr, not a FunctionType.
-  if (llvm::isa<llvm::FunctionType>(local_type)) {
-    local_type = llvm::PointerType::getUnqual(local_type);
   }
 
   auto* val = state.builder->CreateLoad(local_type, it->second, "load");
@@ -1405,7 +1413,7 @@ auto LlvmBackend::lower_fn_ref(const MirFnRef& p, const MirInst& inst,
   if (is_builtin_intrinsic(*p.symbol)) {
     state.values[inst.result.id] = nullptr;
     state.value_types[inst.result.id] = inst.type;
-    state.builtin_names[inst.result.id] = p.symbol->name;
+    state.callees.builtin_names[inst.result.id] = p.symbol->name;
     return true;
   }
 
@@ -1416,32 +1424,295 @@ auto LlvmBackend::lower_fn_ref(const MirFnRef& p, const MirInst& inst,
     return false;
   }
 
-  state.values[inst.result.id] = fn;
+  state.callees.fn_ref_symbols[inst.result.id] = p.symbol;
   state.value_types[inst.result.id] = inst.type;
   return true;
 }
 
-auto LlvmBackend::lower_call(const MirCall& p, const MirInst& inst,
-                               FunctionState& state) -> bool {
-  // Check for compiler builtin intrinsics (size_of$T, align_of$T).
-  auto builtin_it = state.builtin_names.find(p.callee.id);
-  if (builtin_it != state.builtin_names.end()) {
-    return lower_builtin_call(builtin_it->second, p, inst, state);
+auto LlvmBackend::callable_fn_type(const TypeFunction* sem_fn, Span span) -> llvm::FunctionType* {
+  if (sem_fn == nullptr) {
+    emit_diagnostic(span, "callable value missing function type");
+    return nullptr;
+  }
+  std::vector<llvm::Type*> params;
+  params.reserve(sem_fn->param_types().size() + 1);
+  params.push_back(llvm::PointerType::getUnqual(ctx_)); // hidden env_ptr
+  for (const auto* param_type : sem_fn->param_types()) {
+    auto* lowered = types_.lower(param_type);
+    if (lowered == nullptr) {
+      emit_diagnostic(span, "cannot lower callable param type: " + types_.error());
+      return nullptr;
+    }
+    if (LlvmTypeLowering::is_string_type(param_type)) {
+      lowered = llvm::PointerType::getUnqual(lowered);
+    }
+    params.push_back(lowered);
+  }
+  auto* adj_ret = types_.lower(sem_fn->return_type());
+  if (adj_ret == nullptr) {
+    emit_diagnostic(span, "cannot lower callable return type: " + types_.error());
+    return nullptr;
+  }
+  return llvm::FunctionType::get(adj_ret, params, /*isVarArg=*/false);
+}
+
+auto LlvmBackend::get_or_create_fn_thunk(const Symbol& sym, const TypeFunction* sem_fn, Span span)
+    -> llvm::Function* {
+  auto target_name = fn_name(sym);
+  auto thunk_name = target_name + ".thunk";
+  if (auto* existing = module_->getFunction(thunk_name)) {
+    return existing;
+  }
+  auto* target_fn = module_->getFunction(target_name);
+  if (target_fn == nullptr) {
+    emit_diagnostic(span, "function not found for thunk: " + std::string(sym.name));
+    return nullptr;
+  }
+  auto* thunk_type = callable_fn_type(sem_fn, span);
+  if (thunk_type == nullptr) {
+    return nullptr;
+  }
+  auto* thunk_fn = llvm::Function::Create(
+      thunk_type, llvm::Function::InternalLinkage, thunk_name, module_.get());
+  auto* entry = llvm::BasicBlock::Create(ctx_, "entry", thunk_fn);
+  llvm::IRBuilder<> builder(ctx_);
+  builder.SetInsertPoint(entry);
+
+  std::vector<llvm::Value*> forward_args;
+  auto arg_it = thunk_fn->arg_begin();
+  arg_it->setName("env");
+  ++arg_it; // skip env_ptr
+  for (; arg_it != thunk_fn->arg_end(); ++arg_it) {
+    forward_args.push_back(&*arg_it);
   }
 
-  auto* callee_val = get_value(p.callee, state);
-  if (callee_val == nullptr) {
-    emit_diagnostic(inst.span, "call callee not found");
+  auto* call = builder.CreateCall(target_fn->getFunctionType(), target_fn, forward_args);
+  if (thunk_type->getReturnType()->isVoidTy()) {
+    builder.CreateRetVoid();
+  } else {
+    builder.CreateRet(call);
+  }
+  return thunk_fn;
+}
+
+auto LlvmBackend::get_or_create_c_fn_adapter(const TypeFunction* sem_fn, Span span)
+    -> llvm::Function* {
+  auto adapter_name = "__dao.c_fn_adapter." + type_identity_key(sem_fn);
+  if (auto* existing = module_->getFunction(adapter_name)) {
+    return existing;
+  }
+  auto* adapter_type = callable_fn_type(sem_fn, span);
+  if (adapter_type == nullptr) {
+    return nullptr;
+  }
+  std::vector<llvm::Type*> raw_params(adapter_type->param_begin() + 1, adapter_type->param_end());
+  auto* raw_c_type =
+      llvm::FunctionType::get(adapter_type->getReturnType(), raw_params, /*isVarArg=*/false);
+
+  auto* adapter_fn = llvm::Function::Create(
+      adapter_type, llvm::Function::InternalLinkage, adapter_name, module_.get());
+  auto* entry = llvm::BasicBlock::Create(ctx_, "entry", adapter_fn);
+  llvm::IRBuilder<> builder(ctx_);
+  builder.SetInsertPoint(entry);
+
+  auto arg_it = adapter_fn->arg_begin();
+  llvm::Value* c_fn_ptr = &*arg_it;
+  c_fn_ptr->setName("c_fn");
+  ++arg_it;
+  std::vector<llvm::Value*> forward_args;
+  for (; arg_it != adapter_fn->arg_end(); ++arg_it) {
+    forward_args.push_back(&*arg_it);
+  }
+  auto* call = builder.CreateCall(raw_c_type, c_fn_ptr, forward_args);
+  if (adapter_type->getReturnType()->isVoidTy()) {
+    builder.CreateRetVoid();
+  } else {
+    builder.CreateRet(call);
+  }
+  return adapter_fn;
+}
+
+auto LlvmBackend::lower_lambda(const MirLambdaInst& p, const MirInst& inst, FunctionState& state)
+    -> bool {
+  if (p.fn == nullptr) {
+    emit_diagnostic(inst.span, "lambda instruction missing MirFunction");
+    return false;
+  }
+  if (inst.type == nullptr || inst.type->kind() != TypeKind::Function) {
+    emit_diagnostic(inst.span, "lambda instruction missing function type");
+    return false;
+  }
+  const auto* sem_fn = static_cast<const TypeFunction*>(inst.type);
+  auto* lam_fn_type = callable_fn_type(sem_fn, inst.span);
+  if (lam_fn_type == nullptr) {
     return false;
   }
 
-  auto* callee_fn = llvm::dyn_cast<llvm::Function>(callee_val);
+  uint32_t lam_id = next_lambda_id_++;
+  std::string parent_prefix =
+      state.llvm_fn != nullptr ? std::string(state.llvm_fn->getName()) : "__dao";
+  // Strip any ".resume" suffix so generator-nested lambdas still carry the
+  // parent Dao function's prefix.
+  if (parent_prefix.ends_with(".resume")) {
+    parent_prefix.resize(parent_prefix.size() - 7);
+  }
+  auto lam_name = parent_prefix + ".lambda." + std::to_string(lam_id);
+  auto* lam_llvm_fn =
+      llvm::Function::Create(lam_fn_type, llvm::Function::InternalLinkage, lam_name, module_.get());
 
-  // Indirect call: callee is a function pointer (ptr), not a direct
-  // function reference. Reconstruct the LLVM function type from the
-  // semantic TypeFunction, applying the same adjustments used when
-  // functions are declared (string → ptr, function type → ptr).
+  auto* ptr_ty = llvm::PointerType::getUnqual(ctx_);
+  llvm::Value* env_ptr = llvm::ConstantPointerNull::get(ptr_ty);
+  llvm::StructType* env_struct_ty = nullptr;
+  std::vector<llvm::Type*> cap_llvm_types;
+
+  const size_t cap_count = p.captures != nullptr ? p.captures->size() : 0;
+  if (cap_count > 0) {
+    std::vector<llvm::Value*> cap_vals;
+    cap_vals.reserve(cap_count);
+    cap_llvm_types.reserve(cap_count);
+    for (size_t i = 0; i < cap_count; ++i) {
+      auto* cap_val = get_value((*p.captures)[i], state);
+      if (cap_val == nullptr) {
+        emit_diagnostic(inst.span, "lambda capture value not found");
+        return false;
+      }
+      cap_vals.push_back(cap_val);
+      cap_llvm_types.push_back(cap_val->getType());
+    }
+    env_struct_ty =
+        llvm::StructType::create(ctx_, cap_llvm_types, "dao.env." + std::to_string(lam_id));
+
+    auto* i64_ty = llvm::Type::getInt64Ty(ctx_);
+    auto* null_ptr = llvm::ConstantPointerNull::get(ptr_ty);
+    auto* size_gep = state.builder->CreateGEP(
+        env_struct_ty, null_ptr, {llvm::ConstantInt::get(i64_ty, 1)}, "env.sizeof.gep");
+    auto* env_size = state.builder->CreatePtrToInt(size_gep, i64_ty, "env.size");
+
+    auto* align_wrap = llvm::StructType::get(ctx_, {llvm::Type::getInt8Ty(ctx_), env_struct_ty});
+    auto* align_gep =
+        state.builder->CreateGEP(align_wrap,
+                                 null_ptr,
+                                 {llvm::ConstantInt::get(i64_ty, 0),
+                                  llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx_), 1)},
+                                 "env.alignof.gep");
+    auto* env_align = state.builder->CreatePtrToInt(align_gep, i64_ty, "env.align");
+
+    auto* alloc_fn = module_->getFunction(std::string(runtime_hooks::kMemAlloc));
+    if (alloc_fn == nullptr) {
+      emit_diagnostic(inst.span, "__dao_mem_alloc hook not declared");
+      return false;
+    }
+    env_ptr = state.builder->CreateCall(
+        alloc_fn->getFunctionType(), alloc_fn, {env_size, env_align}, "lambda.env");
+    for (size_t i = 0; i < cap_count; ++i) {
+      auto* slot = state.builder->CreateStructGEP(
+          env_struct_ty, env_ptr, static_cast<unsigned>(i), "env.cap.ptr");
+      state.builder->CreateStore(cap_vals[i], slot);
+    }
+  }
+
+  llvm::Value* callable = llvm::UndefValue::get(types_.callable_type());
+  callable = state.builder->CreateInsertValue(callable, lam_llvm_fn, 0, "fn.code");
+  callable = state.builder->CreateInsertValue(callable, env_ptr, 1, "fn.env");
+  state.values[inst.result.id] = callable;
+  state.value_types[inst.result.id] = inst.type;
+
+  // --- Lower the lambda's MirFunction body into lam_llvm_fn ---
+  FunctionState lam_state;
+  lam_state.llvm_fn = lam_llvm_fn;
+  for (const auto* block : p.fn->blocks) {
+    auto* llvm_block =
+        llvm::BasicBlock::Create(ctx_, "bb" + std::to_string(block->id.id), lam_llvm_fn);
+    lam_state.blocks[block->id.id] = llvm_block;
+  }
+
+  llvm::IRBuilder<> lam_builder(ctx_);
+  lam_state.builder = &lam_builder;
+  lam_builder.SetInsertPoint(lam_state.blocks[p.fn->blocks[0]->id.id]);
+
+  size_t param_count = 0;
+  for (const auto& local : p.fn->locals) {
+    if (local.is_param) {
+      ++param_count;
+    }
+    if (local.type != nullptr && local.type->kind() == TypeKind::Void) {
+      emit_diagnostic(local.span, "a binding of type 'void' has no storage");
+      return false;
+    }
+    auto* local_type = types_.lower(local.type);
+    if (local_type == nullptr) {
+      emit_diagnostic(local.span, "cannot lower lambda local type: " + types_.error());
+      return false;
+    }
+    auto* alloca = lam_builder.CreateAlloca(
+        local_type, nullptr, local.symbol != nullptr ? std::string(local.symbol->name) : "");
+    lam_state.locals.slots[local.id.id] = alloca;
+    lam_state.locals.types[local.id.id] = local.type;
+  }
+
+  auto arg_it = lam_llvm_fn->arg_begin();
+  llvm::Value* env_arg = &*arg_it;
+  env_arg->setName("env");
+  ++arg_it;
+
+  for (size_t i = 0; i < param_count && arg_it != lam_llvm_fn->arg_end(); ++i, ++arg_it) {
+    const auto& param_local = p.fn->locals[i];
+    if (param_local.symbol != nullptr) {
+      arg_it->setName(std::string(param_local.symbol->name));
+    }
+    auto* alloca = lam_state.locals.slots[param_local.id.id];
+    if (LlvmTypeLowering::is_string_type(param_local.type)) {
+      auto* loaded = lam_builder.CreateLoad(types_.string_type(), &*arg_it);
+      lam_builder.CreateStore(loaded, alloca);
+    } else {
+      lam_builder.CreateStore(&*arg_it, alloca);
+    }
+  }
+
+  if (env_struct_ty != nullptr) {
+    for (size_t i = 0; i < p.fn->capture_count; ++i) {
+      const auto& cap_local = p.fn->locals[param_count + i];
+      auto* cap_gep =
+          lam_builder.CreateStructGEP(env_struct_ty, env_arg, static_cast<unsigned>(i), "cap.gep");
+      auto* cap_val = lam_builder.CreateLoad(cap_llvm_types[i], cap_gep, "cap.load");
+      lam_builder.CreateStore(cap_val, lam_state.locals.slots[cap_local.id.id]);
+    }
+  }
+
+  for (const auto* block : p.fn->blocks) {
+    if (!lower_block(*block, lam_state)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+auto LlvmBackend::lower_call(const MirCall& p, const MirInst& inst, FunctionState& state) -> bool {
+  // Check for compiler builtin intrinsics (size_of$T, align_of$T).
+  auto builtin_it = state.callees.builtin_names.find(p.callee.id);
+  if (builtin_it != state.callees.builtin_names.end()) {
+    return lower_builtin_call(builtin_it->second, p, inst, state);
+  }
+
+  llvm::Function* callee_fn = nullptr;
+  auto fn_ref_it = state.callees.fn_ref_symbols.find(p.callee.id);
+  if (fn_ref_it != state.callees.fn_ref_symbols.end()) {
+    callee_fn = module_->getFunction(fn_name(*fn_ref_it->second));
+    if (callee_fn == nullptr) {
+      emit_diagnostic(inst.span, "call callee function not found");
+      return false;
+    }
+  }
+
+  // Indirect call: callee is a first-class Dao callable `%dao.fn`
+  // (`{ ptr fn_ptr, ptr env_ptr }`), not a direct static function ref.
   if (callee_fn == nullptr) {
+    auto* callee_val = get_value(p.callee, state);
+    if (callee_val == nullptr) {
+      emit_diagnostic(inst.span, "call callee not found");
+      return false;
+    }
     auto callee_type_it = state.value_types.find(p.callee.id);
     if (callee_type_it == state.value_types.end() ||
         callee_type_it->second == nullptr ||
@@ -1450,34 +1721,16 @@ auto LlvmBackend::lower_call(const MirCall& p, const MirInst& inst,
       return false;
     }
     const auto* sem_fn = static_cast<const TypeFunction*>(callee_type_it->second);
-
-    // Build adjusted parameter types matching declare_functions rules.
-    std::vector<llvm::Type*> adj_params;
-    for (const auto* param_type : sem_fn->param_types()) {
-      auto* lowered = types_.lower(param_type);
-      if (lowered == nullptr) {
-        emit_diagnostic(inst.span, "cannot lower indirect call param");
-        return false;
-      }
-      if (LlvmTypeLowering::is_string_type(param_type)) {
-        lowered = llvm::PointerType::getUnqual(lowered);
-      }
-      if (llvm::isa<llvm::FunctionType>(lowered)) {
-        lowered = llvm::PointerType::getUnqual(lowered);
-      }
-      adj_params.push_back(lowered);
-    }
-    auto* adj_ret = types_.lower(sem_fn->return_type());
-    if (adj_ret == nullptr) {
-      emit_diagnostic(inst.span, "cannot lower indirect call return");
+    auto* llvm_fn_type = callable_fn_type(sem_fn, inst.span);
+    if (llvm_fn_type == nullptr) {
       return false;
     }
-    if (llvm::isa<llvm::FunctionType>(adj_ret)) {
-      adj_ret = llvm::PointerType::getUnqual(adj_ret);
-    }
-    auto* llvm_fn_type = llvm::FunctionType::get(adj_ret, adj_params, false);
+
+    auto* fn_ptr = state.builder->CreateExtractValue(callee_val, 0, "fn.code");
+    auto* env_ptr = state.builder->CreateExtractValue(callee_val, 1, "fn.env");
 
     std::vector<llvm::Value*> indirect_args;
+    indirect_args.push_back(env_ptr);
     if (p.args != nullptr) {
       for (size_t i = 0; i < p.args->size(); ++i) {
         auto* arg_val = get_value((*p.args)[i], state);
@@ -1485,11 +1738,10 @@ auto LlvmBackend::lower_call(const MirCall& p, const MirInst& inst,
           emit_diagnostic(inst.span, "call argument not found");
           return false;
         }
-        // String → pointer coercion.
-        if (i < llvm_fn_type->getNumParams()) {
-          auto* param_type = llvm_fn_type->getParamType(i);
-          if (param_type->isPointerTy() &&
-              arg_val->getType() == types_.string_type()) {
+        // String → pointer coercion (offset +1 past env_ptr).
+        if (i + 1 < llvm_fn_type->getNumParams()) {
+          auto* param_type = llvm_fn_type->getParamType(static_cast<unsigned>(i + 1));
+          if (param_type->isPointerTy() && arg_val->getType() == types_.string_type()) {
             auto* tmp = entry_alloca(state, types_.string_type(), "str.arg");
             state.builder->CreateStore(arg_val, tmp);
             arg_val = tmp;
@@ -1499,14 +1751,19 @@ auto LlvmBackend::lower_call(const MirCall& p, const MirInst& inst,
       }
     }
 
-    auto* call = state.builder->CreateCall(
-        llvm_fn_type, callee_val, indirect_args, "icall");
+    auto* call =
+        state.builder->CreateCall(llvm_fn_type,
+                                  fn_ptr,
+                                  indirect_args,
+                                  llvm_fn_type->getReturnType()->isVoidTy() ? "" : "icall");
     if (!llvm_fn_type->getReturnType()->isVoidTy() && inst.result.valid()) {
       state.values[inst.result.id] = call;
       state.value_types[inst.result.id] = inst.type;
     }
     return true;
   }
+
+  const bool callee_is_user_extern = extern_signatures_.contains(callee_fn->getName().str());
 
   std::vector<llvm::Value*> args;
   // Track the LLVM param index (which may diverge from MIR arg index
@@ -1530,6 +1787,21 @@ auto LlvmBackend::lower_call(const MirCall& p, const MirInst& inst,
 
   if (p.args != nullptr) {
     for (size_t i = 0; i < p.args->size(); ++i) {
+      // C ABI function pointer callback: pass the named Dao function's
+      // address directly as `ptr` (CONTRACT_C_ABI_INTEROP.md §4.4.4).
+      if (callee_is_user_extern) {
+        auto arg_fn_it = state.callees.fn_ref_symbols.find((*p.args)[i].id);
+        if (arg_fn_it != state.callees.fn_ref_symbols.end()) {
+          auto* cb_fn = module_->getFunction(fn_name(*arg_fn_it->second));
+          if (cb_fn == nullptr) {
+            emit_diagnostic(inst.span, "extern callback function not found");
+            return false;
+          }
+          args.push_back(cb_fn);
+          llvm_param_idx++;
+          continue;
+        }
+      }
       auto* arg_val = get_value((*p.args)[i], state);
       if (arg_val == nullptr) {
         emit_diagnostic(inst.span, "call argument not found");
@@ -1604,6 +1876,23 @@ auto LlvmBackend::lower_call(const MirCall& p, const MirInst& inst,
     state.values[inst.result.id] = loaded;
     state.value_types[inst.result.id] = inst.type;
   } else if (!callee_fn->getReturnType()->isVoidTy() && inst.result.valid()) {
+    // User `extern fn` returning a C function pointer (`ptr`): wrap in a
+    // `%dao.fn` pair `{ ptr @c_adapter, ptr %raw_c_fn }` so Dao callers
+    // invoke it with the uniform fat-callable convention.
+    if (callee_is_user_extern && inst.type != nullptr && inst.type->kind() == TypeKind::Function &&
+        call->getType()->isPointerTy()) {
+      auto* adapter =
+          get_or_create_c_fn_adapter(static_cast<const TypeFunction*>(inst.type), inst.span);
+      if (adapter == nullptr) {
+        return false;
+      }
+      llvm::Value* fat = llvm::UndefValue::get(types_.callable_type());
+      fat = state.builder->CreateInsertValue(fat, adapter, 0, "c_fn.code");
+      fat = state.builder->CreateInsertValue(fat, call, 1, "c_fn.env");
+      state.values[inst.result.id] = fat;
+      state.value_types[inst.result.id] = inst.type;
+      return true;
+    }
     // Check if the return was ABI-coerced from a struct.
     if (expected_ret != nullptr && llvm::isa<llvm::StructType>(expected_ret) &&
         call->getType() != expected_ret) {
@@ -1821,9 +2110,9 @@ auto LlvmBackend::lower_enum_payload(const MirEnumPayload& p,
 auto LlvmBackend::lower_return(const MirReturn& p, const MirInst& inst,
                                  FunctionState& state) -> bool {
   // Generator resume: mark done and return void.
-  if (state.gen_frame_ptr != nullptr) {
+  if (state.gen.frame_ptr != nullptr) {
     auto* done_ptr = state.builder->CreateStructGEP(
-        state.gen_frame_type, state.gen_frame_ptr, 1, "done.ptr");
+        state.gen.frame_type, state.gen.frame_ptr, 1, "done.ptr");
     state.builder->CreateStore(state.builder->getTrue(), done_ptr);
     state.builder->CreateRetVoid();
     return true;
@@ -1927,6 +2216,14 @@ auto LlvmBackend::create_generator_frame_type(const MirFunction& fn)
       return nullptr;
     }
     fields.push_back(lt);
+  }
+
+  for (const auto* block : fn.blocks) {
+    for (const auto* inst : block->insts) {
+      if (std::holds_alternative<MirIterInit>(inst->payload)) {
+        fields.push_back(types_.generator_type());
+      }
+    }
   }
 
   return llvm::StructType::create(ctx_, fields, frame_name);
@@ -2050,8 +2347,8 @@ auto LlvmBackend::lower_generator_resume(const MirFunction& fn) -> bool {
 
   FunctionState state;
   state.llvm_fn = resume_fn;
-  state.gen_frame_ptr = frame_arg;
-  state.gen_frame_type = frame_type;
+  state.gen.frame_ptr = frame_arg;
+  state.gen.frame_type = frame_type;
 
   llvm::IRBuilder<> builder(ctx_);
   state.builder = &builder;
@@ -2098,9 +2395,17 @@ auto LlvmBackend::lower_generator_resume(const MirFunction& fn) -> bool {
         : "local." + std::to_string(local.id.id) + ".ptr";
     auto* gep = builder.CreateStructGEP(
         frame_type, frame_arg, frame_field, name);
-    state.locals[local.id.id] = gep;
-    state.local_types[local.id.id] = local.type;
+    state.locals.slots[local.id.id] = gep;
+    state.locals.types[local.id.id] = local.type;
     ++frame_field;
+  }
+
+  for (const auto* block : fn.blocks) {
+    for (const auto* inst : block->insts) {
+      if (std::holds_alternative<MirIterInit>(inst->payload)) {
+        state.gen.iter_frame_fields[inst->result.id] = frame_field++;
+      }
+    }
   }
 
   // Load state and dispatch.
@@ -2195,20 +2500,49 @@ auto LlvmBackend::lower_iter_init(const MirIterInit& p, const MirInst& inst,
   // Propagate tracking to iter_init result for has_next/next/destroy.
   state.values[inst.result.id] = frame_ptr;
   state.value_types[inst.result.id] = inst.type;
-  state.iter_state[inst.result.id] = {frame_ptr, resume_ptr};
+  auto frame_slot_it = state.gen.iter_frame_fields.find(inst.result.id);
+  if (frame_slot_it != state.gen.iter_frame_fields.end()) {
+    auto* slot_ptr = state.builder->CreateStructGEP(
+        state.gen.frame_type, state.gen.frame_ptr, frame_slot_it->second, "iter.slot");
+    state.builder->CreateStore(gen_val, slot_ptr);
+  } else {
+    state.gen.iter_state[inst.result.id] = {frame_ptr, resume_ptr};
+  }
 
   return true;
 }
 
+auto LlvmBackend::load_iter_pair(uint32_t iter_id,
+                                 FunctionState& state,
+                                 llvm::Value*& frame_ptr,
+                                 llvm::Value*& resume_ptr) -> bool {
+  auto frame_slot_it = state.gen.iter_frame_fields.find(iter_id);
+  if (frame_slot_it != state.gen.iter_frame_fields.end()) {
+    auto* slot_ptr = state.builder->CreateStructGEP(
+        state.gen.frame_type, state.gen.frame_ptr, frame_slot_it->second, "iter.slot");
+    auto* gen_val = state.builder->CreateLoad(types_.generator_type(), slot_ptr, "iter.gen");
+    frame_ptr = state.builder->CreateExtractValue(gen_val, 0, "iter.frame");
+    resume_ptr = state.builder->CreateExtractValue(gen_val, 1, "iter.resume");
+    return true;
+  }
+  auto iter_it = state.gen.iter_state.find(iter_id);
+  if (iter_it == state.gen.iter_state.end()) {
+    return false;
+  }
+  frame_ptr = iter_it->second.first;
+  resume_ptr = iter_it->second.second;
+  return true;
+}
+
 auto LlvmBackend::lower_iter_has_next(const MirIterHasNext& p,
-                                        const MirInst& inst,
-                                        FunctionState& state) -> bool {
-  auto iter_it = state.iter_state.find(p.iter_operand.id);
-  if (iter_it == state.iter_state.end()) {
+                                      const MirInst& inst,
+                                      FunctionState& state) -> bool {
+  llvm::Value* frame_ptr = nullptr;
+  llvm::Value* resume_ptr = nullptr;
+  if (!load_iter_pair(p.iter_operand.id, state, frame_ptr, resume_ptr)) {
     emit_diagnostic(inst.span, "iter_has_next: iterator not found");
     return false;
   }
-  auto* frame_ptr = iter_it->second.first;
 
   // Derive yield type from the iter_operand's semantic type (Generator<T>).
   const auto* operand_type = state.value_types[p.iter_operand.id];
@@ -2242,16 +2576,14 @@ auto LlvmBackend::lower_iter_has_next(const MirIterHasNext& p,
   return true;
 }
 
-auto LlvmBackend::lower_iter_next(const MirIterNext& p,
-                                     const MirInst& inst,
-                                     FunctionState& state) -> bool {
-  auto iter_it = state.iter_state.find(p.iter_operand.id);
-  if (iter_it == state.iter_state.end()) {
+auto LlvmBackend::lower_iter_next(const MirIterNext& p, const MirInst& inst, FunctionState& state)
+    -> bool {
+  llvm::Value* frame_ptr = nullptr;
+  llvm::Value* resume_ptr = nullptr;
+  if (!load_iter_pair(p.iter_operand.id, state, frame_ptr, resume_ptr)) {
     emit_diagnostic(inst.span, "iter_next: iterator not found");
     return false;
   }
-  auto* frame_ptr = iter_it->second.first;
-  auto* resume_ptr = iter_it->second.second;
 
   // Derive yield type from the iter_operand's semantic type (Generator<T>).
   const auto* operand_type = state.value_types[p.iter_operand.id];
@@ -2293,14 +2625,14 @@ auto LlvmBackend::lower_iter_next(const MirIterNext& p,
 }
 
 auto LlvmBackend::lower_iter_destroy(const MirIterDestroy& p,
-                                       const MirInst& inst,
-                                       FunctionState& state) -> bool {
-  auto iter_it = state.iter_state.find(p.iter_operand.id);
-  if (iter_it == state.iter_state.end()) {
+                                     const MirInst& inst,
+                                     FunctionState& state) -> bool {
+  llvm::Value* frame_ptr = nullptr;
+  llvm::Value* resume_ptr = nullptr;
+  if (!load_iter_pair(p.iter_operand.id, state, frame_ptr, resume_ptr)) {
     emit_diagnostic(inst.span, "iter_destroy: iterator state not found");
     return false;
   }
-  auto* frame_ptr = iter_it->second.first;
 
   auto* free_fn =
       module_->getFunction(std::string(runtime_hooks::kGenFree));

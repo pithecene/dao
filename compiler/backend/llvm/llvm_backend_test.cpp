@@ -1228,16 +1228,16 @@ suite<"unsupported_constructs"> unsupported_constructs = [] {
     expect(contains(ir, "deref.ptr")) << ir;
   };
 
-  "a pointer to a function value is offset and read as a ptr"_test = [] {
-    LlvmTestPipeline pipe(
-        "fn next(p: Ptr<fn(): i32>): i32\n"
-        "  mode unsafe =>\n"
-        "    let g = p.offset(1).get()\n"
-        "    return g()\n"
-        "  return 0\n");
+  "a pointer to a function value is offset and read as a fat callable"_test = [] {
+    LlvmTestPipeline pipe("fn next(p: Ptr<fn(): i32>): i32\n"
+                          "  mode unsafe =>\n"
+                          "    let g = p.offset(1).get()\n"
+                          "    return g()\n"
+                          "  return 0\n");
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors: " << ir;
-    expect(contains(ir, "getelementptr ptr")) << ir;
+    expect(contains(ir, "getelementptr %dao.fn")) << ir;
+    expect(contains(ir, "extractvalue %dao.fn")) << ir;
   };
 
   // The checker rejects get and offset on Ptr<void>; a generic
@@ -2088,6 +2088,29 @@ suite<"stack_temporaries"> stack_temporaries = [] {
     expect(contains(ir, "br i1")) << ir;
     auto outside = allocas_outside_entry(ir, "define i64 @\"test::spin\"");
     expect(outside.empty()) << "allocas past the entry block:\n" << outside << ir;
+  };
+};
+
+suite<"closures"> closures = [] {
+  "stateless lambda lowers with null env and zero allocation"_test = [] {
+    LlvmTestPipeline pipe("fn apply(f: fn(i32): i32, x: i32): i32 -> f(x)\n"
+                          "fn main(): i32 -> apply(|x| -> x + 1, 41)\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << ir;
+    expect(contains(ir, "%dao.fn")) << ir;
+    expect(contains(ir, "ptr null")) << ir;
+    expect(!contains(ir, "call ptr @__dao_mem_alloc(")) << ir;
+  };
+
+  "capturing lambda allocates env via __dao_mem_alloc"_test = [] {
+    LlvmTestPipeline pipe("fn make_adder(k: i32): fn(i32): i32 -> |x| -> x + k\n"
+                          "fn main(): i32\n"
+                          "  let f: fn(i32): i32 = make_adder(5)\n"
+                          "  return f(37)\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << ir;
+    expect(contains(ir, "call ptr @__dao_mem_alloc(")) << ir;
+    expect(contains(ir, "%dao.fn")) << ir;
   };
 };
 

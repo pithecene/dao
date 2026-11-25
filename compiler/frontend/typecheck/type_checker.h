@@ -139,6 +139,10 @@ private:
   // of the compiler-standard Ptr<T> is legal only there, called.
   const Expr* call_callee_ = nullptr;
 
+  // Generic parameters actively being inferred at the enclosing call
+  // argument site, allowing contextual lambda return types to bind U.
+  GenericBinding active_call_binding_ = kFixedGenerics;
+
   // Symbol -> semantic type cache (populated in pass 1).
   std::unordered_map<const Symbol*, const Type*> symbol_types_;
 
@@ -555,7 +559,15 @@ private:
   void validate_receiver(const Decl* method, Span context_span);
   auto check_index(const Expr* expr) -> const Type*;
   auto check_lambda(const Expr* expr, const Type* expected) -> const Type*;
+  void check_lambda_captures(const Expr* expr, Span lambda_span);
   auto check_list_literal(const Expr* expr) -> const Type*;
+
+  // --- Definite-return and exhaustiveness analysis ---
+
+  [[nodiscard]] auto body_definitely_returns(const std::vector<Stmt*>& body) const -> bool;
+  [[nodiscard]] auto stmt_definitely_returns(const Stmt* stmt) const -> bool;
+  [[nodiscard]] auto match_is_exhaustive(const MatchStmt& match) const -> bool;
+  [[nodiscard]] auto expr_diverges(const Expr* expr, uint32_t depth = 0) const -> bool;
 
   // --- Diagnostics ---
 

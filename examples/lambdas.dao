@@ -1,18 +1,19 @@
 module lambdas
-// lambdas.dao — function types, functions as values, and pipes.
+// lambdas.dao — function types, lambdas, value captures, pipes, and sequence helpers.
 //
-// `fn(i32): i32` is a function type; any function with that signature
-// is a value of it.  `|>` feeds the left value to the function on the
-// right, so a chain reads in evaluation order.
-//
-// Lambda literals (`|x| -> x + 1`) type-check today but do not lower to
-// native code yet; once they do, this file gains them.
+// `fn(A): B` is a first-class function type backed by a uniform fat callable:
+// named functions, stateless lambdas, and value-capturing closures all satisfy
+// the same signature.  Outer variables are captured by value when the lambda
+// is constructed, so mutating a local afterwards leaves the closure's snapshot
+// unchanged.
 
 fn apply(f: fn(i32): i32, x: i32): i32 -> f(x)
 
 fn twice(f: fn(i32): i32, x: i32): i32 -> f(f(x))
 
 fn compose_apply(f: fn(i32): i32, g: fn(i32): i32, x: i32): i32 -> g(f(x))
+
+fn make_adder(delta: i32): fn(i32): i32 -> |x| -> x + delta
 
 fn double(x: i32): i32 -> x * 2
 
@@ -28,5 +29,38 @@ fn main(): i32
 
   // Pipelines read left to right: ((4 * 2) * 2) + 1.
   print(4 |> double |> double |> increment)
+
+  // Non-capturing lambdas and lambda pipelines.
+  print(apply(|x| -> x * 3 + 1, 10))
+  print(5 |> |x| -> x + 2 |> |x| -> x * x)
+
+  // Value captures snapshot outer locals at lambda creation time.
+  let factor: i32 = 10
+  let scale: fn(i32): i32 = |x| -> x * factor
+  factor = 99
+  print(scale(7))
+  let add5: fn(i32): i32 = make_adder(5)
+  print(add5(37))
+
+  // Generic sequence helpers and lazy generator composition.
+  let nums: Vector<i32> = Vector<i32>::new()
+  nums = nums.push(1).push(2).push(3).push(4).push(5)
+  let evens: Vector<i32> = filter_vec(nums, |n| -> (n / 2) * 2 == n)
+  let squares: Vector<i32> = map_vec(evens, |n| -> n * n)
+  for item in enumerate(squares):
+    print(i64_to_string(item.index) + ":" + i32_to_string(item.value))
+
+  print(any_vec(nums, |n| -> n > 4))
+  print(all_vec(nums, |n| -> n > 0))
+  match find_if(nums, |n| -> n * n > 10):
+    Option::Some(found):
+      print(found)
+    Option::None:
+      print(-1)
+
+  let streamed: i32 = 0
+  for v in map_gen(filter_gen(nums.iter(), |n| -> n >= 3), |n| -> n * 10):
+    streamed = streamed + v
+  print(streamed)
 
   return 0

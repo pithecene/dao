@@ -39,7 +39,6 @@ fn vec_log_head_new(outer: bool): Ptr<VecLogHead>
     let head: Ptr<VecLogHead> = raw.cast<VecLogHead>()
     head.set(VecLogHead(Ptr<i64>::new(), Ptr<i64>::new(), Ptr<i64>::new(), Ptr<i64>::new(), to_i64(0), to_i64(0)))
     return head
-  panic("unreachable")
 
 fn vec_log_values_new<T>(outer: bool): Ptr<Ptr<T>>
   let raw: Ptr<void> = Ptr<void>::new()
@@ -51,7 +50,6 @@ fn vec_log_values_new<T>(outer: bool): Ptr<Ptr<T>>
     let cell: Ptr<Ptr<T>> = raw.cast<Ptr<T>>()
     cell.set(Ptr<T>::new())
     return cell
-  panic("unreachable")
 
 class Vector<T>:
   data: Ptr<T>
@@ -67,7 +65,6 @@ class Vector<T>:
       let gen: Ptr<i64> = __dao_mem_alloc(size_of<i64>(), align_of<i64>()).cast<i64>()
       gen.set(to_i64(0))
       return Vector(Ptr<T>::new(), to_i64(0), to_i64(0), gen, to_i64(0), vec_log_head_new(false), vec_log_values_new<T>(false))
-    panic("unreachable")
 
   fn length(self): i64 -> self.len
 
@@ -139,7 +136,6 @@ class Vector<T>:
             return self.log_value.get().offset(k).get()
           k = l.next.offset(k).get()
       return self.data.offset(index).get()
-    panic("unreachable")
 
   // This value's elements in one buffer no later write touched: the
   // buffer itself when this value is the latest, else a fresh copy of
@@ -165,7 +161,6 @@ class Vector<T>:
       let gen: Ptr<i64> = __dao_mem_alloc(size_of<i64>(), align_of<i64>()).cast<i64>()
       gen.set(to_i64(0))
       return Vector(data, self.len, cap, gen, to_i64(0), vec_log_head_new(false), vec_log_values_new<T>(false))
-    panic("unreachable")
 
   fn push(self, elem: T): Vector<T>
     mode unsafe =>
@@ -187,7 +182,6 @@ class Vector<T>:
       fresh.data.offset(fresh.len).set(elem)
       fresh.gen.set(to_i64(1))
       return Vector(fresh.data, fresh.len + 1, fresh.cap, fresh.gen, to_i64(1), fresh.log, fresh.log_value)
-    panic("unreachable")
 
   fn set(self, index: i64, elem: T): Vector<T>
     if index < 0:
@@ -206,7 +200,6 @@ class Vector<T>:
       fresh.data.offset(index).set(elem)
       fresh.gen.set(to_i64(1))
       return Vector(fresh.data, fresh.len, fresh.cap, fresh.gen, to_i64(1), fresh.log, fresh.log_value)
-    panic("unreachable")
 
   // A copy of this vector, buffer and elements, in the enclosing
   // domain: what `copy_out` does for a vector.  Elements are copied
@@ -221,10 +214,71 @@ class Vector<T>:
       let gen: Ptr<i64> = __dao_mem_alloc_outer(size_of<i64>(), align_of<i64>()).cast<i64>()
       gen.set(to_i64(0))
       return Vector(data, self.len, self.cap, gen, to_i64(0), vec_log_head_new(true), vec_log_values_new<T>(true))
-    panic("unreachable")
 
   fn iter(self): Generator<T>
     let i: i64 = 0
     while i < self.len:
       yield self.get(i)
       i = i + 1
+
+class Indexed<T>:
+  index: i64
+  value: T
+
+fn enumerate<T>(xs: Vector<T>): Generator<Indexed<T>>
+  let i: i64 = 0
+  while i < xs.length():
+    yield Indexed(i, xs.get(i))
+    i = i + 1
+
+fn filter_vec<T>(xs: Vector<T>, pred: fn(T): bool): Vector<T>
+  let out: Vector<T> = Vector<T>::new()
+  let i: i64 = 0
+  while i < xs.length():
+    let elem: T = xs.get(i)
+    if pred(elem):
+      out = out.push(elem)
+    i = i + 1
+  return out
+
+fn map_vec<T, U>(xs: Vector<T>, f: fn(T): U): Vector<U>
+  let out: Vector<U> = Vector<U>::new()
+  let i: i64 = 0
+  while i < xs.length():
+    out = out.push(f(xs.get(i)))
+    i = i + 1
+  return out
+
+fn any_vec<T>(xs: Vector<T>, pred: fn(T): bool): bool
+  let i: i64 = 0
+  while i < xs.length():
+    if pred(xs.get(i)):
+      return true
+    i = i + 1
+  return false
+
+fn all_vec<T>(xs: Vector<T>, pred: fn(T): bool): bool
+  let i: i64 = 0
+  while i < xs.length():
+    if pred(xs.get(i)) == false:
+      return false
+    i = i + 1
+  return true
+
+fn find_if<T>(xs: Vector<T>, pred: fn(T): bool): Option<T>
+  let i: i64 = 0
+  while i < xs.length():
+    let elem: T = xs.get(i)
+    if pred(elem):
+      return Option::Some(value = elem)
+    i = i + 1
+  return Option::None
+
+fn filter_gen<T>(gen: Generator<T>, pred: fn(T): bool): Generator<T>
+  for elem in gen:
+    if pred(elem):
+      yield elem
+
+fn map_gen<T, U>(gen: Generator<T>, f: fn(T): U): Generator<U>
+  for elem in gen:
+    yield f(elem)

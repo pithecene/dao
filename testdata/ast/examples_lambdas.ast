@@ -39,6 +39,14 @@ File
               Identifier f
             Args
               Identifier x
+  FunctionDecl make_adder
+    Param delta: i32
+    ReturnType: fn(i32): i32
+    ExprBody
+      Lambda x
+        BinaryExpr +
+          Identifier x
+          Identifier delta
   FunctionDecl double
     Param x: i32
     ReturnType: i32
@@ -108,5 +116,259 @@ File
                 Identifier double
               Identifier double
             Identifier increment
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier apply
+            Args
+              Lambda x
+                BinaryExpr +
+                  BinaryExpr *
+                    Identifier x
+                    IntLiteral 3
+                  IntLiteral 1
+              IntLiteral 10
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          PipeExpr
+            IntLiteral 5
+            Lambda x
+              PipeExpr
+                BinaryExpr +
+                  Identifier x
+                  IntLiteral 2
+                Lambda x
+                  BinaryExpr *
+                    Identifier x
+                    Identifier x
+    LetStatement factor: i32
+      IntLiteral 10
+    LetStatement scale: fn(i32): i32
+      Lambda x
+        BinaryExpr *
+          Identifier x
+          Identifier factor
+    Assignment
+      Target
+        Identifier factor
+      Value
+        IntLiteral 99
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier scale
+            Args
+              IntLiteral 7
+    LetStatement add5: fn(i32): i32
+      CallExpr
+        Callee
+          Identifier make_adder
+        Args
+          IntLiteral 5
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier add5
+            Args
+              IntLiteral 37
+    LetStatement nums: Vector<i32>
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          i32
+    Assignment
+      Target
+        Identifier nums
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push
+              CallExpr
+                Callee
+                  FieldExpr .push
+                    CallExpr
+                      Callee
+                        FieldExpr .push
+                          CallExpr
+                            Callee
+                              FieldExpr .push
+                                CallExpr
+                                  Callee
+                                    FieldExpr .push
+                                      Identifier nums
+                                  Args
+                                    IntLiteral 1
+                            Args
+                              IntLiteral 2
+                      Args
+                        IntLiteral 3
+                Args
+                  IntLiteral 4
+          Args
+            IntLiteral 5
+    LetStatement evens: Vector<i32>
+      CallExpr
+        Callee
+          Identifier filter_vec
+        Args
+          Identifier nums
+          Lambda n
+            BinaryExpr ==
+              BinaryExpr *
+                BinaryExpr /
+                  Identifier n
+                  IntLiteral 2
+                IntLiteral 2
+              Identifier n
+    LetStatement squares: Vector<i32>
+      CallExpr
+        Callee
+          Identifier map_vec
+        Args
+          Identifier evens
+          Lambda n
+            BinaryExpr *
+              Identifier n
+              Identifier n
+    ForStatement item
+      Iterable
+        CallExpr
+          Callee
+            Identifier enumerate
+          Args
+            Identifier squares
+      ExpressionStatement
+        CallExpr
+          Callee
+            Identifier print
+          Args
+            BinaryExpr +
+              BinaryExpr +
+                CallExpr
+                  Callee
+                    Identifier i64_to_string
+                  Args
+                    FieldExpr .index
+                      Identifier item
+                StringLiteral ":"
+              CallExpr
+                Callee
+                  Identifier i32_to_string
+                Args
+                  FieldExpr .value
+                    Identifier item
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier any_vec
+            Args
+              Identifier nums
+              Lambda n
+                BinaryExpr >
+                  Identifier n
+                  IntLiteral 4
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier all_vec
+            Args
+              Identifier nums
+              Lambda n
+                BinaryExpr >
+                  Identifier n
+                  IntLiteral 0
+    MatchStatement
+      Scrutinee
+        CallExpr
+          Callee
+            Identifier find_if
+          Args
+            Identifier nums
+            Lambda n
+              BinaryExpr >
+                BinaryExpr *
+                  Identifier n
+                  Identifier n
+                IntLiteral 10
+      Arm
+        Pattern
+          QualifiedName Option::Some
+        ExpressionStatement
+          CallExpr
+            Callee
+              Identifier print
+            Args
+              Identifier found
+      Arm
+        Pattern
+          QualifiedName Option::None
+        ExpressionStatement
+          CallExpr
+            Callee
+              Identifier print
+            Args
+              UnaryExpr -
+                IntLiteral 1
+    LetStatement streamed: i32
+      IntLiteral 0
+    ForStatement v
+      Iterable
+        CallExpr
+          Callee
+            Identifier map_gen
+          Args
+            CallExpr
+              Callee
+                Identifier filter_gen
+              Args
+                CallExpr
+                  Callee
+                    FieldExpr .iter
+                      Identifier nums
+                Lambda n
+                  BinaryExpr >=
+                    Identifier n
+                    IntLiteral 3
+            Lambda n
+              BinaryExpr *
+                Identifier n
+                IntLiteral 10
+      Assignment
+        Target
+          Identifier streamed
+        Value
+          BinaryExpr +
+            Identifier streamed
+            Identifier v
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          Identifier streamed
     ReturnStatement
       IntLiteral 0

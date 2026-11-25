@@ -108,7 +108,10 @@ enum class MirNode:
   // resolving to a function symbol).
   MirFnRef(sym: i64, type_idx: i64)
 
-  // Call: callee is the value id of a MirFnRef (Tier A).
+  // Closure / lambda value: anonymous MirFunction + snapshotted capture values.
+  MirLambda(fn_node: i64, cap_list_lp: i64, cap_count: i64, type_idx: i64)
+
+  // Call: callee is the value id of a MirFnRef or a %dao.fn callable value.
   // `subst`: the checker's record of what the call decided of its
   // callee's type parameters (HirCall's), or -1 — a call MIR itself
   // makes (copy_out at a domain's exit) is decided from its arguments.
@@ -514,7 +517,8 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       // without is a binding lowering lost, never a function to call.
       if sym >= 0 and sym < br.ms.program.symbols.length():
         let named: Symbol = br.ms.program.symbols.get(sym)
-        if symbol_kind_name(named.kind) == "Local" or symbol_kind_name(named.kind) == "Param":
+        let nk: string = symbol_kind_name(named.kind)
+        if nk == "Local" or nk == "Param" or nk == "LambdaParam":
           br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "'" + named.name + "' has no local slot in MIR")
           return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
       return br_emit_value(br, MirNode::MirFnRef(sym = sym, type_idx = type_idx))
@@ -552,6 +556,8 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       let obj_ti: i64 = ms_get_hir_type(obj_r.br.ms, obj_hir)
       let fidx: i64 = mir_resolve_field_index(obj_r.br.ms, obj_ti, field_tok)
       return br_emit_value(obj_r.br, MirNode::MirFieldAccess(obj = obj_r.value, field_tok = field_tok, field_index = fidx, type_idx = type_idx))
+    HirNode::HirLambda(params_lp, param_count, body, type_idx):
+      return mir_lower_lambda(br, params_lp, body, type_idx)
     HirNode::HirErrorExpr(err_tok):
       // HIR reported this expression already.
       return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
@@ -586,6 +592,157 @@ fn mir_is_type_param(ms: MS, ti: i64): bool
     TypeKind::TGenericParam:
       return true
   return false
+
+class CaptureScan:
+  seen: HashMap<i64>
+  syms: Vector<i64>
+
+fn collect_lambda_captures(ms: MS, hir_idx: i64, bound: HashMap<i64>, scan: CaptureScan): CaptureScan
+  if hir_idx < 0 or hir_idx >= ms.hir.nodes.length():
+    return scan
+  let cur: CaptureScan = scan
+  match ms.hir.nodes.get(hir_idx):
+    HirNode::HirIdent(sym, typ, tok):
+      if sym >= 0:
+        let key: string = i64_to_string(sym)
+        if bound.contains(key) == false and cur.seen.contains(key) == false:
+          if ms_lookup_local(ms, sym) >= 0:
+            cur = CaptureScan(cur.seen.set(key, to_i64(1)), cur.syms.push(sym))
+      return cur
+    HirNode::HirBinary(op, l, r, ti):
+      cur = collect_lambda_captures(ms, l, bound, cur)
+      return collect_lambda_captures(ms, r, bound, cur)
+    HirNode::HirUnary(op, operand, ti):
+      return collect_lambda_captures(ms, operand, bound, cur)
+    HirNode::HirCall(callee, args_lp, ac, ti, sb):
+      cur = collect_lambda_captures(ms, callee, bound, cur)
+      let args: Vector<i64> = read_hir_list(ms.hir.idx, args_lp)
+      let i: i64 = to_i64(0)
+      while i < args.length():
+        cur = collect_lambda_captures(ms, args.get(i), bound, cur)
+        i = i + to_i64(1)
+      return cur
+    HirNode::HirFieldAccess(obj, ft, ti):
+      return collect_lambda_captures(ms, obj, bound, cur)
+    HirNode::HirPipe(l, r, ti):
+      cur = collect_lambda_captures(ms, l, bound, cur)
+      return collect_lambda_captures(ms, r, bound, cur)
+    HirNode::HirEnumDiscriminant(v, ti):
+      return collect_lambda_captures(ms, v, bound, cur)
+    HirNode::HirEnumPayload(v, vi, fi, ti):
+      return collect_lambda_captures(ms, v, bound, cur)
+    HirNode::HirConstruct(args_lp, ac, ti):
+      let cargs: Vector<i64> = read_hir_list(ms.hir.idx, args_lp)
+      let ci: i64 = to_i64(0)
+      while ci < cargs.length():
+        cur = collect_lambda_captures(ms, cargs.get(ci), bound, cur)
+        ci = ci + to_i64(1)
+      return cur
+    HirNode::HirEnumConstruct(v, payload_lp, pc, ti):
+      let epairs: Vector<i64> = read_pairs(ms.hir.idx, payload_lp)
+      let ei: i64 = to_i64(0)
+      while ei < epairs.length():
+        cur = collect_lambda_captures(ms, epairs.get(ei), bound, cur)
+        ei = ei + to_i64(2)
+      return cur
+    HirNode::HirPtrOp(op, p, a, ti):
+      if p >= 0:
+        cur = collect_lambda_captures(ms, p, bound, cur)
+      if a >= 0:
+        cur = collect_lambda_captures(ms, a, bound, cur)
+      return cur
+    HirNode::HirLambda(sub_plp, sub_pc, sub_body, sub_ti):
+      let inner_bound: HashMap<i64> = bound
+      let spcount: i64 = read_hir_list_count(ms.hir.idx, sub_plp)
+      let spstart: i64 = sub_plp - spcount * to_i64(2)
+      let spi: i64 = to_i64(0)
+      while spi < spcount:
+        let spsym: i64 = ms.hir.idx.get(spstart + spi * to_i64(2))
+        if spsym >= 0:
+          inner_bound = inner_bound.set(i64_to_string(spsym), to_i64(1))
+        spi = spi + to_i64(1)
+      return collect_lambda_captures(ms, sub_body, inner_bound, cur)
+  return cur
+
+fn mir_lower_lambda(br: BlockR, params_lp: i64, body: i64, type_idx: i64): ExprR
+  let pcount: i64 = read_hir_list_count(br.ms.hir.idx, params_lp)
+  let pstart: i64 = params_lp - pcount * to_i64(2)
+  let bound: HashMap<i64> = HashMap<i64>::new()
+  let pi: i64 = to_i64(0)
+  while pi < pcount:
+    let psym0: i64 = br.ms.hir.idx.get(pstart + pi * to_i64(2))
+    if psym0 >= 0:
+      bound = bound.set(i64_to_string(psym0), to_i64(1))
+    pi = pi + to_i64(1)
+  let caps: CaptureScan = collect_lambda_captures(br.ms, body, bound, CaptureScan(HashMap<i64>::new(), Vector<i64>::new()))
+  let cap_vals: Vector<i64> = Vector<i64>::new()
+  let cap_tis: Vector<i64> = Vector<i64>::new()
+  let cur_br: BlockR = br
+  let ci: i64 = to_i64(0)
+  while ci < caps.syms.length():
+    let csym: i64 = caps.syms.get(ci)
+    let cslot: i64 = ms_lookup_local(cur_br.ms, csym)
+    let cti: i64 = mir_local_type(cur_br.ms, cslot)
+    let ld: ExprR = emit_load(cur_br, MirPlace(cslot, Vector<i64>::new()), cti)
+    cur_br = ld.br
+    cap_vals = cap_vals.push(ld.value)
+    cap_tis = cap_tis.push(cti)
+    ci = ci + to_i64(1)
+
+  let saved_func: MsFunction = cur_br.ms.func
+  let saved_flow: Flow = cur_br.ms.flow
+  let lam_ms: MS = ms_reset_fn_state(cur_br.ms)
+  lam_ms.func.in_template = saved_func.in_template
+
+  let ret_ti: i64 = to_i64(-1)
+  if type_idx >= 0 and type_idx < lam_ms.program.types.length():
+    ret_ti = lam_ms.program.types.get(type_idx).ret_type
+  if ret_ti < 0 and body >= 0:
+    ret_ti = ms_get_hir_type(lam_ms, lam_ms.hir.nodes.get(body))
+
+  let fn_r: MirR = ms_add_node(lam_ms, MirNode::MirFunction(sym = to_i64(-1), ret_type = ret_ti, param_count = pcount, local_list_lp = to_i64(0), local_count = to_i64(0), block_list_lp = to_i64(0), block_count = to_i64(0), is_extern = to_i64(0)))
+  lam_ms = fn_r.ms
+  let lam_fn_idx: i64 = fn_r.mir
+  lam_ms.func.current_fn = lam_fn_idx
+
+  let pj: i64 = to_i64(0)
+  while pj < pcount:
+    let psym: i64 = lam_ms.hir.idx.get(pstart + pj * to_i64(2))
+    let pti: i64 = lam_ms.hir.idx.get(pstart + pj * to_i64(2) + to_i64(1))
+    let dl: MirR = ms_declare_local(lam_ms, psym, pti, true)
+    lam_ms = dl.ms
+    pj = pj + to_i64(1)
+
+  let cj: i64 = to_i64(0)
+  while cj < caps.syms.length():
+    let dlc: MirR = ms_declare_local(lam_ms, caps.syms.get(cj), cap_tis.get(cj), false)
+    lam_ms = dlc.ms
+    cj = cj + to_i64(1)
+
+  let entry_r: MirR = ms_new_block(lam_ms)
+  let entry_br: BlockR = block_open(entry_r.ms, entry_r.mir)
+  let body_r: ExprR = lower_expr_value(entry_br, body)
+  let closed_br: BlockR = body_r.br
+  if closed_br.sealed == to_i64(0):
+    if ret_ti < 0 or ret_ti == to_i64(11):
+      closed_br = br_emit_terminator(closed_br, MirNode::MirReturn(value = to_i64(-1), has_value = to_i64(0)))
+    else:
+      closed_br = br_emit_terminator(closed_br, MirNode::MirReturn(value = body_r.value, has_value = to_i64(1)))
+  lam_ms = block_seal(closed_br)
+
+  let loc_fl: MirFlush = mir_flush_list(lam_ms, lam_ms.func.locals)
+  lam_ms = loc_fl.ms
+  let blk_fl: MirFlush = mir_flush_list(lam_ms, lam_ms.func.fn_blocks)
+  lam_ms = blk_fl.ms
+  lam_ms.out.nodes = lam_ms.out.nodes.set(lam_fn_idx, MirNode::MirFunction(sym = to_i64(-1), ret_type = ret_ti, param_count = pcount, local_list_lp = loc_fl.list_pos, local_count = lam_ms.func.locals.length(), block_list_lp = blk_fl.list_pos, block_count = lam_ms.func.fn_blocks.length(), is_extern = to_i64(0)))
+
+  lam_ms.func = saved_func
+  lam_ms.flow = saved_flow
+  cur_br.ms = lam_ms
+
+  let cap_fl: MirFlush = mir_flush_list(cur_br.ms, cap_vals)
+  cur_br.ms = cap_fl.ms
+  return br_emit_value(cur_br, MirNode::MirLambda(fn_node = lam_fn_idx, cap_list_lp = cap_fl.list_pos, cap_count = cap_vals.length(), type_idx = type_idx))
 
 // =========================================================================
 // Section 65: Statement lowering
@@ -820,7 +977,10 @@ fn lower_resource(br: BlockR, stmt: i64, kind_tok: i64, name_tok: i64, body_lp: 
       if mir_holds_generator(cur.ms, mir_local_type(cur.ms, slot)):
         cur.ms = ms_add_diag(cur.ms, Span(to_i64(0), to_i64(1)), "'" + mir_local_name(cur.ms, slot) + "' is declared outside resource block '" + mir_tok_text(cur.ms, name_tok) + "' and stored to inside it: a generator cannot be copied out of the block")
       else:
-        escapes = escapes.push(slot)
+        if mir_holds_closure(cur.ms, mir_local_type(cur.ms, slot)):
+          cur.ms = ms_add_diag(cur.ms, Span(to_i64(0), to_i64(1)), "'" + mir_local_name(cur.ms, slot) + "' is declared outside resource block '" + mir_tok_text(cur.ms, name_tok) + "' and stored to inside it: a function value cannot be copied out of the block")
+        else:
+          escapes = escapes.push(slot)
       si = si + to_i64(1)
     let ei: i64 = to_i64(0)
     while ei < escapes.length():
@@ -1001,6 +1161,44 @@ fn mir_generator_search(ms: MS, ti: i64, seen: HashMap<i64>): GenericSearch
         fi = fi + to_i64(1)
   return GenericSearch(so_far, false)
 
+fn mir_holds_closure(ms: MS, ti: i64): bool
+  return mir_closure_search(ms, ti, HashMap<i64>::new()).found
+
+fn mir_closure_search(ms: MS, ti: i64, seen: HashMap<i64>): GenericSearch
+  if ti < 0 or ti >= ms.program.types.length():
+    return GenericSearch(seen, false)
+  let key: string = i64_to_string(ti)
+  if seen.contains(key):
+    return GenericSearch(seen, false)
+  let so_far: HashMap<i64> = seen.set(key, to_i64(1))
+  let t: DaoType = ms.program.types.get(ti)
+  match t.kind:
+    TypeKind::TFunction:
+      return GenericSearch(so_far, true)
+    TypeKind::TStruct:
+      let fi: i64 = to_i64(0)
+      while fi < t.info_count:
+        let sub: GenericSearch = mir_closure_search(ms, ms.program.type_info.get(t.info_lp + fi * to_i64(2) + to_i64(1)), so_far)
+        if sub.found:
+          return sub
+        so_far = sub.seen
+        fi = fi + to_i64(1)
+    TypeKind::TEnum:
+      let at: i64 = t.info_lp
+      let vi: i64 = to_i64(0)
+      while vi < t.info_count:
+        let count: i64 = ms.program.type_info.get(at + to_i64(1))
+        let pi: i64 = to_i64(0)
+        while pi < count:
+          let sub: GenericSearch = mir_closure_search(ms, ms.program.type_info.get(at + to_i64(2) + pi * to_i64(2) + to_i64(1)), so_far)
+          if sub.found:
+            return sub
+          so_far = sub.seen
+          pi = pi + to_i64(1)
+        at = at + to_i64(2) + count * to_i64(2)
+        vi = vi + to_i64(1)
+  return GenericSearch(so_far, false)
+
 // The name of a local slot's binding ("" for a synthesized local).
 fn mir_local_name(ms: MS, slot: i64): string
   if slot < 0 or slot >= ms.func.locals.length():
@@ -1035,6 +1233,8 @@ fn mir_heap_search_in(types: Vector<DaoType>, info: Vector<i64>, ti: i64, seen: 
   let held: Vector<i64> = Vector<i64>::new()
   match t.kind:
     TypeKind::TString:
+      return GenericSearch(so_far, true)
+    TypeKind::TFunction:
       return GenericSearch(so_far, true)
     TypeKind::TGenerator:
       return GenericSearch(so_far, true)
@@ -1782,6 +1982,11 @@ fn mono_scan_function(m: Mono, wi: i64): Mono
   while ii < insts.length():
     let inst: i64 = insts.get(ii)
     match m.tables.nodes.get(inst):
+      MirNode::MirLambda(lam_fn, clp, cc, lti):
+        if m.work.fn_subst.contains(i64_to_string(fn_node)):
+          m.work.fn_subst = m.work.fn_subst.set(i64_to_string(lam_fn), hm_get_or(m.work.fn_subst, i64_to_string(fn_node), to_i64(-1)))
+        m.work.fns = m.work.fns.push(lam_fn)
+        m.work.fn_module = m.work.fn_module.push(m.work.fn_module.get(wi))
       MirNode::MirFnRef(ref_sym, ref_ti):
         let tmpl: i64 = hm_get_or(m.templates.by_sym, i64_to_string(ref_sym), to_i64(-1))
         if tmpl >= 0:
@@ -1894,6 +2099,18 @@ fn mono_match(m: Mono, pattern: i64, concrete: i64, so_far: MonoMap): MonoMap
       return mono_match(m, pt.pointee, types.get(concrete).pointee, so_far)
     TypeKind::TGenerator:
       return mono_match(m, pt.pointee, types.get(concrete).pointee, so_far)
+    TypeKind::TFunction:
+      let ct: DaoType = types.get(concrete)
+      match ct.kind:
+        TypeKind::TFunction:
+          if pt.info_count == ct.info_count:
+            let f_out: MonoMap = so_far
+            let fpi: i64 = to_i64(0)
+            while fpi < pt.info_count:
+              f_out = mono_match(f_out.m, f_out.m.tables.ts.type_info.get(pt.info_lp + fpi), f_out.m.tables.ts.type_info.get(ct.info_lp + fpi), f_out)
+              fpi = fpi + to_i64(1)
+            return mono_match(f_out.m, pt.ret_type, ct.ret_type, f_out)
+      return so_far
   let p_args: Vector<i64> = mir_stands_for_args_of(m.tables.ts.type_info, pt)
   let c_args: Vector<i64> = mir_stands_for_args_of(m.tables.ts.type_info, types.get(concrete))
   let out: MonoMap = so_far
@@ -1958,6 +2175,8 @@ fn mir_value_type(nodes: Vector<MirNode>, inst: i64): i64
     MirNode::MirFieldAccess(o, f, fi, ti):
       return ti
     MirNode::MirFnRef(s, ti):
+      return ti
+    MirNode::MirLambda(fn_node, clp, cc, ti):
       return ti
     MirNode::MirCall(c, a, n, ti, sb):
       return ti
@@ -2247,6 +2466,11 @@ fn mono_clone_inst(m: Mono, node: MirNode, rn: HashMap<i64>, map: HashMap<i64>):
       // Left as the template wrote it; the scan of the clone names what
       // it calls, through this clone's substitution.
       return MonoNode(m, MirNode::MirFnRef(sym = s, type_idx = ti))
+    MirNode::MirLambda(fn_node, clp, cc, ti):
+      let t: MonoType = mono_subst_type(m, map, ti)
+      let cloned_fn: MonoMade = mono_clone(t.m, fn_node, to_i64(-1), map)
+      let fl: MonoFlush = mono_flush(cloned_fn.m, mono_renumbered(read_hir_list(cloned_fn.m.tables.idx, clp), rn))
+      return MonoNode(fl.m, MirNode::MirLambda(fn_node = cloned_fn.sym, cap_list_lp = fl.list_pos, cap_count = cc, type_idx = t.type_idx))
     MirNode::MirCall(c, a, n, ti, sb):
       let t: MonoType = mono_subst_type(m, map, ti)
       let fl: MonoFlush = mono_flush(t.m, mono_renumbered(read_hir_list(t.m.tables.idx, a), rn))
@@ -2413,6 +2637,9 @@ fn mono_expand_copy_at(m: Mono, fn_node: i64, block: i64, call: i64, callee: i64
   if mono_holds_generator(m, ti, false):
     m.diags = m.diags.push(make_error(Span(to_i64(0), to_i64(1)), "a generator cannot be copied out of a resource block: a '" + type_name(m.tables.ts, ti) + "' leaves one through a container"))
     return MonoStep(m, call, false)
+  if mono_holds_closure(m, ti, false):
+    m.diags = m.diags.push(make_error(Span(to_i64(0), to_i64(1)), "a function value cannot be copied out of a resource block: a '" + type_name(m.tables.ts, ti) + "' leaves one"))
+    return MonoStep(m, call, false)
   match t.kind:
     TypeKind::TString:
       if hooks.copy_out_string < 0:
@@ -2481,6 +2708,52 @@ fn mono_is_copier(m: Mono, method: i64, owner_ti: i64): bool
 // holds_generator; `stored` is whether `ti` sits in such storage).
 fn mono_holds_generator(m: Mono, ti: i64, stored: bool): bool
   return mono_generator_search(m, ti, stored, HashMap<i64>::new()).found
+
+fn mono_holds_closure(m: Mono, ti: i64, stored: bool): bool
+  return mono_closure_search(m, ti, stored, HashMap<i64>::new()).found
+
+fn mono_closure_search(m: Mono, ti: i64, stored: bool, seen: HashMap<i64>): GenericSearch
+  let types: Vector<DaoType> = m.tables.ts.types
+  let info: Vector<i64> = m.tables.ts.type_info
+  if ti < 0 or ti >= types.length():
+    return GenericSearch(seen, false)
+  let key: string = i64_to_string(ti) + ":" + bool_to_string(stored)
+  if seen.contains(key):
+    return GenericSearch(seen, false)
+  let so_far: HashMap<i64> = seen.set(key, to_i64(1))
+  let t: DaoType = types.get(ti)
+  let held: Vector<i64> = Vector<i64>::new()
+  match t.kind:
+    TypeKind::TFunction:
+      return GenericSearch(so_far, true)
+    TypeKind::TPointer:
+      if stored == false:
+        return GenericSearch(so_far, false)
+      return mono_closure_search(m, t.pointee, false, so_far)
+    TypeKind::TStruct:
+      let fi: i64 = to_i64(0)
+      while fi < t.info_count:
+        held = held.push(info.get(t.info_lp + fi * to_i64(2) + to_i64(1)))
+        fi = fi + to_i64(1)
+    TypeKind::TEnum:
+      let at: i64 = t.info_lp
+      let vi: i64 = to_i64(0)
+      while vi < t.info_count:
+        let count: i64 = info.get(at + to_i64(1))
+        let pi: i64 = to_i64(0)
+        while pi < count:
+          held = held.push(info.get(at + to_i64(2) + pi * to_i64(2) + to_i64(1)))
+          pi = pi + to_i64(1)
+        at = at + to_i64(2) + count * to_i64(2)
+        vi = vi + to_i64(1)
+  let i: i64 = to_i64(0)
+  while i < held.length():
+    let sub: GenericSearch = mono_closure_search(m, held.get(i), true, so_far)
+    if sub.found:
+      return sub
+    so_far = sub.seen
+    i = i + to_i64(1)
+  return GenericSearch(so_far, false)
 
 fn mono_generator_search(m: Mono, ti: i64, stored: bool, seen: HashMap<i64>): GenericSearch
   let types: Vector<DaoType> = m.tables.ts.types
@@ -2791,6 +3064,8 @@ fn mir_node_kind(n: MirNode): string
       return "MirFieldAccess"
     MirNode::MirFnRef(a, b):
       return "MirFnRef"
+    MirNode::MirLambda(a, b, c, d):
+      return "MirLambda"
     MirNode::MirCall(a, b, c, d, e):
       return "MirCall"
     MirNode::MirStore(a, b, c, d):
