@@ -9,6 +9,7 @@
 #include "ir/mir/mir_builder.h"
 #include "ir/mir/mir_context.h"
 #include "ir/mir/mir_monomorphize.h"
+#include "support/sha256.h"
 #include "support/test_utils.h"
 
 #include <boost/ut.hpp>
@@ -133,7 +134,7 @@ suite<"msl_backend"> msl_backend_suite = [] {
     expect(out.rejections.empty());
     expect(out.kernels.size() == 3_ul);
     expect(out.bundle_sha256.size() == 64_ul);
-    expect(out.bundle_sha256 == MslBackend::sha256_hex(out.bundle_source));
+    expect(out.bundle_sha256 == sha256_hex(out.bundle_source));
     expect(out.kernels[0].origin.module_name == "forecast_plans");
     expect(out.kernels[0].operation_name == "score_v1");
     expect(out.kernels[1].operation_name == "high_wind");
@@ -144,14 +145,6 @@ suite<"msl_backend"> msl_backend_suite = [] {
     expect(contains(tsv, "kernel\tforecast_plans\tscore_v1\t"));
     expect(contains(tsv, "kernel\tforecast_plans\thigh_wind\t"));
     expect(contains(tsv, "kernel\tforecast_plans\tadjust\t"));
-
-    expect(MslBackend::sha256_hex("") ==
-           "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
-    expect(MslBackend::sha256_hex("abc") ==
-           "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
-    expect(MslBackend::sha256_hex(
-               "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq") ==
-           "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
   };
 
   "diagnoses unsupported types, calls, loops, and missing or ambiguous kernels"_test = [] {

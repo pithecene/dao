@@ -63,6 +63,7 @@ Compiler implementation roots only.
 Shared low-level utilities used across compiler subsystems.
 
 - `arena.h` — bump allocator with destructor tracking for compiler-owned object graphs
+- `sha256.h` — dependency-free FIPS 180-4 SHA-256 hex digest helper (`sha256_test`)
 
 ### `compiler/frontend/`
 

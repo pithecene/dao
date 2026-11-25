@@ -116,3 +116,11 @@ target_compile_definitions(module_graph_test PRIVATE
 )
 
 add_test(NAME module_graph_test COMMAND module_graph_test)
+
+add_executable(sha256_test
+  ../support/sha256_test.cpp
+)
+
+target_link_libraries(sha256_test PRIVATE dao_frontend Boost::ut)
+
+add_test(NAME sha256_test COMMAND sha256_test)

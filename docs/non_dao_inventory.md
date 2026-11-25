@@ -20,7 +20,7 @@ Line counts reflect the current branch over `1d7c3b4`, on 2026-11-24.  The table
 
 | Stopgap | Language | Files | Lines | Replacement |
 |---|---|---|---|---|
-| `compiler/` bootstrap tier and its tests | C++ | 112 | 41,565 | nothing: this tier stays permanently |
+| `compiler/` bootstrap tier and its tests | C++ | 114 | 41,610 | nothing: this tier stays permanently |
 | `runtime/` allocator, strings, I/O and generators | C | 11 | 1,632 | Dao over `Ptr<T>` and `mode unsafe` in the fully hosted tier, which needs direct system calls from Dao |
 | `tools/playground/compiler_service/` | C++ | 20 | 3,300 | a Dao service, which needs sockets and HTTP in the standard library |
 | `tools/playground/frontend/` | TypeScript, CSS, HTML | 20 | 1,660 | a Dao browser target, which does not exist |
@@ -35,7 +35,7 @@ Line counts reflect the current branch over `1d7c3b4`, on 2026-11-24.  The table
 | `bootstrap/stage2.sh`, `audit_closure.sh`, `validate_ir.sh` | Shell | 995 | Dao programs, which need a process API in the standard library |
 | `compiler/driver/multifile_build_test.sh`, `tools/playground/dev.sh` | Shell | 194 | the same process API |
 | `Taskfile.yml` | YAML for Task | 209 | a build tool written in Dao |
-| `CMakeLists.txt` files and `CMakePresets.json` | CMake | 565 | stays with the bootstrap tier, and a Dao build tool serves the other tiers |
+| `CMakeLists.txt` files and `CMakePresets.json` | CMake | 573 | stays with the bootstrap tier, and a Dao build tool serves the other tiers |
 | `conanfile.py`, `profiles/` | Python, Conan | 90 | stays with the bootstrap tier |
 | `.github/workflows/` | YAML for GitHub Actions | 270 | Bosun orchestrating compiler and crossing validation directly |
 

@@ -74,8 +74,6 @@ public:
                             const SourceMap* source_map = nullptr) -> MslBackendOutcome;
 
   static auto render_manifest_tsv(const MslBackendOutcome& outcome) -> std::string;
-
-  static auto sha256_hex(std::string_view data) -> std::string;
 };
 
 } // namespace dao
