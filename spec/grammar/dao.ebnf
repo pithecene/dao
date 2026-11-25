@@ -155,9 +155,9 @@ postfix_op :=
 arguments :=
     argument ("," argument)*
 
-# Bare identifiers pun same-named fields in aggregate initialization; explicit
-# `field = expr` binds non-matching or composite expressions (see
-# docs/contracts/ADR_AGGREGATE_INITIALIZATION.md).
+# Named field arguments apply to structured variant construction today
+# (docs/contracts/ADR_ENUM_CLASS.md); punned and class field initialization
+# is proposed in spec/semantics/aggregate_initialization.md.
 argument :=
       identifier "=" expression
     | expression
@@ -179,7 +179,10 @@ lambda_params :=
     identifier ("," identifier)*
 
 list_literal :=
-    "[" arguments? "]"
+    "[" expression_list? "]"
+
+expression_list :=
+    expression ("," expression)*
 
 
 literal :=

@@ -47,12 +47,12 @@ Each probe below ran through both `daoc` (`compiler/`) and `stage2` (`bootstrap/
 | Local inference | `let x = f()` | Pass | Pass | Refactorable today |
 | Open enum context | `let o: Option<i64> = Option::None` | Pass | Pass | Refactorable today |
 | Concrete integer sinks | `let x: i64 = 0`, `Span(0, 1)`, `v.get(0)`, `v_i64.push(0)`, `hm.set("a", 0)` | Pass | Pass | Refactorable today |
-| Expression-body / `yield` / generic variant literals | `fn f(): i64 -> 0`, `yield 0`, `Option::Some(value = 0)` under `Option<i64>` | Fail (`expr_fn`, `yield`, variant) | `expr_fn` Pass; `yield` & variant Fail | Contract + parity (`DAO-H04`) |
-| Collection literals | `let xs: Vector<i64> = [1, 2, 3]`, `[]` | Fail (`type_checker.cpp`) | Fail (`hir/impl.dao`) | Contract + compiler (`ADR`) |
-| Aggregate initialization | `LexState(cursor, diags = d)` | Parsed; rejected in `typecheck` | Parsed; rejected in `typecheck` | Contract + compiler (`ADR`) |
+| Expression-body / `yield` / generic variant literals | `fn f(): i64 -> 0`, `yield 0`, `Option::Some(value = 0)` under `Option<i64>` | Fail (`expr_fn`, `yield`, variant) | `expr_fn` Pass, `yield` and variant Fail | Contract + parity (`DAO-H04`) |
+| Collection literals | `let xs: Vector<i64> = [1, 2, 3]`, `[]` | Fail (`type_checker.cpp`) | Fail (`hir/impl.dao`) | Proposal + compiler (`spec/semantics/`) |
+| Aggregate initialization | `LexState(cursor, diags = d)` | Parsed, rejected in `typecheck` | Parsed, rejected in `typecheck` | Proposal + compiler (`spec/semantics/`) |
 | Nested field mutation | `s.pos = s.pos + 1`, `s.inner.x = 2` | Pass | Pass | Refactorable today |
 | Partial destructuring | `Node::CallE(callee, ..)` | Pass | Fail (`parser` + `typecheck`) | Bootstrap parity (`DAO-H04`) |
-| Wildcard pattern | `_:` arm and `_` binding | Fail (`unknown name '_'`) | Fail (`unknown name '_'`) | Contract + compiler (`ADR`) |
+| Wildcard pattern | `_:` arm and `_` binding | Fail (`unknown name '_'`) | Fail (`unknown name '_'`) | Proposal + compiler (`spec/semantics/`) |
 | Fieldless `enum` `==` | `tok.kind == TK::Plus` | Pass | Pass | Refactorable today |
 | Payload `enum class` `==` | `E::A(x = 1) == E::A(x = 1)` | Rejected (`§13.1`) | Defect: accepted in `typecheck` | Immediate correctness fix |
 | Generator `for` loop | `for x in vec.iter():`, `for i in range(n):` | Pass | Pass | Refactorable today |
@@ -77,11 +77,11 @@ Each probe below ran through both `daoc` (`compiler/`) and `stage2` (`bootstrap/
 3. **`Option<T>` and `Result<T, E>` methods:** both files currently hold 4-line declarations with zero methods (`is_some`, `is_none`, `is_ok`, `is_err`, `unwrap_or`).
 4. **String and `Builder` composition:** `split`, `trim`, `join`, `parse_i64`, `parse_i32`, and `Builder.push_i64` replace `1,750` `+` concatenations and bespoke integer parsers.
 
-### Compiler Parity (`DAO-H04`) and Contract Proposals
+### Compiler Parity (`DAO-H04`) and Semantic Proposals
 
 1. **Immediate correctness repair:** `bootstrap/typecheck/impl.dao` must reject `==` and `!=` on payload-bearing `enum class` types to match `CONTRACT_TYPE_SYSTEM_FOUNDATIONS.md` §13.1.
 2. **Bootstrap parity (`DAO-H04`):** implement `..` rest destructuring (`3,758` match arms), `?` error propagation, and `|>` MIR lowering in `bootstrap/`.
-3. **Normative proposals (`docs/contracts/`):** `ADR_CONTEXTUAL_AND_COLLECTION_LITERALS.md` and `ADR_AGGREGATE_INITIALIZATION.md` specify contextual literal sinks, homogeneous `Vector<T>` literals, `_` wildcards, and dotless structural aggregate initialization (`Point(x, y)`, `Point(x = 0, y = 0)`).
+3. **Semantic proposals (`spec/semantics/`):** `contextual_and_collection_literals.md` and `aggregate_initialization.md` specify contextual literal sinks, homogeneous `Vector<T>` literals, `_` wildcards, and dotless structural aggregate initialization (`Point(x, y)`, `Point(x = 0, y = 0)`) for promotion to `docs/contracts/` upon acceptance.
 
 ## Delivery Sequence
 

@@ -1,6 +1,6 @@
-# ADR: Structural Aggregate Initialization and Pattern Wildcards
+# Structural Aggregate Initialization and Pattern Wildcards
 
-Status: **proposed**
+Status: **proposed** (promotes to `docs/contracts/` upon acceptance)
 Date: 2026-11-24
 
 ## Decision
@@ -23,7 +23,7 @@ Dao already distinguishes types and variants from functions during name resoluti
 
 ## 1. Structural Aggregate Initialization
 
-### 1.1 Surface syntax
+### 1.1 Surface Syntax
 
 Both `class` values and payload-bearing `enum class` variants use the existing parenthesized call syntax with named or punned field arguments:
 
@@ -58,7 +58,7 @@ argument :=
     | expression
 ```
 
-No new grammar production is required: the parser produces `CallExpr` with `arg_names[i]` populated for `identifier "=" expression` and empty for bare `expression`. Name resolution and type checking distinguish structural aggregate initialization from function invocation by callee kind:
+This design needs no new grammar production. The parser produces `CallExpr` with `arg_names[i]` populated for `identifier "=" expression` and empty for bare `expression`. Name resolution and type checking distinguish structural aggregate initialization from function invocation by callee kind:
 
 | Property | Aggregate Initialization (`Type(...)`, `Enum::Variant(...)`) | Function / Method Invocation (`fn(...)`, `Type::make(...)`, `v.m(...)`) |
 |---|---|---|
@@ -67,45 +67,45 @@ No new grammar production is required: the parser produces `CallExpr` with `arg_
 | Argument order | Order-independent (field identity governs slot) | Signature order |
 | Execution | Pure structural value assembly (no hidden user code) | Executes function body |
 
-### 1.2 Shorthand punning rule
+### 1.2 Shorthand Punning Rule
 
 1. **Only bare unqualified identifiers pun:** in an aggregate initializer, an argument without `=` must be a bare `IdentifierExpr` (`cursor`). It binds the field named `cursor` to the value of `cursor` in the enclosing lexical scope, recording a normal `resolve.uses` entry on that identifier token for hover, go-to-definition, and find-references.
-2. **Non-identifiers require `field = expr`:** literals (`0`, `"s"`), member accesses (`self.x`, `other.x`), qualified names (`Mode::Fast`), and call/binary expressions carry no single local binding name and must be written `field = expr` (`Point(x = self.x, y = self.y)`, `Span(offset = 0, length = 1)`).
+2. **Non-identifiers require `field = expr`:** literals (`0`, `"s"`), member accesses (`self.x`, `other.x`), qualified names (`Mode::Fast`), and call/binary expressions carry no single local binding name and require an explicit `field = expr` label (`Point(x = self.x, y = self.y)`, `Span(offset = 0, length = 1)`).
 3. **Lexical scope separation:** in `Point(x = y, y = x)` or `State(pos = pos + 1)`, the left-hand identifier names a field of the target aggregate, while the right-hand expression resolves strictly in the enclosing lexical value scope.
 
-### 1.3 Completeness and required diagnostics
+### 1.3 Completeness and Required Diagnostics
 
-- **No implicit defaults:** every declared field of the `class` or `enum class` variant must be initialized exactly once.
+- **No implicit defaults:** an initializer must supply every declared field of the `class` or `enum class` variant exactly once.
 - **No `field = expr` on functions or methods:** passing `name = expr` to a function, method, or `Ptr<T>` operation continues to diagnose `"arguments are given by position; named fields apply only to class and variant initialization"`.
 - **Non-identifier without field name:** passing a non-identifier expression without `field =` to an aggregate initializer diagnoses `"argument in initialization of '<Type>' requires an explicit field name ('<field> = ...')"`.
-- **Unknown field:** `"no field '<name>' on '<Type>'"` (at the field/identifier span; when `<name>` is a bare identifier pun, notes both that `<Type>` has no field `<name>` and lists valid uninitialized fields).
+- **Unknown field:** `"no field '<name>' on '<Type>'"` at the field or identifier span. For a bare identifier pun, the diagnostic also lists the uninitialized fields of `<Type>`.
 - **Duplicate field:** `"field '<name>' of '<Type>' is initialized more than once"` (at the duplicate argument span, covering both `Point(x = 1, x = 2)` and `Point(x, x = 2)`).
 - **Missing field(s):** `"missing field '<name>' in initialization of '<Type>'"` (at the call span, reported in field declaration order).
 - **Unresolved shorthand binding:** when `Type` has a field `foo` and the caller writes bare `Type(foo, ...)` with no value `foo` in lexical scope, resolution diagnoses `"unknown name 'foo'"` at the `foo` token span.
 
-### 1.4 Evaluation order and generic inference
+### 1.4 Evaluation Order and Generic Inference
 
 1. **Left-to-right runtime evaluation:** argument expressions evaluate strictly left to right in **written source order**, storing into temporaries before populating the aggregate's layout slots in field declaration order.
 2. **Order-independent generic type inference and contextual literal fitting:** explicit type arguments (`Box<i64>(value = 0)`) or enclosing expected type (`let o: Option<i64> = Option::Some(value = 0)`) seed type bindings first. Remaining unbound type parameters of the `class` or `enum class` infer across arguments ordered by **field declaration index** (preserving `type_checker.cpp`'s existing `declaration_order` rule for `enum class`), so `Pair(first = 1, second = x)` and `Pair(second = x, first = 1)` infer the exact same type.
 
-### 1.5 Safe migration without silent positional reinterpretation
+### 1.5 Safe Migration Without Silent Positional Reinterpretation
 
-Flipping existing positional `class` constructors directly to field-name punning would fail at compile time on almost all sites, **except** one hazardous case: a positional call `Edge(to, from)` on `class Edge: from: i64 / to: i64` whose arguments are bare identifiers forming a non-identity permutation of the class's own field names. Under positional rules `Edge(to, from)` reversed the endpoints; under field-identity punning `Edge(to, from)` would silently construct the unreversed edge `(from = from, to = to)`.
+Flipping existing positional `class` calls directly to field-name punning fails at compile time on almost all sites. One case remains hazardous: `Edge(to, from)` on `class Edge` with fields `from` and `to`. Positional rules reversed those endpoints, whereas field-identity punning constructs the unreversed `(from = from, to = to)` value.
 
 Migration therefore follows a strict two-step protocol:
 
-1. **Mechanical pre-flip rewrite (under existing positional semantics):** inspect every resolved `TypeStruct` constructor call across `stdlib/`, `bootstrap/`, `examples/`, and `testdata/`. Any argument `arg_i` at field index `i` that is **not** a bare `IdentifierExpr` spelled identically to `fields[i].name` is rewritten to `fields[i].name = arg_i` (turning `Edge(to, from)` into `Edge(from = to, to = from)` and `Span(0, 1)` into `Span(offset = 0, length = 1)`, while leaving already-matching `Point(x, y)` as `Point(x, y)`).
+1. **Mechanical pre-flip rewrite (under existing positional semantics):** inspect every resolved `TypeStruct` constructor call across `stdlib/`, `bootstrap/`, `examples/`, and `testdata/`. When `arg_i` at field index `i` is not a bare `IdentifierExpr` matching `fields[i].name`, rewrite it to `fields[i].name = arg_i`. That pass rewrites `Edge(to, from)` to `Edge(from = to, to = from)` and `Span(0, 1)` to `Span(offset = 0, length = 1)` while preserving `Point(x, y)`.
 2. **Semantic cutover (both compilers together):** enable named/punned `class` initialization and `enum class` identifier punning in `compiler/` and `bootstrap/`, rejecting non-identifier unnamed arguments on aggregates from that commit onward. Because Step 1 rewrote every non-identity permutation explicitly, **zero call sites can silently change runtime meaning**.
 
 ## 2. Pattern Matching Ergonomics (`..` and `_`)
 
-### 2.1 Bootstrap parity for `..` (`DAO-H04`)
+### 2.1 Bootstrap Parity for `..` (`DAO-H04`)
 
-`CONTRACT_SYNTAX_SURFACE.md` and `ADR_ENUM_CLASS.md` already freeze trailing `..` in `enum class` destructuring (`Expr::Function(name, ret, ..):`). Native `daoc` implements `..`; `DAO-H04` brings `bootstrap/parser`, `bootstrap/typecheck`, and `bootstrap/hir` to full parity before `DAO-H02`.
+`CONTRACT_SYNTAX_SURFACE.md` and `ADR_ENUM_CLASS.md` already freeze trailing `..` in `enum class` destructuring (`Expr::Function(name, ret, ..):`). Native `daoc` implements `..`, and `DAO-H04` brings `bootstrap/parser`, `bootstrap/typecheck`, and `bootstrap/hir` to full parity before `DAO-H02`.
 
-### 2.2 Wildcard `_` pattern
+### 2.2 Wildcard `_` Pattern
 
-`_` is reserved as a non-binding wildcard pattern in two pattern positions (and remains illegal as an expression or declaration name):
+Dao reserves `_` as a non-binding wildcard pattern in two pattern positions while keeping `_` illegal as an expression or declaration name:
 
 1. **Catch-all `match` arm (`_:`):**
    ```dao
@@ -116,11 +116,11 @@ Migration therefore follows a strict two-step protocol:
        return 0
    ```
    - `_:` matches any remaining value of the scrutinee type without introducing a lexical binding.
-   - `_:` must appear as the final arm of a `match`; any arm after `_:` diagnoses `"unreachable match arm after wildcard '_'"`.
+   - `_:` must appear as the final arm of a `match`, and any arm after `_:` diagnoses `"unreachable match arm after wildcard '_'"`.
    - If prior arms already cover every variant of a closed `enum` or `enum class`, `_:` diagnoses `"redundant wildcard '_' arm: all variants of '<Type>' are already covered"` so closed-sum exhaustiveness stays compiler-checked.
 2. **Ignored slot inside variant destructuring (`Variant(first, _, third)`):**
-   - Inside `Enum::Variant(p_0, ..., p_{k-1})`, `_` occupies one field position in declaration order without binding a local symbol, allowing interior fields to be skipped cleanly while trailing fields use `..`.
+   - Inside `Enum::Variant(p_0, ..., p_{k-1})`, `_` occupies one field position in declaration order without binding a local symbol. Callers can skip interior fields cleanly while trailing fields use `..`.
 
-### 2.3 Exhaustiveness and definite return
+### 2.3 Exhaustiveness and Definite Return
 
-When a `match` over an `enum` or `enum class` covers every variant (explicitly or via a non-redundant trailing `_:` arm) and every arm terminates with `return` or `break`, control flow after the `match` is unreachable, removing mandatory dead `return` statements after exhaustive matches.
+A `match` over an `enum` or `enum class` is exhaustive when its arms cover every variant explicitly or end with a non-redundant `_:` arm. When every arm terminates with `return` or `break`, control flow after the `match` is unreachable and needs no trailing dead `return`.

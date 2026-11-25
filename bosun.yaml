@@ -15,6 +15,7 @@ prose:
     - docs/heterogeneous_experiment.md
     - docs/hygiene_audit.md
     - docs/non_dao_inventory.md
-    - docs/contracts/ADR_AGGREGATE_INITIALIZATION.md
-    - docs/contracts/ADR_CONTEXTUAL_AND_COLLECTION_LITERALS.md
     - docs/task_specs/TASK_46_BOOTSTRAP_FIRST_MODULE.md
+    - spec/semantics/README.md
+    - spec/semantics/aggregate_initialization.md
+    - spec/semantics/contextual_and_collection_literals.md
