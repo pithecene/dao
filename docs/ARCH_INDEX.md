@@ -31,6 +31,7 @@ Contracts and explanatory material.
 
 - `ARCH_INDEX.md` — this file
 - `non_dao_inventory.md` — every stopgap not written in Dao, and what replaces it
+- `hygiene_audit.md` — `DAO-H01` corpus repetition measurements, native vs. self-hosted parity matrix, and `DAO-H01`–`DAO-H06` sequencing
 - `contracts/` — normative contracts for structure, syntax, the module system, execution contexts, compiler architecture, bootstrap/interop posture, tooling boundaries, runtime ABI, numeric semantics, and C ABI interop, with ADRs for `enum class` and the raw pointer surface
 - `bootstrap_closure_split.md` — measurement separating compiler-implementation closure from bootstrap test-harness closure
 - `ROADMAP.md` — staged implementation plan from frontend skeleton to self-hosting, tooling maturity, and GPU expansion
@@ -50,7 +51,7 @@ Contracts and explanatory material.
 Reference language material.
 
 - `grammar/` — parser-facing reference grammar, lexical surface, and indentation rules
-- `semantics/` — semantic notes that are below contract level but above examples
+- `semantics/` — semantic notes and pre-contract language proposals (`aggregate_initialization.md`, `contextual_and_collection_literals.md`) below contract level and above examples
 - `syntax_probes/` — small snippets used to test readability and parser direction
 - `examples/` — reference examples housed under `spec/examples/`
 
@@ -139,14 +140,15 @@ Dao standard library surface and future implementation roots.
 Self-hosting compiler subsystems written in Dao.
 
 - `README.md` — scope, parity notes, and subsystem inventory
-- `shared/` — shared AST, parser, module graph, and cross-pass program
-  structures (`base.dao`, importing `bootstrap::lexer`); assembled into
-  remaining `*.gen.dao` files via `assemble.sh`
+- `shared/` — shared type universe and cross-pass program lookup tables
+  (`base.dao`, importing `bootstrap::lexer`, `bootstrap::parser`, and
+  `bootstrap::graph`); assembled into remaining `*.gen.dao` files via
+  `assemble.sh`
 - `ascii.dao` — `bootstrap::ascii`, character-classification module
   imported by `bootstrap::lexer`
 - `assemble.sh` — concatenates `shared/base.dao` with remaining subsystem
   sources to produce `*.gen.dao` outputs under `bootstrap/` or an explicit
-  per-run output root (`lexer` no longer uses assembly)
+  per-run output root (`lexer`, `parser`, and `graph` no longer use assembly)
 - `validate_ir.sh` — compiles, links, and runs the IR the LLVM suite
   emits under `llvm/out/` or a per-run directory, comparing exit codes
   and expected fixture counts
@@ -161,10 +163,12 @@ Self-hosting compiler subsystems written in Dao.
 - `lexer/` — `bootstrap::lexer` (`impl.dao`, importing `bootstrap::ascii`)
   and `bootstrap::lexer::tests` (`tests.dao`), compiled directly as real
   modules without `assemble.sh`
-- `parser/` — recursive-descent parser producing arena-indexed AST for
-  Tier A Dao syntax; tests in `tests.dao` (Task 21)
-- `graph/` — module graph construction, cycle detection, and topological
-  sort for multi-file compilation; tests in `tests.dao` (Task 25)
+- `parser/` — `bootstrap::parser` (`impl.dao`, importing
+  `bootstrap::lexer`) and `bootstrap::parser::tests` (`tests.dao`),
+  compiled directly as real modules without `assemble.sh`
+- `graph/` — `bootstrap::graph` (`impl.dao`, importing `bootstrap::lexer`
+  and `bootstrap::parser`) and `bootstrap::graph::tests` (`tests.dao`),
+  compiled directly as real modules without `assemble.sh`
 - `resolver/` — two-pass name resolver with scope chains, symbol tables,
   and uses map; logic + tests in `impl.dao` (Task 22)
 - `typecheck/` — type checker assigning types to expressions and

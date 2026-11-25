@@ -13,7 +13,7 @@ class ManifestSpec:
 
 class Manifest:
   output: string
-  inputs: Vector<SourceInput>
+  inputs: Vector<graph::SourceInput>
 
 // Resolve the CLI invocation (`<driver> <manifest>` or
 // `<driver> --manifest <manifest>`) to a manifest path.
@@ -121,13 +121,13 @@ fn load_manifest(manifest_path: string): Result<Manifest, string>
     Result::Err(err):
       return Result::Err(error = err)
 
-  let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
+  let inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   let i: i64 = to_i64(0)
   while i < spec.entries.length():
     let entry: ManifestEntry = spec.entries.get(i)
     match try_read_file(entry.path):
       Result::Ok(content):
-        inputs = inputs.push(SourceInput(entry.path, content, entry.is_prelude))
+        inputs = inputs.push(graph::SourceInput(entry.path, content, entry.is_prelude))
       Result::Err(err):
         let role: string = "source"
         if entry.is_prelude:

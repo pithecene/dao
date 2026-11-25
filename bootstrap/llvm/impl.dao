@@ -161,7 +161,7 @@ class MirBackendInput:
 class BackendSource:
   toks: Vector<lexer::Token>
   src: string
-  graph: ProgramGraph
+  module_graph: graph::ProgramGraph
 
 // =========================================================================
 // Section 82: Type lowering (MIR type_idx → LlType → textual form)
@@ -450,8 +450,8 @@ fn bs_named_type(bs: BS, prefix: string, type_idx: i64): string
   if llvm_ident_is_plain(t.name) == false:
     return "%\"" + prefix + t.name + "#" + i64_to_string(type_idx) + "\""
   if bs.input.source.program.shared_type_names.contains(t.name):
-    if t.builtin_id >= 0 and t.builtin_id < bs.input.source.program.graph.modules.length():
-      return "%\"" + prefix + bs.input.source.program.graph.modules.get(t.builtin_id).name + "::" + t.name + "\""
+    if t.builtin_id >= 0 and t.builtin_id < bs.input.source.program.module_graph.modules.length():
+      return "%\"" + prefix + bs.input.source.program.module_graph.modules.get(t.builtin_id).name + "::" + t.name + "\""
   return "%" + prefix + t.name
 
 // =========================================================================
@@ -521,9 +521,9 @@ fn bs_function_name(bs: BS, sym_idx: i64): string
     return ""
   let s: Symbol = bs.input.symbols.get(sym_idx)
   let owner: i64 = s.owner_module_id
-  if owner < 0 or owner >= bs.input.source.program.graph.modules.length():
+  if owner < 0 or owner >= bs.input.source.program.module_graph.modules.length():
     return mangle_symbol_name(s.name)
-  let m: ModuleEntry = bs.input.source.program.graph.modules.get(owner)
+  let m: graph::ModuleEntry = bs.input.source.program.module_graph.modules.get(owner)
   if bs.input.source.program.extern_syms.contains(i64_to_string(sym_idx)):
     return mangle_symbol_name(s.name)
   if m.is_prelude and is_prelude_intrinsic_name(s.name):
@@ -675,13 +675,13 @@ class BsIndex:
 // and the type names more than one module declares, which a module
 // qualifies.
 class BsProgram:
-  graph: ProgramGraph
+  module_graph: graph::ProgramGraph
   entry_module: i64
   extern_syms: HashMap<i64>
   shared_type_names: HashMap<i64>
 
 fn bs_program_of(input: MirBackendInput): BsProgram
-  let modules: Vector<ModuleEntry> = input.source.graph.modules
+  let modules: Vector<graph::ModuleEntry> = input.source.module_graph.modules
   let externs: HashMap<i64> = HashMap<i64>::new()
   let ni: i64 = to_i64(0)
   while ni < input.mir.mir_nodes.length():
@@ -727,7 +727,7 @@ fn bs_program_of(input: MirBackendInput): BsProgram
         if first != t.builtin_id:
           shared = shared.set(t.name, to_i64(1))
     ti = ti + to_i64(1)
-  return BsProgram(input.source.graph, entry, externs, shared)
+  return BsProgram(input.source.module_graph, entry, externs, shared)
 
 fn bs_index_empty(): BsIndex
   return BsIndex(HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new())
@@ -2535,9 +2535,9 @@ fn lower_mir_to_ll_module(bs: BS, root: i64): BS
         let lowered: bool = false
         match bs.input.mir_nodes.get(modules.get(mi)):
           MirNode::MirModule(mfile, mfn_lp, mfn_count, mtl, mtc):
-            if mfile < 0 or mfile >= bs.input.source.program.graph.files.length():
+            if mfile < 0 or mfile >= bs.input.source.program.module_graph.files.length():
               return bs_error(bs, "bootstrap llvm backend: a module's file " + i64_to_string(mfile) + " is not in the program")
-            let sf: SourceFile = bs.input.source.program.graph.files.get(mfile)
+            let sf: graph::SourceFile = bs.input.source.program.module_graph.files.get(mfile)
             bs.input.source.toks = sf.parse_output.toks
             bs.input.source.src = sf.source_text
             bs = bs_lower_module_fns(bs, mfn_lp)
@@ -2773,16 +2773,16 @@ fn lower_mir_to_llvm_text(input: MirBackendInput): LlvmTextResult
 // text.  Used by tests.
 fn lower_to_mir_backend_input(src: string): MirBackendInput
   let wrapped: string = wrap_test_module(src)
-  let inputs: Vector<SourceInput> = Vector<SourceInput>::new()
-  inputs = inputs.push(SourceInput("test.dao", wrapped, false))
-  let pg: ProgramGraph = program_graph_empty()
+  let inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  inputs = inputs.push(graph::SourceInput("test.dao", wrapped, false))
+  let pg: graph::ProgramGraph = graph::program_graph_empty()
   resource memory graph =>
-    pg = build_program(inputs)
+    pg = graph::build_program(inputs)
   let p: Program = program_from_graph(pg)
   // Each stage in its own domain: its scratch is reclaimed at the exit and the result is copied out.
   resource memory resolve =>
     p = program_run_resolve(p)
-  let pt: ProgramTyped = ProgramTyped(p, registry_new(p.resolve.symbols, p.graph.modules))
+  let pt: ProgramTyped = ProgramTyped(p, registry_new(p.resolve.symbols, p.module_graph.modules))
   resource memory typecheck =>
     pt = program_check(p)
   let pm: ProgramMir = ProgramMir(pt.program, mir_result_empty())
@@ -2794,14 +2794,14 @@ fn lower_to_mir_backend_input(src: string): MirBackendInput
   resource memory mono =>
     pc = program_monomorphize(pt, pm)
   let r: MirResult = pc.mir
-  let sf: SourceFile = program_file_of_module(pc.program, to_i64(0))
-  let po: ParseOutput = sf.parse_output
-  return MirBackendInput(MirResult(r.mir_nodes, r.mir_idx, r.diags, mir_only_module(r)), pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, BackendSource(po.toks, sf.source_text, pc.program.graph))
+  let sf: graph::SourceFile = program_file_of_module(pc.program, to_i64(0))
+  let po: parser::ParseOutput = sf.parse_output
+  return MirBackendInput(MirResult(r.mir_nodes, r.mir_idx, r.diags, mir_only_module(r)), pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, BackendSource(po.toks, sf.source_text, pc.program.module_graph))
 
 // A whole program to LLVM text: every module, checked, lowered to MIR,
 // made concrete and lowered here, each function with its own
 // module's tokens.
-fn lower_program_to_llvm_text(inputs: Vector<SourceInput>): LlvmTextResult
+fn lower_program_to_llvm_text(inputs: Vector<graph::SourceInput>): LlvmTextResult
   return lower_program_to_llvm(inputs).result
 
 // A whole program's module, with the source files of its diagnostics.  `result.diags` begins with `program.diags`, in order, and the
@@ -2810,14 +2810,14 @@ class ProgramLlvm:
   program: Program
   result: LlvmTextResult
 
-fn lower_program_to_llvm(inputs: Vector<SourceInput>): ProgramLlvm
-  let pg: ProgramGraph = program_graph_empty()
+fn lower_program_to_llvm(inputs: Vector<graph::SourceInput>): ProgramLlvm
+  let pg: graph::ProgramGraph = graph::program_graph_empty()
   resource memory graph =>
-    pg = build_program(inputs)
+    pg = graph::build_program(inputs)
   let p: Program = program_from_graph(pg)
   resource memory resolve =>
     p = program_run_resolve(p)
-  let pt: ProgramTyped = ProgramTyped(p, registry_new(p.resolve.symbols, p.graph.modules))
+  let pt: ProgramTyped = ProgramTyped(p, registry_new(p.resolve.symbols, p.module_graph.modules))
   resource memory typecheck =>
     pt = program_check(p)
   let pm: ProgramMir = ProgramMir(pt.program, mir_result_empty())
@@ -2826,12 +2826,12 @@ fn lower_program_to_llvm(inputs: Vector<SourceInput>): ProgramLlvm
   let pc: ProgramConcrete = ProgramConcrete(pm.program, pm.mir)
   resource memory mono =>
     pc = program_monomorphize(pt, pm)
-  let input: MirBackendInput = MirBackendInput(pc.mir, pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, BackendSource(Vector<lexer::Token>::new(), "", pc.program.graph))
+  let input: MirBackendInput = MirBackendInput(pc.mir, pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, BackendSource(Vector<lexer::Token>::new(), "", pc.program.module_graph))
   return ProgramLlvm(pc.program, lower_mir_to_llvm_text(input))
 
 // A diagnostic as the host prints it: `path:line:column: message`, or the
 // message alone when no source file carries it.
-fn located_message(fd: FileDiagnostic, files: Vector<SourceFile>): string
+fn located_message(fd: graph::FileDiagnostic, files: Vector<graph::SourceFile>): string
   if fd.file_id < to_i64(0) or fd.file_id >= files.length():
     return fd.diag.message
   let source: string = files.get(fd.file_id).source_text

@@ -1235,6 +1235,75 @@ suite<"typecheck_arithmetic"> typecheck_arithmetic = [] {
         "fn bad(a: string, b: string): string -> a - b\n");
     expect(has_error_containing(result, "arithmetic requires numeric type"));
   };
+
+  "fieldless enum equality and inequality accepted"_test = [] {
+    auto result = check_source(
+        "enum Mode:\n"
+        "  Fast\n"
+        "  Exact\n"
+        "\n"
+        "fn same(a: Mode, b: Mode): bool -> (a == b) and !(a != b)\n");
+    expect(is_ok(result));
+  };
+
+  "fieldless enum class equality accepted"_test = [] {
+    auto result = check_source(
+        "enum class Token:\n"
+        "  Start\n"
+        "  Stop\n"
+        "\n"
+        "fn same(a: Token, b: Token): bool -> a == b\n");
+    expect(is_ok(result));
+  };
+
+  "payload-bearing enum class == and != rejected with source span"_test = [] {
+    const std::string eq_src =
+        "enum class Shape:\n"
+        "  Dot\n"
+        "  Circle(radius: i32)\n"
+        "\n"
+        "fn same(a: Shape, b: Shape): bool -> a == b\n";
+    auto eq_res = check_source(eq_src);
+    expect(has_error_containing(
+        eq_res,
+        "equality comparison is not yet supported for payload-bearing enum 'Shape'"));
+    expect(!eq_res.diagnostics.empty());
+    if (!eq_res.diagnostics.empty()) {
+      expect(eq_res.diagnostics.front().span.length > 0_u);
+    }
+
+    auto ne_res = check_source(
+        "enum class Shape:\n"
+        "  Dot\n"
+        "  Circle(radius: i32)\n"
+        "\n"
+        "fn diff(a: Shape, b: Shape): bool -> a != b\n");
+    expect(has_error_containing(
+        ne_res,
+        "equality comparison is not yet supported for payload-bearing enum 'Shape'"));
+  };
+
+  "generic payload-bearing enum class equality rejected"_test = [] {
+    auto opt_eq = check_source(
+        "enum class Opt<T>:\n"
+        "  Some(value: T)\n"
+        "  None\n"
+        "\n"
+        "fn same(a: Opt<i32>, b: Opt<i32>): bool -> a == b\n");
+    expect(has_error_containing(
+        opt_eq,
+        "equality comparison is not yet supported for payload-bearing enum 'Opt'"));
+
+    auto opt_ne = check_source(
+        "enum class Opt<T>:\n"
+        "  Some(value: T)\n"
+        "  None\n"
+        "\n"
+        "fn diff(a: Opt<i32>, b: Opt<i32>): bool -> a != b\n");
+    expect(has_error_containing(
+        opt_ne,
+        "equality comparison is not yet supported for payload-bearing enum 'Opt'"));
+  };
 };
 
 // ---------------------------------------------------------------------------

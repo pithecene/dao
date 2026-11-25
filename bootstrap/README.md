@@ -7,10 +7,11 @@ a probe or experiment directory.
 
 ## Shared Substrate
 
-The file `shared/base.dao` holds the AST, parser, module graph, and
-cross-pass program types for subsystems that still assemble via
-`bash bootstrap/assemble.sh`. `ascii.dao` (`module bootstrap::ascii`) and
-`lexer/impl.dao` (`module bootstrap::lexer`) compile directly as real
+The file `shared/base.dao` holds cross-pass type-universe and program-lookup
+tables for subsystems that still assemble via `bash bootstrap/assemble.sh`.
+The modules `ascii.dao` (`module bootstrap::ascii`), `lexer/impl.dao`
+(`module bootstrap::lexer`), `parser/impl.dao` (`module bootstrap::parser`),
+and `graph/impl.dao` (`module bootstrap::graph`) compile directly as real
 modules without assembly. See `shared/README.md`.
 
 ## Subsystems
@@ -64,10 +65,10 @@ a comprehensive Dao snippet regression, and self-lex tests over
 
 ### `parser/`
 
-Recursive-descent parser producing an arena-indexed AST for a Tier A
-slice of Dao syntax.
+Recursive-descent parser (`module bootstrap::parser` in `parser/impl.dao`,
+importing `bootstrap::lexer`) producing an arena-indexed AST for Dao syntax.
 
-**Status**: promoted from probe (Task 21, Phase 7).
+**Status**: real multi-file module compiled directly from authored sources without `assemble.sh`.
 
 **Tier A syntax** (supported):
 
@@ -110,12 +111,27 @@ slice of Dao syntax.
 **How to run tests**:
 
 ```sh
-# From repository root:
-bash bootstrap/assemble.sh && daoc build --source bootstrap/parser/parser.gen.dao --source bootstrap/ascii.dao && ./bootstrap/parser/parser.gen
+# From repository root (no assemble.sh step required for parser):
+daoc build --source bootstrap/parser/tests.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/parser/tests
 ```
 
 Tests include golden parse tree assertions, error recovery tests,
 and a self-parse smoke test (lexes and parses a real Dao source file).
+
+### `graph/`
+
+Multi-file module graph builder (`module bootstrap::graph` in `graph/impl.dao`,
+importing `bootstrap::lexer` and `bootstrap::parser`) providing deterministic
+file ordering, import-edge extraction, topological sorting, and cycle-path
+diagnostics.
+
+**Status**: real multi-file module compiled directly from authored sources without `assemble.sh`.
+
+**Running tests**:
+
+```sh
+daoc build --source bootstrap/graph/tests.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/graph/tests
+```
 
 ### `resolver/`
 

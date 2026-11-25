@@ -1,0 +1,33 @@
+module aggregate_initialization
+
+enum Operator:
+  Add
+  Sub
+
+enum class Expr:
+  Const(value: i64)
+  Binary(
+    op: Operator,
+    left: i64,
+    right: i64
+  )
+
+class Point:
+  x: i64
+  y: i64
+
+  fn origin(): Point
+    return Point(x = 0, y = 0)
+
+  fn translated(x: i64, y: i64, dx: i64): Point
+    return Point(
+      x = x + dx,
+      y
+    )
+
+fn make_add(left: i64, right: i64): Expr
+  return Expr::Binary(
+    op = Operator::Add,
+    left,
+    right
+  )
