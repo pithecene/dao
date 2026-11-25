@@ -869,6 +869,97 @@ suite<"driver_cli"> driver_cli_suite = [] {
     expect(built_inline.exit_code == 0) << built_inline.err;
     expect(run_and_capture(scratch.output_for(inline_conf), scratch.dir / "inline_out.txt") ==
            "42\n");
+
+    // Generic key class with explicit inline Equatable/Hashable uses its
+    // declared template methods rather than synthesizing field-wise ones.
+    auto generic_key =
+        scratch.file("generic_key.dao",
+                     "module app::generic_key\n"
+                     "class BucketKey<T>:\n"
+                     "  bucket: i64\n"
+                     "  payload: T\n"
+                     "  as Equatable:\n"
+                     "    fn eq(self, other: BucketKey<T>): bool -> self.bucket == other.bucket\n"
+                     "  as Hashable:\n"
+                     "    fn hash(self): i64 -> self.bucket.hash()\n"
+                     "fn main(): i32\n"
+                     "  let m = HashMap<BucketKey<string>, i32>::new()\n"
+                     "  m = m.set(BucketKey(to_i64(9), \"first\"), 10)\n"
+                     "  m = m.set(BucketKey(to_i64(9), \"second\"), 77)\n"
+                     "  print(i32_to_string(m.get_or(BucketKey(to_i64(9), \"probe\"), 0)))\n"
+                     "  return 0\n");
+    auto built_generic = run_daoc(scratch, {"build", generic_key.string()});
+    expect(built_generic.exit_code == 0) << built_generic.err;
+    expect(run_and_capture(scratch.output_for(generic_key), scratch.dir / "generic_key_out.txt") ==
+           "77\n");
+
+    // Same-named Key classes across modules and caller-scoped local extends
+    // each dispatch to their own Equatable/Hashable implementation.
+    auto shared_lib = scratch.file("app/shared_lib.dao",
+                                   "module app::shared_lib\n"
+                                   "class Shared:\n"
+                                   "  a: i64\n"
+                                   "  b: i64\n");
+    auto mod_one =
+        scratch.file("app/mod_one.dao",
+                     "module app::mod_one\n"
+                     "import app::shared_lib\n"
+                     "class Key:\n"
+                     "  x: i64\n"
+                     "  y: i64\n"
+                     "  as Equatable:\n"
+                     "    fn eq(self, other: Key): bool -> self.x == other.x\n"
+                     "  as Hashable:\n"
+                     "    fn hash(self): i64 -> self.x.hash()\n"
+                     "extend shared_lib::Shared as Equatable:\n"
+                     "  fn eq(self, other: shared_lib::Shared): bool -> self.a == other.a\n"
+                     "extend shared_lib::Shared as Hashable:\n"
+                     "  fn hash(self): i64 -> self.a.hash()\n"
+                     "fn run_one(): i32\n"
+                     "  let km = HashMap<Key, i32>::new()\n"
+                     "  km = km.set(Key(to_i64(1), to_i64(10)), 3)\n"
+                     "  km = km.set(Key(to_i64(1), to_i64(20)), 4)\n"
+                     "  let sm = HashMap<shared_lib::Shared, i32>::new()\n"
+                     "  sm = sm.set(shared_lib::Shared(to_i64(5), to_i64(1)), 10)\n"
+                     "  sm = sm.set(shared_lib::Shared(to_i64(5), to_i64(2)), 20)\n"
+                     "  return km.get_or(Key(to_i64(1), to_i64(99)), 0) + "
+                     "sm.get_or(shared_lib::Shared(to_i64(5), to_i64(9)), 0)\n");
+    auto mod_two =
+        scratch.file("app/mod_two.dao",
+                     "module app::mod_two\n"
+                     "import app::shared_lib\n"
+                     "class Key:\n"
+                     "  x: i64\n"
+                     "  y: i64\n"
+                     "  as Equatable:\n"
+                     "    fn eq(self, other: Key): bool -> self.y == other.y\n"
+                     "  as Hashable:\n"
+                     "    fn hash(self): i64 -> self.y.hash()\n"
+                     "extend shared_lib::Shared as Equatable:\n"
+                     "  fn eq(self, other: shared_lib::Shared): bool -> self.b == other.b\n"
+                     "extend shared_lib::Shared as Hashable:\n"
+                     "  fn hash(self): i64 -> self.b.hash()\n"
+                     "fn run_two(): i32\n"
+                     "  let km = HashMap<Key, i32>::new()\n"
+                     "  km = km.set(Key(to_i64(1), to_i64(10)), 3)\n"
+                     "  km = km.set(Key(to_i64(1), to_i64(20)), 4)\n"
+                     "  let sm = HashMap<shared_lib::Shared, i32>::new()\n"
+                     "  sm = sm.set(shared_lib::Shared(to_i64(5), to_i64(1)), 10)\n"
+                     "  sm = sm.set(shared_lib::Shared(to_i64(5), to_i64(2)), 20)\n"
+                     "  return km.get_or(Key(to_i64(9), to_i64(10)), 0) + "
+                     "sm.get_or(shared_lib::Shared(to_i64(9), to_i64(1)), 0)\n");
+    auto multi_main = scratch.file("multi_main.dao",
+                                   "module app::multi_main\n"
+                                   "import app::mod_one\n"
+                                   "import app::mod_two\n"
+                                   "fn main(): i32\n"
+                                   "  print(i32_to_string(mod_one::run_one()))\n"
+                                   "  print(i32_to_string(mod_two::run_two()))\n"
+                                   "  return 0\n");
+    auto built_multi = run_daoc(scratch, {"build", multi_main.string()});
+    expect(built_multi.exit_code == 0) << built_multi.err;
+    expect(run_and_capture(scratch.output_for(multi_main), scratch.dir / "multi_out.txt") ==
+           "24\n13\n");
   };
 };
 

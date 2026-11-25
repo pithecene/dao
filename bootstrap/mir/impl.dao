@@ -1574,11 +1574,12 @@ class MonoNames:
   spelled: HashMap<string, i64>      // type index → claim number (0 for the first)
   claims: HashMap<string, i64>       // spelling → claims so far
 
-// The program being monomorphized and its MirModules, for a function's
-// module (its tokens, its view of `extend`s).
+// The program being monomorphized, its MirModules, and which non-prelude
+// modules declare local `extend` methods.
 class MonoSource:
   program: Program
   modules: Vector<i64>
+  local_extend_mods: HashMap<string, i64>
 
 class Mono:
   tables: MonoTables
@@ -1594,6 +1595,37 @@ class ProgramConcrete:
   program: Program
   mir: MirResult
 
+fn mono_collect_local_extend_mods(p: Program): HashMap<string, i64>
+  let out: HashMap<string, i64> = HashMap<string, i64>::new()
+  let next_id: i64 = to_i64(0)
+  let fi: i64 = to_i64(0)
+  while fi < p.module_graph.files.length():
+    let sf: graph::SourceFile = p.module_graph.files.get(fi)
+    let mid: i64 = sf.module_id
+    if mid >= 0 and mid < p.module_graph.modules.length():
+      if p.module_graph.modules.get(mid).is_prelude == false:
+        let po: parser::ParseOutput = sf.parse_output
+        if po.root >= 0 and po.root < po.nodes.length():
+          match po.nodes.get(po.root):
+            parser::Node::FileN(module_decl, imports_lp, decls_lp):
+              let decls: Vector<i64> = parser::read_list(po.idx, decls_lp)
+              let di: i64 = to_i64(0)
+              while di < decls.length():
+                match po.nodes.get(decls.get(di)):
+                  parser::Node::ExtendDeclD(t_node, c_tidx, m_lp):
+                    let mkey: string = i64_to_string(mid)
+                    if out.contains(mkey) == false:
+                      next_id = next_id + to_i64(1)
+                      out = out.set(mkey, next_id)
+                di = di + to_i64(1)
+    fi = fi + to_i64(1)
+  return out
+
+fn mono_dispatch_scope(m: Mono, caller_mid: i64, tmpl_owner_mid: i64): i64
+  if caller_mid < 0 or caller_mid == tmpl_owner_mid:
+    return to_i64(0)
+  return hm_get_or(m.source.local_extend_mods, i64_to_string(caller_mid), to_i64(0))
+
 fn program_monomorphize(pt: ProgramTyped, pm: ProgramMir): ProgramConcrete
   let p: Program = pm.program
   let first_module: i64 = to_i64(0)
@@ -1601,15 +1633,16 @@ fn program_monomorphize(pt: ProgramTyped, pm: ProgramMir): ProgramConcrete
     first_module = p.module_graph.topo_order.get(0)
   // Substitution reads no module's syntax; any module's view will do.
   let shell: TS = ts_new(build_module_tc(p, first_module), p.typecheck.types, p.typecheck.type_info, p.typecheck.sym_types, pt.reg)
+  let local_ext: HashMap<string, i64> = mono_collect_local_extend_mods(p)
   let m: Mono = Mono(
     MonoTables(shell, pm.mir.mir_nodes, pm.mir.mir_idx, p.resolve.symbols),
     MonoTemplates(CopyHooks(to_i64(-1), to_i64(-1), to_i64(-1)), HashMap<string, i64>::new(), HashMap<string, i64>::new(), HashMap<string, i64>::new()),
     MonoWork(Vector<i64>::new(), Vector<i64>::new(), Vector<i64>::new(), HashMap<string, i64>::new(), Vector<i64>::new()),
     MonoNames(HashMap<string, i64>::new(), HashMap<string, i64>::new()),
-    MonoSource(p, Vector<i64>::new()),
+    MonoSource(p, Vector<i64>::new(), local_ext),
     Vector<Diagnostic>::new())
   let modules: Vector<i64> = mono_modules(m, pm.mir.root)
-  m.source = MonoSource(p, modules)
+  m.source = MonoSource(p, modules, local_ext)
   m = mono_collect(m, modules)
   m.templates.hooks = mono_copy_hooks(m)
   // The fixpoint: every function scanned once, specializations appended
@@ -1797,7 +1830,10 @@ fn mono_scan_function(m: Mono, wi: i64): Mono
 // host's fixup_method_calls).  The scan decides from the arguments what the method is generic over, if
 // anything, because the checker rejects a type argument written on a call through a bound.
 fn mono_synth_derived_method(m: Mono, st_ti: i64, member: string, sf_mid: i64, origin_mid: i64, module_pos: i64): MonoMade
+  let scope_tag: i64 = mono_dispatch_scope(m, origin_mid, to_i64(-1))
   let cache_key: string = "derived:" + member + ":" + i64_to_string(st_ti)
+  if scope_tag > 0:
+    cache_key = cache_key + ":s=" + i64_to_string(scope_tag)
   let cached: i64 = hm_get_or(m.templates.made, cache_key, to_i64(-1))
   if cached >= 0:
     return MonoMade(m, cached)
@@ -1805,8 +1841,11 @@ fn mono_synth_derived_method(m: Mono, st_ti: i64, member: string, sf_mid: i64, o
   let one_ti: Vector<i64> = Vector<i64>::new().push(st_ti)
   let named: MonoName = mono_mangle(m, st.name + "." + member, one_ti)
   m = named.m
+  let sym_name: string = named.name
+  if scope_tag > 0:
+    sym_name = sym_name + "$s" + i64_to_string(scope_tag)
   let sym: i64 = m.tables.symbols.length()
-  m.tables.symbols = m.tables.symbols.push(Symbol(SymbolKind::Function, named.name, to_i64(-1), to_i64(-1), st.builtin_id))
+  m.tables.symbols = m.tables.symbols.push(Symbol(SymbolKind::Function, sym_name, to_i64(-1), to_i64(-1), st.builtin_id))
   m.templates.made = m.templates.made.set(cache_key, sym)
   let bool_ti: i64 = to_i64(10)
   let i64_ti: i64 = to_i64(3)
@@ -2142,15 +2181,18 @@ fn mir_value_type(nodes: Vector<MirNode>, inst: i64): i64
       return ti
   return to_i64(-1)
 
-// The key of a specialization: its template and what each parameter it
-// is generic over stands for, in parameter order.
-fn mono_key(tmpl_sym: i64, map: MonoMap): string
+// The key of a specialization: its template, what each parameter it
+// is generic over stands for in parameter order, and any caller module
+// dispatch scope holding local `extend` implementations.
+fn mono_key(tmpl_sym: i64, map: MonoMap, scope_tag: i64): string
   let params: Vector<i64> = mono_sorted(map.params)
   let key: string = i64_to_string(tmpl_sym)
   let i: i64 = to_i64(0)
   while i < params.length():
     key = key + ":" + i64_to_string(params.get(i)) + "=" + i64_to_string(hm_get_or(map.map, i64_to_string(params.get(i)), to_i64(-1)))
     i = i + to_i64(1)
+  if scope_tag > 0:
+    key = key + ":s=" + i64_to_string(scope_tag)
   return key
 
 // Ascending, by insertion (a callee is generic over a handful of
@@ -2183,10 +2225,13 @@ fn mono_specialize_ref(m: Mono, inst: i64, tmpl_sym: i64, ref_ti: i64, tmpl: i64
   if decided.params.length() == 0:
     // Nothing decided: the concreteness check reports the reference.
     return m
-  let key: string = mono_key(tmpl_sym, decided)
+  let caller_origin: i64 = m.work.fn_origin_mod.get(wi)
+  let tmpl_owner: i64 = m.tables.symbols.get(tmpl_sym).owner_module_id
+  let scope_tag: i64 = mono_dispatch_scope(m, caller_origin, tmpl_owner)
+  let key: string = mono_key(tmpl_sym, decided, scope_tag)
   let spec_sym: i64 = hm_get_or(m.templates.made, key, to_i64(-1))
   if spec_sym < 0:
-    let made: MonoMade = mono_make(m, tmpl_sym, tmpl, decided, m.work.fn_origin_mod.get(wi))
+    let made: MonoMade = mono_make(m, tmpl_sym, tmpl, decided, caller_origin, scope_tag)
     m = made.m
     spec_sym = made.sym
     m.templates.made = m.templates.made.set(key, spec_sym)
@@ -2221,7 +2266,7 @@ class MonoMade:
 
 // A new specialization: a symbol named `name$args`, and the template
 // cloned with every type substituted, queued to be scanned.
-fn mono_make(m: Mono, tmpl_sym: i64, tmpl: i64, decided: MonoMap, caller_origin_mid: i64): MonoMade
+fn mono_make(m: Mono, tmpl_sym: i64, tmpl: i64, decided: MonoMap, caller_origin_mid: i64, scope_tag: i64): MonoMade
   let params: Vector<i64> = mono_sorted(decided.params)
   let spelled: Vector<i64> = Vector<i64>::new()
   let i: i64 = to_i64(0)
@@ -2230,9 +2275,12 @@ fn mono_make(m: Mono, tmpl_sym: i64, tmpl: i64, decided: MonoMap, caller_origin_
     i = i + to_i64(1)
   let named: MonoName = mono_mangle(m, m.tables.symbols.get(tmpl_sym).name, spelled)
   m = named.m
+  let spec_name: string = named.name
+  if scope_tag > 0:
+    spec_name = spec_name + "$s" + i64_to_string(scope_tag)
   let t: Symbol = m.tables.symbols.get(tmpl_sym)
   let sym: i64 = m.tables.symbols.length()
-  m.tables.symbols = m.tables.symbols.push(Symbol(t.kind, named.name, t.decl_node, t.scope_id, t.owner_module_id))
+  m.tables.symbols = m.tables.symbols.push(Symbol(t.kind, spec_name, t.decl_node, t.scope_id, t.owner_module_id))
   let cloned: MonoMade = mono_clone(m, tmpl, sym, decided.map)
   m = cloned.m
   // Its substitution, kept for the scan of its own calls.

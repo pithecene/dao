@@ -3928,10 +3928,15 @@ fn materialize_pending(ts: TS): TS
 fn derive_instantiation(ts: TS, ti: i64): TS
   let r: TS = ts
   let t: DaoType = r.types.get(ti)
+  let eq_dcti: i64 = prelude_derived_concept(r.reg, r.types, "Equatable")
+  let hash_dcti: i64 = prelude_derived_concept(r.reg, r.types, "Hashable")
   let di: i64 = 0
   while di < r.reg.conform.derived_concepts.length():
     let dcti: i64 = r.reg.conform.derived_concepts.get(di)
     let every_field: bool = true
+    if dcti == hash_dcti and eq_dcti >= 0:
+      if reg_has_explicit_conformance(r.reg, ti, eq_dcti, t.builtin_id):
+        every_field = false
     let fi: i64 = 0
     while fi < t.info_count:
       let fti: i64 = r.type_info.get(t.info_lp + fi * 2 + 1)
@@ -5102,6 +5107,32 @@ fn reg_record_conformance(reg: Registry, ti: i64, concept_ti: i64, from_module: 
   let c: Conformance = reg.conform
   return reg_with_conform(reg, Conformance(c.known.set(conform_key(ti, concept_ti, from_module), to_i64(1)), c.derived_concepts, c.subst_cache, c.providers))
 
+fn explicit_conform_scope(from_module: i64): i64 -> to_i64(-100) - from_module
+
+fn reg_has_explicit_conformance(reg: Registry, ti: i64, concept_ti: i64, from_module: i64): bool
+  if reg.conform.known.contains(conform_key(ti, concept_ti, explicit_conform_scope(conform_everywhere()))):
+    return true
+  if from_module >= 0 and reg.conform.known.contains(conform_key(ti, concept_ti, explicit_conform_scope(from_module))):
+    return true
+  return false
+
+fn reg_is_prelude_concept(reg: Registry, types: Vector<DaoType>, cti: i64, wanted: string): bool
+  if cti < 0 or cti >= types.length():
+    return false
+  let ct: DaoType = types.get(cti)
+  if ct.name != wanted:
+    return false
+  return reg.index.prelude_modules.contains(i64_to_string(ct.builtin_id))
+
+fn prelude_derived_concept(reg: Registry, types: Vector<DaoType>, wanted: string): i64
+  let i: i64 = 0
+  while i < reg.conform.derived_concepts.length():
+    let dti: i64 = reg.conform.derived_concepts.get(i)
+    if reg_is_prelude_concept(reg, types, dti, wanted):
+      return dti
+    i = i + 1
+  return to_i64(-1)
+
 fn ts_record_conformance(ts: TS, ti: i64, concept_ti: i64, from_module: i64): TS
   ts.reg = reg_record_conformance(ts.reg, ti, concept_ti, from_module)
   return ts
@@ -5346,7 +5377,7 @@ fn tc_collect_conformances(ts: TS, decls: Vector<i64>): TS
             r = tr.ts
             if tr.type_idx >= 0 and concept_named_by(r, tr.type_idx) < 0:
               r = ts_record_conformance(r, tr.type_idx, ecti, extend_visible_from)
-              r = ts_record_conformance(r, tr.type_idx, ecti, to_i64(-2))
+              r = ts_record_conformance(r, tr.type_idx, ecti, explicit_conform_scope(extend_visible_from))
     i = i + 1
   return r
 
@@ -5405,18 +5436,8 @@ fn index_program_structs(types: Vector<DaoType>, type_info: Vector<i64>): ClassI
 // blocks its class (count -1).
 fn derive_program_conformances(reg: Registry, idx: ClassIndex, types: Vector<DaoType>): Registry
   let r: Registry = reg
-  let eq_dcti: i64 = to_i64(-1)
-  let hash_dcti: i64 = to_i64(-1)
-  let pi: i64 = 0
-  while pi < r.conform.derived_concepts.length():
-    let dti: i64 = r.conform.derived_concepts.get(pi)
-    if dti >= 0 and dti < types.length():
-      let dt: DaoType = types.get(dti)
-      if dt.name == "Equatable":
-        eq_dcti = dti
-      if dt.name == "Hashable":
-        hash_dcti = dti
-    pi = pi + 1
+  let eq_dcti: i64 = prelude_derived_concept(r, types, "Equatable")
+  let hash_dcti: i64 = prelude_derived_concept(r, types, "Hashable")
   let di: i64 = 0
   while di < r.conform.derived_concepts.length():
     let dcti: i64 = r.conform.derived_concepts.get(di)
@@ -5428,7 +5449,7 @@ fn derive_program_conformances(reg: Registry, idx: ClassIndex, types: Vector<Dao
       let cnt: i64 = 0
       let blocked: bool = false
       if dcti == hash_dcti and eq_dcti >= 0:
-        if r.conform.known.contains(conform_key(sti, eq_dcti, to_i64(-2))):
+        if reg_has_explicit_conformance(r, sti, eq_dcti, idx.mods.get(k)):
           blocked = true
       let fi: i64 = 0
       while fi < idx.f_count.get(k):
@@ -5546,18 +5567,9 @@ fn tc_check_extend_coherence(ts: TS, decl_idx: i64, target_type_node: i64, conce
   if esym < 0:
     return r
   let ecti: i64 = concept_named_by(r, sym_type_at(r, esym))
-  if ecti < 0 or ecti >= r.types.length():
+  if reg_is_prelude_concept(r.reg, r.types, ecti, "Hashable") == false:
     return r
-  if r.types.get(ecti).name != "Hashable":
-    return r
-  let eq_dcti: i64 = to_i64(-1)
-  let di: i64 = 0
-  while di < r.reg.conform.derived_concepts.length():
-    let dti: i64 = r.reg.conform.derived_concepts.get(di)
-    if dti >= 0 and dti < r.types.length():
-      if r.types.get(dti).name == "Equatable":
-        eq_dcti = dti
-    di = di + 1
+  let eq_dcti: i64 = prelude_derived_concept(r.reg, r.types, "Equatable")
   if eq_dcti < 0:
     return r
   let tr: TypeR = resolve_ast_type(r, target_type_node)

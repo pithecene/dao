@@ -266,16 +266,31 @@ private:
 // Specialization key for deduplication.
 // ---------------------------------------------------------------------------
 
-/// One specialization: the template and what it was instantiated with.
+struct FnEntry {
+  const Symbol* symbol = nullptr;
+  const MirFunction* mir_fn = nullptr;
+  bool is_template = false;
+};
+
+struct MethodIndex {
+  std::unordered_map<std::string, std::vector<FnEntry>> by_name;
+  std::unordered_map<const ModuleInfo*, uint32_t> local_extend_modules;
+  const MirFunction* combine_hash_fn = nullptr;
+};
+
+/// One specialization: the template, its concrete type arguments, and
+/// any non-prelude caller dispatch scope that supplies local `extend`s.
 /// The arguments are held as identity keys rather than as pointers,
 /// since two occurrences of `Box<i32>` are two objects and would
 /// otherwise specialize the same template twice.
 struct SpecKey {
   const MirFunction* generic_fn;
   std::vector<std::string> type_args;
+  uint32_t dispatch_scope = 0;
 
   auto operator==(const SpecKey& other) const -> bool {
-    return generic_fn == other.generic_fn && type_args == other.type_args;
+    return generic_fn == other.generic_fn && type_args == other.type_args &&
+           dispatch_scope == other.dispatch_scope;
   }
 };
 
@@ -285,19 +300,49 @@ struct SpecKeyHash {
     for (const auto& arg : key.type_args) {
       h ^= std::hash<std::string>{}(arg) + 0x9e3779b9 + (h << 6) + (h >> 2);
     }
+    h ^= std::hash<uint32_t>{}(key.dispatch_scope) + 0x9e3779b9 + (h << 6) + (h >> 2);
     return h;
   }
 };
 
 /// What one monomorphization run accumulates: the specializations it
-/// has already made, and the spellings their names give type arguments.
+/// has already made, the shared method index, and type spellings.
 struct SpecializationState {
   std::unordered_map<SpecKey, MirFunction*, SpecKeyHash> cache;
   std::unordered_map<const MirFunction*, const ModuleInfo*> origin_module;
   std::unordered_map<std::string, MirFunction*> derived_fns;
   std::unordered_set<const MirFunction*> fixed_up;
+  MethodIndex methods;
   MangledTypeNames names;
 };
+
+auto effective_dispatch_scope(const ModuleInfo* caller_module,
+                              const ModuleInfo* template_module,
+                              const SpecializationState& state) -> uint32_t {
+  if (caller_module == nullptr || caller_module->is_prelude ||
+      caller_module == template_module) {
+    return 0;
+  }
+  auto it = state.methods.local_extend_modules.find(caller_module);
+  return it != state.methods.local_extend_modules.end() ? it->second : 0;
+}
+
+void register_method_entry(MethodIndex& methods, const FnEntry& entry) {
+  if (entry.symbol == nullptr || entry.mir_fn == nullptr) {
+    return;
+  }
+  std::string raw_name(entry.symbol->name);
+  methods.by_name[raw_name].push_back(entry);
+  auto dot = entry.symbol->name.rfind('.');
+  if (dot != std::string_view::npos && !entry.mir_fn->locals.empty() &&
+      entry.mir_fn->locals[0].is_param && entry.mir_fn->locals[0].type != nullptr) {
+    std::string canonical =
+        print_type_name(entry.mir_fn->locals[0].type) + std::string(entry.symbol->name.substr(dot));
+    if (canonical != raw_name) {
+      methods.by_name[std::move(canonical)].push_back(entry);
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Clone a MirFunction with type substitution.
@@ -449,6 +494,98 @@ auto fixup_method_calls(MirFunction* fn,
                         MirContext& ctx,
                         TypeContext& types) -> bool;
 
+auto template_receiver_matches(
+    const Type* pattern,
+    const Type* concrete,
+    std::unordered_map<ParamKey, std::string, ParamKeyHash>& bound,
+    std::unordered_set<TypePair, TypePairHash>& visited) -> bool {
+  if (pattern == nullptr || concrete == nullptr) {
+    return false;
+  }
+  if (!visited.insert(TypePair{pattern, concrete}).second) {
+    return true;
+  }
+  if (pattern->kind() == TypeKind::GenericParam) {
+    auto key = param_key(static_cast<const TypeGenericParam*>(pattern));
+    auto id = type_identity_key(concrete);
+    auto [it, inserted] = bound.emplace(key, id);
+    return inserted || it->second == id;
+  }
+  if (pattern->kind() != concrete->kind()) {
+    return false;
+  }
+  if (pattern->kind() == TypeKind::Struct) {
+    const auto* ps = static_cast<const TypeStruct*>(pattern);
+    const auto* cs = static_cast<const TypeStruct*>(concrete);
+    if (ps->decl_id() != cs->decl_id()) {
+      return false;
+    }
+    if (!ps->type_args().empty()) {
+      if (ps->type_args().size() != cs->type_args().size()) {
+        return false;
+      }
+      for (size_t i = 0; i < ps->type_args().size(); ++i) {
+        if (!template_receiver_matches(ps->type_args()[i], cs->type_args()[i], bound, visited)) {
+          return false;
+        }
+      }
+      return true;
+    }
+    if (ps->fields().size() != cs->fields().size()) {
+      return false;
+    }
+    for (size_t i = 0; i < ps->fields().size(); ++i) {
+      if (!template_receiver_matches(ps->fields()[i].type, cs->fields()[i].type, bound, visited)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (pattern->kind() == TypeKind::Enum) {
+    const auto* pe = static_cast<const TypeEnum*>(pattern);
+    const auto* ce = static_cast<const TypeEnum*>(concrete);
+    if (pe->decl_id() != ce->decl_id() || pe->type_args().size() != ce->type_args().size()) {
+      return false;
+    }
+    for (size_t i = 0; i < pe->type_args().size(); ++i) {
+      if (!template_receiver_matches(pe->type_args()[i], ce->type_args()[i], bound, visited)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (pattern->kind() == TypeKind::Pointer) {
+    return template_receiver_matches(static_cast<const TypePointer*>(pattern)->pointee(),
+                                     static_cast<const TypePointer*>(concrete)->pointee(),
+                                     bound,
+                                     visited);
+  }
+  if (pattern->kind() == TypeKind::Generator) {
+    return template_receiver_matches(static_cast<const TypeGenerator*>(pattern)->yield_type(),
+                                     static_cast<const TypeGenerator*>(concrete)->yield_type(),
+                                     bound,
+                                     visited);
+  }
+  return type_identity_key(pattern) == type_identity_key(concrete);
+}
+
+auto receiver_matches_candidate(const FnEntry& candidate, const Type* obj_type) -> bool {
+  if (candidate.mir_fn == nullptr || candidate.mir_fn->locals.empty() ||
+      !candidate.mir_fn->locals[0].is_param) {
+    return false;
+  }
+  const Type* self_type = candidate.mir_fn->locals[0].type;
+  if (self_type == nullptr || obj_type == nullptr) {
+    return false;
+  }
+  if (!candidate.is_template) {
+    return type_identity_key(self_type) == type_identity_key(obj_type);
+  }
+  std::unordered_map<ParamKey, std::string, ParamKeyHash> bound;
+  std::unordered_set<TypePair, TypePairHash> visited;
+  return template_receiver_matches(self_type, obj_type, bound, visited);
+}
+
 auto synthesize_derived_method(const TypeStruct* st,
                                std::string_view method_kind,
                                const ModuleInfo* origin_module,
@@ -456,14 +593,21 @@ auto synthesize_derived_method(const TypeStruct* st,
                                MirModule& module,
                                MirContext& ctx,
                                TypeContext& types) -> MirFunction* {
+  uint32_t scope_tag = effective_dispatch_scope(origin_module, nullptr, state);
   std::string cache_key = type_identity_key(st) + "#" + std::string(method_kind);
+  if (scope_tag != 0) {
+    cache_key += "#" + std::to_string(scope_tag);
+  }
   if (auto it = state.derived_fns.find(cache_key); it != state.derived_fns.end()) {
     return it->second;
   }
 
   Span span = st->decl_id() != nullptr ? st->decl_id()->span : Span{};
-  auto* name_str = ctx.alloc<std::string>(
-      state.names.mangle(std::string(st->name()) + "." + std::string(method_kind), {st}));
+  auto mangled = state.names.mangle(std::string(st->name()) + "." + std::string(method_kind), {st});
+  if (scope_tag != 0) {
+    mangled += "$s" + std::to_string(scope_tag);
+  }
+  auto* name_str = ctx.alloc<std::string>(std::move(mangled));
   auto* fn_sym = ctx.alloc<Symbol>();
   fn_sym->kind = SymbolKind::Function;
   fn_sym->name = std::string_view(*name_str);
@@ -474,9 +618,13 @@ auto synthesize_derived_method(const TypeStruct* st,
   auto* synth_fn = ctx.alloc<MirFunction>();
   synth_fn->symbol = fn_sym;
   synth_fn->span = span;
+  if (origin_module != nullptr && !origin_module->is_prelude) {
+    state.origin_module[synth_fn] = origin_module;
+  }
   state.derived_fns.emplace(std::move(cache_key), synth_fn);
   state.fixed_up.insert(synth_fn);
   module.functions.push_back(synth_fn);
+  register_method_entry(state.methods, {fn_sym, synth_fn, false});
 
   uint32_t next_val = 0;
   auto fresh_val = [&]() -> MirValueId { return MirValueId{next_val++}; };
@@ -564,14 +712,7 @@ auto synthesize_derived_method(const TypeStruct* st,
   synth_fn->return_type = i64_ty;
   synth_fn->locals.push_back({LocalId{0}, nullptr, st, span, /*is_param=*/true});
 
-  const MirFunction* combine_fn = nullptr;
-  for (const auto* mod_fn : module.functions) {
-    if (mod_fn->symbol != nullptr && mod_fn->symbol->name == "combine_hash" &&
-        (mod_fn->symbol->module == nullptr || mod_fn->symbol->module->is_prelude)) {
-      combine_fn = mod_fn;
-      break;
-    }
-  }
+  const MirFunction* combine_fn = state.methods.combine_hash_fn;
 
   auto* entry = ctx.alloc<MirBlock>();
   entry->id = BlockId{0};
@@ -627,22 +768,7 @@ auto fixup_method_calls(MirFunction* fn,
                         MirModule& module,
                         MirContext& ctx,
                         TypeContext& types) -> bool {
-  // Build a name → (symbol, function) lookup from the module's functions.
-  struct FnEntry {
-    const Symbol* symbol;
-    const MirFunction* mir_fn;
-  };
   bool rewrote = false;
-  // Keyed by name, but a name is not unique across a program: two modules
-  // may each extend `i32` with `local`, and one entry per name let a later
-  // module's method answer for an earlier one's call.  Every candidate is
-  // kept and the visible one is chosen per call site (§5).
-  std::unordered_map<std::string, std::vector<FnEntry>> fn_by_name;
-  for (const auto* mod_fn : module.functions) {
-    if (mod_fn->symbol != nullptr) {
-      fn_by_name[std::string(mod_fn->symbol->name)].push_back({mod_fn->symbol, mod_fn});
-    }
-  }
   // The module whose body is being rewritten: an `extend` of another
   // module is not in scope for it.
   const auto* from_module = fn->symbol == nullptr ? nullptr : fn->symbol->module;
@@ -698,12 +824,16 @@ auto fixup_method_calls(MirFunction* fn,
       auto method_name = print_type_name(obj_type) + "." + std::string(field->field);
       const FnEntry* visible = nullptr;
       FnEntry synth_entry{};
-      auto sym_it = fn_by_name.find(method_name);
-      if (sym_it != fn_by_name.end()) {
+      auto sym_it = state.methods.by_name.find(method_name);
+      if (sym_it != state.methods.by_name.end()) {
         // Innermost-first, as lookup is everywhere else
-        // (CONTRACT_MODULE_SYSTEM.md §7.4): inherent methods first, then
-        // the module's own `extend`, then the caller's or prelude's.
+        // (CONTRACT_MODULE_SYSTEM.md §7.4): inherent methods on the
+        // receiver's own nominal declaration first, then the module's
+        // own `extend`, then the caller's or prelude's.
         for (const auto& candidate : sym_it->second) {
+          if (!receiver_matches_candidate(candidate, obj_type)) {
+            continue;
+          }
           const bool inherent = is_inherent_method_symbol(candidate.symbol);
           const bool visible_here = inherent ||
                                     extend_visible_from(candidate.symbol->module, from_module) ||
@@ -731,7 +861,7 @@ auto fixup_method_calls(MirFunction* fn,
                                                    module,
                                                    ctx,
                                                    types);
-        synth_entry = {synth_fn->symbol, synth_fn};
+        synth_entry = {synth_fn->symbol, synth_fn, false};
         visible = &synth_entry;
       }
       if (visible == nullptr) {
@@ -1165,7 +1295,9 @@ auto specialize_call_site(MirInst* inst,
   }
 
   auto type_args = subst_to_type_args(subst);
-  SpecKey key{git->second, subst_identity(subst)};
+  const auto* tmpl_module = git->second->symbol != nullptr ? git->second->symbol->module : nullptr;
+  uint32_t dispatch_scope = effective_dispatch_scope(caller_module, tmpl_module, state);
+  SpecKey key{git->second, subst_identity(subst), dispatch_scope};
 
   // Check cache.
   auto cache_it = state.cache.find(key);
@@ -1178,7 +1310,11 @@ auto specialize_call_site(MirInst* inst,
 
   // Create mangled symbol.
   // Allocate name string on arena so it outlives this scope.
-  auto* name_str = ctx.alloc<std::string>(state.names.mangle(git->second->symbol->name, type_args));
+  auto mangled = state.names.mangle(git->second->symbol->name, type_args);
+  if (dispatch_scope != 0) {
+    mangled += "$s" + std::to_string(dispatch_scope);
+  }
+  auto* name_str = ctx.alloc<std::string>(std::move(mangled));
 
   auto* new_sym = ctx.alloc<Symbol>();
   new_sym->kind = SymbolKind::Function;
@@ -1195,12 +1331,14 @@ auto specialize_call_site(MirInst* inst,
   }
   state.fixed_up.insert(specialized);
 
-  // Resolve method calls on newly-concrete types.
-  fixup_method_calls(specialized, caller_module, state, module, ctx, types);
-
-  // Register in cache and add to module.
+  // Register in cache, shared method index, and module before fixup so
+  // self-recursive or nested method resolution sees the specialization.
   state.cache[key] = specialized;
   module.functions.push_back(specialized);
+  register_method_entry(state.methods, {new_sym, specialized, false});
+
+  // Resolve method calls on newly-concrete types.
+  fixup_method_calls(specialized, caller_module, state, module, ctx, types);
 
   // Rewrite the FnRef.
   fn_ref->symbol = new_sym;
@@ -1648,8 +1786,41 @@ auto monomorphize(
   // made concrete there, template or not.  The concreteness check
   // below runs regardless, to catch synthetic residue.
 
-  // Specialization cache: (generic fn, type args) → specialized fn.
+  // Specialization cache and shared method index.
   SpecializationState state;
+  for (const auto* mod_fn : module.functions) {
+    if (mod_fn->symbol == nullptr) {
+      continue;
+    }
+    register_method_entry(state.methods, {mod_fn->symbol, mod_fn, false});
+    if (mod_fn->symbol->name == "combine_hash" &&
+        (mod_fn->symbol->module == nullptr || mod_fn->symbol->module->is_prelude)) {
+      state.methods.combine_hash_fn = mod_fn;
+    }
+    if (mod_fn->symbol->module != nullptr && !mod_fn->symbol->module->is_prelude &&
+        !is_inherent_method_symbol(mod_fn->symbol)) {
+      auto next_id = static_cast<uint32_t>(state.methods.local_extend_modules.size() + 1);
+      state.methods.local_extend_modules.try_emplace(mod_fn->symbol->module, next_id);
+    }
+  }
+  std::vector<std::pair<const Symbol*, MirFunction*>> sorted_templates(generic_templates.begin(),
+                                                                       generic_templates.end());
+  std::ranges::sort(sorted_templates, [](const auto& lhs, const auto& rhs) {
+    if (lhs.second->span.offset != rhs.second->span.offset) {
+      return lhs.second->span.offset < rhs.second->span.offset;
+    }
+    return lhs.first->name < rhs.first->name;
+  });
+  for (const auto& [sym, tmpl_fn] : sorted_templates) {
+    if (sym == nullptr) {
+      continue;
+    }
+    register_method_entry(state.methods, {sym, tmpl_fn, true});
+    if (sym->module != nullptr && !sym->module->is_prelude && !is_inherent_method_symbol(sym)) {
+      auto next_id = static_cast<uint32_t>(state.methods.local_extend_modules.size() + 1);
+      state.methods.local_extend_modules.try_emplace(sym->module, next_id);
+    }
+  }
   const auto copy_out_hooks = find_copy_out_hooks(module, generic_templates);
   if (copy_out_hooks.copy_out_template != nullptr && copy_out_hooks.copy_out_string == nullptr) {
     // A string could not be copied out; say so rather than leave the

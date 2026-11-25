@@ -143,7 +143,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 353
+  let total: i32 = 355
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -2189,11 +2189,16 @@ fn main(): i32
     pass_count = pass_count + 1
 
   // Class-level generic bounds and Hashable/Equatable coherence (host parity).
+  let hash_prelude: string = "module core::hash\nderived concept Equatable:\n  fn eq(self, other: Equatable): bool\n\nderived concept Hashable:\n  fn hash(self): i64\n\nextend i64 as Equatable:\n  fn eq(self, other: i64): bool -> self == other\n\nextend i64 as Hashable:\n  fn hash(self): i64 -> self\n"
   if tc_expect_some_diag_containing("class_static_call_enforces_class_bounds", "concept Hashable:\n  fn hash(self): i64\n\nclass Map<K: Hashable>:\n  n: i64\n  fn empty(): Map<K> -> Map(to_i64(0))\n\nfn f(): Map<f64> -> Map<f64>::empty()\n", "does not satisfy concept 'Hashable'"):
     pass_count = pass_count + 1
-  if tc_expect_some_diag_containing("hashable_requires_equatable_coherence", "derived concept Equatable:\n  fn eq(self, other: Equatable): bool\n\nderived concept Hashable:\n  fn hash(self): i64\n\nclass RawFloat:\n  x: f64\n\nextend RawFloat as Hashable:\n  fn hash(self): i64 -> to_i64(1)\n", "cannot conform to 'Hashable' without conforming to 'Equatable'"):
+  if tc_expect_program_errors("hashable_requires_equatable_coherence", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/hash.dao", hash_prelude, true)), "module app::main\nclass RawFloat:\n  x: f64\n\nextend RawFloat as Hashable:\n  fn hash(self): i64\n    let h: i64 = 1\n    return h\n", "main.dao", 1):
     pass_count = pass_count + 1
-  if tc_expect_some_diag_containing("custom_equatable_blocks_derived_hashable", "derived concept Equatable:\n  fn eq(self, other: Equatable): bool\n\nderived concept Hashable:\n  fn hash(self): i64\n\nextend i64 as Equatable:\n  fn eq(self, other: i64): bool -> self == other\n\nextend i64 as Hashable:\n  fn hash(self): i64 -> self\n\nclass CustomEq:\n  id: i64\n\nextend CustomEq as Equatable:\n  fn eq(self, other: CustomEq): bool -> self.id == other.id\n\nfn need_hash<K: Hashable>(k: K): i64 -> k.hash()\n\nfn f(): i64 -> need_hash(CustomEq(to_i64(1)))\n", "does not satisfy concept 'Hashable'"):
+  if tc_expect_program_errors("custom_equatable_blocks_derived_hashable", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/hash.dao", hash_prelude, true)), "module app::main\nclass CustomEq:\n  id: i64\n\nextend CustomEq as Equatable:\n  fn eq(self, other: CustomEq): bool -> self.id == other.id\n\nfn need_hash<K: Hashable>(k: K): i64 -> k.hash()\n\nfn f(): i64\n  let one: i64 = 1\n  return need_hash(CustomEq(one))\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("user_shadowed_hashable_ignores_prelude_coherence", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/hash.dao", hash_prelude, true)), "module app::main\nconcept Hashable:\n  fn hash(self): i64\n\nclass Handle:\n  p: Ptr<i32>\n\nextend Handle as Hashable:\n  fn hash(self): i64\n    let zero: i64 = 0\n    return zero\n", "main.dao", 0):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("other_module_equatable_extend_leaves_derived_hashable_intact", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/hash.dao", hash_prelude, true)).push(graph::SourceInput("lib.dao", "module app::lib\nclass LibKey:\n  x: i64\n", false)).push(graph::SourceInput("a.dao", "module app::a\nimport app::lib\nextend lib::LibKey as Equatable:\n  fn eq(self, other: lib::LibKey): bool -> true\n", false)), "module app::main\nimport app::lib\nimport app::a\n\nfn need_hash<K: Hashable>(k: K): i64 -> k.hash()\n\nfn f(): i64\n  let seven: i64 = 7\n  return need_hash(lib::LibKey(seven))\n", "main.dao", 0):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------
