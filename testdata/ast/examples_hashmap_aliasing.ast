@@ -2,7 +2,7 @@ File
   Module examples::hashmap_aliasing
   FunctionDecl show
     Param label: string
-    Param m: HashMap<i64>
+    Param m: HashMap<string, i64>
     Param key: string
     ReturnType: void
     MatchStatement
@@ -48,11 +48,12 @@ File
                 Identifier key
   FunctionDecl main
     ReturnType: i32
-    LetStatement m: HashMap<i64>
+    LetStatement m: HashMap<string, i64>
       CallExpr
         Callee
           Identifier HashMap.new
         TypeArgs
+          string
           i64
     Assignment
       Target
@@ -65,7 +66,7 @@ File
           Args
             StringLiteral "a"
             IntLiteral 1
-    LetStatement old: HashMap<i64>
+    LetStatement old: HashMap<string, i64>
       Identifier m
     Assignment
       Target
@@ -139,7 +140,7 @@ File
           StringLiteral "old"
           Identifier old
           StringLiteral "b"
-    LetStatement fork: HashMap<i64>
+    LetStatement fork: HashMap<string, i64>
       CallExpr
         Callee
           FieldExpr .set
@@ -179,7 +180,7 @@ File
           StringLiteral "m"
           Identifier m
           StringLiteral "c"
-    LetStatement refresh: HashMap<i64>
+    LetStatement refresh: HashMap<string, i64>
       CallExpr
         Callee
           FieldExpr .set
@@ -212,11 +213,12 @@ File
             Callee
               FieldExpr .length
                 Identifier refresh
-    LetStatement full: HashMap<i64>
+    LetStatement full: HashMap<string, i64>
       CallExpr
         Callee
           Identifier HashMap.new
         TypeArgs
+          string
           i64
     LetStatement f: i64
       IntLiteral 0
@@ -276,7 +278,7 @@ File
             Callee
               FieldExpr .length
                 Identifier full
-    LetStatement before: HashMap<i64>
+    LetStatement before: HashMap<string, i64>
       Identifier m
     LetStatement i: i64
       IntLiteral 0
@@ -342,11 +344,12 @@ File
           StringLiteral "before"
           Identifier before
           StringLiteral "k0"
-    LetStatement churn: HashMap<i64>
+    LetStatement churn: HashMap<string, i64>
       CallExpr
         Callee
           Identifier HashMap.new
         TypeArgs
+          string
           i64
     LetStatement c: i64
       IntLiteral 0
@@ -373,7 +376,7 @@ File
           BinaryExpr +
             Identifier c
             IntLiteral 1
-    LetStatement mid: HashMap<i64>
+    LetStatement mid: HashMap<string, i64>
       Identifier churn
     Assignment
       Target
@@ -397,7 +400,7 @@ File
           Args
             StringLiteral "w"
             IntLiteral 2
-    LetStatement later: HashMap<i64>
+    LetStatement later: HashMap<string, i64>
       Identifier churn
     Assignment
       Target
@@ -459,18 +462,20 @@ File
             Callee
               FieldExpr .length
                 Identifier churn
-    LetStatement out: HashMap<i64>
+    LetStatement out: HashMap<string, i64>
       CallExpr
         Callee
           Identifier HashMap.new
         TypeArgs
+          string
           i64
     ResourceBlock memory pool
-      LetStatement inner: HashMap<i64>
+      LetStatement inner: HashMap<string, i64>
         CallExpr
           Callee
             Identifier HashMap.new
           TypeArgs
+            string
             i64
       Assignment
         Target

@@ -5,7 +5,7 @@ module bootstrap_probe::type_checker
 // booleans, comparisons, and logical operators, then adds a combined
 // resolve + typecheck pass over the arena.
 //
-// Tests: HashMap<V> for O(1) symbol lookup, Option<V> for fallible
+// Tests: HashMap<string, V> for O(1) symbol lookup, Option<V> for fallible
 // map get, Result<T, E> with ? operator for error propagation,
 // multi-pass compiler architecture (lex → parse → analyze), and
 // match destructuring for control flow.
@@ -445,7 +445,7 @@ fn type_name(ty: i32): string
   return "???"
 
 // ---------------------------------------------------------------
-// Symbol table — HashMap<Symbol> with O(1) lookup
+// Symbol table — HashMap<string, Symbol> with O(1) lookup
 // ---------------------------------------------------------------
 
 class Symbol:
@@ -477,7 +477,7 @@ fn check_binary_op(op: TK, left_ty: i32, right_ty: i32): Result<i32, string>
 
   return Result::Err(error = "unknown binary operator")
 
-fn check_expr(arena: Vector<Node>, idx: i64, table: HashMap<Symbol>, source: string): Result<i32, string>
+fn check_expr(arena: Vector<Node>, idx: i64, table: HashMap<string, Symbol>, source: string): Result<i32, string>
   let node: Node = arena.get(idx)
   match node:
     Node::IntLit(v):
@@ -517,7 +517,7 @@ fn check_expr(arena: Vector<Node>, idx: i64, table: HashMap<Symbol>, source: str
 // Analyze a program: walk statements, build symbol table, typecheck.
 // Returns the type of the last statement (Ok) or the first error (Err).
 fn analyze(arena: Vector<Node>, stmts: Vector<Stmt>, source: string): Result<i32, string>
-  let table = HashMap<Symbol>::new()
+  let table = HashMap<string, Symbol>::new()
   let last_ty: i32 = 0
   let i: i64 = 0
   while i < stmts.length():

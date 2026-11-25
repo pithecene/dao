@@ -40,7 +40,7 @@ fn parse_manifest(listing: string): Result<ManifestSpec, string>
   let have_output: bool = false
   let output_path: string = ""
   let entries: Vector<ManifestEntry> = Vector<ManifestEntry>::new()
-  let seen_inputs: HashMap<i64> = HashMap<i64>::new()
+  let seen_inputs: HashMap<string, i64> = HashMap<string, i64>::new()
   let source_count: i64 = to_i64(0)
   let pos: i64 = to_i64(0)
   let line_no: i64 = to_i64(0)

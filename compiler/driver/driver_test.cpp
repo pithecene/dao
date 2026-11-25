@@ -658,18 +658,18 @@ suite<"driver_cli"> driver_cli_suite = [] {
 
     // Outside any block, containers of generators are ordinary: their
     // pushes and sets copy nothing out, so no copier is instantiated.
-    auto plain =
-        scratch.file("plain.dao",
-                     "module app::plain\n\n"
-                     "fn gen(): Generator<i32>\n"
-                     "  yield 1\n\n"
-                     "fn main(): i32\n"
-                     "  let items: Vector<Generator<i32>> = Vector<Generator<i32>>::new()\n"
-                     "  items = items.push(gen())\n"
-                     "  items = items.set(0, gen())\n"
-                     "  let named: HashMap<Generator<i32>> = HashMap<Generator<i32>>::new()\n"
-                     "  named = named.set(\"g\", gen())\n"
-                     "  return 0\n");
+    auto plain = scratch.file(
+        "plain.dao",
+        "module app::plain\n\n"
+        "fn gen(): Generator<i32>\n"
+        "  yield 1\n\n"
+        "fn main(): i32\n"
+        "  let items: Vector<Generator<i32>> = Vector<Generator<i32>>::new()\n"
+        "  items = items.push(gen())\n"
+        "  items = items.set(0, gen())\n"
+        "  let named: HashMap<string, Generator<i32>> = HashMap<string, Generator<i32>>::new()\n"
+        "  named = named.set(\"g\", gen())\n"
+        "  return 0\n");
     auto lowered = run_daoc(scratch, {"mir", plain.string()});
     expect(lowered.exit_code == 0) << lowered.err;
   };
@@ -808,6 +808,67 @@ suite<"driver_cli"> driver_cli_suite = [] {
     expect(broken_link.exit_code != 0)
         << "packaged daoc linked the build-tree runtime instead of the staged archive";
     expect(broken_link.err_says("linking failed")) << broken_link.err;
+  };
+
+  "HashMap<K, V> enforces key bounds, hash/eq coherence, and inline conformances"_test = [] {
+    Scratch scratch("hashmap-bounds");
+
+    auto float_key = scratch.file("float_key.dao",
+                                  "module app::float_key\n"
+                                  "fn main(): i32\n"
+                                  "  let m = HashMap<f64, i32>::new()\n"
+                                  "  return 0\n");
+    auto r_float = run_daoc(scratch, {"check", float_key.string()});
+    expect(r_float.exit_code != 0);
+    expect(r_float.err_says("does not satisfy concept 'Hashable'")) << r_float.err;
+
+    auto orphan_hash = scratch.file("orphan_hash.dao",
+                                    "module app::orphan_hash\n"
+                                    "class OnlyHash:\n"
+                                    "  raw: Ptr<i32>\n"
+                                    "extend OnlyHash as Hashable:\n"
+                                    "  fn hash(self): i64 -> to_i64(1)\n"
+                                    "fn main(): i32 -> 0\n");
+    auto r_orphan = run_daoc(scratch, {"check", orphan_hash.string()});
+    expect(r_orphan.exit_code != 0);
+    expect(r_orphan.err_says("cannot conform to 'Hashable' without conforming to 'Equatable'"))
+        << r_orphan.err;
+
+    auto custom_eq_only =
+        scratch.file("custom_eq_only.dao",
+                     "module app::custom_eq\n"
+                     "class CustomEq:\n"
+                     "  code: i64\n"
+                     "  label: string\n"
+                     "extend CustomEq as Equatable:\n"
+                     "  fn eq(self, other: CustomEq): bool -> self.code == other.code\n"
+                     "fn main(): i32\n"
+                     "  let m = HashMap<CustomEq, i32>::new()\n"
+                     "  return 0\n");
+    auto r_custom = run_daoc(scratch, {"check", custom_eq_only.string()});
+    expect(r_custom.exit_code != 0);
+    expect(r_custom.err_says("does not satisfy concept 'Hashable'")) << r_custom.err;
+
+    auto inline_conf =
+        scratch.file("inline_conf.dao",
+                     "module app::inline_conf\n"
+                     "class InlineKey:\n"
+                     "  id: i64\n"
+                     "  tag: string\n"
+                     "  as Equatable:\n"
+                     "    fn eq(self, other: InlineKey): bool -> self.id == other.id\n"
+                     "  as Hashable:\n"
+                     "    fn hash(self): i64 -> self.id.hash()\n"
+                     "fn main(): i32\n"
+                     "  let m = HashMap<InlineKey, i32>::new()\n"
+                     "  m = m.set(InlineKey(to_i64(5), \"A\"), 11)\n"
+                     "  m = m.set(InlineKey(to_i64(5), \"a\"), 42)\n"
+                     "  print(i32_to_string(m.get_or(InlineKey(to_i64(5), \"x\"), 0)))\n"
+                     "  return 0\n");
+    auto built_inline = run_daoc(scratch, {"build", inline_conf.string()});
+    expect(built_inline.exit_code == 0) << built_inline.err;
+    expect(run_and_capture(scratch.output_for(inline_conf), scratch.dir / "inline_out.txt") ==
+           "42\n");
   };
 };
 

@@ -31,7 +31,7 @@ It stays here as the regression input for that fix, and `testdata/examples/known
 | `lambdas.dao` | function types, functions as values, `\|>` pipelines |
 | `pipelines.dao` | the pipe operator on plain functions |
 | `generators.dao`, `iteration.dao` | `yield`, generators, `for ... in` |
-| `vectors.dao`, `hashmap.dao` | `Vector<T>` and `HashMap<V>` from the prelude |
+| `vectors.dao`, `hashmap.dao` | `Vector<T>` and `HashMap<K, V>` from the prelude |
 | `resource.dao`, `unsafe.dao`, `raw_memory.dao` | `resource memory` domains, `mode unsafe`, pointers and allocation |
 | `astar.dao` | a small search algorithm using several of these features |
 | `ffi/` | calling C from Dao (needs the C helpers alongside) |

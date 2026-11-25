@@ -1,10 +1,18 @@
-=== HashMap<V> ===
+=== HashMap<K, V> ===
 length: 3
 x = 10
 y = 20
 w not found
 x (updated) = 99
-big length: 10
-j = 10
-a = 1
-missing = None (correct)
+imap length: 4
+imap[0] = zero_v2
+imap[-1] = neg_one
+imap[min] = min
+imap[max] = max
+snapshot0 (10->20): direct
+edges (10->20): upgraded
+edges (20->10): reverse
+edge entries: 2
+tags length: 1
+tags[7] = 443
+escaped hops: 2 first=net-hop-1

@@ -548,7 +548,7 @@ fn is_prelude_intrinsic_name(name: string): bool
 // mutable mini-IR output.  Mutating-field style per the post-#248
 // bootstrap convention.
 //
-// Bootstrap Dao's HashMap is HashMap<i64> only, so string-valued
+// Bootstrap Dao's HashMap is HashMap<string, i64> only, so string-valued
 // lookups (MIR node idx → "%N" text, etc.) use parallel Vector
 // side tables with linear scan.  Functions are small; this is
 // fine for Tier A.
@@ -656,17 +656,17 @@ class GenCtx:
   yields: i64
   // Each iterator the function makes, by its MirIterInit node: which pair
   // of frame fields holds it.
-  iters: HashMap<i64>
+  iters: HashMap<string, i64>
 
 // Positions in BS's side tables, by key: a value's and a block label's
 // by MIR node, a slot's by MirLocal node, an extern's and a struct's by
 // name / type index.
 class BsIndex:
-  values: HashMap<i64>
-  slots: HashMap<i64>
-  labels: HashMap<i64>
-  externs: HashMap<i64>
-  structs: HashMap<i64>
+  values: HashMap<string, i64>
+  slots: HashMap<string, i64>
+  labels: HashMap<string, i64>
+  externs: HashMap<string, i64>
+  structs: HashMap<string, i64>
 
 // What naming reads off the program as a whole, as the host's names
 // do (llvm_names.cpp, llvm_type_lowering.cpp): the module graph (each
@@ -677,12 +677,12 @@ class BsIndex:
 class BsProgram:
   module_graph: graph::ProgramGraph
   entry_module: i64
-  extern_syms: HashMap<i64>
-  shared_type_names: HashMap<i64>
+  extern_syms: HashMap<string, i64>
+  shared_type_names: HashMap<string, i64>
 
 fn bs_program_of(input: MirBackendInput): BsProgram
   let modules: Vector<graph::ModuleEntry> = input.source.module_graph.modules
-  let externs: HashMap<i64> = HashMap<i64>::new()
+  let externs: HashMap<string, i64> = HashMap<string, i64>::new()
   let ni: i64 = to_i64(0)
   while ni < input.mir.mir_nodes.length():
     match input.mir.mir_nodes.get(ni):
@@ -708,8 +708,8 @@ fn bs_program_of(input: MirBackendInput): BsProgram
                 entry = to_i64(-2)
     si = si + to_i64(1)
   // A named type's declaring module, by its name; -2 once two differ.
-  let declared_by: HashMap<i64> = HashMap<i64>::new()
-  let shared: HashMap<i64> = HashMap<i64>::new()
+  let declared_by: HashMap<string, i64> = HashMap<string, i64>::new()
+  let shared: HashMap<string, i64> = HashMap<string, i64>::new()
   let ti: i64 = to_i64(0)
   while ti < input.types.length():
     let t: DaoType = input.types.get(ti)
@@ -730,10 +730,10 @@ fn bs_program_of(input: MirBackendInput): BsProgram
   return BsProgram(input.source.module_graph, entry, externs, shared)
 
 fn bs_index_empty(): BsIndex
-  return BsIndex(HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new())
+  return BsIndex(HashMap<string, i64>::new(), HashMap<string, i64>::new(), HashMap<string, i64>::new(), HashMap<string, i64>::new(), HashMap<string, i64>::new())
 
 fn gen_ctx_none(): GenCtx
-  return GenCtx("", "", to_i64(0), HashMap<i64>::new())
+  return GenCtx("", "", to_i64(0), HashMap<string, i64>::new())
 
 fn bs_tables_empty(): BsTables
   return BsTables(BsValues(Vector<i64>::new(), Vector<string>::new(), Vector<string>::new()), BsSlots(Vector<i64>::new(), Vector<string>::new(), Vector<string>::new()), BsLabels(Vector<i64>::new(), Vector<string>::new()))
@@ -751,7 +751,7 @@ fn bs_new(input: MirBackendInput): BS
 fn bs_reset_fn_state(bs: BS): BS
   bs.tables = bs_tables_empty()
   bs.func = bs_function_empty()
-  bs.index = BsIndex(HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), bs.index.externs, bs.index.structs)
+  bs.index = BsIndex(HashMap<string, i64>::new(), HashMap<string, i64>::new(), HashMap<string, i64>::new(), bs.index.externs, bs.index.structs)
   return bs
 
 // Fail-closed type check: if ty is LlUnsupported, emit a diagnostic
@@ -2384,7 +2384,7 @@ fn bs_lower_generator(bs: BS, name: string, gen_ti: i64, params: Vector<LlParam>
 
   // Resume: every local a field of the frame; dispatch on the state.
   bs = bs_reset_fn_state(bs)
-  bs.func.gen = GenCtx("%frame", frame_ty, to_i64(0), HashMap<i64>::new())
+  bs.func.gen = GenCtx("%frame", frame_ty, to_i64(0), HashMap<string, i64>::new())
   let entry: Vector<LlInst> = Vector<LlInst>::new()
   let ie: i64 = to_i64(0)
   while ie < iter_inits.length():

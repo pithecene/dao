@@ -1,0 +1,246 @@
+File
+  Module core::hashable
+  ExternFunctionDecl __dao_str_hash
+    Param s: string
+    ReturnType: i64
+  FunctionDecl hash_i64
+    Param key: i64
+    ReturnType: i64
+    LetStatement two32: i64
+      IntLiteral 4294967296
+    LetStatement two16: i64
+      IntLiteral 65536
+    LetStatement mul_k: i64
+      IntLiteral 2685821657736338717
+    LetStatement folded: i64
+      CallExpr
+        Callee
+          Identifier wrapping_add_i64
+        Args
+          Identifier key
+          BinaryExpr /
+            Identifier key
+            Identifier two32
+    LetStatement mixed: i64
+      CallExpr
+        Callee
+          Identifier wrapping_mul_i64
+        Args
+          Identifier folded
+          Identifier mul_k
+    LetStatement hi_folded: i64
+      CallExpr
+        Callee
+          Identifier wrapping_add_i64
+        Args
+          Identifier mixed
+          BinaryExpr /
+            Identifier mixed
+            Identifier two32
+    ReturnStatement
+      CallExpr
+        Callee
+          Identifier wrapping_add_i64
+        Args
+          Identifier hi_folded
+          BinaryExpr /
+            Identifier hi_folded
+            Identifier two16
+  FunctionDecl combine_hash
+    Param seed: i64
+    Param value_hash: i64
+    ReturnType: i64
+    LetStatement mul_p: i64
+      IntLiteral 6364136223846793005
+    LetStatement add_p: i64
+      IntLiteral 1442695040888963407
+    LetStatement combined: i64
+      CallExpr
+        Callee
+          Identifier wrapping_add_i64
+        Args
+          CallExpr
+            Callee
+              Identifier wrapping_mul_i64
+            Args
+              Identifier seed
+              Identifier mul_p
+          CallExpr
+            Callee
+              Identifier wrapping_add_i64
+            Args
+              Identifier value_hash
+              Identifier add_p
+    ReturnStatement
+      CallExpr
+        Callee
+          Identifier hash_i64
+        Args
+          Identifier combined
+  FunctionDecl hash_string
+    Param s: string
+    ReturnType: i64
+    ExprBody
+      CallExpr
+        Callee
+          Identifier __dao_str_hash
+        Args
+          Identifier s
+  DerivedConceptDecl Hashable
+    FunctionDecl hash
+      Param self
+      ReturnType: i64
+  ExtendDecl i8 as Hashable
+    FunctionDecl hash
+      Param self
+      ReturnType: i64
+      ExprBody
+        CallExpr
+          Callee
+            Identifier hash_i64
+          Args
+            CallExpr
+              Callee
+                Identifier i8_to_i64
+              Args
+                Identifier self
+  ExtendDecl i16 as Hashable
+    FunctionDecl hash
+      Param self
+      ReturnType: i64
+      ExprBody
+        CallExpr
+          Callee
+            Identifier hash_i64
+          Args
+            CallExpr
+              Callee
+                Identifier i16_to_i64
+              Args
+                Identifier self
+  ExtendDecl i32 as Hashable
+    FunctionDecl hash
+      Param self
+      ReturnType: i64
+      ExprBody
+        CallExpr
+          Callee
+            Identifier hash_i64
+          Args
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                Identifier self
+  ExtendDecl i64 as Hashable
+    FunctionDecl hash
+      Param self
+      ReturnType: i64
+      ExprBody
+        CallExpr
+          Callee
+            Identifier hash_i64
+          Args
+            Identifier self
+  ExtendDecl u8 as Hashable
+    FunctionDecl hash
+      Param self
+      ReturnType: i64
+      ExprBody
+        CallExpr
+          Callee
+            Identifier hash_i64
+          Args
+            CallExpr
+              Callee
+                Identifier u64_to_i64
+              Args
+                CallExpr
+                  Callee
+                    Identifier u8_to_u64
+                  Args
+                    Identifier self
+  ExtendDecl u16 as Hashable
+    FunctionDecl hash
+      Param self
+      ReturnType: i64
+      ExprBody
+        CallExpr
+          Callee
+            Identifier hash_i64
+          Args
+            CallExpr
+              Callee
+                Identifier u64_to_i64
+              Args
+                CallExpr
+                  Callee
+                    Identifier u16_to_u64
+                  Args
+                    Identifier self
+  ExtendDecl u32 as Hashable
+    FunctionDecl hash
+      Param self
+      ReturnType: i64
+      ExprBody
+        CallExpr
+          Callee
+            Identifier hash_i64
+          Args
+            CallExpr
+              Callee
+                Identifier u32_to_i64
+              Args
+                Identifier self
+  ExtendDecl u64 as Hashable
+    FunctionDecl hash
+      Param self
+      ReturnType: i64
+      ExprBody
+        CallExpr
+          Callee
+            Identifier hash_i64
+          Args
+            CallExpr
+              Callee
+                Identifier u64_to_i64
+              Args
+                Identifier self
+  ExtendDecl bool as Hashable
+    FunctionDecl hash
+      Param self
+      ReturnType: i64
+      IfStatement
+        Condition
+          Identifier self
+        Then
+          ReturnStatement
+            CallExpr
+              Callee
+                Identifier hash_i64
+              Args
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 1
+      ReturnStatement
+        CallExpr
+          Callee
+            Identifier hash_i64
+          Args
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 0
+  ExtendDecl string as Hashable
+    FunctionDecl hash
+      Param self
+      ReturnType: i64
+      ExprBody
+        CallExpr
+          Callee
+            Identifier __dao_str_hash
+          Args
+            Identifier self

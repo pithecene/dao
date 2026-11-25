@@ -3,6 +3,36 @@ File
   ClassDecl Entry
     Field name: string
     Field value: i32
+  ClassDecl EdgeKey
+    Field from_node: i64
+    Field to_node: i64
+  ClassDecl LabeledEdge
+    Field edge: EdgeKey
+    Field label: string
+  ClassDecl CaseFoldTag
+    Field code: i64
+    Field raw: string
+  ExtendDecl CaseFoldTag as Equatable
+    FunctionDecl eq
+      Param self
+      Param other: CaseFoldTag
+      ReturnType: bool
+      ExprBody
+        BinaryExpr ==
+          FieldExpr .code
+            Identifier self
+          FieldExpr .code
+            Identifier other
+  ExtendDecl CaseFoldTag as Hashable
+    FunctionDecl hash
+      Param self
+      ReturnType: i64
+      ExprBody
+        CallExpr
+          Callee
+            FieldExpr .hash
+              FieldExpr .code
+                Identifier self
   FunctionDecl show_entry
     Param label: string
     Param result: Option<Entry>
@@ -41,6 +71,130 @@ File
                 StringLiteral " not found"
     ReturnStatement
       IntLiteral 0
+  FunctionDecl build_escaped_edges
+    Param prefix: string
+    ReturnType: HashMap<LabeledEdge, Vector<string>>
+    LetStatement out: HashMap<LabeledEdge, Vector<string>>
+      CallExpr
+        Callee
+          Identifier HashMap.new
+        TypeArgs
+          LabeledEdge
+          Vector<string>
+    ResourceBlock memory Scratch
+      LetStatement local: HashMap<LabeledEdge, Vector<string>>
+        CallExpr
+          Callee
+            Identifier HashMap.new
+          TypeArgs
+            LabeledEdge
+            Vector<string>
+      LetStatement k1: LabeledEdge
+        CallExpr
+          Callee
+            Identifier LabeledEdge
+          Args
+            CallExpr
+              Callee
+                Identifier EdgeKey
+              Args
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 1
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 2
+            BinaryExpr +
+              Identifier prefix
+              StringLiteral ":alpha"
+      LetStatement v1: Vector<string>
+        CallExpr
+          Callee
+            FieldExpr .push
+              CallExpr
+                Callee
+                  FieldExpr .push
+                    CallExpr
+                      Callee
+                        Identifier Vector.new
+                      TypeArgs
+                        string
+                Args
+                  BinaryExpr +
+                    Identifier prefix
+                    StringLiteral "-hop-1"
+          Args
+            BinaryExpr +
+              Identifier prefix
+              StringLiteral "-hop-2"
+      Assignment
+        Target
+          Identifier local
+        Value
+          CallExpr
+            Callee
+              FieldExpr .set
+                Identifier local
+            Args
+              Identifier k1
+              Identifier v1
+      LetStatement k2: LabeledEdge
+        CallExpr
+          Callee
+            Identifier LabeledEdge
+          Args
+            CallExpr
+              Callee
+                Identifier EdgeKey
+              Args
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 2
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 3
+            BinaryExpr +
+              Identifier prefix
+              StringLiteral ":beta"
+      LetStatement v2: Vector<string>
+        CallExpr
+          Callee
+            FieldExpr .push
+              CallExpr
+                Callee
+                  Identifier Vector.new
+                TypeArgs
+                  string
+          Args
+            BinaryExpr +
+              Identifier prefix
+              StringLiteral "-hop-3"
+      Assignment
+        Target
+          Identifier local
+        Value
+          CallExpr
+            Callee
+              FieldExpr .set
+                Identifier local
+            Args
+              Identifier k2
+              Identifier v2
+      Assignment
+        Target
+          Identifier out
+        Value
+          Identifier local
+    ReturnStatement
+      Identifier out
   FunctionDecl main
     ReturnType: i32
     ExpressionStatement
@@ -48,12 +202,13 @@ File
         Callee
           Identifier print
         Args
-          StringLiteral "=== HashMap<V> ==="
+          StringLiteral "=== HashMap<K, V> ==="
     LetStatement m
       CallExpr
         Callee
           Identifier HashMap.new
         TypeArgs
+          string
           Entry
     Assignment
       Target
@@ -182,129 +337,99 @@ File
                 Identifier m
             Args
               StringLiteral "x"
-    LetStatement big
+    LetStatement max_i64: i64
+      IntLiteral 9223372036854775807
+    LetStatement min_i64: i64
+      BinaryExpr -
+        UnaryExpr -
+          Identifier max_i64
+        CallExpr
+          Callee
+            Identifier to_i64
+          Args
+            IntLiteral 1
+    LetStatement imap
       CallExpr
         Callee
           Identifier HashMap.new
         TypeArgs
-          i32
+          i64
+          string
     Assignment
       Target
-        Identifier big
+        Identifier imap
       Value
         CallExpr
           Callee
             FieldExpr .set
-              Identifier big
+              Identifier imap
           Args
-            StringLiteral "a"
-            IntLiteral 1
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 0
+            StringLiteral "zero"
     Assignment
       Target
-        Identifier big
+        Identifier imap
       Value
         CallExpr
           Callee
             FieldExpr .set
-              Identifier big
+              Identifier imap
           Args
-            StringLiteral "b"
-            IntLiteral 2
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                UnaryExpr -
+                  IntLiteral 1
+            StringLiteral "neg_one"
     Assignment
       Target
-        Identifier big
+        Identifier imap
       Value
         CallExpr
           Callee
             FieldExpr .set
-              Identifier big
+              Identifier imap
           Args
-            StringLiteral "c"
-            IntLiteral 3
+            Identifier min_i64
+            StringLiteral "min"
     Assignment
       Target
-        Identifier big
+        Identifier imap
       Value
         CallExpr
           Callee
             FieldExpr .set
-              Identifier big
+              Identifier imap
           Args
-            StringLiteral "d"
-            IntLiteral 4
+            Identifier max_i64
+            StringLiteral "max"
     Assignment
       Target
-        Identifier big
+        Identifier imap
       Value
         CallExpr
           Callee
             FieldExpr .set
-              Identifier big
+              Identifier imap
           Args
-            StringLiteral "e"
-            IntLiteral 5
-    Assignment
-      Target
-        Identifier big
-      Value
-        CallExpr
-          Callee
-            FieldExpr .set
-              Identifier big
-          Args
-            StringLiteral "f"
-            IntLiteral 6
-    Assignment
-      Target
-        Identifier big
-      Value
-        CallExpr
-          Callee
-            FieldExpr .set
-              Identifier big
-          Args
-            StringLiteral "g"
-            IntLiteral 7
-    Assignment
-      Target
-        Identifier big
-      Value
-        CallExpr
-          Callee
-            FieldExpr .set
-              Identifier big
-          Args
-            StringLiteral "h"
-            IntLiteral 8
-    Assignment
-      Target
-        Identifier big
-      Value
-        CallExpr
-          Callee
-            FieldExpr .set
-              Identifier big
-          Args
-            StringLiteral "i"
-            IntLiteral 9
-    Assignment
-      Target
-        Identifier big
-      Value
-        CallExpr
-          Callee
-            FieldExpr .set
-              Identifier big
-          Args
-            StringLiteral "j"
-            IntLiteral 10
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 0
+            StringLiteral "zero_v2"
     ExpressionStatement
       CallExpr
         Callee
           Identifier print
         Args
           BinaryExpr +
-            StringLiteral "big length: "
+            StringLiteral "imap length: "
             CallExpr
               Callee
                 Identifier i64_to_string
@@ -312,17 +437,385 @@ File
                 CallExpr
                   Callee
                     FieldExpr .length
-                      Identifier big
-    LetStatement rj: Option<i32>
+                      Identifier imap
+    ExpressionStatement
       CallExpr
         Callee
-          FieldExpr .get
-            Identifier big
+          Identifier print
         Args
-          StringLiteral "j"
+          BinaryExpr +
+            StringLiteral "imap[0] = "
+            CallExpr
+              Callee
+                FieldExpr .get_or
+                  Identifier imap
+              Args
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 0
+                StringLiteral "?"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            StringLiteral "imap[-1] = "
+            CallExpr
+              Callee
+                FieldExpr .get_or
+                  Identifier imap
+              Args
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    UnaryExpr -
+                      IntLiteral 1
+                StringLiteral "?"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            StringLiteral "imap[min] = "
+            CallExpr
+              Callee
+                FieldExpr .get_or
+                  Identifier imap
+              Args
+                Identifier min_i64
+                StringLiteral "?"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            StringLiteral "imap[max] = "
+            CallExpr
+              Callee
+                FieldExpr .get_or
+                  Identifier imap
+              Args
+                Identifier max_i64
+                StringLiteral "?"
+    LetStatement edges
+      CallExpr
+        Callee
+          Identifier HashMap.new
+        TypeArgs
+          EdgeKey
+          string
+    LetStatement snapshot0
+      CallExpr
+        Callee
+          FieldExpr .set
+            Identifier edges
+        Args
+          CallExpr
+            Callee
+              Identifier EdgeKey
+            Args
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 10
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 20
+          StringLiteral "direct"
+    Assignment
+      Target
+        Identifier edges
+      Value
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier snapshot0
+          Args
+            CallExpr
+              Callee
+                Identifier EdgeKey
+              Args
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 20
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 10
+            StringLiteral "reverse"
+    Assignment
+      Target
+        Identifier edges
+      Value
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier edges
+          Args
+            CallExpr
+              Callee
+                Identifier EdgeKey
+              Args
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 10
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 20
+            StringLiteral "upgraded"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            StringLiteral "snapshot0 (10->20): "
+            CallExpr
+              Callee
+                FieldExpr .get_or
+                  Identifier snapshot0
+              Args
+                CallExpr
+                  Callee
+                    Identifier EdgeKey
+                  Args
+                    CallExpr
+                      Callee
+                        Identifier to_i64
+                      Args
+                        IntLiteral 10
+                    CallExpr
+                      Callee
+                        Identifier to_i64
+                      Args
+                        IntLiteral 20
+                StringLiteral "none"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            StringLiteral "edges (10->20): "
+            CallExpr
+              Callee
+                FieldExpr .get_or
+                  Identifier edges
+              Args
+                CallExpr
+                  Callee
+                    Identifier EdgeKey
+                  Args
+                    CallExpr
+                      Callee
+                        Identifier to_i64
+                      Args
+                        IntLiteral 10
+                    CallExpr
+                      Callee
+                        Identifier to_i64
+                      Args
+                        IntLiteral 20
+                StringLiteral "none"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            StringLiteral "edges (20->10): "
+            CallExpr
+              Callee
+                FieldExpr .get_or
+                  Identifier edges
+              Args
+                CallExpr
+                  Callee
+                    Identifier EdgeKey
+                  Args
+                    CallExpr
+                      Callee
+                        Identifier to_i64
+                      Args
+                        IntLiteral 20
+                    CallExpr
+                      Callee
+                        Identifier to_i64
+                      Args
+                        IntLiteral 10
+                StringLiteral "none"
+    LetStatement e_entries: Vector<MapEntry<EdgeKey, string>>
+      CallExpr
+        Callee
+          FieldExpr .entries
+            Identifier edges
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            StringLiteral "edge entries: "
+            CallExpr
+              Callee
+                Identifier i64_to_string
+              Args
+                CallExpr
+                  Callee
+                    FieldExpr .length
+                      Identifier e_entries
+    LetStatement tags
+      CallExpr
+        Callee
+          Identifier HashMap.new
+        TypeArgs
+          CaseFoldTag
+          i64
+    Assignment
+      Target
+        Identifier tags
+      Value
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier tags
+          Args
+            CallExpr
+              Callee
+                Identifier CaseFoldTag
+              Args
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 7
+                StringLiteral "HTTP"
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 80
+    Assignment
+      Target
+        Identifier tags
+      Value
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier tags
+          Args
+            CallExpr
+              Callee
+                Identifier CaseFoldTag
+              Args
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 7
+                StringLiteral "http"
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 443
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            StringLiteral "tags length: "
+            CallExpr
+              Callee
+                Identifier i64_to_string
+              Args
+                CallExpr
+                  Callee
+                    FieldExpr .length
+                      Identifier tags
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          BinaryExpr +
+            StringLiteral "tags[7] = "
+            CallExpr
+              Callee
+                Identifier i64_to_string
+              Args
+                CallExpr
+                  Callee
+                    FieldExpr .get_or
+                      Identifier tags
+                  Args
+                    CallExpr
+                      Callee
+                        Identifier CaseFoldTag
+                      Args
+                        CallExpr
+                          Callee
+                            Identifier to_i64
+                          Args
+                            IntLiteral 7
+                        StringLiteral "Http"
+                    CallExpr
+                      Callee
+                        Identifier to_i64
+                      Args
+                        UnaryExpr -
+                          IntLiteral 1
+    LetStatement escaped
+      CallExpr
+        Callee
+          Identifier build_escaped_edges
+        Args
+          StringLiteral "net"
+    LetStatement probe_k
+      CallExpr
+        Callee
+          Identifier LabeledEdge
+        Args
+          CallExpr
+            Callee
+              Identifier EdgeKey
+            Args
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 1
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 2
+          StringLiteral "net:alpha"
     MatchStatement
       Scrutinee
-        Identifier rj
+        CallExpr
+          Callee
+            FieldExpr .get
+              Identifier escaped
+          Args
+            Identifier probe_k
       Arm
         Pattern
           QualifiedName Option::Some
@@ -332,12 +825,24 @@ File
               Identifier print
             Args
               BinaryExpr +
-                StringLiteral "j = "
+                BinaryExpr +
+                  BinaryExpr +
+                    StringLiteral "escaped hops: "
+                    CallExpr
+                      Callee
+                        Identifier i64_to_string
+                      Args
+                        CallExpr
+                          Callee
+                            FieldExpr .length
+                              Identifier hops
+                  StringLiteral " first="
                 CallExpr
                   Callee
-                    Identifier i32_to_string
+                    FieldExpr .get
+                      Identifier hops
                   Args
-                    Identifier v
+                    IntLiteral 0
       Arm
         Pattern
           QualifiedName Option::None
@@ -346,68 +851,6 @@ File
             Callee
               Identifier print
             Args
-              StringLiteral "j not found"
-    LetStatement ra: Option<i32>
-      CallExpr
-        Callee
-          FieldExpr .get
-            Identifier big
-        Args
-          StringLiteral "a"
-    MatchStatement
-      Scrutinee
-        Identifier ra
-      Arm
-        Pattern
-          QualifiedName Option::Some
-        ExpressionStatement
-          CallExpr
-            Callee
-              Identifier print
-            Args
-              BinaryExpr +
-                StringLiteral "a = "
-                CallExpr
-                  Callee
-                    Identifier i32_to_string
-                  Args
-                    Identifier v
-      Arm
-        Pattern
-          QualifiedName Option::None
-        ExpressionStatement
-          CallExpr
-            Callee
-              Identifier print
-            Args
-              StringLiteral "a not found"
-    LetStatement rm: Option<i32>
-      CallExpr
-        Callee
-          FieldExpr .get
-            Identifier big
-        Args
-          StringLiteral "missing"
-    MatchStatement
-      Scrutinee
-        Identifier rm
-      Arm
-        Pattern
-          QualifiedName Option::Some
-        ExpressionStatement
-          CallExpr
-            Callee
-              Identifier print
-            Args
-              StringLiteral "missing found (unexpected)"
-      Arm
-        Pattern
-          QualifiedName Option::None
-        ExpressionStatement
-          CallExpr
-            Callee
-              Identifier print
-            Args
-              StringLiteral "missing = None (correct)"
+              StringLiteral "escaped missing"
     ReturnStatement
       IntLiteral 0

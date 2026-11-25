@@ -1119,11 +1119,11 @@ void TypeChecker::register_signatures() {
       const auto* struct_type = static_cast<const TypeStruct*>(symbol_types_[decl_it->second]);
 
       // Register class body methods.
-      for (const auto* method : st.methods) {
+      auto register_class_method = [&](const Decl* method) {
         const auto& fn = method->as<FunctionDecl>();
         auto mdecl_it = decl_symbols_.find(fn.name_span.offset);
         if (mdecl_it == decl_symbols_.end()) {
-          continue;
+          return;
         }
         const auto* method_sym = mdecl_it->second;
         std::vector<const Type*> param_types;
@@ -1140,6 +1140,19 @@ void TypeChecker::register_signatures() {
         const auto* fn_type = types_.function_type(std::move(param_types), ret);
         symbol_types_[method_sym] = fn_type;
         typed_.set_decl_type(method, fn_type);
+      };
+      for (const auto* method : st.methods) {
+        register_class_method(method);
+      }
+      for (const auto& conf : st.conformances) {
+        const auto* conf_concept = concept_named_at(conf.target.concept_span);
+        ConceptSelfMapGuard guard(concept_self_map_, conf_concept);
+        if (conf_concept != nullptr && struct_type != nullptr) {
+          concept_self_map_[conf_concept] = struct_type;
+        }
+        for (const auto* method : conf.methods) {
+          register_class_method(method);
+        }
       }
       break;
     }
@@ -1147,6 +1160,11 @@ void TypeChecker::register_signatures() {
     case NodeKind::ExtendDecl: {
       const auto& ext = decl->as<ExtendDecl>();
       const auto* target_type = resolve_type_node(ext.target_type);
+      const auto* ext_concept = concept_named_at(ext.target.concept_span);
+      ConceptSelfMapGuard guard(concept_self_map_, ext_concept);
+      if (ext_concept != nullptr && target_type != nullptr) {
+        concept_self_map_[ext_concept] = target_type;
+      }
       for (const auto* method : ext.methods) {
         const auto& method_fn = method->as<FunctionDecl>();
         std::vector<const Type*> param_types;
@@ -1203,6 +1221,35 @@ void TypeChecker::register_signatures() {
 // ---------------------------------------------------------------------------
 
 auto TypeChecker::type_conforms_to(const Type* type, const Decl* concept_decl) -> bool {
+  if (type == nullptr) {
+    return false;
+  }
+  // Generic type parameters conform to any concept declared in their own bounds.
+  if (type->kind() == TypeKind::GenericParam) {
+    const auto* gp = static_cast<const TypeGenericParam*>(type);
+    const auto* binder = gp->binder();
+    const std::vector<GenericParam>* params = nullptr;
+    if (binder != nullptr) {
+      if (binder->is<FunctionDecl>()) {
+        params = &binder->as<FunctionDecl>().type_params;
+      } else if (binder->is<ClassDecl>()) {
+        params = &binder->as<ClassDecl>().type_params;
+      } else if (binder->is<EnumDeclNode>()) {
+        params = &binder->as<EnumDeclNode>().type_params;
+      }
+    }
+    if (params != nullptr && gp->index() < params->size()) {
+      for (const auto* constraint : (*params)[gp->index()].constraints) {
+        const auto* csym = concept_for_constraint(constraint);
+        if (csym != nullptr && csym->kind == SymbolKind::Concept && csym->decl != nullptr &&
+            csym->decl_as_decl() == concept_decl) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   // Check explicit conformance: inline `as` blocks on structs.
   if (type->kind() == TypeKind::Struct) {
     const auto* struct_type = static_cast<const TypeStruct*>(type);
@@ -1292,6 +1339,20 @@ void TypeChecker::compute_derived_conformances() {
     classes.push_back({decl, &cls, struct_type});
   }
 
+  const Decl* prelude_equatable = nullptr;
+  const Decl* prelude_hashable = nullptr;
+  for (const auto* concept_decl : derived_concepts_) {
+    const auto* owner = declaring_module(concept_decl);
+    if (owner == nullptr || owner->is_prelude) {
+      const auto& cpt = concept_decl->as<ConceptDecl>();
+      if (cpt.name == "Equatable") {
+        prelude_equatable = concept_decl;
+      } else if (cpt.name == "Hashable") {
+        prelude_hashable = concept_decl;
+      }
+    }
+  }
+
   // Fixpoint loop: repeat until no new conformances are discovered.
   // This ensures transitive derivation is independent of declaration order.
   bool changed = true;
@@ -1316,6 +1377,50 @@ void TypeChecker::compute_derived_conformances() {
         }
         if (has_explicit) {
           continue;
+        }
+
+        // Hash/equality coherence: a class that overrides Equatable
+        // explicitly (inline `as Equatable:` or visible `extend`) must
+        // never silently derive field-wise Hashable, which could hash
+        // equal values differently.
+        if (concept_decl == prelude_hashable && prelude_equatable != nullptr) {
+          bool explicit_equatable = false;
+          for (const auto& conf : entry.cls->conformances) {
+            if (concept_named_at(conf.target.concept_span) == prelude_equatable) {
+              explicit_equatable = true;
+              break;
+            }
+          }
+          if (!explicit_equatable) {
+            for (const auto* decl : all_decls_) {
+              if (decl->kind() != NodeKind::ExtendDecl ||
+                  !extend_is_visible(declaring_module(decl))) {
+                continue;
+              }
+              const auto& ext = decl->as<ExtendDecl>();
+              if (resolve_type_node(ext.target_type) == entry.struct_type &&
+                  concept_named_at(ext.target.concept_span) == prelude_equatable) {
+                explicit_equatable = true;
+                break;
+              }
+            }
+          }
+          if (explicit_equatable) {
+            continue;
+          }
+          auto eq_it = derived_conformances_.find(entry.struct_type);
+          bool equatable_is_derived = false;
+          if (eq_it != derived_conformances_.end()) {
+            for (const auto* derived : eq_it->second) {
+              if (derived == prelude_equatable) {
+                equatable_is_derived = true;
+                break;
+              }
+            }
+          }
+          if (!equatable_is_derived) {
+            continue;
+          }
         }
 
         bool denied = false;
@@ -1409,6 +1514,29 @@ void TypeChecker::check_declaration(const Decl* decl) {
           }
         }
       }
+    }
+    const auto* ext_concept = concept_named_at(ext.target.concept_span);
+    if (ctx_.self_type != nullptr && ext_concept != nullptr && ext_concept->is<ConceptDecl>() &&
+        ext_concept->as<ConceptDecl>().name == "Hashable") {
+      const auto* concept_owner = declaring_module(ext_concept);
+      if (concept_owner == nullptr || concept_owner->is_prelude) {
+        for (const auto* d : derived_concepts_) {
+          const auto* eq_owner = declaring_module(d);
+          if ((eq_owner == nullptr || eq_owner->is_prelude) &&
+              d->as<ConceptDecl>().name == "Equatable") {
+            if (!type_conforms_to(ctx_.self_type, d)) {
+              error(ext.target.concept_span,
+                    "type '" + print_type(ctx_.self_type) +
+                        "' cannot conform to 'Hashable' without conforming to 'Equatable'");
+            }
+            break;
+          }
+        }
+      }
+    }
+    ConceptSelfMapGuard guard(concept_self_map_, ext_concept);
+    if (ext_concept != nullptr && ctx_.self_type != nullptr) {
+      concept_self_map_[ext_concept] = ctx_.self_type;
     }
     for (const auto* method : ext.methods) {
       validate_receiver(method, ext.target.concept_span);
@@ -1537,6 +1665,29 @@ void TypeChecker::check_class(const Decl* decl) {
 
   // Validate and check conformance-block methods.
   for (const auto& conf : cls.conformances) {
+    const auto* conf_concept = concept_named_at(conf.target.concept_span);
+    if (ctx_.self_type != nullptr && conf_concept != nullptr && conf_concept->is<ConceptDecl>() &&
+        conf_concept->as<ConceptDecl>().name == "Hashable") {
+      const auto* concept_owner = declaring_module(conf_concept);
+      if (concept_owner == nullptr || concept_owner->is_prelude) {
+        for (const auto* d : derived_concepts_) {
+          const auto* eq_owner = declaring_module(d);
+          if ((eq_owner == nullptr || eq_owner->is_prelude) &&
+              d->as<ConceptDecl>().name == "Equatable") {
+            if (!type_conforms_to(ctx_.self_type, d)) {
+              error(conf.target.concept_span,
+                    "type '" + print_type(ctx_.self_type) +
+                        "' cannot conform to 'Hashable' without conforming to 'Equatable'");
+            }
+            break;
+          }
+        }
+      }
+    }
+    ConceptSelfMapGuard guard(concept_self_map_, conf_concept);
+    if (conf_concept != nullptr && ctx_.self_type != nullptr) {
+      concept_self_map_[conf_concept] = ctx_.self_type;
+    }
     for (const auto* method : conf.methods) {
       validate_receiver(method, conf.target.concept_span);
       const auto& fn = method->as<FunctionDecl>();
@@ -2788,16 +2939,25 @@ auto TypeChecker::callee_function_decl(const Expr* callee) -> const Decl* {
   return decl != nullptr && decl->is<FunctionDecl>() ? decl : nullptr;
 }
 
-void TypeChecker::verify_concept_constraints(
-    const Decl* callee_decl,
-    Span error_span,
-    const TypeBindings& bindings) {
+void TypeChecker::verify_concept_constraints(const Decl* callee_decl,
+                                             Span error_span,
+                                             const TypeBindings& bindings) {
   if (bindings.empty() || callee_decl == nullptr) {
     return;
   }
-  const auto& func = callee_decl->as<FunctionDecl>();
-  for (const auto& gp_decl : func.type_params) {
-    auto idx = static_cast<uint32_t>(&gp_decl - func.type_params.data());
+  const std::vector<GenericParam>* type_params = nullptr;
+  if (callee_decl->is<FunctionDecl>()) {
+    type_params = &callee_decl->as<FunctionDecl>().type_params;
+  } else if (callee_decl->is<ClassDecl>()) {
+    type_params = &callee_decl->as<ClassDecl>().type_params;
+  } else if (callee_decl->is<EnumDeclNode>()) {
+    type_params = &callee_decl->as<EnumDeclNode>().type_params;
+  }
+  if (type_params == nullptr) {
+    return;
+  }
+  for (const auto& gp_decl : *type_params) {
+    auto idx = static_cast<uint32_t>(&gp_decl - type_params->data());
     auto binding_it = bindings.find(ParamKey{callee_decl, idx});
     if (binding_it == bindings.end()) {
       continue;
@@ -3040,8 +3200,11 @@ auto TypeChecker::check_call(const Expr* expr) -> const Type* {
           }
           // Clear the "needs-construction" mark set by check_expr for QualifiedName.
           pending_payload_constructions_.erase(call.callee);
-          return with_inferred_args(expr, substitute_generics(callee_type, type_bindings),
-                                    enum_type->decl_id(), type_bindings);
+          verify_concept_constraints(enum_decl, expr->span, type_bindings);
+          return with_inferred_args(expr,
+                                    substitute_generics(callee_type, type_bindings),
+                                    enum_type->decl_id(),
+                                    type_bindings);
         }
       }
       // Variant not found — emit diagnostic.
@@ -3297,6 +3460,9 @@ auto TypeChecker::check_call(const Expr* expr) -> const Type* {
   // a receiver: `b.accept<Missing>(v)` has to satisfy `accept`'s bounds
   // exactly as `accept(b, missing)` would.
   verify_concept_constraints(binding.binder, expr->span, type_bindings);
+  if (!receiver_fixes_the_callee && binding.owner != nullptr) {
+    verify_concept_constraints(binding.owner, expr->span, type_bindings);
+  }
 
   // Substitute what this call bound into the return type.  The bindings
   // are this call's own — inference above fills only the parameters it
@@ -3305,7 +3471,6 @@ auto TypeChecker::check_call(const Expr* expr) -> const Type* {
   // apply by position, as the signature was written.
   return substitute_generics(fn_type->return_type(), type_bindings);
 }
-
 
 /// A declaration's own parameters as types, in order: what a generic
 /// class or enum stands instantiated with inside its own body.
@@ -3483,11 +3648,13 @@ auto TypeChecker::check_construct(const Expr* expr, const TypeStruct* struct_typ
     }
   }
 
+  verify_concept_constraints(class_decl, expr->span, type_bindings);
+
   // Even with nothing bound the construction is recorded: a class whose
   // parameters no argument reaches (`class Tag<T>: text: string`) leaves
   // all of them open for its context.
-  return with_inferred_args(expr, substitute_generics(struct_type, type_bindings),
-                            struct_type->decl_id(), type_bindings);
+  return with_inferred_args(
+      expr, substitute_generics(struct_type, type_bindings), struct_type->decl_id(), type_bindings);
 }
 
 // ---------------------------------------------------------------------------

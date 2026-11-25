@@ -8,6 +8,7 @@
 
 #include "frontend/module/program.h"
 #include "frontend/module/source_map.h"
+#include "frontend/resolve/scope.h"
 #include "frontend/types/type.h"
 #include "frontend/types/type_ownership.h"
 #include "frontend/types/type_printer.h"
@@ -292,6 +293,9 @@ struct SpecKeyHash {
 /// has already made, and the spellings their names give type arguments.
 struct SpecializationState {
   std::unordered_map<SpecKey, MirFunction*, SpecKeyHash> cache;
+  std::unordered_map<const MirFunction*, const ModuleInfo*> origin_module;
+  std::unordered_map<std::string, MirFunction*> derived_fns;
+  std::unordered_set<const MirFunction*> fixed_up;
   MangledTypeNames names;
 };
 
@@ -409,13 +413,226 @@ auto clone_function(const MirFunction* src, const TypeSubst& subst,
 // mangled extend method, looking it up in the module's function list.
 // ---------------------------------------------------------------------------
 
-void fixup_method_calls(MirFunction* fn, const MirModule& module,
-                        MirContext& ctx, TypeContext& types) {
+auto is_inherent_method_symbol(const Symbol* sym) -> bool {
+  if (sym == nullptr || sym->module == nullptr) {
+    return true;
+  }
+  return sym->module->exports != nullptr && sym->module->exports->lookup_local(sym->name) == sym;
+}
+
+auto has_struct_field(const TypeStruct* st, std::string_view name) -> bool {
+  for (const auto& field : st->fields()) {
+    if (field.name == name) {
+      return true;
+    }
+  }
+  return false;
+}
+
+auto make_synth_inst(MirContext& ctx,
+                     MirValueId result,
+                     const Type* type,
+                     Span span,
+                     MirPayload payload) -> MirInst* {
+  auto* inst = ctx.alloc<MirInst>();
+  inst->result = result;
+  inst->type = type;
+  inst->span = span;
+  inst->payload = std::move(payload);
+  return inst;
+}
+
+auto fixup_method_calls(MirFunction* fn,
+                        const ModuleInfo* origin_module,
+                        SpecializationState& state,
+                        MirModule& module,
+                        MirContext& ctx,
+                        TypeContext& types) -> bool;
+
+auto synthesize_derived_method(const TypeStruct* st,
+                               std::string_view method_kind,
+                               const ModuleInfo* origin_module,
+                               SpecializationState& state,
+                               MirModule& module,
+                               MirContext& ctx,
+                               TypeContext& types) -> MirFunction* {
+  std::string cache_key = type_identity_key(st) + "#" + std::string(method_kind);
+  if (auto it = state.derived_fns.find(cache_key); it != state.derived_fns.end()) {
+    return it->second;
+  }
+
+  Span span = st->decl_id() != nullptr ? st->decl_id()->span : Span{};
+  auto* name_str = ctx.alloc<std::string>(
+      state.names.mangle(std::string(st->name()) + "." + std::string(method_kind), {st}));
+  auto* fn_sym = ctx.alloc<Symbol>();
+  fn_sym->kind = SymbolKind::Function;
+  fn_sym->name = std::string_view(*name_str);
+  fn_sym->decl_span = span;
+  fn_sym->decl = st->decl_id();
+  fn_sym->module = nullptr;
+
+  auto* synth_fn = ctx.alloc<MirFunction>();
+  synth_fn->symbol = fn_sym;
+  synth_fn->span = span;
+  state.derived_fns.emplace(std::move(cache_key), synth_fn);
+  state.fixed_up.insert(synth_fn);
+  module.functions.push_back(synth_fn);
+
+  uint32_t next_val = 0;
+  auto fresh_val = [&]() -> MirValueId { return MirValueId{next_val++}; };
+
+  if (method_kind == "eq") {
+    const auto* bool_ty = types.bool_type();
+    synth_fn->return_type = bool_ty;
+    synth_fn->locals.push_back({LocalId{0}, nullptr, st, span, /*is_param=*/true});
+    synth_fn->locals.push_back({LocalId{1}, nullptr, st, span, /*is_param=*/true});
+
+    auto* entry = ctx.alloc<MirBlock>();
+    entry->id = BlockId{0};
+    synth_fn->blocks.push_back(entry);
+
+    if (st->fields().empty()) {
+      auto tval = fresh_val();
+      entry->insts.push_back(make_synth_inst(ctx, tval, bool_ty, span, MirConstBool{true}));
+      entry->insts.push_back(
+          make_synth_inst(ctx, MirValueId{}, nullptr, span, MirReturn{tval, true}));
+      return synth_fn;
+    }
+
+    auto* self_place = ctx.alloc<MirPlace>(MirPlace{LocalId{0}, {}});
+    auto self_val = fresh_val();
+    entry->insts.push_back(make_synth_inst(ctx, self_val, st, span, MirLoad{self_place}));
+
+    auto* other_place = ctx.alloc<MirPlace>(MirPlace{LocalId{1}, {}});
+    auto other_val = fresh_val();
+    entry->insts.push_back(make_synth_inst(ctx, other_val, st, span, MirLoad{other_place}));
+
+    uint32_t next_blk = 1;
+    MirBlock* false_bb = nullptr;
+    if (st->fields().size() > 1) {
+      false_bb = ctx.alloc<MirBlock>();
+      false_bb->id = BlockId{next_blk++};
+      auto fval = fresh_val();
+      false_bb->insts.push_back(make_synth_inst(ctx, fval, bool_ty, span, MirConstBool{false}));
+      false_bb->insts.push_back(
+          make_synth_inst(ctx, MirValueId{}, nullptr, span, MirReturn{fval, true}));
+    }
+
+    MirBlock* cur_bb = entry;
+    for (size_t i = 0; i < st->fields().size(); ++i) {
+      const auto& f = st->fields()[i];
+      auto lhs_f = fresh_val();
+      cur_bb->insts.push_back(make_synth_inst(
+          ctx, lhs_f, f.type, span, MirFieldAccess{self_val, f.name, static_cast<uint32_t>(i)}));
+      auto rhs_f = fresh_val();
+      cur_bb->insts.push_back(make_synth_inst(
+          ctx, rhs_f, f.type, span, MirFieldAccess{other_val, f.name, static_cast<uint32_t>(i)}));
+
+      auto eq_callee = fresh_val();
+      cur_bb->insts.push_back(make_synth_inst(ctx,
+                                              eq_callee,
+                                              types.function_type({f.type}, bool_ty),
+                                              span,
+                                              MirFieldAccess{lhs_f, "eq", 0}));
+      auto* args = ctx.alloc<std::vector<MirValueId>>();
+      args->push_back(rhs_f);
+      auto eq_res = fresh_val();
+      cur_bb->insts.push_back(
+          make_synth_inst(ctx, eq_res, bool_ty, span, MirCall{eq_callee, args}));
+
+      if (i + 1 == st->fields().size()) {
+        cur_bb->insts.push_back(
+            make_synth_inst(ctx, MirValueId{}, nullptr, span, MirReturn{eq_res, true}));
+      } else {
+        auto* next_bb = ctx.alloc<MirBlock>();
+        next_bb->id = BlockId{next_blk++};
+        cur_bb->insts.push_back(make_synth_inst(
+            ctx, MirValueId{}, nullptr, span, MirCondBr{eq_res, next_bb->id, false_bb->id}));
+        synth_fn->blocks.push_back(next_bb);
+        cur_bb = next_bb;
+      }
+    }
+    if (false_bb != nullptr) {
+      synth_fn->blocks.push_back(false_bb);
+    }
+    fixup_method_calls(synth_fn, origin_module, state, module, ctx, types);
+    return synth_fn;
+  }
+
+  // method_kind == "hash"
+  const auto* i64_ty = types.builtin(BuiltinKind::I64);
+  synth_fn->return_type = i64_ty;
+  synth_fn->locals.push_back({LocalId{0}, nullptr, st, span, /*is_param=*/true});
+
+  const MirFunction* combine_fn = nullptr;
+  for (const auto* mod_fn : module.functions) {
+    if (mod_fn->symbol != nullptr && mod_fn->symbol->name == "combine_hash" &&
+        (mod_fn->symbol->module == nullptr || mod_fn->symbol->module->is_prelude)) {
+      combine_fn = mod_fn;
+      break;
+    }
+  }
+
+  auto* entry = ctx.alloc<MirBlock>();
+  entry->id = BlockId{0};
+  synth_fn->blocks.push_back(entry);
+
+  auto* self_place = ctx.alloc<MirPlace>(MirPlace{LocalId{0}, {}});
+  auto self_val = fresh_val();
+  entry->insts.push_back(make_synth_inst(ctx, self_val, st, span, MirLoad{self_place}));
+
+  auto acc = fresh_val();
+  entry->insts.push_back(
+      make_synth_inst(ctx, acc, i64_ty, span, MirConstInt{1469598103934665603LL}));
+
+  for (size_t i = 0; i < st->fields().size(); ++i) {
+    const auto& f = st->fields()[i];
+    auto fv = fresh_val();
+    entry->insts.push_back(make_synth_inst(
+        ctx, fv, f.type, span, MirFieldAccess{self_val, f.name, static_cast<uint32_t>(i)}));
+    auto hash_callee = fresh_val();
+    entry->insts.push_back(make_synth_inst(
+        ctx, hash_callee, types.function_type({}, i64_ty), span, MirFieldAccess{fv, "hash", 0}));
+    auto* empty_args = ctx.alloc<std::vector<MirValueId>>();
+    auto fh = fresh_val();
+    entry->insts.push_back(
+        make_synth_inst(ctx, fh, i64_ty, span, MirCall{hash_callee, empty_args}));
+
+    if (combine_fn != nullptr) {
+      auto comb_callee = fresh_val();
+      entry->insts.push_back(make_synth_inst(ctx,
+                                             comb_callee,
+                                             types.function_type({i64_ty, i64_ty}, i64_ty),
+                                             span,
+                                             MirFnRef{combine_fn->symbol}));
+      auto* comb_args = ctx.alloc<std::vector<MirValueId>>();
+      comb_args->push_back(acc);
+      comb_args->push_back(fh);
+      auto next_acc = fresh_val();
+      entry->insts.push_back(
+          make_synth_inst(ctx, next_acc, i64_ty, span, MirCall{comb_callee, comb_args}));
+      acc = next_acc;
+    } else {
+      acc = fh;
+    }
+  }
+  entry->insts.push_back(make_synth_inst(ctx, MirValueId{}, nullptr, span, MirReturn{acc, true}));
+  fixup_method_calls(synth_fn, origin_module, state, module, ctx, types);
+  return synth_fn;
+}
+
+auto fixup_method_calls(MirFunction* fn,
+                        const ModuleInfo* origin_module,
+                        SpecializationState& state,
+                        MirModule& module,
+                        MirContext& ctx,
+                        TypeContext& types) -> bool {
   // Build a name → (symbol, function) lookup from the module's functions.
   struct FnEntry {
     const Symbol* symbol;
     const MirFunction* mir_fn;
   };
+  bool rewrote = false;
   // Keyed by name, but a name is not unique across a program: two modules
   // may each extend `i32` with `local`, and one entry per name let a later
   // module's method answer for an earlier one's call.  Every candidate is
@@ -464,36 +681,58 @@ void fixup_method_calls(MirFunction* fn, const MirModule& module,
       if (vt_it != value_types.end()) {
         obj_type = vt_it->second;
       }
-
-      // Skip struct types — those are real field accesses.
-      if (obj_type == nullptr || obj_type->kind() == TypeKind::Struct) {
+      if (obj_type == nullptr) {
         continue;
+      }
+
+      // Real struct field reads stay as MirFieldAccess; only unresolved
+      // method-call callees on structs (`k.hash()`, `k.eq(other)`) rewrite.
+      if (obj_type->kind() == TypeKind::Struct) {
+        const auto* st = static_cast<const TypeStruct*>(obj_type);
+        if (!callee_uses.contains(inst->result.id) || has_struct_field(st, field->field)) {
+          continue;
+        }
       }
 
       // Build mangled method name: "<type>.<field>".
-      auto method_name =
-          print_type_name(obj_type) + "." + std::string(field->field);
-      auto sym_it = fn_by_name.find(method_name);
-      if (sym_it == fn_by_name.end()) {
-        continue;
-      }
-      // Innermost-first, as lookup is everywhere else
-      // (CONTRACT_MODULE_SYSTEM.md §7.4): the module's own `extend`
-      // shadows the prelude's.  HIR lists prelude functions before
-      // module functions, so "first visible" chose the prelude's method
-      // over a local one of the same name.
+      auto method_name = print_type_name(obj_type) + "." + std::string(field->field);
       const FnEntry* visible = nullptr;
-      for (const auto& candidate : sym_it->second) {
-        if (!extend_visible_from(candidate.symbol->module, from_module)) {
-          continue;
+      FnEntry synth_entry{};
+      auto sym_it = fn_by_name.find(method_name);
+      if (sym_it != fn_by_name.end()) {
+        // Innermost-first, as lookup is everywhere else
+        // (CONTRACT_MODULE_SYSTEM.md §7.4): inherent methods first, then
+        // the module's own `extend`, then the caller's or prelude's.
+        for (const auto& candidate : sym_it->second) {
+          const bool inherent = is_inherent_method_symbol(candidate.symbol);
+          const bool visible_here = inherent ||
+                                    extend_visible_from(candidate.symbol->module, from_module) ||
+                                    (origin_module != nullptr &&
+                                     extend_visible_from(candidate.symbol->module, origin_module));
+          if (!visible_here) {
+            continue;
+          }
+          if (inherent || candidate.symbol->module == from_module ||
+              (origin_module != nullptr && candidate.symbol->module == origin_module)) {
+            visible = &candidate;
+            break;
+          }
+          if (visible == nullptr) {
+            visible = &candidate;
+          }
         }
-        if (candidate.symbol->module == from_module) {
-          visible = &candidate;
-          break;
-        }
-        if (visible == nullptr) {
-          visible = &candidate;
-        }
+      }
+      if (visible == nullptr && obj_type->kind() == TypeKind::Struct &&
+          (field->field == "eq" || field->field == "hash")) {
+        auto* synth_fn = synthesize_derived_method(static_cast<const TypeStruct*>(obj_type),
+                                                   field->field,
+                                                   origin_module,
+                                                   state,
+                                                   module,
+                                                   ctx,
+                                                   types);
+        synth_entry = {synth_fn->symbol, synth_fn};
+        visible = &synth_entry;
       }
       if (visible == nullptr) {
         continue;
@@ -507,15 +746,17 @@ void fixup_method_calls(MirFunction* fn, const MirModule& module,
       // Update the instruction type to the method's function type,
       // matching what MirBuilder would produce for a direct FnRef.
       inst->payload = MirFnRef{entry.symbol};
+      rewrote = true;
 
       // Build the function type from the extend method's MIR signature.
       std::vector<const Type*> param_types;
       for (const auto& local : entry.mir_fn->locals) {
-        if (!local.is_param) { break; }
+        if (!local.is_param) {
+          break;
+        }
         param_types.push_back(local.type);
       }
-      inst->type = types.function_type(
-          std::move(param_types), entry.mir_fn->return_type);
+      inst->type = types.function_type(std::move(param_types), entry.mir_fn->return_type);
 
       // Find the MirCall(s) that use this instruction's result as callee
       // and prepend the object as the first argument (self).
@@ -534,6 +775,7 @@ void fixup_method_calls(MirFunction* fn, const MirModule& module,
       }
     }
   }
+  return rewrote;
 }
 
 // ---------------------------------------------------------------------------
@@ -841,6 +1083,7 @@ auto explicit_arg_binder(const MirFnRef* fn_ref, const MirCall* call) -> const D
 
 auto specialize_call_site(MirInst* inst,
                           MirFnRef* fn_ref,
+                          const ModuleInfo* caller_module,
                           const std::unordered_map<uint32_t, const MirCall*>& calls_by_callee,
                           const std::unordered_map<uint32_t, const Type*>& value_types,
                           const std::unordered_map<const Symbol*, MirFunction*>& generic_fns,
@@ -946,11 +1189,14 @@ auto specialize_call_site(MirInst* inst,
       git->second->symbol->module; // an instantiation belongs to its template's module
 
   // Clone the generic function with type substitution.
-  auto* specialized =
-      clone_function(git->second, subst, new_sym, ctx, types);
+  auto* specialized = clone_function(git->second, subst, new_sym, ctx, types);
+  if (caller_module != nullptr && !caller_module->is_prelude) {
+    state.origin_module[specialized] = caller_module;
+  }
+  state.fixed_up.insert(specialized);
 
   // Resolve method calls on newly-concrete types.
-  fixup_method_calls(specialized, module, ctx, types);
+  fixup_method_calls(specialized, caller_module, state, module, ctx, types);
 
   // Register in cache and add to module.
   state.cache[key] = specialized;
@@ -1423,6 +1669,15 @@ auto monomorphize(
     const size_t fn_count = module.functions.size();
     for (size_t fn_idx = 0; fn_idx < fn_count; ++fn_idx) {
       auto* fn = module.functions[fn_idx];
+      const ModuleInfo* fn_origin = fn->symbol != nullptr ? fn->symbol->module : nullptr;
+      if (auto oit = state.origin_module.find(fn); oit != state.origin_module.end()) {
+        fn_origin = oit->second;
+      }
+      if (state.fixed_up.insert(fn).second) {
+        if (fixup_method_calls(fn, fn_origin, state, module, ctx, types)) {
+          changed = true;
+        }
+      }
 
       // Copies out of a domain first, per concrete type, so that what a
       // copy_out call becomes is what gets specialized below.
@@ -1437,8 +1692,7 @@ auto monomorphize(
       auto calls_by_callee = build_call_index(fn);
 
       for (auto* block : fn->blocks) {
-        for (size_t inst_idx = 0; inst_idx < block->insts.size();
-             ++inst_idx) {
+        for (size_t inst_idx = 0; inst_idx < block->insts.size(); ++inst_idx) {
           auto* inst = block->insts[inst_idx];
           auto* fn_ref = std::get_if<MirFnRef>(&inst->payload);
           if (fn_ref == nullptr) {
@@ -1447,6 +1701,7 @@ auto monomorphize(
 
           if (specialize_call_site(inst,
                                    fn_ref,
+                                   fn_origin,
                                    calls_by_callee,
                                    value_types,
                                    generic_templates,

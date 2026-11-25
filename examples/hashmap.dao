@@ -1,9 +1,28 @@
 module hashmap
-// hashmap.dao — HashMap<V> smoke test.
+// hashmap.dao — Generic HashMap<K, V> across string, integer, composite,
+// custom-hashed, and arena-escaping keys.
 
 class Entry:
   name: string
   value: i32
+
+class EdgeKey:
+  from_node: i64
+  to_node: i64
+
+class LabeledEdge:
+  edge: EdgeKey
+  label: string
+
+class CaseFoldTag:
+  code: i64
+  raw: string
+
+extend CaseFoldTag as Equatable:
+  fn eq(self, other: CaseFoldTag): bool -> self.code == other.code
+
+extend CaseFoldTag as Hashable:
+  fn hash(self): i64 -> self.code.hash()
 
 fn show_entry(label: string, result: Option<Entry>): i32
   match result:
@@ -13,59 +32,76 @@ fn show_entry(label: string, result: Option<Entry>): i32
       print(label + " not found")
   return 0
 
-fn main(): i32
-  print("=== HashMap<V> ===")
+fn build_escaped_edges(prefix: string): HashMap<LabeledEdge, Vector<string>>
+  let out: HashMap<LabeledEdge, Vector<string>> = HashMap<LabeledEdge, Vector<string>>::new()
+  resource memory Scratch =>
+    let local: HashMap<LabeledEdge, Vector<string>> = HashMap<LabeledEdge, Vector<string>>::new()
+    let k1: LabeledEdge = LabeledEdge(EdgeKey(to_i64(1), to_i64(2)), prefix + ":alpha")
+    let v1: Vector<string> = Vector<string>::new().push(prefix + "-hop-1").push(prefix + "-hop-2")
+    local = local.set(k1, v1)
+    let k2: LabeledEdge = LabeledEdge(EdgeKey(to_i64(2), to_i64(3)), prefix + ":beta")
+    let v2: Vector<string> = Vector<string>::new().push(prefix + "-hop-3")
+    local = local.set(k2, v2)
+    out = local
+  return out
 
-  let m = HashMap<Entry>::new()
+fn main(): i32
+  print("=== HashMap<K, V> ===")
+
+  // 1. String keys.
+  let m = HashMap<string, Entry>::new()
   m = m.set("x", Entry("x", 10))
   m = m.set("y", Entry("y", 20))
   m = m.set("z", Entry("z", 30))
-
   print("length: " + i64_to_string(m.length()))
 
-  // Option-based lookup.
   let unused1: i32 = show_entry("x", m.get("x"))
   let unused2: i32 = show_entry("y", m.get("y"))
   let unused3: i32 = show_entry("w", m.get("w"))
 
-  // Update existing key.
   m = m.set("x", Entry("x", 99))
   let unused4: i32 = show_entry("x (updated)", m.get("x"))
 
-  // Many inserts to trigger resize.
-  let big = HashMap<i32>::new()
-  big = big.set("a", 1)
-  big = big.set("b", 2)
-  big = big.set("c", 3)
-  big = big.set("d", 4)
-  big = big.set("e", 5)
-  big = big.set("f", 6)
-  big = big.set("g", 7)
-  big = big.set("h", 8)
-  big = big.set("i", 9)
-  big = big.set("j", 10)
-  print("big length: " + i64_to_string(big.length()))
+  // 2. Integer keys (including 0, -1, and extrema) + deterministic order.
+  let max_i64: i64 = 9223372036854775807
+  let min_i64: i64 = -max_i64 - to_i64(1)
+  let imap = HashMap<i64, string>::new()
+  imap = imap.set(to_i64(0), "zero")
+  imap = imap.set(to_i64(-1), "neg_one")
+  imap = imap.set(min_i64, "min")
+  imap = imap.set(max_i64, "max")
+  imap = imap.set(to_i64(0), "zero_v2")
+  print("imap length: " + i64_to_string(imap.length()))
+  print("imap[0] = " + imap.get_or(to_i64(0), "?"))
+  print("imap[-1] = " + imap.get_or(to_i64(-1), "?"))
+  print("imap[min] = " + imap.get_or(min_i64, "?"))
+  print("imap[max] = " + imap.get_or(max_i64, "?"))
 
-  let rj: Option<i32> = big.get("j")
-  match rj:
-    Option::Some(v):
-      print("j = " + i32_to_string(v))
-    Option::None:
-      print("j not found")
+  // 3. Zero-boilerplate composite EdgeKey (derived Equatable + Hashable).
+  let edges = HashMap<EdgeKey, string>::new()
+  let snapshot0 = edges.set(EdgeKey(to_i64(10), to_i64(20)), "direct")
+  edges = snapshot0.set(EdgeKey(to_i64(20), to_i64(10)), "reverse")
+  edges = edges.set(EdgeKey(to_i64(10), to_i64(20)), "upgraded")
+  print("snapshot0 (10->20): " + snapshot0.get_or(EdgeKey(to_i64(10), to_i64(20)), "none"))
+  print("edges (10->20): " + edges.get_or(EdgeKey(to_i64(10), to_i64(20)), "none"))
+  print("edges (20->10): " + edges.get_or(EdgeKey(to_i64(20), to_i64(10)), "none"))
+  let e_entries: Vector<MapEntry<EdgeKey, string>> = edges.entries()
+  print("edge entries: " + i64_to_string(e_entries.length()))
 
-  let ra: Option<i32> = big.get("a")
-  match ra:
-    Option::Some(v):
-      print("a = " + i32_to_string(v))
-    Option::None:
-      print("a not found")
+  // 4. Explicit custom Hashable + Equatable conformance.
+  let tags = HashMap<CaseFoldTag, i64>::new()
+  tags = tags.set(CaseFoldTag(to_i64(7), "HTTP"), to_i64(80))
+  tags = tags.set(CaseFoldTag(to_i64(7), "http"), to_i64(443))
+  print("tags length: " + i64_to_string(tags.length()))
+  print("tags[7] = " + i64_to_string(tags.get_or(CaseFoldTag(to_i64(7), "Http"), to_i64(-1))))
 
-  // Missing key returns None.
-  let rm: Option<i32> = big.get("missing")
-  match rm:
-    Option::Some(v):
-      print("missing found (unexpected)")
+  // 5. Resource escape of composite keys AND values owning heap memory.
+  let escaped = build_escaped_edges("net")
+  let probe_k = LabeledEdge(EdgeKey(to_i64(1), to_i64(2)), "net:alpha")
+  match escaped.get(probe_k):
+    Option::Some(hops):
+      print("escaped hops: " + i64_to_string(hops.length()) + " first=" + hops.get(0))
     Option::None:
-      print("missing = None (correct)")
+      print("escaped missing")
 
   return 0

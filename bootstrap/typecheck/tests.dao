@@ -78,8 +78,8 @@ fn tc_count_types(result: TypeCheckResult): i64
 
 // A dispatch index holding one extend method of type 2 (`i32`) from the
 // prelude (symbol 0) and one from module 0 (symbol 1).
-fn test_dispatch_index(): HashMap<i64>
-  let m: HashMap<i64> = HashMap<i64>::new()
+fn test_dispatch_index(): HashMap<string, i64>
+  let m: HashMap<string, i64> = HashMap<string, i64>::new()
   m = m.set(dispatch_key_extend(to_i64(2), "show", conform_everywhere()), to_i64(0))
   m = m.set(dispatch_key_extend(to_i64(2), "show", to_i64(0)), to_i64(1))
   return m
@@ -143,7 +143,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 350
+  let total: i32 = 353
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -1806,11 +1806,11 @@ fn main(): i32
     pass_count = pass_count + 1
   if tc_expect_some_diag_containing("call_bound_violated_rejected", "concept Show:\n  fn show(self): string\n\nclass Plain:\n  n: i32\n\nfn need<T: Show>(x: T): string -> x.show()\n\nfn f(): string -> need(Plain(1))\n", "does not satisfy concept 'Show' required by generic parameter 'T'"):
     pass_count = pass_count + 1
-  if tc_expect_some_diag_containing("call_bound_not_forwarded_from_parameter", "concept Show:\n  fn show(self): string\n\nfn need<T: Show>(x: T): string -> x.show()\n\nfn forwarded<U: Show>(u: U): string -> need(u)\n", "does not satisfy concept 'Show' required by generic parameter 'T'"):
+  if tc_expect_clean("call_bound_forwarded_from_parameter", "concept Show:\n  fn show(self): string\n\nfn need<T: Show>(x: T): string -> x.show()\n\nfn forwarded<U: Show>(u: U): string -> need(u)\n"):
     pass_count = pass_count + 1
-  // A construction is held to no bound (host parity: only a call of a
-  // function decides parameters that owe one), whatever it decided.
-  if tc_expect_clean("construction_owes_no_bound", "concept Show:\n  fn show(self): string\n\nclass Plain:\n  n: i32\n\nclass Tagged<T: Show, U>:\n  value: T\n\nfn f(): i32\n  let t = Tagged(Plain(1))\n  return 0\n"):
+  // Class construction verifies the class's declared generic bounds
+  // against decided type arguments (host parity).
+  if tc_expect_some_diag_containing("construction_enforces_class_bound", "concept Show:\n  fn show(self): string\n\nclass Plain:\n  n: i32\n\nclass Tagged<T: Show, U>:\n  value: T\n\nfn f(): i32\n  let t = Tagged(Plain(1))\n  return 0\n", "does not satisfy concept 'Show' required by generic parameter 'T'"):
     pass_count = pass_count + 1
   if tc_expect_clean("bounded_class_reconstructs_its_own_value", "concept Show:\n  fn show(self): string\n\nclass Box<T: Show>:\n  value: T\n  fn again(self): i32\n    let b: Box<T> = Box(self.value)\n    return 0\n"):
     pass_count = pass_count + 1
@@ -2186,6 +2186,14 @@ fn main(): i32
   if tc_expect_program_errors("qualified_call_names_the_overload_of_its_arity", Vector<graph::SourceInput>::new().push(graph::SourceInput("lib.dao", "module lib::m\nfn g(a: i32): i32 -> a\nfn g(a: i32, b: i32): i32 -> a + b\n", false)), "module app::main\nimport lib::m\n\nfn f(): i32 -> m::g(1) + m::g(1, 2)\n", "main.dao", 0):
     pass_count = pass_count + 1
   if tc_expect_program_errors("prelude_overload_export_is_its_own_module", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/one.dao", "module core::one\nfn g(a: i32): i32 -> a\n", true)).push(graph::SourceInput("stdlib/core/two.dao", "module core::two\nfn g(a: i32, b: i32): i32 -> a + b\n", true)), "module app::main\nimport core::two\n\nfn f(): i32 -> two::g(1)\n", "main.dao", 1):
+    pass_count = pass_count + 1
+
+  // Class-level generic bounds and Hashable/Equatable coherence (host parity).
+  if tc_expect_some_diag_containing("class_static_call_enforces_class_bounds", "concept Hashable:\n  fn hash(self): i64\n\nclass Map<K: Hashable>:\n  n: i64\n  fn empty(): Map<K> -> Map(to_i64(0))\n\nfn f(): Map<f64> -> Map<f64>::empty()\n", "does not satisfy concept 'Hashable'"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("hashable_requires_equatable_coherence", "derived concept Equatable:\n  fn eq(self, other: Equatable): bool\n\nderived concept Hashable:\n  fn hash(self): i64\n\nclass RawFloat:\n  x: f64\n\nextend RawFloat as Hashable:\n  fn hash(self): i64 -> to_i64(1)\n", "cannot conform to 'Hashable' without conforming to 'Equatable'"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("custom_equatable_blocks_derived_hashable", "derived concept Equatable:\n  fn eq(self, other: Equatable): bool\n\nderived concept Hashable:\n  fn hash(self): i64\n\nextend i64 as Equatable:\n  fn eq(self, other: i64): bool -> self == other\n\nextend i64 as Hashable:\n  fn hash(self): i64 -> self\n\nclass CustomEq:\n  id: i64\n\nextend CustomEq as Equatable:\n  fn eq(self, other: CustomEq): bool -> self.id == other.id\n\nfn need_hash<K: Hashable>(k: K): i64 -> k.hash()\n\nfn f(): i64 -> need_hash(CustomEq(to_i64(1)))\n", "does not satisfy concept 'Hashable'"):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------

@@ -33,12 +33,12 @@ enum ScopeKind:
 class Scope:
   kind: ScopeKind
   parent: i64
-  decls: HashMap<i64>
+  decls: HashMap<string, i64>
 
-// Wrapper for HashMap<i64> to avoid nested-generic issues in the
-// bootstrap compiler's type system (Vector<HashMap<i64>> not supported).
+// Wrapper for HashMap<string, i64> to avoid nested-generic issues in the
+// bootstrap compiler's type system (Vector<HashMap<string, i64>> not supported).
 class ExportTable:
-  entries: HashMap<i64>
+  entries: HashMap<string, i64>
 
 class ExportTables:
   tables: Vector<ExportTable>
@@ -85,7 +85,7 @@ fn rs_add_symbol(rs: RS, sym: Symbol): SymR
 
 fn rs_push_scope(rs: RS, kind: ScopeKind): ScopeR
   let idx: i64 = rs.scopes.length()
-  rs.scopes = rs.scopes.push(Scope(kind, rs.current_scope, HashMap<i64>::new()))
+  rs.scopes = rs.scopes.push(Scope(kind, rs.current_scope, HashMap<string, i64>::new()))
   rs.current_scope = idx
   return ScopeR(rs, idx)
 
@@ -1207,16 +1207,16 @@ fn resolve(src: string): ResolveResult
 class ProgramResolveResult:
   symbols: Vector<Symbol>
   scopes: Vector<Scope>
-  uses: HashMap<i64>      // keyed by uses_key(file_id, tok_idx) → sym_idx
+  uses: HashMap<string, i64>      // keyed by uses_key(file_id, tok_idx) → sym_idx
   diags: Vector<graph::FileDiagnostic>
   module_exports: ExportTables
-  extend_concept_bindings: HashMap<i64>
+  extend_concept_bindings: HashMap<string, i64>
 
 // Build export table by walking the file's declarations and looking up
 // each declared name in the scope.  This exports only the module's own
 // top-level declarations (Function, Type), not builtins or import bindings.
-fn build_export_table(rs: RS, file_node_idx: i64): HashMap<i64>
-  let exports: HashMap<i64> = HashMap<i64>::new()
+fn build_export_table(rs: RS, file_node_idx: i64): HashMap<string, i64>
+  let exports: HashMap<string, i64> = HashMap<string, i64>::new()
   let file_node: parser::Node = rs.rc.nodes.get(file_node_idx)
   match file_node:
     parser::Node::FileN(module_decl, imports_lp, decls_lp):
@@ -1292,19 +1292,19 @@ fn resolve_program(pg: graph::ProgramGraph): ProgramResolveResult
   // with file provenance.  Module exports accumulate per-module.
   let all_symbols: Vector<Symbol> = Vector<Symbol>::new()
   let all_scopes: Vector<Scope> = Vector<Scope>::new()
-  let all_uses: HashMap<i64> = HashMap<i64>::new()
+  let all_uses: HashMap<string, i64> = HashMap<string, i64>::new()
   // Internal pair-format uses passed to RS; snapshot length before
   // each module to extract the per-module delta.
   let rs_uses: Vector<i64> = Vector<i64>::new()
   let all_diags: Vector<graph::FileDiagnostic> = Vector<graph::FileDiagnostic>::new()
   let export_tables: Vector<ExportTable> = Vector<ExportTable>::new()
   // D3: concept bindings accumulated during Pass 2 body resolution.
-  let all_extend_bindings: HashMap<i64> = HashMap<i64>::new()
+  let all_extend_bindings: HashMap<string, i64> = HashMap<string, i64>::new()
 
   // Initialize empty export tables for all modules.
   let mi: i64 = 0
   while mi < pg.modules.length():
-    export_tables = export_tables.push(ExportTable(HashMap<i64>::new()))
+    export_tables = export_tables.push(ExportTable(HashMap<string, i64>::new()))
     mi = mi + 1
 
   // Merge graph-level diagnostics.
@@ -1354,7 +1354,7 @@ fn resolve_program(pg: graph::ProgramGraph): ProgramResolveResult
     // Collect top-level declarations; the export table is the
     // module's own declarations, looked up where they were declared.
     rs = collect_top_level(rs, po.root)
-    let exports: HashMap<i64> = build_export_table(rs, po.root)
+    let exports: HashMap<string, i64> = build_export_table(rs, po.root)
     export_tables = export_tables.set(mid, ExportTable(exports))
     rs.current_scope = fsr.scope_idx
 
@@ -1500,10 +1500,10 @@ fn program_from_graph(pg: graph::ProgramGraph): Program
   let empty_resolve: ProgramResolveResult = ProgramResolveResult(
     Vector<Symbol>::new(),
     Vector<Scope>::new(),
-    HashMap<i64>::new(),
+    HashMap<string, i64>::new(),
     Vector<graph::FileDiagnostic>::new(),
     ExportTables(Vector<ExportTable>::new()),
-    HashMap<i64>::new())
+    HashMap<string, i64>::new())
   let empty_tc: TypeCheckData = TypeCheckData(false, Vector<DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), program_lookup_empty())
   let empty_hir: HirData = HirData(false, to_i64(-1), to_i64(0), to_i64(0))
   return Program(pg, empty_resolve, empty_tc, empty_hir, Vector<graph::FileDiagnostic>::new())
