@@ -143,7 +143,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 343
+  let total: i32 = 350
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -2106,6 +2106,24 @@ fn main(): i32
     pass_count = pass_count + 1
   if tc_expect_clean("alias_to_instantiated_enum_pattern", "enum class Opt<T>:\n  Some(value: T)\n  Nothing\n\ntype IntOpt = Opt<i32>\n\nfn f(o: IntOpt): i32\n  match o:\n    IntOpt::Some(v):\n      return v\n    IntOpt::Nothing:\n      return 0\n  return 0\n"):
     pass_count = pass_count + 1
+  if tc_expect_clean("fieldless_enum_equality_and_inequality_accepted", "enum Mode:\n  Fast\n  Exact\n\nfn same(a: Mode, b: Mode): bool -> (a == b) and !(a != b)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("fieldless_enum_class_equality_accepted", "enum class Token:\n  Start\n  Stop\n\nfn same(a: Token, b: Token): bool -> a == b\n"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("payload_enum_class_eq_rejected", "enum class Shape:\n  Dot\n  Circle(radius: i32)\n\nfn same(a: Shape, b: Shape): bool -> a == b\n", "equality comparison is not yet supported for payload-bearing enum 'Shape'"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("payload_enum_class_ne_rejected", "enum class Shape:\n  Dot\n  Circle(radius: i32)\n\nfn diff(a: Shape, b: Shape): bool -> a != b\n", "equality comparison is not yet supported for payload-bearing enum 'Shape'"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generic_payload_enum_class_eq_rejected", "enum class Opt<T>:\n  Some(value: T)\n  None\n\nfn same(a: Opt<i32>, b: Opt<i32>): bool -> a == b\n", "equality comparison is not yet supported for payload-bearing enum 'Opt'"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("generic_payload_enum_class_ne_rejected", "enum class Opt<T>:\n  Some(value: T)\n  None\n\nfn diff(a: Opt<i32>, b: Opt<i32>): bool -> a != b\n", "equality comparison is not yet supported for payload-bearing enum 'Opt'"):
+    pass_count = pass_count + 1
+  let eq_span_res: TypeCheckResult = typecheck("enum class Shape:\n  Circle(radius: i32)\n\nfn same(a: Shape, b: Shape): bool -> a == b\n")
+  if tc_count_diags(eq_span_res) == 1 and eq_span_res.diags.get(to_i64(0)).span.offset > 0 and eq_span_res.diags.get(to_i64(0)).span.length > 0:
+    print("PASS payload_enum_class_eq_preserves_span")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL payload_enum_class_eq_preserves_span")
 
   // Type arguments written after a member are the method's own
   // (host): they fix its parameters, are counted, and `<` that closes
