@@ -5268,8 +5268,934 @@ File
             Identifier to_i64
           Args
             IntLiteral 0
+  FunctionDecl parse_i32_arg
+    Param text: string
+    ReturnType: Result<i32, string>
+    LetStatement n: i64
+      CallExpr
+        Callee
+          Identifier length
+        Args
+          Identifier text
+    IfStatement
+      Condition
+        BinaryExpr ==
+          Identifier n
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 0
+      Then
+        ReturnStatement
+          CallExpr
+            Callee
+              QualifiedName Result::Err
+            Args
+              StringLiteral "empty integer argument"
+    LetStatement idx: i64
+      CallExpr
+        Callee
+          Identifier to_i64
+        Args
+          IntLiteral 0
+    LetStatement neg: bool
+      BoolLiteral false
+    IfStatement
+      Condition
+        BinaryExpr ==
+          CallExpr
+            Callee
+              Identifier char_at
+            Args
+              Identifier text
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 0
+          IntLiteral 45
+      Then
+        Assignment
+          Target
+            Identifier neg
+          Value
+            BoolLiteral true
+        Assignment
+          Target
+            Identifier idx
+          Value
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 1
+      Else
+        IfStatement
+          Condition
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  Identifier char_at
+                Args
+                  Identifier text
+                  CallExpr
+                    Callee
+                      Identifier to_i64
+                    Args
+                      IntLiteral 0
+              IntLiteral 43
+          Then
+            Assignment
+              Target
+                Identifier idx
+              Value
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 1
+    IfStatement
+      Condition
+        BinaryExpr >=
+          Identifier idx
+          Identifier n
+      Then
+        ReturnStatement
+          CallExpr
+            Callee
+              QualifiedName Result::Err
+            Args
+              BinaryExpr +
+                StringLiteral "missing digits in "
+                Identifier text
+    LetStatement acc: i64
+      CallExpr
+        Callee
+          Identifier to_i64
+        Args
+          IntLiteral 0
+    LetStatement max_pos: i64
+      CallExpr
+        Callee
+          Identifier to_i64
+        Args
+          IntLiteral 2147483647
+    LetStatement max_neg_mag: i64
+      BinaryExpr +
+        Identifier max_pos
+        CallExpr
+          Callee
+            Identifier to_i64
+          Args
+            IntLiteral 1
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier idx
+          Identifier n
+      LetStatement ch: i32
+        CallExpr
+          Callee
+            Identifier char_at
+          Args
+            Identifier text
+            Identifier idx
+      IfStatement
+        Condition
+          BinaryExpr or
+            BinaryExpr <
+              Identifier ch
+              IntLiteral 48
+            BinaryExpr >
+              Identifier ch
+              IntLiteral 57
+        Then
+          ReturnStatement
+            CallExpr
+              Callee
+                QualifiedName Result::Err
+              Args
+                BinaryExpr +
+                  StringLiteral "invalid integer argument "
+                  Identifier text
+      LetStatement digit: i64
+        CallExpr
+          Callee
+            Identifier to_i64
+          Args
+            BinaryExpr -
+              Identifier ch
+              IntLiteral 48
+      Assignment
+        Target
+          Identifier acc
+        Value
+          BinaryExpr +
+            BinaryExpr *
+              Identifier acc
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 10
+            Identifier digit
+      IfStatement
+        Condition
+          Identifier neg
+        Then
+          IfStatement
+            Condition
+              BinaryExpr >
+                Identifier acc
+                Identifier max_neg_mag
+            Then
+              ReturnStatement
+                CallExpr
+                  Callee
+                    QualifiedName Result::Err
+                  Args
+                    BinaryExpr +
+                      StringLiteral "i32 argument out of range "
+                      Identifier text
+        Else
+          IfStatement
+            Condition
+              BinaryExpr >
+                Identifier acc
+                Identifier max_pos
+            Then
+              ReturnStatement
+                CallExpr
+                  Callee
+                    QualifiedName Result::Err
+                  Args
+                    BinaryExpr +
+                      StringLiteral "i32 argument out of range "
+                      Identifier text
+      Assignment
+        Target
+          Identifier idx
+        Value
+          BinaryExpr +
+            Identifier idx
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 1
+    IfStatement
+      Condition
+        Identifier neg
+      Then
+        ReturnStatement
+          CallExpr
+            Callee
+              QualifiedName Result::Ok
+            Args
+              CallExpr
+                Callee
+                  Identifier i64_to_i32
+                Args
+                  BinaryExpr -
+                    CallExpr
+                      Callee
+                        Identifier to_i64
+                      Args
+                        IntLiteral 0
+                    Identifier acc
+    ReturnStatement
+      CallExpr
+        Callee
+          QualifiedName Result::Ok
+        Args
+          CallExpr
+            Callee
+              Identifier i64_to_i32
+            Args
+              Identifier acc
+  FunctionDecl format_i32_csv
+    Param values: Vector<i32>
+    ReturnType: string
+    LetStatement b: Builder
+      CallExpr
+        Callee
+          QualifiedName Builder::new
+    LetStatement i: i64
+      CallExpr
+        Callee
+          Identifier to_i64
+        Args
+          IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier values
+      IfStatement
+        Condition
+          BinaryExpr >
+            Identifier i
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 0
+        Then
+          Assignment
+            Target
+              Identifier b
+            Value
+              CallExpr
+                Callee
+                  FieldExpr .push_char
+                    Identifier b
+                Args
+                  IntLiteral 44
+      Assignment
+        Target
+          Identifier b
+        Value
+          CallExpr
+            Callee
+              FieldExpr .push
+                Identifier b
+            Args
+              CallExpr
+                Callee
+                  Identifier i32_to_string
+                Args
+                  CallExpr
+                    Callee
+                      FieldExpr .get
+                        Identifier values
+                    Args
+                      Identifier i
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 1
+    ReturnStatement
+      CallExpr
+        Callee
+          FieldExpr .to_string
+            Identifier b
+  FunctionDecl format_i32_lines
+    Param values: Vector<i32>
+    ReturnType: string
+    LetStatement b: Builder
+      CallExpr
+        Callee
+          QualifiedName Builder::new
+    LetStatement i: i64
+      CallExpr
+        Callee
+          Identifier to_i64
+        Args
+          IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier values
+      Assignment
+        Target
+          Identifier b
+        Value
+          CallExpr
+            Callee
+              FieldExpr .push
+                Identifier b
+            Args
+              CallExpr
+                Callee
+                  Identifier i32_to_string
+                Args
+                  CallExpr
+                    Callee
+                      FieldExpr .get
+                        Identifier values
+                    Args
+                      Identifier i
+      Assignment
+        Target
+          Identifier b
+        Value
+          CallExpr
+            Callee
+              FieldExpr .push_char
+                Identifier b
+            Args
+              IntLiteral 10
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 1
+    ReturnStatement
+      CallExpr
+        Callee
+          FieldExpr .to_string
+            Identifier b
+  FunctionDecl run_cli_oracle
+    Param cli: Vector<string>
+    ReturnType: i32
+    LetStatement cmd: string
+      CallExpr
+        Callee
+          FieldExpr .get
+            Identifier cli
+        Args
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 1
+    IfStatement
+      Condition
+        BinaryExpr and
+          BinaryExpr ==
+            Identifier cmd
+            StringLiteral "--oracle-domain"
+          BinaryExpr ==
+            CallExpr
+              Callee
+                FieldExpr .length
+                  Identifier cli
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 2
+      Then
+        LetStatement sample_winds: Vector<i32>
+          CallExpr
+            Callee
+              FieldExpr .push
+                CallExpr
+                  Callee
+                    FieldExpr .push
+                      CallExpr
+                        Callee
+                          Identifier Vector.new
+                        TypeArgs
+                          i32
+                  Args
+                    IntLiteral 8
+            Args
+              IntLiteral 12
+        LetStatement sample_eta: Vector<i32>
+          CallExpr
+            Callee
+              Identifier predict_batch
+            Args
+              Identifier sample_winds
+        LetStatement sample_audit: Vector<i32>
+          CallExpr
+            Callee
+              FieldExpr .push
+                CallExpr
+                  Callee
+                    FieldExpr .push
+                      CallExpr
+                        Callee
+                          Identifier Vector.new
+                        TypeArgs
+                          i32
+                  Args
+                    CallExpr
+                      Callee
+                        Identifier score_v1
+                      Args
+                        IntLiteral 8
+            Args
+              CallExpr
+                Callee
+                  Identifier score_v1
+                Args
+                  IntLiteral 12
+        LetStatement domain_winds: Vector<i32>
+          CallExpr
+            Callee
+              Identifier Vector.new
+            TypeArgs
+              i32
+        LetStatement w: i32
+          IntLiteral 0
+        WhileStatement
+          Condition
+            BinaryExpr <=
+              Identifier w
+              IntLiteral 1000
+          Assignment
+            Target
+              Identifier domain_winds
+            Value
+              CallExpr
+                Callee
+                  FieldExpr .push
+                    Identifier domain_winds
+                Args
+                  Identifier w
+          Assignment
+            Target
+              Identifier w
+            Value
+              BinaryExpr +
+                Identifier w
+                IntLiteral 1
+        LetStatement domain_eta: Vector<i32>
+          CallExpr
+            Callee
+              Identifier predict_batch
+            Args
+              Identifier domain_winds
+        ExpressionStatement
+          CallExpr
+            Callee
+              Identifier print
+            Args
+              BinaryExpr +
+                StringLiteral "sample_eta\t"
+                CallExpr
+                  Callee
+                    Identifier format_i32_csv
+                  Args
+                    Identifier sample_eta
+        ExpressionStatement
+          CallExpr
+            Callee
+              Identifier print
+            Args
+              BinaryExpr +
+                StringLiteral "sample_audit_score\t"
+                CallExpr
+                  Callee
+                    Identifier format_i32_csv
+                  Args
+                    Identifier sample_audit
+        ExpressionStatement
+          CallExpr
+            Callee
+              Identifier print
+            Args
+              BinaryExpr +
+                StringLiteral "domain_eta\t"
+                CallExpr
+                  Callee
+                    Identifier format_i32_csv
+                  Args
+                    Identifier domain_eta
+        ReturnStatement
+          IntLiteral 0
+    IfStatement
+      Condition
+        BinaryExpr and
+          BinaryExpr ==
+            Identifier cmd
+            StringLiteral "--oracle-cycled"
+          BinaryExpr ==
+            CallExpr
+              Callee
+                FieldExpr .length
+                  Identifier cli
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 4
+      Then
+        LetStatement rows: i32
+          IntLiteral 0
+        MatchStatement
+          Scrutinee
+            CallExpr
+              Callee
+                Identifier parse_i32_arg
+              Args
+                CallExpr
+                  Callee
+                    FieldExpr .get
+                      Identifier cli
+                  Args
+                    CallExpr
+                      Callee
+                        Identifier to_i64
+                      Args
+                        IntLiteral 2
+          Arm
+            Pattern
+              QualifiedName Result::Ok
+            Assignment
+              Target
+                Identifier rows
+              Value
+                Identifier v
+          Arm
+            Pattern
+              QualifiedName Result::Err
+            ExpressionStatement
+              CallExpr
+                Callee
+                  Identifier eprint
+                Args
+                  BinaryExpr +
+                    StringLiteral "forecast_plans: "
+                    Identifier err
+            ReturnStatement
+              IntLiteral 2
+        IfStatement
+          Condition
+            BinaryExpr <=
+              Identifier rows
+              IntLiteral 0
+          Then
+            ExpressionStatement
+              CallExpr
+                Callee
+                  Identifier eprint
+                Args
+                  StringLiteral "forecast_plans: rows must be positive"
+            ReturnStatement
+              IntLiteral 2
+        LetStatement winds: Vector<i32>
+          CallExpr
+            Callee
+              Identifier Vector.new
+            TypeArgs
+              i32
+        LetStatement r: i32
+          IntLiteral 0
+        WhileStatement
+          Condition
+            BinaryExpr <
+              Identifier r
+              Identifier rows
+          Assignment
+            Target
+              Identifier winds
+            Value
+              CallExpr
+                Callee
+                  FieldExpr .push
+                    Identifier winds
+                Args
+                  BinaryExpr %
+                    Identifier r
+                    IntLiteral 1001
+          Assignment
+            Target
+              Identifier r
+            Value
+              BinaryExpr +
+                Identifier r
+                IntLiteral 1
+        LetStatement batch: Vector<i32>
+          CallExpr
+            Callee
+              Identifier predict_batch
+            Args
+              Identifier winds
+        IfStatement
+          Condition
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  Identifier write_file
+                Args
+                  CallExpr
+                    Callee
+                      FieldExpr .get
+                        Identifier cli
+                    Args
+                      CallExpr
+                        Callee
+                          Identifier to_i64
+                        Args
+                          IntLiteral 3
+                  CallExpr
+                    Callee
+                      Identifier format_i32_lines
+                    Args
+                      Identifier batch
+              BoolLiteral false
+          Then
+            ExpressionStatement
+              CallExpr
+                Callee
+                  Identifier eprint
+                Args
+                  BinaryExpr +
+                    StringLiteral "forecast_plans: could not write "
+                    CallExpr
+                      Callee
+                        FieldExpr .get
+                          Identifier cli
+                      Args
+                        CallExpr
+                          Callee
+                            Identifier to_i64
+                          Args
+                            IntLiteral 3
+            ReturnStatement
+              IntLiteral 2
+        ReturnStatement
+          IntLiteral 0
+    IfStatement
+      Condition
+        BinaryExpr and
+          BinaryExpr ==
+            Identifier cmd
+            StringLiteral "--eval-kernel"
+          BinaryExpr >=
+            CallExpr
+              Callee
+                FieldExpr .length
+                  Identifier cli
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 4
+      Then
+        LetStatement kernel: string
+          CallExpr
+            Callee
+              FieldExpr .get
+                Identifier cli
+            Args
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 2
+        LetStatement a0: i32
+          IntLiteral 0
+        MatchStatement
+          Scrutinee
+            CallExpr
+              Callee
+                Identifier parse_i32_arg
+              Args
+                CallExpr
+                  Callee
+                    FieldExpr .get
+                      Identifier cli
+                  Args
+                    CallExpr
+                      Callee
+                        Identifier to_i64
+                      Args
+                        IntLiteral 3
+          Arm
+            Pattern
+              QualifiedName Result::Ok
+            Assignment
+              Target
+                Identifier a0
+              Value
+                Identifier v
+          Arm
+            Pattern
+              QualifiedName Result::Err
+            ExpressionStatement
+              CallExpr
+                Callee
+                  Identifier eprint
+                Args
+                  BinaryExpr +
+                    StringLiteral "forecast_plans: "
+                    Identifier err
+            ReturnStatement
+              IntLiteral 2
+        IfStatement
+          Condition
+            BinaryExpr and
+              BinaryExpr ==
+                Identifier kernel
+                StringLiteral "score_v1"
+              BinaryExpr ==
+                CallExpr
+                  Callee
+                    FieldExpr .length
+                      Identifier cli
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 4
+          Then
+            ExpressionStatement
+              CallExpr
+                Callee
+                  Identifier print
+                Args
+                  CallExpr
+                    Callee
+                      Identifier i32_to_string
+                    Args
+                      CallExpr
+                        Callee
+                          Identifier score_v1
+                        Args
+                          Identifier a0
+            ReturnStatement
+              IntLiteral 0
+        IfStatement
+          Condition
+            BinaryExpr and
+              BinaryExpr ==
+                Identifier kernel
+                StringLiteral "high_wind"
+              BinaryExpr ==
+                CallExpr
+                  Callee
+                    FieldExpr .length
+                      Identifier cli
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 4
+          Then
+            ExpressionStatement
+              CallExpr
+                Callee
+                  Identifier print
+                Args
+                  CallExpr
+                    Callee
+                      Identifier i32_to_string
+                    Args
+                      CallExpr
+                        Callee
+                          Identifier high_wind
+                        Args
+                          Identifier a0
+            ReturnStatement
+              IntLiteral 0
+        IfStatement
+          Condition
+            BinaryExpr and
+              BinaryExpr ==
+                Identifier kernel
+                StringLiteral "adjust"
+              BinaryExpr ==
+                CallExpr
+                  Callee
+                    FieldExpr .length
+                      Identifier cli
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 5
+          Then
+            LetStatement a1: i32
+              IntLiteral 0
+            MatchStatement
+              Scrutinee
+                CallExpr
+                  Callee
+                    Identifier parse_i32_arg
+                  Args
+                    CallExpr
+                      Callee
+                        FieldExpr .get
+                          Identifier cli
+                      Args
+                        CallExpr
+                          Callee
+                            Identifier to_i64
+                          Args
+                            IntLiteral 4
+              Arm
+                Pattern
+                  QualifiedName Result::Ok
+                Assignment
+                  Target
+                    Identifier a1
+                  Value
+                    Identifier v
+              Arm
+                Pattern
+                  QualifiedName Result::Err
+                ExpressionStatement
+                  CallExpr
+                    Callee
+                      Identifier eprint
+                    Args
+                      BinaryExpr +
+                        StringLiteral "forecast_plans: "
+                        Identifier err
+                ReturnStatement
+                  IntLiteral 2
+            ExpressionStatement
+              CallExpr
+                Callee
+                  Identifier print
+                Args
+                  CallExpr
+                    Callee
+                      Identifier i32_to_string
+                    Args
+                      CallExpr
+                        Callee
+                          Identifier adjust
+                        Args
+                          Identifier a0
+                          Identifier a1
+            ReturnStatement
+              IntLiteral 0
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier eprint
+        Args
+          StringLiteral "usage: forecast_plans [--oracle-domain | --oracle-cycled <rows> <out> | --eval-kernel <name> <arg>...]"
+    ReturnStatement
+      IntLiteral 2
   FunctionDecl main
     ReturnType: i32
+    IfStatement
+      Condition
+        BinaryExpr >
+          CallExpr
+            Callee
+              Identifier arg_count
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 1
+      Then
+        ReturnStatement
+          CallExpr
+            Callee
+              Identifier run_cli_oracle
+            Args
+              CallExpr
+                Callee
+                  Identifier args
     LetStatement archive: Archive
       CallExpr
         Callee
