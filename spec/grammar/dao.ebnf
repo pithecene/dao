@@ -153,7 +153,14 @@ postfix_op :=
     | "[" expression "]"
 
 arguments :=
-    expression ("," expression)*
+    argument ("," argument)*
+
+# Named field arguments apply to structured variant construction today
+# (docs/contracts/ADR_ENUM_CLASS.md); punned and class field initialization
+# is proposed in spec/semantics/aggregate_initialization.md.
+argument :=
+      identifier "=" expression
+    | expression
 
 primary :=
       qualified_name
@@ -172,7 +179,10 @@ lambda_params :=
     identifier ("," identifier)*
 
 list_literal :=
-    "[" arguments? "]"
+    "[" expression_list? "]"
+
+expression_list :=
+    expression ("," expression)*
 
 
 literal :=

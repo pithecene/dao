@@ -1,0 +1,16 @@
+module contextual_literals
+
+enum class Choice<T>:
+  Some(value: T)
+  None
+
+fn zero(): i64 -> 0
+
+fn countdown(): Generator<i64>
+  yield 2
+  yield 1
+  yield 0
+
+fn sample(): Choice<i64>
+  let item: Choice<i64> = Choice::Some(value = 0)
+  return item
