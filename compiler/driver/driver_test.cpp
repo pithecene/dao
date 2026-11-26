@@ -368,12 +368,59 @@ suite<"driver_cli"> driver_cli_suite = [] {
     const Scratch scratch("single-file-dumps");
     auto source = scratch.file("a.dao", "module a\n\nfn one(): i32 -> 1\n");
 
-    for (const auto* command : {"lex", "parse", "ast"}) {
+    for (const auto* command : {"lex", "parse", "ast", "fmt"}) {
       auto result = run_daoc(scratch, {command, "--source", source.string()});
       expect(result.exit_code != 0) << command << ": " << result.out;
       expect(result.err_says("this command takes a single file, not --source inputs"))
           << command << ": " << result.err;
     }
+  };
+
+  "fmt formats to stdout checks and rewrites safely"_test = [] {
+    const Scratch scratch("fmt-cli");
+    const std::string unformatted = "module app\n// keep comment\nfn main():i32\n    return 1+2\n";
+    const std::string canonical = "module app\n\n// keep comment\nfn main(): i32\n  return 1 + 2\n";
+    auto file = scratch.file("app.dao", unformatted);
+
+    auto stdout_res = run_daoc(scratch, {"fmt", file.string()});
+    expect(stdout_res.exit_code == 0) << stdout_res.err;
+    expect(stdout_res.out == canonical) << stdout_res.out;
+    expect(dao::read_file(file) == unformatted) << "stdout mode must not touch disk";
+
+    auto check_before = run_daoc(scratch, {"fmt", "--check", file.string()});
+    expect(check_before.exit_code != 0) << "unformatted file passed --check";
+    expect(check_before.err_says("needs formatting")) << check_before.err;
+
+    auto write_res = run_daoc(scratch, {"fmt", "--write", file.string()});
+    expect(write_res.exit_code == 0) << write_res.err;
+    expect(dao::read_file(file) == canonical) << dao::read_file(file);
+
+    auto check_after = run_daoc(scratch, {"fmt", "--check", file.string()});
+    expect(check_after.exit_code == 0) << check_after.err;
+
+    // Broken syntax must exit non-zero and never corrupt the file.
+    const std::string broken_text = "module bad\nfn broken(: i32\n  return 0\n";
+    auto broken = scratch.file("broken.dao", broken_text);
+    auto broken_write = run_daoc(scratch, {"fmt", "--write", broken.string()});
+    expect(broken_write.exit_code != 0);
+    expect(dao::read_file(broken) == broken_text) << "broken file was modified";
+
+    // Atomic write leaves no sibling `.tmp.` files behind, and if sibling
+    // temp creation fails (read-only directory), the target file is untouched.
+    for (const auto& entry : std::filesystem::directory_iterator(scratch.dir)) {
+      expect(!entry.path().filename().string().contains(".tmp."))
+          << "stray temp file: " << entry.path().string();
+    }
+    auto ro_dir = scratch.dir / "readonly";
+    std::filesystem::create_directories(ro_dir);
+    auto ro_file = ro_dir / "locked.dao";
+    write(ro_file, unformatted);
+    std::filesystem::permissions(
+        ro_dir, std::filesystem::perms::owner_read | std::filesystem::perms::owner_exec);
+    auto ro_write = run_daoc(scratch, {"fmt", "--write", ro_file.string()});
+    std::filesystem::permissions(ro_dir, std::filesystem::perms::owner_all);
+    expect(ro_write.exit_code != 0) << "expected failure in read-only directory";
+    expect(dao::read_file(ro_file) == unformatted) << "target file was damaged on write error";
   };
 
   "link inputs after --source still reach the linker"_test = [] {
@@ -628,14 +675,14 @@ suite<"driver_cli"> driver_cli_suite = [] {
     expect(checked.err_says("a generator cannot be copied out of the block")) << checked.err;
 
     // Pointers among the elements are pointer values, the author's.
-    auto pointers =
-        scratch.file("pointers.dao",
-                     "module app::pointers\n\n"
-                     "fn main(): i32\n"
-                     "  let ptrs: Vector<Ptr<Generator<i32>>> = Vector<Ptr<Generator<i32>>>::new()\n"
-                     "  resource memory pool =>\n"
-                     "    ptrs = ptrs.push(Ptr<Generator<i32>>::new())\n"
-                     "  return 0\n");
+    auto pointers = scratch.file(
+        "pointers.dao",
+        "module app::pointers\n\n"
+        "fn main(): i32\n"
+        "  let ptrs: Vector<Ptr<Generator<i32>>> = Vector<Ptr<Generator<i32>>>::new()\n"
+        "  resource memory pool =>\n"
+        "    ptrs = ptrs.push(Ptr<Generator<i32>>::new())\n"
+        "  return 0\n");
     auto accepted = run_daoc(scratch, {"check", pointers.string()});
     expect(accepted.exit_code == 0) << accepted.err;
 
