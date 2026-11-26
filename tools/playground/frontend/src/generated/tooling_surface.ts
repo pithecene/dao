@@ -255,6 +255,13 @@ export interface RunResponse {
   diagnostics: Diagnostic[];
 }
 
+export interface FormatResponse {
+  file: string;
+  formatted: string;
+  changed: boolean;
+  diagnostics: Diagnostic[];
+}
+
 export interface ExampleEntry {
   name: string;
 }
@@ -275,6 +282,7 @@ export interface ErrorReply {
 export const ROUTES = {
   analyze: { method: "POST", path: "/api/analyze" },
   run: { method: "POST", path: "/api/run" },
+  format: { method: "POST", path: "/api/format" },
   hover: { method: "POST", path: "/api/hover" },
   gotoDef: { method: "POST", path: "/api/goto-def" },
   documentSymbols: { method: "POST", path: "/api/document-symbols" },
@@ -290,6 +298,7 @@ export type RouteName = keyof typeof ROUTES;
 export interface RouteTypes {
   analyze: { request: AnalyzeRequest; response: AnalyzeResponse };
   run: { request: ProgramRequest; response: RunResponse };
+  format: { request: ProgramRequest; response: FormatResponse };
   hover: { request: PositionRequest; response: Hover | null };
   gotoDef: { request: PositionRequest; response: Definition | null };
   documentSymbols: { request: ProgramRequest; response: DocumentSymbol[] };

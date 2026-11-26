@@ -91,6 +91,13 @@ inline constexpr std::array kRunResponseFields{
     FieldSpec{"diagnostics", "Diagnostic[]"},
 };
 
+inline constexpr std::array kFormatResponseFields{
+    FieldSpec{"file", "string"},
+    FieldSpec{"formatted", "string"},
+    FieldSpec{"changed", "boolean"},
+    FieldSpec{"diagnostics", "Diagnostic[]"},
+};
+
 inline constexpr std::array kExampleEntryFields{
     FieldSpec{"name", "string"},
 };
@@ -116,6 +123,7 @@ inline constexpr std::array kServiceShapes{
     ShapeSpec{"ExampleName", kExampleNameFields},
     ShapeSpec{"AnalyzeResponse", kAnalyzeResponseFields},
     ShapeSpec{"RunResponse", kRunResponseFields},
+    ShapeSpec{"FormatResponse", kFormatResponseFields},
     ShapeSpec{"ExampleEntry", kExampleEntryFields},
     ShapeSpec{"ExamplesList", kExamplesListFields},
     ShapeSpec{"ExampleSource", kExampleSourceFields},
@@ -142,6 +150,7 @@ struct RouteSpec {
 inline constexpr std::array kRoutes{
     RouteSpec{"analyze", "POST", "/api/analyze", "AnalyzeRequest", "AnalyzeResponse"},
     RouteSpec{"run", "POST", "/api/run", "ProgramRequest", "RunResponse"},
+    RouteSpec{"format", "POST", "/api/format", "ProgramRequest", "FormatResponse"},
     RouteSpec{"hover", "POST", "/api/hover", "PositionRequest", "Hover | null"},
     RouteSpec{"gotoDef", "POST", "/api/goto-def", "PositionRequest", "Definition | null"},
     RouteSpec{
@@ -210,6 +219,9 @@ inline constexpr std::array kDocumentSymbolEntryPoints{
 inline constexpr std::array kCompletionEntryPoints{
     EntryPoint{"query_completions", "analysis/completion.h"},
 };
+inline constexpr std::array kFormatEntryPoints{
+    EntryPoint{"format_source", "analysis/formatter.h"},
+};
 inline constexpr std::array kAstDumpEntryPoints{
     EntryPoint{"print_ast", "frontend/ast/ast_printer.h"},
 };
@@ -249,6 +261,7 @@ inline constexpr std::array kCapabilities{
                    "textDocument/documentSymbol"},
     CapabilitySpec{
         "Completion", kCompletionEntryPoints, "completions", "", "textDocument/completion"},
+    CapabilitySpec{"Formatting", kFormatEntryPoints, "format", "fmt", "textDocument/formatting"},
     CapabilitySpec{"AST dump", kAstDumpEntryPoints, "analyze", "ast", ""},
     CapabilitySpec{"HIR dump", kHirDumpEntryPoints, "analyze", "hir", ""},
     CapabilitySpec{"MIR dump", kMirDumpEntryPoints, "analyze", "mir", ""},

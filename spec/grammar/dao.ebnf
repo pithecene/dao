@@ -51,39 +51,50 @@ extern_decl :=
 params :=
     param ("," param)*
 
+# Proposed unified call binding (spec/semantics/aggregate_initialization.md)
+# allows a leading prefix of `_ name: type` positional parameters before
+# named `name: type` parameters (and bare `self` on methods).
 param :=
-    identifier ":" type
+      "self"
+    | "_"? identifier ":" type
 
 
 suite :=
     NEWLINE INDENT statement+ DEDENT
 
 statement :=
-      let_statement NEWLINE
-    | assignment NEWLINE
+      let_statement
+    | assignment
     | if_statement
     | while_statement
     | for_statement
     | mode_block
     | resource_block
-    | return_statement NEWLINE
-    | expression NEWLINE
+    | return_statement
+    | terminated_expr
+
+# Inline expressions end with NEWLINE at statement boundaries, whereas
+# indented block expressions (`if` / `match` suites) already consume the
+# trailing newline before DEDENT.
+terminated_expr :=
+      inline_expression NEWLINE
+    | block_expression
 
 let_statement :=
     "let" identifier (
-        ":" type ("=" expression)?
-      | "=" expression
+        ":" type ("=" terminated_expr | NEWLINE)
+      | "=" terminated_expr
     )
 
 assignment :=
-    lvalue "=" expression
+    lvalue "=" terminated_expr
 
 lvalue :=
       identifier
     | postfix_expr
 
 return_statement :=
-    "return" expression
+    "return" terminated_expr
 
 
 if_statement :=
@@ -107,7 +118,36 @@ resource_block :=
 
 
 expression :=
-    pipe_expression
+      inline_expression
+    | block_expression
+
+# Value-producing control-flow proposals live in
+# spec/semantics/control_flow_expressions.md.  In value position, semantic
+# checking requires each `suite` branch to end in a tail expression or a
+# diverging statement (`return`, `break`, `continue`, or `panic`).
+inline_expression :=
+      inline_if_expression
+    | pipe_expression
+
+block_expression :=
+      block_if_expression
+    | match_expression
+
+inline_if_expression :=
+    "if" pipe_expression ":" inline_expression "else" ":" inline_expression
+
+block_if_expression :=
+    "if" pipe_expression ":" suite ("else" "if" pipe_expression ":" suite)* "else" ":" suite
+
+match_expression :=
+    "match" pipe_expression ":" NEWLINE INDENT match_expr_arm+ DEDENT
+
+match_expr_arm :=
+    match_pattern ":" (inline_expression NEWLINE | suite)
+
+match_pattern :=
+      "_"
+    | inline_expression ("as" identifier)?
 
 pipe_expression :=
     logical_or_expression ("|>" pipe_target)*
@@ -155,9 +195,10 @@ postfix_op :=
 arguments :=
     argument ("," argument)*
 
-# Named field arguments apply to structured variant construction today
-# (docs/contracts/ADR_ENUM_CLASS.md); punned and class field initialization
-# is proposed in spec/semantics/aggregate_initialization.md.
+# Unified call and aggregate arguments
+# (spec/semantics/aggregate_initialization.md): `identifier = expression`
+# labels a slot explicitly; bare `identifier` binds a positional `_` prefix
+# slot by index or elides `ident = ident` in the named region.
 argument :=
       identifier "=" expression
     | expression
@@ -202,7 +243,18 @@ type :=
     | named_type
 
 function_type :=
-    "fn" "(" type_list? ")" ":" type
+    "fn" "(" fn_type_params? ")" ":" type
+
+# Proposed labeled callable types (spec/semantics/aggregate_initialization.md):
+# `type`, `_ : type`, and `_ ident : type` denote unlabeled positional slots
+# (forming a leading prefix), while `ident : type` denotes a named slot.
+fn_type_params :=
+    fn_type_param ("," fn_type_param)*
+
+fn_type_param :=
+      "_" identifier? ":" type
+    | identifier ":" type
+    | type
 
 named_type :=
     qualified_name ("[" type_list "]")?

@@ -1,6 +1,7 @@
 import "./style.css";
 import { createEditor } from "./editor";
 import { initAnalysis, scheduleAnalyze } from "./analysis";
+import { doFormat } from "./format";
 import { doRun } from "./run";
 import { loadExamples } from "./examples";
 import { initHover } from "./hover";
@@ -30,12 +31,16 @@ onServiceStatus((restarting) => {
 // Run button + keyboard shortcut
 // ---------------------------------------------------------------------------
 
+document.getElementById("format-btn")?.addEventListener("click", doFormat);
 document.getElementById("run-btn")!.addEventListener("click", doRun);
 
 document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
     e.preventDefault();
     doRun();
+  } else if (e.shiftKey && e.altKey && e.code === "KeyF") {
+    e.preventDefault();
+    doFormat();
   }
 });
 
