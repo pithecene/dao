@@ -1,0 +1,1063 @@
+File
+  Module collections_and_text
+  FunctionDecl check
+    Param ok: bool
+    Param name: string
+    ReturnType: void
+    IfStatement
+      Condition
+        BinaryExpr ==
+          Identifier ok
+          BoolLiteral false
+      Then
+        ExpressionStatement
+          CallExpr
+            Callee
+              Identifier panic
+            Args
+              BinaryExpr +
+                StringLiteral "FAIL "
+                Identifier name
+  FunctionDecl is_none_i64
+    Param opt: Option<i64>
+    ReturnType: bool
+    MatchStatement
+      Scrutinee
+        Identifier opt
+      Arm
+        Pattern
+          QualifiedName Option::Some
+        ReturnStatement
+          BoolLiteral false
+      Arm
+        Pattern
+          QualifiedName Option::None
+        ReturnStatement
+          BoolLiteral true
+    ReturnStatement
+      BoolLiteral true
+  FunctionDecl unwrap_i64
+    Param opt: Option<i64>
+    Param fallback: i64
+    ReturnType: i64
+    MatchStatement
+      Scrutinee
+        Identifier opt
+      Arm
+        Pattern
+          QualifiedName Option::Some
+        ReturnStatement
+          Identifier v
+      Arm
+        Pattern
+          QualifiedName Option::None
+        ReturnStatement
+          Identifier fallback
+    ReturnStatement
+      Identifier fallback
+  FunctionDecl is_none_i32
+    Param opt: Option<i32>
+    ReturnType: bool
+    MatchStatement
+      Scrutinee
+        Identifier opt
+      Arm
+        Pattern
+          QualifiedName Option::Some
+        ReturnStatement
+          BoolLiteral false
+      Arm
+        Pattern
+          QualifiedName Option::None
+        ReturnStatement
+          BoolLiteral true
+    ReturnStatement
+      BoolLiteral true
+  FunctionDecl unwrap_i32
+    Param opt: Option<i32>
+    Param fallback: i32
+    ReturnType: i32
+    MatchStatement
+      Scrutinee
+        Identifier opt
+      Arm
+        Pattern
+          QualifiedName Option::Some
+        ReturnStatement
+          Identifier v
+      Arm
+        Pattern
+          QualifiedName Option::None
+        ReturnStatement
+          Identifier fallback
+    ReturnStatement
+      Identifier fallback
+  FunctionDecl test_vector_ops
+    ReturnType: void
+    LetStatement empty
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          i64
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          CallExpr
+            Callee
+              FieldExpr .is_empty
+                Identifier empty
+          StringLiteral "empty.is_empty"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          CallExpr
+            Callee
+              Identifier is_none_i64
+            Args
+              CallExpr
+                Callee
+                  FieldExpr .first
+                    Identifier empty
+          StringLiteral "empty.first"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          CallExpr
+            Callee
+              Identifier is_none_i64
+            Args
+              CallExpr
+                Callee
+                  FieldExpr .last
+                    Identifier empty
+          StringLiteral "empty.last"
+    LetStatement reserved
+      CallExpr
+        Callee
+          FieldExpr .push
+            CallExpr
+              Callee
+                FieldExpr .push
+                  CallExpr
+                    Callee
+                      Identifier Vector.with_capacity
+                    TypeArgs
+                      i64
+                    Args
+                      IntLiteral 16
+              Args
+                IntLiteral 11
+        Args
+          IntLiteral 22
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  FieldExpr .length
+                    Identifier reserved
+              IntLiteral 2
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  Identifier unwrap_i64
+                Args
+                  CallExpr
+                    Callee
+                      FieldExpr .first
+                        Identifier reserved
+                  CallExpr
+                    Callee
+                      Identifier to_i64
+                    Args
+                      UnaryExpr -
+                        IntLiteral 1
+              IntLiteral 11
+          StringLiteral "with_capacity"
+    LetStatement flags
+      CallExpr
+        Callee
+          Identifier Vector.filled
+        TypeArgs
+          i64
+        Args
+          IntLiteral 5
+          IntLiteral 7
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr ==
+            CallExpr
+              Callee
+                FieldExpr .length
+                  Identifier flags
+            IntLiteral 5
+          StringLiteral "filled.length"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  FieldExpr .get
+                    Identifier flags
+                Args
+                  IntLiteral 0
+              IntLiteral 7
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  FieldExpr .get
+                    Identifier flags
+                Args
+                  IntLiteral 4
+              IntLiteral 7
+          StringLiteral "filled.values"
+    LetStatement v0
+      CallExpr
+        Callee
+          FieldExpr .push
+            CallExpr
+              Callee
+                FieldExpr .push
+                  CallExpr
+                    Callee
+                      FieldExpr .push
+                        CallExpr
+                          Callee
+                            Identifier Vector.new
+                          TypeArgs
+                            i64
+                    Args
+                      IntLiteral 10
+              Args
+                IntLiteral 20
+        Args
+          IntLiteral 30
+    LetStatement v1
+      CallExpr
+        Callee
+          FieldExpr .pop
+            Identifier v0
+    LetStatement v2
+      CallExpr
+        Callee
+          FieldExpr .push
+            Identifier v1
+        Args
+          IntLiteral 99
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  FieldExpr .length
+                    Identifier v0
+              IntLiteral 3
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  FieldExpr .get
+                    Identifier v0
+                Args
+                  IntLiteral 2
+              IntLiteral 30
+          StringLiteral "pop_push_snapshot_v0"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  FieldExpr .length
+                    Identifier v1
+              IntLiteral 2
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  Identifier unwrap_i64
+                Args
+                  CallExpr
+                    Callee
+                      FieldExpr .last
+                        Identifier v1
+                  CallExpr
+                    Callee
+                      Identifier to_i64
+                    Args
+                      UnaryExpr -
+                        IntLiteral 1
+              IntLiteral 20
+          StringLiteral "pop_push_snapshot_v1"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  FieldExpr .length
+                    Identifier v2
+              IntLiteral 3
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  FieldExpr .get
+                    Identifier v2
+                Args
+                  IntLiteral 2
+              IntLiteral 99
+          StringLiteral "pop_push_snapshot_v2"
+    LetStatement branched
+      CallExpr
+        Callee
+          FieldExpr .pop
+            Identifier v0
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr and
+              BinaryExpr ==
+                CallExpr
+                  Callee
+                    FieldExpr .length
+                      Identifier branched
+                IntLiteral 2
+              BinaryExpr ==
+                CallExpr
+                  Callee
+                    FieldExpr .get
+                      Identifier branched
+                  Args
+                    IntLiteral 0
+                IntLiteral 10
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  FieldExpr .get
+                    Identifier branched
+                Args
+                  IntLiteral 1
+              IntLiteral 20
+          StringLiteral "pop_non_latest"
+    LetStatement rev
+      CallExpr
+        Callee
+          FieldExpr .reverse
+            Identifier v0
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr and
+              BinaryExpr ==
+                CallExpr
+                  Callee
+                    FieldExpr .get
+                      Identifier rev
+                  Args
+                    IntLiteral 0
+                IntLiteral 30
+              BinaryExpr ==
+                CallExpr
+                  Callee
+                    FieldExpr .get
+                      Identifier rev
+                  Args
+                    IntLiteral 1
+                IntLiteral 20
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  FieldExpr .get
+                    Identifier rev
+                Args
+                  IntLiteral 2
+              IntLiteral 10
+          StringLiteral "reverse"
+    LetStatement merged
+      CallExpr
+        Callee
+          FieldExpr .append_all
+            Identifier v1
+        Args
+          CallExpr
+            Callee
+              Identifier Vector.filled
+            TypeArgs
+              i64
+            Args
+              IntLiteral 2
+              IntLiteral 5
+    LetStatement total: i64
+      IntLiteral 0
+    ForStatement item
+      Iterable
+        CallExpr
+          Callee
+            FieldExpr .iter
+              Identifier merged
+      Assignment
+        Target
+          Identifier total
+        Value
+          BinaryExpr +
+            Identifier total
+            Identifier item
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  FieldExpr .length
+                    Identifier merged
+              IntLiteral 4
+            BinaryExpr ==
+              Identifier total
+              IntLiteral 40
+          StringLiteral "append_all"
+    LetStatement sub
+      CallExpr
+        Callee
+          FieldExpr .slice
+            Identifier merged
+        Args
+          IntLiteral 1
+          IntLiteral 2
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr and
+              BinaryExpr ==
+                CallExpr
+                  Callee
+                    FieldExpr .length
+                      Identifier sub
+                IntLiteral 2
+              BinaryExpr ==
+                CallExpr
+                  Callee
+                    FieldExpr .get
+                      Identifier sub
+                  Args
+                    IntLiteral 0
+                IntLiteral 20
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  FieldExpr .get
+                    Identifier sub
+                Args
+                  IntLiteral 1
+              IntLiteral 5
+          StringLiteral "slice"
+  FunctionDecl test_ranges
+    ReturnType: void
+    LetStatement acc: i64
+      IntLiteral 0
+    ForStatement k
+      Iterable
+        CallExpr
+          Callee
+            Identifier range_i64
+          Args
+            IntLiteral 1
+            IntLiteral 6
+      Assignment
+        Target
+          Identifier acc
+        Value
+          BinaryExpr +
+            Identifier acc
+            Identifier k
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr ==
+            Identifier acc
+            IntLiteral 15
+          StringLiteral "range_i64.unit"
+    LetStatement max_i64: i64
+      IntLiteral 9223372036854775807
+    LetStatement zero_i64: i64
+      IntLiteral 0
+    LetStatement neg_max
+      BinaryExpr -
+        Identifier zero_i64
+        Identifier max_i64
+    LetStatement min_i64
+      CallExpr
+        Callee
+          Identifier wrapping_sub_i64
+        Args
+          Identifier neg_max
+          IntLiteral 1
+    LetStatement pos_step_count: i64
+      IntLiteral 0
+    LetStatement pos_step_val: i64
+      IntLiteral 0
+    ForStatement x
+      Iterable
+        CallExpr
+          Callee
+            Identifier range_i64
+          Args
+            IntLiteral 1
+            IntLiteral 10
+            Identifier max_i64
+      Assignment
+        Target
+          Identifier pos_step_count
+        Value
+          BinaryExpr +
+            Identifier pos_step_count
+            IntLiteral 1
+      Assignment
+        Target
+          Identifier pos_step_val
+        Value
+          Identifier x
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr ==
+              Identifier pos_step_count
+              IntLiteral 1
+            BinaryExpr ==
+              Identifier pos_step_val
+              IntLiteral 1
+          StringLiteral "range_i64.pos_step_overflow"
+    LetStatement neg_step_count: i64
+      IntLiteral 0
+    LetStatement neg_step_val: i64
+      IntLiteral 0
+    ForStatement x
+      Iterable
+        CallExpr
+          Callee
+            Identifier range_i64
+          Args
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                UnaryExpr -
+                  IntLiteral 1
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                UnaryExpr -
+                  IntLiteral 10
+            Identifier min_i64
+      Assignment
+        Target
+          Identifier neg_step_count
+        Value
+          BinaryExpr +
+            Identifier neg_step_count
+            IntLiteral 1
+      Assignment
+        Target
+          Identifier neg_step_val
+        Value
+          Identifier x
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr ==
+              Identifier neg_step_count
+              IntLiteral 1
+            BinaryExpr ==
+              Identifier neg_step_val
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  UnaryExpr -
+                    IntLiteral 1
+          StringLiteral "range_i64.neg_step_overflow"
+    LetStatement i32_step_count
+      IntLiteral 0
+    ForStatement x
+      Iterable
+        CallExpr
+          Callee
+            Identifier range
+          Args
+            IntLiteral 1
+            IntLiteral 10
+            IntLiteral 2147483647
+      Assignment
+        Target
+          Identifier i32_step_count
+        Value
+          BinaryExpr +
+            Identifier i32_step_count
+            Identifier x
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr ==
+            Identifier i32_step_count
+            IntLiteral 1
+          StringLiteral "range.pos_step_overflow"
+  FunctionDecl test_strings_and_builder
+    ReturnType: void
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr ==
+            CallExpr
+              Callee
+                Identifier trim_start
+              Args
+                StringLiteral "  \thello "
+            StringLiteral "hello "
+          StringLiteral "string.trim_start"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr ==
+            CallExpr
+              Callee
+                Identifier trim_end
+              Args
+                StringLiteral " hello\r\n "
+            StringLiteral " hello"
+          StringLiteral "string.trim_end"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr ==
+            CallExpr
+              Callee
+                Identifier trim
+              Args
+                StringLiteral "  \t hello dao \r\n "
+            StringLiteral "hello dao"
+          StringLiteral "string.trim"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr ==
+            CallExpr
+              Callee
+                Identifier trim
+              Args
+                StringLiteral "   \n\t "
+            StringLiteral ""
+          StringLiteral "string.trim_blank"
+    LetStatement parts
+      CallExpr
+        Callee
+          Identifier split
+        Args
+          StringLiteral "a::b::c"
+          StringLiteral "::"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  FieldExpr .length
+                    Identifier parts
+              IntLiteral 3
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  Identifier join
+                Args
+                  Identifier parts
+                  StringLiteral "/"
+              StringLiteral "a/b/c"
+          StringLiteral "string.split_join"
+    LetStatement edge_parts
+      CallExpr
+        Callee
+          Identifier split
+        Args
+          StringLiteral ",a,,b,"
+          StringLiteral ","
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr and
+              BinaryExpr and
+                BinaryExpr ==
+                  CallExpr
+                    Callee
+                      FieldExpr .length
+                        Identifier edge_parts
+                  IntLiteral 5
+                BinaryExpr ==
+                  CallExpr
+                    Callee
+                      FieldExpr .get
+                        Identifier edge_parts
+                    Args
+                      IntLiteral 0
+                  StringLiteral ""
+              BinaryExpr ==
+                CallExpr
+                  Callee
+                    FieldExpr .get
+                      Identifier edge_parts
+                  Args
+                    IntLiteral 2
+                StringLiteral ""
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  FieldExpr .get
+                    Identifier edge_parts
+                Args
+                  IntLiteral 4
+              StringLiteral ""
+          StringLiteral "string.split_edges"
+    LetStatement bulk_parts
+      CallExpr
+        Callee
+          Identifier split
+        Args
+          CallExpr
+            Callee
+              Identifier repeat
+            Args
+              StringLiteral "a,"
+              IntLiteral 1000
+          StringLiteral ","
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr and
+              BinaryExpr and
+                BinaryExpr ==
+                  CallExpr
+                    Callee
+                      FieldExpr .length
+                        Identifier bulk_parts
+                  IntLiteral 1001
+                BinaryExpr ==
+                  CallExpr
+                    Callee
+                      FieldExpr .get
+                        Identifier bulk_parts
+                    Args
+                      IntLiteral 0
+                  StringLiteral "a"
+              BinaryExpr ==
+                CallExpr
+                  Callee
+                    FieldExpr .get
+                      Identifier bulk_parts
+                  Args
+                    IntLiteral 999
+                StringLiteral "a"
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  FieldExpr .get
+                    Identifier bulk_parts
+                Args
+                  IntLiteral 1000
+              StringLiteral ""
+          StringLiteral "string.split_linear"
+    LetStatement ls
+      CallExpr
+        Callee
+          Identifier lines
+        Args
+          StringLiteral "alpha\r\nbeta\ngamma\n"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr and
+            BinaryExpr and
+              BinaryExpr ==
+                CallExpr
+                  Callee
+                    FieldExpr .length
+                      Identifier ls
+                IntLiteral 3
+              BinaryExpr ==
+                CallExpr
+                  Callee
+                    FieldExpr .get
+                      Identifier ls
+                  Args
+                    IntLiteral 0
+                StringLiteral "alpha"
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  FieldExpr .get
+                    Identifier ls
+                Args
+                  IntLiteral 2
+              StringLiteral "gamma"
+          StringLiteral "string.lines"
+    LetStatement max_expected: i64
+      IntLiteral 9223372036854775807
+    LetStatement zero_exp: i64
+      IntLiteral 0
+    LetStatement neg_max_expected
+      BinaryExpr -
+        Identifier zero_exp
+        Identifier max_expected
+    LetStatement min_expected
+      CallExpr
+        Callee
+          Identifier wrapping_sub_i64
+        Args
+          Identifier neg_max_expected
+          IntLiteral 1
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr ==
+            CallExpr
+              Callee
+                Identifier unwrap_i64
+              Args
+                CallExpr
+                  Callee
+                    Identifier parse_i64
+                  Args
+                    StringLiteral "-9223372036854775808"
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 0
+            Identifier min_expected
+          StringLiteral "parse_i64.min"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr ==
+            CallExpr
+              Callee
+                Identifier unwrap_i64
+              Args
+                CallExpr
+                  Callee
+                    Identifier parse_i64
+                  Args
+                    StringLiteral "9223372036854775807"
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 0
+            Identifier max_expected
+          StringLiteral "parse_i64.max"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          CallExpr
+            Callee
+              Identifier is_none_i64
+            Args
+              CallExpr
+                Callee
+                  Identifier parse_i64
+                Args
+                  StringLiteral "9223372036854775808"
+          StringLiteral "parse_i64.overflow"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          CallExpr
+            Callee
+              Identifier is_none_i32
+            Args
+              CallExpr
+                Callee
+                  Identifier parse_i32
+                Args
+                  StringLiteral "2147483648"
+          StringLiteral "parse_i32.overflow"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr ==
+            CallExpr
+              Callee
+                Identifier unwrap_i32
+              Args
+                CallExpr
+                  Callee
+                    Identifier parse_i32
+                  Args
+                    StringLiteral "-2147483648"
+                IntLiteral 0
+            UnaryExpr -
+              IntLiteral 2147483648
+          StringLiteral "parse_i32.min"
+    LetStatement b
+      CallExpr
+        Callee
+          QualifiedName Builder::new
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          CallExpr
+            Callee
+              FieldExpr .is_empty
+                Identifier b
+          StringLiteral "builder.is_empty"
+    Assignment
+      Target
+        Identifier b
+      Value
+        CallExpr
+          Callee
+            FieldExpr .push_line
+              CallExpr
+                Callee
+                  FieldExpr .push_bool
+                    CallExpr
+                      Callee
+                        FieldExpr .push
+                          CallExpr
+                            Callee
+                              FieldExpr .push_i32
+                                CallExpr
+                                  Callee
+                                    FieldExpr .push
+                                      CallExpr
+                                        Callee
+                                          FieldExpr .push_i64
+                                            CallExpr
+                                              Callee
+                                                FieldExpr .push
+                                                  Identifier b
+                                              Args
+                                                StringLiteral "item="
+                                        Args
+                                          IntLiteral 42
+                                  Args
+                                    StringLiteral " n="
+                            Args
+                              UnaryExpr -
+                                IntLiteral 3
+                      Args
+                        StringLiteral " ok="
+                Args
+                  BoolLiteral true
+          Args
+            StringLiteral ""
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier check
+        Args
+          BinaryExpr ==
+            CallExpr
+              Callee
+                FieldExpr .to_string
+                  Identifier b
+            StringLiteral "item=42 n=-3 ok=true\n"
+          StringLiteral "builder.helpers"
+  FunctionDecl main
+    ReturnType: i32
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier test_vector_ops
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier test_ranges
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier test_strings_and_builder
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          StringLiteral "collections_and_text: all checks passed"
+    ReturnStatement
+      IntLiteral 0

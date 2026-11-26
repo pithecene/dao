@@ -26,11 +26,11 @@ class SourceBuffer:
   line_offsets: Vector<i64>
 
 fn make_source_buffer(filename: string, contents: string): SourceBuffer
-  let offsets: Vector<i64> = Vector<i64>::new()
+  let offsets = Vector<i64>::new()
   let zero: i64 = 0
   offsets = offsets.push(zero)
   let i: i64 = 0
-  let len: i64 = length(contents)
+  let len = length(contents)
   while i < len:
     if char_at(contents, i) == 10:
       offsets = offsets.push(i + 1)
@@ -42,9 +42,9 @@ fn sb_text(buf: SourceBuffer, span: Span): string
 
 fn sb_line_col(buf: SourceBuffer, offset: i64): LineCol
   let low: i64 = 0
-  let high: i64 = buf.line_offsets.length()
+  let high = buf.line_offsets.length()
   while low + 1 < high:
-    let mid: i64 = low + (high - low) / 2
+    let mid = low + (high - low) / 2
     if buf.line_offsets.get(mid) <= offset:
       low = mid
     else:
@@ -52,13 +52,13 @@ fn sb_line_col(buf: SourceBuffer, offset: i64): LineCol
   return LineCol(low + 1, offset - buf.line_offsets.get(low) + 1)
 
 fn sb_line_text(buf: SourceBuffer, line: i64): string
-  let idx: i64 = line - 1
+  let idx = line - 1
   if idx < 0:
     return ""
   if idx >= buf.line_offsets.length():
     return ""
-  let start: i64 = buf.line_offsets.get(idx)
-  let end: i64 = length(buf.contents)
+  let start = buf.line_offsets.get(idx)
+  let end = length(buf.contents)
   if idx + 1 < buf.line_offsets.length():
     end = buf.line_offsets.get(idx + 1)
   // Strip trailing newline if present.
@@ -90,7 +90,7 @@ fn severity_label(sev: Severity): string
 
 // Repeat a character (given as string) n times.
 fn repeat_char(ch: string, n: i64): string
-  let result: string = ""
+  let result = ""
   let i: i64 = 0
   while i < n:
     result = result + ch
@@ -102,7 +102,7 @@ fn digit_width(n: i64): i64
   if n <= 0:
     return 1
   let w: i64 = 0
-  let v: i64 = n
+  let v = n
   while v > 0:
     w = w + 1
     v = v / 10
@@ -116,32 +116,32 @@ fn digit_width(n: i64): i64
 // line_offset is subtracted from the displayed line number to adjust
 // for prepended prelude source (matching the C++ driver convention).
 fn format_diagnostic(buf: SourceBuffer, diag: Diagnostic, line_offset: i64): string
-  let loc: LineCol = sb_line_col(buf, diag.span.offset)
-  let display_line: i64 = loc.line - line_offset
+  let loc = sb_line_col(buf, diag.span.offset)
+  let display_line = loc.line - line_offset
   if display_line < 1:
     display_line = loc.line
 
   // Header: filename:line:col: severity: message
-  let header: string = buf.filename + ":" + i64_to_string(display_line) + ":" + i64_to_string(loc.col) + ": " + severity_label(diag.severity) + ": " + diag.message
+  let header = buf.filename + ":" + i64_to_string(display_line) + ":" + i64_to_string(loc.col) + ": " + severity_label(diag.severity) + ": " + diag.message
 
   // Context line with gutter.
-  let context: string = sb_line_text(buf, loc.line)
-  let gutter_width: i64 = digit_width(display_line)
-  let gutter: string = repeat_char(" ", gutter_width) + " | "
-  let line_gutter: string = i64_to_string(display_line) + " | "
+  let context = sb_line_text(buf, loc.line)
+  let gutter_width = digit_width(display_line)
+  let gutter = repeat_char(" ", gutter_width) + " | "
+  let line_gutter = i64_to_string(display_line) + " | "
 
   // Caret marker under the error column.
-  let caret_padding: string = repeat_char(" ", loc.col - 1)
-  let caret_len: i64 = diag.span.length
+  let caret_padding = repeat_char(" ", loc.col - 1)
+  let caret_len = diag.span.length
   if caret_len < 1:
     caret_len = 1
-  let caret: string = repeat_char("^", caret_len)
+  let caret = repeat_char("^", caret_len)
 
   return header + "\n" + "  " + line_gutter + context + "\n" + "  " + gutter + caret_padding + caret
 
 // Format all diagnostics sequentially with the given prelude line offset.
 fn format_diagnostics(buf: SourceBuffer, diags: Vector<Diagnostic>, line_offset: i64): string
-  let result: string = ""
+  let result = ""
   let i: i64 = 0
   while i < diags.length():
     if i > 0:
@@ -175,31 +175,31 @@ fn main(): i32
   print("=== diagnostic_formatter: Phase 7 entry leaf ===")
   print("")
 
-  let pass_count: i32 = 0
+  let pass_count = 0
 
   // --- SourceBuffer and line indexing ---
 
-  let src: string = "let x = 1\nlet y = x + 1\nlet z = y * 2\n"
-  let buf: SourceBuffer = make_source_buffer("test.dao", src)
+  let src = "let x = 1\nlet y = x + 1\nlet z = y * 2\n"
+  let buf = make_source_buffer("test.dao", src)
 
   // Test line count (3 newlines → 4 line offsets).
   if test_eq("line_count", i64_to_string(sb_line_count(buf)), "4"):
     pass_count = pass_count + 1
 
   // Test line_col for offset 0 (first char, line 1 col 1).
-  let loc0: LineCol = sb_line_col(buf, 0)
+  let loc0 = sb_line_col(buf, 0)
   if test_eq("line_col_0", i64_to_string(loc0.line) + ":" + i64_to_string(loc0.col), "1:1"):
     pass_count = pass_count + 1
 
   // Test line_col for offset 10 (start of second line, 'l' in 'let y').
   let off10: i64 = 10
-  let loc10: LineCol = sb_line_col(buf, off10)
+  let loc10 = sb_line_col(buf, off10)
   if test_eq("line_col_10", i64_to_string(loc10.line) + ":" + i64_to_string(loc10.col), "2:1"):
     pass_count = pass_count + 1
 
   // Test line_col for offset 18 (the 'x' in 'x + 1' on line 2, col 9).
   let off18: i64 = 18
-  let loc18: LineCol = sb_line_col(buf, off18)
+  let loc18 = sb_line_col(buf, off18)
   if test_eq("line_col_18", i64_to_string(loc18.line) + ":" + i64_to_string(loc18.col), "2:9"):
     pass_count = pass_count + 1
 
@@ -215,15 +215,15 @@ fn main(): i32
     pass_count = pass_count + 1
 
   // Test span text extraction.
-  let span_x: Span = Span(off18, one)
+  let span_x = Span(off18, one)
   if test_eq("sb_text", sb_text(buf, span_x), "x"):
     pass_count = pass_count + 1
 
   // --- Diagnostic formatting ---
 
   // Single error diagnostic.
-  let diag1: Diagnostic = make_error(Span(off18, one), "undefined variable 'x'")
-  let fmt1: string = format_diagnostic(buf, diag1, 0)
+  let diag1 = make_error(Span(off18, one), "undefined variable 'x'")
+  let fmt1 = format_diagnostic(buf, diag1, 0)
 
   // Header line.
   if test_contains("fmt_header", fmt1, "test.dao:2:9: error: undefined variable 'x'"):
@@ -240,8 +240,8 @@ fn main(): i32
   // --- Warning diagnostic ---
 
   let zero: i64 = 0
-  let diag_warn: Diagnostic = make_warning(Span(zero, three), "unused variable")
-  let fmt_warn: string = format_diagnostic(buf, diag_warn, 0)
+  let diag_warn = make_warning(Span(zero, three), "unused variable")
+  let fmt_warn = format_diagnostic(buf, diag_warn, 0)
   if test_contains("warn_severity", fmt_warn, "warning: unused variable"):
     pass_count = pass_count + 1
   if test_contains("warn_location", fmt_warn, "test.dao:1:1"):
@@ -254,16 +254,16 @@ fn main(): i32
 
   let off24: i64 = 24
   let five: i64 = 5
-  let diag_wide: Diagnostic = make_error(Span(off24, five), "type mismatch")
-  let fmt_wide: string = format_diagnostic(buf, diag_wide, 0)
+  let diag_wide = make_error(Span(off24, five), "type mismatch")
+  let fmt_wide = format_diagnostic(buf, diag_wide, 0)
   if test_contains("wide_caret", fmt_wide, "^^^^^"):
     pass_count = pass_count + 1
 
   // --- First line diagnostic ---
 
   let four: i64 = 4
-  let diag_first: Diagnostic = make_error(Span(four, one), "unexpected token")
-  let fmt_first: string = format_diagnostic(buf, diag_first, 0)
+  let diag_first = make_error(Span(four, one), "unexpected token")
+  let fmt_first = format_diagnostic(buf, diag_first, 0)
   if test_contains("first_line_loc", fmt_first, "test.dao:1:5"):
     pass_count = pass_count + 1
   if test_contains("first_line_ctx", fmt_first, "1 | let x = 1"):
@@ -271,17 +271,17 @@ fn main(): i32
 
   // --- Last line diagnostic ---
 
-  let diag_last: Diagnostic = make_error(Span(off24, one), "bad expression")
-  let fmt_last: string = format_diagnostic(buf, diag_last, 0)
+  let diag_last = make_error(Span(off24, one), "bad expression")
+  let fmt_last = format_diagnostic(buf, diag_last, 0)
   if test_contains("last_line_loc", fmt_last, "test.dao:3:1"):
     pass_count = pass_count + 1
 
   // --- Multiple diagnostics ---
 
-  let diags: Vector<Diagnostic> = Vector<Diagnostic>::new()
+  let diags = Vector<Diagnostic>::new()
   diags = diags.push(make_error(Span(off18, one), "first error"))
   diags = diags.push(make_warning(Span(zero, three), "second warning"))
-  let fmt_multi: string = format_diagnostics(buf, diags, 0)
+  let fmt_multi = format_diagnostics(buf, diags, 0)
   if test_contains("multi_first", fmt_multi, "error: first error"):
     pass_count = pass_count + 1
   if test_contains("multi_second", fmt_multi, "warning: second warning"):
@@ -290,20 +290,20 @@ fn main(): i32
   // --- Prelude line offset ---
 
   // With line_offset=1, line 2 in source displays as line 1.
-  let diag_offset: Diagnostic = make_error(Span(off18, one), "offset test")
-  let fmt_offset: string = format_diagnostic(buf, diag_offset, one)
+  let diag_offset = make_error(Span(off18, one), "offset test")
+  let fmt_offset = format_diagnostic(buf, diag_offset, one)
   if test_contains("prelude_offset", fmt_offset, "test.dao:1:9"):
     pass_count = pass_count + 1
 
   // --- Empty source ---
 
-  let empty_buf: SourceBuffer = make_source_buffer("empty.dao", "")
+  let empty_buf = make_source_buffer("empty.dao", "")
   if test_eq("empty_line_count", i64_to_string(sb_line_count(empty_buf)), "1"):
     pass_count = pass_count + 1
 
   // --- Single line without trailing newline ---
 
-  let single_buf: SourceBuffer = make_source_buffer("single.dao", "hello")
+  let single_buf = make_source_buffer("single.dao", "hello")
   if test_eq("single_line_count", i64_to_string(sb_line_count(single_buf)), "1"):
     pass_count = pass_count + 1
   if test_eq("single_line_text", sb_line_text(single_buf, one), "hello"):
@@ -320,10 +320,10 @@ fn main(): i32
   // --- Multiple diagnostics on same line ---
 
   let off10b: i64 = 10
-  let diags_same: Vector<Diagnostic> = Vector<Diagnostic>::new()
+  let diags_same = Vector<Diagnostic>::new()
   diags_same = diags_same.push(make_error(Span(off10b, three), "first"))
   diags_same = diags_same.push(make_error(Span(off18, one), "second"))
-  let fmt_same: string = format_diagnostics(buf, diags_same, 0)
+  let fmt_same = format_diagnostics(buf, diags_same, 0)
   if test_contains("same_line_first", fmt_same, "2:1: error: first"):
     pass_count = pass_count + 1
   if test_contains("same_line_second", fmt_same, "2:9: error: second"):
@@ -331,7 +331,7 @@ fn main(): i32
 
   // --- Summary ---
 
-  let total: i32 = 28
+  let total = 28
   print("")
   print("--- results ---")
   print(i32_to_string(pass_count) + " / " + i32_to_string(total) + " passed")

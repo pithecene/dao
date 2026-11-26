@@ -4,8 +4,8 @@ class Point:
   y: i32
 
 fn manhattan(p: Point): i32
-  let ax: i32 = p.x
-  let ay: i32 = p.y
+  let ax = p.x
+  let ay = p.y
   if ax < 0:
     ax = 0 - ax
   if ay < 0:
@@ -16,9 +16,9 @@ fn add_points(a: Point, b: Point): Point
   return Point(a.x + b.x, a.y + b.y)
 
 fn main(): i32
-  let a: Point = Point(3, 4)
-  let b: Point = Point(1, 2)
-  let c: Point = add_points(a, b)
+  let a = Point(3, 4)
+  let b = Point(1, 2)
+  let c = add_points(a, b)
 
   print("a = (3, 4)")
   print("b = (1, 2)")

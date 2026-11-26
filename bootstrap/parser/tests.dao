@@ -13,8 +13,8 @@ fn expect_node_kind_po(label: string, po: parser::ParseOutput, node_idx: i64, ex
   if node_idx >= po.nodes.length():
     print("FAIL " + label + ": node index " + i64_to_string(node_idx) + " out of bounds")
     return false
-  let n: parser::Node = po.nodes.get(node_idx)
-  let actual: string = parser::node_kind_name(n)
+  let n = po.nodes.get(node_idx)
+  let actual = parser::node_kind_name(n)
   if actual == expected:
     print("PASS " + label)
     return true
@@ -28,8 +28,8 @@ fn expect_node_kind(label: string, pr: parser::PR, node_idx: i64, expected: stri
   if node_idx >= pr.ps.nodes.length():
     print("FAIL " + label + ": node index " + i64_to_string(node_idx) + " out of bounds")
     return false
-  let n: parser::Node = pr.ps.nodes.get(node_idx)
-  let actual: string = parser::node_kind_name(n)
+  let n = pr.ps.nodes.get(node_idx)
+  let actual = parser::node_kind_name(n)
   if actual == expected:
     print("PASS " + label)
     return true
@@ -80,9 +80,9 @@ fn expect_node_count_min(label: string, pr: parser::PR, min_count: i64): bool
 
 // Helper to parse an expression snippet
 fn parse_expr_str(src: string): parser::PR
-  let lr: lexer::LexResult = lexer::lex(src)
-  let pc: parser::PC = parser::PC(lr.tokens, src)
-  let ps: parser::PS = parser::PS(to_i64(0), Vector<parser::Node>::new(), Vector<i64>::new(), lr.diagnostics)
+  let lr = lexer::lex(src)
+  let pc = parser::PC(lr.tokens, src)
+  let ps = parser::PS(to_i64(0), Vector<parser::Node>::new(), Vector<i64>::new(), lr.diagnostics)
   return parser::parse_expr(pc, ps)
 
 // The `derived` flag of the first ConceptDeclD node in a parse output,
@@ -91,7 +91,7 @@ fn parse_expr_str(src: string): parser::PR
 fn concept_derived_flag(po: parser::ParseOutput): i64
   let i: i64 = 0
   while i < po.nodes.length():
-    let n: parser::Node = po.nodes.get(i)
+    let n = po.nodes.get(i)
     match n:
       parser::Node::ConceptDeclD(a, b, c, d):
         return d
@@ -106,76 +106,76 @@ fn main(): i32
   print("=== bootstrap/parser: Task 21 — Bootstrap Parser ===")
   print("")
 
-  let pass_count: i32 = 0
-  let total: i32 = 88
+  let pass_count = 0
+  let total = 88
 
   // -----------------------------------------------------------------
   // Expression tests
   // -----------------------------------------------------------------
 
   // Test 1: Simple integer literal
-  let r1: parser::PR = parse_expr_str("42")
+  let r1 = parse_expr_str("42")
   if expect_node_kind("expr_int_lit", r1, r1.node, "IntLitE"):
     pass_count = pass_count + 1
 
   // Test 2: Binary addition
-  let r2: parser::PR = parse_expr_str("1 + 2")
+  let r2 = parse_expr_str("1 + 2")
   if expect_node_kind("expr_binary_add", r2, r2.node, "BinaryE"):
     pass_count = pass_count + 1
 
   // Test 3: Precedence — 2 + 3 * 4 should have BinaryE(+) at root
-  let r3: parser::PR = parse_expr_str("2 + 3 * 4")
+  let r3 = parse_expr_str("2 + 3 * 4")
   if expect_node_kind("expr_precedence", r3, r3.node, "BinaryE"):
     pass_count = pass_count + 1
 
   // Test 4: Unary minus
-  let r4: parser::PR = parse_expr_str("-x")
+  let r4 = parse_expr_str("-x")
   if expect_node_kind("expr_unary_neg", r4, r4.node, "UnaryE"):
     pass_count = pass_count + 1
 
   // Test 5: Function call
-  let r5: parser::PR = parse_expr_str("f(x, y)")
+  let r5 = parse_expr_str("f(x, y)")
   if expect_node_kind("expr_call", r5, r5.node, "CallE"):
     pass_count = pass_count + 1
 
   // Test 6: Field access
-  let r6: parser::PR = parse_expr_str("a.b")
+  let r6 = parse_expr_str("a.b")
   if expect_node_kind("expr_field", r6, r6.node, "FieldE"):
     pass_count = pass_count + 1
 
   // Test 7: Index
-  let r7: parser::PR = parse_expr_str("a[0]")
+  let r7 = parse_expr_str("a[0]")
   if expect_node_kind("expr_index", r7, r7.node, "IndexE"):
     pass_count = pass_count + 1
 
   // Test 8: Pipe
-  let r8: parser::PR = parse_expr_str("x |> f")
+  let r8 = parse_expr_str("x |> f")
   if expect_node_kind("expr_pipe", r8, r8.node, "PipeE"):
     pass_count = pass_count + 1
 
   // Test 9: Try
-  let r9: parser::PR = parse_expr_str("x?")
+  let r9 = parse_expr_str("x?")
   if expect_node_kind("expr_try", r9, r9.node, "TryE"):
     pass_count = pass_count + 1
 
   // Test 10: Qualified name
-  let r10: parser::PR = parse_expr_str("A::B")
+  let r10 = parse_expr_str("A::B")
   if expect_node_kind("expr_qual_name", r10, r10.node, "QualNameE"):
     pass_count = pass_count + 1
 
   // Test 10a: Nested call — regression for idx interleaving bug.
   // f(g(1), 2) must produce CallE with 2 args where arg 0 is CallE.
-  let r10a: parser::PR = parse_expr_str("f(g(1), 2)")
+  let r10a = parse_expr_str("f(g(1), 2)")
   if expect_node_kind("nested_call_outer", r10a, r10a.node, "CallE"):
     pass_count = pass_count + 1
   // Verify the outer call has 2 arguments by reading from the idx list.
   if r10a.node >= 0:
-    let outer: parser::Node = r10a.ps.nodes.get(r10a.node)
-    let ok_nested: bool = false
+    let outer = r10a.ps.nodes.get(r10a.node)
+    let ok_nested = false
     match outer:
       parser::Node::CallE(callee, list_pos, arg_count, targs_lp, names_lp, targs_on_type):
         // Read count from idx list at list_pos
-        let cnt: i64 = r10a.ps.idx.get(list_pos)
+        let cnt = r10a.ps.idx.get(list_pos)
         if cnt == 2:
           ok_nested = true
     if ok_nested:
@@ -187,8 +187,8 @@ fn main(): i32
   // Test 10a2: type arguments after a member are a call's, written for
   // the method (`raw.cast<i64>()`); a `<` not closing onto a call stays
   // a comparison (`p.x < y`).
-  let r10m: parser::PR = parse_expr_str("raw.cast<i64>()")
-  let member_targs: bool = false
+  let r10m = parse_expr_str("raw.cast<i64>()")
+  let member_targs = false
   if r10m.node >= 0:
     match r10m.ps.nodes.get(r10m.node):
       parser::Node::CallE(callee, list_pos, arg_count, targs_lp, names_lp, targs_on_type):
@@ -200,12 +200,12 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL member_call_type_arguments: expected a call on a member carrying its type arguments")
-  let r10c: parser::PR = parse_expr_str("p.x < y")
+  let r10c = parse_expr_str("p.x < y")
   if expect_node_kind("member_less_than_stays_a_comparison", r10c, r10c.node, "BinaryE"):
     pass_count = pass_count + 1
 
   // Test 10b: Nested list literal — regression for list idx interleaving.
-  let r10b: parser::PR = parse_expr_str("[f(1), 2]")
+  let r10b = parse_expr_str("[f(1), 2]")
   if expect_node_kind("nested_list_outer", r10b, r10b.node, "ListLitE"):
     pass_count = pass_count + 1
 
@@ -214,44 +214,44 @@ fn main(): i32
   // -----------------------------------------------------------------
 
   // Test 11: Simple fn declaration
-  let src11: string = "fn foo(x: i32): i32\n  return x\n"
-  let r11: parser::ParseOutput = parser::parse(src11)
+  let src11 = "fn foo(x: i32): i32\n  return x\n"
+  let r11 = parser::parse(src11)
   if expect_node_kind_po("decl_fn", r11, r11.root, "FileN"):
     pass_count = pass_count + 1
 
   // Test 12: Extern fn declaration
-  let src12: string = "extern fn bar(s: string): i32\n"
-  let r12: parser::ParseOutput = parser::parse(src12)
+  let src12 = "extern fn bar(s: string): i32\n"
+  let r12 = parser::parse(src12)
   if expect_node_kind_po("decl_extern_fn", r12, r12.root, "FileN"):
     pass_count = pass_count + 1
 
   // Test 13: Expression-bodied fn
-  let src13: string = "fn add(a: i64, b: i64): i64 -> a + b\n"
-  let r13: parser::ParseOutput = parser::parse(src13)
+  let src13 = "fn add(a: i64, b: i64): i64 -> a + b\n"
+  let r13 = parser::parse(src13)
   if expect_node_kind_po("decl_expr_fn", r13, r13.root, "FileN"):
     pass_count = pass_count + 1
 
   // Test 14: Class with fields
-  let src14: string = "class Point:\n  x: i64\n  y: i64\n"
-  let r14: parser::ParseOutput = parser::parse(src14)
+  let src14 = "class Point:\n  x: i64\n  y: i64\n"
+  let r14 = parser::parse(src14)
   if expect_node_kind_po("decl_class", r14, r14.root, "FileN"):
     pass_count = pass_count + 1
 
   // Test 15: Enum with variants
-  let src15: string = "enum Color:\n  Red\n  Green\n  Blue\n"
-  let r15: parser::ParseOutput = parser::parse(src15)
+  let src15 = "enum Color:\n  Red\n  Green\n  Blue\n"
+  let r15 = parser::parse(src15)
   if expect_node_kind_po("decl_enum", r15, r15.root, "FileN"):
     pass_count = pass_count + 1
 
   // Test 16: Enum with payload variants
-  let src16: string = "enum Expr:\n  IntLit(i64)\n  Binary(TK, i64, i64)\n"
-  let r16: parser::ParseOutput = parser::parse(src16)
+  let src16 = "enum Expr:\n  IntLit(i64)\n  Binary(TK, i64, i64)\n"
+  let r16 = parser::parse(src16)
   if expect_node_kind_po("decl_enum_payload", r16, r16.root, "FileN"):
     pass_count = pass_count + 1
 
   // Test 17: Type alias
-  let src17: string = "type NodeId = i64\n"
-  let r17: parser::ParseOutput = parser::parse(src17)
+  let src17 = "type NodeId = i64\n"
+  let r17 = parser::parse(src17)
   if expect_node_kind_po("decl_type_alias", r17, r17.root, "FileN"):
     pass_count = pass_count + 1
 
@@ -260,45 +260,45 @@ fn main(): i32
   // -----------------------------------------------------------------
 
   // Test 18: Let statement
-  let src18: string = "fn test(): i32\n  let x: i32 = 42\n  return x\n"
-  let r18: parser::ParseOutput = parser::parse(src18)
+  let src18 = "fn test(): i32\n  let x: i32 = 42\n  return x\n"
+  let r18 = parser::parse(src18)
   if expect_node_kind_po("stmt_let", r18, r18.root, "FileN"):
     pass_count = pass_count + 1
 
   // Test 19: If/else
-  let src19: string = "fn test(): i32\n  if x > 0:\n    return 1\n  else:\n    return 0\n"
-  let r19: parser::ParseOutput = parser::parse(src19)
+  let src19 = "fn test(): i32\n  if x > 0:\n    return 1\n  else:\n    return 0\n"
+  let r19 = parser::parse(src19)
   if expect_node_kind_po("stmt_if_else", r19, r19.root, "FileN"):
     pass_count = pass_count + 1
 
   // Test 20: While loop
-  let src20: string = "fn test(): i32\n  while x > 0:\n    x = x - 1\n  return x\n"
-  let r20: parser::ParseOutput = parser::parse(src20)
+  let src20 = "fn test(): i32\n  while x > 0:\n    x = x - 1\n  return x\n"
+  let r20 = parser::parse(src20)
   if expect_node_kind_po("stmt_while", r20, r20.root, "FileN"):
     pass_count = pass_count + 1
 
   // Test 21: For loop
-  let src21: string = "fn test(): i32\n  for i in items:\n    print(i)\n  return 0\n"
-  let r21: parser::ParseOutput = parser::parse(src21)
+  let src21 = "fn test(): i32\n  for i in items:\n    print(i)\n  return 0\n"
+  let r21 = parser::parse(src21)
   if expect_node_kind_po("stmt_for", r21, r21.root, "FileN"):
     pass_count = pass_count + 1
 
   // Test 22: Return
-  let src22: string = "fn test(): i32\n  return 42\n"
-  let r22: parser::ParseOutput = parser::parse(src22)
+  let src22 = "fn test(): i32\n  return 42\n"
+  let r22 = parser::parse(src22)
   if expect_no_parse_errors_po("stmt_return_no_err", r22):
     pass_count = pass_count + 1
 
   // Test 23: Match statement
-  let src23: string = "fn test(): i32\n  match x:\n    TK::Plus:\n      return 1\n    TK::Minus:\n      return 2\n"
-  let r23: parser::ParseOutput = parser::parse(src23)
+  let src23 = "fn test(): i32\n  match x:\n    TK::Plus:\n      return 1\n    TK::Minus:\n      return 2\n"
+  let r23 = parser::parse(src23)
   if expect_node_kind_po("stmt_match", r23, r23.root, "FileN"):
     pass_count = pass_count + 1
 
   // Test 24: Full program (enum + class + fn + main)
-  let src24: string = "enum Color:\n  Red\n  Blue\n\nclass Point:\n  x: i64\n  y: i64\n\nfn add(a: i64, b: i64): i64 -> a + b\n\nfn main(): i32\n  let p: Point = Point(1, 2)\n  return 0\n"
-  let r24: parser::ParseOutput = parser::parse(src24)
-  let r24_ok: bool = true
+  let src24 = "enum Color:\n  Red\n  Blue\n\nclass Point:\n  x: i64\n  y: i64\n\nfn add(a: i64, b: i64): i64 -> a + b\n\nfn main(): i32\n  let p: Point = Point(1, 2)\n  return 0\n"
+  let r24 = parser::parse(src24)
+  let r24_ok = true
   if expect_node_kind_po("full_program_file", r24, r24.root, "FileN") == false:
     r24_ok = false
   if r24_ok:
@@ -310,18 +310,18 @@ fn main(): i32
   // -----------------------------------------------------------------
 
   // Test 25: Missing closing paren
-  let r25: parser::PR = parse_expr_str("f(x, y")
+  let r25 = parse_expr_str("f(x, y")
   if expect_parse_errors("err_missing_rparen", r25, to_i64(1)):
     pass_count = pass_count + 1
 
   // Test 26: Expected expression
-  let r26: parser::PR = parse_expr_str(")")
+  let r26 = parse_expr_str(")")
   if expect_parse_errors("err_expected_expr", r26, to_i64(1)):
     pass_count = pass_count + 1
 
   // Test 27: Missing colon after fn params
-  let src27: string = "fn test(x: i32) i32\n  return x\n"
-  let r27: parser::ParseOutput = parser::parse(src27)
+  let src27 = "fn test(x: i32) i32\n  return x\n"
+  let r27 = parser::parse(src27)
   if expect_node_kind_po("err_missing_colon", r27, r27.root, "FileN"):
     pass_count = pass_count + 1
 
@@ -331,20 +331,20 @@ fn main(): i32
 
   // Test 28: Class with generic field type — verifies field pairs
   // are contiguous in idx despite nested generic type list entries.
-  let src28: string = "class Foo:\n  items: Vector<Token>\n  count: i64\n"
-  let r28: parser::ParseOutput = parser::parse(src28)
+  let src28 = "class Foo:\n  items: Vector<Token>\n  count: i64\n"
+  let r28 = parser::parse(src28)
   if expect_no_parse_errors_po("class_generic_field_no_err", r28):
     pass_count = pass_count + 1
 
   // Test 29: extern fn without return type produces diagnostic.
-  let src29: string = "extern fn bad(x: i32)\n"
-  let r29: parser::ParseOutput = parser::parse(src29)
+  let src29 = "extern fn bad(x: i32)\n"
+  let r29 = parser::parse(src29)
   if expect_parse_errors_po("extern_fn_no_ret", r29, to_i64(1)):
     pass_count = pass_count + 1
 
   // Test 30: Empty class body produces diagnostic.
-  let src30: string = "class Empty:\n  \n"
-  let r30: parser::ParseOutput = parser::parse(src30)
+  let src30 = "class Empty:\n  \n"
+  let r30 = parser::parse(src30)
   if expect_parse_errors_po("empty_class_body", r30, to_i64(1)):
     pass_count = pass_count + 1
 
@@ -353,33 +353,33 @@ fn main(): i32
   // -----------------------------------------------------------------
 
   // Test 31a: module declaration parses
-  let src31a: string = "module app::math\nfn f(): i32 -> 0\n"
-  let r31a: parser::ParseOutput = parser::parse(src31a)
+  let src31a = "module app::math\nfn f(): i32 -> 0\n"
+  let r31a = parser::parse(src31a)
   if expect_no_parse_errors_po("module_decl_parses", r31a):
     pass_count = pass_count + 1
 
   // Test 31b: single import parses
-  let src31b: string = "import core::fmt\nfn f(): i32 -> 0\n"
-  let r31b: parser::ParseOutput = parser::parse(src31b)
+  let src31b = "import core::fmt\nfn f(): i32 -> 0\n"
+  let r31b = parser::parse(src31b)
   if expect_no_parse_errors_po("single_import_parses", r31b):
     pass_count = pass_count + 1
 
   // Test 31c: multiple imports parse
-  let src31c: string = "import core::fmt\nimport app::math\nfn f(): i32 -> 0\n"
-  let r31c: parser::ParseOutput = parser::parse(src31c)
+  let src31c = "import core::fmt\nimport app::math\nfn f(): i32 -> 0\n"
+  let r31c = parser::parse(src31c)
   if expect_no_parse_errors_po("multi_import_parses", r31c):
     pass_count = pass_count + 1
 
   // Test 31d: module + imports + declarations parse
-  let src31d: string = "module app::main\nimport core::fmt\nimport app::math\nfn f(): i32 -> 0\n"
-  let r31d: parser::ParseOutput = parser::parse(src31d)
+  let src31d = "module app::main\nimport core::fmt\nimport app::math\nfn f(): i32 -> 0\n"
+  let r31d = parser::parse(src31d)
   if expect_no_parse_errors_po("module_imports_decls", r31d):
     pass_count = pass_count + 1
 
   // Test 31e: module decl creates ModuleDeclN node
   if r31d.root >= 0:
-    let file_n: parser::Node = r31d.nodes.get(r31d.root)
-    let mod_ok: bool = false
+    let file_n = r31d.nodes.get(r31d.root)
+    let mod_ok = false
     match file_n:
       parser::Node::FileN(mod_decl, imp_lp, decl_lp):
         if mod_decl >= 0:
@@ -391,28 +391,28 @@ fn main(): i32
   // Test 31f: imports produce ImportDeclN nodes — check that the
   // import count stored in the idx list is 2 and first import node is ImportDeclN.
   if r31d.root >= 0:
-    let file_n2: parser::Node = r31d.nodes.get(r31d.root)
-    let imp_ok: bool = false
+    let file_n2 = r31d.nodes.get(r31d.root)
+    let imp_ok = false
     match file_n2:
       parser::Node::FileN(mod_decl, imp_lp, decl_lp):
         // imp_lp points to the count; elements precede it.
-        let imp_count: i64 = r31d.idx.get(imp_lp)
+        let imp_count = r31d.idx.get(imp_lp)
         if imp_count == 2:
-          let first_imp_idx: i64 = r31d.idx.get(imp_lp - 2)
+          let first_imp_idx = r31d.idx.get(imp_lp - 2)
           if expect_node_kind_po("import_node_kind", r31d, first_imp_idx, "ImportDeclN"):
             imp_ok = true
     if imp_ok:
       pass_count = pass_count + 1
 
   // Test 31g: import after function produces diagnostic
-  let src31g: string = "fn f(): i32 -> 0\nimport core::fmt\n"
-  let r31g: parser::ParseOutput = parser::parse(src31g)
+  let src31g = "fn f(): i32 -> 0\nimport core::fmt\n"
+  let r31g = parser::parse(src31g)
   if expect_parse_errors_po("import_after_fn", r31g, to_i64(1)):
     pass_count = pass_count + 1
 
   // Test 31h: module after function produces diagnostic
-  let src31h: string = "fn f(): i32 -> 0\nmodule app::main\n"
-  let r31h: parser::ParseOutput = parser::parse(src31h)
+  let src31h = "fn f(): i32 -> 0\nmodule app::main\n"
+  let r31h = parser::parse(src31h)
   if expect_parse_errors_po("module_after_fn", r31h, to_i64(1)):
     pass_count = pass_count + 1
 
@@ -423,15 +423,15 @@ fn main(): i32
   // Test 31-33: Parse a representative bootstrap source file
   // (uses expr_parser probe as the self-parse target, since this file
   //  is too large for the immutable-vector bootstrap runtime)
-  let self_path: string = "examples/bootstrap_probe/expr_parser.dao"
+  let self_path = "examples/bootstrap_probe/expr_parser.dao"
   if file_exists(self_path):
-    let self_src: string = read_file(self_path)
-    let self_r: parser::ParseOutput = parser::parse(self_src)
+    let self_src = read_file(self_path)
+    let self_r = parser::parse(self_src)
     if expect_node_kind_po("self_parse_file", self_r, self_r.root, "FileN"):
       pass_count = pass_count + 1
     if expect_node_count_min_po("self_parse_nodes", self_r, to_i64(20)):
       pass_count = pass_count + 1
-    let err_count: i64 = self_r.diags.length()
+    let err_count = self_r.diags.length()
     print("  [info] self-parse diagnostics: " + i64_to_string(err_count))
     print("  [info] self-parse node count: " + i64_to_string(self_r.nodes.length()))
     print("  [info] self-parse idx list size: " + i64_to_string(self_r.idx.length()))
@@ -450,47 +450,47 @@ fn main(): i32
   // -----------------------------------------------------------------
 
   // Test 34: Generic fn declaration — fn foo<T>(x: T): T
-  let src34: string = "fn foo<T>(x: T): T\n  return x\n"
-  let r34: parser::ParseOutput = parser::parse(src34)
+  let src34 = "fn foo<T>(x: T): T\n  return x\n"
+  let r34 = parser::parse(src34)
   if expect_no_parse_errors_po("generic_fn_no_err", r34):
     pass_count = pass_count + 1
 
   // Test 35: Generic class declaration — class Box<T>
-  let src35: string = "class Box<T>:\n  value: T\n"
-  let r35: parser::ParseOutput = parser::parse(src35)
+  let src35 = "class Box<T>:\n  value: T\n"
+  let r35 = parser::parse(src35)
   if expect_no_parse_errors_po("generic_class_no_err", r35):
     pass_count = pass_count + 1
 
   // Test 35a: Bounded type parameter — fn foo<T: Printable>(x: T): T
-  let src35a: string = "fn foo<T: Printable>(x: T): T\n  return x\n"
-  let r35a: parser::ParseOutput = parser::parse(src35a)
+  let src35a = "fn foo<T: Printable>(x: T): T\n  return x\n"
+  let r35a = parser::parse(src35a)
   if expect_no_parse_errors_po("generic_fn_bound_no_err", r35a):
     pass_count = pass_count + 1
 
   // Test 35b: Multiple bounds — fn foo<T: A + B>(x: T): T
-  let src35b: string = "fn foo<T: A + B>(x: T): T\n  return x\n"
-  let r35b: parser::ParseOutput = parser::parse(src35b)
+  let src35b = "fn foo<T: A + B>(x: T): T\n  return x\n"
+  let r35b = parser::parse(src35b)
   if expect_no_parse_errors_po("generic_fn_multibound_no_err", r35b):
     pass_count = pass_count + 1
 
   // Test 35c: Bounded class parameter — class Box<T: Printable>
-  let src35c: string = "class Box<T: Printable>:\n  value: T\n"
-  let r35c: parser::ParseOutput = parser::parse(src35c)
+  let src35c = "class Box<T: Printable>:\n  value: T\n"
+  let r35c = parser::parse(src35c)
   if expect_no_parse_errors_po("generic_class_bound_no_err", r35c):
     pass_count = pass_count + 1
 
   // Test 35d: Qualified bound — fn f<T: core::Printable>(x: T): T
-  let src35q: string = "fn f<T: core::Printable>(x: T): T\n  return x\n"
-  let r35q: parser::ParseOutput = parser::parse(src35q)
+  let src35q = "fn f<T: core::Printable>(x: T): T\n  return x\n"
+  let r35q = parser::parse(src35q)
   if expect_no_parse_errors_po("generic_fn_qualified_bound_no_err", r35q):
     pass_count = pass_count + 1
 
   // Test 35e: `derived concept` parses and is marked derived
-  let src35d: string = "derived concept Ord:\n  fn cmp(self, o: Ord): i64\n"
-  let r35d: parser::ParseOutput = parser::parse(src35d)
+  let src35d = "derived concept Ord:\n  fn cmp(self, o: Ord): i64\n"
+  let r35d = parser::parse(src35d)
   if expect_no_parse_errors_po("derived_concept_no_err", r35d):
     pass_count = pass_count + 1
-  let df35d: i64 = concept_derived_flag(r35d)
+  let df35d = concept_derived_flag(r35d)
   if df35d == 1:
     print("PASS derived_concept_flag_set")
     pass_count = pass_count + 1
@@ -498,9 +498,9 @@ fn main(): i32
     print("FAIL derived_concept_flag_set: expected 1, got " + i64_to_string(df35d))
 
   // Test 35f: a plain `concept` is not marked derived (distinct representation)
-  let src35e: string = "concept Eq:\n  fn eq(self, o: Eq): bool\n"
-  let r35e: parser::ParseOutput = parser::parse(src35e)
-  let df35e: i64 = concept_derived_flag(r35e)
+  let src35e = "concept Eq:\n  fn eq(self, o: Eq): bool\n"
+  let r35e = parser::parse(src35e)
+  let df35e = concept_derived_flag(r35e)
   if df35e == 0:
     print("PASS plain_concept_flag_unset")
     pass_count = pass_count + 1
@@ -512,14 +512,14 @@ fn main(): i32
   // -----------------------------------------------------------------
 
   // Test 36: Class with method
-  let src36: string = "class Foo:\n  x: i32\n  fn get_x(self): i32\n    return self.x\n"
-  let r36: parser::ParseOutput = parser::parse(src36)
+  let src36 = "class Foo:\n  x: i32\n  fn get_x(self): i32\n    return self.x\n"
+  let r36 = parser::parse(src36)
   if expect_no_parse_errors_po("class_method_no_err", r36):
     pass_count = pass_count + 1
 
   // Test 37: Class with method and multiple params
-  let src37: string = "class Bar:\n  val: i64\n  fn add(self, n: i64): i64\n    return self.val + n\n"
-  let r37: parser::ParseOutput = parser::parse(src37)
+  let src37 = "class Bar:\n  val: i64\n  fn add(self, n: i64): i64\n    return self.val + n\n"
+  let r37 = parser::parse(src37)
   if expect_no_parse_errors_po("class_method_multi_param_no_err", r37):
     pass_count = pass_count + 1
 
@@ -528,20 +528,20 @@ fn main(): i32
   // -----------------------------------------------------------------
 
   // Test 38: concept declaration parses without error
-  let src38: string = "concept Printable:\n  fn to_string(self): string\n"
-  let r38: parser::ParseOutput = parser::parse(src38)
+  let src38 = "concept Printable:\n  fn to_string(self): string\n"
+  let r38 = parser::parse(src38)
   if expect_no_parse_errors_po("concept_decl_no_err", r38):
     pass_count = pass_count + 1
 
   // Test 39: extend declaration parses without error
-  let src39: string = "class Foo:\n  x: i32\n\nconcept Printable:\n  fn to_string(self): string\n\nextend Foo as Printable:\n  fn to_string(self): string\n    return \"Foo\"\n"
-  let r39: parser::ParseOutput = parser::parse(src39)
+  let src39 = "class Foo:\n  x: i32\n\nconcept Printable:\n  fn to_string(self): string\n\nextend Foo as Printable:\n  fn to_string(self): string\n    return \"Foo\"\n"
+  let r39 = parser::parse(src39)
   if expect_no_parse_errors_po("extend_decl_no_err", r39):
     pass_count = pass_count + 1
 
   // Test 40: concept with multiple method signatures
-  let src40: string = "concept Showable:\n  fn show(self): string\n  fn size(self): i64\n"
-  let r40: parser::ParseOutput = parser::parse(src40)
+  let src40 = "concept Showable:\n  fn show(self): string\n  fn size(self): i64\n"
+  let r40 = parser::parse(src40)
   if expect_no_parse_errors_po("concept_multi_sig_no_err", r40):
     pass_count = pass_count + 1
 
@@ -551,11 +551,11 @@ fn main(): i32
 
   // Test 41: Static call on a generic type: CallE, callee QualNameE of
   // two segments, one type argument.
-  let r41: parser::PR = parse_expr_str("Vector<i64>::new()")
+  let r41 = parse_expr_str("Vector<i64>::new()")
   if expect_node_kind("targs_static_call", r41, r41.node, "CallE"):
     pass_count = pass_count + 1
   if r41.node >= 0:
-    let shape_ok: bool = false
+    let shape_ok = false
     match r41.ps.nodes.get(r41.node):
       parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
         if targs_lp >= 0 and r41.ps.idx.get(targs_lp) == 1 and arg_count == 0:
@@ -572,16 +572,16 @@ fn main(): i32
     pass_count = pass_count + 1
 
   // Test 42: Nested type argument; `>>` closes both.
-  let r42: parser::PR = parse_expr_str("HashMap<Vector<i64>>::new()")
+  let r42 = parse_expr_str("HashMap<Vector<i64>>::new()")
   if expect_node_kind("targs_nested", r42, r42.node, "CallE"):
     pass_count = pass_count + 1
   if r42.node >= 0:
-    let nested_ok: bool = false
+    let nested_ok = false
     match r42.ps.nodes.get(r42.node):
       parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
         if targs_lp >= 0 and r42.ps.idx.get(targs_lp) == 1:
           // The list's one item sits just before its count.
-          let targ: i64 = r42.ps.idx.get(targs_lp - 1)
+          let targ = r42.ps.idx.get(targs_lp - 1)
           match r42.ps.nodes.get(targ):
             parser::Node::GenericT(name, alp, acount):
               nested_ok = true
@@ -594,11 +594,11 @@ fn main(): i32
     pass_count = pass_count + 1
 
   // Test 43: Explicit type arguments on a plain call.
-  let r43: parser::PR = parse_expr_str("identity<i64>(x)")
+  let r43 = parse_expr_str("identity<i64>(x)")
   if expect_node_kind("targs_plain_call", r43, r43.node, "CallE"):
     pass_count = pass_count + 1
   if r43.node >= 0:
-    let plain_ok: bool = false
+    let plain_ok = false
     match r43.ps.nodes.get(r43.node):
       parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
         if targs_lp >= 0 and r43.ps.idx.get(targs_lp) == 1 and arg_count == 1:
@@ -612,27 +612,27 @@ fn main(): i32
       print("FAIL targs_plain_call_shape: expected IdentE callee, 1 type arg, 1 arg")
 
   // Test 44: A comparison stays a comparison.
-  let r44: parser::PR = parse_expr_str("a < b")
+  let r44 = parse_expr_str("a < b")
   if expect_node_kind("lt_is_comparison", r44, r44.node, "BinaryE"):
     pass_count = pass_count + 1
 
   // Test 45: Two comparisons; `>` closes no type list.
-  let r45: parser::PR = parse_expr_str("a < b > c")
+  let r45 = parse_expr_str("a < b > c")
   if expect_node_kind("lt_gt_is_two_comparisons", r45, r45.node, "BinaryE"):
     pass_count = pass_count + 1
   if expect_no_parse_errors("lt_gt_no_err", r45):
     pass_count = pass_count + 1
 
   // Test 46: A comparison as a call argument.
-  let r46: parser::PR = parse_expr_str("f(a < b)")
+  let r46 = parse_expr_str("f(a < b)")
   if expect_node_kind("call_with_comparison", r46, r46.node, "CallE"):
     pass_count = pass_count + 1
   if r46.node >= 0:
-    let cmp_arg_ok: bool = false
+    let cmp_arg_ok = false
     match r46.ps.nodes.get(r46.node):
       parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
         if arg_count == 1 and targs_lp < 0:
-          let arg0: i64 = r46.ps.idx.get(args_lp - 1)
+          let arg0 = r46.ps.idx.get(args_lp - 1)
           match r46.ps.nodes.get(arg0):
             parser::Node::BinaryE(op, l, r):
               cmp_arg_ok = true
@@ -643,11 +643,11 @@ fn main(): i32
       print("FAIL call_with_comparison_arg: expected one BinaryE argument and no type args")
 
   // Test 47: A method call on the static call's result.
-  let r47: parser::PR = parse_expr_str("Vector<i64>::new().push(1)")
+  let r47 = parse_expr_str("Vector<i64>::new().push(1)")
   if expect_node_kind("targs_then_method", r47, r47.node, "CallE"):
     pass_count = pass_count + 1
   if r47.node >= 0:
-    let chain_ok: bool = false
+    let chain_ok = false
     match r47.ps.nodes.get(r47.node):
       parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
         match r47.ps.nodes.get(callee):
@@ -660,7 +660,7 @@ fn main(): i32
       print("FAIL targs_then_method_chain: expected a FieldE callee")
 
   // Test 48: A type list that fails to parse leaves the comparison.
-  let r48: parser::PR = parse_expr_str("x < 3 > (y)")
+  let r48 = parse_expr_str("x < 3 > (y)")
   if expect_node_kind("bad_type_list_is_comparison", r48, r48.node, "BinaryE"):
     pass_count = pass_count + 1
   if expect_no_parse_errors("bad_type_list_no_err", r48):
@@ -672,11 +672,11 @@ fn main(): i32
 
   // Test 49: `resource memory pool =>` and its suite parse to ResourceS
   // with two body statements; the `let` after the dedent is a sibling.
-  let src49: string = "fn f(): i64\n  let n: i64 = 0\n  resource memory pool =>\n    n = 1\n    n = n + 1\n  let m: i64 = n\n  return m\n"
-  let r49: parser::ParseOutput = parser::parse(src49)
+  let src49 = "fn f(): i64\n  let n: i64 = 0\n  resource memory pool =>\n    n = 1\n    n = n + 1\n  let m: i64 = n\n  return m\n"
+  let r49 = parser::parse(src49)
   if expect_no_parse_errors_po("resource_block_no_err", r49):
     pass_count = pass_count + 1
-  let res_ok: bool = false
+  let res_ok = false
   let ri: i64 = 0
   while ri < r49.nodes.length():
     match r49.nodes.get(ri):
@@ -691,11 +691,11 @@ fn main(): i32
     print("FAIL resource_block_two_stmts: expected a ResourceS with a two-statement body")
 
   // Test 49a: `mode unsafe =>` and its suite parse to a ModeS node
-  let src49a: string = "fn f(): i64\n  let n: i64 = 0\n  mode unsafe =>\n    n = 1\n  return n\n"
-  let r49a: parser::ParseOutput = parser::parse(src49a)
+  let src49a = "fn f(): i64\n  let n: i64 = 0\n  mode unsafe =>\n    n = 1\n  return n\n"
+  let r49a = parser::parse(src49a)
   if expect_no_parse_errors_po("mode_block_no_err", r49a):
     pass_count = pass_count + 1
-  let mode_ok: bool = false
+  let mode_ok = false
   let mai: i64 = 0
   while mai < r49a.nodes.length():
     match r49a.nodes.get(mai):
@@ -709,11 +709,11 @@ fn main(): i32
     print("FAIL mode_block_is_ModeS: expected a ModeS node")
 
   // Test 49b: `yield <expr>` parses to a YieldS node
-  let src49b: string = "fn g(): i64\n  yield 1\n  return 0\n"
-  let r49b: parser::ParseOutput = parser::parse(src49b)
+  let src49b = "fn g(): i64\n  yield 1\n  return 0\n"
+  let r49b = parser::parse(src49b)
   if expect_no_parse_errors_po("yield_stmt_no_err", r49b):
     pass_count = pass_count + 1
-  let yield_ok: bool = false
+  let yield_ok = false
   let yai: i64 = 0
   while yai < r49b.nodes.length():
     match r49b.nodes.get(yai):
@@ -733,11 +733,11 @@ fn main(): i32
 
   // Test 50: `f(a = 1, b)` — one named argument, one positional; the
   // names list holds the name's token for the first and -1 for the second.
-  let r50: parser::PR = parse_expr_str("f(a = 1, b)")
+  let r50 = parse_expr_str("f(a = 1, b)")
   if expect_node_kind("named_arg_call", r50, r50.node, "CallE"):
     pass_count = pass_count + 1
   if r50.node >= 0:
-    let names_ok: bool = false
+    let names_ok = false
     match r50.ps.nodes.get(r50.node):
       parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
         if arg_count == 2 and r50.ps.idx.get(names_lp) == 2:
@@ -752,11 +752,11 @@ fn main(): i32
     pass_count = pass_count + 1
 
   // Test 51: `f(a == 1)` is a comparison argument, unnamed.
-  let r51: parser::PR = parse_expr_str("f(a == 1)")
+  let r51 = parse_expr_str("f(a == 1)")
   if expect_node_kind("eq_arg_call", r51, r51.node, "CallE"):
     pass_count = pass_count + 1
   if r51.node >= 0:
-    let cmp_ok: bool = false
+    let cmp_ok = false
     match r51.ps.nodes.get(r51.node):
       parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
         if arg_count == 1 and r51.ps.idx.get(names_lp - 1) < 0:

@@ -1,18 +1,18 @@
 module iteration
 fn squares(n: i32): Generator<i32>
-  let i: i32 = 0
+  let i = 0
   while i < n:
     yield i * i
     i = i + 1
 
 fn sum_squares(n: i32): i32
-  let total: i32 = 0
+  let total = 0
   for x in squares(n):
     total = total + x
   return total
 
 fn nested_iteration(): i32
-  let total: i32 = 0
+  let total = 0
   for i in range(3):
     for j in range(3):
       total = total + i + j

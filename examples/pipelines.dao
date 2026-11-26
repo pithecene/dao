@@ -12,7 +12,7 @@ fn main(): i32
   print(transform(5))
 
   print("3 |> double |> negate:")
-  let result: i32 = 3 |> double |> negate
+  let result = 3 |> double |> negate
   print(result)
 
   return 0

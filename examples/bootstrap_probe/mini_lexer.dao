@@ -6,25 +6,25 @@ fn is_whitespace(ch: i32): bool
   return ch == 32 or ch == 10 or ch == 13 or ch == 9
 
 fn lex_number(source: string, pos: i64): i64
-  let start: i64 = pos
-  let cur: i64 = pos
-  let slen: i64 = length(source)
-  let done: bool = false
+  let start = pos
+  let cur = pos
+  let slen = length(source)
+  let done = false
   while cur < slen and done == false:
-    let ch: i32 = char_at(source, cur)
+    let ch = char_at(source, cur)
     if is_digit(ch):
       cur = cur + 1
     else:
       done = true
-  let value: string = substring(source, start, cur - start)
+  let value = substring(source, start, cur - start)
   print("INT: " + value)
   return cur
 
 fn lex(source: string): i32
   let pos: i64 = 0
-  let slen: i64 = length(source)
+  let slen = length(source)
   while pos < slen:
-    let ch: i32 = char_at(source, pos)
+    let ch = char_at(source, pos)
     if is_whitespace(ch):
       pos = pos + 1
     else:
@@ -62,12 +62,12 @@ fn lex(source: string): i32
 
 fn main(): i32
   print("=== Lexing: 42 + (10 - 3) * 5 ===")
-  let result: i32 = lex("42 + (10 - 3) * 5")
+  let result = lex("42 + (10 - 3) * 5")
 
   print("")
   print("=== Lexing from file ===")
   write_file("/tmp/dao_lex_input.txt", "100 / 20 + 7")
-  let source: string = read_file("/tmp/dao_lex_input.txt")
-  let result2: i32 = lex(source)
+  let source = read_file("/tmp/dao_lex_input.txt")
+  let result2 = lex(source)
 
   return 0

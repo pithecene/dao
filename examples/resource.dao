@@ -1,18 +1,18 @@
 module resource_demo
 fn compute_in_pool(): i32
-  let result: i32 = 0
+  let result = 0
   resource memory pool =>
-    let a: i32 = 10
-    let b: i32 = 20
+    let a = 10
+    let b = 20
     result = a + b
   return result
 
 fn nested_domains(): i32
-  let total: i32 = 0
+  let total = 0
   resource memory outer =>
-    let x: i32 = 100
+    let x = 100
     resource memory inner =>
-      let y: i32 = 50
+      let y = 50
       total = x + y
   return total
 
@@ -20,7 +20,7 @@ fn early_return(flag: i32): i32
   resource memory arena =>
     if flag > 0:
       return flag
-    let x: i32 = 42
+    let x = 42
   return 0
 
 fn scratch_in_pool(): i64
@@ -28,8 +28,8 @@ fn scratch_in_pool(): i64
   // is the block's, reclaimed when it ends; only the length leaves.
   let size: i64 = 0
   resource memory scratch =>
-    let text: string = ""
-    let i: i32 = 0
+    let text = ""
+    let i = 0
     while i < 100:
       text = text + "ab"
       i = i + 1
@@ -45,15 +45,15 @@ class Label:
 // field stored through an outer class value, and a value returned from
 // inside the block.
 fn escaping_string(): string
-  let out: string = "before"
+  let out = "before"
   resource memory pool =>
-    let inner: string = "made"
+    let inner = "made"
     inner = inner + " inside"
     out = inner
   return out
 
 fn escaping_vector(): i64
-  let items: Vector<i64> = Vector<i64>::new()
+  let items = Vector<i64>::new()
   resource memory pool =>
     let i: i64 = 0
     while i < 5:
@@ -67,7 +67,7 @@ fn escaping_vector(): i64
   return total
 
 fn escaping_field(): string
-  let label: Label = Label("", 0)
+  let label = Label("", 0)
   resource memory pool =>
     label.text = "stored" + " through a field"
     label.count = 2
@@ -75,13 +75,13 @@ fn escaping_field(): string
 
 fn returned_from_block(flag: i32): string
   resource memory pool =>
-    let made: string = "returned" + " from inside"
+    let made = "returned" + " from inside"
     if flag > 0:
       return made
   return "fell through"
 
 fn nested_escape(): string
-  let out: string = ""
+  let out = ""
   resource memory outer =>
     resource memory inner =>
       out = "crossed" + " two blocks"

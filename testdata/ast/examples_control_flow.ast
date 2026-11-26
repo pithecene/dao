@@ -3,9 +3,9 @@ File
   FunctionDecl factorial
     Param n: i32
     ReturnType: i32
-    LetStatement result: i32
+    LetStatement result
       IntLiteral 1
-    LetStatement i: i32
+    LetStatement i
       IntLiteral 1
     WhileStatement
       Condition
@@ -31,18 +31,18 @@ File
   FunctionDecl fibonacci
     Param n: i32
     ReturnType: i32
-    LetStatement a: i32
+    LetStatement a
       IntLiteral 0
-    LetStatement b: i32
+    LetStatement b
       IntLiteral 1
-    LetStatement i: i32
+    LetStatement i
       IntLiteral 0
     WhileStatement
       Condition
         BinaryExpr <
           Identifier i
           Identifier n
-      LetStatement tmp: i32
+      LetStatement tmp
         Identifier b
       Assignment
         Target
