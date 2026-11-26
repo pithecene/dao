@@ -400,16 +400,19 @@ probe. The probe remains as a historical artifact.
 - Tier B expansion (generics, concepts, extend, mode/resource)
 - Diagnostic formatting integration
 - Multi-file compilation (eliminate assembly workaround)
-- Count the closure probe's diagnostics over every authored file of an
-  extracted program.  The probe in `llvm/tests.dao` measures only
-  `tests.dao` for `lexer`, `parser`, `graph`, `resolver`, and `typecheck`,
-  so a diagnostic in an `impl.dao` goes uncounted.
-- Regenerate `docs/bootstrap_closure.md` with `task bootstrap-audit` on
-  Linux, and correct the report's statement that it measures the
-  `*.gen.dao` programs.
+- Count the closure probe's `lex`, `parse`, `resolve`, `typecheck`, `hir`,
+  and `mir` columns over every authored file of an extracted program.  The
+  probe in `llvm/tests.dao` limits those columns to `tests.dao` for
+  `lexer`, `parser`, `graph`, `resolver`, and `typecheck`, so a diagnostic
+  in an `impl.dao` goes uncounted.  The `mono` and `llvm` columns already
+  count the whole program.
+- Correct the sentence that `audit_closure.sh` writes about measuring the
+  `*.gen.dao` programs, then regenerate `docs/bootstrap_closure.md` with
+  `task bootstrap-audit` on Linux.
 - Move the pointer-operation codes (`ptr_op_new` and its siblings) from
   `bootstrap::typecheck` to `bootstrap::base`, so `mir` and `llvm` read
-  them without importing the checker.
+  the codes as `base::ptr_op_*`.  Both passes still import the checker
+  for its entry points.
 - Build each module context in `typecheck/tests.dao` with
   `typecheck::build_module_tc` in place of the six positional `TC`
   constructions.
