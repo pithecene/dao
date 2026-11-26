@@ -520,11 +520,11 @@ File
       IntLiteral 9223372036854775807
     LetStatement zero_i64: i64
       IntLiteral 0
-    LetStatement neg_max: i64
+    LetStatement neg_max
       BinaryExpr -
         Identifier zero_i64
         Identifier max_i64
-    LetStatement min_i64: i64
+    LetStatement min_i64
       CallExpr
         Callee
           Identifier wrapping_sub_i64
@@ -622,7 +622,7 @@ File
                   UnaryExpr -
                     IntLiteral 1
           StringLiteral "range_i64.neg_step_overflow"
-    LetStatement i32_step_count: i32
+    LetStatement i32_step_count
       IntLiteral 0
     ForStatement x
       Iterable
@@ -868,11 +868,11 @@ File
       IntLiteral 9223372036854775807
     LetStatement zero_exp: i64
       IntLiteral 0
-    LetStatement neg_max_expected: i64
+    LetStatement neg_max_expected
       BinaryExpr -
         Identifier zero_exp
         Identifier max_expected
-    LetStatement min_expected: i64
+    LetStatement min_expected
       CallExpr
         Callee
           Identifier wrapping_sub_i64

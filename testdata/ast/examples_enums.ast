@@ -73,7 +73,7 @@ File
       StringLiteral "?"
   FunctionDecl main
     ReturnType: i32
-    LetStatement d: Direction
+    LetStatement d
       QualifiedName Direction::East
     ExpressionStatement
       CallExpr

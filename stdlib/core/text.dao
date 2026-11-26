@@ -23,8 +23,8 @@ class Builder:
 
   // The builder with the bytes of `s` appended.
   fn push(self, s: string): Builder
-    let out: Vector<u8> = self.bytes
-    let n: i64 = length(s)
+    let out = self.bytes
+    let n = length(s)
     let i: i64 = 0
     while i < n:
       out = out.push(u32_to_u8(i32_to_u32(char_at(s, i))))
@@ -54,22 +54,22 @@ class Builder:
   // bytes are read as this builder's value sees them, so a later write
   // through another value of the same buffer is invisible here.
   fn to_string(self): string
-    let bytes: Vector<u8> = self.bytes.snapshot()
+    let bytes = self.bytes.snapshot()
     return __dao_str_from_bytes(bytes.data, bytes.len)
 
 fn join(parts: Vector<string>, sep: string): string
-  let count: i64 = parts.length()
+  let count = parts.length()
   if count == to_i64(0):
     return ""
   if count == to_i64(1):
     return parts.get(to_i64(0))
-  let sep_len: i64 = length(sep)
-  let total: i64 = sep_len * (count - to_i64(1))
+  let sep_len = length(sep)
+  let total = sep_len * (count - to_i64(1))
   let i: i64 = 0
   while i < count:
     total = total + length(parts.get(i))
     i = i + 1
-  let out: Builder = Builder::with_capacity(total)
+  let out = Builder::with_capacity(total)
   i = to_i64(0)
   while i < count:
     if i > to_i64(0):
@@ -83,7 +83,7 @@ fn repeat(s: string, count: i64): string
     panic("repeat: negative count")
   if count == to_i64(0) or length(s) == to_i64(0):
     return ""
-  let out: Builder = Builder::with_capacity(length(s) * count)
+  let out = Builder::with_capacity(length(s) * count)
   let i: i64 = 0
   while i < count:
     out = out.push(s)

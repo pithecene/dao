@@ -54,7 +54,7 @@ File
           StringLiteral "1 + x where x is i64:"
     LetStatement x: i64
       IntLiteral 100
-    LetStatement y: i64
+    LetStatement y
       BinaryExpr +
         IntLiteral 1
         Identifier x

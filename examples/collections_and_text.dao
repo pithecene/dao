@@ -83,8 +83,8 @@ fn test_ranges(): void
 
   let max_i64: i64 = 9223372036854775807
   let zero_i64: i64 = 0
-  let neg_max: i64 = zero_i64 - max_i64
-  let min_i64: i64 = wrapping_sub_i64(neg_max, 1)
+  let neg_max = zero_i64 - max_i64
+  let min_i64 = wrapping_sub_i64(neg_max, 1)
 
   // Stepped ranges near integer limits must terminate cleanly on overflow.
   let pos_step_count: i64 = 0
@@ -101,7 +101,7 @@ fn test_ranges(): void
     neg_step_val = x
   check(neg_step_count == 1 and neg_step_val == to_i64(-1), "range_i64.neg_step_overflow")
 
-  let i32_step_count: i32 = 0
+  let i32_step_count = 0
   for x in range(1, 10, 2147483647):
     i32_step_count = i32_step_count + x
   check(i32_step_count == 1, "range.pos_step_overflow")
@@ -126,8 +126,8 @@ fn test_strings_and_builder(): void
 
   let max_expected: i64 = 9223372036854775807
   let zero_exp: i64 = 0
-  let neg_max_expected: i64 = zero_exp - max_expected
-  let min_expected: i64 = wrapping_sub_i64(neg_max_expected, 1)
+  let neg_max_expected = zero_exp - max_expected
+  let min_expected = wrapping_sub_i64(neg_max_expected, 1)
   check(unwrap_i64(parse_i64("-9223372036854775808"), to_i64(0)) == min_expected, "parse_i64.min")
   check(unwrap_i64(parse_i64("9223372036854775807"), to_i64(0)) == max_expected, "parse_i64.max")
   check(is_none_i64(parse_i64("9223372036854775808")), "parse_i64.overflow")

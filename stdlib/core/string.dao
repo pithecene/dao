@@ -25,7 +25,7 @@ fn is_ascii_space(c: i32): bool
   return c == 32 or c == 9 or c == 10 or c == 13
 
 fn trim_start(s: string): string
-  let n: i64 = __dao_str_length(s)
+  let n = __dao_str_length(s)
   let i: i64 = 0
   while i < n:
     if is_ascii_space(__dao_str_char_at(s, i)) == false:
@@ -34,7 +34,7 @@ fn trim_start(s: string): string
   return ""
 
 fn trim_end(s: string): string
-  let end: i64 = __dao_str_length(s)
+  let end = __dao_str_length(s)
   while end > to_i64(0):
     if is_ascii_space(__dao_str_char_at(s, end - to_i64(1))) == false:
       return __dao_str_substring(s, to_i64(0), end)
@@ -42,7 +42,7 @@ fn trim_end(s: string): string
   return ""
 
 fn trim(s: string): string
-  let n: i64 = __dao_str_length(s)
+  let n = __dao_str_length(s)
   let start: i64 = 0
   while start < n:
     if is_ascii_space(__dao_str_char_at(s, start)) == false:
@@ -50,7 +50,7 @@ fn trim(s: string): string
     start = start + 1
   if start >= n:
     return ""
-  let end: i64 = n
+  let end = n
   while end > start:
     if is_ascii_space(__dao_str_char_at(s, end - to_i64(1))) == false:
       break
@@ -62,12 +62,12 @@ fn index_of_from(s: string, s_len: i64, needle: string, needle_len: i64, from: i
     return from
   if needle_len > s_len - from:
     return to_i64(-1)
-  let first: i32 = __dao_str_char_at(needle, to_i64(0))
-  let limit: i64 = s_len - needle_len
-  let pos: i64 = from
+  let first = __dao_str_char_at(needle, to_i64(0))
+  let limit = s_len - needle_len
+  let pos = from
   while pos <= limit:
     if __dao_str_char_at(s, pos) == first:
-      let matched: bool = true
+      let matched = true
       let j: i64 = 1
       while j < needle_len:
         if __dao_str_char_at(s, pos + j) != __dao_str_char_at(needle, j):
@@ -80,14 +80,14 @@ fn index_of_from(s: string, s_len: i64, needle: string, needle_len: i64, from: i
   return to_i64(-1)
 
 fn split(s: string, sep: string): Vector<string>
-  let sep_len: i64 = __dao_str_length(sep)
+  let sep_len = __dao_str_length(sep)
   if sep_len == to_i64(0):
     panic("split: separator must not be empty")
-  let out: Vector<string> = Vector<string>::new()
-  let n: i64 = __dao_str_length(s)
+  let out = Vector<string>::new()
+  let n = __dao_str_length(s)
   let start: i64 = 0
   while start <= n:
-    let match_pos: i64 = index_of_from(s, n, sep, sep_len, start)
+    let match_pos = index_of_from(s, n, sep, sep_len, start)
     if match_pos < to_i64(0):
       out = out.push(__dao_str_substring(s, start, n - start))
       return out
@@ -96,18 +96,18 @@ fn split(s: string, sep: string): Vector<string>
   return out
 
 fn lines(s: string): Vector<string>
-  let out: Vector<string> = Vector<string>::new()
-  let n: i64 = __dao_str_length(s)
+  let out = Vector<string>::new()
+  let n = __dao_str_length(s)
   if n == to_i64(0):
     return out
   let pos: i64 = 0
   while pos < n:
-    let line_start: i64 = pos
+    let line_start = pos
     while pos < n:
       if __dao_str_char_at(s, pos) == 10:
         break
       pos = pos + 1
-    let line_end: i64 = pos
+    let line_end = pos
     if line_end > line_start:
       if __dao_str_char_at(s, line_end - to_i64(1)) == 13:
         line_end = line_end - to_i64(1)
@@ -118,12 +118,12 @@ fn lines(s: string): Vector<string>
 // Checked decimal `i64` parser accepting optional leading `+` or `-` and
 // handling `INT64_MIN` (`-9223372036854775808`) without overflow trap.
 fn parse_i64(s: string): Option<i64>
-  let n: i64 = __dao_str_length(s)
+  let n = __dao_str_length(s)
   if n == to_i64(0):
     return Option::None
   let pos: i64 = 0
-  let negative: bool = false
-  let first: i32 = __dao_str_char_at(s, to_i64(0))
+  let negative = false
+  let first = __dao_str_char_at(s, to_i64(0))
   if first == 45:
     negative = true
     pos = to_i64(1)
@@ -132,12 +132,12 @@ fn parse_i64(s: string): Option<i64>
   if pos >= n:
     return Option::None
   // Accumulate as negative so INT64_MIN (-9223372036854775808) fits in i64.
-  let neg_acc: i64 = to_i64(0)
+  let neg_acc = to_i64(0)
   while pos < n:
-    let ch: i32 = __dao_str_char_at(s, pos)
+    let ch = __dao_str_char_at(s, pos)
     if ch < 48 or ch > 57:
       return Option::None
-    let digit: i64 = to_i64(ch - 48)
+    let digit = to_i64(ch - 48)
     match checked_mul_i64(neg_acc, to_i64(10)):
       Option::Some(scaled):
         neg_acc = scaled

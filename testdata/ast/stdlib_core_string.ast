@@ -154,7 +154,7 @@ File
   FunctionDecl trim_start
     Param s: string
     ReturnType: string
-    LetStatement n: i64
+    LetStatement n
       CallExpr
         Callee
           Identifier __dao_str_length
@@ -204,7 +204,7 @@ File
   FunctionDecl trim_end
     Param s: string
     ReturnType: string
-    LetStatement end: i64
+    LetStatement end
       CallExpr
         Callee
           Identifier __dao_str_length
@@ -268,7 +268,7 @@ File
   FunctionDecl trim
     Param s: string
     ReturnType: string
-    LetStatement n: i64
+    LetStatement n
       CallExpr
         Callee
           Identifier __dao_str_length
@@ -312,7 +312,7 @@ File
       Then
         ReturnStatement
           StringLiteral ""
-    LetStatement end: i64
+    LetStatement end
       Identifier n
     WhileStatement
       Condition
@@ -396,7 +396,7 @@ File
             Args
               UnaryExpr -
                 IntLiteral 1
-    LetStatement first: i32
+    LetStatement first
       CallExpr
         Callee
           Identifier __dao_str_char_at
@@ -407,11 +407,11 @@ File
               Identifier to_i64
             Args
               IntLiteral 0
-    LetStatement limit: i64
+    LetStatement limit
       BinaryExpr -
         Identifier s_len
         Identifier needle_len
-    LetStatement pos: i64
+    LetStatement pos
       Identifier from
     WhileStatement
       Condition
@@ -429,7 +429,7 @@ File
                 Identifier pos
             Identifier first
         Then
-          LetStatement matched: bool
+          LetStatement matched
             BoolLiteral true
           LetStatement j: i64
             IntLiteral 1
@@ -493,7 +493,7 @@ File
     Param s: string
     Param sep: string
     ReturnType: Vector<string>
-    LetStatement sep_len: i64
+    LetStatement sep_len
       CallExpr
         Callee
           Identifier __dao_str_length
@@ -515,13 +515,13 @@ File
               Identifier panic
             Args
               StringLiteral "split: separator must not be empty"
-    LetStatement out: Vector<string>
+    LetStatement out
       CallExpr
         Callee
           Identifier Vector.new
         TypeArgs
           string
-    LetStatement n: i64
+    LetStatement n
       CallExpr
         Callee
           Identifier __dao_str_length
@@ -534,7 +534,7 @@ File
         BinaryExpr <=
           Identifier start
           Identifier n
-      LetStatement match_pos: i64
+      LetStatement match_pos
         CallExpr
           Callee
             Identifier index_of_from
@@ -604,13 +604,13 @@ File
   FunctionDecl lines
     Param s: string
     ReturnType: Vector<string>
-    LetStatement out: Vector<string>
+    LetStatement out
       CallExpr
         Callee
           Identifier Vector.new
         TypeArgs
           string
-    LetStatement n: i64
+    LetStatement n
       CallExpr
         Callee
           Identifier __dao_str_length
@@ -635,7 +635,7 @@ File
         BinaryExpr <
           Identifier pos
           Identifier n
-      LetStatement line_start: i64
+      LetStatement line_start
         Identifier pos
       WhileStatement
         Condition
@@ -661,7 +661,7 @@ File
             BinaryExpr +
               Identifier pos
               IntLiteral 1
-      LetStatement line_end: i64
+      LetStatement line_end
         Identifier pos
       IfStatement
         Condition
@@ -727,7 +727,7 @@ File
   FunctionDecl parse_i64
     Param s: string
     ReturnType: Option<i64>
-    LetStatement n: i64
+    LetStatement n
       CallExpr
         Callee
           Identifier __dao_str_length
@@ -747,9 +747,9 @@ File
           QualifiedName Option::None
     LetStatement pos: i64
       IntLiteral 0
-    LetStatement negative: bool
+    LetStatement negative
       BoolLiteral false
-    LetStatement first: i32
+    LetStatement first
       CallExpr
         Callee
           Identifier __dao_str_char_at
@@ -804,7 +804,7 @@ File
       Then
         ReturnStatement
           QualifiedName Option::None
-    LetStatement neg_acc: i64
+    LetStatement neg_acc
       CallExpr
         Callee
           Identifier to_i64
@@ -815,7 +815,7 @@ File
         BinaryExpr <
           Identifier pos
           Identifier n
-      LetStatement ch: i32
+      LetStatement ch
         CallExpr
           Callee
             Identifier __dao_str_char_at
@@ -834,7 +834,7 @@ File
         Then
           ReturnStatement
             QualifiedName Option::None
-      LetStatement digit: i64
+      LetStatement digit
         CallExpr
           Callee
             Identifier to_i64

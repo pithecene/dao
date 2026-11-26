@@ -12,11 +12,11 @@ fn expect_token(label: string, result: lexer::LexResult, idx: i64, expected_kind
   if idx >= result.tokens.length():
     print("FAIL " + label + ": token index out of bounds")
     return false
-  let tok: lexer::Token = result.tokens.get(idx)
+  let tok = result.tokens.get(idx)
   if lexer::tk_name(tok.kind) == lexer::tk_name(expected_kind):
     print("PASS " + label)
     return true
-  let text: string = ""
+  let text = ""
   if tok.len > 0:
     text = substring(src, tok.offset, tok.len)
   print("FAIL " + label + ": expected " + lexer::tk_name(expected_kind) + ", got " + lexer::tk_name(tok.kind) + " '" + text + "'")
@@ -26,8 +26,8 @@ fn expect_token_text(label: string, result: lexer::LexResult, idx: i64, expected
   if idx >= result.tokens.length():
     print("FAIL " + label + ": token index out of bounds")
     return false
-  let tok: lexer::Token = result.tokens.get(idx)
-  let text: string = ""
+  let tok = result.tokens.get(idx)
+  let text = ""
   if tok.len > 0:
     text = substring(src, tok.offset, tok.len)
   if lexer::tk_name(tok.kind) == lexer::tk_name(expected_kind):
@@ -43,7 +43,7 @@ fn expect_token_span(label: string, result: lexer::LexResult, idx: i64, expected
   if idx >= result.tokens.length():
     print("FAIL " + label + ": token index out of bounds")
     return false
-  let tok: lexer::Token = result.tokens.get(idx)
+  let tok = result.tokens.get(idx)
   if tok.offset == expected_offset:
     if tok.len == expected_len:
       print("PASS " + label)
@@ -79,7 +79,7 @@ fn expect_eof_last(label: string, result: lexer::LexResult): bool
   if result.tokens.length() == 0:
     print("FAIL " + label + ": empty token stream")
     return false
-  let last: lexer::Token = result.tokens.get(result.tokens.length() - 1)
+  let last = result.tokens.get(result.tokens.length() - 1)
   if lexer::tk_name(last.kind) == lexer::tk_name(lexer::TK::Eof):
     print("PASS " + label)
     return true
@@ -90,7 +90,7 @@ fn expect_eof_last(label: string, result: lexer::LexResult): bool
 fn expect_has_kind(label: string, result: lexer::LexResult, kind: lexer::TK): bool
   let i: i64 = 0
   while i < result.tokens.length():
-    let tok: lexer::Token = result.tokens.get(i)
+    let tok = result.tokens.get(i)
     if lexer::tk_name(tok.kind) == lexer::tk_name(kind):
       print("PASS " + label)
       return true
@@ -106,14 +106,14 @@ fn main(): i32
   print("=== bootstrap/lexer: Task 20 — Bootstrap Lexer ===")
   print("")
 
-  let pass_count: i32 = 0
+  let pass_count = 0
 
   // -----------------------------------------------------------------
   // 7.1 Basic tokens
   // -----------------------------------------------------------------
 
-  let src1: string = "let x = 42\n"
-  let r1: lexer::LexResult = lexer::lex(src1)
+  let src1 = "let x = 42\n"
+  let r1 = lexer::lex(src1)
   if expect_token_text("let_kw", r1, 0, lexer::TK::KwLet, "let", src1):
     pass_count = pass_count + 1
   if expect_token_text("ident_x", r1, 1, lexer::TK::Identifier, "x", src1):
@@ -133,8 +133,8 @@ fn main(): i32
   // 7.2 All keywords
   // -----------------------------------------------------------------
 
-  let src_kw: string = "fn class enum if else while for in return match\n"
-  let rkw: lexer::LexResult = lexer::lex(src_kw)
+  let src_kw = "fn class enum if else while for in return match\n"
+  let rkw = lexer::lex(src_kw)
   if expect_token("kw_fn", rkw, 0, lexer::TK::KwFn, src_kw):
     pass_count = pass_count + 1
   if expect_token("kw_class", rkw, 1, lexer::TK::KwClass, src_kw):
@@ -150,8 +150,8 @@ fn main(): i32
   // 7.3 Multi-character operators
   // -----------------------------------------------------------------
 
-  let src2: string = "== != <= >= -> => :: |>\n"
-  let r2: lexer::LexResult = lexer::lex(src2)
+  let src2 = "== != <= >= -> => :: |>\n"
+  let r2 = lexer::lex(src2)
   if expect_token("op_eqeq", r2, 0, lexer::TK::EqEq, src2):
     pass_count = pass_count + 1
   if expect_token("op_bangeq", r2, 1, lexer::TK::BangEq, src2):
@@ -173,8 +173,8 @@ fn main(): i32
   // 7.4 Single-character operators
   // -----------------------------------------------------------------
 
-  let src_ops: string = "+ - * / % & . , | ! < > ?\n"
-  let r_ops: lexer::LexResult = lexer::lex(src_ops)
+  let src_ops = "+ - * / % & . , | ! < > ?\n"
+  let r_ops = lexer::lex(src_ops)
   if expect_token("op_plus", r_ops, 0, lexer::TK::Plus, src_ops):
     pass_count = pass_count + 1
   if expect_token("op_minus", r_ops, 1, lexer::TK::Minus, src_ops):
@@ -208,8 +208,8 @@ fn main(): i32
   // 7.5 String literal
   // -----------------------------------------------------------------
 
-  let src3: string = "\"hello world\"\n"
-  let r3: lexer::LexResult = lexer::lex(src3)
+  let src3 = "\"hello world\"\n"
+  let r3 = lexer::lex(src3)
   if expect_token("str_lit", r3, 0, lexer::TK::StringLiteral, src3):
     pass_count = pass_count + 1
   if expect_no_errors("str_no_err", r3):
@@ -219,8 +219,8 @@ fn main(): i32
   // 7.6 String with escape sequences
   // -----------------------------------------------------------------
 
-  let src_esc: string = "\"hello\\nworld\\t\\\"end\"\n"
-  let r_esc: lexer::LexResult = lexer::lex(src_esc)
+  let src_esc = "\"hello\\nworld\\t\\\"end\"\n"
+  let r_esc = lexer::lex(src_esc)
   if expect_token("str_esc", r_esc, 0, lexer::TK::StringLiteral, src_esc):
     pass_count = pass_count + 1
   if expect_no_errors("str_esc_no_err", r_esc):
@@ -230,8 +230,8 @@ fn main(): i32
   // 7.7 Float literal
   // -----------------------------------------------------------------
 
-  let src4: string = "3.14\n"
-  let r4: lexer::LexResult = lexer::lex(src4)
+  let src4 = "3.14\n"
+  let r4 = lexer::lex(src4)
   if expect_token_text("float_lit", r4, 0, lexer::TK::FloatLiteral, "3.14", src4):
     pass_count = pass_count + 1
 
@@ -239,8 +239,8 @@ fn main(): i32
   // 7.8 Indentation with span assertions
   // -----------------------------------------------------------------
 
-  let src5: string = "fn foo():\n  let x = 1\n  let y = 2\nlet z = 3\n"
-  let r5: lexer::LexResult = lexer::lex(src5)
+  let src5 = "fn foo():\n  let x = 1\n  let y = 2\nlet z = 3\n"
+  let r5 = lexer::lex(src5)
   // Tokens: fn foo ( ) : NL INDENT let x = 1 NL let y = 2 NL DEDENT let z = 3 NL EOF
   if expect_token("indent_fn", r5, 0, lexer::TK::KwFn, src5):
     pass_count = pass_count + 1
@@ -261,8 +261,8 @@ fn main(): i32
   // 7.9 Multi-level indentation
   // -----------------------------------------------------------------
 
-  let src_ml: string = "if x:\n  if y:\n    z\n"
-  let r_ml: lexer::LexResult = lexer::lex(src_ml)
+  let src_ml = "if x:\n  if y:\n    z\n"
+  let r_ml = lexer::lex(src_ml)
   // Tokens: if(0) x(1) :(2) NL(3) INDENT(4) if(5) y(6) :(7) NL(8)
   //         INDENT(9) z(10) NL(11) DEDENT(12) DEDENT(13) EOF(14)
   if expect_token("ml_if", r_ml, 0, lexer::TK::KwIf, src_ml):
@@ -283,8 +283,8 @@ fn main(): i32
   // 7.10 Paren depth suppresses newlines
   // -----------------------------------------------------------------
 
-  let src6: string = "foo(\n  1,\n  2\n)\n"
-  let r6: lexer::LexResult = lexer::lex(src6)
+  let src6 = "foo(\n  1,\n  2\n)\n"
+  let r6 = lexer::lex(src6)
   // Inside parens, newlines and indentation are suppressed.
   // Tokens: foo ( 1 , 2 ) NL EOF
   if expect_token("paren_foo", r6, 0, lexer::TK::Identifier, src6):
@@ -308,8 +308,8 @@ fn main(): i32
   // 7.11 Nested brackets inside parens
   // -----------------------------------------------------------------
 
-  let src_nb: string = "f(a[0], b)\n"
-  let r_nb: lexer::LexResult = lexer::lex(src_nb)
+  let src_nb = "f(a[0], b)\n"
+  let r_nb = lexer::lex(src_nb)
   // f ( a [ 0 ] , b ) NL EOF
   if expect_token("nb_f", r_nb, 0, lexer::TK::Identifier, src_nb):
     pass_count = pass_count + 1
@@ -328,8 +328,8 @@ fn main(): i32
   // 7.12 Comments
   // -----------------------------------------------------------------
 
-  let src7: string = "x // comment\ny\n"
-  let r7: lexer::LexResult = lexer::lex(src7)
+  let src7 = "x // comment\ny\n"
+  let r7 = lexer::lex(src7)
   // comment is skipped: x NL y NL EOF
   if expect_token_text("comment_x", r7, 0, lexer::TK::Identifier, "x", src7):
     pass_count = pass_count + 1
@@ -342,8 +342,8 @@ fn main(): i32
   // 7.13 Comment-only line preserves indentation
   // -----------------------------------------------------------------
 
-  let src_co: string = "if x:\n  // comment\n  y\n"
-  let r_co: lexer::LexResult = lexer::lex(src_co)
+  let src_co = "if x:\n  // comment\n  y\n"
+  let r_co = lexer::lex(src_co)
   // Comment line is blank — does not affect indentation.
   // Tokens: if x : NL INDENT y NL DEDENT EOF
   if expect_token("co_indent", r_co, 4, lexer::TK::Indent, src_co):
@@ -357,8 +357,8 @@ fn main(): i32
   // 7.14 Tab error
   // -----------------------------------------------------------------
 
-  let src8: string = "\tx\n"
-  let r8: lexer::LexResult = lexer::lex(src8)
+  let src8 = "\tx\n"
+  let r8 = lexer::lex(src8)
   // Tab emits TK::Error token (matching C++ emit_error behavior).
   if expect_token("tab_err_tok", r8, 0, lexer::TK::Error, src8):
     pass_count = pass_count + 1
@@ -369,8 +369,8 @@ fn main(): i32
   // 7.15 Question mark (try operator)
   // -----------------------------------------------------------------
 
-  let src9: string = "x?\n"
-  let r9: lexer::LexResult = lexer::lex(src9)
+  let src9 = "x?\n"
+  let r9 = lexer::lex(src9)
   if expect_token("try_ident", r9, 0, lexer::TK::Identifier, src9):
     pass_count = pass_count + 1
   if expect_token("try_question", r9, 1, lexer::TK::Question, src9):
@@ -380,8 +380,8 @@ fn main(): i32
   // 7.16 Brackets track paren depth
   // -----------------------------------------------------------------
 
-  let src10: string = "a[0]\n"
-  let r10: lexer::LexResult = lexer::lex(src10)
+  let src10 = "a[0]\n"
+  let r10 = lexer::lex(src10)
   if expect_token("bracket_a", r10, 0, lexer::TK::Identifier, src10):
     pass_count = pass_count + 1
   if expect_token("bracket_l", r10, 1, lexer::TK::LBracket, src10):
@@ -395,8 +395,8 @@ fn main(): i32
   // 7.17 Unterminated string at EOF
   // -----------------------------------------------------------------
 
-  let src11: string = "\"hello"
-  let r11: lexer::LexResult = lexer::lex(src11)
+  let src11 = "\"hello"
+  let r11 = lexer::lex(src11)
   if expect_token("unterm_eof_tok", r11, 0, lexer::TK::Error, src11):
     pass_count = pass_count + 1
   if expect_error_count("unterm_eof_err", r11, 1):
@@ -406,8 +406,8 @@ fn main(): i32
   // 7.18 Unterminated string at newline
   // -----------------------------------------------------------------
 
-  let src_unl: string = "\"hello\nx\n"
-  let r_unl: lexer::LexResult = lexer::lex(src_unl)
+  let src_unl = "\"hello\nx\n"
+  let r_unl = lexer::lex(src_unl)
   if expect_token("unterm_nl_tok", r_unl, 0, lexer::TK::Error, src_unl):
     pass_count = pass_count + 1
   if expect_error_count("unterm_nl_err", r_unl, 1):
@@ -417,8 +417,8 @@ fn main(): i32
   // 7.19 Unexpected character
   // -----------------------------------------------------------------
 
-  let src_uc: string = "x @ y\n"
-  let r_uc: lexer::LexResult = lexer::lex(src_uc)
+  let src_uc = "x @ y\n"
+  let r_uc = lexer::lex(src_uc)
   if expect_token("uc_x", r_uc, 0, lexer::TK::Identifier, src_uc):
     pass_count = pass_count + 1
   if expect_token("uc_err", r_uc, 1, lexer::TK::Error, src_uc):
@@ -432,8 +432,8 @@ fn main(): i32
   // 7.20 Empty source
   // -----------------------------------------------------------------
 
-  let src_empty: string = ""
-  let re: lexer::LexResult = lexer::lex(src_empty)
+  let src_empty = ""
+  let re = lexer::lex(src_empty)
   if expect_token("empty_eof", re, 0, lexer::TK::Eof, src_empty):
     pass_count = pass_count + 1
 
@@ -441,8 +441,8 @@ fn main(): i32
   // 7.21 Comprehensive Dao snippet (golden regression)
   // -----------------------------------------------------------------
 
-  let src_dao: string = "enum Color:\n  Red\n  Green\n  Blue\n\nclass Point:\n  x: f64\n  y: f64\n\nfn distance(a: Point, b: Point): f64\n  let dx: f64 = b.x - a.x\n  let dy: f64 = b.y - a.y\n  return sqrt(dx * dx + dy * dy)\n\nfn main(): i32\n  let p: Point = Point(1.0, 2.0)\n  let q: Point = Point(4.0, 6.0)\n  print(distance(p, q))\n  return 0\n"
-  let r_dao: lexer::LexResult = lexer::lex(src_dao)
+  let src_dao = "enum Color:\n  Red\n  Green\n  Blue\n\nclass Point:\n  x: f64\n  y: f64\n\nfn distance(a: Point, b: Point): f64\n  let dx: f64 = b.x - a.x\n  let dy: f64 = b.y - a.y\n  return sqrt(dx * dx + dy * dy)\n\nfn main(): i32\n  let p: Point = Point(1.0, 2.0)\n  let q: Point = Point(4.0, 6.0)\n  print(distance(p, q))\n  return 0\n"
+  let r_dao = lexer::lex(src_dao)
   // Smoke: correct keywords, no errors, ends with Eof.
   if expect_has_kind("dao_has_enum", r_dao, lexer::TK::KwEnum):
     pass_count = pass_count + 1
@@ -467,10 +467,10 @@ fn main(): i32
   // Section 8: Self-lex regression over authored module files
   // =========================================================================
 
-  let impl_path: string = "bootstrap/lexer/impl.dao"
+  let impl_path = "bootstrap/lexer/impl.dao"
   if file_exists(impl_path):
-    let impl_src: string = read_file(impl_path)
-    let r_self: lexer::LexResult = lexer::lex(impl_src)
+    let impl_src = read_file(impl_path)
+    let r_self = lexer::lex(impl_src)
     if expect_min_tokens("self_lex_count", r_self, 500):
       pass_count = pass_count + 1
     if expect_eof_last("self_lex_eof", r_self):
@@ -490,9 +490,9 @@ fn main(): i32
   else:
     print("FAIL self_lex: missing authored file " + impl_path)
 
-  let tests_path: string = "bootstrap/lexer/tests.dao"
+  let tests_path = "bootstrap/lexer/tests.dao"
   if file_exists(tests_path):
-    let r_tests: lexer::LexResult = lexer::lex(read_file(tests_path))
+    let r_tests = lexer::lex(read_file(tests_path))
     if expect_has_kind("tests_lex_has_import", r_tests, lexer::TK::KwImport):
       pass_count = pass_count + 1
     if expect_has_kind("tests_lex_has_coloncolon", r_tests, lexer::TK::ColonColon):
@@ -506,7 +506,7 @@ fn main(): i32
   // Section 9: Summary
   // =========================================================================
 
-  let total: i32 = 108
+  let total = 108
   print("")
   print("--- results ---")
   print(i32_to_string(pass_count) + " / " + i32_to_string(total) + " passed")

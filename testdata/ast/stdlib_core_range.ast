@@ -3,7 +3,7 @@ File
   FunctionDecl range
     Param n: i32
     ReturnType: Generator<i32>
-    LetStatement i: i32
+    LetStatement i
       IntLiteral 0
     WhileStatement
       Condition
@@ -23,7 +23,7 @@ File
     Param start: i32
     Param end: i32
     ReturnType: Generator<i32>
-    LetStatement i: i32
+    LetStatement i
       Identifier start
     WhileStatement
       Condition
@@ -44,7 +44,7 @@ File
     Param end: i32
     Param step: i32
     ReturnType: Generator<i32>
-    LetStatement i: i32
+    LetStatement i
       Identifier start
     IfStatement
       Condition
@@ -136,7 +136,7 @@ File
     Param start: i64
     Param end: i64
     ReturnType: Generator<i64>
-    LetStatement i: i64
+    LetStatement i
       Identifier start
     WhileStatement
       Condition
@@ -157,7 +157,7 @@ File
     Param end: i64
     Param step: i64
     ReturnType: Generator<i64>
-    LetStatement i: i64
+    LetStatement i
       Identifier start
     IfStatement
       Condition

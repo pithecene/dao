@@ -10,7 +10,7 @@ File
   FunctionDecl vec_log_head_new
     Param outer: bool
     ReturnType: Ptr<VecLogHead>
-    LetStatement raw: Ptr<void>
+    LetStatement raw
       CallExpr
         Callee
           Identifier Ptr.new
@@ -58,7 +58,7 @@ File
                   TypeArgs
                     VecLogHead
     ModeBlock unsafe
-      LetStatement head: Ptr<VecLogHead>
+      LetStatement head
         CallExpr
           Callee
             FieldExpr .cast
@@ -116,7 +116,7 @@ File
   FunctionDecl vec_log_values_new<T>
     Param outer: bool
     ReturnType: Ptr<Ptr<T>>
-    LetStatement raw: Ptr<void>
+    LetStatement raw
       CallExpr
         Callee
           Identifier Ptr.new
@@ -164,7 +164,7 @@ File
                   TypeArgs
                     Ptr<T>
     ModeBlock unsafe
-      LetStatement cell: Ptr<Ptr<T>>
+      LetStatement cell
         CallExpr
           Callee
             FieldExpr .cast
@@ -197,7 +197,7 @@ File
   FunctionDecl vec_track_new
     Param outer: bool
     ReturnType: VecTrack
-    LetStatement raw: Ptr<void>
+    LetStatement raw
       CallExpr
         Callee
           Identifier Ptr.new
@@ -245,7 +245,7 @@ File
                   TypeArgs
                     i64
     ModeBlock unsafe
-      LetStatement gen: Ptr<i64>
+      LetStatement gen
         CallExpr
           Callee
             FieldExpr .cast
@@ -366,7 +366,7 @@ File
               TypeArgs
                 T
       ModeBlock unsafe
-        LetStatement data: Ptr<T>
+        LetStatement data
           CallExpr
             Callee
               FieldExpr .cast
@@ -445,7 +445,7 @@ File
                 Identifier Vector.new
               TypeArgs
                 T
-      LetStatement cap: i64
+      LetStatement cap
         Identifier count
       IfStatement
         Condition
@@ -467,7 +467,7 @@ File
                 Args
                   IntLiteral 8
       ModeBlock unsafe
-        LetStatement data: Ptr<T>
+        LetStatement data
           CallExpr
             Callee
               FieldExpr .cast
@@ -556,20 +556,20 @@ File
       Param stamp: i64
       ReturnType: void
       ModeBlock unsafe
-        LetStatement l: VecLogHead
+        LetStatement l
           CallExpr
             Callee
               FieldExpr .get
                 FieldExpr .log
                   FieldExpr .track
                     Identifier self
-        LetStatement values: Ptr<T>
+        LetStatement values
           CallExpr
             Callee
               FieldExpr .get
                 FieldExpr .log_value
                   Identifier self
-        LetStatement owner: Ptr<void>
+        LetStatement owner
           CallExpr
             Callee
               FieldExpr .cast
@@ -588,7 +588,7 @@ File
                 Args
                   IntLiteral 0
           Then
-            LetStatement nf: Ptr<i64>
+            LetStatement nf
               CallExpr
                 Callee
                   FieldExpr .cast
@@ -612,7 +612,7 @@ File
                             i64
                 TypeArgs
                   i64
-            LetStatement nl: Ptr<i64>
+            LetStatement nl
               CallExpr
                 Callee
                   FieldExpr .cast
@@ -711,7 +711,7 @@ File
               FieldExpr .cap
                 Identifier l
           Then
-            LetStatement cap: i64
+            LetStatement cap
               BinaryExpr *
                 FieldExpr .cap
                   Identifier l
@@ -727,7 +727,7 @@ File
                     Identifier cap
                   Value
                     IntLiteral 8
-            LetStatement ns: Ptr<i64>
+            LetStatement ns
               CallExpr
                 Callee
                   FieldExpr .cast
@@ -750,7 +750,7 @@ File
                             i64
                 TypeArgs
                   i64
-            LetStatement nn: Ptr<i64>
+            LetStatement nn
               CallExpr
                 Callee
                   FieldExpr .cast
@@ -773,7 +773,7 @@ File
                             i64
                 TypeArgs
                   i64
-            LetStatement nv: Ptr<T>
+            LetStatement nv
               CallExpr
                 Callee
                   FieldExpr .cast
@@ -903,7 +903,7 @@ File
                       Identifier self
                 Args
                   Identifier nv
-        LetStatement entry: i64
+        LetStatement entry
           FieldExpr .len
             Identifier l
         ExpressionStatement
@@ -958,7 +958,7 @@ File
                             Identifier self
                       Args
                         Identifier index
-        LetStatement tail: i64
+        LetStatement tail
           CallExpr
             Callee
               FieldExpr .get
@@ -1098,7 +1098,7 @@ File
                             Identifier self
                       Args
                         Identifier index
-        LetStatement l: VecLogHead
+        LetStatement l
           CallExpr
             Callee
               FieldExpr .get
@@ -1116,7 +1116,7 @@ File
                 Args
                   IntLiteral 0
           Then
-            LetStatement k: i64
+            LetStatement k
               CallExpr
                 Callee
                   FieldExpr .get
@@ -1266,7 +1266,7 @@ File
     FunctionDecl snapshot
       Param self
       ReturnType: Vector<T>
-      LetStatement latest: bool
+      LetStatement latest
         BoolLiteral false
       ModeBlock unsafe
         Assignment
@@ -1302,7 +1302,7 @@ File
       Param cap: i64
       ReturnType: Vector<T>
       ModeBlock unsafe
-        LetStatement data: Ptr<T>
+        LetStatement data
           CallExpr
             Callee
               FieldExpr .cast
@@ -1414,7 +1414,7 @@ File
                               Identifier self
                     Args
                       Identifier elem
-                LetStatement stamp: i64
+                LetStatement stamp
                   BinaryExpr +
                     FieldExpr .version
                       FieldExpr .track
@@ -1451,7 +1451,7 @@ File
                           Identifier stamp
                       FieldExpr .log_value
                         Identifier self
-        LetStatement cap: i64
+        LetStatement cap
           FieldExpr .cap
             Identifier self
         IfStatement
@@ -1479,7 +1479,7 @@ File
                     Identifier cap
                   Value
                     IntLiteral 8
-        LetStatement fresh: Vector<T>
+        LetStatement fresh
           CallExpr
             Callee
               FieldExpr .refreshed
@@ -1589,7 +1589,7 @@ File
                 FieldExpr .track
                   Identifier self
           Then
-            LetStatement stamp: i64
+            LetStatement stamp
               BinaryExpr +
                 FieldExpr .version
                   FieldExpr .track
@@ -1645,7 +1645,7 @@ File
                       Identifier stamp
                   FieldExpr .log_value
                     Identifier self
-        LetStatement fresh: Vector<T>
+        LetStatement fresh
           CallExpr
             Callee
               FieldExpr .refreshed
@@ -1729,7 +1729,7 @@ File
                 Identifier panic
               Args
                 StringLiteral "Vector.pop: empty vector"
-      LetStatement new_len: i64
+      LetStatement new_len
         BinaryExpr -
           FieldExpr .len
             Identifier self
@@ -1768,7 +1768,7 @@ File
                 FieldExpr .track
                   Identifier self
           Then
-            LetStatement stamp: i64
+            LetStatement stamp
               BinaryExpr +
                 FieldExpr .version
                   FieldExpr .track
@@ -1810,7 +1810,7 @@ File
                       Identifier stamp
                   FieldExpr .log_value
                     Identifier self
-        LetStatement data: Ptr<T>
+        LetStatement data
           CallExpr
             Callee
               FieldExpr .cast
@@ -1903,7 +1903,7 @@ File
               TypeArgs
                 T
       ModeBlock unsafe
-        LetStatement data: Ptr<T>
+        LetStatement data
           CallExpr
             Callee
               FieldExpr .cast
@@ -2003,7 +2003,7 @@ File
         Then
           ReturnStatement
             Identifier self
-      LetStatement out: Vector<T>
+      LetStatement out
         Identifier self
       LetStatement i: i64
         IntLiteral 0
@@ -2089,7 +2089,7 @@ File
                 Identifier Vector.new
               TypeArgs
                 T
-      LetStatement cap: i64
+      LetStatement cap
         Identifier count
       IfStatement
         Condition
@@ -2111,7 +2111,7 @@ File
                 Args
                   IntLiteral 8
       ModeBlock unsafe
-        LetStatement data: Ptr<T>
+        LetStatement data
           CallExpr
             Callee
               FieldExpr .cast
@@ -2187,7 +2187,7 @@ File
       Param self
       ReturnType: Vector<T>
       ModeBlock unsafe
-        LetStatement data: Ptr<T>
+        LetStatement data
           CallExpr
             Callee
               FieldExpr .cast

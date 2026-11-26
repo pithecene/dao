@@ -3,7 +3,7 @@ File
   FunctionDecl squares
     Param n: i32
     ReturnType: Generator<i32>
-    LetStatement i: i32
+    LetStatement i
       IntLiteral 0
     WhileStatement
       Condition
@@ -24,7 +24,7 @@ File
   FunctionDecl sum_squares
     Param n: i32
     ReturnType: i32
-    LetStatement total: i32
+    LetStatement total
       IntLiteral 0
     ForStatement x
       Iterable
@@ -44,7 +44,7 @@ File
       Identifier total
   FunctionDecl nested_iteration
     ReturnType: i32
-    LetStatement total: i32
+    LetStatement total
       IntLiteral 0
     ForStatement i
       Iterable

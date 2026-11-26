@@ -52,10 +52,10 @@ File
       Param self
       Param s: string
       ReturnType: Builder
-      LetStatement out: Vector<u8>
+      LetStatement out
         FieldExpr .bytes
           Identifier self
-      LetStatement n: i64
+      LetStatement n
         CallExpr
           Callee
             Identifier length
@@ -201,7 +201,7 @@ File
     FunctionDecl to_string
       Param self
       ReturnType: string
-      LetStatement bytes: Vector<u8>
+      LetStatement bytes
         CallExpr
           Callee
             FieldExpr .snapshot
@@ -220,7 +220,7 @@ File
     Param parts: Vector<string>
     Param sep: string
     ReturnType: string
-    LetStatement count: i64
+    LetStatement count
       CallExpr
         Callee
           FieldExpr .length
@@ -258,13 +258,13 @@ File
                   Identifier to_i64
                 Args
                   IntLiteral 0
-    LetStatement sep_len: i64
+    LetStatement sep_len
       CallExpr
         Callee
           Identifier length
         Args
           Identifier sep
-    LetStatement total: i64
+    LetStatement total
       BinaryExpr *
         Identifier sep_len
         BinaryExpr -
@@ -304,7 +304,7 @@ File
           BinaryExpr +
             Identifier i
             IntLiteral 1
-    LetStatement out: Builder
+    LetStatement out
       CallExpr
         Callee
           QualifiedName Builder::with_capacity
@@ -415,7 +415,7 @@ File
       Then
         ReturnStatement
           StringLiteral ""
-    LetStatement out: Builder
+    LetStatement out
       CallExpr
         Callee
           QualifiedName Builder::with_capacity
