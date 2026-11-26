@@ -3,7 +3,7 @@ File
   FunctionDecl countdown
     Param from: i32
     ReturnType: Generator<i32>
-    LetStatement i: i32
+    LetStatement i
       Identifier from
     WhileStatement
       Condition
@@ -22,7 +22,7 @@ File
   FunctionDecl evens
     Param n: i32
     ReturnType: Generator<i32>
-    LetStatement i: i32
+    LetStatement i
       IntLiteral 0
     WhileStatement
       Condition
@@ -86,7 +86,7 @@ File
           Identifier print
         Args
           StringLiteral "sum of range(5):"
-    LetStatement total: i32
+    LetStatement total
       IntLiteral 0
     ForStatement i
       Iterable

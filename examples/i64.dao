@@ -12,7 +12,7 @@ fn main(): i32
   print(factorial_i64(20))
   print("1 + x where x is i64:")
   let x: i64 = 100
-  let y: i64 = 1 + x
+  let y = 1 + x
   print(y)
   print("length of hello:")
   print(length("hello"))

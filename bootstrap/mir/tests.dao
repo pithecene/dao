@@ -1,4 +1,11 @@
-module bootstrap::mir_tests
+module bootstrap::mir::tests
+
+import bootstrap::lexer
+import bootstrap::parser
+import bootstrap::graph
+import bootstrap::base
+import bootstrap::resolver
+
 // Test runner for the bootstrap mir.  Assembled after the
 // shared base and every library it exercises; never compiled
 // standalone.
@@ -35,8 +42,8 @@ fn mir_count_kind(r: MirResult, kind: string): i64
 
 // A program of `inputs` resolved, type-checked and lowered to MIR.
 fn mir_of_program(inputs: Vector<graph::SourceInput>): ProgramMir
-  let p: Program = program_from_graph(graph::build_program(inputs))
-  p = program_run_resolve(p)
+  let p: resolver::Program = resolver::program_from_graph(graph::build_program(inputs))
+  p = resolver::program_run_resolve(p)
   p = program_run_typecheck(p)
   return program_run_mir(p)
 
@@ -45,7 +52,7 @@ fn mir_of_program(inputs: Vector<graph::SourceInput>): ProgramMir
 // parameters.
 fn mir_call_substs(pm: ProgramMir): string
   let r: MirResult = pm.mir
-  let types: Vector<DaoType> = pm.program.typecheck.types
+  let types: Vector<base::DaoType> = pm.program.typecheck.types
   let info: Vector<i64> = pm.program.typecheck.type_info
   let out: string = ""
   let i: i64 = 0
@@ -68,8 +75,8 @@ fn mir_call_substs(pm: ProgramMir): string
 
 // A program of `inputs` checked, lowered to MIR and monomorphized.
 fn mono_of_program(inputs: Vector<graph::SourceInput>): ProgramConcrete
-  let p: Program = program_from_graph(graph::build_program(inputs))
-  p = program_run_resolve(p)
+  let p: resolver::Program = resolver::program_from_graph(graph::build_program(inputs))
+  p = resolver::program_run_resolve(p)
   let pt: ProgramTyped = program_check(p)
   return program_monomorphize(pt, program_run_mir(pt.program))
 

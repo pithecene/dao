@@ -1,24 +1,65 @@
 module core::range
+
 fn range(n: i32): Generator<i32>
-  let i: i32 = 0
+  let i = 0
   while i < n:
     yield i
     i = i + 1
 
 fn range(start: i32, end: i32): Generator<i32>
-  let i: i32 = start
+  let i = start
   while i < end:
     yield i
     i = i + 1
 
 fn range(start: i32, end: i32, step: i32): Generator<i32>
-  let i: i32 = start
+  let i = start
   if step > 0:
     while i < end:
       yield i
-      i = i + step
+      match checked_add(i, step):
+        Option::Some(next_i):
+          i = next_i
+        Option::None:
+          break
   else:
     if step < 0:
       while i > end:
         yield i
-        i = i + step
+        match checked_add(i, step):
+          Option::Some(next_i):
+            i = next_i
+          Option::None:
+            break
+
+fn range_i64(n: i64): Generator<i64>
+  let i: i64 = 0
+  while i < n:
+    yield i
+    i = i + 1
+
+fn range_i64(start: i64, end: i64): Generator<i64>
+  let i = start
+  while i < end:
+    yield i
+    i = i + 1
+
+fn range_i64(start: i64, end: i64, step: i64): Generator<i64>
+  let i = start
+  if step > to_i64(0):
+    while i < end:
+      yield i
+      match checked_add_i64(i, step):
+        Option::Some(next_i):
+          i = next_i
+        Option::None:
+          break
+  else:
+    if step < to_i64(0):
+      while i > end:
+        yield i
+        match checked_add_i64(i, step):
+          Option::Some(next_i):
+            i = next_i
+          Option::None:
+            break

@@ -148,7 +148,7 @@ File
                   BinaryExpr *
                     Identifier x
                     Identifier x
-    LetStatement factor: i32
+    LetStatement factor
       IntLiteral 10
     LetStatement scale: fn(i32): i32
       Lambda x
@@ -170,7 +170,7 @@ File
               Identifier scale
             Args
               IntLiteral 7
-    LetStatement add5: fn(i32): i32
+    LetStatement add5
       CallExpr
         Callee
           Identifier make_adder
@@ -186,7 +186,7 @@ File
               Identifier add5
             Args
               IntLiteral 37
-    LetStatement nums: Vector<i32>
+    LetStatement nums
       CallExpr
         Callee
           Identifier Vector.new
@@ -222,7 +222,7 @@ File
                   IntLiteral 4
           Args
             IntLiteral 5
-    LetStatement evens: Vector<i32>
+    LetStatement evens
       CallExpr
         Callee
           Identifier filter_vec
@@ -236,7 +236,7 @@ File
                   IntLiteral 2
                 IntLiteral 2
               Identifier n
-    LetStatement squares: Vector<i32>
+    LetStatement squares
       CallExpr
         Callee
           Identifier map_vec
@@ -333,7 +333,7 @@ File
             Args
               UnaryExpr -
                 IntLiteral 1
-    LetStatement streamed: i32
+    LetStatement streamed
       IntLiteral 0
     ForStatement v
       Iterable

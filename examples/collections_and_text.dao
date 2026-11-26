@@ -1,0 +1,147 @@
+module collections_and_text
+// collections_and_text.dao — Vector operations, overflow-safe stepped ranges,
+// Builder helpers, and string/number parsing utilities.
+
+fn check(ok: bool, name: string): void
+  if ok == false:
+    panic("FAIL " + name)
+
+fn is_none_i64(opt: Option<i64>): bool
+  match opt:
+    Option::Some(v):
+      return false
+    Option::None:
+      return true
+  return true
+
+fn unwrap_i64(opt: Option<i64>, fallback: i64): i64
+  match opt:
+    Option::Some(v):
+      return v
+    Option::None:
+      return fallback
+  return fallback
+
+fn is_none_i32(opt: Option<i32>): bool
+  match opt:
+    Option::Some(v):
+      return false
+    Option::None:
+      return true
+  return true
+
+fn unwrap_i32(opt: Option<i32>, fallback: i32): i32
+  match opt:
+    Option::Some(v):
+      return v
+    Option::None:
+      return fallback
+  return fallback
+
+fn test_vector_ops(): void
+  let empty = Vector<i64>::new()
+  check(empty.is_empty(), "empty.is_empty")
+  check(is_none_i64(empty.first()), "empty.first")
+  check(is_none_i64(empty.last()), "empty.last")
+
+  let reserved = Vector<i64>::with_capacity(16).push(11).push(22)
+  check(reserved.length() == 2 and unwrap_i64(reserved.first(), to_i64(-1)) == 11, "with_capacity")
+
+  let flags = Vector<i64>::filled(5, 7)
+  check(flags.length() == 5, "filled.length")
+  check(flags.get(0) == 7 and flags.get(4) == 7, "filled.values")
+
+  // Verify `pop` followed by `push` preserves older snapshots.
+  let v0 = Vector<i64>::new().push(10).push(20).push(30)
+  let v1 = v0.pop()
+  let v2 = v1.push(99)
+  check(v0.length() == 3 and v0.get(2) == 30, "pop_push_snapshot_v0")
+  check(v1.length() == 2 and unwrap_i64(v1.last(), to_i64(-1)) == 20, "pop_push_snapshot_v1")
+  check(v2.length() == 3 and v2.get(2) == 99, "pop_push_snapshot_v2")
+
+  // Also exercise `pop` on a non-latest snapshot (branched buffer).
+  let branched = v0.pop()
+  check(branched.length() == 2 and branched.get(0) == 10 and branched.get(1) == 20, "pop_non_latest")
+
+  let rev = v0.reverse()
+  check(rev.get(0) == 30 and rev.get(1) == 20 and rev.get(2) == 10, "reverse")
+
+  let merged = v1.append_all(Vector<i64>::filled(2, 5))
+  let total: i64 = 0
+  for item in merged.iter():
+    total = total + item
+  check(merged.length() == 4 and total == 40, "append_all")
+
+  let sub = merged.slice(1, 2)
+  check(sub.length() == 2 and sub.get(0) == 20 and sub.get(1) == 5, "slice")
+
+fn test_ranges(): void
+  let acc: i64 = 0
+  for k in range_i64(1, 6):
+    acc = acc + k
+  check(acc == 15, "range_i64.unit")
+
+  let max_i64: i64 = 9223372036854775807
+  let zero_i64: i64 = 0
+  let neg_max = zero_i64 - max_i64
+  let min_i64 = wrapping_sub_i64(neg_max, 1)
+
+  // Stepped ranges near integer limits must terminate cleanly on overflow.
+  let pos_step_count: i64 = 0
+  let pos_step_val: i64 = 0
+  for x in range_i64(1, 10, max_i64):
+    pos_step_count = pos_step_count + 1
+    pos_step_val = x
+  check(pos_step_count == 1 and pos_step_val == 1, "range_i64.pos_step_overflow")
+
+  let neg_step_count: i64 = 0
+  let neg_step_val: i64 = 0
+  for x in range_i64(to_i64(-1), to_i64(-10), min_i64):
+    neg_step_count = neg_step_count + 1
+    neg_step_val = x
+  check(neg_step_count == 1 and neg_step_val == to_i64(-1), "range_i64.neg_step_overflow")
+
+  let i32_step_count = 0
+  for x in range(1, 10, 2147483647):
+    i32_step_count = i32_step_count + x
+  check(i32_step_count == 1, "range.pos_step_overflow")
+
+fn test_strings_and_builder(): void
+  check(trim_start("  \thello ") == "hello ", "string.trim_start")
+  check(trim_end(" hello\r\n ") == " hello", "string.trim_end")
+  check(trim("  \t hello dao \r\n ") == "hello dao", "string.trim")
+  check(trim("   \n\t ") == "", "string.trim_blank")
+
+  let parts = split("a::b::c", "::")
+  check(parts.length() == 3 and join(parts, "/") == "a/b/c", "string.split_join")
+
+  let edge_parts = split(",a,,b,", ",")
+  check(edge_parts.length() == 5 and edge_parts.get(0) == "" and edge_parts.get(2) == "" and edge_parts.get(4) == "", "string.split_edges")
+
+  let bulk_parts = split(repeat("a,", 1000), ",")
+  check(bulk_parts.length() == 1001 and bulk_parts.get(0) == "a" and bulk_parts.get(999) == "a" and bulk_parts.get(1000) == "", "string.split_linear")
+
+  let ls = lines("alpha\r\nbeta\ngamma\n")
+  check(ls.length() == 3 and ls.get(0) == "alpha" and ls.get(2) == "gamma", "string.lines")
+
+  let max_expected: i64 = 9223372036854775807
+  let zero_exp: i64 = 0
+  let neg_max_expected = zero_exp - max_expected
+  let min_expected = wrapping_sub_i64(neg_max_expected, 1)
+  check(unwrap_i64(parse_i64("-9223372036854775808"), to_i64(0)) == min_expected, "parse_i64.min")
+  check(unwrap_i64(parse_i64("9223372036854775807"), to_i64(0)) == max_expected, "parse_i64.max")
+  check(is_none_i64(parse_i64("9223372036854775808")), "parse_i64.overflow")
+  check(is_none_i32(parse_i32("2147483648")), "parse_i32.overflow")
+  check(unwrap_i32(parse_i32("-2147483648"), 0) == -2147483648, "parse_i32.min")
+
+  let b = Builder::new()
+  check(b.is_empty(), "builder.is_empty")
+  b = b.push("item=").push_i64(42).push(" n=").push_i32(-3).push(" ok=").push_bool(true).push_line("")
+  check(b.to_string() == "item=42 n=-3 ok=true\n", "builder.helpers")
+
+fn main(): i32
+  test_vector_ops()
+  test_ranges()
+  test_strings_and_builder()
+  print("collections_and_text: all checks passed")
+  return 0

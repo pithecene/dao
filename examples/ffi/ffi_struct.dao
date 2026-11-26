@@ -47,67 +47,67 @@ extern fn mixed_nested_val(m: MixedNested): f64
 
 fn main(): i32
   print("--- struct param: Point ---")
-  let p: Point = Point(10, 20)
+  let p = Point(10, 20)
   print(point_sum(p))
 
   print("--- struct return: Point ---")
-  let p2: Point = make_point(42, 99)
+  let p2 = make_point(42, 99)
   print(p2.x)
   print(p2.y)
 
   print("--- struct param: Mixed (flag=true) ---")
   let w1: i64 = 999
-  let m1: Mixed = Mixed(true, 7, w1)
+  let m1 = Mixed(true, 7, w1)
   print(check_mixed(m1))
 
   print("--- struct param: Mixed (flag=false) ---")
   let w2: i64 = 999
-  let m2: Mixed = Mixed(false, 7, w2)
+  let m2 = Mixed(false, 7, w2)
   print(check_mixed(m2))
 
   print("--- struct return: Mixed ---")
   let w3: i64 = 100
-  let m3: Mixed = make_mixed(true, 42, w3)
+  let m3 = make_mixed(true, 42, w3)
   print(m3.flag)
   print(m3.value)
   print(m3.wide)
 
   print("--- nested struct param ---")
-  let inner: Inner = Inner(5, 3.14)
-  let outer: Outer = Outer(inner, 77)
+  let inner = Inner(5, 3.14)
+  let outer = Outer(inner, 77)
   print(outer_inner_b(outer))
 
   print("--- nested struct return ---")
-  let o2: Outer = make_outer(1, 2.718, 99)
+  let o2 = make_outer(1, 2.718, 99)
   print(o2.inner.a)
   print(o2.inner.b)
   print(o2.tag)
 
   print("--- alignment: i32 + i64 ---")
   let hi1: i64 = 9999999999
-  let pair: Pair64 = Pair64(11, hi1)
+  let pair = Pair64(11, hi1)
   print(pair64_hi(pair))
 
   print("--- alignment return: i32 + i64 ---")
   let hi2: i64 = 8888888888
-  let pair2: Pair64 = make_pair64(22, hi2)
+  let pair2 = make_pair64(22, hi2)
   print(pair2.lo)
   print(pair2.hi)
 
   print("--- SSE: f64 struct param ---")
-  let fw: F64Wrap = F64Wrap(3.14)
+  let fw = F64Wrap(3.14)
   print(unwrap_f64(fw))
 
   print("--- SSE: f64 struct return ---")
-  let fw2: F64Wrap = wrap_f64(2.718)
+  let fw2 = wrap_f64(2.718)
   print(fw2.val)
 
   print("--- SSE: nested f64 struct ---")
-  let nf: NestedF64 = NestedF64(F64Wrap(9.0))
+  let nf = NestedF64(F64Wrap(9.0))
   print(unwrap_nested_f64(nf))
 
   print("--- SSE+INTEGER: mixed nested ---")
-  let mn: MixedNested = MixedNested(F64Wrap(1.5), 42)
+  let mn = MixedNested(F64Wrap(1.5), 42)
   print(mixed_nested_tag(mn))
   print(mixed_nested_val(mn))
 

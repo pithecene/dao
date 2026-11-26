@@ -35,18 +35,18 @@ fn main(): i32
   print(5 |> |x| -> x + 2 |> |x| -> x * x)
 
   // Value captures snapshot outer locals at lambda creation time.
-  let factor: i32 = 10
+  let factor = 10
   let scale: fn(i32): i32 = |x| -> x * factor
   factor = 99
   print(scale(7))
-  let add5: fn(i32): i32 = make_adder(5)
+  let add5 = make_adder(5)
   print(add5(37))
 
   // Generic sequence helpers and lazy generator composition.
-  let nums: Vector<i32> = Vector<i32>::new()
+  let nums = Vector<i32>::new()
   nums = nums.push(1).push(2).push(3).push(4).push(5)
-  let evens: Vector<i32> = filter_vec(nums, |n| -> (n / 2) * 2 == n)
-  let squares: Vector<i32> = map_vec(evens, |n| -> n * n)
+  let evens = filter_vec(nums, |n| -> (n / 2) * 2 == n)
+  let squares = map_vec(evens, |n| -> n * n)
   for item in enumerate(squares):
     print(i64_to_string(item.index) + ":" + i32_to_string(item.value))
 
@@ -58,7 +58,7 @@ fn main(): i32
     Option::None:
       print(-1)
 
-  let streamed: i32 = 0
+  let streamed = 0
   for v in map_gen(filter_gen(nums.iter(), |n| -> n >= 3), |n| -> n * 10):
     streamed = streamed + v
   print(streamed)

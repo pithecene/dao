@@ -1,4 +1,11 @@
 module bootstrap::mir::impl
+
+import bootstrap::lexer
+import bootstrap::parser
+import bootstrap::graph
+import bootstrap::base
+import bootstrap::resolver
+
 // bootstrap/mir/impl.dao — Tier A MIR subsystem.
 //
 // Lowers HIR into a basic-block MIR mirroring the host compiler's
@@ -164,9 +171,9 @@ class MsHir:
 
 // The whole program's types and symbols, read-only once lowering starts.
 class MsProgram:
-  types: Vector<DaoType>
+  types: Vector<base::DaoType>
   type_info: Vector<i64>
-  symbols: Vector<Symbol>
+  symbols: Vector<resolver::Symbol>
   sym_types: Vector<i64>
   uses_map: HashMap<i64>    // program-level uses_key(file_id, tok_idx) → sym_idx
   copy_out_sym: i64         // the prelude's `copy_out`, for resource exits (-1 when absent)
@@ -314,7 +321,7 @@ fn ms_lookup_local(ms: MS, sym: i64): i64
 fn ms_tok_to_sym(ms: MS, tok_idx: i64): i64
   if tok_idx < 0:
     return to_i64(-1)
-  let key: string = uses_key(ms.source.file_id, tok_idx)
+  let key: string = resolver::uses_key(ms.source.file_id, tok_idx)
   let found: Option<i64> = ms.program.uses_map.get(key)
   match found:
     Option::Some(sym):
@@ -390,9 +397,9 @@ fn mir_resolve_field_index(ms: MS, struct_type_idx: i64, field_tok: i64): i64
     return to_i64(-1)
   if struct_type_idx >= ms.program.types.length():
     return to_i64(-1)
-  let t: DaoType = ms.program.types.get(struct_type_idx)
+  let t: base::DaoType = ms.program.types.get(struct_type_idx)
   match t.kind:
-    TypeKind::TStruct:
+    base::TypeKind::TStruct:
       // Extract the field name from the field_tok.
       let ft: lexer::Token = ms.source.toks.get(field_tok)
       let field_name: string = substring(ms.source.src, ft.offset, ft.len)
@@ -478,7 +485,7 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       return br_emit_value(fields.br, MirNode::MirConstruct(arg_list_lp = cfl.list_pos, arg_count = arg_count, type_idx = type_idx))
     HirNode::HirEnumConstruct(variant, payload_lp, payload_count, type_idx):
       // Evaluated in source order, placed in declaration order.
-      let pairs: Vector<i64> = read_pairs(br.ms.hir.idx, payload_lp)
+      let pairs: Vector<i64> = resolver::read_pairs(br.ms.hir.idx, payload_lp)
       let exprs: Vector<i64> = Vector<i64>::new()
       let pi: i64 = to_i64(0)
       while pi < pairs.length():
@@ -516,8 +523,8 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       // A local or parameter always has a slot by the time it is read; one
       // without is a binding lowering lost, never a function to call.
       if sym >= 0 and sym < br.ms.program.symbols.length():
-        let named: Symbol = br.ms.program.symbols.get(sym)
-        let nk: string = symbol_kind_name(named.kind)
+        let named: resolver::Symbol = br.ms.program.symbols.get(sym)
+        let nk: string = resolver::symbol_kind_name(named.kind)
         if nk == "Local" or nk == "Param" or nk == "LambdaParam":
           br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "'" + named.name + "' has no local slot in MIR")
           return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
@@ -589,7 +596,7 @@ fn mir_is_type_param(ms: MS, ti: i64): bool
   if ti < 0 or ti >= ms.program.types.length():
     return false
   match ms.program.types.get(ti).kind:
-    TypeKind::TGenericParam:
+    base::TypeKind::TGenericParam:
       return true
   return false
 
@@ -639,7 +646,7 @@ fn collect_lambda_captures(ms: MS, hir_idx: i64, bound: HashMap<i64>, scan: Capt
         ci = ci + to_i64(1)
       return cur
     HirNode::HirEnumConstruct(v, payload_lp, pc, ti):
-      let epairs: Vector<i64> = read_pairs(ms.hir.idx, payload_lp)
+      let epairs: Vector<i64> = resolver::read_pairs(ms.hir.idx, payload_lp)
       let ei: i64 = to_i64(0)
       while ei < epairs.length():
         cur = collect_lambda_captures(ms, epairs.get(ei), bound, cur)
@@ -926,7 +933,7 @@ fn lower_for(br: BlockR, stmt: i64, var_sym: i64, iter: i64, body_lp: i64): Bloc
   let elem_ti: i64 = iter_ti
   if iter_ti >= 0 and iter_ti < init.br.ms.program.types.length():
     match init.br.ms.program.types.get(iter_ti).kind:
-      TypeKind::TGenerator:
+      base::TypeKind::TGenerator:
         elem_ti = init.br.ms.program.types.get(iter_ti).pointee
   let var_r: MirR = ms_declare_local(init.br.ms, var_sym, elem_ti, false)
   let cur: BlockR = init.br
@@ -1152,11 +1159,11 @@ fn mir_generator_search(ms: MS, ti: i64, seen: HashMap<i64>): GenericSearch
   if seen.contains(key):
     return GenericSearch(seen, false)
   let so_far: HashMap<i64> = seen.set(key, to_i64(1))
-  let t: DaoType = ms.program.types.get(ti)
+  let t: base::DaoType = ms.program.types.get(ti)
   match t.kind:
-    TypeKind::TGenerator:
+    base::TypeKind::TGenerator:
       return GenericSearch(so_far, true)
-    TypeKind::TStruct:
+    base::TypeKind::TStruct:
       let fi: i64 = to_i64(0)
       while fi < t.info_count:
         let sub: GenericSearch = mir_generator_search(ms, ms.program.type_info.get(t.info_lp + fi * to_i64(2) + to_i64(1)), so_far)
@@ -1176,11 +1183,11 @@ fn mir_closure_search(ms: MS, ti: i64, seen: HashMap<i64>): GenericSearch
   if seen.contains(key):
     return GenericSearch(seen, false)
   let so_far: HashMap<i64> = seen.set(key, to_i64(1))
-  let t: DaoType = ms.program.types.get(ti)
+  let t: base::DaoType = ms.program.types.get(ti)
   match t.kind:
-    TypeKind::TFunction:
+    base::TypeKind::TFunction:
       return GenericSearch(so_far, true)
-    TypeKind::TStruct:
+    base::TypeKind::TStruct:
       let fi: i64 = to_i64(0)
       while fi < t.info_count:
         let sub: GenericSearch = mir_closure_search(ms, ms.program.type_info.get(t.info_lp + fi * to_i64(2) + to_i64(1)), so_far)
@@ -1188,7 +1195,7 @@ fn mir_closure_search(ms: MS, ti: i64, seen: HashMap<i64>): GenericSearch
           return sub
         so_far = sub.seen
         fi = fi + to_i64(1)
-    TypeKind::TEnum:
+    base::TypeKind::TEnum:
       let at: i64 = t.info_lp
       let vi: i64 = to_i64(0)
       while vi < t.info_count:
@@ -1227,31 +1234,31 @@ fn mir_tok_text(ms: MS, tok: i64): string
 fn mir_owns_heap(ms: MS, ti: i64): bool
   return mir_heap_search_in(ms.program.types, ms.program.type_info, ti, HashMap<i64>::new()).found
 
-fn mir_heap_search_in(types: Vector<DaoType>, info: Vector<i64>, ti: i64, seen: HashMap<i64>): GenericSearch
+fn mir_heap_search_in(types: Vector<base::DaoType>, info: Vector<i64>, ti: i64, seen: HashMap<i64>): GenericSearch
   if ti < 0 or ti >= types.length():
     return GenericSearch(seen, false)
   let key: string = i64_to_string(ti)
   if seen.contains(key):
     return GenericSearch(seen, false)
   let so_far: HashMap<i64> = seen.set(key, to_i64(1))
-  let t: DaoType = types.get(ti)
+  let t: base::DaoType = types.get(ti)
   let held: Vector<i64> = Vector<i64>::new()
   match t.kind:
-    TypeKind::TString:
+    base::TypeKind::TString:
       return GenericSearch(so_far, true)
-    TypeKind::TFunction:
+    base::TypeKind::TFunction:
       return GenericSearch(so_far, true)
-    TypeKind::TGenerator:
+    base::TypeKind::TGenerator:
       return GenericSearch(so_far, true)
-    TypeKind::TGenericParam:
+    base::TypeKind::TGenericParam:
       return GenericSearch(so_far, true)
-    TypeKind::TStruct:
+    base::TypeKind::TStruct:
       // Field pairs: (name, type).
       let fi: i64 = to_i64(0)
       while fi < t.info_count:
         held = held.push(info.get(t.info_lp + fi * to_i64(2) + to_i64(1)))
         fi = fi + to_i64(1)
-    TypeKind::TEnum:
+    base::TypeKind::TEnum:
       // Per variant: name, payload count, then (name, type) per value.
       let at: i64 = t.info_lp
       let vi: i64 = to_i64(0)
@@ -1268,7 +1275,7 @@ fn mir_heap_search_in(types: Vector<DaoType>, info: Vector<i64>, ti: i64, seen: 
     let part: i64 = held.get(i)
     if part >= 0 and part < types.length():
       match types.get(part).kind:
-        TypeKind::TPointer:
+        base::TypeKind::TPointer:
           return GenericSearch(so_far, true)
     let sub: GenericSearch = mir_heap_search_in(types, info, part, so_far)
     if sub.found:
@@ -1508,31 +1515,31 @@ class GenericSearch:
 // Whether `ti` is, or holds at any depth, a type parameter, in the type
 // tables `types` / `info`.  A type graph shares its parts, so each type
 // is searched once.
-fn mir_generic_search_in(types: Vector<DaoType>, info: Vector<i64>, ti: i64, seen: HashMap<i64>): GenericSearch
+fn mir_generic_search_in(types: Vector<base::DaoType>, info: Vector<i64>, ti: i64, seen: HashMap<i64>): GenericSearch
   if ti < 0 or ti >= types.length():
     return GenericSearch(seen, false)
   let key: string = i64_to_string(ti)
   if seen.contains(key):
     return GenericSearch(seen, false)
   let so_far: HashMap<i64> = seen.set(key, to_i64(1))
-  let t: DaoType = types.get(ti)
+  let t: base::DaoType = types.get(ti)
   let parts: Vector<i64> = Vector<i64>::new()
   match t.kind:
-    TypeKind::TGenericParam:
+    base::TypeKind::TGenericParam:
       return GenericSearch(so_far, true)
-    TypeKind::TPointer:
+    base::TypeKind::TPointer:
       parts = parts.push(t.pointee)
-    TypeKind::TGenerator:
+    base::TypeKind::TGenerator:
       parts = parts.push(t.pointee)
-    TypeKind::TFunction:
+    base::TypeKind::TFunction:
       parts = parts.push(t.ret_type)
       let fi: i64 = to_i64(0)
       while fi < t.info_count:
         parts = parts.push(info.get(t.info_lp + fi))
         fi = fi + to_i64(1)
-    TypeKind::TStruct:
+    base::TypeKind::TStruct:
       parts = mir_stands_for_args_of(info, t)
-    TypeKind::TEnum:
+    base::TypeKind::TEnum:
       parts = mir_stands_for_args_of(info, t)
   let i: i64 = to_i64(0)
   while i < parts.length():
@@ -1546,7 +1553,7 @@ fn mir_generic_search_in(types: Vector<DaoType>, info: Vector<i64>, ti: i64, see
 // The prelude's free function `copy_out(x)`, which a resource block's
 // exit calls to copy a value one domain outward; -1 when the program has
 // none (a program without the prelude).
-fn find_prelude_copy_out(p: Program, ms: MS): i64
+fn find_prelude_copy_out(p: resolver::Program, ms: MS): i64
   if p.hir.root < 0 or p.hir.root >= ms.hir.nodes.length():
     return to_i64(-1)
   match ms.hir.nodes.get(p.hir.root):
@@ -1556,7 +1563,7 @@ fn find_prelude_copy_out(p: Program, ms: MS): i64
       while mi < modules.length():
         match ms.hir.nodes.get(modules.get(mi)):
           HirNode::HirModule(name_tok, decls_lp, module_id):
-            if program_module(p, module_id).is_prelude:
+            if resolver::program_module(p, module_id).is_prelude:
               let decls: Vector<i64> = read_hir_list(ms.hir.idx, decls_lp)
               let di: i64 = to_i64(0)
               while di < decls.length():
@@ -1574,7 +1581,7 @@ fn find_prelude_copy_out(p: Program, ms: MS): i64
 // MIR's (each on its module's file), and the MIR, rooted at a
 // MirProgram.
 class ProgramMir:
-  program: Program
+  program: resolver::Program
   mir: MirResult
 
 // One module's lowered functions: the MIR state after them, and the
@@ -1618,9 +1625,9 @@ fn lower_module(ms: MS, sf: graph::SourceFile, decls: Vector<i64>): ModuleLoweri
 fn ms_function_empty(): MsFunction
   return MsFunction(to_i64(-1), Vector<i64>::new(), Vector<i64>::new(), HashMap<i64>::new(), to_i64(0), false)
 
-fn program_run_mir(p: Program): ProgramMir
+fn program_run_mir(p: resolver::Program): ProgramMir
   let ph: ProgramHir = program_lower_hir(p)
-  let hp: Program = ph.program
+  let hp: resolver::Program = ph.program
   let ms: MS = MS(
     MsHir(ph.arena.nodes, ph.arena.idx),
     MsProgram(hp.typecheck.types, hp.typecheck.type_info, hp.resolve.symbols, hp.typecheck.sym_types, hp.resolve.uses, to_i64(-1)),
@@ -1639,7 +1646,7 @@ fn program_run_mir(p: Program): ProgramMir
         while mi < modules.length():
           match ms.hir.nodes.get(modules.get(mi)):
             HirNode::HirModule(name_tok, decls_lp, module_id):
-              let sf: graph::SourceFile = program_file_of_module(hp, module_id)
+              let sf: graph::SourceFile = resolver::program_file_of_module(hp, module_id)
               let before: i64 = ms.out.diags.length()
               let lowered: ModuleLowering = lower_module(ms, sf, read_hir_list(ms.hir.idx, decls_lp))
               ms = lowered.ms
@@ -1656,7 +1663,7 @@ fn program_run_mir(p: Program): ProgramMir
   while fi < all_diags.length():
     flat = flat.push(all_diags.get(fi).diag)
     fi = fi + to_i64(1)
-  let out: Program = Program(hp.module_graph, hp.resolve, hp.typecheck, hp.hir, all_diags)
+  let out: resolver::Program = resolver::Program(hp.module_graph, hp.resolve, hp.typecheck, hp.hir, all_diags)
   return ProgramMir(out, MirResult(root_r.ms.out.nodes, root_r.ms.out.idx, flat, root_r.mir))
 
 // The module a single-source program lowers to: its MirProgram holds
@@ -1673,16 +1680,16 @@ fn mir_only_module(r: MirResult): i64
 // Lower one source snippet, wrapped as a module, to MIR.  The root is
 // the snippet's MirModule, and the diagnostics every stage's.
 fn lower_to_mir(src: string): MirResult
-  let wrapped: string = wrap_test_module(src)
+  let wrapped: string = base::wrap_test_module(src)
   let inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   inputs = inputs.push(graph::SourceInput("test.dao", wrapped, false))
   let pg: graph::ProgramGraph = graph::program_graph_empty()
   resource memory graph =>
     pg = graph::build_program(inputs)
-  let p: Program = program_from_graph(pg)
+  let p: resolver::Program = resolver::program_from_graph(pg)
   // Each stage in its own domain: its scratch is reclaimed at the exit and the result is copied out.
   resource memory resolve =>
-    p = program_run_resolve(p)
+    p = resolver::program_run_resolve(p)
   resource memory typecheck =>
     p = program_run_typecheck(p)
   let pm: ProgramMir = ProgramMir(p, mir_result_empty())
@@ -1695,7 +1702,7 @@ fn lower_to_mir(src: string): MirResult
 // function: until an instantiation names a concrete copy a
 // template has no code, so a consumer that needs concrete MIR reports
 // each one rather than referring to a function it never emits.
-fn mir_template_refs(r: MirResult, symbols: Vector<Symbol>, module_node: i64): Vector<Diagnostic>
+fn mir_template_refs(r: MirResult, symbols: Vector<resolver::Symbol>, module_node: i64): Vector<Diagnostic>
   let out: Vector<Diagnostic> = Vector<Diagnostic>::new()
   if module_node < 0:
     return out
@@ -1753,7 +1760,7 @@ class MonoTables:
   ts: TS
   nodes: Vector<MirNode>
   idx: Vector<i64>
-  symbols: Vector<Symbol>
+  symbols: Vector<resolver::Symbol>
 
 // The program's templates, and the specializations made of them.
 class MonoTemplates:
@@ -1781,7 +1788,7 @@ class MonoNames:
 // The program being monomorphized and its MirModules, for a function's
 // module (its tokens, its view of `extend`s).
 class MonoSource:
-  program: Program
+  program: resolver::Program
   modules: Vector<i64>
 
 class Mono:
@@ -1795,11 +1802,11 @@ class Mono:
 // A monomorphized program: the program (its types and symbols grown by
 // the specializations) and its MIR, every module function concrete.
 class ProgramConcrete:
-  program: Program
+  program: resolver::Program
   mir: MirResult
 
 fn program_monomorphize(pt: ProgramTyped, pm: ProgramMir): ProgramConcrete
-  let p: Program = pm.program
+  let p: resolver::Program = pm.program
   let first_module: i64 = to_i64(0)
   if p.module_graph.topo_order.length() > 0:
     first_module = p.module_graph.topo_order.get(0)
@@ -1848,8 +1855,8 @@ fn program_monomorphize(pt: ProgramTyped, pm: ProgramMir): ProgramConcrete
   // its diagnostics on the file of the module whose function had them
   // are not kept apart: they are internal errors of the pass.
   let tables: MonoTables = m.tables
-  let resolved: ProgramResolveResult = ProgramResolveResult(tables.symbols, p.resolve.scopes, p.resolve.uses, p.resolve.diags, p.resolve.module_exports, p.resolve.extend_concept_bindings)
-  let typed: TypeCheckData = TypeCheckData(p.typecheck.initialized, tables.ts.types, tables.ts.type_info, tables.ts.sym_types, p.typecheck.lookup)
+  let resolved: resolver::ProgramResolveResult = resolver::ProgramResolveResult(tables.symbols, p.resolve.scopes, p.resolve.uses, p.resolve.diags, p.resolve.module_exports, p.resolve.extend_concept_bindings)
+  let typed: base::TypeCheckData = base::TypeCheckData(p.typecheck.initialized, tables.ts.types, tables.ts.type_info, tables.ts.sym_types, p.typecheck.lookup)
   let all_diags: Vector<graph::FileDiagnostic> = p.diags
   let flat: Vector<Diagnostic> = pm.mir.diags
   let di: i64 = to_i64(0)
@@ -1857,7 +1864,7 @@ fn program_monomorphize(pt: ProgramTyped, pm: ProgramMir): ProgramConcrete
     all_diags = all_diags.push(graph::FileDiagnostic(to_i64(-1), "", m.diags.get(di)))
     flat = flat.push(m.diags.get(di))
     di = di + to_i64(1)
-  let out: Program = Program(p.module_graph, resolved, typed, p.hir, all_diags)
+  let out: resolver::Program = resolver::Program(p.module_graph, resolved, typed, p.hir, all_diags)
   return ProgramConcrete(out, MirResult(tables.nodes, tables.idx, flat, root))
 
 class MonoFlush:
@@ -1926,7 +1933,7 @@ fn mono_fn_insts(m: Mono, fn_node: i64): Vector<i64>
 // The substitution a scanned function stands in: a specialization's, or
 // none for an original.
 fn mono_fn_map(m: Mono, fn_node: i64): HashMap<i64>
-  let start: i64 = hm_get_or(m.work.fn_subst, i64_to_string(fn_node), to_i64(-1))
+  let start: i64 = base::hm_get_or(m.work.fn_subst, i64_to_string(fn_node), to_i64(-1))
   return mono_read_subst(m.work.subst_data, start, HashMap<i64>::new())
 
 // A [count, (param, arg)*] record, as a map from parameter to argument.
@@ -1948,7 +1955,7 @@ fn mono_subst_type(m: Mono, map: HashMap<i64>, ti: i64): MonoType
   // substitute_type rebuilds what a class or enum stands for.
   let is_fn: bool = false
   match m.tables.ts.types.get(ti).kind:
-    TypeKind::TFunction:
+    base::TypeKind::TFunction:
       is_fn = true
   if is_fn:
     let rf: TypeR = substitute_fn_type(m.tables.ts, map, ti)
@@ -1989,14 +1996,14 @@ fn mono_scan_function(m: Mono, wi: i64): Mono
     match m.tables.nodes.get(inst):
       MirNode::MirLambda(lam_fn, clp, cc, lti):
         if m.work.fn_subst.contains(i64_to_string(fn_node)):
-          m.work.fn_subst = m.work.fn_subst.set(i64_to_string(lam_fn), hm_get_or(m.work.fn_subst, i64_to_string(fn_node), to_i64(-1)))
+          m.work.fn_subst = m.work.fn_subst.set(i64_to_string(lam_fn), base::hm_get_or(m.work.fn_subst, i64_to_string(fn_node), to_i64(-1)))
           m = mono_check_lambda_captures(m, lam_fn, cc)
         m.work.fns = m.work.fns.push(lam_fn)
         m.work.fn_module = m.work.fn_module.push(m.work.fn_module.get(wi))
       MirNode::MirFnRef(ref_sym, ref_ti):
-        let tmpl: i64 = hm_get_or(m.templates.by_sym, i64_to_string(ref_sym), to_i64(-1))
+        let tmpl: i64 = base::hm_get_or(m.templates.by_sym, i64_to_string(ref_sym), to_i64(-1))
         if tmpl >= 0:
-          m = mono_specialize_ref(m, inst, ref_sym, ref_ti, tmpl, hm_get_or(call_of, i64_to_string(inst), to_i64(-1)), here, wi)
+          m = mono_specialize_ref(m, inst, ref_sym, ref_ti, tmpl, base::hm_get_or(call_of, i64_to_string(inst), to_i64(-1)), here, wi)
     ii = ii + to_i64(1)
   return m
 
@@ -2108,24 +2115,24 @@ class MonoMap:
 // Bind the type parameters `pattern` holds to what `concrete` holds in
 // their place (the host's infer_bindings_recursive, for a call MIR made).
 fn mono_match(m: Mono, pattern: i64, concrete: i64, so_far: MonoMap): MonoMap
-  let types: Vector<DaoType> = m.tables.ts.types
+  let types: Vector<base::DaoType> = m.tables.ts.types
   if pattern < 0 or concrete < 0 or pattern >= types.length() or concrete >= types.length():
     return so_far
-  let pt: DaoType = types.get(pattern)
+  let pt: base::DaoType = types.get(pattern)
   match pt.kind:
-    TypeKind::TGenericParam:
+    base::TypeKind::TGenericParam:
       let key: string = i64_to_string(pattern)
       if so_far.map.contains(key):
         return so_far
       return MonoMap(so_far.m, so_far.map.set(key, concrete), so_far.params.push(pattern))
-    TypeKind::TPointer:
+    base::TypeKind::TPointer:
       return mono_match(m, pt.pointee, types.get(concrete).pointee, so_far)
-    TypeKind::TGenerator:
+    base::TypeKind::TGenerator:
       return mono_match(m, pt.pointee, types.get(concrete).pointee, so_far)
-    TypeKind::TFunction:
-      let ct: DaoType = types.get(concrete)
+    base::TypeKind::TFunction:
+      let ct: base::DaoType = types.get(concrete)
       match ct.kind:
-        TypeKind::TFunction:
+        base::TypeKind::TFunction:
           if pt.info_count == ct.info_count:
             let f_out: MonoMap = so_far
             let fpi: i64 = to_i64(0)
@@ -2144,13 +2151,13 @@ fn mono_match(m: Mono, pattern: i64, concrete: i64, so_far: MonoMap): MonoMap
       i = i + to_i64(1)
   return out
 
-fn mir_stands_for_args_of(info: Vector<i64>, t: DaoType): Vector<i64>
+fn mir_stands_for_args_of(info: Vector<i64>, t: base::DaoType): Vector<i64>
   let args: Vector<i64> = Vector<i64>::new()
   let record: i64 = to_i64(-1)
   match t.kind:
-    TypeKind::TStruct:
+    base::TypeKind::TStruct:
       record = t.ret_type
-    TypeKind::TEnum:
+    base::TypeKind::TEnum:
       record = t.ret_type
   if record < 0 or record + 1 >= info.length():
     return args
@@ -2218,7 +2225,7 @@ fn mono_key(tmpl_sym: i64, map: MonoMap): string
   let key: string = i64_to_string(tmpl_sym)
   let i: i64 = to_i64(0)
   while i < params.length():
-    key = key + ":" + i64_to_string(params.get(i)) + "=" + i64_to_string(hm_get_or(map.map, i64_to_string(params.get(i)), to_i64(-1)))
+    key = key + ":" + i64_to_string(params.get(i)) + "=" + i64_to_string(base::hm_get_or(map.map, i64_to_string(params.get(i)), to_i64(-1)))
     i = i + to_i64(1)
   return key
 
@@ -2253,7 +2260,7 @@ fn mono_specialize_ref(m: Mono, inst: i64, tmpl_sym: i64, ref_ti: i64, tmpl: i64
     // Nothing decided: the concreteness check reports the reference.
     return m
   let key: string = mono_key(tmpl_sym, decided)
-  let spec_sym: i64 = hm_get_or(m.templates.made, key, to_i64(-1))
+  let spec_sym: i64 = base::hm_get_or(m.templates.made, key, to_i64(-1))
   if spec_sym < 0:
     let made: MonoMade = mono_make(m, tmpl_sym, tmpl, decided)
     m = made.m
@@ -2276,7 +2283,7 @@ fn mono_specialize_ref(m: Mono, inst: i64, tmpl_sym: i64, ref_ti: i64, tmpl: i64
     let pi: i64 = to_i64(0)
     while pi < params.length():
       record = record.push(params.get(pi))
-      record = record.push(hm_get_or(decided.map, i64_to_string(params.get(pi)), to_i64(-1)))
+      record = record.push(base::hm_get_or(decided.map, i64_to_string(params.get(pi)), to_i64(-1)))
       pi = pi + to_i64(1)
     m.tables.ts = ts_push_info_run(m.tables.ts, record)
     match m.tables.nodes.get(call):
@@ -2295,13 +2302,13 @@ fn mono_make(m: Mono, tmpl_sym: i64, tmpl: i64, decided: MonoMap): MonoMade
   let spelled: Vector<i64> = Vector<i64>::new()
   let i: i64 = to_i64(0)
   while i < params.length():
-    spelled = spelled.push(hm_get_or(decided.map, i64_to_string(params.get(i)), to_i64(-1)))
+    spelled = spelled.push(base::hm_get_or(decided.map, i64_to_string(params.get(i)), to_i64(-1)))
     i = i + to_i64(1)
   let named: MonoName = mono_mangle(m, m.tables.symbols.get(tmpl_sym).name, spelled)
   m = named.m
-  let t: Symbol = m.tables.symbols.get(tmpl_sym)
+  let t: resolver::Symbol = m.tables.symbols.get(tmpl_sym)
   let sym: i64 = m.tables.symbols.length()
-  m.tables.symbols = m.tables.symbols.push(Symbol(t.kind, named.name, t.decl_node, t.scope_id, t.owner_module_id))
+  m.tables.symbols = m.tables.symbols.push(resolver::Symbol(t.kind, named.name, t.decl_node, t.scope_id, t.owner_module_id))
   let cloned: MonoMade = mono_clone(m, tmpl, sym, decided.map)
   m = cloned.m
   // Its substitution, kept for the scan of its own calls.
@@ -2310,11 +2317,11 @@ fn mono_make(m: Mono, tmpl_sym: i64, tmpl: i64, decided: MonoMap): MonoMade
   let pi: i64 = to_i64(0)
   while pi < params.length():
     m.work.subst_data = m.work.subst_data.push(params.get(pi))
-    m.work.subst_data = m.work.subst_data.push(hm_get_or(decided.map, i64_to_string(params.get(pi)), to_i64(-1)))
+    m.work.subst_data = m.work.subst_data.push(base::hm_get_or(decided.map, i64_to_string(params.get(pi)), to_i64(-1)))
     pi = pi + to_i64(1)
   m.work.fn_subst = m.work.fn_subst.set(i64_to_string(cloned.sym), start)
   m.work.fns = m.work.fns.push(cloned.sym)
-  m.work.fn_module = m.work.fn_module.push(hm_get_or(m.templates.module_of, i64_to_string(tmpl_sym), to_i64(0)))
+  m.work.fn_module = m.work.fn_module.push(base::hm_get_or(m.templates.module_of, i64_to_string(tmpl_sym), to_i64(0)))
   return MonoMade(m, sym)
 
 class MonoName:
@@ -2323,8 +2330,8 @@ class MonoName:
 
 // `name$A_B`: each argument spelled by its type's name, a spelling taken
 // by an earlier, different type numbered (`Box.1`).
-fn mono_mangle(m: Mono, base: string, args: Vector<i64>): MonoName
-  let out: string = base + "$"
+fn mono_mangle(m: Mono, base_name: string, args: Vector<i64>): MonoName
+  let out: string = base_name + "$"
   let i: i64 = to_i64(0)
   while i < args.length():
     if i > to_i64(0):
@@ -2332,9 +2339,9 @@ fn mono_mangle(m: Mono, base: string, args: Vector<i64>): MonoName
     let ti: i64 = args.get(i)
     let spelling: string = mono_type_spelling(m, ti)
     let key: string = i64_to_string(ti)
-    let claim: i64 = hm_get_or(m.names.spelled, key, to_i64(-1))
+    let claim: i64 = base::hm_get_or(m.names.spelled, key, to_i64(-1))
     if claim < 0:
-      claim = hm_get_or(m.names.claims, spelling, to_i64(0))
+      claim = base::hm_get_or(m.names.claims, spelling, to_i64(0))
       m.names.claims = m.names.claims.set(spelling, claim + to_i64(1))
       m.names.spelled = m.names.spelled.set(key, claim)
     if claim == to_i64(0):
@@ -2348,10 +2355,10 @@ fn mono_mangle(m: Mono, base: string, args: Vector<i64>): MonoName
 // arguments are the numbering's to tell apart), anything else by its
 // own.
 fn mono_type_spelling(m: Mono, ti: i64): string
-  let types: Vector<DaoType> = m.tables.ts.types
+  let types: Vector<base::DaoType> = m.tables.ts.types
   if ti < 0 or ti >= types.length():
     return "?"
-  let t: DaoType = types.get(ti)
+  let t: base::DaoType = types.get(ti)
   let args: Vector<i64> = mir_stands_for_args_of(m.tables.ts.type_info, t)
   if args.length() > 0:
     let record: i64 = t.ret_type
@@ -2399,7 +2406,7 @@ fn mono_clone(m: Mono, tmpl: i64, sym: i64, map: HashMap<i64>): MonoMade
         let old: i64 = insts.get(ij)
         let redone: MonoNode = mono_clone_inst(m, m.tables.nodes.get(old), renumber, map)
         m = redone.m
-        m.tables.nodes = m.tables.nodes.set(hm_get_or(renumber, i64_to_string(old), to_i64(-1)), redone.node)
+        m.tables.nodes = m.tables.nodes.set(base::hm_get_or(renumber, i64_to_string(old), to_i64(-1)), redone.node)
         ij = ij + to_i64(1)
       let new_blocks: Vector<i64> = Vector<i64>::new()
       let bj: i64 = to_i64(0)
@@ -2408,7 +2415,7 @@ fn mono_clone(m: Mono, tmpl: i64, sym: i64, map: HashMap<i64>): MonoMade
           MirNode::MirBlock(block_id, inst_list_lp, inst_count):
             let fl: MonoFlush = mono_flush(m, mono_renumbered(read_hir_list(m.tables.idx, inst_list_lp), renumber))
             m = fl.m
-            let nb: i64 = hm_get_or(renumber, i64_to_string(blocks.get(bj)), to_i64(-1))
+            let nb: i64 = base::hm_get_or(renumber, i64_to_string(blocks.get(bj)), to_i64(-1))
             m.tables.nodes = m.tables.nodes.set(nb, MirNode::MirBlock(block_id = block_id, inst_list_lp = fl.list_pos, inst_count = inst_count))
             new_blocks = new_blocks.push(nb)
         bj = bj + to_i64(1)
@@ -2434,7 +2441,7 @@ fn mono_renumbered(v: Vector<i64>, renumber: HashMap<i64>): Vector<i64>
 fn mono_re(renumber: HashMap<i64>, old: i64): i64
   if old < 0:
     return old
-  return hm_get_or(renumber, i64_to_string(old), old)
+  return base::hm_get_or(renumber, i64_to_string(old), old)
 
 class MonoNode:
   m: Mono
@@ -2589,12 +2596,12 @@ class CopyHooks:
 
 fn mono_copy_hooks(m: Mono): CopyHooks
   let hooks: CopyHooks = CopyHooks(to_i64(-1), to_i64(-1))
-  let symbols: Vector<Symbol> = m.tables.symbols
+  let symbols: Vector<resolver::Symbol> = m.tables.symbols
   let modules: Vector<graph::ModuleEntry> = m.source.program.module_graph.modules
   let si: i64 = to_i64(0)
   while si < symbols.length():
-    let s: Symbol = symbols.get(si)
-    if symbol_kind_name(s.kind) == "Function" and s.owner_module_id >= 0 and s.owner_module_id < modules.length():
+    let s: resolver::Symbol = symbols.get(si)
+    if resolver::symbol_kind_name(s.kind) == "Function" and s.owner_module_id >= 0 and s.owner_module_id < modules.length():
       if modules.get(s.owner_module_id).is_prelude:
         if s.name == "copy_out" and m.templates.by_sym.contains(i64_to_string(si)):
           hooks.copy_out = si
@@ -2652,7 +2659,7 @@ fn mono_is_ref_to(m: Mono, node: i64, sym: i64): bool
   return false
 
 fn mono_expand_copy_at(m: Mono, fn_node: i64, block: i64, call: i64, callee: i64, value: i64, ti: i64, hooks: CopyHooks): MonoStep
-  let t: DaoType = m.tables.ts.types.get(ti)
+  let t: base::DaoType = m.tables.ts.types.get(ti)
   // A generator has no copier (its frame layout is the generator's own);
   // one reached here, at any depth of what is copied, came through a
   // container past the checker's rule, and is rejected rather than
@@ -2664,13 +2671,13 @@ fn mono_expand_copy_at(m: Mono, fn_node: i64, block: i64, call: i64, callee: i64
     m.diags = m.diags.push(make_error(Span(to_i64(0), to_i64(1)), "a function value cannot be copied out of a resource block: a '" + type_name(m.tables.ts, ti) + "' leaves one"))
     return MonoStep(m, call, false)
   match t.kind:
-    TypeKind::TString:
+    base::TypeKind::TString:
       if hooks.copy_out_string < 0:
         m.diags = m.diags.push(make_error(Span(to_i64(0), to_i64(1)), "internal: the prelude declares `copy_out` but not `copy_out_string`"))
         return MonoStep(m, call, false)
       m.tables.nodes = m.tables.nodes.set(callee, MirNode::MirFnRef(sym = hooks.copy_out_string, type_idx = m.tables.ts.sym_types.get(hooks.copy_out_string)))
       return MonoStep(m, call, true)
-    TypeKind::TStruct:
+    base::TypeKind::TStruct:
       let owner_ti: i64 = dispatch_owner(m.tables.ts.types, m.tables.ts.type_info, ti)
       let copier: i64 = find_inherent_method_sym(m.tables.ts.reg.methods, "copy_out", owner_ti)
       // (`and` evaluates both sides: the copier is checked only when found.)
@@ -2700,7 +2707,7 @@ fn mono_expand_copy_at(m: Mono, fn_node: i64, block: i64, call: i64, callee: i64
       m = fl.m
       m.tables.nodes = m.tables.nodes.set(call, MirNode::MirConstruct(arg_list_lp = fl.list_pos, arg_count = fields.length(), type_idx = ti))
       return MonoStep(mono_splice(m, block, callee, call, added), call, true)
-    TypeKind::TEnum:
+    base::TypeKind::TEnum:
       return MonoStep(mono_expand_enum_copy(m, fn_node, block, call, callee, value, ti, hooks), call, true)
   return MonoStep(m, call, false)
 
@@ -2713,10 +2720,10 @@ fn mono_is_copier(m: Mono, method: i64, owner_ti: i64): bool
   let fn_ti: i64 = m.tables.ts.sym_types.get(method)
   if fn_ti < 0 or fn_ti >= m.tables.ts.types.length():
     return false
-  let ft: DaoType = m.tables.ts.types.get(fn_ti)
+  let ft: base::DaoType = m.tables.ts.types.get(fn_ti)
   let is_fn: bool = false
   match ft.kind:
-    TypeKind::TFunction:
+    base::TypeKind::TFunction:
       is_fn = true
   if is_fn == false or ft.builtin_id != to_i64(1) or ft.info_count != to_i64(1):
     return false
@@ -2736,7 +2743,7 @@ fn mono_holds_closure(m: Mono, ti: i64, stored: bool): bool
   return mono_closure_search(m, ti, stored, HashMap<i64>::new()).found
 
 fn mono_closure_search(m: Mono, ti: i64, stored: bool, seen: HashMap<i64>): GenericSearch
-  let types: Vector<DaoType> = m.tables.ts.types
+  let types: Vector<base::DaoType> = m.tables.ts.types
   let info: Vector<i64> = m.tables.ts.type_info
   if ti < 0 or ti >= types.length():
     return GenericSearch(seen, false)
@@ -2744,21 +2751,21 @@ fn mono_closure_search(m: Mono, ti: i64, stored: bool, seen: HashMap<i64>): Gene
   if seen.contains(key):
     return GenericSearch(seen, false)
   let so_far: HashMap<i64> = seen.set(key, to_i64(1))
-  let t: DaoType = types.get(ti)
+  let t: base::DaoType = types.get(ti)
   let held: Vector<i64> = Vector<i64>::new()
   match t.kind:
-    TypeKind::TFunction:
+    base::TypeKind::TFunction:
       return GenericSearch(so_far, true)
-    TypeKind::TPointer:
+    base::TypeKind::TPointer:
       if stored == false:
         return GenericSearch(so_far, false)
       return mono_closure_search(m, t.pointee, false, so_far)
-    TypeKind::TStruct:
+    base::TypeKind::TStruct:
       let fi: i64 = to_i64(0)
       while fi < t.info_count:
         held = held.push(info.get(t.info_lp + fi * to_i64(2) + to_i64(1)))
         fi = fi + to_i64(1)
-    TypeKind::TEnum:
+    base::TypeKind::TEnum:
       let at: i64 = t.info_lp
       let vi: i64 = to_i64(0)
       while vi < t.info_count:
@@ -2779,7 +2786,7 @@ fn mono_closure_search(m: Mono, ti: i64, stored: bool, seen: HashMap<i64>): Gene
   return GenericSearch(so_far, false)
 
 fn mono_generator_search(m: Mono, ti: i64, stored: bool, seen: HashMap<i64>): GenericSearch
-  let types: Vector<DaoType> = m.tables.ts.types
+  let types: Vector<base::DaoType> = m.tables.ts.types
   let info: Vector<i64> = m.tables.ts.type_info
   if ti < 0 or ti >= types.length():
     return GenericSearch(seen, false)
@@ -2787,21 +2794,21 @@ fn mono_generator_search(m: Mono, ti: i64, stored: bool, seen: HashMap<i64>): Ge
   if seen.contains(key):
     return GenericSearch(seen, false)
   let so_far: HashMap<i64> = seen.set(key, to_i64(1))
-  let t: DaoType = types.get(ti)
+  let t: base::DaoType = types.get(ti)
   let held: Vector<i64> = Vector<i64>::new()
   match t.kind:
-    TypeKind::TGenerator:
+    base::TypeKind::TGenerator:
       return GenericSearch(so_far, true)
-    TypeKind::TPointer:
+    base::TypeKind::TPointer:
       if stored == false:
         return GenericSearch(so_far, false)
       return mono_generator_search(m, t.pointee, false, so_far)
-    TypeKind::TStruct:
+    base::TypeKind::TStruct:
       let fi: i64 = to_i64(0)
       while fi < t.info_count:
         held = held.push(info.get(t.info_lp + fi * to_i64(2) + to_i64(1)))
         fi = fi + to_i64(1)
-    TypeKind::TEnum:
+    base::TypeKind::TEnum:
       let at: i64 = t.info_lp
       let vi: i64 = to_i64(0)
       while vi < t.info_count:
@@ -2871,7 +2878,7 @@ fn mono_splice(m: Mono, block: i64, callee: i64, call: i64, added: Vector<i64>):
 // payloads into a temporary; a merge block reads it back where the call
 // stood, followed by what came after the call.
 fn mono_expand_enum_copy(m: Mono, fn_node: i64, block: i64, call: i64, callee: i64, value: i64, ti: i64, hooks: CopyHooks): Mono
-  let t: DaoType = m.tables.ts.types.get(ti)
+  let t: base::DaoType = m.tables.ts.types.get(ti)
   let i32_ti: i64 = to_i64(2)
   let bool_ti: i64 = to_i64(10)
   // The temporary the variants store into.

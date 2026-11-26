@@ -31,9 +31,9 @@ File
     Param a: i32
     Param b: i32
     ReturnType: i32
-    LetStatement total: i32
+    LetStatement total
       IntLiteral 0
-    LetStatement i: i32
+    LetStatement i
       Identifier a
     WhileStatement
       Condition

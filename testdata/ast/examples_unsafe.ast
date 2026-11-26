@@ -3,7 +3,7 @@ File
   FunctionDecl read_ptr
     Param ptr: Ptr<i32>
     ReturnType: i32
-    LetStatement value: i32
+    LetStatement value
       IntLiteral 0
     ModeBlock unsafe
       Assignment
@@ -18,7 +18,7 @@ File
       Identifier value
   FunctionDecl main
     ReturnType: i32
-    LetStatement cell: Ptr<i32>
+    LetStatement cell
       CallExpr
         Callee
           FieldExpr .cast
@@ -46,7 +46,7 @@ File
               Identifier cell
           Args
             IntLiteral 42
-      LetStatement val: i32
+      LetStatement val
         CallExpr
           Callee
             Identifier read_ptr

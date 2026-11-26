@@ -132,3 +132,855 @@ File
         Args
           Identifier a
           Identifier b
+  FunctionDecl is_ascii_space
+    Param c: i32
+    ReturnType: bool
+    ReturnStatement
+      BinaryExpr or
+        BinaryExpr or
+          BinaryExpr or
+            BinaryExpr ==
+              Identifier c
+              IntLiteral 32
+            BinaryExpr ==
+              Identifier c
+              IntLiteral 9
+          BinaryExpr ==
+            Identifier c
+            IntLiteral 10
+        BinaryExpr ==
+          Identifier c
+          IntLiteral 13
+  FunctionDecl trim_start
+    Param s: string
+    ReturnType: string
+    LetStatement n
+      CallExpr
+        Callee
+          Identifier __dao_str_length
+        Args
+          Identifier s
+    LetStatement i: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          Identifier n
+      IfStatement
+        Condition
+          BinaryExpr ==
+            CallExpr
+              Callee
+                Identifier is_ascii_space
+              Args
+                CallExpr
+                  Callee
+                    Identifier __dao_str_char_at
+                  Args
+                    Identifier s
+                    Identifier i
+            BoolLiteral false
+        Then
+          ReturnStatement
+            CallExpr
+              Callee
+                Identifier __dao_str_substring
+              Args
+                Identifier s
+                Identifier i
+                BinaryExpr -
+                  Identifier n
+                  Identifier i
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            IntLiteral 1
+    ReturnStatement
+      StringLiteral ""
+  FunctionDecl trim_end
+    Param s: string
+    ReturnType: string
+    LetStatement end
+      CallExpr
+        Callee
+          Identifier __dao_str_length
+        Args
+          Identifier s
+    WhileStatement
+      Condition
+        BinaryExpr >
+          Identifier end
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 0
+      IfStatement
+        Condition
+          BinaryExpr ==
+            CallExpr
+              Callee
+                Identifier is_ascii_space
+              Args
+                CallExpr
+                  Callee
+                    Identifier __dao_str_char_at
+                  Args
+                    Identifier s
+                    BinaryExpr -
+                      Identifier end
+                      CallExpr
+                        Callee
+                          Identifier to_i64
+                        Args
+                          IntLiteral 1
+            BoolLiteral false
+        Then
+          ReturnStatement
+            CallExpr
+              Callee
+                Identifier __dao_str_substring
+              Args
+                Identifier s
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 0
+                Identifier end
+      Assignment
+        Target
+          Identifier end
+        Value
+          BinaryExpr -
+            Identifier end
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 1
+    ReturnStatement
+      StringLiteral ""
+  FunctionDecl trim
+    Param s: string
+    ReturnType: string
+    LetStatement n
+      CallExpr
+        Callee
+          Identifier __dao_str_length
+        Args
+          Identifier s
+    LetStatement start: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier start
+          Identifier n
+      IfStatement
+        Condition
+          BinaryExpr ==
+            CallExpr
+              Callee
+                Identifier is_ascii_space
+              Args
+                CallExpr
+                  Callee
+                    Identifier __dao_str_char_at
+                  Args
+                    Identifier s
+                    Identifier start
+            BoolLiteral false
+        Then
+          BreakStatement
+      Assignment
+        Target
+          Identifier start
+        Value
+          BinaryExpr +
+            Identifier start
+            IntLiteral 1
+    IfStatement
+      Condition
+        BinaryExpr >=
+          Identifier start
+          Identifier n
+      Then
+        ReturnStatement
+          StringLiteral ""
+    LetStatement end
+      Identifier n
+    WhileStatement
+      Condition
+        BinaryExpr >
+          Identifier end
+          Identifier start
+      IfStatement
+        Condition
+          BinaryExpr ==
+            CallExpr
+              Callee
+                Identifier is_ascii_space
+              Args
+                CallExpr
+                  Callee
+                    Identifier __dao_str_char_at
+                  Args
+                    Identifier s
+                    BinaryExpr -
+                      Identifier end
+                      CallExpr
+                        Callee
+                          Identifier to_i64
+                        Args
+                          IntLiteral 1
+            BoolLiteral false
+        Then
+          BreakStatement
+      Assignment
+        Target
+          Identifier end
+        Value
+          BinaryExpr -
+            Identifier end
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 1
+    ReturnStatement
+      CallExpr
+        Callee
+          Identifier __dao_str_substring
+        Args
+          Identifier s
+          Identifier start
+          BinaryExpr -
+            Identifier end
+            Identifier start
+  FunctionDecl index_of_from
+    Param s: string
+    Param s_len: i64
+    Param needle: string
+    Param needle_len: i64
+    Param from: i64
+    ReturnType: i64
+    IfStatement
+      Condition
+        BinaryExpr ==
+          Identifier needle_len
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 0
+      Then
+        ReturnStatement
+          Identifier from
+    IfStatement
+      Condition
+        BinaryExpr >
+          Identifier needle_len
+          BinaryExpr -
+            Identifier s_len
+            Identifier from
+      Then
+        ReturnStatement
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              UnaryExpr -
+                IntLiteral 1
+    LetStatement first
+      CallExpr
+        Callee
+          Identifier __dao_str_char_at
+        Args
+          Identifier needle
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 0
+    LetStatement limit
+      BinaryExpr -
+        Identifier s_len
+        Identifier needle_len
+    LetStatement pos
+      Identifier from
+    WhileStatement
+      Condition
+        BinaryExpr <=
+          Identifier pos
+          Identifier limit
+      IfStatement
+        Condition
+          BinaryExpr ==
+            CallExpr
+              Callee
+                Identifier __dao_str_char_at
+              Args
+                Identifier s
+                Identifier pos
+            Identifier first
+        Then
+          LetStatement matched
+            BoolLiteral true
+          LetStatement j: i64
+            IntLiteral 1
+          WhileStatement
+            Condition
+              BinaryExpr <
+                Identifier j
+                Identifier needle_len
+            IfStatement
+              Condition
+                BinaryExpr !=
+                  CallExpr
+                    Callee
+                      Identifier __dao_str_char_at
+                    Args
+                      Identifier s
+                      BinaryExpr +
+                        Identifier pos
+                        Identifier j
+                  CallExpr
+                    Callee
+                      Identifier __dao_str_char_at
+                    Args
+                      Identifier needle
+                      Identifier j
+              Then
+                Assignment
+                  Target
+                    Identifier matched
+                  Value
+                    BoolLiteral false
+                BreakStatement
+            Assignment
+              Target
+                Identifier j
+              Value
+                BinaryExpr +
+                  Identifier j
+                  IntLiteral 1
+          IfStatement
+            Condition
+              Identifier matched
+            Then
+              ReturnStatement
+                Identifier pos
+      Assignment
+        Target
+          Identifier pos
+        Value
+          BinaryExpr +
+            Identifier pos
+            IntLiteral 1
+    ReturnStatement
+      CallExpr
+        Callee
+          Identifier to_i64
+        Args
+          UnaryExpr -
+            IntLiteral 1
+  FunctionDecl split
+    Param s: string
+    Param sep: string
+    ReturnType: Vector<string>
+    LetStatement sep_len
+      CallExpr
+        Callee
+          Identifier __dao_str_length
+        Args
+          Identifier sep
+    IfStatement
+      Condition
+        BinaryExpr ==
+          Identifier sep_len
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 0
+      Then
+        ExpressionStatement
+          CallExpr
+            Callee
+              Identifier panic
+            Args
+              StringLiteral "split: separator must not be empty"
+    LetStatement out
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          string
+    LetStatement n
+      CallExpr
+        Callee
+          Identifier __dao_str_length
+        Args
+          Identifier s
+    LetStatement start: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <=
+          Identifier start
+          Identifier n
+      LetStatement match_pos
+        CallExpr
+          Callee
+            Identifier index_of_from
+          Args
+            Identifier s
+            Identifier n
+            Identifier sep
+            Identifier sep_len
+            Identifier start
+      IfStatement
+        Condition
+          BinaryExpr <
+            Identifier match_pos
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 0
+        Then
+          Assignment
+            Target
+              Identifier out
+            Value
+              CallExpr
+                Callee
+                  FieldExpr .push
+                    Identifier out
+                Args
+                  CallExpr
+                    Callee
+                      Identifier __dao_str_substring
+                    Args
+                      Identifier s
+                      Identifier start
+                      BinaryExpr -
+                        Identifier n
+                        Identifier start
+          ReturnStatement
+            Identifier out
+      Assignment
+        Target
+          Identifier out
+        Value
+          CallExpr
+            Callee
+              FieldExpr .push
+                Identifier out
+            Args
+              CallExpr
+                Callee
+                  Identifier __dao_str_substring
+                Args
+                  Identifier s
+                  Identifier start
+                  BinaryExpr -
+                    Identifier match_pos
+                    Identifier start
+      Assignment
+        Target
+          Identifier start
+        Value
+          BinaryExpr +
+            Identifier match_pos
+            Identifier sep_len
+    ReturnStatement
+      Identifier out
+  FunctionDecl lines
+    Param s: string
+    ReturnType: Vector<string>
+    LetStatement out
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          string
+    LetStatement n
+      CallExpr
+        Callee
+          Identifier __dao_str_length
+        Args
+          Identifier s
+    IfStatement
+      Condition
+        BinaryExpr ==
+          Identifier n
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 0
+      Then
+        ReturnStatement
+          Identifier out
+    LetStatement pos: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier pos
+          Identifier n
+      LetStatement line_start
+        Identifier pos
+      WhileStatement
+        Condition
+          BinaryExpr <
+            Identifier pos
+            Identifier n
+        IfStatement
+          Condition
+            BinaryExpr ==
+              CallExpr
+                Callee
+                  Identifier __dao_str_char_at
+                Args
+                  Identifier s
+                  Identifier pos
+              IntLiteral 10
+          Then
+            BreakStatement
+        Assignment
+          Target
+            Identifier pos
+          Value
+            BinaryExpr +
+              Identifier pos
+              IntLiteral 1
+      LetStatement line_end
+        Identifier pos
+      IfStatement
+        Condition
+          BinaryExpr >
+            Identifier line_end
+            Identifier line_start
+        Then
+          IfStatement
+            Condition
+              BinaryExpr ==
+                CallExpr
+                  Callee
+                    Identifier __dao_str_char_at
+                  Args
+                    Identifier s
+                    BinaryExpr -
+                      Identifier line_end
+                      CallExpr
+                        Callee
+                          Identifier to_i64
+                        Args
+                          IntLiteral 1
+                IntLiteral 13
+            Then
+              Assignment
+                Target
+                  Identifier line_end
+                Value
+                  BinaryExpr -
+                    Identifier line_end
+                    CallExpr
+                      Callee
+                        Identifier to_i64
+                      Args
+                        IntLiteral 1
+      Assignment
+        Target
+          Identifier out
+        Value
+          CallExpr
+            Callee
+              FieldExpr .push
+                Identifier out
+            Args
+              CallExpr
+                Callee
+                  Identifier __dao_str_substring
+                Args
+                  Identifier s
+                  Identifier line_start
+                  BinaryExpr -
+                    Identifier line_end
+                    Identifier line_start
+      Assignment
+        Target
+          Identifier pos
+        Value
+          BinaryExpr +
+            Identifier pos
+            IntLiteral 1
+    ReturnStatement
+      Identifier out
+  FunctionDecl parse_i64
+    Param s: string
+    ReturnType: Option<i64>
+    LetStatement n
+      CallExpr
+        Callee
+          Identifier __dao_str_length
+        Args
+          Identifier s
+    IfStatement
+      Condition
+        BinaryExpr ==
+          Identifier n
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 0
+      Then
+        ReturnStatement
+          QualifiedName Option::None
+    LetStatement pos: i64
+      IntLiteral 0
+    LetStatement negative
+      BoolLiteral false
+    LetStatement first
+      CallExpr
+        Callee
+          Identifier __dao_str_char_at
+        Args
+          Identifier s
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 0
+    IfStatement
+      Condition
+        BinaryExpr ==
+          Identifier first
+          IntLiteral 45
+      Then
+        Assignment
+          Target
+            Identifier negative
+          Value
+            BoolLiteral true
+        Assignment
+          Target
+            Identifier pos
+          Value
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 1
+      Else
+        IfStatement
+          Condition
+            BinaryExpr ==
+              Identifier first
+              IntLiteral 43
+          Then
+            Assignment
+              Target
+                Identifier pos
+              Value
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 1
+    IfStatement
+      Condition
+        BinaryExpr >=
+          Identifier pos
+          Identifier n
+      Then
+        ReturnStatement
+          QualifiedName Option::None
+    LetStatement neg_acc
+      CallExpr
+        Callee
+          Identifier to_i64
+        Args
+          IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier pos
+          Identifier n
+      LetStatement ch
+        CallExpr
+          Callee
+            Identifier __dao_str_char_at
+          Args
+            Identifier s
+            Identifier pos
+      IfStatement
+        Condition
+          BinaryExpr or
+            BinaryExpr <
+              Identifier ch
+              IntLiteral 48
+            BinaryExpr >
+              Identifier ch
+              IntLiteral 57
+        Then
+          ReturnStatement
+            QualifiedName Option::None
+      LetStatement digit
+        CallExpr
+          Callee
+            Identifier to_i64
+          Args
+            BinaryExpr -
+              Identifier ch
+              IntLiteral 48
+      MatchStatement
+        Scrutinee
+          CallExpr
+            Callee
+              Identifier checked_mul_i64
+            Args
+              Identifier neg_acc
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 10
+        Arm
+          Pattern
+            QualifiedName Option::Some
+          Assignment
+            Target
+              Identifier neg_acc
+            Value
+              Identifier scaled
+        Arm
+          Pattern
+            QualifiedName Option::None
+          ReturnStatement
+            QualifiedName Option::None
+      MatchStatement
+        Scrutinee
+          CallExpr
+            Callee
+              Identifier checked_sub_i64
+            Args
+              Identifier neg_acc
+              Identifier digit
+        Arm
+          Pattern
+            QualifiedName Option::Some
+          Assignment
+            Target
+              Identifier neg_acc
+            Value
+              Identifier next_val
+        Arm
+          Pattern
+            QualifiedName Option::None
+          ReturnStatement
+            QualifiedName Option::None
+      Assignment
+        Target
+          Identifier pos
+        Value
+          BinaryExpr +
+            Identifier pos
+            IntLiteral 1
+    IfStatement
+      Condition
+        Identifier negative
+      Then
+        ReturnStatement
+          CallExpr
+            Callee
+              QualifiedName Option::Some
+            Args
+              Identifier neg_acc
+    MatchStatement
+      Scrutinee
+        CallExpr
+          Callee
+            Identifier checked_sub_i64
+          Args
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 0
+            Identifier neg_acc
+      Arm
+        Pattern
+          QualifiedName Option::Some
+        ReturnStatement
+          CallExpr
+            Callee
+              QualifiedName Option::Some
+            Args
+              Identifier pos_val
+      Arm
+        Pattern
+          QualifiedName Option::None
+        ReturnStatement
+          QualifiedName Option::None
+    ReturnStatement
+      QualifiedName Option::None
+  FunctionDecl parse_i32
+    Param s: string
+    ReturnType: Option<i32>
+    MatchStatement
+      Scrutinee
+        CallExpr
+          Callee
+            Identifier parse_i64
+          Args
+            Identifier s
+      Arm
+        Pattern
+          QualifiedName Option::Some
+        IfStatement
+          Condition
+            BinaryExpr or
+              BinaryExpr <
+                Identifier v
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    UnaryExpr -
+                      IntLiteral 2147483648
+              BinaryExpr >
+                Identifier v
+                CallExpr
+                  Callee
+                    Identifier to_i64
+                  Args
+                    IntLiteral 2147483647
+          Then
+            ReturnStatement
+              QualifiedName Option::None
+        ReturnStatement
+          CallExpr
+            Callee
+              QualifiedName Option::Some
+            Args
+              CallExpr
+                Callee
+                  Identifier i64_to_i32
+                Args
+                  Identifier v
+      Arm
+        Pattern
+          QualifiedName Option::None
+        ReturnStatement
+          QualifiedName Option::None
+    ReturnStatement
+      QualifiedName Option::None

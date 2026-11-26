@@ -6,8 +6,8 @@ fn cube(x: i32): i32 -> x * x * x
 fn is_even(x: i32): bool -> x == (x / 2) * 2
 
 fn sum_range(a: i32, b: i32): i32
-  let total: i32 = 0
-  let i: i32 = a
+  let total = 0
+  let i = a
   while i < b:
     total = total + i
     i = i + 1

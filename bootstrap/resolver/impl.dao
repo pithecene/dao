@@ -1,4 +1,10 @@
 module bootstrap::resolver
+
+import bootstrap::lexer
+import bootstrap::parser
+import bootstrap::graph
+import bootstrap::base
+
 // =========================================================================
 // Section 17: Resolver data structures
 // =========================================================================
@@ -212,7 +218,7 @@ fn scope_declare(rs: RS, name: string, sym_idx: i64, decl_tidx: i64): RS
 fn declare_function(rs: RS, name: string, arity: i64, is_extern: bool, sym_idx: i64, decl_tidx: i64): RS
   let scope: Scope = rs.scopes.get(rs.current_scope)
   let arity_key: string = name + "/" + i64_to_string(arity)
-  let existing: i64 = hm_get_or(scope.decls, name, to_i64(-1))
+  let existing: i64 = base::hm_get_or(scope.decls, name, to_i64(-1))
   if existing < 0:
     let r: RS = declare_top_level(rs, name, sym_idx, decl_tidx)
     let declared: Scope = r.scopes.get(r.current_scope)
@@ -242,9 +248,9 @@ fn scope_lookup_call(rs: RS, name: string, arity: i64): i64
   let sid: i64 = rs.current_scope
   while sid >= 0:
     let scope: Scope = rs.scopes.get(sid)
-    let plain: i64 = hm_get_or(scope.decls, name, to_i64(-1))
+    let plain: i64 = base::hm_get_or(scope.decls, name, to_i64(-1))
     if plain >= 0:
-      return hm_get_or(scope.decls, name + "/" + i64_to_string(arity), plain)
+      return base::hm_get_or(scope.decls, name + "/" + i64_to_string(arity), plain)
     sid = scope.parent
   return to_i64(-1)
 
@@ -267,7 +273,7 @@ fn pick_qualified_overload(rs: RS, callee: i64, arity: i64): RS
       if target_mid < 0 or target_mid >= rs.rc.exports.tables.length():
         return rs
       let table: ExportTable = rs.rc.exports.tables.get(target_mid)
-      let overload: i64 = hm_get_or(table.entries, tok_name(rs, segs.get(1)) + "/" + i64_to_string(arity), to_i64(-1))
+      let overload: i64 = base::hm_get_or(table.entries, tok_name(rs, segs.get(1)) + "/" + i64_to_string(arity), to_i64(-1))
       if overload >= 0:
         return rs_add_use(rs, segs.get(1), overload)
   return rs
@@ -1267,7 +1273,7 @@ fn build_export_table(rs: RS, file_node_idx: i64): HashMap<i64>
               fn_arity = read_pairs(rs.rc.idx_data, xplp).length() / 2
           if fn_arity >= 0:
             let arity_key: string = name + "/" + i64_to_string(fn_arity)
-            let own: i64 = hm_get_or(scope.decls, arity_key, to_i64(-1))
+            let own: i64 = base::hm_get_or(scope.decls, arity_key, to_i64(-1))
             if own >= 0:
               exports = exports.set(arity_key, own)
               if exports.contains(name) == false:
@@ -1482,24 +1488,15 @@ fn resolve_program(pg: graph::ProgramGraph): ProgramResolveResult
 // Section 30: Task 27 — Program wrapper and service helpers (D0)
 // =========================================================================
 //
-// Placement note: the `Program` value and its `program_*` service
-// helpers live in this file (the resolver) rather than in
-// `shared/base.dao` because `Program.resolve` references
-// `ProgramResolveResult`, and the bootstrap build is linear
-// concatenation (`shared/base.dao` is assembled before every
-// subsystem file, so shared types cannot reference resolver types).
-// Long-term, `Program` and its dependents should migrate to a
-// dedicated program-substrate layer by moving resolver core types
-// (`Symbol`, `Scope`, `ExportTable`, `ExportTables`,
-// `ProgramResolveResult`) into `shared/base.dao` — see the Task 27
-// plan's deferred (B)-option restructure.  Until then this is the
-// correct home given the current assembly order.
+// `Program` bundles `graph::ProgramGraph`, `ProgramResolveResult`, and
+// downstream `base::TypeCheckData` / `base::HirData` payloads across
+// multi-module compilation stages.
 
 class Program:
   module_graph: graph::ProgramGraph
   resolve: ProgramResolveResult
-  typecheck: TypeCheckData
-  hir: HirData
+  typecheck: base::TypeCheckData
+  hir: base::HirData
   diags: Vector<graph::FileDiagnostic>
 
 // Construct a `Program` from a graph with empty resolve/typecheck/hir
@@ -1512,8 +1509,8 @@ fn program_from_graph(pg: graph::ProgramGraph): Program
     Vector<graph::FileDiagnostic>::new(),
     ExportTables(Vector<ExportTable>::new()),
     HashMap<i64>::new())
-  let empty_tc: TypeCheckData = TypeCheckData(false, Vector<DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), program_lookup_empty())
-  let empty_hir: HirData = HirData(false, to_i64(-1), to_i64(0), to_i64(0))
+  let empty_tc: base::TypeCheckData = base::TypeCheckData(false, Vector<base::DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), base::program_lookup_empty())
+  let empty_hir: base::HirData = base::HirData(false, to_i64(-1), to_i64(0), to_i64(0))
   return Program(pg, empty_resolve, empty_tc, empty_hir, Vector<graph::FileDiagnostic>::new())
 
 // Run `resolve_program` and fold the result into the `Program`
