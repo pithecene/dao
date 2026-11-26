@@ -133,44 +133,74 @@ only types are listed.
 
 #### 4.4.2 ABI-compatible function type predicate
 
-A Dao function type is C-ABI-compatible if and only if:
+A Dao function type is C-ABI-compatible as a top-level `extern fn`
+parameter or return type if and only if it is **first-order**:
 
-1. every parameter type is itself C-ABI-compatible (scalar, pointer,
-   repr-C-compatible struct, or recursively ABI-compatible function
-   type)
-2. the return type is C-ABI-compatible or void
+1. every parameter type is a non-function C-ABI-compatible value type
+   (scalar, pointer, or repr-C-compatible struct)
+2. the return type is a non-function C-ABI-compatible value type
+   (scalar, pointer, or repr-C-compatible struct) or `void`
 
-The compiler must reject extern fn signatures that use function types
-failing this predicate with a clear diagnostic.
+Higher-order function types (`fn(fn(...): ...): ...` or
+`fn(...): fn(...): ...`) and structs containing function-typed fields
+are not C-ABI-compatible. The compiler must reject `extern fn`
+signatures that use function types failing this predicate with a clear
+diagnostic.
 
 #### 4.4.3 Representation
 
-Function types at the C ABI boundary are lowered to opaque pointers
-(`ptr` in LLVM IR). This matches the C calling convention where
-function pointer parameters are pointer-sized values.
+Inside Dao, first-class function values (`fn(T, ...): R`) carry a
+two-pointer `{ fn_ptr, env_ptr }` representation (`%dao.fn`). At the
+C ABI boundary, first-order function types are lowered to bare opaque
+function pointers (`ptr` in LLVM IR), matching the C calling
+convention where function pointers are single pointer-sized addresses
+without closure environments. When an `extern fn` returns a
+first-order C function pointer, the compiler wraps the returned `ptr`
+in an internal C-ABI adapter so Dao callers invoke it through
+`%dao.fn`.
 
 #### 4.4.4 Passing functions as callbacks
 
-A named Dao function may be passed as an argument where a function
-type is expected in an extern fn call. The compiler emits the
-function's address as the argument value.
+A named top-level function (`fn` or `extern fn`) may be passed
+directly as an argument where a function type is expected in an
+`extern fn` call:
+
+- when the argument names an `extern fn`, its raw C symbol address is
+  passed directly without generating an adapter
+- when the argument names a Dao `fn` with scalar or pointer parameters
+  and return type, its function address is passed directly; when its
+  signature passes or returns repr-C-compatible structs by value, the
+  hosted native LLVM backend emits an internal C-ABI callback wrapper
+  coercing between platform C struct conventions and Dao's aggregate
+  layout
 
 #### 4.4.5 Restrictions
 
-- **No closures**: only named function references may be passed as
-  function-pointer arguments to extern fn calls. Lambda expressions
-  in function-pointer argument positions of extern fn calls must be
-  rejected by the type checker with a clear diagnostic. Closures
-  cannot be represented as C function pointers.
-- **Indirect calls (Dao-to-Dao)**: calling through a function-typed
-  value is supported for Dao-to-Dao higher-order functions. The
-  indirect call path applies the same parameter adjustments as
-  direct calls (string → pointer, function type → pointer).
-- **Indirect calls (C-origin)**: calling through a function pointer
-  received from C works for scalar-only signatures. C-origin
-  function pointers with struct-by-value parameters or returns
-  would require C ABI coercion in the indirect call path, which
-  is not yet implemented.
+- **No closures or function-typed locals**: only named function
+  references (`fn` or `extern fn`) may be passed as function-pointer
+  arguments to `extern fn` calls. Lambda expressions and
+  function-typed variables or expressions in callback argument
+  positions of `extern fn` calls must be rejected by the type checker
+  with a clear diagnostic, because `%dao.fn` environment pointers
+  cannot be represented as bare C function pointers.
+- **No higher-order C function types**: C callback parameters and C
+  function-pointer return types must be first-order; nested function
+  types and structs holding function-typed fields are rejected at the
+  C ABI boundary.
+- **Direct calls only for callback-taking externs**: an `extern fn`
+  that declares any function-typed parameter may only be called
+  directly and cannot be used as a first-class Dao `%dao.fn` value,
+  because a `%dao.fn` caller could supply a capturing closure whose
+  environment pointer cannot be forwarded across a bare C callback
+  parameter. An `extern fn` without callback parameters may be used as
+  a first-class Dao function value via a compiler-generated thunk.
+- **Indirect calls (Dao-to-Dao and C-origin)**: calling through a
+  function-typed value is supported for Dao-to-Dao higher-order
+  functions and for first-order C-origin function pointers returned
+  from `extern fn` declarations (including repr-C-compatible
+  struct-by-value parameters and returns on the hosted native LLVM
+  backend; the self-hosted bootstrap backend fails closed on
+  struct-by-value at the C ABI boundary).
 - **Calling convention**: function pointers follow the platform C
   calling convention. No other conventions are supported.
 
@@ -182,6 +212,8 @@ function's address as the argument value.
 - C unions
 - arrays / slices by value
 - capturing lambdas / closures at the C boundary
+- higher-order function pointers or structs containing function fields
+  at the C boundary
 
 If a user-declared `extern fn` uses an unsupported type, the compiler
 must reject it with a clear diagnostic during type checking or
@@ -200,8 +232,8 @@ The following may be added in later versions:
 
 - `c_string` or explicit null-terminated byte string type
 - packed structs / explicit alignment control
-- indirect calls through function-typed values (C → Dao callbacks
-  returning function pointers)
+- higher-order C function pointer interop where C signatures carry
+  explicit user-data context pointers
 
 Each expansion requires updating this contract before implementation.
 
@@ -306,7 +338,8 @@ Each expansion requires updating this contract before implementation.
 | Function pointer params          | Implemented     |
 | Function pointer return type     | Implemented     |
 | Indirect call (Dao-to-Dao)       | Implemented     |
-| Indirect call (C-origin struct)  | Not implemented |
+| Indirect call (C-origin struct)  | Implemented (native) |
+| First-order C fn-type predicate  | Implemented     |
 | Named function as callback       | Implemented     |
 | Lambda rejection at ABI boundary | Implemented     |
 | E2E callback example             | Implemented     |

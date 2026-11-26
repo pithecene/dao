@@ -1578,7 +1578,9 @@ auto LlvmBackend::get_or_create_c_callback_wrapper(llvm::Function* dao_fn,
       needs_struct_abi = true;
     }
   }
-  if (!needs_struct_abi) {
+  // An `extern fn` already uses the target C ABI signature, so its raw
+  // symbol address is passed directly without generating a Dao-to-C adapter.
+  if (!needs_struct_abi || extern_signatures_.contains(std::string(dao_fn->getName()))) {
     return dao_fn;
   }
 

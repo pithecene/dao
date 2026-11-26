@@ -2147,6 +2147,8 @@ suite<"closures"> closures = [] {
   "first-order C callbacks and returned function pointers coerce repr-C structs"_test = [] {
     LlvmTestPipeline pipe("class Point:\n  x: i32\n  y: i32\n"
                           "class Big:\n  a: i64\n  b: i64\n  c: i64\n"
+                          "extern fn c_flip(p: Point): Point\n"
+                          "extern fn c_id_big(b: Big): Big\n"
                           "extern fn apply_pt(cb: fn(Point): Point, p: Point): Point\n"
                           "extern fn apply_big(cb: fn(Big): Big, b: Big): Big\n"
                           "extern fn get_pt_op(): fn(Point): Point\n"
@@ -2155,8 +2157,10 @@ suite<"closures"> closures = [] {
                           "fn flip(p: Point): Point -> Point(p.y, p.x)\n"
                           "fn id_big(b: Big): Big -> b\n"
                           "fn main(): i32\n"
-                          "  let p1: Point = apply_pt(flip, Point(1, 2))\n"
-                          "  let b1: Big = apply_big(id_big, Big(1, 2, 3))\n"
+                          "  let p0: Point = apply_pt(c_flip, Point(1, 2))\n"
+                          "  let b0: Big = apply_big(c_id_big, Big(1, 2, 3))\n"
+                          "  let p1: Point = apply_pt(flip, p0)\n"
+                          "  let b1: Big = apply_big(id_big, b0)\n"
                           "  let pt_maker: fn(): fn(Point): Point = get_pt_op\n"
                           "  let pt_op: fn(Point): Point = pt_maker()\n"
                           "  let p2: Point = pt_op(p1)\n"
@@ -2170,6 +2174,8 @@ suite<"closures"> closures = [] {
     expect(!pipe.has_errors()) << ir;
     expect(pipe.llvm_result.module != nullptr);
     expect(!llvm::verifyModule(*pipe.llvm_result.module, &llvm::errs())) << ir;
+    expect(!contains(ir, "c_flip.c_cb")) << ir;
+    expect(!contains(ir, "c_id_big.c_cb")) << ir;
     expect(contains(ir, "test::flip.c_cb")) << ir;
     expect(contains(ir, "test::id_big.c_cb")) << ir;
     expect(contains(ir, "sum_pt.thunk")) << ir;

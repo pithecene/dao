@@ -1250,14 +1250,14 @@ fn main(): i32
   else:
     print("FAIL void_divergence_fixed_point: bad_ok=" + bool_to_string(r52_bad.ok) + " good_ok=" + bool_to_string(r52_good.ok) + " " + diags_text(r52_good.diags))
 
-  // Test 53: direct 1st-order named callback to extern fn emits valid LLVM IR,
-  // while extern fn with callback param as first-class value and higher-order
-  // C function types fail closed.
-  let r53_ok: LlvmTextResult = lower_source_to_llvm_text("extern fn apply_cb(cb: fn(i32): i32, x: i32): i32\n\nfn inc(x: i32): i32 -> x + 1\n\nfn run(): i32 -> apply_cb(inc, 41)\n")
+  // Test 53: direct 1st-order named callback (both Dao fn and extern fn) to
+  // extern fn emits valid LLVM IR, while extern fn with callback param as
+  // first-class value and higher-order C function types fail closed.
+  let r53_ok: LlvmTextResult = lower_source_to_llvm_text("extern fn c_inc(x: i32): i32\nextern fn apply_cb(cb: fn(i32): i32, x: i32): i32\n\nfn inc(x: i32): i32 -> x + 1\n\nfn run(): i32 -> apply_cb(inc, 41) + apply_cb(c_inc, 1)\n")
   write_failures = write_failures + emit_ir("extern_direct_named_callback", r53_ok, -1)
   let r53_bad_val: LlvmTextResult = lower_source_to_llvm_text("extern fn apply_cb(cb: fn(i32): i32, x: i32): i32\n\nfn leak(): fn(fn(i32): i32, i32): i32 -> apply_cb\n")
   let r53_bad_ho: LlvmTextResult = lower_source_to_llvm_text("extern fn ho(cb: fn(fn(i32): i32): i32): i32\n\nfn main(): i32 -> 0\n")
-  if r53_ok.ok and check_contains(r53_ok, "declare i32 @apply_cb(ptr %arg0, i32 %arg1)", "extern_direct_named_callback") and r53_bad_val.ok == false and r53_bad_ho.ok == false:
+  if r53_ok.ok and check_contains(r53_ok, "declare i32 @apply_cb(ptr %arg0, i32 %arg1)", "extern_direct_named_callback") and check_contains(r53_ok, "call i32 @apply_cb(ptr @c_inc, i32 1)", "extern_direct_named_callback") and r53_bad_val.ok == false and r53_bad_ho.ok == false:
     print("PASS extern_callback_validation_and_lowering")
     pass_count = pass_count + 1
   else:
