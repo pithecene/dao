@@ -407,7 +407,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 54
+  let total: i32 = 56
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -1223,6 +1223,33 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL cloned_lambda_local_extend_dispatch: " + diags_text(r51.diags))
+
+  // Test 52: void helper with reachable return is NOT divergent, while
+  // unconditional expression-bodied and branching void panic wrappers diverge.
+  let panic_mod52: graph::SourceInput = graph::SourceInput("stdlib/core/panic.dao", "module core::panic\nextern fn __dao_panic(msg: string): void\nfn panic(msg: string): void -> __dao_panic(msg)\n", true)
+  let bad52: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new().push(panic_mod52).push(graph::SourceInput("main.dao", "module demo::main\nfn maybe_stop(stop: bool): void\n  if stop:\n    return\n  panic(\"stop\")\n\nfn bad(): i32\n  maybe_stop(true)\n\nfn main(): i32 -> bad()\n", false))
+  let r52_bad: LlvmTextResult = lower_program_to_llvm_text(bad52)
+  let good52: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new().push(panic_mod52).push(graph::SourceInput("main.dao", "module demo::main\nfn fail_msg(msg: string): void -> panic(msg)\n\nfn fail_both(c: bool): void\n  if c:\n    fail_msg(\"a\")\n  else:\n    panic(\"b\")\n\nfn choose(ok: bool, v: i32): i32\n  if ok:\n    return v\n  else:\n    fail_both(ok)\n\nfn main(): i32 -> choose(true, 19) - 19\n", false))
+  let r52_good: LlvmTextResult = lower_program_to_llvm_text(good52)
+  write_failures = write_failures + emit_ir("unconditional_panic_wrappers", r52_good, 0)
+  if r52_bad.ok == false and contains_substring(diags_text(r52_bad.diags), "without returning a value") and r52_good.ok:
+    print("PASS void_divergence_fixed_point")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL void_divergence_fixed_point: bad_ok=" + bool_to_string(r52_bad.ok) + " good_ok=" + bool_to_string(r52_good.ok) + " " + diags_text(r52_good.diags))
+
+  // Test 53: direct 1st-order named callback to extern fn emits valid LLVM IR,
+  // while extern fn with callback param as first-class value and higher-order
+  // C function types fail closed.
+  let r53_ok: LlvmTextResult = lower_source_to_llvm_text("extern fn apply_cb(cb: fn(i32): i32, x: i32): i32\n\nfn inc(x: i32): i32 -> x + 1\n\nfn run(): i32 -> apply_cb(inc, 41)\n")
+  write_failures = write_failures + emit_ir("extern_direct_named_callback", r53_ok, -1)
+  let r53_bad_val: LlvmTextResult = lower_source_to_llvm_text("extern fn apply_cb(cb: fn(i32): i32, x: i32): i32\n\nfn leak(): fn(fn(i32): i32, i32): i32 -> apply_cb\n")
+  let r53_bad_ho: LlvmTextResult = lower_source_to_llvm_text("extern fn ho(cb: fn(fn(i32): i32): i32): i32\n\nfn main(): i32 -> 0\n")
+  if r53_ok.ok and check_contains(r53_ok, "declare i32 @apply_cb(ptr %arg0, i32 %arg1)", "extern_direct_named_callback") and r53_bad_val.ok == false and r53_bad_ho.ok == false:
+    print("PASS extern_callback_validation_and_lowering")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL extern_callback_validation_and_lowering: ok=" + bool_to_string(r53_ok.ok) + " bad_val=" + bool_to_string(r53_bad_val.ok) + " bad_ho=" + bool_to_string(r53_bad_ho.ok))
 
   // -----------------------------------------------------------------
   // Summary

@@ -540,7 +540,7 @@ private:
   GenericParamReach mentions_param_;
   /// The function a callee resolves to — a named one, or the method a
   /// member expression selected; null where the callee is a value.
-  auto callee_function_decl(const Expr* callee) -> const Decl*;
+  [[nodiscard]] auto callee_function_decl(const Expr* callee) const -> const Decl*;
   /// Whether a method is reached on a receiver instantiated with that
   /// method's own type parameter, which leaves the call nothing to bind.
   auto receiver_fixes(const Expr* callee, const Decl* callee_decl) -> bool;
@@ -564,10 +564,22 @@ private:
 
   // --- Definite-return and exhaustiveness analysis ---
 
+  struct ReturnAnalysis {
+    std::vector<const FunctionDecl*> pending_checks;
+    std::unordered_set<const Decl*> diverging_decls;
+    std::unordered_set<const Decl*> failed_functions;
+  };
+  ReturnAnalysis return_analysis_;
+
+  void compute_diverging_functions();
+  [[nodiscard]] static auto stmts_have_return(const std::vector<Stmt*>& body) -> bool;
+  [[nodiscard]] auto body_terminates_all_paths(const std::vector<Stmt*>& body,
+                                               bool allow_return) const -> bool;
+  [[nodiscard]] auto stmt_terminates_all_paths(const Stmt* stmt, bool allow_return) const -> bool;
   [[nodiscard]] auto body_definitely_returns(const std::vector<Stmt*>& body) const -> bool;
-  [[nodiscard]] auto stmt_definitely_returns(const Stmt* stmt) const -> bool;
-  [[nodiscard]] auto match_is_exhaustive(const MatchStmt& match) const -> bool;
-  [[nodiscard]] auto expr_diverges(const Expr* expr, uint32_t depth = 0) const -> bool;
+  [[nodiscard]] auto match_terminates_all_paths(const MatchStmt& match, bool allow_return) const
+      -> bool;
+  [[nodiscard]] auto expr_diverges(const Expr* expr) const -> bool;
 
   // --- Diagnostics ---
 

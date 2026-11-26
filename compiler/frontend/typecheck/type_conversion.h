@@ -61,9 +61,11 @@ auto is_float(const Type* type) -> bool;
 auto is_string(const Type* type) -> bool;
 
 /// Returns true if the type is compatible with the C ABI boundary.
-/// Supported: builtin scalars (i32, i64, f64, bool, etc.), pointers,
-/// and repr-C-compatible structs (non-empty, all fields recursively
-/// C-ABI-compatible, no non-pointer self-reference).
+/// Supported: builtin scalars (i8..u64, f32, f64, bool), pointers,
+/// repr-C-compatible structs (non-empty, all fields recursively scalar,
+/// pointer, or repr-C struct, with no non-pointer self-reference), and
+/// first-order C function pointers whose parameter and return types are
+/// C-ABI scalars, pointers, or repr-C structs (or void return).
 auto is_c_abi_compatible(const Type* type) -> bool;
 
 } // namespace dao

@@ -62,6 +62,7 @@ auto TypeChecker::check(std::span<const FileNode* const> files) -> TypeCheckResu
   all_decls_.clear();
   decl_module_.clear();
   type_decls_.clear();
+  return_analysis_ = {};
   for (const auto* file : files) {
     auto module_it = file_modules_.find(file);
     const auto* module = module_it == file_modules_.end() ? nullptr : module_it->second;
@@ -92,6 +93,17 @@ auto TypeChecker::check(std::span<const FileNode* const> files) -> TypeCheckResu
   // Pass 2: check all declaration bodies.
   for (const auto* decl : all_decls_) {
     check_declaration(decl);
+  }
+
+  // Pass 2b: compute fixed-point divergence across void functions, then
+  // verify definite returns on all clean non-void functions and methods.
+  compute_diverging_functions();
+  for (const auto* fn : return_analysis_.pending_checks) {
+    if (!body_definitely_returns(fn->body)) {
+      error(fn->name_span,
+            "function '" + std::string(fn->name) +
+                "' may reach end of body without returning a value");
+    }
   }
 
   // Export method table for tooling (completion, hover).
@@ -1439,20 +1451,36 @@ void TypeChecker::check_function(const Decl* decl) {
   // runtime hooks (Dao-defined ABI per CONTRACT_RUNTIME_ABI) and
   // aligns with C's reserved identifier convention.
   if (fn.is_extern && !fn.name.starts_with("__")) {
+    auto is_higher_order_fn = [](const Type* type) -> bool {
+      if (type == nullptr || type->kind() != TypeKind::Function) {
+        return false;
+      }
+      const auto* ft = static_cast<const TypeFunction*>(type);
+      if (ft->return_type() != nullptr && ft->return_type()->kind() == TypeKind::Function) {
+        return true;
+      }
+      return std::ranges::any_of(ft->param_types(), [](const Type* pt) {
+        return pt != nullptr && pt->kind() == TypeKind::Function;
+      });
+    };
     for (const auto& param : fn.params) {
       if (param.type != nullptr) {
         const auto* param_type = resolve_type_node(param.type);
         if (param_type != nullptr && !is_c_abi_compatible(param_type)) {
+          const char* kind_desc =
+              is_higher_order_fn(param_type) ? "higher-order function type" : "parameter type";
           error(param.type->span,
-                "extern fn parameter type '" + print_type(param_type) +
+                "extern fn " + std::string(kind_desc) + " '" + print_type(param_type) +
                     "' is not supported at the C ABI boundary");
         }
       }
     }
     if (ret_type != nullptr && ret_type->kind() != TypeKind::Void &&
         !is_c_abi_compatible(ret_type)) {
+      const char* kind_desc =
+          is_higher_order_fn(ret_type) ? "higher-order function type" : "return type";
       error(fn.return_type->span,
-            "extern fn return type '" + print_type(ret_type) +
+            "extern fn " + std::string(kind_desc) + " '" + print_type(ret_type) +
                 "' is not supported at the C ABI boundary");
     }
   }
@@ -1486,6 +1514,12 @@ void TypeChecker::check_function(const Decl* decl) {
     return;
   }
 
+  const auto count_errors = [&]() {
+    return std::ranges::count_if(diagnostics_,
+                                 [](const Diagnostic& d) { return d.severity == Severity::Error; });
+  };
+  const auto errs_before = count_errors();
+
   if (fn.is_expr_bodied()) {
     // Expression-bodied: -> expr
     const auto* expr_type = fn.expr_body->is<LambdaExpr>() ? check_expr(fn.expr_body, ret_type)
@@ -1495,19 +1529,19 @@ void TypeChecker::check_function(const Decl* decl) {
             "expression body type '" + print_type(expr_type) + "' does not match return type '" +
                 print_type(ret_type) + "'");
     }
+    if (count_errors() > errs_before) {
+      return_analysis_.failed_functions.insert(decl);
+    }
   } else {
     // Block-bodied: check statements.
     warn_whole_body_domain(fn);
-    const size_t errs_before = std::ranges::count_if(
-        diagnostics_, [](const Diagnostic& d) { return d.severity == Severity::Error; });
     check_body(fn.body);
-    const size_t errs_after = std::ranges::count_if(
-        diagnostics_, [](const Diagnostic& d) { return d.severity == Severity::Error; });
-    if (errs_after == errs_before && ret_type != nullptr && ret_type->kind() != TypeKind::Void &&
-        ret_type->kind() != TypeKind::Generator && !body_definitely_returns(fn.body)) {
-      error(fn.name_span,
-            "function '" + std::string(fn.name) +
-                "' may reach end of body without returning a value");
+    const auto errs_after = count_errors();
+    if (errs_after > errs_before) {
+      return_analysis_.failed_functions.insert(decl);
+    } else if (ret_type != nullptr && ret_type->kind() != TypeKind::Void &&
+               ret_type->kind() != TypeKind::Generator) {
+      return_analysis_.pending_checks.push_back(&fn);
     }
   }
 
@@ -2328,6 +2362,24 @@ auto TypeChecker::check_identifier(const Expr* expr) -> const Type* {
   if (result == nullptr && sym->kind == SymbolKind::Param) {
     error(expr->span, "'" + std::string(sym->name) + "' has no known type in this context");
   }
+  if (call_callee_ != expr && sym->kind == SymbolKind::Function && sym->decl != nullptr &&
+      result != nullptr && result->kind() == TypeKind::Function) {
+    const auto* fn_decl = sym->decl_as_decl();
+    if (fn_decl->is<FunctionDecl>() && fn_decl->as<FunctionDecl>().is_extern &&
+        !sym->name.starts_with("__")) {
+      const auto* fn_type = static_cast<const TypeFunction*>(result);
+      const bool has_callback_param =
+          std::ranges::any_of(fn_type->param_types(), [](const Type* pt) {
+            return pt != nullptr && pt->kind() == TypeKind::Function;
+          });
+      if (has_callback_param) {
+        error(expr->span,
+              "extern function '" + std::string(sym->name) +
+                  "' with callback parameter cannot be used as a first-class function value");
+        return nullptr;
+      }
+    }
+  }
   return result;
 }
 
@@ -2803,7 +2855,7 @@ auto TypeChecker::receiver_fixes(const Expr* callee, const Decl* callee_decl) ->
   return type_mentions_param_of(typed_.expr_type(callee->as<FieldExpr>().object), callee_decl);
 }
 
-auto TypeChecker::callee_function_decl(const Expr* callee) -> const Decl* {
+auto TypeChecker::callee_function_decl(const Expr* callee) const -> const Decl* {
   const Decl* decl = nullptr;
   if (callee->is<FieldExpr>()) {
     decl = typed_.method_resolution(callee);
@@ -4292,40 +4344,154 @@ void TypeChecker::check_lambda_captures(const Expr* expr, Span lambda_span) {
   }
 }
 
-auto TypeChecker::body_definitely_returns(const std::vector<Stmt*>& body) const -> bool {
-  return std::ranges::any_of(body, [&](const Stmt* s) { return stmt_definitely_returns(s); });
+void TypeChecker::compute_diverging_functions() {
+  std::vector<const Decl*> candidates;
+  auto inspect_fn = [&](const Decl* decl, const ModuleInfo* owner_mod) {
+    if (decl == nullptr || !decl->is<FunctionDecl>()) {
+      return;
+    }
+    const auto& fn = decl->as<FunctionDecl>();
+    const auto* fn_type = typed_.decl_type(decl);
+    if (fn_type == nullptr || fn_type->kind() != TypeKind::Function) {
+      return;
+    }
+    const auto* ret = static_cast<const TypeFunction*>(fn_type)->return_type();
+    if (ret == nullptr || ret->kind() != TypeKind::Void) {
+      return;
+    }
+    if (fn.is_extern) {
+      const bool in_prelude_mod = owner_mod != nullptr && owner_mod->is_prelude;
+      const bool is_intrinsic_panic =
+          (in_prelude_mod && (fn.name == "__dao_panic" || fn.name == "panic")) ||
+          (file_modules_.empty() && fn.name == "__dao_panic");
+      if (is_intrinsic_panic) {
+        return_analysis_.diverging_decls.insert(decl);
+      }
+      return;
+    }
+    if (return_analysis_.failed_functions.contains(decl)) {
+      return;
+    }
+    if (!fn.is_expr_bodied() && (fn.body.empty() || stmts_have_return(fn.body))) {
+      return;
+    }
+    candidates.push_back(decl);
+  };
+
+  for (const auto* decl : all_decls_) {
+    const auto* mod = declaring_module(decl);
+    switch (decl->kind()) {
+    case NodeKind::FunctionDecl:
+      inspect_fn(decl, mod);
+      break;
+    case NodeKind::ClassDecl: {
+      const auto& cls = decl->as<ClassDecl>();
+      for (const auto* method : cls.methods) {
+        inspect_fn(method, mod);
+      }
+      for (const auto& conf : cls.conformances) {
+        for (const auto* method : conf.methods) {
+          inspect_fn(method, mod);
+        }
+      }
+      break;
+    }
+    case NodeKind::ExtendDecl: {
+      for (const auto* method : decl->as<ExtendDecl>().methods) {
+        inspect_fn(method, mod);
+      }
+      break;
+    }
+    default:
+      break;
+    }
+  }
+
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (const auto* decl : candidates) {
+      if (return_analysis_.diverging_decls.contains(decl)) {
+        continue;
+      }
+      const auto& fn = decl->as<FunctionDecl>();
+      const bool diverges = fn.is_expr_bodied()
+                                ? expr_diverges(fn.expr_body)
+                                : body_terminates_all_paths(fn.body, /*allow_return=*/false);
+      if (diverges) {
+        return_analysis_.diverging_decls.insert(decl);
+        changed = true;
+      }
+    }
+  }
 }
 
-auto TypeChecker::stmt_definitely_returns(const Stmt* stmt) const -> bool {
+auto TypeChecker::stmts_have_return(const std::vector<Stmt*>& body) -> bool {
+  return std::ranges::any_of(body, [](const Stmt* stmt) {
+    if (stmt == nullptr) {
+      return false;
+    }
+    switch (stmt->kind()) {
+    case NodeKind::ReturnStatement:
+      return true;
+    case NodeKind::IfStatement: {
+      const auto& ifs = stmt->as<IfStatement>();
+      return stmts_have_return(ifs.then_body) || stmts_have_return(ifs.else_body);
+    }
+    case NodeKind::WhileStatement:
+      return stmts_have_return(stmt->as<WhileStatement>().body);
+    case NodeKind::ForStatement:
+      return stmts_have_return(stmt->as<ForStatement>().body);
+    case NodeKind::MatchStatement:
+      return std::ranges::any_of(stmt->as<MatchStmt>().arms,
+                                 [](const MatchArm& arm) { return stmts_have_return(arm.body); });
+    case NodeKind::ModeBlock:
+      return stmts_have_return(stmt->as<ModeBlock>().body);
+    case NodeKind::ResourceBlock:
+      return stmts_have_return(stmt->as<ResourceBlock>().body);
+    default:
+      return false;
+    }
+  });
+}
+
+auto TypeChecker::body_terminates_all_paths(const std::vector<Stmt*>& body, bool allow_return) const
+    -> bool {
+  return std::ranges::any_of(
+      body, [&](const Stmt* s) { return stmt_terminates_all_paths(s, allow_return); });
+}
+
+auto TypeChecker::stmt_terminates_all_paths(const Stmt* stmt, bool allow_return) const -> bool {
   if (stmt == nullptr) {
     return false;
   }
   switch (stmt->kind()) {
   case NodeKind::ReturnStatement:
-    return true;
+    return allow_return;
   case NodeKind::ExpressionStatement:
     return expr_diverges(stmt->as<ExpressionStatement>().expr);
   case NodeKind::IfStatement: {
     const auto& ifs = stmt->as<IfStatement>();
-    return !ifs.else_body.empty() && body_definitely_returns(ifs.then_body) &&
-           body_definitely_returns(ifs.else_body);
+    return !ifs.else_body.empty() && body_terminates_all_paths(ifs.then_body, allow_return) &&
+           body_terminates_all_paths(ifs.else_body, allow_return);
   }
-  case NodeKind::MatchStatement: {
-    const auto& match = stmt->as<MatchStmt>();
-    return match_is_exhaustive(match) && std::ranges::all_of(match.arms, [&](const MatchArm& arm) {
-             return body_definitely_returns(arm.body);
-           });
-  }
+  case NodeKind::MatchStatement:
+    return match_terminates_all_paths(stmt->as<MatchStmt>(), allow_return);
   case NodeKind::ModeBlock:
-    return body_definitely_returns(stmt->as<ModeBlock>().body);
+    return body_terminates_all_paths(stmt->as<ModeBlock>().body, allow_return);
   case NodeKind::ResourceBlock:
-    return body_definitely_returns(stmt->as<ResourceBlock>().body);
+    return body_terminates_all_paths(stmt->as<ResourceBlock>().body, allow_return);
   default:
     return false;
   }
 }
 
-auto TypeChecker::match_is_exhaustive(const MatchStmt& match) const -> bool {
+auto TypeChecker::body_definitely_returns(const std::vector<Stmt*>& body) const -> bool {
+  return body_terminates_all_paths(body, /*allow_return=*/true);
+}
+
+auto TypeChecker::match_terminates_all_paths(const MatchStmt& match, bool allow_return) const
+    -> bool {
   if (match.scrutinee == nullptr || match.arms.empty()) {
     return false;
   }
@@ -4335,32 +4501,67 @@ auto TypeChecker::match_is_exhaustive(const MatchStmt& match) const -> bool {
   }
   if (scrutinee_type->kind() == TypeKind::Enum) {
     const auto* enum_type = static_cast<const TypeEnum*>(scrutinee_type);
-    if (enum_type->variants().empty()) {
+    const size_t total = enum_type->variants().size();
+    if (total == 0) {
       return false;
     }
     std::unordered_set<std::string_view> covered;
     for (const auto& arm : match.arms) {
+      if (covered.size() == total) {
+        break;
+      }
+      std::string_view vname;
       if (arm.pattern != nullptr && arm.pattern->is<QualifiedName>()) {
         const auto& qn = arm.pattern->as<QualifiedName>();
         if (qn.segments.size() >= 2) {
-          covered.insert(qn.segments.back());
+          vname = qn.segments.back();
+        }
+      } else if (arm.pattern != nullptr && arm.pattern->is<CallExpr>()) {
+        const auto& call = arm.pattern->as<CallExpr>();
+        if (call.callee != nullptr && call.callee->is<QualifiedName>()) {
+          const auto& qn = call.callee->as<QualifiedName>();
+          if (qn.segments.size() >= 2) {
+            vname = qn.segments.back();
+          }
         }
       }
+      const bool is_variant =
+          !vname.empty() && std::ranges::any_of(enum_type->variants(), [&](const EnumVariant& v) {
+            return v.name == vname;
+          });
+      if (is_variant) {
+        if (covered.contains(vname)) {
+          continue;
+        }
+        covered.insert(vname);
+      }
+      if (!body_terminates_all_paths(arm.body, allow_return)) {
+        return false;
+      }
     }
-    return std::ranges::all_of(enum_type->variants(),
-                               [&](const EnumVariant& v) { return covered.contains(v.name); });
+    return covered.size() == total;
   }
   if (scrutinee_type->kind() == TypeKind::Builtin &&
       static_cast<const TypeBuiltin*>(scrutinee_type)->builtin() == BuiltinKind::Bool) {
     bool has_true = false;
     bool has_false = false;
     for (const auto& arm : match.arms) {
+      if (has_true && has_false) {
+        break;
+      }
       if (arm.pattern != nullptr && arm.pattern->is<BoolLiteral>()) {
-        if (arm.pattern->as<BoolLiteral>().value) {
+        const bool val = arm.pattern->as<BoolLiteral>().value;
+        if ((val && has_true) || (!val && has_false)) {
+          continue;
+        }
+        if (val) {
           has_true = true;
         } else {
           has_false = true;
         }
+      }
+      if (!body_terminates_all_paths(arm.body, allow_return)) {
+        return false;
       }
     }
     return has_true && has_false;
@@ -4368,33 +4569,21 @@ auto TypeChecker::match_is_exhaustive(const MatchStmt& match) const -> bool {
   return false;
 }
 
-auto TypeChecker::expr_diverges(const Expr* expr, uint32_t depth) const -> bool {
-  if (expr == nullptr || depth > 4 || !expr->is<CallExpr>()) {
+auto TypeChecker::expr_diverges(const Expr* expr) const -> bool {
+  if (expr == nullptr) {
     return false;
   }
-  const auto* sym = symbol_for_use(expr->as<CallExpr>().callee);
-  if (sym == nullptr || sym->kind != SymbolKind::Function) {
-    return false;
+  if (expr->is<CallExpr>()) {
+    const auto* target = callee_function_decl(expr->as<CallExpr>().callee);
+    return target != nullptr && return_analysis_.diverging_decls.contains(target);
   }
-  if (sym->name == "__dao_panic") {
-    return true;
-  }
-  const auto* decl = sym->decl_as_decl();
-  if (decl == nullptr || !decl->is<FunctionDecl>()) {
-    return false;
-  }
-  const auto& fn = decl->as<FunctionDecl>();
-  if (fn.is_extern) {
-    return false;
-  }
-  if (fn.is_expr_bodied()) {
-    return expr_diverges(fn.expr_body, depth + 1);
-  }
-  if (!fn.is_extern && !fn.body.empty()) {
-    return std::ranges::any_of(fn.body, [&](const Stmt* s) {
-      return s != nullptr && s->is<ExpressionStatement>() &&
-             expr_diverges(s->as<ExpressionStatement>().expr, depth + 1);
-    });
+  if (expr->is<PipeExpr>()) {
+    const auto& pipe = expr->as<PipeExpr>();
+    if (pipe.right == nullptr || pipe.right->is<LambdaExpr>()) {
+      return false;
+    }
+    const auto* target = callee_function_decl(pipe.right);
+    return target != nullptr && return_analysis_.diverging_decls.contains(target);
   }
   return false;
 }

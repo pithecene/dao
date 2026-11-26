@@ -15,6 +15,7 @@
 
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -180,6 +181,26 @@ private:
       -> bool;
   auto lower_fn_ref(const MirFnRef& p, const MirInst& inst, FunctionState& state) -> bool;
   auto lower_lambda(const MirLambdaInst& p, const MirInst& inst, FunctionState& state) -> bool;
+  struct CAbiSignature {
+    llvm::FunctionType* fn_type = nullptr;
+    llvm::StructType* sret_type = nullptr;
+    std::vector<llvm::StructType*> byval_param_types;
+  };
+
+  template <typename Target> void apply_c_abi_attrs(Target* target, const CAbiSignature& sig);
+
+  auto build_c_abi_signature(std::span<const Type* const> param_sem_types,
+                             const Type* ret_sem_type,
+                             Span span) -> CAbiSignature;
+  auto emit_c_abi_call(llvm::IRBuilder<>& builder,
+                       const CAbiSignature& sig,
+                       llvm::Value* c_callee,
+                       std::span<llvm::Value* const> dao_args,
+                       const TypeFunction* sem_fn,
+                       Span span) -> llvm::Value*;
+  auto get_or_create_c_callback_wrapper(llvm::Function* dao_fn,
+                                        const TypeFunction* sem_fn,
+                                        Span span) -> llvm::Function*;
   auto callable_fn_type(const TypeFunction* sem_fn, Span span) -> llvm::FunctionType*;
   auto get_or_create_fn_thunk(const Symbol& sym, const TypeFunction* sem_fn, Span span)
       -> llvm::Function*;

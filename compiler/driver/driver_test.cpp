@@ -880,6 +880,53 @@ suite<"driver_cli"> driver_cli_suite = [] {
     expect(built.exit_code == 0) << built.err;
     expect(exit_status(scratch.output_for(app)) == 0);
   };
+
+  "reachable return in void helper is rejected while unconditional panic wrappers diverge"_test =
+      [] {
+        const Scratch scratch("divergence-and-extern-callbacks");
+        auto bad = scratch.file("bad.dao",
+                                "module app::bad\n\n"
+                                "fn maybe_stop(stop: bool): void\n"
+                                "  if stop:\n"
+                                "    return\n"
+                                "  panic(\"stop\")\n\n"
+                                "fn main(): i32\n"
+                                "  maybe_stop(true)\n");
+        auto bad_res = run_daoc(scratch, {"check", bad.string()});
+        expect(bad_res.exit_code != 0);
+        expect(bad_res.err_says("may reach end of body without returning a value")) << bad_res.err;
+
+        auto bad_cb = scratch.file("bad_cb.dao",
+                                   "module app::bad_cb\n\n"
+                                   "extern fn run_cb(cb: fn(i32): i32): i32\n\n"
+                                   "fn main(): i32\n"
+                                   "  let f: fn(fn(i32): i32): i32 = run_cb\n"
+                                   "  return 0\n");
+        auto bad_cb_res = run_daoc(scratch, {"check", bad_cb.string()});
+        expect(bad_cb_res.exit_code != 0);
+        expect(bad_cb_res.err_says(
+            "with callback parameter cannot be used as a first-class function value"))
+            << bad_cb_res.err;
+
+        auto good = scratch.file("good.dao",
+                                 "module app::good\n\n"
+                                 "fn fail_msg(msg: string): void -> panic(msg)\n\n"
+                                 "fn fail_both(c: bool): void\n"
+                                 "  if c:\n"
+                                 "    fail_msg(\"left\")\n"
+                                 "  else:\n"
+                                 "    panic(\"right\")\n\n"
+                                 "fn choose(ok: bool, x: i32): i32\n"
+                                 "  if ok:\n"
+                                 "    return x\n"
+                                 "  else:\n"
+                                 "    fail_both(ok)\n\n"
+                                 "fn main(): i32\n"
+                                 "  return choose(true, 42) - 42\n");
+        auto built = run_daoc(scratch, {"build", good.string()});
+        expect(built.exit_code == 0) << built.err;
+        expect(exit_status(scratch.output_for(good)) == 0);
+      };
 };
 
 auto main(int argc, const char** argv) -> int {

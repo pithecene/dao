@@ -130,87 +130,59 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
       continue;
     }
 
-    // Build LLVM function type.
-    auto* ret_type = types_.lower(mir_fn->return_type);
-    if (ret_type == nullptr) {
+    llvm::FunctionType* fn_type = nullptr;
+    CAbiSignature c_sig;
+    if (mir_fn->is_extern) {
+      std::vector<const Type*> ext_param_types;
+      for (const auto& local : mir_fn->locals) {
+        if (!local.is_param) {
+          break;
+        }
+        ext_param_types.push_back(local.type);
+      }
       size_t diag_idx = diagnostics_.size();
-      emit_diagnostic(mir_fn->span,
-                      "cannot lower return type: " + types_.error());
-      // Downgrade to warning for prelude functions.
-      if (in_prelude(*mir_fn, source_map)) {
-        diagnostics_[diag_idx].severity = Severity::Warning;
-      }
-      continue;
-    }
-    // At the C ABI boundary (`extern fn`), function types are raw C
-    // function pointers (`ptr`), not Dao `{ fn_ptr, env_ptr }` pairs
-    // (CONTRACT_C_ABI_INTEROP.md §4.4.3).
-    if (mir_fn->is_extern && mir_fn->return_type != nullptr &&
-        mir_fn->return_type->kind() == TypeKind::Function) {
-      ret_type = llvm::PointerType::getUnqual(ctx_);
-    }
-
-    std::vector<llvm::Type*> param_types;
-    for (const auto& local : mir_fn->locals) {
-      if (!local.is_param) {
-        break; // params come first
-      }
-      auto* lowered_param = types_.lower(local.type);
-      if (lowered_param == nullptr) {
-        emit_diagnostic(local.span,
-                        "cannot lower param type: " + types_.error());
-        break;
-      }
-      if (mir_fn->is_extern && local.type != nullptr && local.type->kind() == TypeKind::Function) {
-        param_types.push_back(llvm::PointerType::getUnqual(ctx_));
-        continue;
-      }
-      // String params are passed by pointer for C ABI compatibility.
-      if (LlvmTypeLowering::is_string_type(local.type)) {
-        lowered_param = llvm::PointerType::getUnqual(lowered_param);
-      }
-      // For extern fn: struct params need ABI coercion at the C boundary.
-      if (mir_fn->is_extern && llvm::isa<llvm::StructType>(lowered_param) &&
-          !LlvmTypeLowering::is_string_type(local.type)) {
-        auto* struct_ty = llvm::cast<llvm::StructType>(lowered_param);
-        auto coercion = classify_struct_for_c_abi(
-            struct_ty, module_->getDataLayout(), ctx_);
-        if (coercion.indirect) {
-          // Large struct: pass by pointer with byval attribute.
-          param_types.push_back(llvm::PointerType::getUnqual(lowered_param));
-        } else {
-          // Small struct: expand to coerced scalar types.
-          for (auto* coerced : coercion.coerced_types) {
-            param_types.push_back(coerced);
+      c_sig = build_c_abi_signature(ext_param_types, mir_fn->return_type, mir_fn->span);
+      if (c_sig.fn_type == nullptr) {
+        if (in_prelude(*mir_fn, source_map)) {
+          for (size_t di = diag_idx; di < diagnostics_.size(); ++di) {
+            diagnostics_[di].severity = Severity::Warning;
           }
         }
-
-      } else {
+        continue;
+      }
+      fn_type = c_sig.fn_type;
+    } else {
+      auto* ret_type = types_.lower(mir_fn->return_type);
+      if (ret_type == nullptr) {
+        size_t diag_idx = diagnostics_.size();
+        emit_diagnostic(mir_fn->span, "cannot lower return type: " + types_.error());
+        if (in_prelude(*mir_fn, source_map)) {
+          diagnostics_[diag_idx].severity = Severity::Warning;
+        }
+        continue;
+      }
+      std::vector<llvm::Type*> param_types;
+      bool params_ok = true;
+      for (const auto& local : mir_fn->locals) {
+        if (!local.is_param) {
+          break;
+        }
+        auto* lowered_param = types_.lower(local.type);
+        if (lowered_param == nullptr) {
+          emit_diagnostic(local.span, "cannot lower param type: " + types_.error());
+          params_ok = false;
+          break;
+        }
+        if (LlvmTypeLowering::is_string_type(local.type)) {
+          lowered_param = llvm::PointerType::getUnqual(lowered_param);
+        }
         param_types.push_back(lowered_param);
       }
-    }
-
-    // For extern fn: struct returns also need ABI coercion.
-    auto* lowered_ret = ret_type;
-    if (mir_fn->is_extern && llvm::isa<llvm::StructType>(ret_type) &&
-        !LlvmTypeLowering::is_string_type(mir_fn->return_type)) {
-      auto* struct_ty = llvm::cast<llvm::StructType>(ret_type);
-      auto coercion = classify_struct_for_c_abi(
-          struct_ty, module_->getDataLayout(), ctx_);
-      if (coercion.indirect) {
-        // Large struct return: add sret pointer parameter, return void.
-        param_types.insert(param_types.begin(),
-                           llvm::PointerType::getUnqual(ret_type));
-        lowered_ret = llvm::Type::getVoidTy(ctx_);
-      } else if (coercion.coerced_types.size() == 1) {
-        lowered_ret = coercion.coerced_types[0];
-      } else {
-        // Multiple coerced types: wrap in a struct for the return value.
-        lowered_ret = llvm::StructType::get(ctx_, coercion.coerced_types);
+      if (!params_ok) {
+        continue;
       }
+      fn_type = llvm::FunctionType::get(ret_type, param_types, /*isVarArg=*/false);
     }
-    auto* fn_type =
-        llvm::FunctionType::get(lowered_ret, param_types, /*isVarArg=*/false);
 
     // An `extern fn` keeps the C symbol name exactly as written
     // (CONTRACT_C_ABI_INTEROP.md §3), so two modules declaring the same
@@ -262,46 +234,9 @@ void LlvmBackend::declare_functions(const MirModule& mir_module,
     auto* llvm_fn =
         llvm::Function::Create(fn_type, llvm::Function::ExternalLinkage, name, module_.get());
 
-    // Add byval attributes for indirect struct params.
+    // Add sret / byval attributes for indirect struct returns and params.
     if (mir_fn->is_extern) {
-      unsigned arg_idx = 0;
-      // Skip sret param if present.
-      if (llvm::isa<llvm::StructType>(ret_type) &&
-          !LlvmTypeLowering::is_string_type(mir_fn->return_type)) {
-        auto coercion = classify_struct_for_c_abi(
-            llvm::cast<llvm::StructType>(ret_type),
-            module_->getDataLayout(), ctx_);
-        if (coercion.indirect) {
-          llvm_fn->addParamAttr(0, llvm::Attribute::get(
-              ctx_, llvm::Attribute::StructRet, ret_type));
-          arg_idx = 1;
-        }
-      }
-      for (const auto& local : mir_fn->locals) {
-        if (!local.is_param)
-          break;
-        if (local.type != nullptr && local.type->kind() == TypeKind::Function) {
-          arg_idx++;
-          continue;
-        }
-        auto* lowered_param = types_.lower(local.type);
-        if (lowered_param != nullptr &&
-            llvm::isa<llvm::StructType>(lowered_param) &&
-            !LlvmTypeLowering::is_string_type(local.type)) {
-          auto coercion = classify_struct_for_c_abi(
-              llvm::cast<llvm::StructType>(lowered_param),
-              module_->getDataLayout(), ctx_);
-          if (coercion.indirect) {
-            llvm_fn->addParamAttr(arg_idx, llvm::Attribute::get(
-                ctx_, llvm::Attribute::ByVal, lowered_param));
-            arg_idx++;
-          } else {
-            arg_idx += coercion.coerced_types.size();
-          }
-        } else {
-          arg_idx++;
-        }
-      }
+      apply_c_abi_attrs(llvm_fn, c_sig);
     }
 
     // Name parameters (skip naming for ABI-coerced params).
@@ -1455,6 +1390,261 @@ auto LlvmBackend::lower_fn_ref(const MirFnRef& p, const MirInst& inst,
   return true;
 }
 
+auto LlvmBackend::build_c_abi_signature(std::span<const Type* const> param_sem_types,
+                                        const Type* ret_sem_type,
+                                        Span span) -> CAbiSignature {
+  CAbiSignature sig;
+  llvm::Type* ret_type = nullptr;
+  if (ret_sem_type != nullptr && ret_sem_type->kind() == TypeKind::Function) {
+    ret_type = llvm::PointerType::getUnqual(ctx_);
+  } else {
+    ret_type = types_.lower(ret_sem_type);
+    if (ret_type == nullptr) {
+      emit_diagnostic(span, "cannot lower return type: " + types_.error());
+      return {};
+    }
+  }
+
+  std::vector<llvm::Type*> param_types;
+  auto* lowered_ret = ret_type;
+  if (llvm::isa<llvm::StructType>(ret_type) && !LlvmTypeLowering::is_string_type(ret_sem_type)) {
+    auto* struct_ty = llvm::cast<llvm::StructType>(ret_type);
+    auto coercion = classify_struct_for_c_abi(struct_ty, module_->getDataLayout(), ctx_);
+    if (coercion.indirect) {
+      sig.sret_type = struct_ty;
+      param_types.push_back(llvm::PointerType::getUnqual(ret_type));
+      sig.byval_param_types.push_back(nullptr);
+      lowered_ret = llvm::Type::getVoidTy(ctx_);
+    } else if (coercion.coerced_types.size() == 1) {
+      lowered_ret = coercion.coerced_types[0];
+    } else {
+      lowered_ret = llvm::StructType::get(ctx_, coercion.coerced_types);
+    }
+  }
+
+  for (const auto* param_sem : param_sem_types) {
+    if (param_sem != nullptr && param_sem->kind() == TypeKind::Function) {
+      param_types.push_back(llvm::PointerType::getUnqual(ctx_));
+      sig.byval_param_types.push_back(nullptr);
+      continue;
+    }
+    auto* lowered_param = types_.lower(param_sem);
+    if (lowered_param == nullptr) {
+      emit_diagnostic(span, "cannot lower param type: " + types_.error());
+      return {};
+    }
+    if (LlvmTypeLowering::is_string_type(param_sem)) {
+      param_types.push_back(llvm::PointerType::getUnqual(lowered_param));
+      sig.byval_param_types.push_back(nullptr);
+      continue;
+    }
+    if (llvm::isa<llvm::StructType>(lowered_param)) {
+      auto* struct_ty = llvm::cast<llvm::StructType>(lowered_param);
+      auto coercion = classify_struct_for_c_abi(struct_ty, module_->getDataLayout(), ctx_);
+      if (coercion.indirect) {
+        param_types.push_back(llvm::PointerType::getUnqual(lowered_param));
+        sig.byval_param_types.push_back(struct_ty);
+      } else {
+        for (auto* coerced : coercion.coerced_types) {
+          param_types.push_back(coerced);
+          sig.byval_param_types.push_back(nullptr);
+        }
+      }
+    } else {
+      param_types.push_back(lowered_param);
+      sig.byval_param_types.push_back(nullptr);
+    }
+  }
+
+  sig.fn_type = llvm::FunctionType::get(lowered_ret, param_types, /*isVarArg=*/false);
+  return sig;
+}
+
+template <typename Target>
+void LlvmBackend::apply_c_abi_attrs(Target* target, const CAbiSignature& sig) {
+  if (sig.sret_type != nullptr) {
+    target->addParamAttr(0, llvm::Attribute::get(ctx_, llvm::Attribute::StructRet, sig.sret_type));
+  }
+  for (unsigned idx = 0; idx < sig.byval_param_types.size(); ++idx) {
+    if (sig.byval_param_types[idx] != nullptr) {
+      target->addParamAttr(
+          idx, llvm::Attribute::get(ctx_, llvm::Attribute::ByVal, sig.byval_param_types[idx]));
+    }
+  }
+}
+
+auto LlvmBackend::emit_c_abi_call(llvm::IRBuilder<>& builder,
+                                  const CAbiSignature& sig,
+                                  llvm::Value* c_callee,
+                                  std::span<llvm::Value* const> dao_args,
+                                  const TypeFunction* sem_fn,
+                                  Span span) -> llvm::Value* {
+  auto* enclosing_fn = builder.GetInsertBlock()->getParent();
+  auto alloc_at_entry = [&](llvm::Type* type, const llvm::Twine& name) -> llvm::AllocaInst* {
+    auto* entry = &enclosing_fn->getEntryBlock();
+    llvm::IRBuilder<> at_entry(entry, entry->begin());
+    return at_entry.CreateAlloca(type, nullptr, name);
+  };
+
+  std::vector<llvm::Value*> call_args;
+  llvm::AllocaInst* sret_alloca = nullptr;
+  if (sig.sret_type != nullptr) {
+    sret_alloca = alloc_at_entry(sig.sret_type, "sret");
+    call_args.push_back(sret_alloca);
+  }
+
+  for (size_t i = 0; i < dao_args.size(); ++i) {
+    llvm::Value* arg_val = dao_args[i];
+    const Type* param_sem = (sem_fn != nullptr && i < sem_fn->param_types().size())
+                                ? sem_fn->param_types()[i]
+                                : nullptr;
+    if (LlvmTypeLowering::is_string_type(param_sem)) {
+      if (arg_val->getType() == types_.string_type()) {
+        auto* tmp = alloc_at_entry(types_.string_type(), "str.arg");
+        builder.CreateStore(arg_val, tmp);
+        arg_val = tmp;
+      }
+      call_args.push_back(arg_val);
+      continue;
+    }
+    if (arg_val->getType()->isStructTy() &&
+        (param_sem == nullptr || param_sem->kind() != TypeKind::Function)) {
+      auto* struct_ty = llvm::cast<llvm::StructType>(arg_val->getType());
+      auto coercion = classify_struct_for_c_abi(struct_ty, module_->getDataLayout(), ctx_);
+      if (coercion.indirect) {
+        auto* tmp = alloc_at_entry(struct_ty, "byval.arg");
+        builder.CreateStore(arg_val, tmp);
+        call_args.push_back(tmp);
+      } else {
+        auto* tmp = alloc_at_entry(struct_ty, "coerce.arg");
+        builder.CreateStore(arg_val, tmp);
+        for (size_t ci = 0; ci < coercion.coerced_types.size(); ++ci) {
+          uint64_t byte_offset = ci * 8;
+          auto* gep = builder.CreateGEP(
+              builder.getInt8Ty(), tmp, builder.getInt64(byte_offset), "coerce.gep");
+          call_args.push_back(builder.CreateLoad(coercion.coerced_types[ci], gep, "coerce.load"));
+        }
+      }
+      continue;
+    }
+    call_args.push_back(arg_val);
+  }
+
+  auto* call = builder.CreateCall(sig.fn_type, c_callee, call_args);
+  apply_c_abi_attrs(call, sig);
+
+  const Type* ret_sem = sem_fn != nullptr ? sem_fn->return_type() : nullptr;
+  if (sret_alloca != nullptr) {
+    return builder.CreateLoad(sig.sret_type, sret_alloca, "sret.load");
+  }
+  if (ret_sem == nullptr || ret_sem->kind() == TypeKind::Void) {
+    return llvm::UndefValue::get(llvm::Type::getVoidTy(ctx_));
+  }
+  if (ret_sem->kind() == TypeKind::Function && call->getType()->isPointerTy()) {
+    return wrap_c_fn_ptr(builder, call, static_cast<const TypeFunction*>(ret_sem), span);
+  }
+  auto* expected_ret = types_.lower(ret_sem);
+  if (expected_ret != nullptr && llvm::isa<llvm::StructType>(expected_ret) &&
+      call->getType() != expected_ret) {
+    auto* tmp = alloc_at_entry(expected_ret, "coerce.ret");
+    builder.CreateStore(call, tmp);
+    return builder.CreateLoad(expected_ret, tmp, "coerce.ret.load");
+  }
+  return call;
+}
+
+auto LlvmBackend::get_or_create_c_callback_wrapper(llvm::Function* dao_fn,
+                                                   const TypeFunction* sem_fn,
+                                                   Span span) -> llvm::Function* {
+  if (dao_fn == nullptr || sem_fn == nullptr) {
+    emit_diagnostic(span, "missing function type for C callback");
+    return nullptr;
+  }
+  const Type* ret_sem = sem_fn->return_type();
+  if (ret_sem != nullptr &&
+      (ret_sem->kind() == TypeKind::Function || LlvmTypeLowering::is_string_type(ret_sem))) {
+    emit_diagnostic(span, "C callback return type '" + print_type(ret_sem) + "' is not supported");
+    return nullptr;
+  }
+  bool needs_struct_abi = ret_sem != nullptr && ret_sem->kind() == TypeKind::Struct;
+  for (const auto* param_sem : sem_fn->param_types()) {
+    if (param_sem != nullptr &&
+        (param_sem->kind() == TypeKind::Function || LlvmTypeLowering::is_string_type(param_sem))) {
+      emit_diagnostic(span,
+                      "C callback parameter type '" + print_type(param_sem) + "' is not supported");
+      return nullptr;
+    }
+    if (param_sem != nullptr && param_sem->kind() == TypeKind::Struct) {
+      needs_struct_abi = true;
+    }
+  }
+  if (!needs_struct_abi) {
+    return dao_fn;
+  }
+
+  auto wrapper_name = std::string(dao_fn->getName()) + ".c_cb";
+  if (auto* existing = module_->getFunction(wrapper_name)) {
+    return existing;
+  }
+  auto sig = build_c_abi_signature(sem_fn->param_types(), ret_sem, span);
+  if (sig.fn_type == nullptr) {
+    return nullptr;
+  }
+  auto* wrapper_fn = llvm::Function::Create(
+      sig.fn_type, llvm::Function::InternalLinkage, wrapper_name, module_.get());
+  apply_c_abi_attrs(wrapper_fn, sig);
+
+  auto* entry = llvm::BasicBlock::Create(ctx_, "entry", wrapper_fn);
+  llvm::IRBuilder<> builder(ctx_);
+  builder.SetInsertPoint(entry);
+
+  auto arg_it = wrapper_fn->arg_begin();
+  llvm::Value* sret_arg = nullptr;
+  if (sig.sret_type != nullptr) {
+    sret_arg = &*arg_it++;
+    sret_arg->setName("sret");
+  }
+
+  std::vector<llvm::Value*> dao_args;
+  dao_args.reserve(sem_fn->param_types().size());
+  for (const auto* param_sem : sem_fn->param_types()) {
+    if (param_sem != nullptr && param_sem->kind() == TypeKind::Struct) {
+      auto* struct_ty = llvm::cast<llvm::StructType>(types_.lower(param_sem));
+      auto coercion = classify_struct_for_c_abi(struct_ty, module_->getDataLayout(), ctx_);
+      if (coercion.indirect) {
+        llvm::Value* byval_ptr = &*arg_it++;
+        dao_args.push_back(builder.CreateLoad(struct_ty, byval_ptr, "byval.load"));
+      } else {
+        auto* tmp = builder.CreateAlloca(struct_ty, nullptr, "uncoerce.arg");
+        for (size_t ci = 0; ci < coercion.coerced_types.size(); ++ci) {
+          uint64_t byte_offset = ci * 8;
+          auto* gep = builder.CreateGEP(
+              builder.getInt8Ty(), tmp, builder.getInt64(byte_offset), "uncoerce.gep");
+          builder.CreateStore(&*arg_it++, gep);
+        }
+        dao_args.push_back(builder.CreateLoad(struct_ty, tmp, "uncoerce.val"));
+      }
+    } else {
+      dao_args.push_back(&*arg_it++);
+    }
+  }
+
+  auto* dao_ret = builder.CreateCall(dao_fn->getFunctionType(), dao_fn, dao_args);
+  if (sret_arg != nullptr) {
+    builder.CreateStore(dao_ret, sret_arg);
+    builder.CreateRetVoid();
+  } else if (sig.fn_type->getReturnType()->isVoidTy()) {
+    builder.CreateRetVoid();
+  } else if (dao_ret->getType() != sig.fn_type->getReturnType()) {
+    auto* tmp = builder.CreateAlloca(dao_ret->getType(), nullptr, "coerce.cb.ret");
+    builder.CreateStore(dao_ret, tmp);
+    builder.CreateRet(builder.CreateLoad(sig.fn_type->getReturnType(), tmp, "coerce.cb.load"));
+  } else {
+    builder.CreateRet(dao_ret);
+  }
+  return wrapper_fn;
+}
+
 auto LlvmBackend::callable_fn_type(const TypeFunction* sem_fn, Span span) -> llvm::FunctionType* {
   if (sem_fn == nullptr) {
     emit_diagnostic(span, "callable value missing function type");
@@ -1494,6 +1684,18 @@ auto LlvmBackend::get_or_create_fn_thunk(const Symbol& sym, const TypeFunction* 
     emit_diagnostic(span, "function not found for thunk: " + std::string(sym.name));
     return nullptr;
   }
+  const bool is_user_extern = extern_signatures_.contains(target_fn->getName().str());
+  if (is_user_extern) {
+    for (const auto* param_sem : sem_fn->param_types()) {
+      if (param_sem != nullptr && param_sem->kind() == TypeKind::Function) {
+        emit_diagnostic(span,
+                        "extern function '" + std::string(sym.name) +
+                            "' with callback parameter cannot be used as a first-class function "
+                            "value");
+        return nullptr;
+      }
+    }
+  }
   auto* thunk_type = callable_fn_type(sem_fn, span);
   if (thunk_type == nullptr) {
     return nullptr;
@@ -1512,20 +1714,28 @@ auto LlvmBackend::get_or_create_fn_thunk(const Symbol& sym, const TypeFunction* 
     forward_args.push_back(&*arg_it);
   }
 
-  auto* call = builder.CreateCall(target_fn->getFunctionType(), target_fn, forward_args);
-  if (thunk_type->getReturnType()->isVoidTy()) {
-    builder.CreateRetVoid();
-  } else if (extern_signatures_.contains(target_fn->getName().str()) &&
-             sem_fn->return_type() != nullptr &&
-             sem_fn->return_type()->kind() == TypeKind::Function &&
-             call->getType()->isPointerTy()) {
-    auto* fat =
-        wrap_c_fn_ptr(builder, call, static_cast<const TypeFunction*>(sem_fn->return_type()), span);
-    if (fat == nullptr) {
+  if (is_user_extern) {
+    auto sig = build_c_abi_signature(sem_fn->param_types(), sem_fn->return_type(), span);
+    if (sig.fn_type == nullptr) {
       thunk_fn->eraseFromParent();
       return nullptr;
     }
-    builder.CreateRet(fat);
+    auto* result = emit_c_abi_call(builder, sig, target_fn, forward_args, sem_fn, span);
+    if (result == nullptr) {
+      thunk_fn->eraseFromParent();
+      return nullptr;
+    }
+    if (thunk_type->getReturnType()->isVoidTy()) {
+      builder.CreateRetVoid();
+    } else {
+      builder.CreateRet(result);
+    }
+    return thunk_fn;
+  }
+
+  auto* call = builder.CreateCall(target_fn->getFunctionType(), target_fn, forward_args);
+  if (thunk_type->getReturnType()->isVoidTy()) {
+    builder.CreateRetVoid();
   } else {
     builder.CreateRet(call);
   }
@@ -1547,6 +1757,28 @@ auto LlvmBackend::wrap_c_fn_ptr(llvm::IRBuilder<>& builder,
 
 auto LlvmBackend::get_or_create_c_fn_adapter(const TypeFunction* sem_fn, Span span)
     -> llvm::Function* {
+  if (sem_fn == nullptr) {
+    emit_diagnostic(span, "missing function type for C function adapter");
+    return nullptr;
+  }
+  const Type* ret_sem = sem_fn->return_type();
+  if (ret_sem != nullptr &&
+      (ret_sem->kind() == TypeKind::Function || LlvmTypeLowering::is_string_type(ret_sem))) {
+    emit_diagnostic(span,
+                    "extern fn return function type '" + print_type(sem_fn) +
+                        "' is not supported at the C ABI boundary");
+    return nullptr;
+  }
+  for (const auto* param_sem : sem_fn->param_types()) {
+    if (param_sem != nullptr &&
+        (param_sem->kind() == TypeKind::Function || LlvmTypeLowering::is_string_type(param_sem))) {
+      emit_diagnostic(span,
+                      "extern fn return function type '" + print_type(sem_fn) +
+                          "' is not supported at the C ABI boundary");
+      return nullptr;
+    }
+  }
+
   auto adapter_name = "__dao.c_fn_adapter." + type_identity_key(sem_fn);
   if (auto* existing = module_->getFunction(adapter_name)) {
     return existing;
@@ -1555,11 +1787,10 @@ auto LlvmBackend::get_or_create_c_fn_adapter(const TypeFunction* sem_fn, Span sp
   if (adapter_type == nullptr) {
     return nullptr;
   }
-  const bool returns_c_fn =
-      sem_fn->return_type() != nullptr && sem_fn->return_type()->kind() == TypeKind::Function;
-  std::vector<llvm::Type*> raw_params(adapter_type->param_begin() + 1, adapter_type->param_end());
-  auto* raw_ret = returns_c_fn ? llvm::PointerType::getUnqual(ctx_) : adapter_type->getReturnType();
-  auto* raw_c_type = llvm::FunctionType::get(raw_ret, raw_params, /*isVarArg=*/false);
+  auto sig = build_c_abi_signature(sem_fn->param_types(), ret_sem, span);
+  if (sig.fn_type == nullptr) {
+    return nullptr;
+  }
 
   auto* adapter_fn = llvm::Function::Create(
       adapter_type, llvm::Function::InternalLinkage, adapter_name, module_.get());
@@ -1575,19 +1806,15 @@ auto LlvmBackend::get_or_create_c_fn_adapter(const TypeFunction* sem_fn, Span sp
   for (; arg_it != adapter_fn->arg_end(); ++arg_it) {
     forward_args.push_back(&*arg_it);
   }
-  auto* call = builder.CreateCall(raw_c_type, c_fn_ptr, forward_args);
+  auto* result = emit_c_abi_call(builder, sig, c_fn_ptr, forward_args, sem_fn, span);
+  if (result == nullptr) {
+    adapter_fn->eraseFromParent();
+    return nullptr;
+  }
   if (adapter_type->getReturnType()->isVoidTy()) {
     builder.CreateRetVoid();
-  } else if (returns_c_fn) {
-    auto* fat =
-        wrap_c_fn_ptr(builder, call, static_cast<const TypeFunction*>(sem_fn->return_type()), span);
-    if (fat == nullptr) {
-      adapter_fn->eraseFromParent();
-      return nullptr;
-    }
-    builder.CreateRet(fat);
   } else {
-    builder.CreateRet(call);
+    builder.CreateRet(result);
   }
   return adapter_fn;
 }
@@ -1823,144 +2050,94 @@ auto LlvmBackend::lower_call(const MirCall& p, const MirInst& inst, FunctionStat
     return true;
   }
 
-  const bool callee_is_user_extern = extern_signatures_.contains(callee_fn->getName().str());
+  if (extern_signatures_.contains(callee_fn->getName().str())) {
+    const TypeFunction* callee_sem_fn = nullptr;
+    auto callee_ty_it = state.value_types.find(p.callee.id);
+    if (callee_ty_it != state.value_types.end() && callee_ty_it->second != nullptr &&
+        callee_ty_it->second->kind() == TypeKind::Function) {
+      callee_sem_fn = static_cast<const TypeFunction*>(callee_ty_it->second);
+    }
 
-  std::vector<llvm::Value*> args;
-  // Track the LLVM param index (which may diverge from MIR arg index
-  // due to sret insertion or struct param expansion).
-  unsigned llvm_param_idx = 0;
+    std::vector<llvm::Value*> dao_args;
+    std::vector<const Type*> param_sem_types;
+    if (p.args != nullptr) {
+      dao_args.reserve(p.args->size());
+      param_sem_types.reserve(p.args->size());
+      for (size_t i = 0; i < p.args->size(); ++i) {
+        const Type* arg_sem =
+            (callee_sem_fn != nullptr && i < callee_sem_fn->param_types().size())
+                ? callee_sem_fn->param_types()[i]
+                : (state.value_types.contains((*p.args)[i].id) ? state.value_types[(*p.args)[i].id]
+                                                               : nullptr);
+        param_sem_types.push_back(arg_sem);
 
-  // Detect if the return type was ABI-coerced from a struct.
-  // If the callee returns void but MIR expects a struct, there may be
-  // an sret pointer as the first parameter.
-  auto* expected_ret = inst.type != nullptr ? types_.lower(inst.type) : nullptr;
-  llvm::AllocaInst* sret_alloca = nullptr;
-  if (expected_ret != nullptr && llvm::isa<llvm::StructType>(expected_ret) &&
-      callee_fn->getReturnType()->isVoidTy() &&
-      callee_fn->arg_size() > 0 &&
-      callee_fn->hasParamAttribute(0, llvm::Attribute::StructRet)) {
-    // Indirect struct return: allocate space and pass as first arg.
-    sret_alloca = entry_alloca(state, expected_ret, "sret");
-    args.push_back(sret_alloca);
-    llvm_param_idx = 1;
-  }
-
-  if (p.args != nullptr) {
-    for (size_t i = 0; i < p.args->size(); ++i) {
-      // C ABI function pointer callback: pass the named Dao function's
-      // address directly as `ptr` (CONTRACT_C_ABI_INTEROP.md §4.4.4).
-      if (callee_is_user_extern) {
         auto arg_fn_it = state.callees.fn_ref_symbols.find((*p.args)[i].id);
-        if (arg_fn_it != state.callees.fn_ref_symbols.end()) {
+        if (arg_fn_it != state.callees.fn_ref_symbols.end() && arg_sem != nullptr &&
+            arg_sem->kind() == TypeKind::Function) {
           auto* cb_fn = module_->getFunction(fn_name(*arg_fn_it->second));
           if (cb_fn == nullptr) {
             emit_diagnostic(inst.span, "extern callback function not found");
             return false;
           }
-          args.push_back(cb_fn);
-          llvm_param_idx++;
+          auto* cb_wrapped = get_or_create_c_callback_wrapper(
+              cb_fn, static_cast<const TypeFunction*>(arg_sem), inst.span);
+          if (cb_wrapped == nullptr) {
+            return false;
+          }
+          dao_args.push_back(cb_wrapped);
           continue;
         }
+        auto* arg_val = get_value((*p.args)[i], state);
+        if (arg_val == nullptr) {
+          emit_diagnostic(inst.span, "call argument not found");
+          return false;
+        }
+        dao_args.push_back(arg_val);
       }
+    }
+
+    const Type* ret_sem = callee_sem_fn != nullptr ? callee_sem_fn->return_type() : inst.type;
+    auto sig = build_c_abi_signature(param_sem_types, ret_sem, inst.span);
+    if (sig.fn_type == nullptr) {
+      return false;
+    }
+    CAbiSignature actual_sig = sig;
+    actual_sig.fn_type = callee_fn->getFunctionType();
+    auto* result =
+        emit_c_abi_call(*state.builder, actual_sig, callee_fn, dao_args, callee_sem_fn, inst.span);
+    if (result == nullptr) {
+      return false;
+    }
+    if (ret_sem != nullptr && ret_sem->kind() != TypeKind::Void && inst.result.valid()) {
+      state.values[inst.result.id] = result;
+      state.value_types[inst.result.id] = inst.type;
+    }
+    return true;
+  }
+
+  std::vector<llvm::Value*> args;
+  if (p.args != nullptr) {
+    for (size_t i = 0; i < p.args->size(); ++i) {
       auto* arg_val = get_value((*p.args)[i], state);
       if (arg_val == nullptr) {
         emit_diagnostic(inst.span, "call argument not found");
         return false;
       }
-      // String → pointer coercion.
-      if (llvm_param_idx < callee_fn->getFunctionType()->getNumParams()) {
-        auto* param_type = callee_fn->getFunctionType()->getParamType(llvm_param_idx);
+      if (i < callee_fn->getFunctionType()->getNumParams()) {
+        auto* param_type = callee_fn->getFunctionType()->getParamType(static_cast<unsigned>(i));
         if (param_type->isPointerTy() && arg_val->getType() == types_.string_type()) {
           auto* tmp = entry_alloca(state, types_.string_type(), "str.arg");
           state.builder->CreateStore(arg_val, tmp);
           arg_val = tmp;
-          args.push_back(arg_val);
-          llvm_param_idx++;
-          continue;
         }
-      }
-      // Struct ABI coercion: the arg is a struct but the callee expects
-      // coerced scalar types (from classify_struct_for_c_abi).
-      if (arg_val->getType()->isStructTy() &&
-          llvm_param_idx < callee_fn->getFunctionType()->getNumParams() &&
-          !callee_fn->getFunctionType()->getParamType(llvm_param_idx)->isStructTy()) {
-        auto* struct_ty = llvm::cast<llvm::StructType>(arg_val->getType());
-        auto coercion = classify_struct_for_c_abi(
-            struct_ty, module_->getDataLayout(), ctx_);
-        if (coercion.indirect) {
-          // Indirect: alloca + store + pass pointer.
-          auto* tmp = entry_alloca(state, struct_ty, "byval.arg");
-          state.builder->CreateStore(arg_val, tmp);
-          args.push_back(tmp);
-          llvm_param_idx++;
-        } else {
-          // Direct: store struct to memory, load as coerced types.
-          auto* tmp = entry_alloca(state, struct_ty, "coerce.arg");
-          state.builder->CreateStore(arg_val, tmp);
-          for (size_t ci = 0; ci < coercion.coerced_types.size(); ++ci) {
-            auto* coerced_ty = coercion.coerced_types[ci];
-            // GEP into the alloca at the eightbyte offset, bitcast-load.
-            uint64_t byte_offset = ci * 8;
-            auto* gep = state.builder->CreateGEP(
-                state.builder->getInt8Ty(), tmp,
-                state.builder->getInt64(byte_offset), "coerce.gep");
-            auto* loaded = state.builder->CreateLoad(coerced_ty, gep, "coerce.load");
-            args.push_back(loaded);
-            llvm_param_idx++;
-          }
-        }
-        continue;
-      }
-      // Struct ABI coercion: callee expects pointer with byval attribute.
-      if (arg_val->getType()->isStructTy() &&
-          llvm_param_idx < callee_fn->getFunctionType()->getNumParams() &&
-          callee_fn->hasParamAttribute(llvm_param_idx, llvm::Attribute::ByVal)) {
-        auto* tmp = entry_alloca(state, arg_val->getType(), "byval.arg");
-        state.builder->CreateStore(arg_val, tmp);
-        args.push_back(tmp);
-        llvm_param_idx++;
-        continue;
       }
       args.push_back(arg_val);
-      llvm_param_idx++;
     }
   }
 
-  auto* call = state.builder->CreateCall(callee_fn->getFunctionType(),
-                                          callee_fn, args);
-
-  // Handle return value.
-  if (sret_alloca != nullptr && inst.result.valid()) {
-    // Indirect return: load from the sret alloca.
-    auto* loaded = state.builder->CreateLoad(expected_ret, sret_alloca, "sret.load");
-    state.values[inst.result.id] = loaded;
-    state.value_types[inst.result.id] = inst.type;
-  } else if (!callee_fn->getReturnType()->isVoidTy() && inst.result.valid()) {
-    // User `extern fn` returning a C function pointer (`ptr`): wrap in a
-    // `%dao.fn` pair `{ ptr @c_adapter, ptr %raw_c_fn }` so Dao callers
-    // invoke it with the uniform fat-callable convention.
-    if (callee_is_user_extern && inst.type != nullptr && inst.type->kind() == TypeKind::Function &&
-        call->getType()->isPointerTy()) {
-      auto* fat = wrap_c_fn_ptr(
-          *state.builder, call, static_cast<const TypeFunction*>(inst.type), inst.span);
-      if (fat == nullptr) {
-        return false;
-      }
-      state.values[inst.result.id] = fat;
-      state.value_types[inst.result.id] = inst.type;
-      return true;
-    }
-    // Check if the return was ABI-coerced from a struct.
-    if (expected_ret != nullptr && llvm::isa<llvm::StructType>(expected_ret) &&
-        call->getType() != expected_ret) {
-      // Direct coerced return: store coerced value, load as struct.
-      auto* tmp = entry_alloca(state, expected_ret, "coerce.ret");
-      state.builder->CreateStore(call, tmp);
-      auto* loaded = state.builder->CreateLoad(expected_ret, tmp, "coerce.ret.load");
-      state.values[inst.result.id] = loaded;
-    } else {
-      state.values[inst.result.id] = call;
-    }
+  auto* call = state.builder->CreateCall(callee_fn->getFunctionType(), callee_fn, args);
+  if (!callee_fn->getReturnType()->isVoidTy() && inst.result.valid()) {
+    state.values[inst.result.id] = call;
     state.value_types[inst.result.id] = inst.type;
   }
   return true;

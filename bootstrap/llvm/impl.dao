@@ -694,6 +694,79 @@ class BsProgram:
   shared_type_names: HashMap<i64>
   diverging_syms: HashMap<i64>
 
+fn bs_mir_block_diverges_raw(mir_nodes: Vector<MirNode>, mir_idx: Vector<i64>, block_node_idx: i64, diverging: HashMap<i64>): bool
+  match mir_nodes.get(block_node_idx):
+    MirNode::MirBlock(block_id, inst_list_lp, inst_count):
+      let insts_raw: Vector<i64> = read_mir_list(mir_idx, inst_list_lp)
+      let ii: i64 = to_i64(0)
+      while ii < insts_raw.length():
+        match mir_nodes.get(insts_raw.get(ii)):
+          MirNode::MirCall(callee, alp, ac, ti, sb):
+            match mir_nodes.get(callee):
+              MirNode::MirFnRef(csym, cti):
+                if diverging.contains(i64_to_string(csym)):
+                  return true
+        ii = ii + to_i64(1)
+  return false
+
+fn bs_mir_void_fn_diverges(input: MirBackendInput, ret_type: i64, block_list_lp: i64, diverging: HashMap<i64>): bool
+  if ret_type < 0 or ret_type >= input.types.length():
+    return false
+  let is_void: bool = false
+  match input.types.get(ret_type).kind:
+    TypeKind::TVoid:
+      is_void = true
+  if is_void == false:
+    return false
+  let fblocks: Vector<i64> = read_mir_list(input.mir.mir_idx, block_list_lp)
+  if fblocks.length() == to_i64(0):
+    return false
+  let block_pos: HashMap<i64> = HashMap<i64>::new()
+  let bi: i64 = to_i64(0)
+  while bi < fblocks.length():
+    block_pos = block_pos.set(i64_to_string(fblocks.get(bi)), bi)
+    bi = bi + to_i64(1)
+  // Reject any function with backward/self CFG edges (loops do not definitely diverge).
+  let bj: i64 = to_i64(0)
+  while bj < fblocks.length():
+    match input.mir.mir_nodes.get(fblocks.get(bj)):
+      MirNode::MirBlock(bid, ilp, ic):
+        if bs_mir_block_diverges_raw(input.mir.mir_nodes, input.mir.mir_idx, fblocks.get(bj), diverging) == false:
+          let insts: Vector<i64> = read_mir_list(input.mir.mir_idx, ilp)
+          let ii: i64 = to_i64(0)
+          while ii < insts.length():
+            match input.mir.mir_nodes.get(insts.get(ii)):
+              MirNode::MirBr(tb):
+                if hm_get_or(block_pos, i64_to_string(tb), to_i64(-1)) <= bj:
+                  return false
+              MirNode::MirCondBr(c, tb1, tb2):
+                if hm_get_or(block_pos, i64_to_string(tb1), to_i64(-1)) <= bj:
+                  return false
+                if hm_get_or(block_pos, i64_to_string(tb2), to_i64(-1)) <= bj:
+                  return false
+            ii = ii + to_i64(1)
+    bj = bj + to_i64(1)
+  let dummy_prog: BsProgram = BsProgram(input.source.module_graph, to_i64(-1), HashMap<i64>::new(), HashMap<i64>::new(), diverging)
+  let dummy_bs: BS = BS(BsInput(input.mir.mir_nodes, input.mir.mir_idx, input.symbols, input.types, input.type_info, BsSource(input.source.toks, input.source.src, dummy_prog)), BsOutput(Vector<LlGlobal>::new(), to_i64(0), Vector<LlFunction>::new(), Vector<LlFunction>::new(), Vector<Diagnostic>::new(), to_i64(0)), BsDecls(Vector<string>::new(), Vector<CallArgs>::new(), Vector<LlStructDef>::new()), bs_tables_empty(), bs_function_empty(), bs_index_empty())
+  let rblocks: Vector<i64> = mir_reachable_blocks(dummy_bs, fblocks)
+  if rblocks.length() == to_i64(0):
+    return false
+  let ri: i64 = to_i64(0)
+  while ri < rblocks.length():
+    let rb: i64 = rblocks.get(ri)
+    if bs_mir_block_diverges_raw(input.mir.mir_nodes, input.mir.mir_idx, rb, diverging) == false:
+      match input.mir.mir_nodes.get(rb):
+        MirNode::MirBlock(bid2, ilp2, ic2):
+          let rinsts: Vector<i64> = read_mir_list(input.mir.mir_idx, ilp2)
+          let rii: i64 = to_i64(0)
+          while rii < rinsts.length():
+            match input.mir.mir_nodes.get(rinsts.get(rii)):
+              MirNode::MirReturn(rv, rhv):
+                return false
+            rii = rii + to_i64(1)
+    ri = ri + to_i64(1)
+  return true
+
 fn bs_program_of(input: MirBackendInput): BsProgram
   let modules: Vector<graph::ModuleEntry> = input.source.module_graph.modules
   let externs: HashMap<i64> = HashMap<i64>::new()
@@ -705,29 +778,27 @@ fn bs_program_of(input: MirBackendInput): BsProgram
         if is_extern_i > to_i64(0):
           externs = externs.set(i64_to_string(fn_sym), to_i64(1))
           if fn_sym >= 0 and fn_sym < input.symbols.length():
-            if input.symbols.get(fn_sym).name == "__dao_panic":
-              diverging = diverging.set(i64_to_string(fn_sym), to_i64(1))
+            let sym: Symbol = input.symbols.get(fn_sym)
+            let is_pre: bool = false
+            if sym.owner_module_id >= 0 and sym.owner_module_id < modules.length():
+              is_pre = modules.get(sym.owner_module_id).is_prelude
+            if is_pre:
+              if sym.name == "__dao_panic" or sym.name == "panic":
+                diverging = diverging.set(i64_to_string(fn_sym), to_i64(1))
     ni = ni + to_i64(1)
-  let nj: i64 = to_i64(0)
-  while nj < input.mir.mir_nodes.length():
-    match input.mir.mir_nodes.get(nj):
-      MirNode::MirFunction(fn_sym, ret_type, param_count, local_list_lp, local_count, block_list_lp, block_count, is_extern_i):
-        if is_extern_i == to_i64(0) and fn_sym >= 0 and block_count == to_i64(1):
-          let fblocks: Vector<i64> = read_mir_list(input.mir.mir_idx, block_list_lp)
-          if fblocks.length() == to_i64(1):
-            match input.mir.mir_nodes.get(fblocks.get(to_i64(0))):
-              MirNode::MirBlock(bid, ilp, ic):
-                let finsts: Vector<i64> = read_mir_list(input.mir.mir_idx, ilp)
-                let fii: i64 = to_i64(0)
-                while fii < finsts.length():
-                  match input.mir.mir_nodes.get(finsts.get(fii)):
-                    MirNode::MirCall(fcallee, falp, fac, fti, fsb):
-                      match input.mir.mir_nodes.get(fcallee):
-                        MirNode::MirFnRef(csym, cti):
-                          if diverging.contains(i64_to_string(csym)):
-                            diverging = diverging.set(i64_to_string(fn_sym), to_i64(1))
-                  fii = fii + to_i64(1)
-    nj = nj + to_i64(1)
+  let div_changed: bool = true
+  while div_changed:
+    div_changed = false
+    let nj: i64 = to_i64(0)
+    while nj < input.mir.mir_nodes.length():
+      match input.mir.mir_nodes.get(nj):
+        MirNode::MirFunction(fn_sym, ret_type, param_count, local_list_lp, local_count, block_list_lp, block_count, is_extern_i):
+          if is_extern_i == to_i64(0) and fn_sym >= 0:
+            if diverging.contains(i64_to_string(fn_sym)) == false:
+              if bs_mir_void_fn_diverges(input, ret_type, block_list_lp, diverging):
+                diverging = diverging.set(i64_to_string(fn_sym), to_i64(1))
+                div_changed = true
+      nj = nj + to_i64(1)
   // The entry: the one module outside the prelude that defines `main`.
   // An extern `main` is C's, so it selects nothing.
   let entry: i64 = to_i64(-1)
@@ -922,11 +993,40 @@ fn bs_mark_extern(bs: BS, name: string, signature: string): BS
 // does not lower: such an extern fails the module rather than calling
 // C with the wrong register layout.  A string is a pointer to its
 // `%dao.string` (the runtime's own ABI).
+fn bs_check_c_fn_ptr_sig(bs: BS, extern_name: string, fn_ti: i64): BS
+  if fn_ti < 0 or fn_ti >= bs.input.types.length():
+    return bs
+  let ft: DaoType = bs.input.types.get(fn_ti)
+  match ll_type_of(bs, ft.ret_type):
+    LlType::LlStruct:
+      return bs_error(bs, "bootstrap llvm backend: extern '" + extern_name + "' uses a C function pointer returning a class or enum by value; its C ABI coercion is not lowered")
+    LlType::LlFn:
+      return bs_error(bs, "extern fn higher-order function type is not supported at the C ABI boundary")
+    LlType::LlStr:
+      return bs_error(bs, "extern fn function type with 'string' is not supported at the C ABI boundary")
+  let pi: i64 = to_i64(0)
+  while pi < ft.info_count:
+    let pti: i64 = bs.input.type_info.get(ft.info_lp + pi)
+    match ll_type_of(bs, pti):
+      LlType::LlStruct:
+        return bs_error(bs, "bootstrap llvm backend: extern '" + extern_name + "' uses a C function pointer taking a class or enum by value; its C ABI coercion is not lowered")
+      LlType::LlFn:
+        return bs_error(bs, "extern fn higher-order function type is not supported at the C ABI boundary")
+      LlType::LlStr:
+        return bs_error(bs, "extern fn function type with 'string' is not supported at the C ABI boundary")
+    pi = pi + to_i64(1)
+  return bs
+
 fn bs_check_extern_scalars(bs: BS, name: string, ret_type: i64, locals_raw: Vector<i64>, param_count: i64): BS
+  let raw_name: string = llvm_name_body(name)
+  if starts_with(raw_name, "__"):
+    return bs
   let what: string = ""
   match ll_type_of(bs, ret_type):
     LlType::LlStruct:
       what = "returns"
+    LlType::LlFn:
+      bs = bs_check_c_fn_ptr_sig(bs, raw_name, ret_type)
   let i: i64 = to_i64(0)
   while i < param_count and i < locals_raw.length():
     match bs.input.mir_nodes.get(locals_raw.get(i)):
@@ -934,10 +1034,12 @@ fn bs_check_extern_scalars(bs: BS, name: string, ret_type: i64, locals_raw: Vect
         match ll_type_of(bs, ltype_idx):
           LlType::LlStruct:
             what = "takes"
+          LlType::LlFn:
+            bs = bs_check_c_fn_ptr_sig(bs, raw_name, ltype_idx)
     i = i + to_i64(1)
   if what == "":
     return bs
-  return bs_error(bs, "bootstrap llvm backend: extern '" + llvm_name_body(name) + "' " + what + " a class or enum by value; its C ABI coercion is not lowered")
+  return bs_error(bs, "bootstrap llvm backend: extern '" + raw_name + "' " + what + " a class or enum by value; its C ABI coercion is not lowered")
 
 // An extern's Dao signature by type identity -- its result's and each
 // parameter's type index -- as the host compares them: `*i32` and
@@ -2695,8 +2797,18 @@ fn bs_get_or_create_fn_thunk(bs: BS, sym: i64, type_idx: i64): FreshR
   let thunk_name: string = llvm_suffixed(target_name, ".thunk")
   if bs.index.thunks.contains(thunk_name):
     return FreshR(bs, thunk_name)
-  bs.index.thunks = bs.index.thunks.set(thunk_name, to_i64(1))
   let ft: DaoType = bs.input.types.get(type_idx)
+  let is_ext_target: bool = bs.input.source.program.extern_syms.contains(i64_to_string(sym))
+  if is_ext_target:
+    let raw_target: string = llvm_name_body(target_name)
+    if starts_with(raw_target, "__") == false:
+      let cpi: i64 = to_i64(0)
+      while cpi < ft.info_count:
+        match ll_type_of(bs, bs.input.type_info.get(ft.info_lp + cpi)):
+          LlType::LlFn:
+            return FreshR(bs_error(bs, "extern function '" + raw_target + "' with callback parameter cannot be used as a first-class function value"), thunk_name)
+        cpi = cpi + to_i64(1)
+  bs.index.thunks = bs.index.thunks.set(thunk_name, to_i64(1))
   let ret_ti: i64 = ft.ret_type
   bs = bs_define_aggregate(bs, ret_ti)
   let ret_ty_text: string = bs_ty(bs, ret_ti)
@@ -2718,7 +2830,7 @@ fn bs_get_or_create_fn_thunk(bs: BS, sym: i64, type_idx: i64): FreshR
   let bundle_idx: i64 = bs.decls.call_arg_bundles.length()
   bs.decls.call_arg_bundles = bs.decls.call_arg_bundles.push(arg_entry)
   let is_ext_fn_ret: bool = false
-  if bs.input.source.program.extern_syms.contains(i64_to_string(sym)):
+  if is_ext_target:
     match ll_type_of(bs, ret_ti):
       LlType::LlFn:
         is_ext_fn_ret = true
@@ -2745,15 +2857,14 @@ fn bs_get_or_create_c_fn_adapter(bs: BS, type_idx: i64): FreshR
   let adapter_name: string = llvm_global_name("__dao.c_fn_adapter." + i64_to_string(type_idx))
   if bs.index.thunks.contains(adapter_name):
     return FreshR(bs, adapter_name)
+  bs = bs_check_c_fn_ptr_sig(bs, "c_fn_adapter", type_idx)
+  if bs.out.had_error > to_i64(0):
+    return FreshR(bs, adapter_name)
   bs.index.thunks = bs.index.thunks.set(adapter_name, to_i64(1))
   let ft: DaoType = bs.input.types.get(type_idx)
   let ret_ti: i64 = ft.ret_type
   bs = bs_define_aggregate(bs, ret_ti)
   let ret_ty_text: string = bs_ty(bs, ret_ti)
-  let returns_c_fn: bool = false
-  match ll_type_of(bs, ret_ti):
-    LlType::LlFn:
-      returns_c_fn = true
   let a_params: Vector<LlParam> = Vector<LlParam>::new()
   a_params = a_params.push(LlParam("%c_fn", "ptr"))
   let arg_entry: CallArgs = CallArgs(Vector<string>::new(), Vector<string>::new())
@@ -2762,8 +2873,6 @@ fn bs_get_or_create_c_fn_adapter(bs: BS, type_idx: i64): FreshR
     let pti: i64 = bs.input.type_info.get(ft.info_lp + pi)
     bs = bs_define_aggregate(bs, pti)
     let p_ty: string = bs_ty(bs, pti)
-    if p_ty == "%dao.string":
-      p_ty = "ptr"
     let pname: string = "%arg" + i64_to_string(pi)
     a_params = a_params.push(LlParam(pname, p_ty))
     arg_entry.arg_texts = arg_entry.arg_texts.push(pname)
@@ -2776,16 +2885,8 @@ fn bs_get_or_create_c_fn_adapter(bs: BS, type_idx: i64): FreshR
     a_insts = a_insts.push(LlInst(LlInstKind::LlCall(callee = "%c_fn", arg_list_lp = bundle_idx, arg_count = ft.info_count, ret_ty_text = "void"), ""))
     a_insts = a_insts.push(LlInst(LlInstKind::LlRet(value_text = "", value_ty_text = "void", has_value = to_i64(0)), ""))
   else:
-    if returns_c_fn:
-      let nested: FreshR = bs_get_or_create_c_fn_adapter(bs, ret_ti)
-      bs = nested.bs
-      a_insts = a_insts.push(LlInst(LlInstKind::LlCall(callee = "%c_fn", arg_list_lp = bundle_idx, arg_count = ft.info_count, ret_ty_text = "ptr"), "%0"))
-      a_insts = a_insts.push(LlInst(LlInstKind::LlText(rhs = "insertvalue %dao.fn undef, ptr " + nested.name + ", 0"), "%1"))
-      a_insts = a_insts.push(LlInst(LlInstKind::LlText(rhs = "insertvalue %dao.fn %1, ptr %0, 1"), "%2"))
-      a_insts = a_insts.push(LlInst(LlInstKind::LlRet(value_text = "%2", value_ty_text = "%dao.fn", has_value = to_i64(1)), ""))
-    else:
-      a_insts = a_insts.push(LlInst(LlInstKind::LlCall(callee = "%c_fn", arg_list_lp = bundle_idx, arg_count = ft.info_count, ret_ty_text = ret_ty_text), "%0"))
-      a_insts = a_insts.push(LlInst(LlInstKind::LlRet(value_text = "%0", value_ty_text = ret_ty_text, has_value = to_i64(1)), ""))
+    a_insts = a_insts.push(LlInst(LlInstKind::LlCall(callee = "%c_fn", arg_list_lp = bundle_idx, arg_count = ft.info_count, ret_ty_text = ret_ty_text), "%0"))
+    a_insts = a_insts.push(LlInst(LlInstKind::LlRet(value_text = "%0", value_ty_text = ret_ty_text, has_value = to_i64(1)), ""))
   let a_blocks: Vector<LlBlock> = Vector<LlBlock>::new()
   bs.out.functions = bs.out.functions.push(LlFunction(adapter_name, ret_ty_text, a_params, a_blocks.push(LlBlock("entry", a_insts)), to_i64(0)))
   return FreshR(bs, adapter_name)
