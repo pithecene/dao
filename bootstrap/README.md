@@ -340,7 +340,7 @@ expressions, break/continue, LLVM C API integration,
 task bootstrap-test   # every suite, then validate_ir over bootstrap/llvm/out
 ```
 
-The `bootstrap-test` task in `Taskfile.yml` holds the suite's source list.  The suite writes its artifacts under `bootstrap/llvm/out`, which Git ignores, and the task creates that directory first.
+The `bootstrap-test` task in `Taskfile.yml` holds the suite's source list.  The suite writes its artifacts under `bootstrap/llvm/out`, which Git ignores, and the task clears and recreates that directory first.
 
 The suite writes the IR of every fixture it lowers to
 `bootstrap/llvm/out/<test>.ll` by default, or to `<ir-dir>/<test>.ll`
