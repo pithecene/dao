@@ -1,4 +1,11 @@
 module bootstrap::driver_main
+
+import bootstrap::lexer
+import bootstrap::parser
+import bootstrap::graph
+import bootstrap::base
+import bootstrap::resolver
+
 // Entry point for the bootstrap compiler driver. Reads an explicit
 // manifest path from the command line, validates every directive and
 // input file, lowers the program to textual LLVM IR, and writes the

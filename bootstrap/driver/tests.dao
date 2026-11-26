@@ -1,4 +1,7 @@
-module bootstrap::driver_tests
+module bootstrap::driver::tests
+
+import bootstrap::graph
+
 // Contract tests for bootstrap driver CLI argument parsing, manifest
 // grammar validation, duplicate detection, and non-trapping file loads.
 

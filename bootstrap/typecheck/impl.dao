@@ -1,19 +1,21 @@
 module bootstrap::typecheck
+
+import bootstrap::lexer
+import bootstrap::parser
+import bootstrap::graph
+import bootstrap::base
+import bootstrap::resolver
+
 // =========================================================================
 // Section 33: Type checker data structures
 // =========================================================================
 //
 // Bootstrap type checker — Task 23.
 //
-// This file is a FRAGMENT: it is assembled after shared/base.dao and
-// resolver/impl.dao.  It must NOT contain any token model, lexer,
-// parser, or resolver code — those come from the preceding files.
-//
-// Assembly:
-//   cat bootstrap/shared/base.dao \
-//       bootstrap/resolver/impl.dao \
-//       bootstrap/typecheck/impl.dao \
-//       > bootstrap/typecheck/typecheck.gen.dao
+// Imports `bootstrap::lexer`, `bootstrap::parser`, `bootstrap::graph`,
+// `bootstrap::base`, and `bootstrap::resolver` as real modules; still
+// assembled ahead of downstream unextracted passes (`hir`, `mir`, `llvm`,
+// `driver`) via `bootstrap/assemble.sh`.
 //
 // Covered here: concepts, `extend`, derived conformance with the host's
 // module visibility, method dispatch by the receiver's type (a class's
@@ -58,13 +60,13 @@ class TC:
   idx_data: Vector<i64>
   toks: Vector<lexer::Token>
   src: string
-  symbols: Vector<Symbol>
-  scopes: Vector<Scope>
+  symbols: Vector<resolver::Symbol>
+  scopes: Vector<resolver::Scope>
   uses_map: HashMap<i64>         // program-level uses_key(file_id, tok_idx) → sym_idx
   file_id: i64                   // module-level file provenance (-1 for dummy)
   concept_bindings: HashMap<i64> // program-level extend_binding_key → concept sym_idx
   module_id: i64                 // module identity for owner_module_id filtering (D2)
-  exports: ExportTables          // cross-module export lookup (D4)
+  exports: resolver::ExportTables          // cross-module export lookup (D4)
 
 // Mutable type checker state — threaded through all operations.
 // The context of the function body being checked: what a `return`,
@@ -80,7 +82,7 @@ class CheckCtx:
 
 class TS:
   tc: TC
-  types: Vector<DaoType>
+  types: Vector<base::DaoType>
   type_info: Vector<i64>
   sym_types: Vector<i64>
   diags: Vector<Diagnostic>
@@ -107,29 +109,29 @@ class Registry:
   variant_set: HashMap<i64>     // program-wide variant registry, keyed by name (see tc_pass1)
   conform: Conformance          // conformance state (explicit extends, derived concepts)
   methods: HashMap<i64>         // method dispatch by owner type and name (dispatch_key_*), filled by tc_bind_self
-  index: ProgramIndex           // the resolved program's declaration indexes
+  index: base::ProgramIndex           // the resolved program's declaration indexes
   made: MadeTypes               // the types this program made once and shares (see MadeTypes)
 
 
 // The registries for a resolved program: the declaration indexes
 // (ProgramIndex) built in one scan of the symbols, every accumulating
 // registry empty.
-fn registry_new(symbols: Vector<Symbol>, modules: Vector<graph::ModuleEntry>): Registry
+fn registry_new(symbols: Vector<resolver::Symbol>, modules: Vector<graph::ModuleEntry>): Registry
   let type_syms: HashMap<i64> = HashMap<i64>::new()
   let callables: HashMap<i64> = HashMap<i64>::new()
   let members: HashMap<i64> = HashMap<i64>::new()
   let si: i64 = 0
   while si < symbols.length():
-    let sym: Symbol = symbols.get(si)
-    let kind: string = symbol_kind_name(sym.kind)
+    let sym: resolver::Symbol = symbols.get(si)
+    let kind: string = resolver::symbol_kind_name(sym.kind)
     if kind == "Type":
-      type_syms = type_syms.set(decl_key(sym.owner_module_id, sym.decl_node), si)
+      type_syms = type_syms.set(base::decl_key(sym.owner_module_id, sym.decl_node), si)
     if is_method_symbol(sym):
-      callables = callables.set(decl_key(sym.owner_module_id, sym.decl_node), si)
+      callables = callables.set(base::decl_key(sym.owner_module_id, sym.decl_node), si)
     if kind == "Param" or kind == "Field":
-      members = members.set(member_key(sym.owner_module_id, sym.decl_node, kind, sym.name), si)
+      members = members.set(base::member_key(sym.owner_module_id, sym.decl_node, kind, sym.name), si)
     if kind == "Local":
-      members = members.set(member_key(sym.owner_module_id, sym.decl_node, kind, ""), si)
+      members = members.set(base::member_key(sym.owner_module_id, sym.decl_node, kind, ""), si)
     si = si + 1
   let preludes: HashMap<i64> = HashMap<i64>::new()
   let mi: i64 = 0
@@ -138,7 +140,7 @@ fn registry_new(symbols: Vector<Symbol>, modules: Vector<graph::ModuleEntry>): R
     if me.is_prelude:
       preludes = preludes.set(i64_to_string(me.module_id), to_i64(1))
     mi = mi + 1
-  return Registry(HashMap<i64>::new(), HashMap<i64>::new(), conformance_empty(), HashMap<i64>::new(), ProgramIndex(type_syms, callables, members, preludes), MadeTypes(HashMap<i64>::new(), HashMap<i64>::new(), Vector<i64>::new(), HashMap<i64>::new(), Vector<i64>::new()))
+  return Registry(HashMap<i64>::new(), HashMap<i64>::new(), conformance_empty(), HashMap<i64>::new(), base::ProgramIndex(type_syms, callables, members, preludes), MadeTypes(HashMap<i64>::new(), HashMap<i64>::new(), Vector<i64>::new(), HashMap<i64>::new(), Vector<i64>::new()))
 
 fn conformance_empty(): Conformance
   return Conformance(HashMap<i64>::new(), Vector<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new())
@@ -146,7 +148,7 @@ fn conformance_empty(): Conformance
 // The registries with nothing declared: for a state that checks no
 // declarations (builtin seeding).
 fn registry_empty(): Registry
-  return registry_new(Vector<Symbol>::new(), Vector<graph::ModuleEntry>::new())
+  return registry_new(Vector<resolver::Symbol>::new(), Vector<graph::ModuleEntry>::new())
 
 fn reg_with_expr_types(rg: Registry, m: HashMap<i64>): Registry
   return Registry(m, rg.variant_set, rg.conform, rg.methods, rg.index, rg.made)
@@ -185,24 +187,24 @@ fn reg_with_in_progress(rg: Registry, in_progress: Vector<i64>): Registry
 // checked introduces (a class, enum, alias, or concept), or -1 — a
 // constant-time read of the program's index.
 fn type_sym_of_decl(ts: TS, decl_idx: i64): i64
-  return hm_get_or(ts.reg.index.type_syms, decl_key(ts.tc.module_id, decl_idx), to_i64(-1))
+  return base::hm_get_or(ts.reg.index.type_syms, base::decl_key(ts.tc.module_id, decl_idx), to_i64(-1))
 
 // The callable symbol the declaration at `decl_idx` of the module being
 // checked introduces (a free function, a class's method, an extend's
 // method), or -1 — a constant-time read of the program's index.
 fn callable_sym_of_decl(ts: TS, decl_idx: i64): i64
-  return hm_get_or(ts.reg.index.callables, decl_key(ts.tc.module_id, decl_idx), to_i64(-1))
+  return base::hm_get_or(ts.reg.index.callables, base::decl_key(ts.tc.module_id, decl_idx), to_i64(-1))
 
 // A member symbol of the declaration at `decl_idx` of module `module_id`
 // — a "Param" or "Field" by name, a "Local" by kind — or -1: a
 // constant-time read of the program's index, shared with HIR.
-fn member_sym_of(index: ProgramIndex, module_id: i64, decl_idx: i64, kind: string, name: string): i64
-  return hm_get_or(index.members, member_key(module_id, decl_idx, kind, name), to_i64(-1))
+fn member_sym_of(index: base::ProgramIndex, module_id: i64, decl_idx: i64, kind: string, name: string): i64
+  return base::hm_get_or(index.members, base::member_key(module_id, decl_idx, kind, name), to_i64(-1))
 
 // A fresh checker state over a module (`tc`) and the accumulated type
 // tables, with no diagnostics and no body context yet.  The one place a
 // TS is built field by field; every other site goes through here.
-fn ts_new(tc: TC, types: Vector<DaoType>, type_info: Vector<i64>, sym_types: Vector<i64>, reg: Registry): TS
+fn ts_new(tc: TC, types: Vector<base::DaoType>, type_info: Vector<i64>, sym_types: Vector<i64>, reg: Registry): TS
   return TS(tc, types, type_info, sym_types, Vector<Diagnostic>::new(), ctx_outside_fn(), reg)
 
 // The program's conformance state, accumulated across every module
@@ -223,7 +225,7 @@ class TypeR:
   type_idx: i64
 
 class TypeCheckResult:
-  types: Vector<DaoType>
+  types: Vector<base::DaoType>
   type_info: Vector<i64>
   expr_types: HashMap<i64>
   sym_types: Vector<i64>
@@ -234,7 +236,7 @@ class TypeCheckResult:
 // Section 35: TS state helpers
 // =========================================================================
 
-fn ts_add_type(ts: TS, t: DaoType): TypeR
+fn ts_add_type(ts: TS, t: base::DaoType): TypeR
   let idx: i64 = ts.types.length()
   ts.types = ts.types.push(t)
   return TypeR(ts, idx)
@@ -246,7 +248,7 @@ fn ts_add_diag(ts: TS, span: Span, msg: string): TS
 fn ts_set_expr_type(ts: TS, node_idx: i64, type_idx: i64): TS
   // Key by (module_id, node_idx) so the per-program expr_types
   // HashMap disambiguates nodes across modules.
-  let key: string = expr_id_key(ts.tc.module_id, node_idx)
+  let key: string = base::expr_id_key(ts.tc.module_id, node_idx)
   ts.reg = reg_with_expr_types(ts.reg, ts.reg.expr_types.set(key, type_idx))
   return ts
 
@@ -314,15 +316,15 @@ fn tc_enter_fn_ctx(ts: TS, fn_ti: i64): TS
   let ret_ti: i64 = to_i64(-1)
   if fn_ti >= 0:
     if fn_ti < r.types.length():
-      let fn_type: DaoType = r.types.get(fn_ti)
+      let fn_type: base::DaoType = r.types.get(fn_ti)
       ret_ti = fn_type.ret_type
   let in_gen: i64 = 0
   let gen_elem: i64 = to_i64(-1)
   if ret_ti >= 0:
     if ret_ti < r.types.length():
-      let rt: DaoType = r.types.get(ret_ti)
+      let rt: base::DaoType = r.types.get(ret_ti)
       match rt.kind:
-        TypeKind::TGenerator:
+        base::TypeKind::TGenerator:
           in_gen = 1
           gen_elem = rt.pointee
   r.ctx = CheckCtx(ret_ti, to_i64(0), in_gen, gen_elem, to_i64(0), to_i64(0))
@@ -403,7 +405,7 @@ fn ts_node_span(ts: TS, node_idx: i64): Span
 // =========================================================================
 
 fn lookup_use(ts: TS, tok_idx: i64): i64
-  let key: string = uses_key(ts.tc.file_id, tok_idx)
+  let key: string = resolver::uses_key(ts.tc.file_id, tok_idx)
   let result: Option<i64> = ts.tc.uses_map.get(key)
   match result:
     Option::Some(sym_idx):
@@ -416,19 +418,19 @@ fn lookup_use(ts: TS, tok_idx: i64): i64
 // =========================================================================
 
 fn register_builtins(ts: TS): TS
-  let r0: TypeR = ts_add_type(ts, DaoType(TypeKind::TBuiltin, to_i64(0), "i8", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r1: TypeR = ts_add_type(r0.ts, DaoType(TypeKind::TBuiltin, to_i64(1), "i16", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r2: TypeR = ts_add_type(r1.ts, DaoType(TypeKind::TBuiltin, to_i64(2), "i32", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r3: TypeR = ts_add_type(r2.ts, DaoType(TypeKind::TBuiltin, to_i64(3), "i64", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r4: TypeR = ts_add_type(r3.ts, DaoType(TypeKind::TBuiltin, to_i64(4), "u8", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r5: TypeR = ts_add_type(r4.ts, DaoType(TypeKind::TBuiltin, to_i64(5), "u16", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r6: TypeR = ts_add_type(r5.ts, DaoType(TypeKind::TBuiltin, to_i64(6), "u32", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r7: TypeR = ts_add_type(r6.ts, DaoType(TypeKind::TBuiltin, to_i64(7), "u64", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r8: TypeR = ts_add_type(r7.ts, DaoType(TypeKind::TBuiltin, to_i64(8), "f32", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r9: TypeR = ts_add_type(r8.ts, DaoType(TypeKind::TBuiltin, to_i64(9), "f64", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r10: TypeR = ts_add_type(r9.ts, DaoType(TypeKind::TBuiltin, to_i64(10), "bool", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r11: TypeR = ts_add_type(r10.ts, DaoType(TypeKind::TVoid, to_i64(-1), "void", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
-  let r12: TypeR = ts_add_type(r11.ts, DaoType(TypeKind::TString, to_i64(-1), "string", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r0: TypeR = ts_add_type(ts, base::DaoType(base::TypeKind::TBuiltin, to_i64(0), "i8", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r1: TypeR = ts_add_type(r0.ts, base::DaoType(base::TypeKind::TBuiltin, to_i64(1), "i16", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r2: TypeR = ts_add_type(r1.ts, base::DaoType(base::TypeKind::TBuiltin, to_i64(2), "i32", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r3: TypeR = ts_add_type(r2.ts, base::DaoType(base::TypeKind::TBuiltin, to_i64(3), "i64", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r4: TypeR = ts_add_type(r3.ts, base::DaoType(base::TypeKind::TBuiltin, to_i64(4), "u8", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r5: TypeR = ts_add_type(r4.ts, base::DaoType(base::TypeKind::TBuiltin, to_i64(5), "u16", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r6: TypeR = ts_add_type(r5.ts, base::DaoType(base::TypeKind::TBuiltin, to_i64(6), "u32", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r7: TypeR = ts_add_type(r6.ts, base::DaoType(base::TypeKind::TBuiltin, to_i64(7), "u64", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r8: TypeR = ts_add_type(r7.ts, base::DaoType(base::TypeKind::TBuiltin, to_i64(8), "f32", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r9: TypeR = ts_add_type(r8.ts, base::DaoType(base::TypeKind::TBuiltin, to_i64(9), "f64", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r10: TypeR = ts_add_type(r9.ts, base::DaoType(base::TypeKind::TBuiltin, to_i64(10), "bool", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r11: TypeR = ts_add_type(r10.ts, base::DaoType(base::TypeKind::TVoid, to_i64(-1), "void", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let r12: TypeR = ts_add_type(r11.ts, base::DaoType(base::TypeKind::TString, to_i64(-1), "string", to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
   return r12.ts
 
 // =========================================================================
@@ -440,7 +442,7 @@ fn register_builtins(ts: TS): TS
 // Produces the same builtin layout as single-file `register_builtins`
 // (indices 0–12 are i8, i16, i32, i64, u8, u16, u32, u64, f32, f64,
 // bool, void, string) so all modules share a canonical type table.
-fn program_init_typecheck(p: Program): Program
+fn program_init_typecheck(p: resolver::Program): resolver::Program
   // Guard: if TypeCheckData is already initialized (builtins seeded),
   // return unchanged.  A second call must not discard accumulated
   // canonical types, type_info, sym_types, or expr_types — the
@@ -457,22 +459,22 @@ fn program_init_typecheck(p: Program): Program
     Vector<i64>::new(),
     Vector<lexer::Token>::new(),
     "",
-    Vector<Symbol>::new(),
-    Vector<Scope>::new(),
+    Vector<resolver::Symbol>::new(),
+    Vector<resolver::Scope>::new(),
     HashMap<i64>::new(),  // uses_map
     to_i64(-1),
     HashMap<i64>::new(),  // concept_bindings
     to_i64(-1),
-    ExportTables(Vector<ExportTable>::new()))
-  let dummy_ts: TS = ts_new(dummy_tc, Vector<DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), registry_empty())
+    resolver::ExportTables(Vector<resolver::ExportTable>::new()))
+  let dummy_ts: TS = ts_new(dummy_tc, Vector<base::DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), registry_empty())
   let seeded: TS = register_builtins(dummy_ts)
-  let td: TypeCheckData = TypeCheckData(
+  let td: base::TypeCheckData = base::TypeCheckData(
     true,
     seeded.types,
     seeded.type_info,
     seeded.sym_types,
-    program_lookup_empty())
-  return Program(p.module_graph, p.resolve, td, p.hir, p.diags)
+    base::program_lookup_empty())
+  return resolver::Program(p.module_graph, p.resolve, td, p.hir, p.diags)
 
 // =========================================================================
 // Section 39: Type query helpers
@@ -483,9 +485,9 @@ fn is_numeric(ts: TS, type_idx: i64): bool
     return false
   if type_idx >= ts.types.length():
     return false
-  let t: DaoType = ts.types.get(type_idx)
+  let t: base::DaoType = ts.types.get(type_idx)
   match t.kind:
-    TypeKind::TBuiltin:
+    base::TypeKind::TBuiltin:
       if t.builtin_id >= 0:
         if t.builtin_id <= 9:
           return true
@@ -496,9 +498,9 @@ fn is_integer(ts: TS, type_idx: i64): bool
     return false
   if type_idx >= ts.types.length():
     return false
-  let t: DaoType = ts.types.get(type_idx)
+  let t: base::DaoType = ts.types.get(type_idx)
   match t.kind:
-    TypeKind::TBuiltin:
+    base::TypeKind::TBuiltin:
       if t.builtin_id >= 0:
         if t.builtin_id <= 7:
           return true
@@ -509,9 +511,9 @@ fn is_float(ts: TS, type_idx: i64): bool
     return false
   if type_idx >= ts.types.length():
     return false
-  let t: DaoType = ts.types.get(type_idx)
+  let t: base::DaoType = ts.types.get(type_idx)
   match t.kind:
-    TypeKind::TBuiltin:
+    base::TypeKind::TBuiltin:
       if t.builtin_id == 8:
         return true
       if t.builtin_id == 9:
@@ -523,9 +525,9 @@ fn is_bool_type(ts: TS, type_idx: i64): bool
     return false
   if type_idx >= ts.types.length():
     return false
-  let t: DaoType = ts.types.get(type_idx)
+  let t: base::DaoType = ts.types.get(type_idx)
   match t.kind:
-    TypeKind::TBuiltin:
+    base::TypeKind::TBuiltin:
       return t.builtin_id == 10
   return false
 
@@ -534,9 +536,9 @@ fn is_string_type(ts: TS, type_idx: i64): bool
     return false
   if type_idx >= ts.types.length():
     return false
-  let t: DaoType = ts.types.get(type_idx)
+  let t: base::DaoType = ts.types.get(type_idx)
   match t.kind:
-    TypeKind::TString:
+    base::TypeKind::TString:
       return true
   return false
 
@@ -545,9 +547,9 @@ fn is_void_type(ts: TS, type_idx: i64): bool
     return false
   if type_idx >= ts.types.length():
     return false
-  let t: DaoType = ts.types.get(type_idx)
+  let t: base::DaoType = ts.types.get(type_idx)
   match t.kind:
-    TypeKind::TVoid:
+    base::TypeKind::TVoid:
       return true
   return false
 
@@ -557,16 +559,16 @@ fn types_equal(ts: TS, a: i64, b: i64): bool
   // Two generators, one of whose element type is unresolved, compare as
   // an unresolved type does everywhere else: never a reported mismatch.
   if a >= 0 and b >= 0 and a < ts.types.length() and b < ts.types.length():
-    let ta: DaoType = ts.types.get(a)
-    let tb: DaoType = ts.types.get(b)
+    let ta: base::DaoType = ts.types.get(a)
+    let tb: base::DaoType = ts.types.get(b)
     if is_generator_kind(ta) and is_generator_kind(tb):
       if ta.pointee < 0 or tb.pointee < 0:
         return true
   return false
 
-fn is_generator_kind(t: DaoType): bool
+fn is_generator_kind(t: base::DaoType): bool
   match t.kind:
-    TypeKind::TGenerator:
+    base::TypeKind::TGenerator:
       return true
   return false
 
@@ -575,7 +577,7 @@ fn type_name(ts: TS, type_idx: i64): string
     return "<unknown>"
   if type_idx >= ts.types.length():
     return "<unknown>"
-  let t: DaoType = ts.types.get(type_idx)
+  let t: base::DaoType = ts.types.get(type_idx)
   return t.name
 
 // =========================================================================
@@ -618,7 +620,7 @@ fn builtin_type_index(name: string): i64
 // per-field walk `type_info.get(info_lp + i*2)` reads out of bounds.
 // Report whether the layout is walkable here; a caller skips the walk
 // when it is not (fail-closed — cross-module generic layout is deferred to a later program-level pass).
-fn layout_walkable(ts: TS, t: DaoType): bool
+fn layout_walkable(ts: TS, t: base::DaoType): bool
   if t.info_lp < 0:
     return false
   if t.info_lp + t.info_count * 2 <= ts.type_info.length():
@@ -631,7 +633,7 @@ fn layout_walkable(ts: TS, t: DaoType): bool
 // module (a prelude function or method) can carry an `info_lp` that
 // overruns this module's `type_info`; report whether the parameter slots
 // are in range so a caller skips the per-argument walk otherwise.
-fn fn_params_walkable(ts: TS, t: DaoType): bool
+fn fn_params_walkable(ts: TS, t: base::DaoType): bool
   if t.info_lp < 0:
     return false
   if t.info_lp + t.info_count <= ts.type_info.length():
@@ -654,15 +656,15 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
         return TypeR(ts, bi)
       let sym_idx: i64 = lookup_use(ts, tidx)
       if sym_idx >= 0:
-        let sym: Symbol = ts.tc.symbols.get(sym_idx)
-        let sk: string = symbol_kind_name(sym.kind)
+        let sym: resolver::Symbol = ts.tc.symbols.get(sym_idx)
+        let sk: string = resolver::symbol_kind_name(sym.kind)
         if sk == "GenericParam":
           // Check if we already have a TGenericParam type for this symbol
           let existing_ti: i64 = sym_type_at(ts, sym_idx)
           if existing_ti >= 0:
             return TypeR(ts, existing_ti)
           // Create a new TGenericParam type
-          let tr: TypeR = ts_add_type(ts, DaoType(TypeKind::TGenericParam, sym_idx, name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+          let tr: TypeR = ts_add_type(ts, base::DaoType(base::TypeKind::TGenericParam, sym_idx, name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
           let ts2: TS = ts_set_sym_type(tr.ts, sym_idx, tr.type_idx)
           return TypeR(ts2, tr.type_idx)
         let ti: i64 = sym_type_at(ts, sym_idx)
@@ -678,13 +680,13 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
       // Try to find it by scanning symbols for GenericParam with matching name
       let gi: i64 = 0
       while gi < ts.tc.symbols.length():
-        let gsym: Symbol = ts.tc.symbols.get(gi)
+        let gsym: resolver::Symbol = ts.tc.symbols.get(gi)
         if gsym.name == name:
-          if symbol_kind_name(gsym.kind) == "GenericParam":
+          if resolver::symbol_kind_name(gsym.kind) == "GenericParam":
             let existing_ti: i64 = sym_type_at(ts, gi)
             if existing_ti >= 0:
               return TypeR(ts, existing_ti)
-            let tr: TypeR = ts_add_type(ts, DaoType(TypeKind::TGenericParam, gi, name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+            let tr: TypeR = ts_add_type(ts, base::DaoType(base::TypeKind::TGenericParam, gi, name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
             let ts2: TS = ts_set_sym_type(tr.ts, gi, tr.type_idx)
             return TypeR(ts2, tr.type_idx)
         gi = gi + 1
@@ -794,7 +796,7 @@ fn is_generator_head(ts: TS, name_tidx: i64): bool
     return true
   if sym >= ts.tc.symbols.length():
     return false
-  return symbol_kind_name(ts.tc.symbols.get(sym).kind) == "Builtin"
+  return resolver::symbol_kind_name(ts.tc.symbols.get(sym).kind) == "Builtin"
 
 // Diagnose a malformed `Generator` nested in an ordinary annotation's
 // spelling (through pointers and generic arguments): bare `Generator`,
@@ -869,13 +871,13 @@ fn concept_named_by(ts: TS, ti: i64): i64
     return to_i64(-1)
   if ti >= ts.types.length():
     return to_i64(-1)
-  let t: DaoType = ts.types.get(ti)
+  let t: base::DaoType = ts.types.get(ti)
   match t.kind:
-    TypeKind::TConcept:
+    base::TypeKind::TConcept:
       return ti
-    TypeKind::TPointer:
+    base::TypeKind::TPointer:
       return concept_named_by(ts, t.pointee)
-    TypeKind::TGenerator:
+    base::TypeKind::TGenerator:
       return concept_named_by(ts, t.pointee)
   return to_i64(-1)
 
@@ -1123,10 +1125,10 @@ fn resolve_generator_annotation(ts: TS, node_idx: i64, self_concept: i64): TypeR
 // index is file-local, so the owning module is half the identity: two
 // modules' declarations share an index freely.  A negative module id
 // is the single-file adapters', where no other module exists.
-fn find_callable_sym(symbols: Vector<Symbol>, decl_idx: i64, module_id: i64): i64
+fn find_callable_sym(symbols: Vector<resolver::Symbol>, decl_idx: i64, module_id: i64): i64
   let si: i64 = 0
   while si < symbols.length():
-    let sym: Symbol = symbols.get(si)
+    let sym: resolver::Symbol = symbols.get(si)
     if sym.decl_node == decl_idx:
       if is_method_symbol(sym):
         if module_id < 0:
@@ -1150,7 +1152,7 @@ fn find_field_sym(ts: TS, decl_idx: i64, field_name: string): i64
 // field's symbol index (program-wide, so a struct declared in another
 // module is read the same way), or -1 for a field the resolver never
 // declared, which names nothing.
-fn field_slot_name(symbols: Vector<Symbol>, slot: i64): string
+fn field_slot_name(symbols: Vector<resolver::Symbol>, slot: i64): string
   if slot < 0:
     return ""
   if slot >= symbols.length():
@@ -1167,7 +1169,7 @@ fn find_param_sym(ts: TS, decl_idx: i64, param_name: string): i64
 // (`info_count` slots, each a TConcept type index, or -1 for a bound
 // whose concept lives outside this module's `types`).  Report whether the
 // slots are in range of this module's `type_info`.
-fn bounds_walkable(ts: TS, t: DaoType): bool
+fn bounds_walkable(ts: TS, t: base::DaoType): bool
   if t.info_lp < 0:
     return false
   if t.info_lp + t.info_count <= ts.type_info.length():
@@ -1179,7 +1181,7 @@ fn generic_param_type(ts: TS, sym_idx: i64, name: string): TypeR
   let existing_ti: i64 = sym_type_at(ts, sym_idx)
   if existing_ti >= 0:
     return TypeR(ts, existing_ti)
-  let tr: TypeR = ts_add_type(ts, DaoType(TypeKind::TGenericParam, sym_idx, name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+  let tr: TypeR = ts_add_type(ts, base::DaoType(base::TypeKind::TGenericParam, sym_idx, name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
   let ts2: TS = ts_set_sym_type(tr.ts, sym_idx, tr.type_idx)
   return TypeR(ts2, tr.type_idx)
 
@@ -1205,7 +1207,7 @@ fn bound_symbol(ts: TS, b_node: i64): i64
 fn sym_in_module(ts: TS, sym_idx: i64): bool
   if ts.tc.module_id < 0:
     return true
-  let sym: Symbol = ts.tc.symbols.get(sym_idx)
+  let sym: resolver::Symbol = ts.tc.symbols.get(sym_idx)
   return sym.owner_module_id == ts.tc.module_id
 
 // Bind a declaration's generic parameter bounds: for each `<T: A + B>`
@@ -1248,10 +1250,10 @@ fn tc_bind_generic_bounds(ts: TS, tparams_lp: i64): TS
               r = btr.ts
               let b_name: string = extract_type_name(r, b_node)
               if btr.type_idx >= 0:
-                let bt: DaoType = r.types.get(btr.type_idx)
+                let bt: base::DaoType = r.types.get(btr.type_idx)
                 let is_concept: bool = false
                 match bt.kind:
-                  TypeKind::TConcept:
+                  base::TypeKind::TConcept:
                     is_concept = true
                 if is_concept:
                   bound_tis = bound_tis.push(btr.type_idx)
@@ -1274,10 +1276,10 @@ fn tc_bind_generic_bounds(ts: TS, tparams_lp: i64): TS
                   // type is not a concept.
                   let head_ti: i64 = sym_type_at(r, b_sym)
                   if head_ti >= 0:
-                    let ht: DaoType = r.types.get(head_ti)
+                    let ht: base::DaoType = r.types.get(head_ti)
                     let head_is_concept: bool = false
                     match ht.kind:
-                      TypeKind::TConcept:
+                      base::TypeKind::TConcept:
                         head_is_concept = true
                     if head_is_concept:
                       bound_tis = bound_tis.push(head_ti)
@@ -1293,8 +1295,8 @@ fn tc_bind_generic_bounds(ts: TS, tparams_lp: i64): TS
                       // variant is rejected here.  A type-declaring symbol
                       // (concept, class, enum, alias) cannot be told apart
                       // without its declaration, so it is recorded as -1.
-                      let b_sym_obj: Symbol = r.tc.symbols.get(b_sym)
-                      if symbol_kind_name(b_sym_obj.kind) == "Type":
+                      let b_sym_obj: resolver::Symbol = r.tc.symbols.get(b_sym)
+                      if resolver::symbol_kind_name(b_sym_obj.kind) == "Type":
                         bound_tis = bound_tis.push(to_i64(-1))
                       else:
                         r = ts_add_diag(r, ts_node_span(r, b_node), "bound '" + b_name + "' on type parameter '" + tname + "' is not a concept")
@@ -1304,8 +1306,8 @@ fn tc_bind_generic_bounds(ts: TS, tparams_lp: i64): TS
             while pi < bound_tis.length():
               r = ts_push_type_info(r, bound_tis.get(pi))
               pi = pi + 1
-            let gt: DaoType = r.types.get(gtr.type_idx)
-            r.types = r.types.set(gtr.type_idx, DaoType(TypeKind::TGenericParam, gt.builtin_id, gt.name, gt.decl_node, info_start, bound_tis.length(), gt.ret_type, gt.pointee))
+            let gt: base::DaoType = r.types.get(gtr.type_idx)
+            r.types = r.types.set(gtr.type_idx, base::DaoType(base::TypeKind::TGenericParam, gt.builtin_id, gt.name, gt.decl_node, info_start, bound_tis.length(), gt.ret_type, gt.pointee))
     i = i + 1
   return r
 
@@ -1321,13 +1323,13 @@ class AliasGraph:
   edges: HashMap<i64>
   order: Vector<i64>
 
-fn alias_graph_of(p: Program, acc: TcAccum): AliasGraph
+fn alias_graph_of(p: resolver::Program, acc: TcAccum): AliasGraph
   let g: AliasGraph = AliasGraph(HashMap<i64>::new(), Vector<i64>::new())
   let ti: i64 = 0
   while ti < p.module_graph.topo_order.length():
     let mid: i64 = p.module_graph.topo_order.get(ti)
     let ts: TS = ts_new(build_module_tc(p, mid), acc.types, acc.type_info, acc.sym_types, acc.reg)
-    let root: parser::Node = ts.tc.nodes.get(program_file_of_module(p, mid).parse_output.root)
+    let root: parser::Node = ts.tc.nodes.get(resolver::program_file_of_module(p, mid).parse_output.root)
     match root:
       parser::Node::FileN(module_decl, imports_lp, decls_lp):
         let decls: Vector<i64> = parser::read_list(ts.tc.idx_data, decls_lp)
@@ -1359,7 +1361,7 @@ class AliasBindR:
   acc: TcAccum
   marks: HashMap<i64>
 
-fn tc_resolve_aliases(p: Program, acc: TcAccum): TcAccum
+fn tc_resolve_aliases(p: resolver::Program, acc: TcAccum): TcAccum
   let g: AliasGraph = alias_graph_of(p, acc)
   let st: AliasBindR = AliasBindR(acc, HashMap<i64>::new())
   let i: i64 = 0
@@ -1372,23 +1374,23 @@ fn tc_resolve_aliases(p: Program, acc: TcAccum): TcAccum
 // alias naming an alias that stayed unbound — a cycle, reached through
 // pointers, generic arguments, or a generator's element — stays unbound
 // itself, and is diagnosed as such.
-fn bind_alias(p: Program, g: AliasGraph, sym_idx: i64, st: AliasBindR): AliasBindR
+fn bind_alias(p: resolver::Program, g: AliasGraph, sym_idx: i64, st: AliasBindR): AliasBindR
   let k: string = i64_to_string(sym_idx)
-  if hm_get_or(st.marks, k, to_i64(0)) != 0:
+  if base::hm_get_or(st.marks, k, to_i64(0)) != 0:
     return st
   let r: AliasBindR = AliasBindR(st.acc, st.marks.set(k, to_i64(2)))
   let target_unbound: bool = false
-  let ref_count: i64 = hm_get_or(g.edges, "t:" + k, to_i64(0))
+  let ref_count: i64 = base::hm_get_or(g.edges, "t:" + k, to_i64(0))
   let ri: i64 = 0
   while ri < ref_count:
-    let ref_sym: i64 = hm_get_or(g.edges, "t:" + k + ":" + i64_to_string(ri), to_i64(-1))
+    let ref_sym: i64 = base::hm_get_or(g.edges, "t:" + k + ":" + i64_to_string(ri), to_i64(-1))
     if ref_sym >= 0 and g.edges.contains("d:" + i64_to_string(ref_sym)):
       r = bind_alias(p, g, ref_sym, r)
       if vec_i64_get(r.acc.sym_types, ref_sym) < 0:
         target_unbound = true
     ri = ri + 1
-  let mid: i64 = hm_get_or(g.edges, "m:" + k, to_i64(-1))
-  let decl_idx: i64 = hm_get_or(g.edges, "d:" + k, to_i64(-1))
+  let mid: i64 = base::hm_get_or(g.edges, "m:" + k, to_i64(-1))
+  let decl_idx: i64 = base::hm_get_or(g.edges, "d:" + k, to_i64(-1))
   let ts: TS = ts_new(build_module_tc(p, mid), r.acc.types, r.acc.type_info, r.acc.sym_types, r.acc.reg)
   let node: parser::Node = ts.tc.nodes.get(decl_idx)
   match node:
@@ -1465,7 +1467,7 @@ fn tc_register_struct_shells(ts: TS, decls: Vector<i64>): TS
         let name: string = ts_tok_name(r, name_tidx)
         // `builtin_id` records the declaring module: a declaration index
         // is file-local, so the type itself must say whose it is.
-        let tr: TypeR = ts_add_type(r, DaoType(TypeKind::TStruct, r.tc.module_id, name, decl_idx, to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+        let tr: TypeR = ts_add_type(r, base::DaoType(base::TypeKind::TStruct, r.tc.module_id, name, decl_idx, to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
         r = tr.ts
         // The head stands for its own parameters — the record any
         // module instantiates it from, where its declaration is not
@@ -1487,7 +1489,7 @@ fn tc_register_enum_shells(ts: TS, decls: Vector<i64>): TS
     let node: parser::Node = r.tc.nodes.get(decl_idx)
     match node:
       parser::Node::EnumDeclD(name_tidx, tparams_lp, variants_lp):
-        let tr: TypeR = ts_add_type(r, DaoType(TypeKind::TEnum, r.tc.module_id, ts_tok_name(r, name_tidx), decl_idx, to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
+        let tr: TypeR = ts_add_type(r, base::DaoType(base::TypeKind::TEnum, r.tc.module_id, ts_tok_name(r, name_tidx), decl_idx, to_i64(-1), to_i64(0), to_i64(-1), to_i64(-1)))
         r = tr.ts
         r = record_own_params(r, tr.type_idx, tparams_lp)
         let sym_idx: i64 = type_sym_of_decl(r, decl_idx)
@@ -1510,7 +1512,7 @@ fn tc_fill_enum_variants(ts: TS, decls: Vector<i64>): TS
         let enum_ti: i64 = to_i64(-1)
         if enum_sym >= 0:
           enum_ti = sym_type_at(r, enum_sym)
-        let pairs: Vector<i64> = read_pairs(r.tc.idx_data, variants_lp)
+        let pairs: Vector<i64> = resolver::read_pairs(r.tc.idx_data, variants_lp)
         let variant_records: Vector<i64> = Vector<i64>::new()
         let vi: i64 = 0
         let variant_count: i64 = 0
@@ -1535,7 +1537,7 @@ fn tc_fill_enum_variants(ts: TS, decls: Vector<i64>): TS
         let info_start: i64 = r.type_info.length()
         r = ts_push_info_run(r, variant_records)
         if enum_ti >= 0:
-          let et: DaoType = r.types.get(enum_ti)
+          let et: base::DaoType = r.types.get(enum_ti)
           et.info_lp = info_start
           et.info_count = variant_count
           r.types = r.types.set(enum_ti, et)
@@ -1581,7 +1583,7 @@ fn tc_fill_struct_fields(ts: TS, decls: Vector<i64>): TS
     let node: parser::Node = r.tc.nodes.get(decl_idx)
     match node:
       parser::Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
-        let pairs: Vector<i64> = read_pairs(r.tc.idx_data, fields_lp)
+        let pairs: Vector<i64> = resolver::read_pairs(r.tc.idx_data, fields_lp)
         let field_records: Vector<i64> = Vector<i64>::new()
         let field_count: i64 = 0
         let fi: i64 = 0
@@ -1602,7 +1604,7 @@ fn tc_fill_struct_fields(ts: TS, decls: Vector<i64>): TS
         r = ts_push_info_run(r, field_records)
         let struct_ti: i64 = sym_type_at(r, type_sym_of_decl(r, decl_idx))
         if struct_ti >= 0:
-          let t: DaoType = r.types.get(struct_ti)
+          let t: base::DaoType = r.types.get(struct_ti)
           t.info_lp = field_info_start
           t.info_count = field_count
           r.types = r.types.set(struct_ti, t)
@@ -1617,7 +1619,7 @@ fn tc_fill_struct_fields(ts: TS, decls: Vector<i64>): TS
 // means the conforming type), or -1 for every other callable.
 fn tc_register_fn_sig_core(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, ret_type_node: i64, self_concept: i64): TypeR
   let r: TS = ts
-  let pairs: Vector<i64> = read_pairs(r.tc.idx_data, params_lp)
+  let pairs: Vector<i64> = resolver::read_pairs(r.tc.idx_data, params_lp)
   let param_tis: Vector<i64> = Vector<i64>::new()
   let param_count: i64 = 0
   let pi: i64 = 0
@@ -1654,7 +1656,7 @@ fn tc_register_fn_sig_core(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64
       takes_self = to_i64(1)
   let fname: string = ts_tok_name(r, name_tidx)
   let fn_name: string = "fn " + fname
-  let tr: TypeR = ts_add_type(r, DaoType(TypeKind::TFunction, takes_self, fn_name, decl_idx, param_info_start, param_count, ret_ti, to_i64(-1)))
+  let tr: TypeR = ts_add_type(r, base::DaoType(base::TypeKind::TFunction, takes_self, fn_name, decl_idx, param_info_start, param_count, ret_ti, to_i64(-1)))
   // The signature stands for its own type parameters: what a call
   // from any module may decide (callee_own_params).
   return TypeR(record_own_params(tr.ts, tr.type_idx, callable_tparams_lp(tr.ts, decl_idx)), tr.type_idx)
@@ -1735,7 +1737,7 @@ fn tc_register_method_sig(ts: TS, owner_ti: i64, meth_idx: i64, m_name_tidx: i64
 // validate_receiver): a conformance method has a receiver.  A class's
 // own method may be static instead.
 fn tc_require_receiver(ts: TS, m_name_tidx: i64, m_params_lp: i64): TS
-  let pairs: Vector<i64> = read_pairs(ts.tc.idx_data, m_params_lp)
+  let pairs: Vector<i64> = resolver::read_pairs(ts.tc.idx_data, m_params_lp)
   if pairs.length() >= 2:
     if ts_tok_name(ts, pairs.get(0)) == "self":
       return ts
@@ -1879,10 +1881,10 @@ fn tc_register_concepts(ts: TS, decls: Vector<i64>): TS
 // prelude scope, whichever prelude module owns it — its `extend`
 // methods join every module's method set, CONTRACT_MODULE_SYSTEM.md
 // §7.2), or the module's own.
-fn sym_visible_in_module(sym: Symbol, module_id: i64): bool
+fn sym_visible_in_module(sym: resolver::Symbol, module_id: i64): bool
   if sym.owner_module_id < 0:
     return true
-  if sym.scope_id == prelude_scope_idx():
+  if sym.scope_id == resolver::prelude_scope_idx():
     return true
   return sym.owner_module_id == module_id
 
@@ -1893,10 +1895,10 @@ fn sym_visible_in_module(sym: Symbol, module_id: i64): bool
 // A mangled name (`Box.m`) is borne by a class's own method
 // (`SymbolKind::Method`) and by one an `extend` block introduces
 // (`Function`, like the free function it is).
-fn is_method_symbol(sym: Symbol): bool
-  if symbol_kind_name(sym.kind) == "Method":
+fn is_method_symbol(sym: resolver::Symbol): bool
+  if resolver::symbol_kind_name(sym.kind) == "Method":
     return true
-  return symbol_kind_name(sym.kind) == "Function"
+  return resolver::symbol_kind_name(sym.kind) == "Function"
 
 // Where a method is found at dispatch: the receiver's type and the
 // method's own name — never the owner's spelling, which an alias
@@ -1931,13 +1933,13 @@ fn tc_bind_self(ts: TS, meth_idx: i64, msym: i64, m_name_tidx: i64, owner_ti: i6
   // call (`C::get(c)`) checks its first argument against it.
   let fn_ti: i64 = sym_type_at(r, msym)
   if fn_ti >= 0:
-    let ft: DaoType = r.types.get(fn_ti)
+    let ft: base::DaoType = r.types.get(fn_ti)
     if ft.builtin_id == 1 and fn_params_walkable(r, ft) and ft.info_count > 0:
       r.type_info = vec_i64_set(r.type_info, ft.info_lp, owner_ti)
   let name: string = ts_tok_name(r, m_name_tidx)
-  let sym: Symbol = r.tc.symbols.get(msym)
+  let sym: resolver::Symbol = r.tc.symbols.get(msym)
   let key: string = dispatch_key_inherent(owner_ti, name)
-  if symbol_kind_name(sym.kind) != "Method":
+  if resolver::symbol_kind_name(sym.kind) != "Method":
     let from_module: i64 = r.tc.module_id
     if module_in_prelude(r):
       from_module = conform_everywhere()
@@ -1946,15 +1948,15 @@ fn tc_bind_self(ts: TS, meth_idx: i64, msym: i64, m_name_tidx: i64, owner_ti: i6
   // written through an alias of an already extended type, say, or an
   // extend redefining the type's own method, which dispatch would
   // always prefer — is a conflict, never a silent replacement.
-  let existing: i64 = hm_get_or(r.reg.methods, key, to_i64(-1))
-  if existing < 0 and symbol_kind_name(sym.kind) != "Method":
-    existing = hm_get_or(r.reg.methods, dispatch_key_inherent(owner_ti, name), to_i64(-1))
-  if existing < 0 and symbol_kind_name(sym.kind) == "Method":
+  let existing: i64 = base::hm_get_or(r.reg.methods, key, to_i64(-1))
+  if existing < 0 and resolver::symbol_kind_name(sym.kind) != "Method":
+    existing = base::hm_get_or(r.reg.methods, dispatch_key_inherent(owner_ti, name), to_i64(-1))
+  if existing < 0 and resolver::symbol_kind_name(sym.kind) == "Method":
     // The type's own method registered after an extend of it visible
     // here — one of a prelude file registered earlier — conflicts too.
-    existing = hm_get_or(r.reg.methods, dispatch_key_extend(owner_ti, name, r.tc.module_id), to_i64(-1))
+    existing = base::hm_get_or(r.reg.methods, dispatch_key_extend(owner_ti, name, r.tc.module_id), to_i64(-1))
     if existing < 0:
-      existing = hm_get_or(r.reg.methods, dispatch_key_extend(owner_ti, name, conform_everywhere()), to_i64(-1))
+      existing = base::hm_get_or(r.reg.methods, dispatch_key_extend(owner_ti, name, conform_everywhere()), to_i64(-1))
   if existing >= 0 and existing != msym:
     // Two methods of one mangled name in one resolver namespace (one
     // module, or the prelude's files) are the resolver's duplicate
@@ -1962,7 +1964,7 @@ fn tc_bind_self(ts: TS, meth_idx: i64, msym: i64, m_name_tidx: i64, owner_ti: i6
     // through an alias, or a module's extend of a prelude type, which
     // the resolver lets shadow the prelude's name — is the checker's.
     if existing < r.tc.symbols.length():
-      let es: Symbol = r.tc.symbols.get(existing)
+      let es: resolver::Symbol = r.tc.symbols.get(existing)
       if es.name == sym.name and same_resolver_namespace(r, es.owner_module_id, sym.owner_module_id):
         return r
     return ts_add_diag(r, ts_tok_span(r, m_name_tidx), "method '" + name + "' is already defined for type " + type_name(r, owner_ti))
@@ -1972,12 +1974,12 @@ fn tc_bind_self(ts: TS, meth_idx: i64, msym: i64, m_name_tidx: i64, owner_ti: i6
 // The class's own method named `name` of the type `owner_ti`, whatever
 // the class's spelling here, or -1.
 fn find_inherent_method_sym(methods: HashMap<i64>, name: string, owner_ti: i64): i64
-  return hm_get_or(methods, dispatch_key_inherent(owner_ti, name), to_i64(-1))
+  return base::hm_get_or(methods, dispatch_key_inherent(owner_ti, name), to_i64(-1))
 
 /// The type a receiver's methods are declared on: an instantiation
 /// answers with its head's (`Box<i32>` has what `class Box<T>`
 /// declares); any other type answers with its own.
-fn dispatch_owner(types: Vector<DaoType>, type_info: Vector<i64>, receiver_ti: i64): i64
+fn dispatch_owner(types: Vector<base::DaoType>, type_info: Vector<i64>, receiver_ti: i64): i64
   if receiver_ti < 0:
     return receiver_ti
   if receiver_ti >= types.length():
@@ -2025,10 +2027,10 @@ fn find_method_sym_for_receiver(methods: HashMap<i64>, module_id: i64, name: str
 // The method an extend visible from `module_id` gives `type_ti` under
 // `name`: this module's, else the prelude's.
 fn find_extend_method_sym(methods: HashMap<i64>, module_id: i64, name: string, type_ti: i64): i64
-  let local: i64 = hm_get_or(methods, dispatch_key_extend(type_ti, name, module_id), to_i64(-1))
+  let local: i64 = base::hm_get_or(methods, dispatch_key_extend(type_ti, name, module_id), to_i64(-1))
   if local >= 0:
     return local
-  return hm_get_or(methods, dispatch_key_extend(type_ti, name, conform_everywhere()), to_i64(-1))
+  return base::hm_get_or(methods, dispatch_key_extend(type_ti, name, conform_everywhere()), to_i64(-1))
 
 fn tc_register_extend_methods(ts: TS, decls: Vector<i64>): TS
   let r: TS = ts
@@ -2079,7 +2081,7 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
         // during resolution.
         let concept_name: string = ts_tok_name(r, concept_name_tidx)
         let concept_ti: i64 = to_i64(-1)
-        let cb_key: string = extend_binding_key(r.tc.file_id, decl_idx)
+        let cb_key: string = resolver::extend_binding_key(r.tc.file_id, decl_idx)
         let cb_found: Option<i64> = r.tc.concept_bindings.get(cb_key)
         let concept_sym_idx: i64 = to_i64(-1)
         match cb_found:
@@ -2090,9 +2092,9 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
         if concept_sym_idx >= 0:
           let cti: i64 = sym_type_at(r, concept_sym_idx)
           if cti >= 0:
-            let ct: DaoType = r.types.get(cti)
+            let ct: base::DaoType = r.types.get(cti)
             match ct.kind:
-              TypeKind::TConcept:
+              base::TypeKind::TConcept:
                 concept_ti = cti
         if concept_ti < 0:
           // The name after `as` names no concept: nothing in scope, or a
@@ -2103,7 +2105,7 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
           else:
             r = ts_add_diag(r, ts_tok_span(r, concept_name_tidx), "'" + concept_name + "' is not a concept")
         else:
-          let concept_type: DaoType = r.types.get(concept_ti)
+          let concept_type: base::DaoType = r.types.get(concept_ti)
           // The concept's own name in a required signature means the
           // conforming type, so each requirement is compared as its
           // signature for this extend's target — a type, never a concept
@@ -2162,8 +2164,8 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
                 impl_ti = as_required.type_idx
             if impl_ti >= 0:
               if req_fn_ti >= 0:
-                let impl_type: DaoType = r.types.get(impl_ti)
-                let req_type: DaoType = r.types.get(req_fn_ti)
+                let impl_type: base::DaoType = r.types.get(impl_ti)
+                let req_type: base::DaoType = r.types.get(req_fn_ti)
                 // A requirement taking `self` is met only by a method
                 // taking `self` (a class's static method is no match),
                 // and a static requirement only by a static method.
@@ -2371,7 +2373,7 @@ fn tc_export_lookup(ts: TS, target_mid: i64, name: string): i64
     return to_i64(-1)
   if target_mid >= ts.tc.exports.tables.length():
     return to_i64(-1)
-  let table: ExportTable = ts.tc.exports.tables.get(target_mid)
+  let table: resolver::ExportTable = ts.tc.exports.tables.get(target_mid)
   let found: Option<i64> = table.entries.get(name)
   match found:
     Option::Some(sym_idx):
@@ -2388,10 +2390,10 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
   let sym_idx: i64 = lookup_use(ts, first_tidx)
   if sym_idx < 0:
     return ts
-  let sym: Symbol = ts.tc.symbols.get(sym_idx)
+  let sym: resolver::Symbol = ts.tc.symbols.get(sym_idx)
   // D4: If the first segment resolves to a Module symbol, look up
   // the second segment in the target module's export table.
-  if symbol_kind_name(sym.kind) == "Module":
+  if resolver::symbol_kind_name(sym.kind) == "Module":
     if segs.length() < 2:
       return ts
     let target_mid: i64 = sym.decl_node  // Module symbols store target_module_id in decl_node
@@ -2410,9 +2412,9 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
       if exp_sym >= 0:
         let exp_ti: i64 = sym_type_at(ts, exp_sym)
         if exp_ti >= 0:
-          let exp_type: DaoType = ts.types.get(exp_ti)
+          let exp_type: base::DaoType = ts.types.get(exp_ti)
           match exp_type.kind:
-            TypeKind::TEnum:
+            base::TypeKind::TEnum:
               // mod::Enum::Variant — validate the variant exists via
               // variant_set (populated during pass1 of the declaring
               // module) then type as the enum type.
@@ -2426,7 +2428,7 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
                 Option::None:
                   let vsp: Span = ts_tok_span(ts, variant_tidx)
                   return ts_add_diag(ts, vsp, "'" + variant_name + "' is not a variant of enum '" + second_name + "'")
-            TypeKind::TStruct:
+            base::TypeKind::TStruct:
               let sp: Span = ts_tok_span(ts, segs.get(2))
               return ts_add_diag(ts, sp, "associated items on imported types are not supported in this release (Task 28)")
       let sp: Span = ts_tok_span(ts, segs.get(2))
@@ -2449,15 +2451,15 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
   // variant must exist, as for `mod::Enum::Variant` above.  A value's
   // name (`c::make` with `c` a parameter) is no namespace: the host
   // reaches a type's members through the type, never through a value.
-  if symbol_kind_name(ts.tc.symbols.get(sym_idx).kind) != "Type":
+  if resolver::symbol_kind_name(ts.tc.symbols.get(sym_idx).kind) != "Type":
     return ts_add_diag(ts, ts_tok_span(ts, first_tidx), "'" + ts_tok_name(ts, first_tidx) + "' is a value, not a type: '" + ts_tok_name(ts, first_tidx) + "::…' names nothing")
   let ti: i64 = sym_type_at(ts, sym_idx)
   if ti < 0:
     return ts
   if segs.length() == 2:
-    let head_type: DaoType = ts.types.get(ti)
+    let head_type: base::DaoType = ts.types.get(ti)
     match head_type.kind:
-      TypeKind::TEnum:
+      base::TypeKind::TEnum:
         let variant_tidx: i64 = segs.get(1)
         let variant_name: string = ts_tok_name(ts, variant_tidx)
         let vkey: string = variant_key(ts, ti, variant_name)
@@ -2491,7 +2493,7 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
   return ts_set_expr_type(ts, node_idx, ti)
 
 fn get_expr_type(ts: TS, node_idx: i64): i64
-  let key: string = expr_id_key(ts.tc.module_id, node_idx)
+  let key: string = base::expr_id_key(ts.tc.module_id, node_idx)
   let found: Option<i64> = ts.reg.expr_types.get(key)
   match found:
     Option::Some(ti):
@@ -2544,9 +2546,9 @@ fn open_enum_head(ts: TS, ti: i64): i64
     return to_i64(-1)
   if ti >= ts.types.length():
     return to_i64(-1)
-  let t: DaoType = ts.types.get(ti)
+  let t: base::DaoType = ts.types.get(ti)
   match t.kind:
-    TypeKind::TEnum:
+    base::TypeKind::TEnum:
       let head_ti: i64 = record_head(ts, t)
       if head_ti < 0:
         return to_i64(-1)
@@ -2695,7 +2697,7 @@ fn check_compare_binop(ts: TS, node_idx: i64, op_tidx: i64, lt: i64, rt: i64, op
 fn enum_base_name(ts: TS, ti: i64): string
   if ti < 0 or ti >= ts.types.length():
     return ""
-  let t: DaoType = ts.types.get(ti)
+  let t: base::DaoType = ts.types.get(ti)
   let head_ti: i64 = record_head(ts, t)
   if head_ti >= 0 and head_ti < ts.types.length():
     return ts.types.get(head_ti).name
@@ -2704,10 +2706,10 @@ fn enum_base_name(ts: TS, ti: i64): string
 fn enum_has_payload(ts: TS, ti: i64): bool
   if ti < 0 or ti >= ts.types.length():
     return false
-  let t: DaoType = ts.types.get(ti)
+  let t: base::DaoType = ts.types.get(ti)
   match t.kind:
-    TypeKind::TEnum:
-      let table: DaoType = t
+    base::TypeKind::TEnum:
+      let table: base::DaoType = t
       let head_ti: i64 = record_head(ts, t)
       if table.info_lp < 0 and head_ti >= 0 and head_ti < ts.types.length():
         table = ts.types.get(head_ti)
@@ -2757,16 +2759,16 @@ fn check_logical_binop(ts: TS, node_idx: i64, op_tidx: i64, lt: i64, rt: i64, op
 fn find_or_add_pointer_type(ts: TS, pointee_ti: i64): TypeR
   let i: i64 = 0
   while i < ts.types.length():
-    let t: DaoType = ts.types.get(i)
+    let t: base::DaoType = ts.types.get(i)
     match t.kind:
-      TypeKind::TPointer:
+      base::TypeKind::TPointer:
         if t.pointee == pointee_ti:
           return TypeR(ts, i)
     i = i + 1
   // A pointer is named as it is written (ADR_RAW_POINTER_SURFACE.md),
   // so a diagnostic says `Ptr<i32>` where the source said `Ptr<i32>`.
   let ptr_name: string = "Ptr<" + spell_type(ts, pointee_ti, spelling_depth() - 1) + ">"
-  return ts_add_type(ts, DaoType(TypeKind::TPointer, to_i64(-1), ptr_name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), pointee_ti))
+  return ts_add_type(ts, base::DaoType(base::TypeKind::TPointer, to_i64(-1), ptr_name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), pointee_ti))
 
 // The generator type yielding `elem_ti`: one per element type, found in
 // constant time through the registry's generator index.  An unresolved
@@ -2774,7 +2776,7 @@ fn find_or_add_pointer_type(ts: TS, pointee_ti: i64): TypeR
 // generator body; its element compares as unknown (types_equal).
 fn find_or_add_generator_type(ts: TS, elem_ti: i64): TypeR
   let key: string = i64_to_string(elem_ti)
-  let known: i64 = hm_get_or(ts.reg.made.generators, key, to_i64(-1))
+  let known: i64 = base::hm_get_or(ts.reg.made.generators, key, to_i64(-1))
   if known >= 0:
     return TypeR(ts, known)
   let tr: TypeR = ts_add_type(ts, generator_type(elem_ti, "Generator<" + spell_type(ts, elem_ti, spelling_depth() - 1) + ">"))
@@ -2783,8 +2785,8 @@ fn find_or_add_generator_type(ts: TS, elem_ti: i64): TypeR
   return TypeR(r, tr.type_idx)
 
 // A generator type: its element type in `pointee`.
-fn generator_type(elem_ti: i64, name: string): DaoType
-  return DaoType(TypeKind::TGenerator, to_i64(-1), name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), elem_ti)
+fn generator_type(elem_ti: i64, name: string): base::DaoType
+  return base::DaoType(base::TypeKind::TGenerator, to_i64(-1), name, to_i64(-1), to_i64(-1), to_i64(0), to_i64(-1), elem_ti)
 
 // True if the AST node is an lvalue: identifier, field access, or
 // index expression — what an assignment may target.
@@ -2852,7 +2854,7 @@ fn ptr_call_shape(ts: TS, callee: i64): PtrShape
       if obj_ti >= r.types.length():
         return PtrShape(r, false)
       match r.types.get(obj_ti).kind:
-        TypeKind::TPointer:
+        base::TypeKind::TPointer:
           return PtrShape(r, true)
       return PtrShape(r, false)
     parser::Node::QualNameE(seg_lp, seg_count):
@@ -2919,7 +2921,7 @@ fn ptr_call_member(ts: TS, callee: i64): string
 // The key under which the checker records which pointer operation the
 // call at `node_idx` is.
 fn ptr_op_key(module_id: i64, node_idx: i64): string
-  return expr_id_key(module_id, node_idx) + ":ptr_op"
+  return base::expr_id_key(module_id, node_idx) + ":ptr_op"
 
 fn record_ptr_op(ts: TS, node_idx: i64, op: i64): TS
   ts.reg = reg_with_expr_types(ts.reg, ts.reg.expr_types.set(ptr_op_key(ts.tc.module_id, node_idx), op))
@@ -2945,9 +2947,9 @@ fn check_ptr_method_call(ts: TS, node_idx: i64, callee: i64, args: Vector<i64>, 
         return unhandled
       if obj_ti >= ts.types.length():
         return unhandled
-      let obj_type: DaoType = ts.types.get(obj_ti)
+      let obj_type: base::DaoType = ts.types.get(obj_ti)
       match obj_type.kind:
-        TypeKind::TPointer:
+        base::TypeKind::TPointer:
           let name: string = ts_tok_name(ts, field_tidx)
           let sp: Span = ts_tok_span(ts, field_tidx)
           let targs: Vector<i64> = read_type_args(ts, targs_lp)
@@ -3059,29 +3061,29 @@ fn infer_bindings(ts: TS, map: HashMap<i64>, pattern_ti: i64, concrete_ti: i64, 
     return Bound(ts, map)
   if concrete_ti >= ts.types.length():
     return Bound(ts, map)
-  let pt: DaoType = ts.types.get(pattern_ti)
-  let ct: DaoType = ts.types.get(concrete_ti)
+  let pt: base::DaoType = ts.types.get(pattern_ti)
+  let ct: base::DaoType = ts.types.get(concrete_ti)
   match pt.kind:
-    TypeKind::TGenericParam:
+    base::TypeKind::TGenericParam:
       // A parameter the callee does not declare is fixed: it names the
       // one type it stands for, whatever sits at its position.
       if decides_param(own, pattern_ti) == false:
         return Bound(ts, map)
       let key: string = i64_to_string(pattern_ti)
-      let bound: i64 = hm_get_or(map, key, to_i64(-1))
+      let bound: i64 = base::hm_get_or(map, key, to_i64(-1))
       if bound < 0:
         return Bound(ts, map.set(key, concrete_ti))
       if types_equal(ts, bound, concrete_ti):
         return Bound(ts, map)
       return Bound(ts_add_diag(ts, span, "conflicting types for generic parameter '" + pt.name + "': " + type_name(ts, bound) + " vs " + type_name(ts, concrete_ti)), map)
-    TypeKind::TPointer:
+    base::TypeKind::TPointer:
       match ct.kind:
-        TypeKind::TPointer:
+        base::TypeKind::TPointer:
           return infer_bindings(ts, map, pt.pointee, ct.pointee, span, own)
       return Bound(ts, map)
-    TypeKind::TGenerator:
+    base::TypeKind::TGenerator:
       match ct.kind:
-        TypeKind::TGenerator:
+        base::TypeKind::TGenerator:
           return infer_bindings(ts, map, pt.pointee, ct.pointee, span, own)
       return Bound(ts, map)
   // `Box<T>` against `Box<i32>`, `Opt<T>` against `Opt<i64>` decides
@@ -3125,22 +3127,22 @@ fn substitute_once(ts: TS, map: HashMap<i64>, ti: i64, done: HashMap<i64>): Subs
   // `map` takes a type index to what stands in for it: a parameter a
   // call decided, or a concept's own name in its signatures, which
   // means the conforming type (concept_method_sig).
-  let standing_in: i64 = hm_get_or(map, i64_to_string(ti), to_i64(-1))
+  let standing_in: i64 = base::hm_get_or(map, i64_to_string(ti), to_i64(-1))
   if standing_in >= 0:
     return Subst(ts, standing_in, done)
   let key: string = i64_to_string(ti)
-  let already: i64 = hm_get_or(done, key, to_i64(-2))
+  let already: i64 = base::hm_get_or(done, key, to_i64(-2))
   if already != to_i64(-2):
     return Subst(ts, already, done)
-  let t: DaoType = ts.types.get(ti)
+  let t: base::DaoType = ts.types.get(ti)
   match t.kind:
-    TypeKind::TPointer:
+    base::TypeKind::TPointer:
       let inner: Subst = substitute_once(ts, map, t.pointee, done)
       if inner.type_idx == t.pointee:
         return Subst(inner.ts, ti, inner.done.set(key, ti))
       let ptr: TypeR = find_or_add_pointer_type(inner.ts, inner.type_idx)
       return Subst(ptr.ts, ptr.type_idx, inner.done.set(key, ptr.type_idx))
-    TypeKind::TGenerator:
+    base::TypeKind::TGenerator:
       let elem: Subst = substitute_once(ts, map, t.pointee, done)
       if elem.type_idx == t.pointee:
         return Subst(elem.ts, ti, elem.done.set(key, ti))
@@ -3183,17 +3185,17 @@ fn substitute_once(ts: TS, map: HashMap<i64>, ti: i64, done: HashMap<i64>): Subs
 /// The stands-for record a nominal type carries (write_stands_for) —
 /// a class's or an enum's, head or instantiation — or -1 for any other
 /// type, or a nominal type standing for nothing.
-fn stands_for_of(t: DaoType): i64
+fn stands_for_of(t: base::DaoType): i64
   match t.kind:
-    TypeKind::TStruct:
+    base::TypeKind::TStruct:
       return t.ret_type
-    TypeKind::TEnum:
+    base::TypeKind::TEnum:
       return t.ret_type
   return to_i64(-1)
 
 /// The head a nominal type's record names: itself for a head, the head
 /// it was made from for an instantiation; -1 for a type with no record.
-fn record_head(ts: TS, t: DaoType): i64
+fn record_head(ts: TS, t: base::DaoType): i64
   let rec: i64 = stands_for_of(t)
   if rec < 0:
     return to_i64(-1)
@@ -3225,7 +3227,7 @@ fn is_generic_head(ts: TS, ti: i64): bool
 /// The parameters a class head stands for, by type index, from the
 /// record its type carries (record_own_params) — readable from any
 /// module; none for a class without parameters.
-fn head_params(ts: TS, head: DaoType): ParamIds
+fn head_params(ts: TS, head: base::DaoType): ParamIds
   return ParamIds(ts, stands_for_args(ts, stands_for_of(head)))
 
 /// The type parameters a declaration declares, by the type index its
@@ -3290,11 +3292,11 @@ fn spell_type(ts: TS, ti: i64, budget: i64): string
     return "<unknown>"
   if budget <= 0:
     return "…"
-  let t: DaoType = ts.types.get(ti)
+  let t: base::DaoType = ts.types.get(ti)
   match t.kind:
-    TypeKind::TPointer:
+    base::TypeKind::TPointer:
       return "Ptr<" + spell_type(ts, t.pointee, budget - 1) + ">"
-    TypeKind::TGenerator:
+    base::TypeKind::TGenerator:
       return "Generator<" + spell_type(ts, t.pointee, budget - 1) + ">"
   let head_ti: i64 = record_head(ts, t)
   if head_ti >= 0 and head_ti != ti:
@@ -3355,13 +3357,13 @@ fn record_own_params(ts: TS, ti: i64, tparams_lp: i64): TS
     return r
   let record: TypeR = write_stands_for(r, ti, params.ids)
   r = record.ts
-  let t: DaoType = r.types.get(ti)
+  let t: base::DaoType = r.types.get(ti)
   match t.kind:
-    TypeKind::TStruct:
+    base::TypeKind::TStruct:
       t.ret_type = record.type_idx
-    TypeKind::TEnum:
+    base::TypeKind::TEnum:
       t.ret_type = record.type_idx
-    TypeKind::TFunction:
+    base::TypeKind::TFunction:
       t.pointee = record.type_idx
   r.types = r.types.set(ti, t)
   return r
@@ -3398,18 +3400,18 @@ fn type_nesting(ts: TS, ti: i64): Nesting
   if ti >= ts.types.length():
     return Nesting(ts, to_i64(0))
   let key: string = i64_to_string(ti)
-  let known: i64 = hm_get_or(ts.reg.made.nesting, key, to_i64(-1))
+  let known: i64 = base::hm_get_or(ts.reg.made.nesting, key, to_i64(-1))
   if known >= 0:
     return Nesting(ts, known)
   let r: TS = ts
   let depth: i64 = to_i64(1)
-  let t: DaoType = r.types.get(ti)
+  let t: base::DaoType = r.types.get(ti)
   match t.kind:
-    TypeKind::TPointer:
+    base::TypeKind::TPointer:
       let held: Nesting = type_nesting(r, t.pointee)
       r = held.ts
       depth = held.depth + 1
-    TypeKind::TGenerator:
+    base::TypeKind::TGenerator:
       let element: Nesting = type_nesting(r, t.pointee)
       r = element.ts
       depth = element.depth + 1
@@ -3474,9 +3476,9 @@ fn callee_own_params(ts: TS, callee: i64): ParamIds
   let fn_ti: i64 = sym_type_at(ts, sym)
   if fn_ti < 0:
     return ParamIds(ts, none)
-  let ft: DaoType = ts.types.get(fn_ti)
+  let ft: base::DaoType = ts.types.get(fn_ti)
   match ft.kind:
-    TypeKind::TFunction:
+    base::TypeKind::TFunction:
       return ParamIds(ts, stands_for_args(ts, ft.pointee))
   return ParamIds(ts, none)
 
@@ -3559,7 +3561,7 @@ fn type_mentions_any(ts: TS, ti: i64, params: Vector<i64>): bool
 fn decided_mention_any(ts: TS, decided: HashMap<i64>, keys: Vector<i64>, params: Vector<i64>): bool
   let i: i64 = 0
   while i < keys.length():
-    if type_mentions_any(ts, hm_get_or(decided, i64_to_string(keys.get(i)), to_i64(-1)), params):
+    if type_mentions_any(ts, base::hm_get_or(decided, i64_to_string(keys.get(i)), to_i64(-1)), params):
       return true
     i = i + 1
   return false
@@ -3583,11 +3585,11 @@ fn mention_search(ts: TS, ti: i64, params: Vector<i64>, so_far: Mention): Mentio
   if so_far.seen.contains(key):
     return so_far
   let m: Mention = Mention(so_far.seen.set(key, to_i64(1)), false)
-  let t: DaoType = ts.types.get(ti)
+  let t: base::DaoType = ts.types.get(ti)
   match t.kind:
-    TypeKind::TPointer:
+    base::TypeKind::TPointer:
       return mention_search(ts, t.pointee, params, m)
-    TypeKind::TGenerator:
+    base::TypeKind::TGenerator:
       return mention_search(ts, t.pointee, params, m)
   let args: Vector<i64> = stands_for_args(ts, stands_for_of(t))
   let i: i64 = 0
@@ -3605,7 +3607,7 @@ fn instantiation_decided(ts: TS, ti: i64, into: HashMap<i64>): Bound
     return Bound(ts, into)
   if ti >= ts.types.length():
     return Bound(ts, into)
-  let t: DaoType = ts.types.get(ti)
+  let t: base::DaoType = ts.types.get(ti)
   let stands_for: i64 = stands_for_of(t)
   if stands_for < 0:
     return Bound(ts, into)
@@ -3631,7 +3633,7 @@ fn qualified_type_head(ts: TS, segs: Vector<i64>): i64
   let head_sym: i64 = lookup_use(ts, segs.get(0))
   if head_sym < 0:
     return to_i64(-1)
-  if symbol_kind_name(ts.tc.symbols.get(head_sym).kind) != "Type":
+  if resolver::symbol_kind_name(ts.tc.symbols.get(head_sym).kind) != "Type":
     return to_i64(-1)
   return sym_type_at(ts, head_sym)
 
@@ -3644,7 +3646,7 @@ fn type_args_head(ts: TS, callee: i64): i64
       if head_ti < 0:
         return to_i64(-1)
       match ts.types.get(head_ti).kind:
-        TypeKind::TStruct:
+        base::TypeKind::TStruct:
           return head_ti
   return to_i64(-1)
 
@@ -3668,7 +3670,7 @@ fn call_owner_params(ts: TS, callee: i64): ParamIds
 /// The key under which the checker records a call's substitution: a
 /// type_info record [count, (parameter, what it stands for) * count].
 fn call_subst_key(module_id: i64, node_idx: i64): string
-  return expr_id_key(module_id, node_idx) + ":subst"
+  return base::expr_id_key(module_id, node_idx) + ":subst"
 
 /// Record what the call at `node_idx` decided of `params`; a parameter
 /// it left undecided stands for itself, and the concreteness check after
@@ -3683,7 +3685,7 @@ fn record_call_subst(ts: TS, node_idx: i64, params: Vector<i64>, decided: HashMa
   while i < params.length():
     let p: i64 = params.get(i)
     pairs = pairs.push(p)
-    pairs = pairs.push(hm_get_or(decided, i64_to_string(p), p))
+    pairs = pairs.push(base::hm_get_or(decided, i64_to_string(p), p))
     i = i + 1
   let start: i64 = ts.type_info.length()
   let r: TS = ts_push_info_run(ts, pairs)
@@ -3718,10 +3720,10 @@ fn check_decided_bounds(ts: TS, decided: HashMap<i64>, own: Vector<i64>, span: S
   let i: i64 = 0
   while i < own.length():
     let param_ti: i64 = own.get(i)
-    let with_ti: i64 = hm_get_or(decided, i64_to_string(param_ti), to_i64(-1))
+    let with_ti: i64 = base::hm_get_or(decided, i64_to_string(param_ti), to_i64(-1))
     if with_ti >= 0:
       if param_ti < r.types.length():
-        let pt: DaoType = r.types.get(param_ti)
+        let pt: base::DaoType = r.types.get(param_ti)
         if bounds_walkable(r, pt):
           let b: i64 = 0
           while b < pt.info_count:
@@ -3748,7 +3750,7 @@ fn instantiate_generic(ts: TS, head_ti: i64, args: Vector<i64>): TypeR
     return TypeR(ts, to_i64(-1))
   if head_ti >= ts.types.length():
     return TypeR(ts, to_i64(-1))
-  let head: DaoType = ts.types.get(head_ti)
+  let head: base::DaoType = ts.types.get(head_ti)
   if stands_for_of(head) < 0:
     return TypeR(ts, to_i64(-1))
   let params: ParamIds = head_params(ts, head)
@@ -3770,7 +3772,7 @@ fn instantiate_generic(ts: TS, head_ti: i64, args: Vector<i64>): TypeR
   if is_the_head:
     return TypeR(r, head_ti)
   let key: string = instantiation_key(head_ti, args)
-  let known: i64 = hm_get_or(r.reg.made.instantiations, key, to_i64(-1))
+  let known: i64 = base::hm_get_or(r.reg.made.instantiations, key, to_i64(-1))
   if known >= 0:
     return TypeR(r, known)
   // An instantiation of a head asked for, with deeper arguments, while
@@ -3786,7 +3788,7 @@ fn instantiate_generic(ts: TS, head_ti: i64, args: Vector<i64>): TypeR
     return TypeR(r, to_i64(-1))
   let record: TypeR = write_stands_for(r, head_ti, args)
   r = record.ts
-  let shell: TypeR = ts_add_type(r, DaoType(head.kind, head.builtin_id, instantiation_name(r, head.name, args), head.decl_node, to_i64(-1), to_i64(0), record.type_idx, to_i64(-1)))
+  let shell: TypeR = ts_add_type(r, base::DaoType(head.kind, head.builtin_id, instantiation_name(r, head.name, args), head.decl_node, to_i64(-1), to_i64(0), record.type_idx, to_i64(-1)))
   r = shell.ts
   r.reg = reg_add_instantiation(r.reg, key, shell.type_idx)
   if layout_ready(r, head):
@@ -3804,11 +3806,11 @@ fn instantiate_generic(ts: TS, head_ti: i64, args: Vector<i64>): TypeR
 /// progress while they are (the recursion guard above).  One whose
 /// layout is written already, or whose head's still is not, is left.
 fn materialize(ts: TS, inst_ti: i64): TS
-  let t: DaoType = ts.types.get(inst_ti)
+  let t: base::DaoType = ts.types.get(inst_ti)
   if t.info_lp >= 0:
     return ts
   let head_ti: i64 = ts.type_info.get(t.ret_type)
-  let head: DaoType = ts.types.get(head_ti)
+  let head: base::DaoType = ts.types.get(head_ti)
   if layout_ready(ts, head) == false:
     return ts
   let args: Vector<i64> = stands_for_args(ts, t.ret_type)
@@ -3824,7 +3826,7 @@ fn materialize(ts: TS, inst_ti: i64): TS
   let outer: Vector<i64> = r.reg.made.in_progress
   r.reg = reg_with_in_progress(r.reg, outer.push(head_ti).push(deepest.depth))
   match head.kind:
-    TypeKind::TEnum:
+    base::TypeKind::TEnum:
       let with_variants: TS = materialize_variants(r, inst_ti, head, decided)
       with_variants.reg = reg_with_in_progress(with_variants.reg, outer)
       return with_variants
@@ -3842,7 +3844,7 @@ fn materialize(ts: TS, inst_ti: i64): TS
     r = ts_push_type_info(r, r.type_info.get(head.info_lp + wf * 2))
     r = ts_push_type_info(r, field_types.get(wf))
     wf = wf + 1
-  let made: DaoType = r.types.get(inst_ti)
+  let made: base::DaoType = r.types.get(inst_ti)
   made.info_lp = info_start
   made.info_count = head.info_count
   r.types = r.types.set(inst_ti, made)
@@ -3850,9 +3852,9 @@ fn materialize(ts: TS, inst_ti: i64): TS
 
 /// Whether a head's layout is written: a class's fields, or an enum's
 /// variant table (written as one run by tc_fill_enum_variants).
-fn layout_ready(ts: TS, head: DaoType): bool
+fn layout_ready(ts: TS, head: base::DaoType): bool
   match head.kind:
-    TypeKind::TEnum:
+    base::TypeKind::TEnum:
       return head.info_lp >= 0 and head.info_lp < ts.type_info.length()
   return layout_walkable(ts, head)
 
@@ -3862,7 +3864,7 @@ fn layout_ready(ts: TS, head: DaoType): bool
 /// type.  Every payload type is substituted before the table is
 /// written, so it is one run however many instantiations substitution
 /// makes.  `decided` maps the head's parameters to the arguments.
-fn materialize_variants(ts: TS, inst_ti: i64, head: DaoType, decided: HashMap<i64>): TS
+fn materialize_variants(ts: TS, inst_ti: i64, head: base::DaoType, decided: HashMap<i64>): TS
   let r: TS = ts
   let records: Vector<i64> = Vector<i64>::new()
   let pos: i64 = head.info_lp
@@ -3882,7 +3884,7 @@ fn materialize_variants(ts: TS, inst_ti: i64, head: DaoType, decided: HashMap<i6
     v = v + 1
   let info_start: i64 = r.type_info.length()
   r = ts_push_info_run(r, records)
-  let made: DaoType = r.types.get(inst_ti)
+  let made: base::DaoType = r.types.get(inst_ti)
   made.info_lp = info_start
   made.info_count = head.info_count
   r.types = r.types.set(inst_ti, made)
@@ -3927,7 +3929,7 @@ fn materialize_pending(ts: TS): TS
 /// indexes the instantiation (index_program_structs).
 fn derive_instantiation(ts: TS, ti: i64): TS
   let r: TS = ts
-  let t: DaoType = r.types.get(ti)
+  let t: base::DaoType = r.types.get(ti)
   let di: i64 = 0
   while di < r.reg.conform.derived_concepts.length():
     let dcti: i64 = r.reg.conform.derived_concepts.get(di)
@@ -4000,9 +4002,9 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
         if csegs.length() > 0:
           let csym: i64 = lookup_use(r, csegs.get(0))
           if csym >= 0:
-            let csym_obj: Symbol = r.tc.symbols.get(csym)
+            let csym_obj: resolver::Symbol = r.tc.symbols.get(csym)
             // D4: Module-qualified call (e.g. fmt::print(...))
-            if symbol_kind_name(csym_obj.kind) == "Module":
+            if resolver::symbol_kind_name(csym_obj.kind) == "Module":
               if csegs.length() >= 2:
                 let fn_name: string = ts_tok_name(r, csegs.get(1))
                 let exp_sym: i64 = lookup_use(r, csegs.get(1))
@@ -4016,9 +4018,9 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
     return r
   if callee_ti >= r.types.length():
     return r
-  let callee_type: DaoType = r.types.get(callee_ti)
+  let callee_type: base::DaoType = r.types.get(callee_ti)
   match callee_type.kind:
-    TypeKind::TFunction:
+    base::TypeKind::TFunction:
       // A dot-call (`obj.m(...)`) is a method call: the method takes
       // `self` (its function type says so), and the receiver fills it.
       // A static method reached through a value is a diagnostic — it is
@@ -4183,7 +4185,7 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
         generic_over = generic_over.push(owner.ids.get(oi))
         oi = oi + 1
       return record_call_subst(r, node_idx, generic_over, decided)
-    TypeKind::TStruct:
+    base::TypeKind::TStruct:
       // A class is constructed positionally (`Point(1, 2)`); a named
       // argument constructs a variant, never a class.
       let cnames: Vector<i64> = parser::read_list(r.tc.idx_data, names_lp)
@@ -4261,7 +4263,7 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
         if made.type_idx >= 0:
           return ts_set_expr_type(r, node_idx, made.type_idx)
       return ts_set_expr_type(r, node_idx, callee_ti)
-    TypeKind::TEnum:
+    base::TypeKind::TEnum:
       // A variant construction, `Enum::Variant(param = value, ..)`: the
       // callee's last segment names the variant, a member of the enum's
       // namespace; its parameters come from the registry by name, so
@@ -4326,13 +4328,13 @@ fn check_variant_construction(ts: TS, node_idx: i64, callee: i64, enum_ti: i64, 
       let asp: Span = ts_node_span(r, args.get(ai))
       return ts_add_diag(r, asp, "variant '" + variant_name + "' is constructed by parameter name: " + variant_name + "(name = value)")
     let arg_name: string = ts_tok_name(r, name_tidx)
-    let param_index: i64 = hm_get_or(r.reg.variant_set, vkey + ":" + arg_name, to_i64(-1))
+    let param_index: i64 = base::hm_get_or(r.reg.variant_set, vkey + ":" + arg_name, to_i64(-1))
     if param_index < 0:
       return ts_add_diag(r, ts_tok_span(r, name_tidx), "variant '" + variant_name + "' has no parameter '" + arg_name + "'")
     if at_param.get(param_index) >= 0:
       return ts_add_diag(r, ts_tok_span(r, name_tidx), "parameter '" + arg_name + "' of variant '" + variant_name + "' is given twice")
     at_param = at_param.set(param_index, ai)
-    r.reg = reg_with_expr_types(r.reg, r.reg.expr_types.set(expr_id_key(r.tc.module_id, args.get(ai)) + ":param", param_index))
+    r.reg = reg_with_expr_types(r.reg, r.reg.expr_types.set(base::expr_id_key(r.tc.module_id, args.get(ai)) + ":param", param_index))
     ai = ai + 1
   if args.length() != param_count:
     return ts_add_diag(r, sp, "variant '" + variant_name + "' takes " + i64_to_string(param_count) + " parameter(s), got " + i64_to_string(args.length()))
@@ -4366,7 +4368,7 @@ fn check_variant_construction(ts: TS, node_idx: i64, callee: i64, enum_ti: i64, 
   let pi: i64 = 0
   while pi < param_count:
     let arg: i64 = args.get(at_param.get(pi))
-    let param_ti: i64 = hm_get_or(r.reg.variant_set, vkey + ":#" + i64_to_string(pi) + ":type", to_i64(-1))
+    let param_ti: i64 = base::hm_get_or(r.reg.variant_set, vkey + ":#" + i64_to_string(pi) + ":type", to_i64(-1))
     // A literal argument adopts the parameter's concrete type, as a
     // call argument does (host).
     let so_far: TypeR = substitute_type(r, decided, param_ti)
@@ -4398,7 +4400,7 @@ fn decided_or_own(decided: HashMap<i64>, params: Vector<i64>): Vector<i64>
   let i: i64 = 0
   while i < params.length():
     let param_ti: i64 = params.get(i)
-    out = out.push(hm_get_or(decided, i64_to_string(param_ti), param_ti))
+    out = out.push(base::hm_get_or(decided, i64_to_string(param_ti), param_ti))
     i = i + 1
   return out
 
@@ -4409,9 +4411,9 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
     return r
   if obj_ti >= r.types.length():
     return r
-  let obj_type: DaoType = r.types.get(obj_ti)
+  let obj_type: base::DaoType = r.types.get(obj_ti)
   match obj_type.kind:
-    TypeKind::TStruct:
+    base::TypeKind::TStruct:
       let field_name: string = ts_tok_name(r, field_tidx)
       // Field lookup reads the layout's field symbols (program-wide, so
       // another module's struct is read the same way); it is skipped when
@@ -4461,7 +4463,7 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
         let sp: Span = ts_tok_span(r, field_tidx)
         r = ts_add_diag(r, sp, "no field '" + field_name + "' on type " + type_name(r, obj_ti))
       return r
-    TypeKind::TGenericParam:
+    base::TypeKind::TGenericParam:
       // A member access on a type parameter: its bound concepts are the
       // only source of members.  The first bound requiring the member,
       // in declaration order (the host's constraint search), types the
@@ -4481,7 +4483,7 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
             unreadable = true
           else:
             if cti < r.types.length():
-              let ct: DaoType = r.types.get(cti)
+              let ct: base::DaoType = r.types.get(cti)
               if layout_walkable(r, ct):
                 let gm: i64 = 0
                 while gm < ct.info_count:
@@ -4524,9 +4526,9 @@ fn check_pipe_expr(ts: TS, node_idx: i64, left: i64, right: i64): TS
   if rhs_ti >= r.types.length():
     return r
   if rhs_ti >= 0:
-    let rhs_type: DaoType = r.types.get(rhs_ti)
+    let rhs_type: base::DaoType = r.types.get(rhs_ti)
     match rhs_type.kind:
-      TypeKind::TFunction:
+      base::TypeKind::TFunction:
         // RHS must accept at least 1 param, and LHS type must match first param
         if rhs_type.info_count < 1:
           let sp: Span = ts_node_span(r, right)
@@ -4746,10 +4748,10 @@ fn check_for_stmt(ts: TS, for_node: i64, iter_node: i64, body_lp: i64): TS
   let r: TS = check_expr(ts, iter_node)
   let iter_ti: i64 = get_expr_type(r, iter_node)
   if iter_ti >= 0:
-    let iter_t: DaoType = r.types.get(iter_ti)
+    let iter_t: base::DaoType = r.types.get(iter_ti)
     let is_generator: bool = false
     match iter_t.kind:
-      TypeKind::TGenerator:
+      base::TypeKind::TGenerator:
         is_generator = true
     if is_generator:
       let var_sym: i64 = member_sym_of(r.reg.index, r.tc.module_id, for_node, "Local", "")
@@ -4888,7 +4890,7 @@ fn type_arm_bindings(ts: TS, pat_node: i64, scrut_ti: i64): TS
       let bindings: Vector<i64> = parser::read_list(r.tc.idx_data, args_lp)
       let bi: i64 = 0
       while bi < bindings.length():
-        let payload_ti: i64 = hm_get_or(r.reg.variant_set, vkey + ":#" + i64_to_string(bi) + ":type", to_i64(-1))
+        let payload_ti: i64 = base::hm_get_or(r.reg.variant_set, vkey + ":#" + i64_to_string(bi) + ":type", to_i64(-1))
         let sym: i64 = member_sym_of(r.reg.index, r.tc.module_id, bindings.get(bi), "Local", "")
         if payload_ti >= 0 and sym >= 0:
           let as_scrutinee: TypeR = substitute_type(r, decided.map, payload_ti)
@@ -4902,7 +4904,7 @@ fn type_arm_bindings(ts: TS, pat_node: i64, scrut_ti: i64): TS
 fn check_match_stmt(ts: TS, scrut_node: i64, arms_lp: i64): TS
   let r: TS = check_expr(ts, scrut_node)
   let scrut_ti: i64 = get_expr_type(r, scrut_node)
-  let arms: Vector<i64> = read_pairs(r.tc.idx_data, arms_lp)
+  let arms: Vector<i64> = resolver::read_pairs(r.tc.idx_data, arms_lp)
   let i: i64 = 0
   while i < arms.length():
     let pat_node: i64 = arms.get(i)
@@ -4948,7 +4950,7 @@ fn tc_check_fn_body(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, ret_t
   let old_ctx: CheckCtx = r.ctx
   r = tc_enter_fn_ctx(r, fn_ti)
   // Declare param types
-  let pairs: Vector<i64> = read_pairs(r.tc.idx_data, params_lp)
+  let pairs: Vector<i64> = resolver::read_pairs(r.tc.idx_data, params_lp)
   let pi: i64 = 0
   while pi < pairs.length():
     let p_tidx: i64 = pairs.get(pi)
@@ -4973,7 +4975,7 @@ fn tc_check_expr_fn_body(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, 
     fn_ti = sym_type_at(r, sym_idx)
   let old_ctx: CheckCtx = r.ctx
   r = tc_enter_fn_ctx(r, fn_ti)
-  let pairs: Vector<i64> = read_pairs(r.tc.idx_data, params_lp)
+  let pairs: Vector<i64> = resolver::read_pairs(r.tc.idx_data, params_lp)
   let pi: i64 = 0
   while pi < pairs.length():
     let p_tidx: i64 = pairs.get(pi)
@@ -5020,7 +5022,7 @@ fn tc_enter_method(ts: TS, owner_ti: i64, meth_idx: i64, m_name_tidx: i64, m_par
   if msym >= 0:
     fn_ti = sym_type_at(r, msym)
   r = tc_enter_fn_ctx(r, fn_ti)
-  let pairs: Vector<i64> = read_pairs(r.tc.idx_data, m_params_lp)
+  let pairs: Vector<i64> = resolver::read_pairs(r.tc.idx_data, m_params_lp)
   let pi: i64 = 0
   while pi < pairs.length():
     let p_tidx: i64 = pairs.get(pi)
@@ -5114,13 +5116,13 @@ fn ts_add_derived_concept(ts: TS, concept_ti: i64): TS
   let c: Conformance = ts.reg.conform
   let providers: HashMap<i64> = c.providers
   if concept_ti < ts.types.length():
-    let ct: DaoType = ts.types.get(concept_ti)
+    let ct: base::DaoType = ts.types.get(concept_ti)
     if layout_walkable(ts, ct):
       let mi: i64 = 0
       while mi < ct.info_count:
         let fn_ti: i64 = ts.type_info.get(ct.info_lp + mi * 2 + 1)
         let name: string = method_type_name(ts, fn_ti)
-        let n: i64 = hm_get_or(providers, name, to_i64(0))
+        let n: i64 = base::hm_get_or(providers, name, to_i64(0))
         providers = providers.set(provider_key(name, n), concept_ti)
         providers = providers.set(provider_fn_key(name, n), fn_ti)
         providers = providers.set(name, n + 1)
@@ -5138,24 +5140,24 @@ fn provider_fn_key(name: string, j: i64): string
 // declaration order, as flat (concept type, member signature) pairs.
 fn derived_providers_of(reg: Registry, name: string): Vector<i64>
   let out: Vector<i64> = Vector<i64>::new()
-  let n: i64 = hm_get_or(reg.conform.providers, name, to_i64(0))
+  let n: i64 = base::hm_get_or(reg.conform.providers, name, to_i64(0))
   let j: i64 = 0
   while j < n:
-    out = out.push(hm_get_or(reg.conform.providers, provider_key(name, j), to_i64(-1)))
-    out = out.push(hm_get_or(reg.conform.providers, provider_fn_key(name, j), to_i64(-1)))
+    out = out.push(base::hm_get_or(reg.conform.providers, provider_key(name, j), to_i64(-1)))
+    out = out.push(base::hm_get_or(reg.conform.providers, provider_fn_key(name, j), to_i64(-1)))
     j = j + 1
   return out
 
 // A concept type: `builtin_id` records the declaring module, `decl_node`
 // its declaration, and the method table (name-token / method-type pairs)
 // lives at `info_lp` for `info_count` methods.
-fn concept_type(module_id: i64, name: string, decl_idx: i64, info_lp: i64, info_count: i64): DaoType
-  return DaoType(TypeKind::TConcept, module_id, name, decl_idx, info_lp, info_count, to_i64(-1), to_i64(-1))
+fn concept_type(module_id: i64, name: string, decl_idx: i64, info_lp: i64, info_count: i64): base::DaoType
+  return base::DaoType(base::TypeKind::TConcept, module_id, name, decl_idx, info_lp, info_count, to_i64(-1), to_i64(-1))
 
 // A function type derived from `ft` with a different parameter table and
 // result: `info_lp` / `info_count` locate the parameter type slots.
-fn fn_type_with(ft: DaoType, info_lp: i64, info_count: i64, ret: i64): DaoType
-  return DaoType(TypeKind::TFunction, ft.builtin_id, ft.name, ft.decl_node, info_lp, info_count, ret, ft.pointee)
+fn fn_type_with(ft: base::DaoType, info_lp: i64, info_count: i64, ret: i64): base::DaoType
+  return base::DaoType(base::TypeKind::TFunction, ft.builtin_id, ft.name, ft.decl_node, info_lp, info_count, ret, ft.pointee)
 
 // Whether the method type `fn_ti` is the concept method named `name`.  A
 // method's type carries its name as "fn <name>", so the match reads the
@@ -5171,7 +5173,7 @@ fn method_type_name(ts: TS, fn_ti: i64): string
     return ""
   if fn_ti >= ts.types.length():
     return ""
-  let mt: DaoType = ts.types.get(fn_ti)
+  let mt: base::DaoType = ts.types.get(fn_ti)
   if starts_with(mt.name, "fn "):
     return substring(mt.name, to_i64(3), length(mt.name) - 3)
   return ""
@@ -5183,7 +5185,7 @@ fn substitute_fn_type(ts: TS, map: HashMap<i64>, fn_ti: i64): TypeR
     return TypeR(ts, fn_ti)
   if fn_ti >= ts.types.length():
     return TypeR(ts, fn_ti)
-  let ft: DaoType = ts.types.get(fn_ti)
+  let ft: base::DaoType = ts.types.get(fn_ti)
   if fn_params_walkable(ts, ft) == false:
     return TypeR(ts, fn_ti)
   let r: TS = ts
@@ -5223,7 +5225,7 @@ fn concept_method_sig(ts: TS, fn_ti: i64, concept_ti: i64, self_ti: i64): TypeR
   if fn_ti >= r.types.length():
     return TypeR(r, fn_ti)
   let key: string = i64_to_string(fn_ti) + ":" + i64_to_string(concept_ti) + ":" + i64_to_string(self_ti)
-  let cached: i64 = hm_get_or(r.reg.conform.subst_cache, key, to_i64(-1))
+  let cached: i64 = base::hm_get_or(r.reg.conform.subst_cache, key, to_i64(-1))
   if cached >= 0:
     return TypeR(r, cached)
   let as_self: HashMap<i64> = HashMap<i64>::new().set(i64_to_string(concept_ti), self_ti)
@@ -5253,7 +5255,7 @@ fn ts_set_concept_member(ts: TS, node_idx: i64, fn_ti: i64, concept_ti: i64, sel
 // variant an `Enum::Variant` name (node `node_idx`) denotes, so a later
 // pass reads which variant it is without the declaring module's tokens.
 fn variant_index_key(module_id: i64, node_idx: i64): string
-  return expr_id_key(module_id, node_idx) + ":variant"
+  return base::expr_id_key(module_id, node_idx) + ":variant"
 
 // The registry entry holding a variant's declaration index.  Its
 // parameters are entered by name under `vkey:<name>`; `#` is no name's
@@ -5264,14 +5266,14 @@ fn variant_index_entry(vkey: string): string
 // Record the declaration index of the variant registered under `vkey`
 // for the name at `node_idx`.
 fn record_variant_index(ts: TS, node_idx: i64, vkey: string): TS
-  let index: i64 = hm_get_or(ts.reg.variant_set, variant_index_entry(vkey), to_i64(-1))
+  let index: i64 = base::hm_get_or(ts.reg.variant_set, variant_index_entry(vkey), to_i64(-1))
   if index < 0:
     return ts
   ts.reg = reg_with_expr_types(ts.reg, ts.reg.expr_types.set(variant_index_key(ts.tc.module_id, node_idx), index))
   return ts
 
 fn concept_member_key(module_id: i64, node_idx: i64): string
-  return expr_id_key(module_id, node_idx) + ":concept"
+  return base::expr_id_key(module_id, node_idx) + ":concept"
 
 // A `derived concept` is conformed to structurally: a class conforms when
 // every field's type conforms (explicitly, or itself derived), computed
@@ -5314,7 +5316,7 @@ fn tc_collect_conformances(ts: TS, decls: Vector<i64>): TS
             if cti >= 0:
               r = ts_add_derived_concept(r, cti)
       parser::Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
-        let cb_key: string = extend_binding_key(r.tc.file_id, decl_idx)
+        let cb_key: string = resolver::extend_binding_key(r.tc.file_id, decl_idx)
         let cb_found: Option<i64> = r.tc.concept_bindings.get(cb_key)
         let esym: i64 = to_i64(-1)
         match cb_found:
@@ -5354,13 +5356,13 @@ fn class_index_empty(): ClassIndex
 // instantiation made while signatures were resolved — indexed for
 // derivation: its type, its declaring module (an instantiation's is its
 // head's), and its field types, read from the layout a single time.
-fn index_program_structs(types: Vector<DaoType>, type_info: Vector<i64>): ClassIndex
+fn index_program_structs(types: Vector<base::DaoType>, type_info: Vector<i64>): ClassIndex
   let x: ClassIndex = class_index_empty()
   let sti: i64 = 0
   while sti < types.length():
-    let st: DaoType = types.get(sti)
+    let st: base::DaoType = types.get(sti)
     match st.kind:
-      TypeKind::TStruct:
+      base::TypeKind::TStruct:
         if st.info_lp >= 0 and st.info_lp + st.info_count * 2 <= type_info.length():
           let k: i64 = x.tis.length()
           x.tis = x.tis.push(sti)
@@ -5373,7 +5375,7 @@ fn index_program_structs(types: Vector<DaoType>, type_info: Vector<i64>): ClassI
             x.f_tis = x.f_tis.push(fti)
             if fti >= 0:
               let nkey: string = "n:" + i64_to_string(fti)
-              let n: i64 = hm_get_or(x.deps, nkey, to_i64(0))
+              let n: i64 = base::hm_get_or(x.deps, nkey, to_i64(0))
               x.deps = x.deps.set("d:" + i64_to_string(fti) + ":" + i64_to_string(n), k)
               x.deps = x.deps.set(nkey, n + 1)
             fi = fi + 1
@@ -5428,10 +5430,10 @@ fn derive_program_conformances(reg: Registry, idx: ClassIndex): Registry
     let qi: i64 = 0
     while qi < queue.length():
       let done_ti: i64 = queue.get(qi)
-      let dn: i64 = hm_get_or(idx.deps, "n:" + i64_to_string(done_ti), to_i64(0))
+      let dn: i64 = base::hm_get_or(idx.deps, "n:" + i64_to_string(done_ti), to_i64(0))
       let dj: i64 = 0
       while dj < dn:
-        let dep_k: i64 = hm_get_or(idx.deps, "d:" + i64_to_string(done_ti) + ":" + i64_to_string(dj), to_i64(-1))
+        let dep_k: i64 = base::hm_get_or(idx.deps, "d:" + i64_to_string(done_ti) + ":" + i64_to_string(dj), to_i64(-1))
         // A dependent whose own module's `extend` already conformed this
         // type counted it as conforming; only the others are decremented.
         if dep_k >= 0 and r.conform.known.contains(conform_key(done_ti, dcti, idx.mods.get(dep_k))) == false:
@@ -5588,8 +5590,8 @@ fn tc_bind_method_bounds(ts: TS, methods_lp: i64): TS
 // =========================================================================
 
 // Helper: build per-module TC from Program state.
-fn build_module_tc(p: Program, mid: i64): TC
-  let sf: graph::SourceFile = program_file_of_module(p, mid)
+fn build_module_tc(p: resolver::Program, mid: i64): TC
+  let sf: graph::SourceFile = resolver::program_file_of_module(p, mid)
   let po: parser::ParseOutput = sf.parse_output
   return TC(po.nodes, po.idx, po.toks, sf.source_text, p.resolve.symbols, p.resolve.scopes, p.resolve.uses, sf.file_id, p.resolve.extend_concept_bindings, mid, p.resolve.module_exports)
 
@@ -5599,7 +5601,7 @@ fn build_module_tc(p: Program, mid: i64): TC
 // shared type tables, the program-wide registries, and every module's
 // diagnostics.
 class TcAccum:
-  types: Vector<DaoType>
+  types: Vector<base::DaoType>
   type_info: Vector<i64>
   sym_types: Vector<i64>
   reg: Registry
@@ -5608,12 +5610,12 @@ class TcAccum:
 // Run one file-level pass over every module in dependency order,
 // threading the accumulated state through and folding each module's
 // diagnostics in.
-fn run_program_pass(p: Program, acc: TcAccum, pass: TcPass): TcAccum
+fn run_program_pass(p: resolver::Program, acc: TcAccum, pass: TcPass): TcAccum
   let a: TcAccum = acc
   let ti: i64 = 0
   while ti < p.module_graph.topo_order.length():
     let mid: i64 = p.module_graph.topo_order.get(ti)
-    let sf: graph::SourceFile = program_file_of_module(p, mid)
+    let sf: graph::SourceFile = resolver::program_file_of_module(p, mid)
     let ts: TS = ts_new(build_module_tc(p, mid), a.types, a.type_info, a.sym_types, a.reg)
     ts = tc_file_pass(ts, pass, sf.parse_output.root)
     let diags: Vector<graph::FileDiagnostic> = a.diags
@@ -5638,7 +5640,7 @@ fn run_program_pass(p: Program, acc: TcAccum, pass: TcPass): TcAccum
 // Concept satisfaction is signature-level only: every required method
 // has a matching signature on the implementing type's method set.  Body
 // correctness is the bodies pass's.
-fn program_run_typecheck(p: Program): Program
+fn program_run_typecheck(p: resolver::Program): resolver::Program
   return program_check(p).program
 
 // A type-checked program and the checker's program-wide registry — the
@@ -5647,10 +5649,10 @@ fn program_run_typecheck(p: Program): Program
 // continues from.  Beside the program, not in TypeCheckData, which
 // shared/base.dao gives programs that have no checker types.
 class ProgramTyped:
-  program: Program
+  program: resolver::Program
   reg: Registry
 
-fn program_check(p: Program): ProgramTyped
+fn program_check(p: resolver::Program): ProgramTyped
   p = program_init_typecheck(p)
   // Seed diagnostics from the resolve pass only (the pre-typecheck
   // baseline), NOT from p.diags which may already include typecheck
@@ -5666,8 +5668,8 @@ fn program_check(p: Program): ProgramTyped
   // Derivation runs once over every struct in the program at program scope.
   acc = TcAccum(acc.types, acc.type_info, acc.sym_types, derive_program_conformances(acc.reg, index_program_structs(acc.types, acc.type_info)), acc.diags)
   acc = run_program_pass(p, acc, TcPass::Bodies)
-  let td: TypeCheckData = TypeCheckData(true, acc.types, acc.type_info, acc.sym_types, ProgramLookup(acc.reg.expr_types, acc.reg.methods, acc.reg.index))
-  return ProgramTyped(Program(p.module_graph, p.resolve, td, p.hir, acc.diags), acc.reg)
+  let td: base::TypeCheckData = base::TypeCheckData(true, acc.types, acc.type_info, acc.sym_types, base::ProgramLookup(acc.reg.expr_types, acc.reg.methods, acc.reg.index))
+  return ProgramTyped(resolver::Program(p.module_graph, p.resolve, td, p.hir, acc.diags), acc.reg)
 
 // =========================================================================
 // Section 46b: Legacy single-file typecheck adapter
@@ -5683,18 +5685,18 @@ fn typecheck(src: string): TypeCheckResult
   // per-file expr_types which the program orchestrator does not
   // accumulate into TypeCheckData. Multi-module callers should use
   // program_run_typecheck instead.
-  let wrapped: string = wrap_test_module(src)
+  let wrapped: string = base::wrap_test_module(src)
   let inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   inputs = inputs.push(graph::SourceInput("test.dao", wrapped, false))
   let pg: graph::ProgramGraph = graph::build_program(inputs)
-  let p: Program = program_from_graph(pg)
-  p = program_run_resolve(p)
+  let p: resolver::Program = resolver::program_from_graph(pg)
+  p = resolver::program_run_resolve(p)
   p = program_init_typecheck(p)
 
   // Build per-module TC/TS and run the passes directly (one module:
   // one sweep of each).
   let tc: TC = build_module_tc(p, to_i64(0))
-  let sf: graph::SourceFile = program_file_of_module(p, to_i64(0))
+  let sf: graph::SourceFile = resolver::program_file_of_module(p, to_i64(0))
   let po: parser::ParseOutput = sf.parse_output
   let ts: TS = ts_new(tc, p.typecheck.types, p.typecheck.type_info, p.typecheck.sym_types, reg_with_expr_types(registry_new(p.resolve.symbols, p.module_graph.modules), p.typecheck.lookup.expr_types))
 

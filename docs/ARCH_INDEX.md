@@ -143,14 +143,15 @@ Self-hosting compiler subsystems written in Dao.
 
 - `README.md` — scope, parity notes, and subsystem inventory
 - `shared/` — shared type universe and cross-pass program lookup tables
-  (`base.dao`, importing `bootstrap::lexer`, `bootstrap::parser`, and
-  `bootstrap::graph`); assembled into remaining `*.gen.dao` files via
-  `assemble.sh`
+  (`base.dao`, `module bootstrap::base`, compiled directly as a real module
+  without `assemble.sh`)
 - `ascii.dao` — `bootstrap::ascii`, character-classification module
   imported by `bootstrap::lexer`
-- `assemble.sh` — concatenates `shared/base.dao` with remaining subsystem
-  sources to produce `*.gen.dao` outputs under `bootstrap/` or an explicit
-  per-run output root (`lexer`, `parser`, and `graph` no longer use assembly)
+- `assemble.sh` — concatenates remaining unextracted subsystem fragments
+  (`typecheck`, `hir`, `mir`, `llvm`, `driver`) to produce `*.gen.dao`
+  outputs under `bootstrap/` or an explicit per-run output root (`ascii`,
+  `lexer`, `parser`, `graph`, `base`, and `resolver` compile directly
+  without assembly)
 - `validate_ir.sh` — compiles, links, and runs the IR the LLVM suite
   emits under `llvm/out/` or a per-run directory, comparing exit codes
   and expected fixture counts
@@ -171,8 +172,10 @@ Self-hosting compiler subsystems written in Dao.
 - `graph/` — `bootstrap::graph` (`impl.dao`, importing `bootstrap::lexer`
   and `bootstrap::parser`) and `bootstrap::graph::tests` (`tests.dao`),
   compiled directly as real modules without `assemble.sh`
-- `resolver/` — two-pass name resolver with scope chains, symbol tables,
-  and uses map; logic + tests in `impl.dao` (Task 22)
+- `resolver/` — `bootstrap::resolver` (`impl.dao`, importing
+  `bootstrap::lexer`, `bootstrap::parser`, `bootstrap::graph`, and
+  `bootstrap::base`) and `bootstrap::resolver::tests` (`tests.dao`),
+  compiled directly as real modules without `assemble.sh`
 - `typecheck/` — type checker assigning types to expressions and
   validating type correctness; logic + tests in `impl.dao` (Task 23)
 - `hir/` — HIR lowering pass producing compiler-owned typed IR from

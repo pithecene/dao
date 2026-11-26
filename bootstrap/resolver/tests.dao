@@ -1,41 +1,46 @@
-module bootstrap::resolver_tests
-// Test runner for the bootstrap resolver.  Assembled after the
-// shared base and every library it exercises; never compiled
-// standalone.
+module bootstrap::resolver::tests
+
+import bootstrap::lexer
+import bootstrap::parser
+import bootstrap::graph
+import bootstrap::base
+import bootstrap::resolver
+
+// Standalone test runner for `bootstrap::resolver` (`module bootstrap::resolver::tests`).
 
 // =========================================================================
 // Section 31: Test infrastructure
 // =========================================================================
 
-fn count_symbols_of_kind(result: ResolveResult, kind: SymbolKind): i64
+fn count_symbols_of_kind(result: resolver::ResolveResult, kind: resolver::SymbolKind): i64
   let count: i64 = 0
   let i: i64 = 0
   while i < result.symbols.length():
-    let sym: Symbol = result.symbols.get(i)
-    if symbol_kind_name(sym.kind) == symbol_kind_name(kind):
+    let sym: resolver::Symbol = result.symbols.get(i)
+    if resolver::symbol_kind_name(sym.kind) == resolver::symbol_kind_name(kind):
       count = count + 1
     i = i + 1
   return count
 
-fn count_locals_named(result: ResolveResult, name: string): i64
+fn count_locals_named(result: resolver::ResolveResult, name: string): i64
   let n: i64 = 0
   let i: i64 = 0
   while i < result.symbols.length():
-    let sym: Symbol = result.symbols.get(i)
+    let sym: resolver::Symbol = result.symbols.get(i)
     if sym.name == name:
-      if symbol_kind_name(sym.kind) == "Local":
+      if resolver::symbol_kind_name(sym.kind) == "Local":
         n = n + 1
     i = i + 1
   return n
 
-fn count_diags(result: ResolveResult): i64
+fn count_diags(result: resolver::ResolveResult): i64
   return result.diags.length()
 
-fn count_uses(result: ResolveResult): i64
+fn count_uses(result: resolver::ResolveResult): i64
   // Uses are stored as flat pairs, so count is length / 2
   return result.uses.length() / 2
 
-fn program_error_count(rr: ProgramResolveResult): i64
+fn program_error_count(rr: resolver::ProgramResolveResult): i64
   let n: i64 = 0
   let i: i64 = 0
   while i < rr.diags.length():
@@ -44,7 +49,7 @@ fn program_error_count(rr: ProgramResolveResult): i64
     i = i + 1
   return n
 
-fn program_has_message(rr: ProgramResolveResult, message: string): bool
+fn program_has_message(rr: resolver::ProgramResolveResult, message: string): bool
   let i: i64 = 0
   while i < rr.diags.length():
     if rr.diags.get(i).diag.message == message:
@@ -55,7 +60,7 @@ fn program_has_message(rr: ProgramResolveResult, message: string): bool
 // The symbol the program resolved for the first token spelled `name`
 // in file `path` that has a use (a declaration's own name token has
 // none), or -1.
-fn program_use_of(pg: graph::ProgramGraph, rr: ProgramResolveResult, path: string, name: string): i64
+fn program_use_of(pg: graph::ProgramGraph, rr: resolver::ProgramResolveResult, path: string, name: string): i64
   let fi: i64 = 0
   while fi < pg.files.length():
     let sf: graph::SourceFile = pg.files.get(fi)
@@ -65,7 +70,7 @@ fn program_use_of(pg: graph::ProgramGraph, rr: ProgramResolveResult, path: strin
       while ti < toks.length():
         let tok: lexer::Token = toks.get(ti)
         if substring(sf.source_text, tok.offset, tok.len) == name:
-          let found: Option<i64> = rr.uses.get(uses_key(sf.file_id, ti))
+          let found: Option<i64> = rr.uses.get(resolver::uses_key(sf.file_id, ti))
           match found:
             Option::Some(sym_idx):
               return sym_idx
@@ -77,8 +82,8 @@ fn program_use_of(pg: graph::ProgramGraph, rr: ProgramResolveResult, path: strin
     fi = fi + 1
   return to_i64(-1)
 
-fn resolve_inputs(inputs: Vector<graph::SourceInput>): ProgramResolveResult
-  return resolve_program(graph::build_program(inputs))
+fn resolve_inputs(inputs: Vector<graph::SourceInput>): resolver::ProgramResolveResult
+  return resolver::resolve_program(graph::build_program(inputs))
 
 // =========================================================================
 // Section 32: Golden resolve tests
@@ -95,7 +100,7 @@ fn main(): i32
   // Test 1: forward_ref — fn calls fn defined later in file; no diagnostic
   // -----------------------------------------------------------------
   let src1: string = "fn foo(): i32\n  return bar()\n\nfn bar(): i32\n  return 42\n"
-  let r1: ResolveResult = resolve(src1)
+  let r1: resolver::ResolveResult = resolver::resolve(src1)
   let r1_diag_count: i64 = count_diags(r1)
   if r1_diag_count == 0:
     print("PASS forward_ref")
@@ -107,7 +112,7 @@ fn main(): i32
   // Test 2: local_shadow — let in block shadows file-level fn name
   // -----------------------------------------------------------------
   let src2: string = "fn foo(): i32\n  return 1\n\nfn main(): i32\n  let foo: i32 = 42\n  return foo\n"
-  let r2: ResolveResult = resolve(src2)
+  let r2: resolver::ResolveResult = resolver::resolve(src2)
   let r2_diags: i64 = count_diags(r2)
   // Should have 0 diagnostics (local shadows fn is valid)
   if r2_diags == 0:
@@ -120,7 +125,7 @@ fn main(): i32
   // Test 3: duplicate_decl — two fn with same name; expect 1 diagnostic
   // -----------------------------------------------------------------
   let src3: string = "fn foo(): i32\n  return 1\n\nfn foo(): i32\n  return 2\n"
-  let r3: ResolveResult = resolve(src3)
+  let r3: resolver::ResolveResult = resolver::resolve(src3)
   let r3_diags: i64 = count_diags(r3)
   if r3_diags >= 1:
     print("PASS duplicate_decl")
@@ -132,7 +137,7 @@ fn main(): i32
   // Test 4: unknown_name — use of undeclared identifier; expect 1 diagnostic
   // -----------------------------------------------------------------
   let src4: string = "fn main(): i32\n  return xyz\n"
-  let r4: ResolveResult = resolve(src4)
+  let r4: resolver::ResolveResult = resolver::resolve(src4)
   let r4_diags: i64 = count_diags(r4)
   if r4_diags >= 1:
     print("PASS unknown_name")
@@ -144,7 +149,7 @@ fn main(): i32
   // Test 5: builtin_type — let x: i32; i32 resolves to builtin
   // -----------------------------------------------------------------
   let src5: string = "fn main(): i32\n  let x: i32 = 0\n  return x\n"
-  let r5: ResolveResult = resolve(src5)
+  let r5: resolver::ResolveResult = resolver::resolve(src5)
   let r5_uses: i64 = count_uses(r5)
   let r5_diags: i64 = count_diags(r5)
   // Should have uses for i32 (return type), i32 (let type), x (return)
@@ -161,7 +166,7 @@ fn main(): i32
   // Test 6: for_scope — for-loop variable not visible outside loop body
   // -----------------------------------------------------------------
   let src6: string = "fn main(): i32\n  for i in items:\n    let x: i32 = i\n  return i\n"
-  let r6: ResolveResult = resolve(src6)
+  let r6: resolver::ResolveResult = resolver::resolve(src6)
   let r6_diags: i64 = count_diags(r6)
   // "items" is unknown (1 diag), "i" in return is out of scope (1 diag) = 2
   if r6_diags >= 2:
@@ -174,7 +179,7 @@ fn main(): i32
   // Test 7: lambda_scope — lambda param visible inside body
   // -----------------------------------------------------------------
   let src7: string = "fn main(): i32\n  let f = |x| -> x\n  return 0\n"
-  let r7: ResolveResult = resolve(src7)
+  let r7: resolver::ResolveResult = resolver::resolve(src7)
   let r7_diags: i64 = count_diags(r7)
   // Lambda param x is used in body — should resolve without diagnostic
   if r7_diags == 0:
@@ -187,8 +192,8 @@ fn main(): i32
   // Test 8: class_fields — class with 2 fields; verify 2 Field symbols
   // -----------------------------------------------------------------
   let src8: string = "class Point:\n  x: i64\n  y: i64\n"
-  let r8: ResolveResult = resolve(src8)
-  let r8_fields: i64 = count_symbols_of_kind(r8, SymbolKind::Field)
+  let r8: resolver::ResolveResult = resolver::resolve(src8)
+  let r8_fields: i64 = count_symbols_of_kind(r8, resolver::SymbolKind::Field)
   if r8_fields == 2:
     print("PASS class_fields")
     pass_count = pass_count + 1
@@ -199,8 +204,8 @@ fn main(): i32
   // Test 9: enum_decl — enum declares a Type symbol
   // -----------------------------------------------------------------
   let src9: string = "enum Color:\n  Red\n  Green\n  Blue\n"
-  let r9: ResolveResult = resolve(src9)
-  let r9_types: i64 = count_symbols_of_kind(r9, SymbolKind::Type)
+  let r9: resolver::ResolveResult = resolver::resolve(src9)
+  let r9_types: i64 = count_symbols_of_kind(r9, resolver::SymbolKind::Type)
   if r9_types >= 1:
     print("PASS enum_decl")
     pass_count = pass_count + 1
@@ -211,8 +216,8 @@ fn main(): i32
   // Test 10: type_alias — type alias declares a Type symbol
   // -----------------------------------------------------------------
   let src10: string = "type NodeId = i64\n"
-  let r10: ResolveResult = resolve(src10)
-  let r10_types: i64 = count_symbols_of_kind(r10, SymbolKind::Type)
+  let r10: resolver::ResolveResult = resolver::resolve(src10)
+  let r10_types: i64 = count_symbols_of_kind(r10, resolver::SymbolKind::Type)
   if r10_types >= 1:
     print("PASS type_alias")
     pass_count = pass_count + 1
@@ -223,7 +228,7 @@ fn main(): i32
   // Test 11: qual_name — TK::KwFn; first segment resolves
   // -----------------------------------------------------------------
   let src11: string = "enum TK:\n  KwFn\n\nfn main(): i32\n  let x = TK::KwFn\n  return 0\n"
-  let r11: ResolveResult = resolve(src11)
+  let r11: resolver::ResolveResult = resolver::resolve(src11)
   let r11_uses: i64 = count_uses(r11)
   // TK::KwFn should resolve the first segment "TK" to the enum Type symbol
   if r11_uses >= 1:
@@ -236,7 +241,7 @@ fn main(): i32
   // Test 12: nested_scope — fn with nested if/while blocks
   // -----------------------------------------------------------------
   let src12: string = "fn main(): i32\n  let x: i32 = 1\n  if x > 0:\n    let y: i32 = 2\n    while y > 0:\n      y = y - 1\n  return x\n"
-  let r12: ResolveResult = resolve(src12)
+  let r12: resolver::ResolveResult = resolver::resolve(src12)
   let r12_diags: i64 = count_diags(r12)
   let r12_scopes: i64 = r12.scopes.length()
   // Should have: file, function, block (fn body), block (if), block (while) = 5 scopes
@@ -253,7 +258,7 @@ fn main(): i32
   // Test 13: let_no_self_ref — let x = x should fail if no outer x
   // -----------------------------------------------------------------
   let src13: string = "fn main(): i32\n  let x: i32 = x\n  return 0\n"
-  let r13: ResolveResult = resolve(src13)
+  let r13: resolver::ResolveResult = resolver::resolve(src13)
   let r13_diags: i64 = count_diags(r13)
   // "x" in initializer is not yet declared, so should be unknown
   if r13_diags >= 1:
@@ -266,8 +271,8 @@ fn main(): i32
   // Test 14: extern_fn — extern fn declares Function symbol
   // -----------------------------------------------------------------
   let src14: string = "extern fn printf(fmt: string): i32\n"
-  let r14: ResolveResult = resolve(src14)
-  let r14_fns: i64 = count_symbols_of_kind(r14, SymbolKind::Function)
+  let r14: resolver::ResolveResult = resolver::resolve(src14)
+  let r14_fns: i64 = count_symbols_of_kind(r14, resolver::SymbolKind::Function)
   if r14_fns >= 1:
     print("PASS extern_fn")
     pass_count = pass_count + 1
@@ -278,15 +283,15 @@ fn main(): i32
   // Test 15: type_pos_rejects_local — local should not satisfy type position
   // -----------------------------------------------------------------
   let src15: string = "fn test(): i32\n  let T: i32 = 0\n  let x: T = 1\n  return x\n"
-  let rr15: ResolveResult = resolve(src15)
+  let rr15: resolver::ResolveResult = resolver::resolve(src15)
   // T in type position (let x: T) must NOT resolve to the local T.
   // Count uses that resolve to a Local symbol in type position.
   let local_type_uses: i64 = 0
   let u15: i64 = 0
   while u15 < rr15.uses.length():
-    let sym15: Symbol = rr15.symbols.get(rr15.uses.get(u15 + 1))
+    let sym15: resolver::Symbol = rr15.symbols.get(rr15.uses.get(u15 + 1))
     match sym15.kind:
-      SymbolKind::Local:
+      resolver::SymbolKind::Local:
         // Check if the use token is "T" by name
         if sym15.name == "T":
           local_type_uses = local_type_uses + 1
@@ -304,7 +309,7 @@ fn main(): i32
   // no diagnostic, a call names the overload of its argument count, and
   // a later overload is named `g$2`.  The same arity is a duplicate.
   // -----------------------------------------------------------------
-  let r_ovl: ResolveResult = resolve("fn g(n: i32): i32 -> n\nfn g(a: i32, b: i32): i32 -> a + b\n\nfn f(): i32 -> g(1) + g(1, 2)\n")
+  let r_ovl: resolver::ResolveResult = resolver::resolve("fn g(n: i32): i32 -> n\nfn g(a: i32, b: i32): i32 -> a + b\n\nfn f(): i32 -> g(1) + g(1, 2)\n")
   let ovl_first: bool = false
   let ovl_second: bool = false
   let so: i64 = 0
@@ -319,7 +324,7 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL arity_overloads_declare: expected no diagnostics and symbols g, g$2; got " + i64_to_string(count_diags(r_ovl)) + " diagnostic(s)")
-  let r_same: ResolveResult = resolve("fn g(n: i32): i32 -> n\nfn g(s: string): i32 -> 0\n")
+  let r_same: resolver::ResolveResult = resolver::resolve("fn g(n: i32): i32 -> n\nfn g(s: string): i32 -> 0\n")
   if count_diags(r_same) == 1:
     print("PASS same_arity_is_a_duplicate")
     pass_count = pass_count + 1
@@ -330,7 +335,7 @@ fn main(): i32
   // Test 16: dup_decl_span — duplicate declaration diagnostic should have valid span
   // -----------------------------------------------------------------
   let src16: string = "fn foo(): i32\n  return 0\n\nfn foo(): i32\n  return 1\n"
-  let rr16: ResolveResult = resolve(src16)
+  let rr16: resolver::ResolveResult = resolver::resolve(src16)
   let has_valid_span: bool = false
   let d16: i64 = 0
   while d16 < rr16.diags.length():
@@ -351,7 +356,7 @@ fn main(): i32
   let self_path: string = "examples/bootstrap_probe/expr_parser.dao"
   if file_exists(self_path):
     let self_src: string = read_file(self_path)
-    let self_r: ResolveResult = resolve(self_src)
+    let self_r: resolver::ResolveResult = resolver::resolve(self_src)
     let self_syms: i64 = self_r.symbols.length()
     let self_scopes: i64 = self_r.scopes.length()
     let self_uses: i64 = count_uses(self_r)
@@ -377,8 +382,8 @@ fn main(): i32
   // Test 18: generic_param — fn identity<T>(x: T): T — T resolves as GenericParam
   // -----------------------------------------------------------------
   let src18: string = "fn identity<T>(x: T): T\n  return x\n"
-  let r18: ResolveResult = resolve(src18)
-  let r18_gp: i64 = count_symbols_of_kind(r18, SymbolKind::GenericParam)
+  let r18: resolver::ResolveResult = resolver::resolve(src18)
+  let r18_gp: i64 = count_symbols_of_kind(r18, resolver::SymbolKind::GenericParam)
   let r18_diags: i64 = count_diags(r18)
   if r18_gp >= 1:
     if r18_diags == 0:
@@ -393,14 +398,14 @@ fn main(): i32
   // Test 19: extend creates mangled symbol — extend Foo as Printable creates Foo.to_string
   // -----------------------------------------------------------------
   let src19: string = "class Foo:\n  x: i32\n\nconcept Printable:\n  fn to_string(self): string\n\nextend Foo as Printable:\n  fn to_string(self): string\n    return \"Foo\"\n"
-  let r19: ResolveResult = resolve(src19)
+  let r19: resolver::ResolveResult = resolver::resolve(src19)
   let r19_diags: i64 = count_diags(r19)
   let r19_found_mangled: bool = false
   let r19_si: i64 = 0
   while r19_si < r19.symbols.length():
-    let r19_sym: Symbol = r19.symbols.get(r19_si)
+    let r19_sym: resolver::Symbol = r19.symbols.get(r19_si)
     if r19_sym.name == "Foo.to_string":
-      if symbol_kind_name(r19_sym.kind) == "Function":
+      if resolver::symbol_kind_name(r19_sym.kind) == "Function":
         r19_found_mangled = true
     r19_si = r19_si + 1
   if r19_found_mangled:
@@ -413,9 +418,9 @@ fn main(): i32
   // Test 20: concept resolves without diagnostics
   // -----------------------------------------------------------------
   let src20: string = "concept Showable:\n  fn show(self): string\n"
-  let r20: ResolveResult = resolve(src20)
+  let r20: resolver::ResolveResult = resolver::resolve(src20)
   let r20_diags: i64 = count_diags(r20)
-  let r20_type_syms: i64 = count_symbols_of_kind(r20, SymbolKind::Type)
+  let r20_type_syms: i64 = count_symbols_of_kind(r20, resolver::SymbolKind::Type)
   if r20_diags == 0:
     if r20_type_syms >= 1:
       print("PASS concept_resolve_no_err")
@@ -434,12 +439,12 @@ fn main(): i32
   cf_inputs1 = cf_inputs1.push(graph::SourceInput("fmt.dao", "module core::fmt\nfn print_line(s: string): void\n  print(s)\n", false))
   cf_inputs1 = cf_inputs1.push(graph::SourceInput("main.dao", "module app::main\nimport core::fmt\nfn f(): i32 -> 0\n", false))
   let cf_pg1: graph::ProgramGraph = graph::build_program(cf_inputs1)
-  let cf_r1: ProgramResolveResult = resolve_program(cf_pg1)
+  let cf_r1: resolver::ProgramResolveResult = resolver::resolve_program(cf_pg1)
   let found_mod_sym: bool = false
   let cfi: i64 = 0
   while cfi < cf_r1.symbols.length():
-    let s: Symbol = cf_r1.symbols.get(cfi)
-    if symbol_kind_name(s.kind) == "Module":
+    let s: resolver::Symbol = cf_r1.symbols.get(cfi)
+    if resolver::symbol_kind_name(s.kind) == "Module":
       if s.name == "fmt":
         found_mod_sym = true
     cfi = cfi + 1
@@ -454,7 +459,7 @@ fn main(): i32
   cf_inputs2 = cf_inputs2.push(graph::SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
   cf_inputs2 = cf_inputs2.push(graph::SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
   let cf_pg2: graph::ProgramGraph = graph::build_program(cf_inputs2)
-  let cf_r2: ProgramResolveResult = resolve_program(cf_pg2)
+  let cf_r2: resolver::ProgramResolveResult = resolver::resolve_program(cf_pg2)
   // Should have no diagnostics related to resolution
   let cf_r2_errs: i64 = 0
   cfi = 0
@@ -474,7 +479,7 @@ fn main(): i32
   cf_inputs3 = cf_inputs3.push(graph::SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
   cf_inputs3 = cf_inputs3.push(graph::SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::sub(1, 2)\n", false))
   let cf_pg3: graph::ProgramGraph = graph::build_program(cf_inputs3)
-  let cf_r3: ProgramResolveResult = resolve_program(cf_pg3)
+  let cf_r3: resolver::ProgramResolveResult = resolver::resolve_program(cf_pg3)
   let found_no_export: bool = false
   cfi = 0
   while cfi < cf_r3.diags.length():
@@ -494,7 +499,7 @@ fn main(): i32
   cf_inputs4 = cf_inputs4.push(graph::SourceInput("b_fmt.dao", "module b::fmt\nfn g(): i32 -> 0\n", false))
   cf_inputs4 = cf_inputs4.push(graph::SourceInput("main.dao", "module app::main\nimport a::fmt\nimport b::fmt\nfn h(): i32 -> 0\n", false))
   let cf_pg4: graph::ProgramGraph = graph::build_program(cf_inputs4)
-  let cf_r4: ProgramResolveResult = resolve_program(cf_pg4)
+  let cf_r4: resolver::ProgramResolveResult = resolver::resolve_program(cf_pg4)
   let found_dup_import: bool = false
   cfi = 0
   while cfi < cf_r4.diags.length():
@@ -513,7 +518,7 @@ fn main(): i32
   cf_inputs5 = cf_inputs5.push(graph::SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
   cf_inputs5 = cf_inputs5.push(graph::SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return add(1, 2)\n", false))
   let cf_pg5: graph::ProgramGraph = graph::build_program(cf_inputs5)
-  let cf_r5: ProgramResolveResult = resolve_program(cf_pg5)
+  let cf_r5: resolver::ProgramResolveResult = resolver::resolve_program(cf_pg5)
   let found_unknown_add: bool = false
   cfi = 0
   while cfi < cf_r5.diags.length():
@@ -531,7 +536,7 @@ fn main(): i32
   let cf_inputs6: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   cf_inputs6 = cf_inputs6.push(graph::SourceInput("math.dao", "module app::math\nfn helper(): i32 -> 42\n\nfn add(a: i32, b: i32): i32\n  return helper()\n", false))
   let cf_pg6: graph::ProgramGraph = graph::build_program(cf_inputs6)
-  let cf_r6: ProgramResolveResult = resolve_program(cf_pg6)
+  let cf_r6: resolver::ProgramResolveResult = resolver::resolve_program(cf_pg6)
   let cf_r6_errs: i64 = 0
   cfi = 0
   while cfi < cf_r6.diags.length():
@@ -550,7 +555,7 @@ fn main(): i32
   cf_inputs7 = cf_inputs7.push(graph::SourceInput("colors.dao", "module app::colors\nenum Color:\n  Red\n  Blue\n", false))
   cf_inputs7 = cf_inputs7.push(graph::SourceInput("main.dao", "module app::main\nimport app::colors\nfn f(): i32\n  let c: i32 = colors::Color::Red\n  return 0\n", false))
   let cf_pg7: graph::ProgramGraph = graph::build_program(cf_inputs7)
-  let cf_r7: ProgramResolveResult = resolve_program(cf_pg7)
+  let cf_r7: resolver::ProgramResolveResult = resolver::resolve_program(cf_pg7)
   // colors::Color::Red should resolve — 'colors' as Module, 'Color' through
   // exports, 'Red' deferred to typecheck (variant resolution).
   let cf_r7_errs: i64 = 0
@@ -577,12 +582,12 @@ fn main(): i32
   cf_inputs9a = cf_inputs9a.push(graph::SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
   cf_inputs9a = cf_inputs9a.push(graph::SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
   let cf_pg9a: graph::ProgramGraph = graph::build_program(cf_inputs9a)
-  let cf_r9a: ProgramResolveResult = resolve_program(cf_pg9a)
+  let cf_r9a: resolver::ProgramResolveResult = resolver::resolve_program(cf_pg9a)
   let cf_inputs9b: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   cf_inputs9b = cf_inputs9b.push(graph::SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
   cf_inputs9b = cf_inputs9b.push(graph::SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
   let cf_pg9b: graph::ProgramGraph = graph::build_program(cf_inputs9b)
-  let cf_r9b: ProgramResolveResult = resolve_program(cf_pg9b)
+  let cf_r9b: resolver::ProgramResolveResult = resolver::resolve_program(cf_pg9b)
   if cf_r9a.diags.length() == cf_r9b.diags.length():
     print("PASS topo_order_stable")
     pass_count = pass_count + 1
@@ -595,7 +600,7 @@ fn main(): i32
   cf_inputs10 = cf_inputs10.push(graph::SourceInput("mid.dao", "module lib::mid\nimport lib::base\nfn get_zero(): i32\n  return base::zero()\n", false))
   cf_inputs10 = cf_inputs10.push(graph::SourceInput("top.dao", "module app::top\nimport lib::mid\nfn f(): i32\n  return mid::get_zero()\n", false))
   let cf_pg10: graph::ProgramGraph = graph::build_program(cf_inputs10)
-  let cf_r10: ProgramResolveResult = resolve_program(cf_pg10)
+  let cf_r10: resolver::ProgramResolveResult = resolver::resolve_program(cf_pg10)
   let cf_r10_errs: i64 = 0
   cfi = 0
   while cfi < cf_r10.diags.length():
@@ -614,7 +619,7 @@ fn main(): i32
   cf_inputs11 = cf_inputs11.push(graph::SourceInput("types.dao", "module app::types\nclass Point:\n  x: i32\n  y: i32\n", false))
   cf_inputs11 = cf_inputs11.push(graph::SourceInput("main.dao", "module app::main\nimport app::types\nfn f(): i32\n  let p: types::Point = types::Point(1, 2)\n  return p.x\n", false))
   let cf_pg11: graph::ProgramGraph = graph::build_program(cf_inputs11)
-  let cf_r11: ProgramResolveResult = resolve_program(cf_pg11)
+  let cf_r11: resolver::ProgramResolveResult = resolver::resolve_program(cf_pg11)
   let cf_r11_errs: i64 = 0
   cfi = 0
   while cfi < cf_r11.diags.length():
@@ -633,7 +638,7 @@ fn main(): i32
   cf_inputs12 = cf_inputs12.push(graph::SourceInput("a.dao", "module app::a\nfn f(): i32 -> 0\n", false))
   cf_inputs12 = cf_inputs12.push(graph::SourceInput("b.dao", "module app::b\nimport app::a\nfn g(): i32\n  return a::i32\n", false))
   let cf_pg12: graph::ProgramGraph = graph::build_program(cf_inputs12)
-  let cf_r12: ProgramResolveResult = resolve_program(cf_pg12)
+  let cf_r12: resolver::ProgramResolveResult = resolver::resolve_program(cf_pg12)
   let found_no_i32: bool = false
   cfi = 0
   while cfi < cf_r12.diags.length():
@@ -668,7 +673,7 @@ fn main(): i32
       let tok_count: i64 = main_sf.parse_output.toks.length()
       let tti: i64 = 0
       while tti < tok_count:
-        let probe_key: string = uses_key(main_fid, tti)
+        let probe_key: string = resolver::uses_key(main_fid, tti)
         let probe_found: Option<i64> = cf_r2.uses.get(probe_key)
         match probe_found:
           Option::Some(v):
@@ -694,8 +699,8 @@ fn main(): i32
   p_inputs = p_inputs.push(graph::SourceInput("fmt.dao", "module core::fmt\nfn print_line(s: string): void\n  print(s)\n", false))
   p_inputs = p_inputs.push(graph::SourceInput("main.dao", "module app::main\nimport core::fmt\nfn f(): i32\n  return 0\n", false))
   let p_pg: graph::ProgramGraph = graph::build_program(p_inputs)
-  let p0_val: Program = program_from_graph(p_pg)
-  let p1_val: Program = program_run_resolve(p0_val)
+  let p0_val: resolver::Program = resolver::program_from_graph(p_pg)
+  let p1_val: resolver::Program = resolver::program_run_resolve(p0_val)
 
   let d0_ok: bool = true
 
@@ -703,20 +708,20 @@ fn main(): i32
   let fmt_mid: i64 = graph::find_module_by_name(p1_val.module_graph.modules, "core::fmt")
   if fmt_mid < 0:
     d0_ok = false
-  let print_sym: i64 = program_exported_symbol(p1_val, fmt_mid, "print_line")
+  let print_sym: i64 = resolver::program_exported_symbol(p1_val, fmt_mid, "print_line")
   if print_sym < 0:
     d0_ok = false
 
   // program_module / program_file_of_module must agree on the module.
-  let fmt_mod: graph::ModuleEntry = program_module(p1_val, fmt_mid)
+  let fmt_mod: graph::ModuleEntry = resolver::program_module(p1_val, fmt_mid)
   if fmt_mod.name != "core::fmt":
     d0_ok = false
-  let fmt_file: graph::SourceFile = program_file_of_module(p1_val, fmt_mid)
+  let fmt_file: graph::SourceFile = resolver::program_file_of_module(p1_val, fmt_mid)
   if fmt_file.file_id != fmt_mod.file_id:
     d0_ok = false
 
   // program_extend_concept_sym returns -1 until D3 populates the table.
-  let d0_extend_sym: i64 = program_extend_concept_sym(p1_val, to_i64(0), to_i64(0))
+  let d0_extend_sym: i64 = resolver::program_extend_concept_sym(p1_val, to_i64(0), to_i64(0))
   if d0_extend_sym != to_i64(-1):
     d0_ok = false
 
@@ -735,7 +740,7 @@ fn main(): i32
     let d0_found_use: bool = false
     let d0_tti: i64 = 0
     while d0_tti < d0_tok_count:
-      let d0_via_helper: i64 = program_resolved_use(p1_val, d0_main_fid, d0_tti)
+      let d0_via_helper: i64 = resolver::program_resolved_use(p1_val, d0_main_fid, d0_tti)
       if d0_via_helper >= 0:
         d0_found_use = true
         d0_tti = d0_tok_count
@@ -745,10 +750,10 @@ fn main(): i32
       d0_ok = false
 
   // Missing lookups return -1.
-  let miss_sym: i64 = program_exported_symbol(p1_val, fmt_mid, "nonexistent_symbol")
+  let miss_sym: i64 = resolver::program_exported_symbol(p1_val, fmt_mid, "nonexistent_symbol")
   if miss_sym != to_i64(-1):
     d0_ok = false
-  let miss_use: i64 = program_resolved_use(p1_val, to_i64(999), to_i64(999))
+  let miss_use: i64 = resolver::program_resolved_use(p1_val, to_i64(999), to_i64(999))
   if miss_use != to_i64(-1):
     d0_ok = false
 
@@ -763,7 +768,7 @@ fn main(): i32
   // block is unknown after it (the block is a scope).
   // -----------------------------------------------------------------
   let src35: string = "fn f(): i64\n  resource memory pool =>\n    let inner: i64 = 1\n  return inner\n"
-  let r35: ResolveResult = resolve(src35)
+  let r35: resolver::ResolveResult = resolver::resolve(src35)
   let r35_diags: i64 = count_diags(r35)
   if r35_diags == 1:
     print("PASS resource_block_scope")
@@ -782,7 +787,7 @@ fn main(): i32
   let pv_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   pv_inputs = pv_inputs.push(greet_prelude)
   pv_inputs = pv_inputs.push(graph::SourceInput("main.dao", "module app::main\nfn f(): i32\n  return greeting()\n", false))
-  let pv_r: ProgramResolveResult = resolve_inputs(pv_inputs)
+  let pv_r: resolver::ProgramResolveResult = resolve_inputs(pv_inputs)
   if program_error_count(pv_r) == 0:
     print("PASS prelude_visibility")
     pass_count = pass_count + 1
@@ -795,7 +800,7 @@ fn main(): i32
   ps_inputs = ps_inputs.push(greet_prelude)
   ps_inputs = ps_inputs.push(graph::SourceInput("main.dao", "module app::main\nfn greeting(): i32 -> 2\nfn f(): i32\n  return greeting()\n", false))
   let ps_pg: graph::ProgramGraph = graph::build_program(ps_inputs)
-  let ps_r: ProgramResolveResult = resolve_program(ps_pg)
+  let ps_r: resolver::ProgramResolveResult = resolver::resolve_program(ps_pg)
   let ps_sym: i64 = program_use_of(ps_pg, ps_r, "main.dao", "greeting")
   let ps_ok: bool = false
   if program_error_count(ps_r) == 0:
@@ -815,7 +820,7 @@ fn main(): i32
   let bp_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   bp_inputs = bp_inputs.push(graph::SourceInput("stdlib/core/bad.dao", "module core::bad\nfn bool(): i32 -> 0\n", true))
   bp_inputs = bp_inputs.push(graph::SourceInput("main.dao", "module app::main\nclass string:\n  n: i32\nfn f(): i32\n  let i32: i32 = 1\n  return i32\n", false))
-  let bp_r: ProgramResolveResult = resolve_inputs(bp_inputs)
+  let bp_r: resolver::ProgramResolveResult = resolve_inputs(bp_inputs)
   let bp_ok: bool = false
   if program_error_count(bp_r) == 2:
     if program_has_message(bp_r, "duplicate top-level declaration 'bool'"):
@@ -830,7 +835,7 @@ fn main(): i32
   // `Generator` is predeclared, as in the host: no module declares it.
   let gp_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   gp_inputs = gp_inputs.push(graph::SourceInput("main.dao", "module app::main\ntype Generator = i64\n", false))
-  let gp_r: ProgramResolveResult = resolve_inputs(gp_inputs)
+  let gp_r: resolver::ProgramResolveResult = resolve_inputs(gp_inputs)
   if program_error_count(gp_r) == 1 and program_has_message(gp_r, "duplicate top-level declaration 'Generator'"):
     print("PASS generator_name_predeclared")
     pass_count = pass_count + 1
@@ -844,7 +849,7 @@ fn main(): i32
   pi_inputs = pi_inputs.push(greet_prelude)
   pi_inputs = pi_inputs.push(graph::SourceInput("main.dao", "module app::main\nimport core::greet\nfn f(): i32\n  return greeting() + greet::greeting()\n", false))
   let pi_pg: graph::ProgramGraph = graph::build_program(pi_inputs)
-  let pi_r: ProgramResolveResult = resolve_program(pi_pg)
+  let pi_r: resolver::ProgramResolveResult = resolver::resolve_program(pi_pg)
   let pi_bare: i64 = program_use_of(pi_pg, pi_r, "main.dao", "greeting")
   let pi_greet_mid: i64 = graph::find_module_by_name(pi_pg.modules, "core::greet")
   let pi_qualified: i64 = to_i64(-1)
@@ -870,7 +875,7 @@ fn main(): i32
   let pn_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   pn_inputs = pn_inputs.push(greet_prelude)
   pn_inputs = pn_inputs.push(graph::SourceInput("stdlib/core/twice.dao", "module core::twice\nfn twice(): i32\n  return greeting() + greeting()\n", true))
-  let pn_r: ProgramResolveResult = resolve_inputs(pn_inputs)
+  let pn_r: resolver::ProgramResolveResult = resolve_inputs(pn_inputs)
   if program_error_count(pn_r) == 0:
     print("PASS prelude_one_namespace")
     pass_count = pass_count + 1
@@ -885,7 +890,7 @@ fn main(): i32
   pm_inputs = pm_inputs.push(graph::SourceInput("stdlib/core/uses_lib.dao", "module core::uses_lib\nimport app::lib\nfn via(): i32\n  return lib::helper()\n", true))
   pm_inputs = pm_inputs.push(graph::SourceInput("lib.dao", "module app::lib\nfn helper(): i32 -> 3\n", false))
   pm_inputs = pm_inputs.push(graph::SourceInput("main.dao", "module app::main\nfn f(): i32\n  return helper() + lib::helper()\n", false))
-  let pm_r: ProgramResolveResult = resolve_inputs(pm_inputs)
+  let pm_r: resolver::ProgramResolveResult = resolve_inputs(pm_inputs)
   let pm_ok: bool = false
   if program_error_count(pm_r) == 2:
     if program_has_message(pm_r, "unknown name 'helper'"):
@@ -903,7 +908,7 @@ fn main(): i32
   po_inputs = po_inputs.push(graph::SourceInput("main.dao", "module app::main\nfn f(): i32\n  return greeting()\n", false))
   po_inputs = po_inputs.push(greet_prelude)
   let po_pg: graph::ProgramGraph = graph::build_program(po_inputs)
-  let po_r: ProgramResolveResult = resolve_program(po_pg)
+  let po_r: resolver::ProgramResolveResult = resolver::resolve_program(po_pg)
   let po_sym: i64 = program_use_of(po_pg, po_r, "main.dao", "greeting")
   let pv_pg: graph::ProgramGraph = graph::build_program(pv_inputs)
   let pv_sym: i64 = program_use_of(pv_pg, pv_r, "main.dao", "greeting")
@@ -923,7 +928,7 @@ fn main(): i32
   let pa_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   pa_inputs = pa_inputs.push(greet_prelude)
   pa_inputs = pa_inputs.push(graph::SourceInput("main.dao", "module app::main\nfn f(): i32\n  return farewell()\n", false))
-  let pa_r: ProgramResolveResult = resolve_inputs(pa_inputs)
+  let pa_r: resolver::ProgramResolveResult = resolve_inputs(pa_inputs)
   if program_has_message(pa_r, "unknown name 'farewell'"):
     print("PASS prelude_absence")
     pass_count = pass_count + 1
@@ -938,7 +943,7 @@ fn main(): i32
   rn_inputs = rn_inputs.push(graph::SourceInput("stdlib/core/hooks.dao", "module core::hooks\nextern fn __dao_x(): i32\nfn size_of(): i32 -> 8\n", true))
   rn_inputs = rn_inputs.push(graph::SourceInput("copy_out.dao", "module lib::copy_out\nfn f(): i32 -> 0\n", false))
   rn_inputs = rn_inputs.push(graph::SourceInput("main.dao", "module app::main\nimport lib::copy_out\nfn __dao_y(): i32 -> 0\nfn ptr_offset(): i32 -> 0\nclass Box:\n  n: i32\n  fn copy_out(self): i32 -> self.n\nfn g(): i32 -> copy_out::f()\n", false))
-  let rn_r: ProgramResolveResult = resolve_inputs(rn_inputs)
+  let rn_r: resolver::ProgramResolveResult = resolve_inputs(rn_inputs)
   let rn_ok: bool = false
   if program_error_count(rn_r) == 2:
     if program_has_message(rn_r, "'__dao_y': the '__dao_' prefix is reserved for compiler/runtime use"):
@@ -956,7 +961,7 @@ fn main(): i32
   let pc_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   pc_inputs = pc_inputs.push(graph::SourceInput("stdlib/core/two.dao", "module core::two\nfn pair(): i32 -> 2\n", true))
   pc_inputs = pc_inputs.push(graph::SourceInput("stdlib/core/user.dao", "module core::user\nimport core::two\nfn two(): i32 -> 0\n", true))
-  let pc_r: ProgramResolveResult = resolve_inputs(pc_inputs)
+  let pc_r: resolver::ProgramResolveResult = resolve_inputs(pc_inputs)
   let pc_ok: bool = false
   if program_error_count(pc_r) == 1:
     if program_has_message(pc_r, "duplicate declaration 'two'"):
@@ -974,7 +979,7 @@ fn main(): i32
   pe_inputs = pe_inputs.push(greet_prelude)
   pe_inputs = pe_inputs.push(graph::SourceInput("stdlib/core/twice.dao", "module core::twice\nfn twice(): i32 -> 2\n", true))
   pe_inputs = pe_inputs.push(graph::SourceInput("main.dao", "module app::main\nimport core::greet\nfn f(): i32\n  return twice() + greet::twice()\n", false))
-  let pe_r: ProgramResolveResult = resolve_inputs(pe_inputs)
+  let pe_r: resolver::ProgramResolveResult = resolve_inputs(pe_inputs)
   let pe_ok: bool = false
   if program_error_count(pe_r) == 1:
     if program_has_message(pe_r, "module 'greet' has no exported symbol 'twice'"):
@@ -993,7 +998,7 @@ fn main(): i32
 
   // Test 47: destructuring — both bound names resolve in the body.
   let src47: string = arm_enum + "fn f(e: E): i32\n  match e:\n    E::Both(a, b):\n      return a + b\n    E::One(c):\n      return c\n    E::None:\n      return 0\n  return 0\n"
-  let r47: ResolveResult = resolve(src47)
+  let r47: resolver::ResolveResult = resolver::resolve(src47)
   if count_diags(r47) == 0:
     print("PASS match_arm_destructuring")
     pass_count = pass_count + 1
@@ -1007,9 +1012,9 @@ fn main(): i32
     if count_locals_named(r47, "a") == 1:
       let bi48: i64 = 0
       while bi48 < r47.symbols.length():
-        let sym48: Symbol = r47.symbols.get(bi48)
+        let sym48: resolver::Symbol = r47.symbols.get(bi48)
         if sym48.name == "a":
-          if symbol_kind_name(sym48.kind) == "Local":
+          if resolver::symbol_kind_name(sym48.kind) == "Local":
             if sym48.decl_node >= 0:
               binder_ok = true
         bi48 = bi48 + 1
@@ -1021,7 +1026,7 @@ fn main(): i32
 
   // Test 49: arm isolation — a binding of one arm is unknown in another.
   let src49: string = arm_enum + "fn f(e: E): i32\n  match e:\n    E::Both(a, b):\n      return a\n    E::One(c):\n      return a\n  return 0\n"
-  let r49: ResolveResult = resolve(src49)
+  let r49: resolver::ResolveResult = resolver::resolve(src49)
   if count_diags(r49) == 1:
     print("PASS match_arm_isolation")
     pass_count = pass_count + 1
@@ -1030,7 +1035,7 @@ fn main(): i32
 
   // Test 50: a binding is unknown after the match.
   let src50: string = arm_enum + "fn f(e: E): i32\n  match e:\n    E::One(c):\n      return c\n  return c\n"
-  let r50: ResolveResult = resolve(src50)
+  let r50: resolver::ResolveResult = resolver::resolve(src50)
   if count_diags(r50) == 1:
     print("PASS match_binding_ends_with_the_arm")
     pass_count = pass_count + 1
@@ -1040,7 +1045,7 @@ fn main(): i32
   // Test 51: a binder shadows an outer local; both symbols exist and
   // the body resolves without a diagnostic.
   let src51: string = arm_enum + "fn f(e: E): i32\n  let a: i32 = 1\n  match e:\n    E::Both(a, b):\n      return a\n  return a\n"
-  let r51: ResolveResult = resolve(src51)
+  let r51: resolver::ResolveResult = resolver::resolve(src51)
   let shadow_ok: bool = false
   if count_diags(r51) == 0:
     if count_locals_named(r51, "a") == 2:
@@ -1053,7 +1058,7 @@ fn main(): i32
 
   // Test 52: a parameterless variant pattern binds nothing and resolves.
   let src52: string = arm_enum + "fn f(e: E): i32\n  match e:\n    E::None:\n      return 0\n  return 1\n"
-  let r52: ResolveResult = resolve(src52)
+  let r52: resolver::ResolveResult = resolver::resolve(src52)
   if count_diags(r52) == 0:
     print("PASS match_fieldless_variant")
     pass_count = pass_count + 1
@@ -1062,7 +1067,7 @@ fn main(): i32
 
   // Test 53: one pattern may not bind a name twice.
   let src54: string = arm_enum + "fn f(e: E): i32\n  match e:\n    E::Both(a, a):\n      return a\n  return 0\n"
-  let r54: ResolveResult = resolve(src54)
+  let r54: resolver::ResolveResult = resolver::resolve(src54)
   if count_diags(r54) == 1:
     print("PASS match_duplicate_binder")
     pass_count = pass_count + 1
@@ -1073,7 +1078,7 @@ fn main(): i32
   // expression, not a destructuring: `Box(x):` uses `x` (the host's
   // rule; only a `::` variant takes a value apart).
   let src55: string = "class Box:\n  n: i32\n\nfn f(b: Box): i32\n  match b:\n    Box(x):\n      return 1\n  return 0\n"
-  let r55: ResolveResult = resolve(src55)
+  let r55: resolver::ResolveResult = resolver::resolve(src55)
   if count_diags(r55) == 1:
     print("PASS match_call_pattern_is_not_destructuring")
     pass_count = pass_count + 1
@@ -1083,7 +1088,7 @@ fn main(): i32
   // Test 55: a pattern's call-site type arguments resolve as types of
   // the enclosing scope, as a call's do — the use is recorded.
   let src56: string = "class Cell:\n  n: i32\n\nenum class E:\n  One(v: i32)\n\nfn f(e: E): i32\n  match e:\n    E<Cell>::One(a):\n      return a\n  return 0\n"
-  let r56: ResolveResult = resolve(src56)
+  let r56: resolver::ResolveResult = resolver::resolve(src56)
   let targ_used: bool = false
   let u56: i64 = 0
   while u56 < r56.uses.length():
@@ -1103,7 +1108,7 @@ fn main(): i32
   let ma_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   ma_inputs = ma_inputs.push(graph::SourceInput("shapes.dao", "module app::shapes\nenum class E:\n  Both(x: i32, y: i32)\n  None\n", false))
   ma_inputs = ma_inputs.push(graph::SourceInput("main.dao", "module app::main\nimport app::shapes\nfn f(e: shapes::E): i32\n  match e:\n    shapes::E::Both(a, b):\n      return a + b\n    shapes::E::None:\n      return 0\n  return 0\n", false))
-  let ma_r: ProgramResolveResult = resolve_inputs(ma_inputs)
+  let ma_r: resolver::ProgramResolveResult = resolve_inputs(ma_inputs)
   if program_error_count(ma_r) == 0:
     print("PASS match_cross_module_pattern")
     pass_count = pass_count + 1
@@ -1120,7 +1125,7 @@ fn main(): i32
   // the bound name is resolved as a use, mirroring `extend ... as Concept`.
   // -----------------------------------------------------------------
   let src_gb: string = "concept Printable:\n  fn to_string(self): string\n\nfn show<T: Printable>(x: T): string\n  return \"x\"\n"
-  let r_gb: ResolveResult = resolve(src_gb)
+  let r_gb: resolver::ResolveResult = resolver::resolve(src_gb)
   let r_gb_diags: i64 = count_diags(r_gb)
   if r_gb_diags == 0:
     print("PASS bounded_generic_resolves")
@@ -1135,7 +1140,7 @@ fn main(): i32
   // finds no concept behind.  The resolve pass must also survive it.
   // -----------------------------------------------------------------
   let src_gu: string = "fn show<T: Nope>(x: T): T\n  return x\n"
-  let r_gu: ResolveResult = resolve(src_gu)
+  let r_gu: resolver::ResolveResult = resolver::resolve(src_gu)
   let r_gu_diags: i64 = count_diags(r_gu)
   if r_gu_diags == 0:
     print("PASS unbound_concept_deferred")
@@ -1149,7 +1154,7 @@ fn main(): i32
   // marker being preserved distinctly on the decl node.
   // -----------------------------------------------------------------
   let src_dc: string = "derived concept Ord:\n  fn cmp(self, o: Ord): i64\n"
-  let r_dc: ResolveResult = resolve(src_dc)
+  let r_dc: resolver::ResolveResult = resolver::resolve(src_dc)
   let r_dc_diags: i64 = count_diags(r_dc)
   if r_dc_diags == 0:
     print("PASS derived_concept_resolves")
@@ -1162,7 +1167,7 @@ fn main(): i32
   // in a fresh block scope (outer locals visible), no diagnostic.
   // -----------------------------------------------------------------
   let src_mode: string = "fn f(): i64\n  let n: i64 = 0\n  mode unsafe =>\n    n = 1\n  return n\n"
-  let r_mode: ResolveResult = resolve(src_mode)
+  let r_mode: resolver::ResolveResult = resolver::resolve(src_mode)
   let r_mode_diags: i64 = count_diags(r_mode)
   if r_mode_diags == 0:
     print("PASS mode_block_resolves")
@@ -1175,7 +1180,7 @@ fn main(): i32
   // against the visible scope, no diagnostic.
   // -----------------------------------------------------------------
   let src_yld: string = "fn g(): i64\n  let x: i64 = 1\n  yield x\n  return 0\n"
-  let r_yld: ResolveResult = resolve(src_yld)
+  let r_yld: resolver::ResolveResult = resolver::resolve(src_yld)
   let r_yld_diags: i64 = count_diags(r_yld)
   if r_yld_diags == 0:
     print("PASS yield_value_resolves")

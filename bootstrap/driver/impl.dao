@@ -1,4 +1,7 @@
 module bootstrap::driver
+
+import bootstrap::graph
+
 // Manifest request parsing, validation, and file loading for the
 // bootstrap compiler driver.
 
