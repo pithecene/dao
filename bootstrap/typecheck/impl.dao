@@ -13,9 +13,9 @@ import bootstrap::resolver
 // Bootstrap type checker — Task 23.
 //
 // Imports `bootstrap::lexer`, `bootstrap::parser`, `bootstrap::graph`,
-// `bootstrap::base`, and `bootstrap::resolver` as real modules; still
-// assembled ahead of downstream unextracted passes (`hir`, `mir`, `llvm`,
-// `driver`) via `bootstrap/assemble.sh`.
+// `bootstrap::base`, and `bootstrap::resolver` as real modules, and
+// compiles directly as `module bootstrap::typecheck` without
+// `bootstrap/assemble.sh`.
 //
 // Covered here: concepts, `extend`, derived conformance with the host's
 // module visibility, method dispatch by the receiver's type (a class's

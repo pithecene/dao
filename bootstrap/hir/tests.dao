@@ -5,6 +5,7 @@ import bootstrap::parser
 import bootstrap::graph
 import bootstrap::base
 import bootstrap::resolver
+import bootstrap::typecheck
 
 // Test runner for the bootstrap hir.  Assembled after the
 // shared base and every library it exercises; never compiled
@@ -409,7 +410,7 @@ fn main(): i32
   let d7_pg: graph::ProgramGraph = graph::build_program(d7_inputs)
   let d7_p: resolver::Program = resolver::program_from_graph(d7_pg)
   d7_p = resolver::program_run_resolve(d7_p)
-  d7_p = program_run_typecheck(d7_p)
+  d7_p = typecheck::program_run_typecheck(d7_p)
   d7_p = program_run_hir(d7_p)
   let d7_1_ok: bool = true
   if d7_p.hir.initialized == false:
@@ -432,7 +433,7 @@ fn main(): i32
   let d7_pg2: graph::ProgramGraph = graph::build_program(d7_inputs2)
   let d7_p2: resolver::Program = resolver::program_from_graph(d7_pg2)
   d7_p2 = resolver::program_run_resolve(d7_p2)
-  d7_p2 = program_run_typecheck(d7_p2)
+  d7_p2 = typecheck::program_run_typecheck(d7_p2)
   d7_p2 = program_run_hir(d7_p2)
   let d7_2_ok: bool = true
   if d7_p2.hir.root < 0:
@@ -462,7 +463,7 @@ fn main(): i32
     let hs_pg: graph::ProgramGraph = graph::build_program(hs_inputs)
     let hs_p: resolver::Program = resolver::program_from_graph(hs_pg)
     hs_p = resolver::program_run_resolve(hs_p)
-    hs_p = program_run_typecheck(hs_p)
+    hs_p = typecheck::program_run_typecheck(hs_p)
     hs_p = program_run_hir(hs_p)
     if hs_p.hir.initialized:
       if hs_p.hir.root >= 0:
@@ -540,7 +541,7 @@ fn main(): i32
   let iso_pg: graph::ProgramGraph = graph::build_program(iso_inputs)
   let iso_p: resolver::Program = resolver::program_from_graph(iso_pg)
   iso_p = resolver::program_run_resolve(iso_p)
-  iso_p = program_run_typecheck(iso_p)
+  iso_p = typecheck::program_run_typecheck(iso_p)
   iso_p = program_run_hir(iso_p)
   // Success criteria: both modules lowered without diagnostic storms,
   // two HirModules produced, and HIR nodes accumulated beyond the
@@ -743,7 +744,7 @@ fn main(): i32
   m32_inputs = m32_inputs.push(graph::SourceInput("b.dao", "module app::b\nclass Box:\n  x: i64\n  fn get(self): i64 -> self.x\n", false))
   let m32_p: resolver::Program = resolver::program_from_graph(graph::build_program(m32_inputs))
   m32_p = resolver::program_run_resolve(m32_p)
-  m32_p = program_run_typecheck(m32_p)
+  m32_p = typecheck::program_run_typecheck(m32_p)
   let m32_mid: i64 = graph::find_module_by_name(m32_p.module_graph.modules, "app::b")
   let m32_hs: HS = build_module_hs(m32_p, m32_mid)
   let m32_root: parser::Node = m32_hs.unit.nodes.get(resolver::program_file_of_module(m32_p, m32_mid).parse_output.root)

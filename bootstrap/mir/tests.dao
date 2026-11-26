@@ -5,6 +5,7 @@ import bootstrap::parser
 import bootstrap::graph
 import bootstrap::base
 import bootstrap::resolver
+import bootstrap::typecheck
 
 // Test runner for the bootstrap mir.  Assembled after the
 // shared base and every library it exercises; never compiled
@@ -44,7 +45,7 @@ fn mir_count_kind(r: MirResult, kind: string): i64
 fn mir_of_program(inputs: Vector<graph::SourceInput>): ProgramMir
   let p: resolver::Program = resolver::program_from_graph(graph::build_program(inputs))
   p = resolver::program_run_resolve(p)
-  p = program_run_typecheck(p)
+  p = typecheck::program_run_typecheck(p)
   return program_run_mir(p)
 
 // For each call carrying the checker's substitution record, what each
@@ -77,7 +78,7 @@ fn mir_call_substs(pm: ProgramMir): string
 fn mono_of_program(inputs: Vector<graph::SourceInput>): ProgramConcrete
   let p: resolver::Program = resolver::program_from_graph(graph::build_program(inputs))
   p = resolver::program_run_resolve(p)
-  let pt: ProgramTyped = program_check(p)
+  let pt: typecheck::ProgramTyped = typecheck::program_check(p)
   return program_monomorphize(pt, program_run_mir(pt.program))
 
 // The names of every module function of a concrete program, "a;b;".

@@ -4,8 +4,9 @@
 # runner or entry point.
 #
 # `bootstrap::ascii`, `bootstrap::lexer`, `bootstrap::parser`,
-# `bootstrap::graph`, `bootstrap::base`, and `bootstrap::resolver` are real
-# modules compiled directly from authored sources and are not assembled here.
+# `bootstrap::graph`, `bootstrap::base`, `bootstrap::resolver`, and
+# `bootstrap::typecheck` are real modules compiled directly from authored
+# sources and are not assembled here.
 #
 # Run from repository root:
 #   bash bootstrap/assemble.sh [output-root]
@@ -70,29 +71,21 @@ assemble() {
   echo "  assembled $out"
 }
 
-TYPECHECK=bootstrap/typecheck/impl.dao
 HIR=bootstrap/hir/impl.dao
 MIR=bootstrap/mir/impl.dao
 LLVM=bootstrap/llvm/impl.dao
 DRIVER=bootstrap/driver/impl.dao
 
-assemble "$OUT_ROOT/typecheck/typecheck.gen.dao" \
-  "$TYPECHECK" \
-  bootstrap/typecheck/tests.dao
-
 assemble "$OUT_ROOT/hir/hir.gen.dao" \
-  "$TYPECHECK" \
   "$HIR" \
   bootstrap/hir/tests.dao
 
 assemble "$OUT_ROOT/mir/mir.gen.dao" \
-  "$TYPECHECK" \
   "$HIR" \
   "$MIR" \
   bootstrap/mir/tests.dao
 
 assemble "$OUT_ROOT/llvm/llvm.gen.dao" \
-  "$TYPECHECK" \
   "$HIR" \
   "$MIR" \
   "$LLVM" \
@@ -103,11 +96,10 @@ assemble "$OUT_ROOT/driver/driver_tests.gen.dao" \
   bootstrap/driver/tests.dao
 
 assemble "$OUT_ROOT/driver/driver.gen.dao" \
-  "$TYPECHECK" \
   "$HIR" \
   "$MIR" \
   "$LLVM" \
   "$DRIVER" \
   bootstrap/driver/main.dao
 
-echo "done — 6 files assembled"
+echo "done — 5 files assembled"

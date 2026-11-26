@@ -5,22 +5,21 @@ import bootstrap::parser
 import bootstrap::graph
 import bootstrap::base
 import bootstrap::resolver
+import bootstrap::typecheck
 
-// Test runner for the bootstrap typecheck.  Assembled after the
-// shared base and every library it exercises; never compiled
-// standalone.
+// Standalone test runner for `bootstrap::typecheck` (`module bootstrap::typecheck::tests`).
 
 // =========================================================================
 // Section 47: Test helpers
 // =========================================================================
 
-fn tc_count_diags(result: TypeCheckResult): i64
+fn tc_count_diags(result: typecheck::TypeCheckResult): i64
   return result.diags.length()
 
 // Typecheck `src` and report whether it is free of diagnostics, naming
 // the scenario.  Extracted so each literal-fitting case is one line.
 fn tc_expect_clean(label: string, src: string): bool
-  let res: TypeCheckResult = typecheck(src)
+  let res: typecheck::TypeCheckResult = typecheck::typecheck(src)
   if tc_count_diags(res) == 0:
     print("PASS " + label)
     return true
@@ -29,7 +28,7 @@ fn tc_expect_clean(label: string, src: string): bool
 
 // Typecheck `src` and report whether it yields exactly `n` diagnostics.
 fn tc_expect_diags(label: string, src: string, n: i64): bool
-  let res: TypeCheckResult = typecheck(src)
+  let res: typecheck::TypeCheckResult = typecheck::typecheck(src)
   if tc_count_diags(res) == n:
     print("PASS " + label)
     return true
@@ -39,7 +38,7 @@ fn tc_expect_diags(label: string, src: string, n: i64): bool
 // Typecheck `src` and report whether it is rejected (at least one
 // diagnostic), when the exact count is not the point.
 fn tc_expect_rejected(label: string, src: string): bool
-  let res: TypeCheckResult = typecheck(src)
+  let res: typecheck::TypeCheckResult = typecheck::typecheck(src)
   if tc_count_diags(res) >= 1:
     print("PASS " + label)
     return true
@@ -51,7 +50,7 @@ fn tc_expect_rejected(label: string, src: string): bool
 // conflicting type parameter also leaves an argument that does not fit
 // — and the reason under test is the one named here.
 fn tc_expect_some_diag_containing(label: string, src: string, needle: string): bool
-  let res: TypeCheckResult = typecheck(src)
+  let res: typecheck::TypeCheckResult = typecheck::typecheck(src)
   let i: i64 = 0
   while i < res.diags.length():
     if index_of(res.diags.get(i).message, needle) >= 0:
@@ -68,7 +67,7 @@ fn tc_expect_some_diag_containing(label: string, src: string, needle: string): b
 // Typecheck `src` and report whether exactly one diagnostic is raised
 // and its message contains `needle`.
 fn tc_expect_diag_containing(label: string, src: string, needle: string): bool
-  let res: TypeCheckResult = typecheck(src)
+  let res: typecheck::TypeCheckResult = typecheck::typecheck(src)
   if tc_count_diags(res) == 1:
     if index_of(res.diags.get(to_i64(0)).message, needle) >= 0:
       print("PASS " + label)
@@ -80,15 +79,15 @@ fn tc_expect_diag_containing(label: string, src: string, needle: string): bool
     i = i + 1
   return false
 
-fn tc_count_types(result: TypeCheckResult): i64
+fn tc_count_types(result: typecheck::TypeCheckResult): i64
   return result.types.length()
 
 // A dispatch index holding one extend method of type 2 (`i32`) from the
 // prelude (symbol 0) and one from module 0 (symbol 1).
 fn test_dispatch_index(): HashMap<string, i64>
   let m: HashMap<string, i64> = HashMap<string, i64>::new()
-  m = m.set(dispatch_key_extend(to_i64(2), "show", conform_everywhere()), to_i64(0))
-  m = m.set(dispatch_key_extend(to_i64(2), "show", to_i64(0)), to_i64(1))
+  m = m.set(typecheck::dispatch_key_extend(to_i64(2), "show", typecheck::conform_everywhere()), to_i64(0))
+  m = m.set(typecheck::dispatch_key_extend(to_i64(2), "show", to_i64(0)), to_i64(1))
   return m
 
 // Resolve and typecheck a program — the library files `libs` (each
@@ -99,7 +98,7 @@ fn tc_expect_program_errors(label: string, libs: Vector<graph::SourceInput>, mai
   let inputs: Vector<graph::SourceInput> = libs.push(graph::SourceInput("main.dao", main_src, false))
   let p: resolver::Program = resolver::program_from_graph(graph::build_program(inputs))
   p = resolver::program_run_resolve(p)
-  p = program_run_typecheck(p)
+  p = typecheck::program_run_typecheck(p)
   let errs: i64 = 0
   let lib_errs: i64 = 0
   let i: i64 = 0
@@ -154,7 +153,7 @@ fn main(): i32
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
-  let r1: TypeCheckResult = typecheck(src1)
+  let r1: typecheck::TypeCheckResult = typecheck::typecheck(src1)
   if tc_count_types(r1) > 13:
     print("PASS correct_arithmetic")
     pass_count = pass_count + 1
@@ -163,7 +162,7 @@ fn main(): i32
 
   // Test 2: correct_let
   let src2: string = "fn main(): i32\n  let x: i32 = 42\n  return x\n"
-  let r2: TypeCheckResult = typecheck(src2)
+  let r2: typecheck::TypeCheckResult = typecheck::typecheck(src2)
   if tc_count_diags(r2) == 0:
     print("PASS correct_let")
     pass_count = pass_count + 1
@@ -172,7 +171,7 @@ fn main(): i32
 
   // Test 3: correct_fn_return
   let src3: string = "fn add(a: i32, b: i32): i32\n  return a + b\n"
-  let r3: TypeCheckResult = typecheck(src3)
+  let r3: typecheck::TypeCheckResult = typecheck::typecheck(src3)
   if tc_count_diags(r3) == 0:
     print("PASS correct_fn_return")
     pass_count = pass_count + 1
@@ -181,7 +180,7 @@ fn main(): i32
 
   // Test 4: err_type_mismatch
   let src4: string = "fn main(): i32\n  let x: i32 = \"hello\"\n  return 0\n"
-  let r4: TypeCheckResult = typecheck(src4)
+  let r4: typecheck::TypeCheckResult = typecheck::typecheck(src4)
   if tc_count_diags(r4) >= 1:
     print("PASS err_type_mismatch")
     pass_count = pass_count + 1
@@ -190,7 +189,7 @@ fn main(): i32
 
   // Test 5: err_non_bool_condition
   let src5: string = "fn main(): i32\n  if 42:\n    return 1\n  return 0\n"
-  let r5: TypeCheckResult = typecheck(src5)
+  let r5: typecheck::TypeCheckResult = typecheck::typecheck(src5)
   if tc_count_diags(r5) >= 1:
     print("PASS err_non_bool_condition")
     pass_count = pass_count + 1
@@ -199,7 +198,7 @@ fn main(): i32
 
   // Test 6: err_arity_mismatch
   let src6: string = "fn foo(x: i32): i32\n  return x\n\nfn main(): i32\n  return foo(1, 2)\n"
-  let r6: TypeCheckResult = typecheck(src6)
+  let r6: typecheck::TypeCheckResult = typecheck::typecheck(src6)
   if tc_count_diags(r6) >= 1:
     print("PASS err_arity_mismatch")
     pass_count = pass_count + 1
@@ -208,7 +207,7 @@ fn main(): i32
 
   // Test 7: err_break_outside_loop
   let src7: string = "fn main(): i32\n  break\n  return 0\n"
-  let r7: TypeCheckResult = typecheck(src7)
+  let r7: typecheck::TypeCheckResult = typecheck::typecheck(src7)
   if tc_count_diags(r7) >= 1:
     print("PASS err_break_outside_loop")
     pass_count = pass_count + 1
@@ -217,7 +216,7 @@ fn main(): i32
 
   // Test 8: correct_struct_constructor
   let src8: string = "class Point:\n  x: i32\n  y: i32\n\nfn main(): i32\n  let p: Point = Point(1, 2)\n  return 0\n"
-  let r8: TypeCheckResult = typecheck(src8)
+  let r8: typecheck::TypeCheckResult = typecheck::typecheck(src8)
   if tc_count_types(r8) >= 15:
     print("PASS correct_struct_constructor")
     pass_count = pass_count + 1
@@ -226,7 +225,7 @@ fn main(): i32
 
   // Test 9: correct_field_access
   let src9: string = "class Point:\n  x: i32\n  y: i32\n\nfn get_x(p: Point): i32\n  return p.x\n"
-  let r9: TypeCheckResult = typecheck(src9)
+  let r9: typecheck::TypeCheckResult = typecheck::typecheck(src9)
   if tc_count_diags(r9) == 0:
     print("PASS correct_field_access")
     pass_count = pass_count + 1
@@ -235,7 +234,7 @@ fn main(): i32
 
   // Test 10: correct_enum
   let src10: string = "enum Color:\n  Red\n  Green\n  Blue\n\nfn main(): i32\n  let c = Color::Red\n  return 0\n"
-  let r10: TypeCheckResult = typecheck(src10)
+  let r10: typecheck::TypeCheckResult = typecheck::typecheck(src10)
   if tc_count_types(r10) >= 14:
     print("PASS correct_enum")
     pass_count = pass_count + 1
@@ -244,7 +243,7 @@ fn main(): i32
 
   // Test 11: correct_if_else
   let src11: string = "fn abs(x: i32): i32\n  if x > 0:\n    return x\n  else:\n    return 0 - x\n"
-  let r11: TypeCheckResult = typecheck(src11)
+  let r11: typecheck::TypeCheckResult = typecheck::typecheck(src11)
   if tc_count_diags(r11) == 0:
     print("PASS correct_if_else")
     pass_count = pass_count + 1
@@ -253,7 +252,7 @@ fn main(): i32
 
   // Test 12: correct_while
   let src12: string = "fn countdown(n: i32): i32\n  let x: i32 = n\n  while x > 0:\n    x = x - 1\n  return x\n"
-  let r12: TypeCheckResult = typecheck(src12)
+  let r12: typecheck::TypeCheckResult = typecheck::typecheck(src12)
   if tc_count_diags(r12) == 0:
     print("PASS correct_while")
     pass_count = pass_count + 1
@@ -262,7 +261,7 @@ fn main(): i32
 
   // Test 13: err_return_mismatch
   let src13: string = "fn foo(): i32\n  return \"hello\"\n"
-  let r13: TypeCheckResult = typecheck(src13)
+  let r13: typecheck::TypeCheckResult = typecheck::typecheck(src13)
   if tc_count_diags(r13) >= 1:
     print("PASS err_return_mismatch")
     pass_count = pass_count + 1
@@ -271,7 +270,7 @@ fn main(): i32
 
   // Test 14: err_unknown_type
   let src14: string = "fn main(): i32\n  let x: Foo = 42\n  return 0\n"
-  let r14: TypeCheckResult = typecheck(src14)
+  let r14: typecheck::TypeCheckResult = typecheck::typecheck(src14)
   if tc_count_diags(r14) >= 1:
     print("PASS err_unknown_type")
     pass_count = pass_count + 1
@@ -280,7 +279,7 @@ fn main(): i32
 
   // Test 15: correct_expr_fn
   let src15: string = "fn double(x: i32): i32 -> x + x\n"
-  let r15: TypeCheckResult = typecheck(src15)
+  let r15: typecheck::TypeCheckResult = typecheck::typecheck(src15)
   if tc_count_diags(r15) == 0:
     print("PASS correct_expr_fn")
     pass_count = pass_count + 1
@@ -292,7 +291,7 @@ fn main(): i32
   // `set`, walked by `offset`, and asked `is_null`; there is no sigil
   // to take an address with or to read through.
   let src15a: string = "fn test(): i32\n  let p: Ptr<i32> = Ptr<i32>::new()\n  return 0\n"
-  let r15a: TypeCheckResult = typecheck(src15a)
+  let r15a: typecheck::TypeCheckResult = typecheck::typecheck(src15a)
   if tc_count_diags(r15a) == 0:
     print("PASS pointer_is_made_by_new")
     pass_count = pass_count + 1
@@ -300,7 +299,7 @@ fn main(): i32
     print("FAIL pointer_is_made_by_new: expected 0 diagnostics, got " + i64_to_string(tc_count_diags(r15a)))
 
   let src15b: string = "fn test(): i32\n  let p: Ptr<i32> = Ptr<i32>::new()\n  mode unsafe =>\n    let y: i32 = p.get()\n  return 0\n"
-  let r15b: TypeCheckResult = typecheck(src15b)
+  let r15b: typecheck::TypeCheckResult = typecheck::typecheck(src15b)
   if tc_count_diags(r15b) == 0:
     print("PASS pointer_get_reads_the_pointee")
     pass_count = pass_count + 1
@@ -309,7 +308,7 @@ fn main(): i32
 
   // A value of another type is no value of the pointee.
   let src15c: string = "fn test(): i32\n  let p: Ptr<i32> = Ptr<i32>::new()\n  mode unsafe =>\n    p.set(\"x\")\n  return 0\n"
-  let r15c: TypeCheckResult = typecheck(src15c)
+  let r15c: typecheck::TypeCheckResult = typecheck::typecheck(src15c)
   let found_set_err: bool = false
   let d15c: i64 = 0
   while d15c < r15c.diags.length():
@@ -325,7 +324,7 @@ fn main(): i32
 
   // A pointer has the operations the contract froze and no others.
   let src15d: string = "fn test(): i32\n  let p: Ptr<i32> = Ptr<i32>::new()\n  mode unsafe =>\n    let y: i32 = p.deref()\n  return 0\n"
-  let r15d: TypeCheckResult = typecheck(src15d)
+  let r15d: typecheck::TypeCheckResult = typecheck::typecheck(src15d)
   let found_op_err: bool = false
   let d15d: i64 = 0
   while d15d < r15d.diags.length():
@@ -341,7 +340,7 @@ fn main(): i32
 
   // Test 16: err_assign_to_literal — assignment to non-lvalue
   let src16a: string = "fn test(): i32\n  42 = 1\n  return 0\n"
-  let r16a: TypeCheckResult = typecheck(src16a)
+  let r16a: typecheck::TypeCheckResult = typecheck::typecheck(src16a)
   if tc_count_diags(r16a) >= 1:
     print("PASS err_assign_to_literal")
     pass_count = pass_count + 1
@@ -350,7 +349,7 @@ fn main(): i32
 
   // Test 17: err_pipe_type_mismatch — pipe LHS type incompatible with RHS first param
   let src17: string = "fn add_one(x: i32): i32\n  return x + 1\n\nfn test(): i32\n  let x: string = \"hello\" |> add_one\n  return 0\n"
-  let r17: TypeCheckResult = typecheck(src17)
+  let r17: typecheck::TypeCheckResult = typecheck::typecheck(src17)
   if tc_count_diags(r17) >= 1:
     print("PASS err_pipe_type_mismatch")
     pass_count = pass_count + 1
@@ -359,7 +358,7 @@ fn main(): i32
 
   // Test 18: err_match_pattern_type — match arm pattern type != scrutinee type
   let src18: string = "fn test(): i32\n  let x: i32 = 1\n  match x:\n    \"hello\":\n      return 0\n  return 0\n"
-  let r18: TypeCheckResult = typecheck(src18)
+  let r18: typecheck::TypeCheckResult = typecheck::typecheck(src18)
   if tc_count_diags(r18) >= 1:
     print("PASS err_match_pattern_type")
     pass_count = pass_count + 1
@@ -369,7 +368,7 @@ fn main(): i32
   // Test 19: generic_fn_parses — fn identity<T>(x: T): T typechecks and
   // produces TGenericParam in the type table.
   let src19: string = "fn identity<T>(x: T): T\n  return x\n"
-  let r19: TypeCheckResult = typecheck(src19)
+  let r19: typecheck::TypeCheckResult = typecheck::typecheck(src19)
   let found_gp: bool = false
   let ti19: i64 = 0
   while ti19 < tc_count_types(r19):
@@ -390,7 +389,7 @@ fn main(): i32
 
   // Test 20: extend method body type-checks
   let src20e: string = "class Foo:\n  x: i32\n\nconcept Printable:\n  fn to_string(self): string\n\nextend Foo as Printable:\n  fn to_string(self): string\n    return \"Foo\"\n"
-  let r20e: TypeCheckResult = typecheck(src20e)
+  let r20e: typecheck::TypeCheckResult = typecheck::typecheck(src20e)
   if tc_count_diags(r20e) == 0:
     print("PASS extend_method_typecheck")
     pass_count = pass_count + 1
@@ -399,7 +398,7 @@ fn main(): i32
 
   // Test 21: concept_satisfaction — missing method produces diagnostic
   let src21c: string = "concept Showable:\n  fn show(self): string\n\nclass Foo:\n  x: i32\n\nextend Foo as Showable:\n  fn other(self): i32\n    return self.x\n"
-  let r21c: TypeCheckResult = typecheck(src21c)
+  let r21c: typecheck::TypeCheckResult = typecheck::typecheck(src21c)
   if tc_count_diags(r21c) >= 1:
     print("PASS concept_satisfaction_missing_method")
     pass_count = pass_count + 1
@@ -408,7 +407,7 @@ fn main(): i32
 
   // Test 22: concept_satisfaction — correct extend has no extra diagnostics
   let src22c: string = "concept Showable:\n  fn show(self): string\n\nclass Bar:\n  name: string\n\nextend Bar as Showable:\n  fn show(self): string\n    return self.name\n"
-  let r22c: TypeCheckResult = typecheck(src22c)
+  let r22c: typecheck::TypeCheckResult = typecheck::typecheck(src22c)
   // May have some diagnostics from resolution, but should NOT have
   // "does not implement required method" diagnostic
   let has_missing: bool = false
@@ -426,7 +425,7 @@ fn main(): i32
 
   // Test 23: concept_satisfaction — param type mismatch detected
   let src23c: string = "concept Eqable:\n  fn eq(self, other: i32): bool\n\nclass Baz:\n  val: i32\n\nextend Baz as Eqable:\n  fn eq(self, other: string): bool\n    return false\n"
-  let r23c: TypeCheckResult = typecheck(src23c)
+  let r23c: typecheck::TypeCheckResult = typecheck::typecheck(src23c)
   let has_param_mismatch: bool = false
   let di23: i64 = 0
   while di23 < tc_count_diags(r23c):
@@ -445,7 +444,7 @@ fn main(): i32
   let self_path: string = "examples/bootstrap_probe/expr_parser.dao"
   if file_exists(self_path):
     let self_src: string = read_file(self_path)
-    let self_r: TypeCheckResult = typecheck(self_src)
+    let self_r: typecheck::TypeCheckResult = typecheck::typecheck(self_src)
     let self_types: i64 = tc_count_types(self_r)
     let self_diags: i64 = tc_count_diags(self_r)
     print("  [info] self-typecheck types: " + i64_to_string(self_types))
@@ -470,7 +469,7 @@ fn main(): i32
   let p_pg: graph::ProgramGraph = graph::build_program(p_inputs)
   let p_val: resolver::Program = resolver::program_from_graph(p_pg)
   let p_r: resolver::Program = resolver::program_run_resolve(p_val)
-  let p_tc: resolver::Program = program_init_typecheck(p_r)
+  let p_tc: resolver::Program = typecheck::program_init_typecheck(p_r)
   let d1a_1_ok: bool = true
   // Builtins: 13 types (i8..u64, f32, f64, bool, void, string).
   if p_tc.typecheck.types.length() != 13:
@@ -496,7 +495,7 @@ fn main(): i32
   // Test d1a_1b: double-init is a no-op (preserves accumulated state).
   let td_with_expr: base::TypeCheckData = base::tc_set_expr_type(p_tc.typecheck, to_i64(0), to_i64(7), to_i64(2))
   let p_tc_with_expr: resolver::Program = resolver::Program(p_tc.module_graph, p_tc.resolve, td_with_expr, p_tc.hir, p_tc.diags)
-  let p_tc2: resolver::Program = program_init_typecheck(p_tc_with_expr)
+  let p_tc2: resolver::Program = typecheck::program_init_typecheck(p_tc_with_expr)
   let d1a_1b_ok: bool = true
   // expr_types entry should survive the second init call.
   let preserved: i64 = base::tc_get_expr_type(p_tc2.typecheck, to_i64(0), to_i64(7))
@@ -548,7 +547,7 @@ fn main(): i32
   let d3_pg: graph::ProgramGraph = graph::build_program(d3_inputs)
   let d3_p: resolver::Program = resolver::program_from_graph(d3_pg)
   d3_p = resolver::program_run_resolve(d3_p)
-  d3_p = program_init_typecheck(d3_p)
+  d3_p = typecheck::program_init_typecheck(d3_p)
 
   let d3_ok: bool = true
 
@@ -579,7 +578,7 @@ fn main(): i32
   // `display` but Showable requires `show`. Should produce a
   // "does not implement required method 'show'" diagnostic, proving
   // concept_satisfaction used the resolver-bound identity.
-  let d3_r: TypeCheckResult = typecheck(d3_src)
+  let d3_r: typecheck::TypeCheckResult = typecheck::typecheck(d3_src)
   let d3_found_diag: bool = false
   let d3_di: i64 = 0
   while d3_di < d3_r.diags.length():
@@ -611,7 +610,7 @@ fn main(): i32
   // diagnostics.
 
   let me_src: string = "concept Showable:\n  fn show(self): string\n\nclass Foo:\n  x: i32\n\nclass Bar:\n  name: string\n\nextend Foo as Showable:\n  fn other(self): i32\n    return self.x\n\nextend Bar as Showable:\n  fn show(self): string\n    return self.name\n"
-  let me_r: TypeCheckResult = typecheck(me_src)
+  let me_r: typecheck::TypeCheckResult = typecheck::typecheck(me_src)
   let me_found: bool = false
   let me_di: i64 = 0
   while me_di < me_r.diags.length():
@@ -638,26 +637,26 @@ fn main(): i32
   let d4_pg1: graph::ProgramGraph = graph::build_program(d4_inputs1)
   let d4_p1: resolver::Program = resolver::program_from_graph(d4_pg1)
   d4_p1 = resolver::program_run_resolve(d4_p1)
-  d4_p1 = program_init_typecheck(d4_p1)
+  d4_p1 = typecheck::program_init_typecheck(d4_p1)
   // Run typecheck on the main module (module_id 1 after math at 0).
   let d4_main_mid: i64 = graph::find_module_by_name(d4_p1.module_graph.modules, "app::main")
   let d4_sf: graph::SourceFile = resolver::program_file_of_module(d4_p1, d4_main_mid)
   let d4_po: parser::ParseOutput = d4_sf.parse_output
-  let d4_tc: TC = TC(d4_po.nodes, d4_po.idx, d4_po.toks, d4_sf.source_text, d4_p1.resolve.symbols, d4_p1.resolve.scopes, d4_p1.resolve.uses, d4_sf.file_id, d4_p1.resolve.extend_concept_bindings, d4_main_mid, d4_p1.resolve.module_exports)
-  let d4_ts: TS = ts_new(d4_tc, d4_p1.typecheck.types, d4_p1.typecheck.type_info, d4_p1.typecheck.sym_types, registry_new(d4_p1.resolve.symbols, d4_p1.module_graph.modules))
+  let d4_tc: typecheck::TC = typecheck::TC(d4_po.nodes, d4_po.idx, d4_po.toks, d4_sf.source_text, d4_p1.resolve.symbols, d4_p1.resolve.scopes, d4_p1.resolve.uses, d4_sf.file_id, d4_p1.resolve.extend_concept_bindings, d4_main_mid, d4_p1.resolve.module_exports)
+  let d4_ts: typecheck::TS = typecheck::ts_new(d4_tc, d4_p1.typecheck.types, d4_p1.typecheck.type_info, d4_p1.typecheck.sym_types, typecheck::registry_new(d4_p1.resolve.symbols, d4_p1.module_graph.modules))
   // Run pass1 on math first (to register the exported function type).
   let d4_math_mid: i64 = graph::find_module_by_name(d4_p1.module_graph.modules, "app::math")
   let d4_math_sf: graph::SourceFile = resolver::program_file_of_module(d4_p1, d4_math_mid)
   let d4_math_po: parser::ParseOutput = d4_math_sf.parse_output
-  let d4_math_tc: TC = TC(d4_math_po.nodes, d4_math_po.idx, d4_math_po.toks, d4_math_sf.source_text, d4_p1.resolve.symbols, d4_p1.resolve.scopes, d4_p1.resolve.uses, d4_math_sf.file_id, d4_p1.resolve.extend_concept_bindings, d4_math_mid, d4_p1.resolve.module_exports)
-  let d4_math_ts: TS = ts_new(d4_math_tc, d4_p1.typecheck.types, d4_p1.typecheck.type_info, d4_p1.typecheck.sym_types, registry_new(d4_p1.resolve.symbols, d4_p1.module_graph.modules))
-  d4_math_ts = tc_pass_shells(d4_math_ts, d4_math_po.root)
-  d4_math_ts = tc_pass1(d4_math_ts, d4_math_po.root)
+  let d4_math_tc: typecheck::TC = typecheck::TC(d4_math_po.nodes, d4_math_po.idx, d4_math_po.toks, d4_math_sf.source_text, d4_p1.resolve.symbols, d4_p1.resolve.scopes, d4_p1.resolve.uses, d4_math_sf.file_id, d4_p1.resolve.extend_concept_bindings, d4_math_mid, d4_p1.resolve.module_exports)
+  let d4_math_ts: typecheck::TS = typecheck::ts_new(d4_math_tc, d4_p1.typecheck.types, d4_p1.typecheck.type_info, d4_p1.typecheck.sym_types, typecheck::registry_new(d4_p1.resolve.symbols, d4_p1.module_graph.modules))
+  d4_math_ts = typecheck::tc_pass_shells(d4_math_ts, d4_math_po.root)
+  d4_math_ts = typecheck::tc_pass1(d4_math_ts, d4_math_po.root)
   // Now run both passes on main using math's accumulated types/sym_types.
-  d4_ts = ts_new(d4_tc, d4_math_ts.types, d4_math_ts.type_info, d4_math_ts.sym_types, reg_with_variant_set(registry_new(d4_p1.resolve.symbols, d4_p1.module_graph.modules), d4_math_ts.reg.variant_set))
-  d4_ts = tc_pass_shells(d4_ts, d4_po.root)
-  d4_ts = tc_pass1(d4_ts, d4_po.root)
-  d4_ts = tc_pass2(d4_ts, d4_po.root)
+  d4_ts = typecheck::ts_new(d4_tc, d4_math_ts.types, d4_math_ts.type_info, d4_math_ts.sym_types, typecheck::reg_with_variant_set(typecheck::registry_new(d4_p1.resolve.symbols, d4_p1.module_graph.modules), d4_math_ts.reg.variant_set))
+  d4_ts = typecheck::tc_pass_shells(d4_ts, d4_po.root)
+  d4_ts = typecheck::tc_pass1(d4_ts, d4_po.root)
+  d4_ts = typecheck::tc_pass2(d4_ts, d4_po.root)
 
   let d4_1_ok: bool = true
   // Should have no type errors (math::add(1,2) should resolve and type-check).
@@ -681,24 +680,24 @@ fn main(): i32
   let d4_pg2: graph::ProgramGraph = graph::build_program(d4_inputs2)
   let d4_p2: resolver::Program = resolver::program_from_graph(d4_pg2)
   d4_p2 = resolver::program_run_resolve(d4_p2)
-  d4_p2 = program_init_typecheck(d4_p2)
+  d4_p2 = typecheck::program_init_typecheck(d4_p2)
   let d4_b_mid: i64 = graph::find_module_by_name(d4_p2.module_graph.modules, "app::b")
   let d4_b_sf: graph::SourceFile = resolver::program_file_of_module(d4_p2, d4_b_mid)
   let d4_b_po: parser::ParseOutput = d4_b_sf.parse_output
-  let d4_b_tc: TC = TC(d4_b_po.nodes, d4_b_po.idx, d4_b_po.toks, d4_b_sf.source_text, d4_p2.resolve.symbols, d4_p2.resolve.scopes, d4_p2.resolve.uses, d4_b_sf.file_id, d4_p2.resolve.extend_concept_bindings, d4_b_mid, d4_p2.resolve.module_exports)
+  let d4_b_tc: typecheck::TC = typecheck::TC(d4_b_po.nodes, d4_b_po.idx, d4_b_po.toks, d4_b_sf.source_text, d4_p2.resolve.symbols, d4_p2.resolve.scopes, d4_p2.resolve.uses, d4_b_sf.file_id, d4_p2.resolve.extend_concept_bindings, d4_b_mid, d4_p2.resolve.module_exports)
   // Run pass1 on lib::a first.
   let d4_a_mid: i64 = graph::find_module_by_name(d4_p2.module_graph.modules, "lib::a")
   let d4_a_sf: graph::SourceFile = resolver::program_file_of_module(d4_p2, d4_a_mid)
   let d4_a_po: parser::ParseOutput = d4_a_sf.parse_output
-  let d4_a_tc: TC = TC(d4_a_po.nodes, d4_a_po.idx, d4_a_po.toks, d4_a_sf.source_text, d4_p2.resolve.symbols, d4_p2.resolve.scopes, d4_p2.resolve.uses, d4_a_sf.file_id, d4_p2.resolve.extend_concept_bindings, d4_a_mid, d4_p2.resolve.module_exports)
-  let d4_a_ts: TS = ts_new(d4_a_tc, d4_p2.typecheck.types, d4_p2.typecheck.type_info, d4_p2.typecheck.sym_types, registry_new(d4_p2.resolve.symbols, d4_p2.module_graph.modules))
-  d4_a_ts = tc_pass_shells(d4_a_ts, d4_a_po.root)
-  d4_a_ts = tc_pass1(d4_a_ts, d4_a_po.root)
+  let d4_a_tc: typecheck::TC = typecheck::TC(d4_a_po.nodes, d4_a_po.idx, d4_a_po.toks, d4_a_sf.source_text, d4_p2.resolve.symbols, d4_p2.resolve.scopes, d4_p2.resolve.uses, d4_a_sf.file_id, d4_p2.resolve.extend_concept_bindings, d4_a_mid, d4_p2.resolve.module_exports)
+  let d4_a_ts: typecheck::TS = typecheck::ts_new(d4_a_tc, d4_p2.typecheck.types, d4_p2.typecheck.type_info, d4_p2.typecheck.sym_types, typecheck::registry_new(d4_p2.resolve.symbols, d4_p2.module_graph.modules))
+  d4_a_ts = typecheck::tc_pass_shells(d4_a_ts, d4_a_po.root)
+  d4_a_ts = typecheck::tc_pass1(d4_a_ts, d4_a_po.root)
   // Now typecheck app::b.
-  let d4_b_ts: TS = ts_new(d4_b_tc, d4_a_ts.types, d4_a_ts.type_info, d4_a_ts.sym_types, reg_with_variant_set(registry_new(d4_p2.resolve.symbols, d4_p2.module_graph.modules), d4_a_ts.reg.variant_set))
-  d4_b_ts = tc_pass_shells(d4_b_ts, d4_b_po.root)
-  d4_b_ts = tc_pass1(d4_b_ts, d4_b_po.root)
-  d4_b_ts = tc_pass2(d4_b_ts, d4_b_po.root)
+  let d4_b_ts: typecheck::TS = typecheck::ts_new(d4_b_tc, d4_a_ts.types, d4_a_ts.type_info, d4_a_ts.sym_types, typecheck::reg_with_variant_set(typecheck::registry_new(d4_p2.resolve.symbols, d4_p2.module_graph.modules), d4_a_ts.reg.variant_set))
+  d4_b_ts = typecheck::tc_pass_shells(d4_b_ts, d4_b_po.root)
+  d4_b_ts = typecheck::tc_pass1(d4_b_ts, d4_b_po.root)
+  d4_b_ts = typecheck::tc_pass2(d4_b_ts, d4_b_po.root)
 
   let d4_2_ok: bool = false
   let d4_2di: i64 = 0
@@ -720,24 +719,24 @@ fn main(): i32
   let d4_pg3: graph::ProgramGraph = graph::build_program(d4_inputs3)
   let d4_p3: resolver::Program = resolver::program_from_graph(d4_pg3)
   d4_p3 = resolver::program_run_resolve(d4_p3)
-  d4_p3 = program_init_typecheck(d4_p3)
+  d4_p3 = typecheck::program_init_typecheck(d4_p3)
   // Run pass1 on lib::colors (registers enum + variants).
   let d4_c_mid: i64 = graph::find_module_by_name(d4_p3.module_graph.modules, "lib::colors")
   let d4_c_sf: graph::SourceFile = resolver::program_file_of_module(d4_p3, d4_c_mid)
   let d4_c_po: parser::ParseOutput = d4_c_sf.parse_output
-  let d4_c_tc: TC = TC(d4_c_po.nodes, d4_c_po.idx, d4_c_po.toks, d4_c_sf.source_text, d4_p3.resolve.symbols, d4_p3.resolve.scopes, d4_p3.resolve.uses, d4_c_sf.file_id, d4_p3.resolve.extend_concept_bindings, d4_c_mid, d4_p3.resolve.module_exports)
-  let d4_c_ts: TS = ts_new(d4_c_tc, d4_p3.typecheck.types, d4_p3.typecheck.type_info, d4_p3.typecheck.sym_types, registry_new(d4_p3.resolve.symbols, d4_p3.module_graph.modules))
-  d4_c_ts = tc_pass_shells(d4_c_ts, d4_c_po.root)
-  d4_c_ts = tc_pass1(d4_c_ts, d4_c_po.root)
+  let d4_c_tc: typecheck::TC = typecheck::TC(d4_c_po.nodes, d4_c_po.idx, d4_c_po.toks, d4_c_sf.source_text, d4_p3.resolve.symbols, d4_p3.resolve.scopes, d4_p3.resolve.uses, d4_c_sf.file_id, d4_p3.resolve.extend_concept_bindings, d4_c_mid, d4_p3.resolve.module_exports)
+  let d4_c_ts: typecheck::TS = typecheck::ts_new(d4_c_tc, d4_p3.typecheck.types, d4_p3.typecheck.type_info, d4_p3.typecheck.sym_types, typecheck::registry_new(d4_p3.resolve.symbols, d4_p3.module_graph.modules))
+  d4_c_ts = typecheck::tc_pass_shells(d4_c_ts, d4_c_po.root)
+  d4_c_ts = typecheck::tc_pass1(d4_c_ts, d4_c_po.root)
   // Run pass1+pass2 on app::d with colors' variant_set.
   let d4_d_mid: i64 = graph::find_module_by_name(d4_p3.module_graph.modules, "app::d")
   let d4_d_sf: graph::SourceFile = resolver::program_file_of_module(d4_p3, d4_d_mid)
   let d4_d_po: parser::ParseOutput = d4_d_sf.parse_output
-  let d4_d_tc: TC = TC(d4_d_po.nodes, d4_d_po.idx, d4_d_po.toks, d4_d_sf.source_text, d4_p3.resolve.symbols, d4_p3.resolve.scopes, d4_p3.resolve.uses, d4_d_sf.file_id, d4_p3.resolve.extend_concept_bindings, d4_d_mid, d4_p3.resolve.module_exports)
-  let d4_d_ts: TS = ts_new(d4_d_tc, d4_c_ts.types, d4_c_ts.type_info, d4_c_ts.sym_types, reg_with_variant_set(registry_new(d4_p3.resolve.symbols, d4_p3.module_graph.modules), d4_c_ts.reg.variant_set))
-  d4_d_ts = tc_pass_shells(d4_d_ts, d4_d_po.root)
-  d4_d_ts = tc_pass1(d4_d_ts, d4_d_po.root)
-  d4_d_ts = tc_pass2(d4_d_ts, d4_d_po.root)
+  let d4_d_tc: typecheck::TC = typecheck::TC(d4_d_po.nodes, d4_d_po.idx, d4_d_po.toks, d4_d_sf.source_text, d4_p3.resolve.symbols, d4_p3.resolve.scopes, d4_p3.resolve.uses, d4_d_sf.file_id, d4_p3.resolve.extend_concept_bindings, d4_d_mid, d4_p3.resolve.module_exports)
+  let d4_d_ts: typecheck::TS = typecheck::ts_new(d4_d_tc, d4_c_ts.types, d4_c_ts.type_info, d4_c_ts.sym_types, typecheck::reg_with_variant_set(typecheck::registry_new(d4_p3.resolve.symbols, d4_p3.module_graph.modules), d4_c_ts.reg.variant_set))
+  d4_d_ts = typecheck::tc_pass_shells(d4_d_ts, d4_d_po.root)
+  d4_d_ts = typecheck::tc_pass1(d4_d_ts, d4_d_po.root)
+  d4_d_ts = typecheck::tc_pass2(d4_d_ts, d4_d_po.root)
   let d4_3_ok: bool = false
   let d4_3di: i64 = 0
   while d4_3di < d4_d_ts.diags.length():
@@ -767,7 +766,7 @@ fn main(): i32
   let d5_pg1: graph::ProgramGraph = graph::build_program(d5_inputs1)
   let d5_p1: resolver::Program = resolver::program_from_graph(d5_pg1)
   d5_p1 = resolver::program_run_resolve(d5_p1)
-  d5_p1 = program_run_typecheck(d5_p1)
+  d5_p1 = typecheck::program_run_typecheck(d5_p1)
   let d5_1_ok: bool = true
   // Count typecheck-origin diagnostics. Resolve diagnostics are the
   // baseline in p.resolve.diags; anything in p.diags beyond that
@@ -795,7 +794,7 @@ fn main(): i32
   let d5_pg2: graph::ProgramGraph = graph::build_program(d5_inputs2)
   let d5_p2: resolver::Program = resolver::program_from_graph(d5_pg2)
   d5_p2 = resolver::program_run_resolve(d5_p2)
-  d5_p2 = program_run_typecheck(d5_p2)
+  d5_p2 = typecheck::program_run_typecheck(d5_p2)
   let d5_2_ok: bool = true
   // Both fa and fb should have function types with ret_type == 2 (i32).
   // Since builtins are seeded once (D1a), the i32 index is canonical.
@@ -820,7 +819,7 @@ fn main(): i32
   let d5_pg3: graph::ProgramGraph = graph::build_program(d5_inputs3)
   let d5_p3: resolver::Program = resolver::program_from_graph(d5_pg3)
   d5_p3 = resolver::program_run_resolve(d5_p3)
-  d5_p3 = program_run_typecheck(d5_p3)
+  d5_p3 = typecheck::program_run_typecheck(d5_p3)
   let d5_3_ok: bool = false
   // Scan all node indices in module 0 for any expression with a type.
   let d5_3_mid: i64 = to_i64(0)
@@ -852,7 +851,7 @@ fn main(): i32
     let smoke_pg: graph::ProgramGraph = graph::build_program(smoke_inputs)
     let smoke_p: resolver::Program = resolver::program_from_graph(smoke_pg)
     smoke_p = resolver::program_run_resolve(smoke_p)
-    smoke_p = program_run_typecheck(smoke_p)
+    smoke_p = typecheck::program_run_typecheck(smoke_p)
     // Verify: 3 modules in topo order, types registered beyond builtins,
     // no typecheck-origin diagnostics beyond the resolve baseline.
     let smoke_tc_ok: bool = true
@@ -883,7 +882,7 @@ fn main(): i32
     let enum_pg: graph::ProgramGraph = graph::build_program(enum_inputs)
     let enum_p: resolver::Program = resolver::program_from_graph(enum_pg)
     enum_p = resolver::program_run_resolve(enum_p)
-    enum_p = program_run_typecheck(enum_p)
+    enum_p = typecheck::program_run_typecheck(enum_p)
     // Verify: 2 modules, no typecheck errors beyond resolve baseline.
     if enum_p.module_graph.topo_order.length() == 2:
       if enum_p.diags.length() <= enum_p.resolve.diags.length():
@@ -918,7 +917,7 @@ fn main(): i32
     let ext_pg: graph::ProgramGraph = graph::build_program(ext_inputs)
     let ext_p: resolver::Program = resolver::program_from_graph(ext_pg)
     ext_p = resolver::program_run_resolve(ext_p)
-    ext_p = program_run_typecheck(ext_p)
+    ext_p = typecheck::program_run_typecheck(ext_p)
     if ext_p.module_graph.topo_order.length() == 2:
       if ext_p.diags.length() <= ext_p.resolve.diags.length():
         ext_ok = true
@@ -958,7 +957,7 @@ fn main(): i32
   // satisfaction would never fire, and the typecheck-origin diag
   // count below would still be zero.
   let cb_resolve_diags: i64 = cb_p.resolve.diags.length()
-  cb_p = program_run_typecheck(cb_p)
+  cb_p = typecheck::program_run_typecheck(cb_p)
   // Count typecheck-origin diagnostics (exclude resolve baseline).
   let cb_typecheck_diags: i64 = cb_p.diags.length() - cb_resolve_diags
   let cb_found_spurious: bool = false
@@ -987,7 +986,7 @@ fn main(): i32
   // Test 44: a two-segment variant access types as the enum and a
   // construction of a payload variant types as the enum.
   let src44: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn main(): i32\n  let d: Shape = Shape::Dot\n  let c: Shape = Shape::Circle(r = 3)\n  return 0\n"
-  let r44: TypeCheckResult = typecheck(src44)
+  let r44: typecheck::TypeCheckResult = typecheck::typecheck(src44)
   if tc_count_diags(r44) == 0:
     print("PASS qualified_variant_types")
     pass_count = pass_count + 1
@@ -996,7 +995,7 @@ fn main(): i32
 
   // Test 45: a name that is no variant of the enum is diagnosed.
   let src45: string = "enum Color:\n  Red\n  Green\n\nfn main(): i32\n  let c: Color = Color::Blue\n  return 0\n"
-  let r45: TypeCheckResult = typecheck(src45)
+  let r45: typecheck::TypeCheckResult = typecheck::typecheck(src45)
   if tc_count_diags(r45) == 1:
     print("PASS qualified_variant_unknown")
     pass_count = pass_count + 1
@@ -1009,7 +1008,7 @@ fn main(): i32
   // itself is the resolver's deferral: its one "unknown name" is the
   // only diagnostic expected.)
   let src46: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn pick(s: Shape): i32\n  match s:\n    Shape::Circle(r):\n      return 1\n    Shape::Dot:\n      return 2\n  return 0\n"
-  let r46: TypeCheckResult = typecheck(src46)
+  let r46: typecheck::TypeCheckResult = typecheck::typecheck(src46)
   let construction_diag: bool = false
   let di46: i64 = 0
   while di46 < r46.diags.length():
@@ -1031,7 +1030,7 @@ fn main(): i32
   // name that is no field, a field given twice, a fieldless variant
   // with an argument.
   let src47: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn main(): i32\n  let a: Shape = Shape::Circle()\n  let b: Shape = Shape::Circle(3)\n  let c: Shape = Shape::Circle(q = 3)\n  let d: Shape = Shape::Circle(r = 3, r = 4)\n  let e: Shape = Shape::Dot(1)\n  let f: Shape = Shape::Dot()\n  return 0\n"
-  let r47: TypeCheckResult = typecheck(src47)
+  let r47: typecheck::TypeCheckResult = typecheck::typecheck(src47)
   if tc_count_diags(r47) == 6:
     print("PASS qualified_variant_shape")
     pass_count = pass_count + 1
@@ -1046,7 +1045,7 @@ fn main(): i32
   // literal where a binding goes, the wrong number of bindings, a
   // payload variant bare, and a binding by name are each diagnosed.
   let src49: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn pick(s: Shape): i32\n  match s:\n    Shape::Dot():\n      return 1\n    Shape::Circle(1):\n      return 2\n    Shape::Circle(a, b):\n      return 3\n    Shape::Circle:\n      return 4\n    Shape::Circle(r = x):\n      return 5\n  return 0\n"
-  let r49: TypeCheckResult = typecheck(src49)
+  let r49: typecheck::TypeCheckResult = typecheck::typecheck(src49)
   let shape_diags: i64 = 0
   let dk49: i64 = 0
   while dk49 < r49.diags.length():
@@ -1066,7 +1065,7 @@ fn main(): i32
 
   // Test 48: a named argument's value must have the field's type.
   let src48: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn main(): i32\n  let a: Shape = Shape::Circle(r = true)\n  return 0\n"
-  let r48: TypeCheckResult = typecheck(src48)
+  let r48: typecheck::TypeCheckResult = typecheck::typecheck(src48)
   if tc_count_diags(r48) == 1:
     print("PASS qualified_variant_field_type")
     pass_count = pass_count + 1
@@ -1079,9 +1078,9 @@ fn main(): i32
   let prelude_sym: resolver::Symbol = resolver::Symbol(resolver::SymbolKind::Method, "i32.show", to_i64(0), resolver::prelude_scope_idx(), to_i64(7))
   let module_sym: resolver::Symbol = resolver::Symbol(resolver::SymbolKind::Method, "i32.show", to_i64(0), resolver::prelude_scope_idx() + to_i64(1), to_i64(0))
   let vis_ok: bool = false
-  if sym_visible_in_module(prelude_sym, to_i64(1)):
-    if sym_visible_in_module(module_sym, to_i64(0)):
-      if sym_visible_in_module(module_sym, to_i64(1)) == false:
+  if typecheck::sym_visible_in_module(prelude_sym, to_i64(1)):
+    if typecheck::sym_visible_in_module(module_sym, to_i64(0)):
+      if typecheck::sym_visible_in_module(module_sym, to_i64(1)) == false:
         vis_ok = true
   if vis_ok:
     print("PASS prelude_method_visibility")
@@ -1093,9 +1092,9 @@ fn main(): i32
   // that module; another module sees only the prelude's; an unknown
   // name is none.
   let shadow_ok: bool = false
-  if find_method_sym_for_receiver(test_dispatch_index(), to_i64(0), "show", to_i64(2), to_i64(2)) == to_i64(1):
-    if find_method_sym_for_receiver(test_dispatch_index(), to_i64(1), "show", to_i64(2), to_i64(2)) == to_i64(0):
-      if find_method_sym_for_receiver(test_dispatch_index(), to_i64(0), "hash", to_i64(2), to_i64(2)) == to_i64(-1):
+  if typecheck::find_method_sym_for_receiver(test_dispatch_index(), to_i64(0), "show", to_i64(2), to_i64(2)) == to_i64(1):
+    if typecheck::find_method_sym_for_receiver(test_dispatch_index(), to_i64(1), "show", to_i64(2), to_i64(2)) == to_i64(0):
+      if typecheck::find_method_sym_for_receiver(test_dispatch_index(), to_i64(0), "hash", to_i64(2), to_i64(2)) == to_i64(-1):
         shadow_ok = true
   if shadow_ok:
     print("PASS module_method_shadows_prelude")
@@ -1115,7 +1114,7 @@ fn main(): i32
   sb_inputs = sb_inputs.push(graph::SourceInput("main.dao", "module app::main\nfn pad(): i32 -> 0\nclass Box:\n  n: i32\n  fn m(self): i32\n    return self.n\nfn f(): i32\n  let b: Box = Box(1)\n  return b.m()\n", false))
   let sb_p: resolver::Program = resolver::program_from_graph(graph::build_program(sb_inputs))
   sb_p = resolver::program_run_resolve(sb_p)
-  sb_p = program_run_typecheck(sb_p)
+  sb_p = typecheck::program_run_typecheck(sb_p)
   let sb_errors: i64 = 0
   let sb_i: i64 = 0
   while sb_i < sb_p.diags.length():
@@ -1141,7 +1140,7 @@ fn main(): i32
   qb_inputs = qb_inputs.push(graph::SourceInput("main.dao", "module app::main\nfn pad(): i32 -> 0\nclass Box:\n  n: i32\n  fn m(self): i32\n    return self.n\nfn f(): bool\n  return make_box().m()\nfn g(): i32\n  return Box(2).m()\n", false))
   let qb_p: resolver::Program = resolver::program_from_graph(graph::build_program(qb_inputs))
   qb_p = resolver::program_run_resolve(qb_p)
-  qb_p = program_run_typecheck(qb_p)
+  qb_p = typecheck::program_run_typecheck(qb_p)
   let qb_errors: i64 = 0
   let qb_i: i64 = 0
   while qb_i < qb_p.diags.length():
@@ -1167,7 +1166,7 @@ fn main(): i32
   xb_inputs = xb_inputs.push(graph::SourceInput("main.dao", "module app::main\nconcept PickI:\n  fn pick(self): i32\n\nextend Box as PickI:\n  fn pick(self): i32\n    return 7\n\nfn f(): i32\n  return make_box().pick()\n", false))
   let xb_p: resolver::Program = resolver::program_from_graph(graph::build_program(xb_inputs))
   xb_p = resolver::program_run_resolve(xb_p)
-  xb_p = program_run_typecheck(xb_p)
+  xb_p = typecheck::program_run_typecheck(xb_p)
   let xb_errors: i64 = 0
   let xb_i: i64 = 0
   while xb_i < xb_p.diags.length():
@@ -1194,7 +1193,7 @@ fn main(): i32
   let ci_pg: graph::ProgramGraph = graph::build_program(ci_inputs)
   let ci_p: resolver::Program = resolver::program_from_graph(ci_pg)
   ci_p = resolver::program_run_resolve(ci_p)
-  ci_p = program_run_typecheck(ci_p)
+  ci_p = typecheck::program_run_typecheck(ci_p)
   let ci_a_idx: i64 = to_i64(-1)
   let ci_b_idx: i64 = to_i64(-1)
   let ci_fi: i64 = 0
@@ -1280,7 +1279,7 @@ fn main(): i32
   shadow_inputs = shadow_inputs.push(graph::SourceInput("main.dao", "module app::main\nclass Box:\n  n: i32\nfn f(): i32\n  let b: Box = Box::make()\n  return 0\n", false))
   let shadow_p: resolver::Program = resolver::program_from_graph(graph::build_program(shadow_inputs))
   shadow_p = resolver::program_run_resolve(shadow_p)
-  shadow_p = program_run_typecheck(shadow_p)
+  shadow_p = typecheck::program_run_typecheck(shadow_p)
   let shadow_errors: i64 = 0
   let shadow_i: i64 = 0
   while shadow_i < shadow_p.diags.length():
@@ -1338,7 +1337,7 @@ fn main(): i32
     pass_count = pass_count + 1
   if tc_expect_clean("derived_conformance_transitive", "derived concept Show:\n  fn show(self): string\n\nextend i64 as Show:\n  fn show(self): string\n    return \"n\"\n\nclass P:\n  x: i64\n\nclass W:\n  p: P\n\nfn f(w: W): string\n  return w.show()\n"):
     pass_count = pass_count + 1
-  let r_dnc: TypeCheckResult = typecheck("derived concept Show:\n  fn show(self): string\n\nclass R:\n  s: string\n\nclass Q:\n  r: R\n\nfn f(q: Q): string\n  return q.show()\n")
+  let r_dnc: typecheck::TypeCheckResult = typecheck::typecheck("derived concept Show:\n  fn show(self): string\n\nclass R:\n  s: string\n\nclass Q:\n  r: R\n\nfn f(q: Q): string\n  return q.show()\n")
   if tc_count_diags(r_dnc) >= 1:
     print("PASS derived_conformance_blocked_by_field")
     pass_count = pass_count + 1
@@ -1347,7 +1346,7 @@ fn main(): i32
   // A class declared after a field's class must count that field against
   // the conformances known before derivation began: P derives first, and W
   // (field p: P, field s: string) must still be blocked by `string`.
-  let r_ddc: TypeCheckResult = typecheck("derived concept Show:\n  fn show(self): string\n\nextend i64 as Show:\n  fn show(self): string\n    return \"n\"\n\nclass P:\n  x: i64\n\nclass W:\n  p: P\n  s: string\n\nfn f(w: W): string\n  return w.show()\n")
+  let r_ddc: typecheck::TypeCheckResult = typecheck::typecheck("derived concept Show:\n  fn show(self): string\n\nextend i64 as Show:\n  fn show(self): string\n    return \"n\"\n\nclass P:\n  x: i64\n\nclass W:\n  p: P\n  s: string\n\nfn f(w: W): string\n  return w.show()\n")
   if tc_count_diags(r_ddc) >= 1:
     print("PASS derived_conformance_no_double_count")
     pass_count = pass_count + 1
@@ -1720,7 +1719,7 @@ fn main(): i32
     pass_count = pass_count + 1
   // A `yield` diagnostic points at its keyword, whatever the operand:
   // the source is wrapped as `module test`, so `yield` sits at 26.
-  let r_ys: TypeCheckResult = typecheck("fn g(): i64\n  yield [1]\n  return 0\n")
+  let r_ys: typecheck::TypeCheckResult = typecheck::typecheck("fn g(): i64\n  yield [1]\n  return 0\n")
   let ys_at: i64 = to_i64(-1)
   let ysi: i64 = 0
   while ysi < r_ys.diags.length():
@@ -1740,7 +1739,7 @@ fn main(): i32
     pass_count = pass_count + 1
   if tc_expect_diag_containing("generator_unknown_nested_argument_rejected", "class Box<T>:\n  v: T\n\nfn g(): Generator<Box<Missing>>\n  return\n", "unknown type 'Missing'"):
     pass_count = pass_count + 1
-  let r_gq: TypeCheckResult = typecheck("enum E:\n  A\n\nfn g(): Generator<E::Missing>\n  return\n")
+  let r_gq: typecheck::TypeCheckResult = typecheck::typecheck("enum E:\n  A\n\nfn g(): Generator<E::Missing>\n  return\n")
   let gq_seen: bool = false
   let gqi: i64 = 0
   while gqi < r_gq.diags.length():
@@ -1774,7 +1773,7 @@ fn main(): i32
     pass_count = pass_count + 1
   if tc_expect_diag_containing("generator_alias_cycle_through_argument_rejected", "class Box<T>:\n  v: T\n\ntype G = Generator<Box<G>>\n", "no resolvable target"):
     pass_count = pass_count + 1
-  let r_unc: TypeCheckResult = typecheck("fn f<T>(x: T): string\n  return x.to_string()\n")
+  let r_unc: typecheck::TypeCheckResult = typecheck::typecheck("fn f<T>(x: T): string\n  return x.to_string()\n")
   if tc_count_diags(r_unc) >= 1:
     print("PASS unconstrained_param_member_rejected")
     pass_count = pass_count + 1
@@ -2125,7 +2124,7 @@ fn main(): i32
     pass_count = pass_count + 1
   if tc_expect_diag_containing("generic_payload_enum_class_ne_rejected", "enum class Opt<T>:\n  Some(value: T)\n  None\n\nfn diff(a: Opt<i32>, b: Opt<i32>): bool -> a != b\n", "equality comparison is not yet supported for payload-bearing enum 'Opt'"):
     pass_count = pass_count + 1
-  let eq_span_res: TypeCheckResult = typecheck("enum class Shape:\n  Circle(radius: i32)\n\nfn same(a: Shape, b: Shape): bool -> a == b\n")
+  let eq_span_res: typecheck::TypeCheckResult = typecheck::typecheck("enum class Shape:\n  Circle(radius: i32)\n\nfn same(a: Shape, b: Shape): bool -> a == b\n")
   if tc_count_diags(eq_span_res) == 1 and eq_span_res.diags.get(to_i64(0)).span.offset > 0 and eq_span_res.diags.get(to_i64(0)).span.length > 0:
     print("PASS payload_enum_class_eq_preserves_span")
     pass_count = pass_count + 1

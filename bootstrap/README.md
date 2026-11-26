@@ -12,8 +12,9 @@ type-universe and program-lookup tables imported by `bootstrap::resolver` and
 downstream passes. The modules `ascii.dao` (`module bootstrap::ascii`),
 `lexer/impl.dao` (`module bootstrap::lexer`), `parser/impl.dao`
 (`module bootstrap::parser`), `graph/impl.dao` (`module bootstrap::graph`),
-`shared/base.dao` (`module bootstrap::base`), and `resolver/impl.dao`
-(`module bootstrap::resolver`) compile directly as real modules without
+`shared/base.dao` (`module bootstrap::base`), `resolver/impl.dao`
+(`module bootstrap::resolver`), and `typecheck/impl.dao`
+(`module bootstrap::typecheck`) compile directly as real modules without
 assembly. See `shared/README.md`.
 
 ## Subsystems
@@ -179,10 +180,12 @@ daoc build --source bootstrap/resolver/tests.dao --source bootstrap/resolver/imp
 
 ### `typecheck/`
 
-Type checker assigning types to expressions and validating type
-correctness for Tier A Dao syntax.
+Type checker (`module bootstrap::typecheck` in `typecheck/impl.dao`,
+importing `bootstrap::lexer`, `bootstrap::parser`, `bootstrap::graph`,
+`bootstrap::base`, and `bootstrap::resolver`) assigning types to
+expressions and validating type correctness for Tier A Dao syntax.
 
-**Status**: implemented (Task 23, Phase 7).
+**Status**: real multi-file module compiled directly from authored sources without `assemble.sh`.
 
 **Tier A scope**:
 
@@ -210,7 +213,7 @@ correctness for Tier A Dao syntax.
 **How to run tests**:
 
 ```sh
-bash bootstrap/assemble.sh && daoc build --source bootstrap/typecheck/typecheck.gen.dao --source bootstrap/ascii.dao && ./bootstrap/typecheck/typecheck.gen
+daoc build --source bootstrap/typecheck/tests.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/typecheck/tests
 ```
 
 ### `hir/`

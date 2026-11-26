@@ -17,12 +17,13 @@ recursive-descent parsing live in `bootstrap/parser/impl.dao`
 (`module bootstrap::parser`), which imports `bootstrap::lexer`
 (`bootstrap/lexer/impl.dao`), which imports `bootstrap::ascii`
 (`bootstrap/ascii.dao`). Name resolution lives in `bootstrap/resolver/impl.dao`
-(`module bootstrap::resolver`).
+(`module bootstrap::resolver`), and type checking lives in
+`bootstrap/typecheck/impl.dao` (`module bootstrap::typecheck`).
 
 ## Assembly
 
-The modules `bootstrap::base` and `bootstrap::resolver` compile directly from
-authored sources without `bootstrap/assemble.sh`. Subsystems not yet extracted
+The modules `bootstrap::base`, `bootstrap::resolver`, and
+`bootstrap::typecheck` compile directly from authored sources without `bootstrap/assemble.sh`. Subsystems not yet extracted
 into standalone modules still compose upstream fragments via
 `bootstrap/assemble.sh`:
 
@@ -30,9 +31,10 @@ into standalone modules still compose upstream fragments via
 bash bootstrap/assemble.sh
 ```
 
-This produces `<subsystem>.gen.dao` for `typecheck`, `hir`, `mir`, `llvm`,
+This produces `<subsystem>.gen.dao` for `hir`, `mir`, `llvm`,
 `driver_tests`, and `driver`. The `ascii`, `lexer`, `parser`, `graph`, `base`,
-and `resolver` modules compile directly from authored sources without assembly:
+`resolver`, and `typecheck` modules compile directly from authored sources
+without assembly:
 
 ```sh
 daoc build --source bootstrap/resolver/tests.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao
@@ -43,7 +45,7 @@ Git ignores `*.gen.dao` files because they are build artifacts.
 ## Editing Rules
 
 1. **Edit authored `.dao` sources** (`base.dao`, `impl.dao`, `tests.dao`, `main.dao`), never `.gen.dao` files.
-2. **Run `bash bootstrap/assemble.sh`** after editing any assembled input (`typecheck`, `hir`, `mir`, `llvm`, `driver`).
+2. **Run `bash bootstrap/assemble.sh`** after editing any assembled input (`hir`, `mir`, `llvm`, `driver`).
 3. **Verify subsystems** via `task bootstrap-test` or `task bootstrap-crossing`.
 
 ## Rationale
@@ -51,5 +53,5 @@ Git ignores `*.gen.dao` files because they are build artifacts.
 The shared file `base.dao` eliminated triplicated frontend code before
 multi-file compilation landed. Real module boundaries (`bootstrap::ascii`,
 `bootstrap::lexer`, `bootstrap::parser`, `bootstrap::graph`, `bootstrap::base`,
-and `bootstrap::resolver`) are retiring `assemble.sh` one phase boundary at a
+`bootstrap::resolver`, and `bootstrap::typecheck`) are retiring `assemble.sh` one phase boundary at a
 time.
