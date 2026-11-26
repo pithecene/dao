@@ -1,11 +1,7 @@
 module bootstrap::base
 
-import bootstrap::lexer
-import bootstrap::parser
-import bootstrap::graph
-
-// Shared type-universe and cross-pass program lookup tables for subsystems
-// that still assemble through `bootstrap/assemble.sh`.
+// Cross-pass semantic type universe and program lookup tables shared by
+// bootstrap resolver, typecheck, HIR, MIR, and LLVM passes.
 
 // The value `m` holds under `key`, or `dflt` where it holds none.
 fn hm_get_or(m: HashMap<string, i64>, key: string, dflt: i64): i64

@@ -4,7 +4,7 @@ File
     Param label: string
     Param v: Vector<i64>
     ReturnType: void
-    LetStatement b: Builder
+    LetStatement b
       CallExpr
         Callee
           FieldExpr .push
@@ -70,7 +70,7 @@ File
                 Identifier b
   FunctionDecl main
     ReturnType: i32
-    LetStatement v: Vector<i64>
+    LetStatement v
       CallExpr
         Callee
           Identifier Vector.new
@@ -96,7 +96,7 @@ File
                   IntLiteral 2
           Args
             IntLiteral 3
-    LetStatement old: Vector<i64>
+    LetStatement old
       Identifier v
     Assignment
       Target
@@ -155,7 +155,7 @@ File
         Args
           StringLiteral "old"
           Identifier old
-    LetStatement fork: Vector<i64>
+    LetStatement fork
       CallExpr
         Callee
           FieldExpr .set
@@ -184,7 +184,7 @@ File
         Args
           StringLiteral "v"
           Identifier v
-    LetStatement grown: Vector<i64>
+    LetStatement grown
       Identifier v
     LetStatement i: i64
       IntLiteral 0
@@ -260,7 +260,7 @@ File
           Identifier print
         Args
           Identifier total
-    LetStatement base: Vector<i64>
+    LetStatement base
       CallExpr
         Callee
           FieldExpr .push
@@ -281,7 +281,7 @@ File
                 IntLiteral 2
         Args
           IntLiteral 3
-    LetStatement keep: Vector<i64>
+    LetStatement keep
       Identifier base
     ResourceBlock memory inside
       Assignment
@@ -320,7 +320,7 @@ File
         Args
           StringLiteral "keep"
           Identifier keep
-    LetStatement bytes: Vector<u8>
+    LetStatement bytes
       CallExpr
         Callee
           FieldExpr .push
@@ -336,7 +336,7 @@ File
                 IntLiteral 65
         Args
           IntLiteral 66
-    LetStatement before: Builder
+    LetStatement before
       CallExpr
         Callee
           Identifier Builder
@@ -375,7 +375,7 @@ File
                     Identifier Builder
                   Args
                     Identifier bytes
-    LetStatement r0: Vector<i64>
+    LetStatement r0
       CallExpr
         Callee
           FieldExpr .push
@@ -391,7 +391,7 @@ File
                 IntLiteral 0
         Args
           IntLiteral 0
-    LetStatement r1: Vector<i64>
+    LetStatement r1
       CallExpr
         Callee
           FieldExpr .set
@@ -399,7 +399,7 @@ File
         Args
           IntLiteral 0
           IntLiteral 1
-    LetStatement r2: Vector<i64>
+    LetStatement r2
       CallExpr
         Callee
           FieldExpr .set
@@ -407,7 +407,7 @@ File
         Args
           IntLiteral 0
           IntLiteral 2
-    LetStatement r3: Vector<i64>
+    LetStatement r3
       CallExpr
         Callee
           FieldExpr .set
@@ -474,14 +474,14 @@ File
         Args
           StringLiteral "r3"
           Identifier r3
-    LetStatement out: Vector<i64>
+    LetStatement out
       CallExpr
         Callee
           Identifier Vector.new
         TypeArgs
           i64
     ResourceBlock memory pool
-      LetStatement inner: Vector<i64>
+      LetStatement inner
         CallExpr
           Callee
             Identifier Vector.new

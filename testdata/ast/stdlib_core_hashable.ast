@@ -12,7 +12,7 @@ File
       IntLiteral 65536
     LetStatement mul_k: i64
       IntLiteral 2685821657736338717
-    LetStatement folded: i64
+    LetStatement folded
       CallExpr
         Callee
           Identifier wrapping_add_i64
@@ -21,14 +21,14 @@ File
           BinaryExpr /
             Identifier key
             Identifier two32
-    LetStatement mixed: i64
+    LetStatement mixed
       CallExpr
         Callee
           Identifier wrapping_mul_i64
         Args
           Identifier folded
           Identifier mul_k
-    LetStatement hi_folded: i64
+    LetStatement hi_folded
       CallExpr
         Callee
           Identifier wrapping_add_i64
@@ -46,6 +46,69 @@ File
           BinaryExpr /
             Identifier hi_folded
             Identifier two16
+  FunctionDecl hash_u64
+    Param key: u64
+    ReturnType: i64
+    LetStatement max_i64_u: u64
+      IntLiteral 9223372036854775807
+    IfStatement
+      Condition
+        BinaryExpr <=
+          Identifier key
+          Identifier max_i64_u
+      Then
+        ReturnStatement
+          CallExpr
+            Callee
+              Identifier hash_i64
+            Args
+              CallExpr
+                Callee
+                  Identifier u64_to_i64
+                Args
+                  Identifier key
+    LetStatement one_u: u64
+      IntLiteral 1
+    LetStatement max_i64_s: i64
+      IntLiteral 9223372036854775807
+    LetStatement min_i64_s
+      CallExpr
+        Callee
+          Identifier wrapping_sub_i64
+        Args
+          BinaryExpr -
+            CallExpr
+              Callee
+                Identifier to_i64
+              Args
+                IntLiteral 0
+            Identifier max_i64_s
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 1
+    LetStatement low_bits
+      CallExpr
+        Callee
+          Identifier u64_to_i64
+        Args
+          BinaryExpr -
+            BinaryExpr -
+              Identifier key
+              Identifier max_i64_u
+            Identifier one_u
+    ReturnStatement
+      CallExpr
+        Callee
+          Identifier hash_i64
+        Args
+          CallExpr
+            Callee
+              Identifier wrapping_add_i64
+            Args
+              Identifier min_i64_s
+              Identifier low_bits
   FunctionDecl combine_hash
     Param seed: i64
     Param value_hash: i64
@@ -54,7 +117,7 @@ File
       IntLiteral 6364136223846793005
     LetStatement add_p: i64
       IntLiteral 1442695040888963407
-    LetStatement combined: i64
+    LetStatement combined
       CallExpr
         Callee
           Identifier wrapping_add_i64
@@ -149,17 +212,13 @@ File
       ExprBody
         CallExpr
           Callee
-            Identifier hash_i64
+            Identifier hash_u64
           Args
             CallExpr
               Callee
-                Identifier u64_to_i64
+                Identifier u8_to_u64
               Args
-                CallExpr
-                  Callee
-                    Identifier u8_to_u64
-                  Args
-                    Identifier self
+                Identifier self
   ExtendDecl u16 as Hashable
     FunctionDecl hash
       Param self
@@ -167,17 +226,13 @@ File
       ExprBody
         CallExpr
           Callee
-            Identifier hash_i64
+            Identifier hash_u64
           Args
             CallExpr
               Callee
-                Identifier u64_to_i64
+                Identifier u16_to_u64
               Args
-                CallExpr
-                  Callee
-                    Identifier u16_to_u64
-                  Args
-                    Identifier self
+                Identifier self
   ExtendDecl u32 as Hashable
     FunctionDecl hash
       Param self
@@ -199,13 +254,9 @@ File
       ExprBody
         CallExpr
           Callee
-            Identifier hash_i64
+            Identifier hash_u64
           Args
-            CallExpr
-              Callee
-                Identifier u64_to_i64
-              Args
-                Identifier self
+            Identifier self
   ExtendDecl bool as Hashable
     FunctionDecl hash
       Param self

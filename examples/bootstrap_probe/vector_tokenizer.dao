@@ -128,8 +128,8 @@ fn is_keyword(word: string): bool
 // ---------------------------------------------------------------
 
 fn skip_while(source: string, pos: i64, pred: fn(i32): bool): i64
-  let cur: i64 = pos
-  let slen: i64 = length(source)
+  let cur = pos
+  let slen = length(source)
   while cur < slen:
     if pred(char_at(source, cur)):
       cur = cur + 1
@@ -144,9 +144,9 @@ fn skip_while(source: string, pos: i64, pred: fn(i32): bool): i64
 fn lex(source: string): Vector<Token>
   let tokens = Vector<Token>::new()
   let pos: i64 = 0
-  let slen: i64 = length(source)
+  let slen = length(source)
   while pos < slen:
-    let ch: i32 = char_at(source, pos)
+    let ch = char_at(source, pos)
 
     // Skip whitespace (not newlines).
     if is_whitespace(ch):
@@ -159,7 +159,7 @@ fn lex(source: string): Vector<Token>
       else:
         // Line comments — skip, no token emitted.
         if ch == 47 and pos + 1 < slen and char_at(source, pos + 1) == 47:
-          let end: i64 = pos + 2
+          let end = pos + 2
           while end < slen:
             if char_at(source, end) == 10:
               break
@@ -168,8 +168,8 @@ fn lex(source: string): Vector<Token>
         else:
           // Identifiers and keywords.
           if is_alpha(ch):
-            let end: i64 = skip_while(source, pos, is_alnum)
-            let word: string = substring(source, pos, end - pos)
+            let end = skip_while(source, pos, is_alnum)
+            let word = substring(source, pos, end - pos)
             if is_keyword(word):
               tokens = tokens.push(make_token(TK_KW(), pos, end - pos))
             else:
@@ -178,14 +178,14 @@ fn lex(source: string): Vector<Token>
           else:
             // Number literals.
             if is_digit(ch):
-              let end: i64 = skip_while(source, pos, is_digit)
+              let end = skip_while(source, pos, is_digit)
               tokens = tokens.push(make_token(TK_INT(), pos, end - pos))
               pos = end
             else:
               // String literals.
               if ch == 34:
-                let end: i64 = pos + 1
-                let found_end: bool = false
+                let end = pos + 1
+                let found_end = false
                 while end < slen:
                   if char_at(source, end) == 34:
                     found_end = true
@@ -200,7 +200,7 @@ fn lex(source: string): Vector<Token>
               else:
                 // Two-character operators.
                 if pos + 1 < slen:
-                  let next: i32 = char_at(source, pos + 1)
+                  let next = char_at(source, pos + 1)
                   if (ch == 61 and next == 61) or (ch == 33 and next == 61) or (ch == 60 and next == 61) or (ch == 62 and next == 61) or (ch == 45 and next == 62) or (ch == 61 and next == 62) or (ch == 124 and next == 62) or (ch == 58 and next == 58):
                     tokens = tokens.push(make_token(TK_OP(), pos, to_i64(2)))
                     pos = pos + 2
@@ -219,13 +219,13 @@ fn lex(source: string): Vector<Token>
 // ---------------------------------------------------------------
 
 fn count_by_kind(tokens: Vector<Token>): i32
-  let kw_count: i32 = 0
-  let ident_count: i32 = 0
-  let int_count: i32 = 0
-  let string_count: i32 = 0
-  let op_count: i32 = 0
-  let newline_count: i32 = 0
-  let error_count: i32 = 0
+  let kw_count = 0
+  let ident_count = 0
+  let int_count = 0
+  let string_count = 0
+  let op_count = 0
+  let newline_count = 0
+  let error_count = 0
   for tok in tokens.iter():
     if tok.kind == TK_KW():
       kw_count = kw_count + 1
@@ -255,12 +255,12 @@ fn count_by_kind(tokens: Vector<Token>): i32
 // ---------------------------------------------------------------
 
 fn check_delimiters(tokens: Vector<Token>, source: string): bool
-  let paren_depth: i32 = 0
-  let bracket_depth: i32 = 0
-  let balanced: bool = true
+  let paren_depth = 0
+  let bracket_depth = 0
+  let balanced = true
   for tok in tokens.iter():
     if tok.kind == TK_OP() and tok.len == to_i64(1):
-      let ch: i32 = char_at(source, tok.offset)
+      let ch = char_at(source, tok.offset)
       if ch == 40:
         paren_depth = paren_depth + 1
       if ch == 41:
@@ -290,12 +290,12 @@ fn check_delimiters(tokens: Vector<Token>, source: string): bool
 // ---------------------------------------------------------------
 
 fn nontrivia_head(tokens: Vector<Token>, source: string, limit: i32): i32
-  let printed: i32 = 0
+  let printed = 0
   let i: i64 = 0
   while i < tokens.length() and printed < limit:
-    let tok: Token = tokens.get(i)
+    let tok = tokens.get(i)
     if tok.kind != TK_NEWLINE():
-      let lexeme: string = substring(source, tok.offset, tok.len)
+      let lexeme = substring(source, tok.offset, tok.len)
       print("  " + kind_name(tok.kind) + " " + lexeme)
       printed = printed + 1
     i = i + 1
@@ -306,28 +306,28 @@ fn nontrivia_head(tokens: Vector<Token>, source: string, limit: i32): i32
 // ---------------------------------------------------------------
 
 fn main(): i32
-  let self_path: string = "examples/bootstrap_probe/vector_tokenizer.dao"
+  let self_path = "examples/bootstrap_probe/vector_tokenizer.dao"
   if file_exists(self_path) == false:
     eprint("file not found: " + self_path)
     return 1
 
-  let source: string = read_file(self_path)
+  let source = read_file(self_path)
   print("=== vector_tokenizer: self-lex ===")
   print("source bytes: " + i64_to_string(length(source)))
 
   // Lex into Vector<Token>.
-  let tokens: Vector<Token> = lex(source)
+  let tokens = lex(source)
   print("total tokens: " + i64_to_string(tokens.length()))
 
   // Pass 1: count by kind.
   print("")
   print("--- token distribution ---")
-  let total: i32 = count_by_kind(tokens)
+  let total = count_by_kind(tokens)
 
   // Pass 2: delimiter balance.
   print("")
   print("--- delimiter balance ---")
-  let balanced: bool = check_delimiters(tokens, source)
+  let balanced = check_delimiters(tokens, source)
   if balanced:
     print("  result: balanced")
   else:
@@ -336,12 +336,12 @@ fn main(): i32
   // Pass 3: nontrivia head — first 20 real tokens.
   print("")
   print("--- nontrivia head (first 20) ---")
-  let shown: i32 = nontrivia_head(tokens, source, 20)
+  let shown = nontrivia_head(tokens, source, 20)
 
   // Indexed access spot-check: read the last token.
   if tokens.length() > to_i64(0):
-    let last: Token = tokens.get(tokens.length() - 1)
-    let last_lexeme: string = substring(source, last.offset, last.len)
+    let last = tokens.get(tokens.length() - 1)
+    let last_lexeme = substring(source, last.offset, last.len)
     print("")
     print("last token: " + kind_name(last.kind) + " " + last_lexeme)
 

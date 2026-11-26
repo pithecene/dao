@@ -7,20 +7,20 @@ import bootstrap::parser
 // topological dependency sort, and cycle trace reporting.
 
 fn join_path_segments(po: parser::ParseOutput, path_lp: i64, seg_count: i64): string
-  let result: Builder = Builder::new()
+  let result = Builder::new()
   let i: i64 = 0
   while i < seg_count:
     if i > 0:
       result = result.push("::")
-    let tidx: i64 = po.idx.get(path_lp - seg_count + i)
-    let tok: lexer::Token = po.toks.get(tidx)
+    let tidx = po.idx.get(path_lp - seg_count + i)
+    let tok = po.toks.get(tidx)
     result = result.push(substring(po.src, tok.offset, tok.len))
     i = i + 1
   return result.to_string()
 
 // Extract the canonical module name ("a::b::c") from a ModuleDeclN node.
 fn extract_module_name(po: parser::ParseOutput, mod_node_idx: i64): string
-  let node: parser::Node = po.nodes.get(mod_node_idx)
+  let node = po.nodes.get(mod_node_idx)
   match node:
     parser::Node::ModuleDeclN(path_lp, seg_count):
       return join_path_segments(po, path_lp, seg_count)
@@ -28,7 +28,7 @@ fn extract_module_name(po: parser::ParseOutput, mod_node_idx: i64): string
 
 // Extract the imported module name ("a::b::c") from an ImportDeclN node.
 fn extract_import_name(po: parser::ParseOutput, imp_node_idx: i64): string
-  let node: parser::Node = po.nodes.get(imp_node_idx)
+  let node = po.nodes.get(imp_node_idx)
   match node:
     parser::Node::ImportDeclN(path_lp, seg_count):
       return join_path_segments(po, path_lp, seg_count)
@@ -72,7 +72,7 @@ fn program_graph_empty(): ProgramGraph
 fn find_module_by_name(modules: Vector<ModuleEntry>, name: string): i64
   let i: i64 = 0
   while i < modules.length():
-    let m: ModuleEntry = modules.get(i)
+    let m = modules.get(i)
     if m.name == name:
       return m.module_id
     i = i + 1
@@ -81,33 +81,33 @@ fn find_module_by_name(modules: Vector<ModuleEntry>, name: string): i64
 // Topological sort via Kahn's algorithm.
 // Returns sorted module_ids, or a partial prefix when a cycle exists.
 fn topo_sort(modules: Vector<ModuleEntry>, edges: Vector<i64>, edge_count: i64): Vector<i64>
-  let n: i64 = modules.length()
-  let in_deg: Vector<i64> = Vector<i64>::new()
+  let n = modules.length()
+  let in_deg = Vector<i64>::new()
   let i: i64 = 0
   while i < n:
     in_deg = in_deg.push(to_i64(0))
     i = i + 1
   let e: i64 = 0
   while e < edge_count:
-    let to_id: i64 = edges.get(e * 2 + 1)
+    let to_id = edges.get(e * 2 + 1)
     in_deg = in_deg.set(to_id, in_deg.get(to_id) + 1)
     e = e + 1
-  let queue: Vector<i64> = Vector<i64>::new()
+  let queue = Vector<i64>::new()
   i = 0
   while i < n:
     if in_deg.get(i) == 0:
       queue = queue.push(i)
     i = i + 1
-  let result: Vector<i64> = Vector<i64>::new()
+  let result = Vector<i64>::new()
   let head: i64 = 0
   while head < queue.length():
-    let mid: i64 = queue.get(head)
+    let mid = queue.get(head)
     head = head + 1
     result = result.push(mid)
     e = 0
     while e < edge_count:
       if edges.get(e * 2) == mid:
-        let to_id: i64 = edges.get(e * 2 + 1)
+        let to_id = edges.get(e * 2 + 1)
         in_deg = in_deg.set(to_id, in_deg.get(to_id) - 1)
         if in_deg.get(to_id) == 0:
           queue = queue.push(to_id)
@@ -122,18 +122,18 @@ fn input_before(a: SourceInput, b: SourceInput): bool
   return str_compare(a.path, b.path) < 0
 
 fn sort_inputs(inputs: Vector<SourceInput>): Vector<SourceInput>
-  let sorted: Vector<SourceInput> = Vector<SourceInput>::new()
+  let sorted = Vector<SourceInput>::new()
   let si: i64 = 0
   while si < inputs.length():
-    let inp: SourceInput = inputs.get(si)
-    let insert_at: i64 = sorted.length()
+    let inp = inputs.get(si)
+    let insert_at = sorted.length()
     let j: i64 = 0
     while j < sorted.length():
       if input_before(inp, sorted.get(j)):
         insert_at = j
         j = sorted.length()
       j = j + 1
-    let rebuilt: Vector<SourceInput> = Vector<SourceInput>::new()
+    let rebuilt = Vector<SourceInput>::new()
     j = 0
     while j < sorted.length() + 1:
       if j == insert_at:
@@ -146,7 +146,7 @@ fn sort_inputs(inputs: Vector<SourceInput>): Vector<SourceInput>
   return sorted
 
 fn zero_flags(count: i64): Vector<i64>
-  let flags: Vector<i64> = Vector<i64>::new()
+  let flags = Vector<i64>::new()
   let i: i64 = 0
   while i < count:
     flags = flags.push(to_i64(0))
@@ -156,23 +156,23 @@ fn zero_flags(count: i64): Vector<i64>
 // Walk import edges within unprocessed modules from `root_mod`; if `root_mod`
 // can reach itself, mark every module along that active path in `on_cycle`.
 fn mark_cycle_from_root(root_mod: i64, module_count: i64, edges: Vector<i64>, edge_count: i64, in_topo: Vector<i64>, on_cycle: Vector<i64>): Vector<i64>
-  let path: Vector<i64> = Vector<i64>::new()
+  let path = Vector<i64>::new()
   path = path.push(root_mod)
   let path_depth: i64 = 1
-  let visited: Vector<i64> = zero_flags(module_count)
+  let visited = zero_flags(module_count)
   visited = visited.set(root_mod, to_i64(1))
-  let edge_cursor: Vector<i64> = Vector<i64>::new()
+  let edge_cursor = Vector<i64>::new()
   edge_cursor = edge_cursor.push(to_i64(0))
-  let found: bool = false
-  let walk_done: bool = false
+  let found = false
+  let walk_done = false
   while walk_done == false:
-    let cur: i64 = path.get(path_depth - 1)
-    let cursor: i64 = edge_cursor.get(path_depth - 1)
-    let next: i64 = to_i64(-1)
-    let ei: i64 = cursor
+    let cur = path.get(path_depth - 1)
+    let cursor = edge_cursor.get(path_depth - 1)
+    let next = to_i64(-1)
+    let ei = cursor
     while ei < edge_count:
-      let importer: i64 = edges.get(ei * 2 + 1)
-      let dep_mod: i64 = edges.get(ei * 2)
+      let importer = edges.get(ei * 2 + 1)
+      let dep_mod = edges.get(ei * 2)
       if importer == cur and in_topo.get(dep_mod) == 0:
         if dep_mod == root_mod:
           found = true
@@ -207,12 +207,12 @@ fn mark_cycle_from_root(root_mod: i64, module_count: i64, edges: Vector<i64>, ed
   return on_cycle
 
 fn find_cycle_members(module_count: i64, edges: Vector<i64>, edge_count: i64, topo: Vector<i64>): Vector<i64>
-  let in_topo: Vector<i64> = zero_flags(module_count)
+  let in_topo = zero_flags(module_count)
   let ti: i64 = 0
   while ti < topo.length():
     in_topo = in_topo.set(topo.get(ti), to_i64(1))
     ti = ti + 1
-  let on_cycle: Vector<i64> = zero_flags(module_count)
+  let on_cycle = zero_flags(module_count)
   ti = 0
   while ti < module_count:
     if in_topo.get(ti) == 0 and on_cycle.get(ti) == 0:
@@ -221,7 +221,7 @@ fn find_cycle_members(module_count: i64, edges: Vector<i64>, edge_count: i64, to
   return on_cycle
 
 fn trace_cycle_path(modules: Vector<ModuleEntry>, edges: Vector<i64>, edge_count: i64, on_cycle: Vector<i64>): string
-  let start: i64 = to_i64(-1)
+  let start = to_i64(-1)
   let ti: i64 = 0
   while ti < modules.length():
     if on_cycle.get(ti) == 1 and start < 0:
@@ -229,21 +229,21 @@ fn trace_cycle_path(modules: Vector<ModuleEntry>, edges: Vector<i64>, edge_count
     ti = ti + 1
   if start < 0:
     return ""
-  let cycle_path: Builder = Builder::new()
+  let cycle_path = Builder::new()
   cycle_path = cycle_path.push(modules.get(start).name)
-  let cur_node: i64 = start
-  let trace_done: bool = false
-  let max_steps: i64 = modules.length() + 1
+  let cur_node = start
+  let trace_done = false
+  let max_steps = modules.length() + 1
   let step: i64 = 0
   while trace_done == false:
     if step >= max_steps:
       trace_done = true
     else:
-      let next: i64 = to_i64(-1)
+      let next = to_i64(-1)
       let ei: i64 = 0
       while ei < edge_count:
-        let importer: i64 = edges.get(ei * 2 + 1)
-        let dep_mod: i64 = edges.get(ei * 2)
+        let importer = edges.get(ei * 2 + 1)
+        let dep_mod = edges.get(ei * 2)
         if importer == cur_node and on_cycle.get(dep_mod) == 1:
           next = dep_mod
           ei = edge_count
@@ -261,20 +261,20 @@ fn trace_cycle_path(modules: Vector<ModuleEntry>, edges: Vector<i64>, edge_count
   return cycle_path.to_string()
 
 fn build_program(inputs: Vector<SourceInput>): ProgramGraph
-  let sorted: Vector<SourceInput> = sort_inputs(inputs)
-  let files: Vector<SourceFile> = Vector<SourceFile>::new()
-  let modules: Vector<ModuleEntry> = Vector<ModuleEntry>::new()
-  let diags: Vector<FileDiagnostic> = Vector<FileDiagnostic>::new()
+  let sorted = sort_inputs(inputs)
+  let files = Vector<SourceFile>::new()
+  let modules = Vector<ModuleEntry>::new()
+  let diags = Vector<FileDiagnostic>::new()
   let fi: i64 = 0
   while fi < sorted.length():
-    let inp: SourceInput = sorted.get(fi)
-    let po: parser::ParseOutput = parser::parse(inp.source_text)
+    let inp = sorted.get(fi)
+    let po = parser::parse(inp.source_text)
     let di: i64 = 0
     while di < po.diags.length():
       diags = diags.push(FileDiagnostic(fi, inp.path, po.diags.get(di)))
       di = di + 1
-    let mod_name: string = ""
-    let root_node: parser::Node = po.nodes.get(po.root)
+    let mod_name = ""
+    let root_node = po.nodes.get(po.root)
     match root_node:
       parser::Node::FileN(mod_decl, imports_lp, decls_lp):
         if mod_decl >= 0:
@@ -283,33 +283,33 @@ fn build_program(inputs: Vector<SourceInput>): ProgramGraph
       diags = diags.push(FileDiagnostic(fi, inp.path, make_error(Span(to_i64(0), to_i64(0)), "file '" + inp.path + "' has no module declaration")))
       files = files.push(SourceFile(fi, inp.path, inp.source_text, po, to_i64(-1)))
     else:
-      let existing: i64 = find_module_by_name(modules, mod_name)
+      let existing = find_module_by_name(modules, mod_name)
       if existing >= 0:
-        let dup_entry: ModuleEntry = modules.get(existing)
-        let dup_file: SourceFile = files.get(dup_entry.file_id)
+        let dup_entry = modules.get(existing)
+        let dup_file = files.get(dup_entry.file_id)
         diags = diags.push(FileDiagnostic(fi, inp.path, make_error(Span(to_i64(0), to_i64(0)), "duplicate module '" + mod_name + "' declared in '" + dup_file.path + "' and '" + inp.path + "'")))
         files = files.push(SourceFile(fi, inp.path, inp.source_text, po, to_i64(-1)))
       else:
-        let mid: i64 = modules.length()
+        let mid = modules.length()
         modules = modules.push(ModuleEntry(mid, fi, mod_name, inp.is_prelude))
         files = files.push(SourceFile(fi, inp.path, inp.source_text, po, mid))
     fi = fi + 1
 
-  let edges: Vector<i64> = Vector<i64>::new()
+  let edges = Vector<i64>::new()
   let ec: i64 = 0
   fi = 0
   while fi < files.length():
-    let sf: SourceFile = files.get(fi)
+    let sf = files.get(fi)
     if sf.module_id >= 0:
-      let root_n: parser::Node = sf.parse_output.nodes.get(sf.parse_output.root)
+      let root_n = sf.parse_output.nodes.get(sf.parse_output.root)
       match root_n:
         parser::Node::FileN(mod_decl, imports_lp, decls_lp):
-          let imps: Vector<i64> = parser::read_list(sf.parse_output.idx, imports_lp)
+          let imps = parser::read_list(sf.parse_output.idx, imports_lp)
           let ii: i64 = 0
           while ii < imps.length():
-            let imp_name: string = extract_import_name(sf.parse_output, imps.get(ii))
-            let target: i64 = find_module_by_name(modules, imp_name)
-            let sf_mod_name: string = modules.get(sf.module_id).name
+            let imp_name = extract_import_name(sf.parse_output, imps.get(ii))
+            let target = find_module_by_name(modules, imp_name)
+            let sf_mod_name = modules.get(sf.module_id).name
             if target < 0:
               diags = diags.push(FileDiagnostic(sf.file_id, sf.path, make_error(Span(to_i64(0), to_i64(0)), "imported module '" + imp_name + "' not found in compilation set")))
             else if target == sf.module_id:
@@ -321,10 +321,10 @@ fn build_program(inputs: Vector<SourceInput>): ProgramGraph
             ii = ii + 1
     fi = fi + 1
 
-  let topo: Vector<i64> = topo_sort(modules, edges, ec)
+  let topo = topo_sort(modules, edges, ec)
   if topo.length() < modules.length():
-    let on_cycle: Vector<i64> = find_cycle_members(modules.length(), edges, ec, topo)
-    let cycle_path: string = trace_cycle_path(modules, edges, ec, on_cycle)
+    let on_cycle = find_cycle_members(modules.length(), edges, ec, topo)
+    let cycle_path = trace_cycle_path(modules, edges, ec, on_cycle)
     if cycle_path != "":
       diags = diags.push(FileDiagnostic(to_i64(-1), "", make_error(Span(to_i64(0), to_i64(0)), "import cycle detected: " + cycle_path)))
 

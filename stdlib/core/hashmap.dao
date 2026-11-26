@@ -19,7 +19,7 @@ module core::hashmap
 //     first-insertion order in `order[0 .. count)`.
 
 fn hash_index(h: i64, cap: i64): i64
-  let rem: i64 = h % cap
+  let rem = h % cap
   if rem < to_i64(0):
     return rem + cap
   return rem
@@ -37,8 +37,8 @@ fn hash_meta_empty(): HashMeta
   return HashMeta(to_i64(0), Ptr<i64>::new(), Ptr<i64>::new())
 
 fn hash_meta_fresh(cap: i64, outer: bool): HashMeta
-  let used_raw: Ptr<void> = Ptr<void>::new()
-  let gen_raw: Ptr<void> = Ptr<void>::new()
+  let used_raw = Ptr<void>::new()
+  let gen_raw = Ptr<void>::new()
   if outer:
     used_raw = __dao_mem_alloc_outer(size_of<i64>(), align_of<i64>())
     gen_raw = __dao_mem_alloc_outer(size_of<i64>(), align_of<i64>())
@@ -46,9 +46,9 @@ fn hash_meta_fresh(cap: i64, outer: bool): HashMeta
     used_raw = __dao_mem_alloc(size_of<i64>(), align_of<i64>())
     gen_raw = __dao_mem_alloc(size_of<i64>(), align_of<i64>())
   mode unsafe =>
-    let used: Ptr<i64> = used_raw.cast<i64>()
+    let used = used_raw.cast<i64>()
     used.set(to_i64(0))
-    let gen: Ptr<i64> = gen_raw.cast<i64>()
+    let gen = gen_raw.cast<i64>()
     gen.set(to_i64(0))
     return HashMeta(cap, used, gen)
   panic("unreachable")
@@ -61,13 +61,13 @@ class HashStorage<K: Hashable + Equatable, V>:
   meta: HashMeta
 
   fn fresh(cap: i64, outer: bool): HashStorage<K, V>
-    let key_bytes: i64 = size_of<K>() * cap
-    let val_bytes: i64 = size_of<V>() * cap
-    let stamp_bytes: i64 = size_of<i64>() * cap
-    let key_raw: Ptr<void> = Ptr<void>::new()
-    let val_raw: Ptr<void> = Ptr<void>::new()
-    let stamp_raw: Ptr<void> = Ptr<void>::new()
-    let order_raw: Ptr<void> = Ptr<void>::new()
+    let key_bytes = size_of<K>() * cap
+    let val_bytes = size_of<V>() * cap
+    let stamp_bytes = size_of<i64>() * cap
+    let key_raw = Ptr<void>::new()
+    let val_raw = Ptr<void>::new()
+    let stamp_raw = Ptr<void>::new()
+    let order_raw = Ptr<void>::new()
     if outer:
       key_raw = __dao_mem_alloc_outer(key_bytes, align_of<K>())
       val_raw = __dao_mem_alloc_outer(val_bytes, align_of<V>())
@@ -78,9 +78,9 @@ class HashStorage<K: Hashable + Equatable, V>:
       val_raw = __dao_mem_alloc(val_bytes, align_of<V>())
       stamp_raw = __dao_mem_alloc(stamp_bytes, align_of<i64>())
       order_raw = __dao_mem_alloc(key_bytes, align_of<K>())
-    let meta: HashMeta = hash_meta_fresh(cap, outer)
+    let meta = hash_meta_fresh(cap, outer)
     mode unsafe =>
-      let stamps: Ptr<i64> = stamp_raw.cast<i64>()
+      let stamps = stamp_raw.cast<i64>()
       let z: i64 = 0
       while z < cap:
         stamps.offset(z).set(to_i64(0))
@@ -90,12 +90,12 @@ class HashStorage<K: Hashable + Equatable, V>:
 
   fn fill(self, key: K, value: V, is_new_key: bool, order_pos: i64): void
     mode unsafe =>
-      let idx: i64 = hash_index(key.hash(), self.meta.cap)
+      let idx = hash_index(key.hash(), self.meta.cap)
       while self.stamps.offset(idx).get() != to_i64(0):
         idx = idx + 1
         if idx >= self.meta.cap:
           idx = to_i64(0)
-      let stamp: i64 = self.meta.gen.get() + to_i64(1)
+      let stamp = self.meta.gen.get() + to_i64(1)
       self.keys.offset(idx).set(key)
       self.vals.offset(idx).set(value)
       self.stamps.offset(idx).set(stamp)
@@ -110,7 +110,7 @@ class HashMap<K: Hashable + Equatable, V>:
   count: i64
 
   fn new(): HashMap<K, V>
-    let none: HashStorage<K, V> = HashStorage(Ptr<K>::new(), Ptr<V>::new(), Ptr<i64>::new(), Ptr<K>::new(), hash_meta_empty())
+    let none = HashStorage(Ptr<K>::new(), Ptr<V>::new(), Ptr<i64>::new(), Ptr<K>::new(), hash_meta_empty())
     return HashMap(none, to_i64(0), to_i64(0))
 
   fn length(self): i64 -> self.count
@@ -118,16 +118,16 @@ class HashMap<K: Hashable + Equatable, V>:
   fn is_empty(self): bool -> self.count == to_i64(0)
 
   fn visible_slot(self, key: K): i64
-    let s: HashStorage<K, V> = self.storage
+    let s = self.storage
     if s.meta.cap == to_i64(0):
       return to_i64(-1)
-    let idx: i64 = hash_index(key.hash(), s.meta.cap)
-    let best: i64 = to_i64(-1)
-    let best_stamp: i64 = to_i64(0)
+    let idx = hash_index(key.hash(), s.meta.cap)
+    let best = to_i64(-1)
+    let best_stamp = to_i64(0)
     mode unsafe =>
       let probes: i64 = 0
       while probes < s.meta.cap:
-        let stamp: i64 = s.stamps.offset(idx).get()
+        let stamp = s.stamps.offset(idx).get()
         if stamp == to_i64(0):
           return best
         if stamp <= self.version:
@@ -142,7 +142,7 @@ class HashMap<K: Hashable + Equatable, V>:
     return best
 
   fn get(self, key: K): Option<V>
-    let slot: i64 = self.visible_slot(key)
+    let slot = self.visible_slot(key)
     if slot < to_i64(0):
       return Option::None
     mode unsafe =>
@@ -150,7 +150,7 @@ class HashMap<K: Hashable + Equatable, V>:
     panic("unreachable")
 
   fn get_or(self, key: K, fallback: V): V
-    let slot: i64 = self.visible_slot(key)
+    let slot = self.visible_slot(key)
     if slot < to_i64(0):
       return fallback
     mode unsafe =>
@@ -160,13 +160,13 @@ class HashMap<K: Hashable + Equatable, V>:
   fn contains(self, key: K): bool -> self.visible_slot(key) >= to_i64(0)
 
   fn compacted(self, cap: i64): HashMap<K, V>
-    let fresh: HashStorage<K, V> = HashStorage<K, V>::fresh(cap, false)
-    let s: HashStorage<K, V> = self.storage
+    let fresh = HashStorage<K, V>::fresh(cap, false)
+    let s = self.storage
     mode unsafe =>
       let i: i64 = 0
       while i < self.count:
-        let k: K = s.order.offset(i).get()
-        let slot: i64 = self.visible_slot(k)
+        let k = s.order.offset(i).get()
+        let slot = self.visible_slot(k)
         fresh.fill(k, s.vals.offset(slot).get(), true, i)
         i = i + 1
       return HashMap(fresh, fresh.meta.gen.get(), self.count)
@@ -175,33 +175,33 @@ class HashMap<K: Hashable + Equatable, V>:
   fn copy_out(self): HashMap<K, V>
     if self.count == to_i64(0):
       return HashMap<K, V>::new()
-    let s: HashStorage<K, V> = self.storage
-    let fresh: HashStorage<K, V> = HashStorage<K, V>::fresh(s.meta.cap, true)
+    let s = self.storage
+    let fresh = HashStorage<K, V>::fresh(s.meta.cap, true)
     mode unsafe =>
       let i: i64 = 0
       while i < self.count:
-        let orig_k: K = s.order.offset(i).get()
-        let slot: i64 = self.visible_slot(orig_k)
-        let copied_k: K = copy_out<K>(orig_k)
-        let copied_v: V = copy_out<V>(s.vals.offset(slot).get())
+        let orig_k = s.order.offset(i).get()
+        let slot = self.visible_slot(orig_k)
+        let copied_k = copy_out<K>(orig_k)
+        let copied_v = copy_out<V>(s.vals.offset(slot).get())
         fresh.fill(copied_k, copied_v, true, i)
         i = i + 1
       return HashMap(fresh, fresh.meta.gen.get(), self.count)
     panic("unreachable")
 
   fn set(self, key: K, value: V): HashMap<K, V>
-    let s: HashStorage<K, V> = self.storage
+    let s = self.storage
     mode unsafe =>
       if s.meta.cap > to_i64(0):
         if s.meta.gen.get() == self.version:
           if (s.meta.used.get() + to_i64(1)) * to_i64(4) <= s.meta.cap * to_i64(3):
-            let known: bool = self.contains(key)
+            let known = self.contains(key)
             s.fill(key, value, known == false, self.count)
-            let count: i64 = self.count
+            let count = self.count
             if known == false:
               count = count + to_i64(1)
             return HashMap(s, s.meta.gen.get(), count)
-    let new_cap: i64 = s.meta.cap
+    let new_cap = s.meta.cap
     if new_cap < to_i64(8):
       new_cap = to_i64(8)
     while (self.count + to_i64(1)) * to_i64(4) > new_cap * to_i64(3):
@@ -209,7 +209,7 @@ class HashMap<K: Hashable + Equatable, V>:
     return self.compacted(new_cap).set(key, value)
 
   fn keys(self): Vector<K>
-    let out: Vector<K> = Vector<K>::new()
+    let out = Vector<K>::new()
     let i: i64 = 0
     mode unsafe =>
       while i < self.count:
@@ -218,29 +218,29 @@ class HashMap<K: Hashable + Equatable, V>:
     return out
 
   fn values(self): Vector<V>
-    let out: Vector<V> = Vector<V>::new()
+    let out = Vector<V>::new()
     let i: i64 = 0
     mode unsafe =>
       while i < self.count:
-        let k: K = self.storage.order.offset(i).get()
-        let slot: i64 = self.visible_slot(k)
+        let k = self.storage.order.offset(i).get()
+        let slot = self.visible_slot(k)
         out = out.push(self.storage.vals.offset(slot).get())
         i = i + 1
     return out
 
   fn entries(self): Vector<MapEntry<K, V>>
-    let out: Vector<MapEntry<K, V>> = Vector<MapEntry<K, V>>::new()
+    let out = Vector<MapEntry<K, V>>::new()
     let i: i64 = 0
     mode unsafe =>
       while i < self.count:
-        let k: K = self.storage.order.offset(i).get()
-        let slot: i64 = self.visible_slot(k)
+        let k = self.storage.order.offset(i).get()
+        let slot = self.visible_slot(k)
         out = out.push(MapEntry(k, self.storage.vals.offset(slot).get()))
         i = i + 1
     return out
 
   fn iter_keys(self): Generator<K>
-    let ks: Vector<K> = self.keys()
+    let ks = self.keys()
     let i: i64 = 0
     while i < ks.length():
       yield ks.get(i)

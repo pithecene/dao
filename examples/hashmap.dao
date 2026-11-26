@@ -33,14 +33,14 @@ fn show_entry(label: string, result: Option<Entry>): i32
   return 0
 
 fn build_escaped_edges(prefix: string): HashMap<LabeledEdge, Vector<string>>
-  let out: HashMap<LabeledEdge, Vector<string>> = HashMap<LabeledEdge, Vector<string>>::new()
+  let out = HashMap<LabeledEdge, Vector<string>>::new()
   resource memory Scratch =>
-    let local: HashMap<LabeledEdge, Vector<string>> = HashMap<LabeledEdge, Vector<string>>::new()
-    let k1: LabeledEdge = LabeledEdge(EdgeKey(to_i64(1), to_i64(2)), prefix + ":alpha")
-    let v1: Vector<string> = Vector<string>::new().push(prefix + "-hop-1").push(prefix + "-hop-2")
+    let local = HashMap<LabeledEdge, Vector<string>>::new()
+    let k1 = LabeledEdge(EdgeKey(to_i64(1), to_i64(2)), prefix + ":alpha")
+    let v1 = Vector<string>::new().push(prefix + "-hop-1").push(prefix + "-hop-2")
     local = local.set(k1, v1)
-    let k2: LabeledEdge = LabeledEdge(EdgeKey(to_i64(2), to_i64(3)), prefix + ":beta")
-    let v2: Vector<string> = Vector<string>::new().push(prefix + "-hop-3")
+    let k2 = LabeledEdge(EdgeKey(to_i64(2), to_i64(3)), prefix + ":beta")
+    let v2 = Vector<string>::new().push(prefix + "-hop-3")
     local = local.set(k2, v2)
     out = local
   return out
@@ -55,16 +55,16 @@ fn main(): i32
   m = m.set("z", Entry("z", 30))
   print("length: " + i64_to_string(m.length()))
 
-  let unused1: i32 = show_entry("x", m.get("x"))
-  let unused2: i32 = show_entry("y", m.get("y"))
-  let unused3: i32 = show_entry("w", m.get("w"))
+  let unused1 = show_entry("x", m.get("x"))
+  let unused2 = show_entry("y", m.get("y"))
+  let unused3 = show_entry("w", m.get("w"))
 
   m = m.set("x", Entry("x", 99))
-  let unused4: i32 = show_entry("x (updated)", m.get("x"))
+  let unused4 = show_entry("x (updated)", m.get("x"))
 
   // 2. Integer keys (including 0, -1, and extrema) + deterministic order.
   let max_i64: i64 = 9223372036854775807
-  let min_i64: i64 = -max_i64 - to_i64(1)
+  let min_i64 = -max_i64 - to_i64(1)
   let imap = HashMap<i64, string>::new()
   imap = imap.set(to_i64(0), "zero")
   imap = imap.set(to_i64(-1), "neg_one")
@@ -85,7 +85,7 @@ fn main(): i32
   print("snapshot0 (10->20): " + snapshot0.get_or(EdgeKey(to_i64(10), to_i64(20)), "none"))
   print("edges (10->20): " + edges.get_or(EdgeKey(to_i64(10), to_i64(20)), "none"))
   print("edges (20->10): " + edges.get_or(EdgeKey(to_i64(20), to_i64(10)), "none"))
-  let e_entries: Vector<MapEntry<EdgeKey, string>> = edges.entries()
+  let e_entries = edges.entries()
   print("edge entries: " + i64_to_string(e_entries.length()))
 
   // 4. Explicit custom Hashable + Equatable conformance.

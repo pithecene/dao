@@ -92,7 +92,7 @@ File
           Identifier print
         Args
           StringLiteral ""
-    LetStatement unused1: i32
+    LetStatement unused1
       CallExpr
         Callee
           Identifier show_i32
@@ -104,7 +104,7 @@ File
             Args
               IntLiteral 10
               IntLiteral 20
-    LetStatement unused2: i32
+    LetStatement unused2
       CallExpr
         Callee
           Identifier show_i32
@@ -116,7 +116,7 @@ File
             Args
               IntLiteral 100
               IntLiteral 42
-    LetStatement unused3: i32
+    LetStatement unused3
       CallExpr
         Callee
           Identifier show_i32
@@ -128,7 +128,7 @@ File
             Args
               IntLiteral 7
               IntLiteral 6
-    LetStatement unused4: i32
+    LetStatement unused4
       CallExpr
         Callee
           Identifier show_i32
@@ -140,7 +140,7 @@ File
             Args
               IntLiteral 2147483647
               IntLiteral 1
-    LetStatement unused5: i32
+    LetStatement unused5
       CallExpr
         Callee
           Identifier show_i32
@@ -153,7 +153,7 @@ File
               UnaryExpr -
                 IntLiteral 2147483648
               IntLiteral 1
-    LetStatement unused6: i32
+    LetStatement unused6
       CallExpr
         Callee
           Identifier show_i32
@@ -165,7 +165,7 @@ File
             Args
               IntLiteral 2147483647
               IntLiteral 2
-    LetStatement unused7: i32
+    LetStatement unused7
       CallExpr
         Callee
           Identifier show_i32
@@ -177,7 +177,7 @@ File
             Args
               IntLiteral 0
               IntLiteral 0
-    LetStatement unused8: i32
+    LetStatement unused8
       CallExpr
         Callee
           Identifier show_i32
@@ -207,7 +207,7 @@ File
           Identifier print
         Args
           StringLiteral ""
-    LetStatement unused9: i32
+    LetStatement unused9
       CallExpr
         Callee
           Identifier show_i64
@@ -227,7 +227,7 @@ File
                   Identifier to_i64
                 Args
                   IntLiteral 200
-    LetStatement unused10: i32
+    LetStatement unused10
       CallExpr
         Callee
           Identifier show_i64
@@ -247,7 +247,7 @@ File
                   Identifier to_i64
                 Args
                   IntLiteral 30
-    LetStatement unused11: i32
+    LetStatement unused11
       CallExpr
         Callee
           Identifier show_i64
@@ -267,7 +267,7 @@ File
                   Identifier to_i64
                 Args
                   IntLiteral 1000
-    LetStatement max64: i64
+    LetStatement max64
       BinaryExpr +
         BinaryExpr *
           CallExpr
@@ -285,7 +285,7 @@ File
             Identifier to_i64
           Args
             IntLiteral 3
-    LetStatement unused12: i32
+    LetStatement unused12
       CallExpr
         Callee
           Identifier show_i64
@@ -297,7 +297,7 @@ File
             Args
               Identifier max64
               Identifier max64
-    LetStatement unused13: i32
+    LetStatement unused13
       CallExpr
         Callee
           Identifier show_i64
@@ -309,7 +309,7 @@ File
             Args
               Identifier max64
               Identifier max64
-    LetStatement unused14: i32
+    LetStatement unused14
       CallExpr
         Callee
           Identifier show_i64
@@ -330,7 +330,7 @@ File
                   Identifier to_i64
                 Args
                   IntLiteral 42
-    LetStatement unused15: i32
+    LetStatement unused15
       CallExpr
         Callee
           Identifier show_i64

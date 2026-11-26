@@ -25,9 +25,9 @@ fn describe_token(t: Token): i32
   return 0
 
 fn main(): i32
-  let t1: Token = Token::Int(value = to_i64(42))
-  let t2: Token = Token::Plus
-  let t3: Token = Token::Int(value = to_i64(99))
+  let t1 = Token::Int(value = to_i64(42))
+  let t2 = Token::Plus
+  let t3 = Token::Int(value = to_i64(99))
 
   describe_token(t1)
   describe_token(t2)

@@ -2,9 +2,9 @@ File
   Module conversions
   FunctionDecl main
     ReturnType: i32
-    LetStatement x: i32
+    LetStatement x
       IntLiteral 42
-    LetStatement y: f64
+    LetStatement y
       CallExpr
         Callee
           Identifier to_f64
@@ -22,7 +22,7 @@ File
           Identifier print
         Args
           Identifier y
-    LetStatement big: i64
+    LetStatement big
       CallExpr
         Callee
           Identifier to_i64
@@ -40,9 +40,9 @@ File
           Identifier print
         Args
           Identifier big
-    LetStatement pi: f64
+    LetStatement pi
       FloatLiteral 3.14
-    LetStatement truncated: i32
+    LetStatement truncated
       CallExpr
         Callee
           Identifier f64_to_i32
@@ -60,11 +60,11 @@ File
           Identifier print
         Args
           Identifier truncated
-    LetStatement neg: f64
+    LetStatement neg
       BinaryExpr -
         FloatLiteral 0.0
         FloatLiteral 2.71
-    LetStatement neg_trunc: i32
+    LetStatement neg_trunc
       CallExpr
         Callee
           Identifier f64_to_i32
@@ -84,7 +84,7 @@ File
           Identifier neg_trunc
     LetStatement wide: i64
       IntLiteral 100
-    LetStatement narrow: i32
+    LetStatement narrow
       CallExpr
         Callee
           Identifier i64_to_i32

@@ -3,7 +3,7 @@ File
   FunctionDecl range
     Param n: i32
     ReturnType: Generator<i32>
-    LetStatement i: i32
+    LetStatement i
       IntLiteral 0
     WhileStatement
       Condition
@@ -23,7 +23,7 @@ File
     Param start: i32
     Param end: i32
     ReturnType: Generator<i32>
-    LetStatement i: i32
+    LetStatement i
       Identifier start
     WhileStatement
       Condition
@@ -44,7 +44,7 @@ File
     Param end: i32
     Param step: i32
     ReturnType: Generator<i32>
-    LetStatement i: i32
+    LetStatement i
       Identifier start
     IfStatement
       Condition
@@ -59,13 +59,26 @@ File
               Identifier end
           YieldStatement
             Identifier i
-          Assignment
-            Target
-              Identifier i
-            Value
-              BinaryExpr +
-                Identifier i
-                Identifier step
+          MatchStatement
+            Scrutinee
+              CallExpr
+                Callee
+                  Identifier checked_add
+                Args
+                  Identifier i
+                  Identifier step
+            Arm
+              Pattern
+                QualifiedName Option::Some
+              Assignment
+                Target
+                  Identifier i
+                Value
+                  Identifier next_i
+            Arm
+              Pattern
+                QualifiedName Option::None
+              BreakStatement
       Else
         IfStatement
           Condition
@@ -80,10 +93,144 @@ File
                   Identifier end
               YieldStatement
                 Identifier i
+              MatchStatement
+                Scrutinee
+                  CallExpr
+                    Callee
+                      Identifier checked_add
+                    Args
+                      Identifier i
+                      Identifier step
+                Arm
+                  Pattern
+                    QualifiedName Option::Some
+                  Assignment
+                    Target
+                      Identifier i
+                    Value
+                      Identifier next_i
+                Arm
+                  Pattern
+                    QualifiedName Option::None
+                  BreakStatement
+  FunctionDecl range_i64
+    Param n: i64
+    ReturnType: Generator<i64>
+    LetStatement i: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          Identifier n
+      YieldStatement
+        Identifier i
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            IntLiteral 1
+  FunctionDecl range_i64
+    Param start: i64
+    Param end: i64
+    ReturnType: Generator<i64>
+    LetStatement i
+      Identifier start
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          Identifier end
+      YieldStatement
+        Identifier i
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            IntLiteral 1
+  FunctionDecl range_i64
+    Param start: i64
+    Param end: i64
+    Param step: i64
+    ReturnType: Generator<i64>
+    LetStatement i
+      Identifier start
+    IfStatement
+      Condition
+        BinaryExpr >
+          Identifier step
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 0
+      Then
+        WhileStatement
+          Condition
+            BinaryExpr <
+              Identifier i
+              Identifier end
+          YieldStatement
+            Identifier i
+          MatchStatement
+            Scrutinee
+              CallExpr
+                Callee
+                  Identifier checked_add_i64
+                Args
+                  Identifier i
+                  Identifier step
+            Arm
+              Pattern
+                QualifiedName Option::Some
               Assignment
                 Target
                   Identifier i
                 Value
-                  BinaryExpr +
-                    Identifier i
-                    Identifier step
+                  Identifier next_i
+            Arm
+              Pattern
+                QualifiedName Option::None
+              BreakStatement
+      Else
+        IfStatement
+          Condition
+            BinaryExpr <
+              Identifier step
+              CallExpr
+                Callee
+                  Identifier to_i64
+                Args
+                  IntLiteral 0
+          Then
+            WhileStatement
+              Condition
+                BinaryExpr >
+                  Identifier i
+                  Identifier end
+              YieldStatement
+                Identifier i
+              MatchStatement
+                Scrutinee
+                  CallExpr
+                    Callee
+                      Identifier checked_add_i64
+                    Args
+                      Identifier i
+                      Identifier step
+                Arm
+                  Pattern
+                    QualifiedName Option::Some
+                  Assignment
+                    Target
+                      Identifier i
+                    Value
+                      Identifier next_i
+                Arm
+                  Pattern
+                    QualifiedName Option::None
+                  BreakStatement

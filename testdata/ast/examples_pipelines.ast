@@ -54,7 +54,7 @@ File
           Identifier print
         Args
           StringLiteral "3 |> double |> negate:"
-    LetStatement result: i32
+    LetStatement result
       PipeExpr
         PipeExpr
           IntLiteral 3

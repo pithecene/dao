@@ -74,7 +74,7 @@ File
   FunctionDecl build_escaped_edges
     Param prefix: string
     ReturnType: HashMap<LabeledEdge, Vector<string>>
-    LetStatement out: HashMap<LabeledEdge, Vector<string>>
+    LetStatement out
       CallExpr
         Callee
           Identifier HashMap.new
@@ -82,14 +82,14 @@ File
           LabeledEdge
           Vector<string>
     ResourceBlock memory Scratch
-      LetStatement local: HashMap<LabeledEdge, Vector<string>>
+      LetStatement local
         CallExpr
           Callee
             Identifier HashMap.new
           TypeArgs
             LabeledEdge
             Vector<string>
-      LetStatement k1: LabeledEdge
+      LetStatement k1
         CallExpr
           Callee
             Identifier LabeledEdge
@@ -111,7 +111,7 @@ File
             BinaryExpr +
               Identifier prefix
               StringLiteral ":alpha"
-      LetStatement v1: Vector<string>
+      LetStatement v1
         CallExpr
           Callee
             FieldExpr .push
@@ -142,7 +142,7 @@ File
             Args
               Identifier k1
               Identifier v1
-      LetStatement k2: LabeledEdge
+      LetStatement k2
         CallExpr
           Callee
             Identifier LabeledEdge
@@ -164,7 +164,7 @@ File
             BinaryExpr +
               Identifier prefix
               StringLiteral ":beta"
-      LetStatement v2: Vector<string>
+      LetStatement v2
         CallExpr
           Callee
             FieldExpr .push
@@ -273,7 +273,7 @@ File
                   Callee
                     FieldExpr .length
                       Identifier m
-    LetStatement unused1: i32
+    LetStatement unused1
       CallExpr
         Callee
           Identifier show_entry
@@ -285,7 +285,7 @@ File
                 Identifier m
             Args
               StringLiteral "x"
-    LetStatement unused2: i32
+    LetStatement unused2
       CallExpr
         Callee
           Identifier show_entry
@@ -297,7 +297,7 @@ File
                 Identifier m
             Args
               StringLiteral "y"
-    LetStatement unused3: i32
+    LetStatement unused3
       CallExpr
         Callee
           Identifier show_entry
@@ -325,7 +325,7 @@ File
               Args
                 StringLiteral "x"
                 IntLiteral 99
-    LetStatement unused4: i32
+    LetStatement unused4
       CallExpr
         Callee
           Identifier show_entry
@@ -339,7 +339,7 @@ File
               StringLiteral "x"
     LetStatement max_i64: i64
       IntLiteral 9223372036854775807
-    LetStatement min_i64: i64
+    LetStatement min_i64
       BinaryExpr -
         UnaryExpr -
           Identifier max_i64
@@ -660,7 +660,7 @@ File
                       Args
                         IntLiteral 10
                 StringLiteral "none"
-    LetStatement e_entries: Vector<MapEntry<EdgeKey, string>>
+    LetStatement e_entries
       CallExpr
         Callee
           FieldExpr .entries

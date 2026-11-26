@@ -4,7 +4,7 @@ File
     Param h: i64
     Param cap: i64
     ReturnType: i64
-    LetStatement rem: i64
+    LetStatement rem
       BinaryExpr %
         Identifier h
         Identifier cap
@@ -57,13 +57,13 @@ File
     Param cap: i64
     Param outer: bool
     ReturnType: HashMeta
-    LetStatement used_raw: Ptr<void>
+    LetStatement used_raw
       CallExpr
         Callee
           Identifier Ptr.new
         TypeArgs
           void
-    LetStatement gen_raw: Ptr<void>
+    LetStatement gen_raw
       CallExpr
         Callee
           Identifier Ptr.new
@@ -147,7 +147,7 @@ File
                   TypeArgs
                     i64
     ModeBlock unsafe
-      LetStatement used: Ptr<i64>
+      LetStatement used
         CallExpr
           Callee
             FieldExpr .cast
@@ -165,7 +165,7 @@ File
                 Identifier to_i64
               Args
                 IntLiteral 0
-      LetStatement gen: Ptr<i64>
+      LetStatement gen
         CallExpr
           Callee
             FieldExpr .cast
@@ -207,7 +207,7 @@ File
       Param cap: i64
       Param outer: bool
       ReturnType: HashStorage<K, V>
-      LetStatement key_bytes: i64
+      LetStatement key_bytes
         BinaryExpr *
           CallExpr
             Callee
@@ -215,7 +215,7 @@ File
             TypeArgs
               K
           Identifier cap
-      LetStatement val_bytes: i64
+      LetStatement val_bytes
         BinaryExpr *
           CallExpr
             Callee
@@ -223,7 +223,7 @@ File
             TypeArgs
               V
           Identifier cap
-      LetStatement stamp_bytes: i64
+      LetStatement stamp_bytes
         BinaryExpr *
           CallExpr
             Callee
@@ -231,25 +231,25 @@ File
             TypeArgs
               i64
           Identifier cap
-      LetStatement key_raw: Ptr<void>
+      LetStatement key_raw
         CallExpr
           Callee
             Identifier Ptr.new
           TypeArgs
             void
-      LetStatement val_raw: Ptr<void>
+      LetStatement val_raw
         CallExpr
           Callee
             Identifier Ptr.new
           TypeArgs
             void
-      LetStatement stamp_raw: Ptr<void>
+      LetStatement stamp_raw
         CallExpr
           Callee
             Identifier Ptr.new
           TypeArgs
             void
-      LetStatement order_raw: Ptr<void>
+      LetStatement order_raw
         CallExpr
           Callee
             Identifier Ptr.new
@@ -372,7 +372,7 @@ File
                       Identifier align_of
                     TypeArgs
                       K
-      LetStatement meta: HashMeta
+      LetStatement meta
         CallExpr
           Callee
             Identifier hash_meta_fresh
@@ -380,7 +380,7 @@ File
             Identifier cap
             Identifier outer
       ModeBlock unsafe
-        LetStatement stamps: Ptr<i64>
+        LetStatement stamps
           CallExpr
             Callee
               FieldExpr .cast
@@ -456,7 +456,7 @@ File
       Param order_pos: i64
       ReturnType: void
       ModeBlock unsafe
-        LetStatement idx: i64
+        LetStatement idx
           CallExpr
             Callee
               Identifier hash_index
@@ -510,7 +510,7 @@ File
                       Identifier to_i64
                     Args
                       IntLiteral 0
-        LetStatement stamp: i64
+        LetStatement stamp
           BinaryExpr +
             CallExpr
               Callee
@@ -614,7 +614,7 @@ File
     Field count: i64
     FunctionDecl new
       ReturnType: HashMap<K, V>
-      LetStatement none: HashStorage<K, V>
+      LetStatement none
         CallExpr
           Callee
             Identifier HashStorage
@@ -680,7 +680,7 @@ File
       Param self
       Param key: K
       ReturnType: i64
-      LetStatement s: HashStorage<K, V>
+      LetStatement s
         FieldExpr .storage
           Identifier self
       IfStatement
@@ -702,7 +702,7 @@ File
               Args
                 UnaryExpr -
                   IntLiteral 1
-      LetStatement idx: i64
+      LetStatement idx
         CallExpr
           Callee
             Identifier hash_index
@@ -714,14 +714,14 @@ File
             FieldExpr .cap
               FieldExpr .meta
                 Identifier s
-      LetStatement best: i64
+      LetStatement best
         CallExpr
           Callee
             Identifier to_i64
           Args
             UnaryExpr -
               IntLiteral 1
-      LetStatement best_stamp: i64
+      LetStatement best_stamp
         CallExpr
           Callee
             Identifier to_i64
@@ -737,7 +737,7 @@ File
               FieldExpr .cap
                 FieldExpr .meta
                   Identifier s
-          LetStatement stamp: i64
+          LetStatement stamp
             CallExpr
               Callee
                 FieldExpr .get
@@ -838,7 +838,7 @@ File
       Param self
       Param key: K
       ReturnType: Option<V>
-      LetStatement slot: i64
+      LetStatement slot
         CallExpr
           Callee
             FieldExpr .visible_slot
@@ -885,7 +885,7 @@ File
       Param key: K
       Param fallback: V
       ReturnType: V
-      LetStatement slot: i64
+      LetStatement slot
         CallExpr
           Callee
             FieldExpr .visible_slot
@@ -944,7 +944,7 @@ File
       Param self
       Param cap: i64
       ReturnType: HashMap<K, V>
-      LetStatement fresh: HashStorage<K, V>
+      LetStatement fresh
         CallExpr
           Callee
             Identifier HashStorage.fresh
@@ -954,7 +954,7 @@ File
           Args
             Identifier cap
             BoolLiteral false
-      LetStatement s: HashStorage<K, V>
+      LetStatement s
         FieldExpr .storage
           Identifier self
       ModeBlock unsafe
@@ -966,7 +966,7 @@ File
               Identifier i
               FieldExpr .count
                 Identifier self
-          LetStatement k: K
+          LetStatement k
             CallExpr
               Callee
                 FieldExpr .get
@@ -977,7 +977,7 @@ File
                           Identifier s
                     Args
                       Identifier i
-          LetStatement slot: i64
+          LetStatement slot
             CallExpr
               Callee
                 FieldExpr .visible_slot
@@ -1051,10 +1051,10 @@ File
               TypeArgs
                 K
                 V
-      LetStatement s: HashStorage<K, V>
+      LetStatement s
         FieldExpr .storage
           Identifier self
-      LetStatement fresh: HashStorage<K, V>
+      LetStatement fresh
         CallExpr
           Callee
             Identifier HashStorage.fresh
@@ -1075,7 +1075,7 @@ File
               Identifier i
               FieldExpr .count
                 Identifier self
-          LetStatement orig_k: K
+          LetStatement orig_k
             CallExpr
               Callee
                 FieldExpr .get
@@ -1086,14 +1086,14 @@ File
                           Identifier s
                     Args
                       Identifier i
-          LetStatement slot: i64
+          LetStatement slot
             CallExpr
               Callee
                 FieldExpr .visible_slot
                   Identifier self
               Args
                 Identifier orig_k
-          LetStatement copied_k: K
+          LetStatement copied_k
             CallExpr
               Callee
                 Identifier copy_out
@@ -1101,7 +1101,7 @@ File
                 K
               Args
                 Identifier orig_k
-          LetStatement copied_v: V
+          LetStatement copied_v
             CallExpr
               Callee
                 Identifier copy_out
@@ -1160,7 +1160,7 @@ File
       Param key: K
       Param value: V
       ReturnType: HashMap<K, V>
-      LetStatement s: HashStorage<K, V>
+      LetStatement s
         FieldExpr .storage
           Identifier self
       ModeBlock unsafe
@@ -1219,7 +1219,7 @@ File
                           Args
                             IntLiteral 3
                   Then
-                    LetStatement known: bool
+                    LetStatement known
                       CallExpr
                         Callee
                           FieldExpr .contains
@@ -1239,7 +1239,7 @@ File
                             BoolLiteral false
                           FieldExpr .count
                             Identifier self
-                    LetStatement count: i64
+                    LetStatement count
                       FieldExpr .count
                         Identifier self
                     IfStatement
@@ -1272,7 +1272,7 @@ File
                                   FieldExpr .meta
                                     Identifier s
                           Identifier count
-      LetStatement new_cap: i64
+      LetStatement new_cap
         FieldExpr .cap
           FieldExpr .meta
             Identifier s
@@ -1346,7 +1346,7 @@ File
     FunctionDecl keys
       Param self
       ReturnType: Vector<K>
-      LetStatement out: Vector<K>
+      LetStatement out
         CallExpr
           Callee
             Identifier Vector.new
@@ -1393,7 +1393,7 @@ File
     FunctionDecl values
       Param self
       ReturnType: Vector<V>
-      LetStatement out: Vector<V>
+      LetStatement out
         CallExpr
           Callee
             Identifier Vector.new
@@ -1408,7 +1408,7 @@ File
               Identifier i
               FieldExpr .count
                 Identifier self
-          LetStatement k: K
+          LetStatement k
             CallExpr
               Callee
                 FieldExpr .get
@@ -1420,7 +1420,7 @@ File
                             Identifier self
                     Args
                       Identifier i
-          LetStatement slot: i64
+          LetStatement slot
             CallExpr
               Callee
                 FieldExpr .visible_slot
@@ -1459,7 +1459,7 @@ File
     FunctionDecl entries
       Param self
       ReturnType: Vector<MapEntry<K, V>>
-      LetStatement out: Vector<MapEntry<K, V>>
+      LetStatement out
         CallExpr
           Callee
             Identifier Vector.new
@@ -1474,7 +1474,7 @@ File
               Identifier i
               FieldExpr .count
                 Identifier self
-          LetStatement k: K
+          LetStatement k
             CallExpr
               Callee
                 FieldExpr .get
@@ -1486,7 +1486,7 @@ File
                             Identifier self
                     Args
                       Identifier i
-          LetStatement slot: i64
+          LetStatement slot
             CallExpr
               Callee
                 FieldExpr .visible_slot
@@ -1530,7 +1530,7 @@ File
     FunctionDecl iter_keys
       Param self
       ReturnType: Generator<K>
-      LetStatement ks: Vector<K>
+      LetStatement ks
         CallExpr
           Callee
             FieldExpr .keys

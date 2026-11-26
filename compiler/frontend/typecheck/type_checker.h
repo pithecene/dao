@@ -469,6 +469,11 @@ private:
                                         std::unordered_set<const Type*>& acyclic) -> bool;
   void register_signatures();
   void compute_derived_conformances();
+  [[nodiscard]] auto find_prelude_derived_concept(std::string_view wanted) const -> const Decl*;
+  [[nodiscard]] auto is_canonical_key_concept(const Decl* concept_decl) const -> bool;
+  [[nodiscard]] auto nominal_owner_module(const Type* type) const -> const ModuleInfo*;
+  [[nodiscard]] auto extend_decl_is_canonical(const Decl* ext_decl, const Type* target) const
+      -> bool;
   auto type_conforms_to(const Type* type, const Decl* concept_decl) -> bool;
   void check_declaration(const Decl* decl);
   void check_function(const Decl* decl);

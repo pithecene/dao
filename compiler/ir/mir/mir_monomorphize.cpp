@@ -270,6 +270,7 @@ struct FnEntry {
   const Symbol* symbol = nullptr;
   const MirFunction* mir_fn = nullptr;
   bool is_template = false;
+  bool is_canonical_key_method = false;
 };
 
 struct MethodIndex {
@@ -465,6 +466,35 @@ auto is_inherent_method_symbol(const Symbol* sym) -> bool {
   return sym->module->exports != nullptr && sym->module->exports->lookup_local(sym->name) == sym;
 }
 
+auto is_canonical_key_extend_fn(const Symbol* sym) -> bool {
+  if (sym == nullptr || sym->decl == nullptr || sym->module == nullptr || sym->module->is_prelude ||
+      sym->module->file == nullptr || sym->module->file->parse.file == nullptr) {
+    return false;
+  }
+  const auto* method_decl = sym->decl_as_decl();
+  for (const auto* decl : sym->module->file->parse.file->declarations) {
+    if (decl->kind() != NodeKind::ExtendDecl) {
+      continue;
+    }
+    const auto& ext = decl->as<ExtendDecl>();
+    if (ext.target.concept_name != "Equatable" && ext.target.concept_name != "Hashable") {
+      continue;
+    }
+    if (sym->module->exports != nullptr) {
+      const auto* local_cpt = sym->module->exports->lookup_local(ext.target.concept_name);
+      if (local_cpt != nullptr && local_cpt->kind == SymbolKind::Concept) {
+        continue;
+      }
+    }
+    for (const auto* method : ext.methods) {
+      if (method == method_decl) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 auto has_struct_field(const TypeStruct* st, std::string_view name) -> bool {
   for (const auto& field : st->fields()) {
     if (field.name == name) {
@@ -588,25 +618,17 @@ auto receiver_matches_candidate(const FnEntry& candidate, const Type* obj_type) 
 
 auto synthesize_derived_method(const TypeStruct* st,
                                std::string_view method_kind,
-                               const ModuleInfo* origin_module,
                                SpecializationState& state,
                                MirModule& module,
                                MirContext& ctx,
                                TypeContext& types) -> MirFunction* {
-  uint32_t scope_tag = effective_dispatch_scope(origin_module, nullptr, state);
   std::string cache_key = type_identity_key(st) + "#" + std::string(method_kind);
-  if (scope_tag != 0) {
-    cache_key += "#" + std::to_string(scope_tag);
-  }
   if (auto it = state.derived_fns.find(cache_key); it != state.derived_fns.end()) {
     return it->second;
   }
 
   Span span = st->decl_id() != nullptr ? st->decl_id()->span : Span{};
   auto mangled = state.names.mangle(std::string(st->name()) + "." + std::string(method_kind), {st});
-  if (scope_tag != 0) {
-    mangled += "$s" + std::to_string(scope_tag);
-  }
   auto* name_str = ctx.alloc<std::string>(std::move(mangled));
   auto* fn_sym = ctx.alloc<Symbol>();
   fn_sym->kind = SymbolKind::Function;
@@ -618,13 +640,10 @@ auto synthesize_derived_method(const TypeStruct* st,
   auto* synth_fn = ctx.alloc<MirFunction>();
   synth_fn->symbol = fn_sym;
   synth_fn->span = span;
-  if (origin_module != nullptr && !origin_module->is_prelude) {
-    state.origin_module[synth_fn] = origin_module;
-  }
   state.derived_fns.emplace(std::move(cache_key), synth_fn);
   state.fixed_up.insert(synth_fn);
   module.functions.push_back(synth_fn);
-  register_method_entry(state.methods, {fn_sym, synth_fn, false});
+  register_method_entry(state.methods, {fn_sym, synth_fn, false, true});
 
   uint32_t next_val = 0;
   auto fresh_val = [&]() -> MirValueId { return MirValueId{next_val++}; };
@@ -703,7 +722,7 @@ auto synthesize_derived_method(const TypeStruct* st,
     if (false_bb != nullptr) {
       synth_fn->blocks.push_back(false_bb);
     }
-    fixup_method_calls(synth_fn, origin_module, state, module, ctx, types);
+    fixup_method_calls(synth_fn, nullptr, state, module, ctx, types);
     return synth_fn;
   }
 
@@ -758,7 +777,7 @@ auto synthesize_derived_method(const TypeStruct* st,
     }
   }
   entry->insts.push_back(make_synth_inst(ctx, MirValueId{}, nullptr, span, MirReturn{acc, true}));
-  fixup_method_calls(synth_fn, origin_module, state, module, ctx, types);
+  fixup_method_calls(synth_fn, nullptr, state, module, ctx, types);
   return synth_fn;
 }
 
@@ -824,44 +843,47 @@ auto fixup_method_calls(MirFunction* fn,
       auto method_name = print_type_name(obj_type) + "." + std::string(field->field);
       const FnEntry* visible = nullptr;
       FnEntry synth_entry{};
+      const bool canonical_only = (from_module == nullptr || from_module->is_prelude) &&
+                                  (field->field == "eq" || field->field == "hash");
       auto sym_it = state.methods.by_name.find(method_name);
       if (sym_it != state.methods.by_name.end()) {
-        // Innermost-first, as lookup is everywhere else
-        // (CONTRACT_MODULE_SYSTEM.md §7.4): inherent methods on the
-        // receiver's own nominal declaration first, then the module's
-        // own `extend`, then the caller's or prelude's.
+        // Innermost-first (CONTRACT_MODULE_SYSTEM.md §7.4): inherent
+        // methods first, then non-prelude `from_module`'s local `extend`,
+        // then non-prelude caller `origin_module`'s local `extend`, then
+        // prelude or canonical type-owner `extend`s.  Canonical `eq`/`hash`
+        // inside prelude containers and derived synthesis ignore caller-local
+        // overrides so map key semantics stay invariant across modules.
+        int best_tier = 4;
         for (const auto& candidate : sym_it->second) {
           if (!receiver_matches_candidate(candidate, obj_type)) {
             continue;
           }
           const bool inherent = is_inherent_method_symbol(candidate.symbol);
-          const bool visible_here = inherent ||
-                                    extend_visible_from(candidate.symbol->module, from_module) ||
-                                    (origin_module != nullptr &&
-                                     extend_visible_from(candidate.symbol->module, origin_module));
-          if (!visible_here) {
+          const auto* cand_mod = candidate.symbol->module;
+          const bool is_from_local = !canonical_only && from_module != nullptr &&
+                                     !from_module->is_prelude && cand_mod == from_module;
+          const bool is_origin_local = !canonical_only && origin_module != nullptr &&
+                                       !origin_module->is_prelude && cand_mod == origin_module;
+          const bool is_global =
+              cand_mod == nullptr || cand_mod->is_prelude || candidate.is_canonical_key_method;
+          if (!inherent && !is_from_local && !is_origin_local && !is_global) {
             continue;
           }
-          if (inherent || candidate.symbol->module == from_module ||
-              (origin_module != nullptr && candidate.symbol->module == origin_module)) {
+          const int tier = inherent ? 0 : is_from_local ? 1 : is_origin_local ? 2 : 3;
+          if (tier < best_tier) {
+            best_tier = tier;
             visible = &candidate;
-            break;
-          }
-          if (visible == nullptr) {
-            visible = &candidate;
+            if (tier == 0) {
+              break;
+            }
           }
         }
       }
       if (visible == nullptr && obj_type->kind() == TypeKind::Struct &&
           (field->field == "eq" || field->field == "hash")) {
-        auto* synth_fn = synthesize_derived_method(static_cast<const TypeStruct*>(obj_type),
-                                                   field->field,
-                                                   origin_module,
-                                                   state,
-                                                   module,
-                                                   ctx,
-                                                   types);
-        synth_entry = {synth_fn->symbol, synth_fn, false};
+        auto* synth_fn = synthesize_derived_method(
+            static_cast<const TypeStruct*>(obj_type), field->field, state, module, ctx, types);
+        synth_entry = {synth_fn->symbol, synth_fn, false, true};
         visible = &synth_entry;
       }
       if (visible == nullptr) {
@@ -1792,13 +1814,14 @@ auto monomorphize(
     if (mod_fn->symbol == nullptr) {
       continue;
     }
-    register_method_entry(state.methods, {mod_fn->symbol, mod_fn, false});
+    const bool canon_key = is_canonical_key_extend_fn(mod_fn->symbol);
+    register_method_entry(state.methods, {mod_fn->symbol, mod_fn, false, canon_key});
     if (mod_fn->symbol->name == "combine_hash" &&
         (mod_fn->symbol->module == nullptr || mod_fn->symbol->module->is_prelude)) {
       state.methods.combine_hash_fn = mod_fn;
     }
     if (mod_fn->symbol->module != nullptr && !mod_fn->symbol->module->is_prelude &&
-        !is_inherent_method_symbol(mod_fn->symbol)) {
+        !is_inherent_method_symbol(mod_fn->symbol) && !canon_key) {
       auto next_id = static_cast<uint32_t>(state.methods.local_extend_modules.size() + 1);
       state.methods.local_extend_modules.try_emplace(mod_fn->symbol->module, next_id);
     }
@@ -1815,8 +1838,10 @@ auto monomorphize(
     if (sym == nullptr) {
       continue;
     }
-    register_method_entry(state.methods, {sym, tmpl_fn, true});
-    if (sym->module != nullptr && !sym->module->is_prelude && !is_inherent_method_symbol(sym)) {
+    const bool canon_key = is_canonical_key_extend_fn(sym);
+    register_method_entry(state.methods, {sym, tmpl_fn, true, canon_key});
+    if (sym->module != nullptr && !sym->module->is_prelude && !is_inherent_method_symbol(sym) &&
+        !canon_key) {
       auto next_id = static_cast<uint32_t>(state.methods.local_extend_modules.size() + 1);
       state.methods.local_extend_modules.try_emplace(sym->module, next_id);
     }

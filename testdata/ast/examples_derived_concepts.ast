@@ -65,14 +65,14 @@ File
               Identifier describe
             Args
               StringLiteral "seven"
-    LetStatement p: Point
+    LetStatement p
       CallExpr
         Callee
           Identifier Point
         Args
           IntLiteral 1
           IntLiteral 2
-    LetStatement s: Segment
+    LetStatement s
       CallExpr
         Callee
           Identifier Segment
@@ -116,7 +116,7 @@ File
             Args
               FieldExpr .name
                 Identifier s
-    LetStatement admitted: i32
+    LetStatement admitted
       BinaryExpr +
         CallExpr
           Callee

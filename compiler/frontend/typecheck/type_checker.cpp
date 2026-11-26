@@ -1220,6 +1220,58 @@ void TypeChecker::register_signatures() {
 // Derived conformance computation
 // ---------------------------------------------------------------------------
 
+auto TypeChecker::find_prelude_derived_concept(std::string_view wanted) const -> const Decl* {
+  for (const auto* concept_decl : derived_concepts_) {
+    const auto* owner = declaring_module(concept_decl);
+    if ((owner == nullptr || owner->is_prelude) &&
+        concept_decl->as<ConceptDecl>().name == wanted) {
+      return concept_decl;
+    }
+  }
+  return nullptr;
+}
+
+auto TypeChecker::is_canonical_key_concept(const Decl* concept_decl) const -> bool {
+  if (concept_decl == nullptr || !concept_decl->is<ConceptDecl>()) {
+    return false;
+  }
+  const auto* owner = declaring_module(concept_decl);
+  if (owner == nullptr || !owner->is_prelude) {
+    return false;
+  }
+  const auto name = concept_decl->as<ConceptDecl>().name;
+  return name == "Equatable" || name == "Hashable";
+}
+
+auto TypeChecker::nominal_owner_module(const Type* type) const -> const ModuleInfo* {
+  if (type == nullptr) {
+    return nullptr;
+  }
+  if (type->kind() == TypeKind::Struct) {
+    return declaring_module(static_cast<const TypeStruct*>(type)->decl_id());
+  }
+  if (type->kind() == TypeKind::Enum) {
+    return declaring_module(static_cast<const TypeEnum*>(type)->decl_id());
+  }
+  return nullptr;
+}
+
+auto TypeChecker::extend_decl_is_canonical(const Decl* ext_decl, const Type* target) const -> bool {
+  if (ext_decl == nullptr || ext_decl->kind() != NodeKind::ExtendDecl || target == nullptr) {
+    return false;
+  }
+  const auto& ext = ext_decl->as<ExtendDecl>();
+  if (!is_canonical_key_concept(concept_named_at(ext.target.concept_span))) {
+    return false;
+  }
+  const auto* ext_mod = declaring_module(ext_decl);
+  if (ext_mod == nullptr || ext_mod->is_prelude) {
+    return true;
+  }
+  const auto* target_owner = nominal_owner_module(target);
+  return target_owner != nullptr && ext_mod == target_owner;
+}
+
 auto TypeChecker::type_conforms_to(const Type* type, const Decl* concept_decl) -> bool {
   if (type == nullptr) {
     return false;
@@ -1278,23 +1330,32 @@ auto TypeChecker::type_conforms_to(const Type* type, const Decl* concept_decl) -
   }
 
   // Check extend declarations.
+  const bool canonical_key_concept = is_canonical_key_concept(concept_decl);
   if (!all_decls_.empty()) {
     for (const auto* decl : all_decls_) {
       if (decl->kind() != NodeKind::ExtendDecl) {
         continue;
       }
       const auto& ext = decl->as<ExtendDecl>();
-      // Conformance introduced by `extend` is scoped like the methods it
-      // introduces (CONTRACT_MODULE_SYSTEM.md §5): a type does not
-      // satisfy a bound on the strength of an extension another module
-      // declared.
-      if (!extend_is_visible(declaring_module(decl))) {
+      if (concept_named_at(ext.target.concept_span) != concept_decl) {
         continue;
       }
       const auto* target = resolve_type_node(ext.target_type);
-      if (target == type && concept_named_at(ext.target.concept_span) == concept_decl) {
-        return true;
+      if (target != type) {
+        continue;
       }
+      // Prelude `Equatable` and `Hashable` are canonical properties of the
+      // key type: only the prelude or the type's own declaring module may
+      // implement them, and that implementation travels with the type.
+      // Every other `extend` remains module-scoped (CONTRACT_MODULE_SYSTEM.md §5).
+      if (canonical_key_concept) {
+        if (!extend_decl_is_canonical(decl, target)) {
+          continue;
+        }
+      } else if (!extend_is_visible(declaring_module(decl))) {
+        continue;
+      }
+      return true;
     }
   }
 
@@ -1303,6 +1364,21 @@ auto TypeChecker::type_conforms_to(const Type* type, const Decl* concept_decl) -
   if (it != derived_conformances_.end()) {
     for (const auto* derived : it->second) {
       if (derived == concept_decl) {
+        // Use-site (eq, hash) pair coherence: never satisfy `Hashable` via
+        // field-wise derivation in a scope that overrides `Equatable`
+        // without also providing an explicit `Hashable`.
+        if (concept_decl != nullptr && concept_decl == find_prelude_derived_concept("Hashable")) {
+          if (const auto* eq_cand = find_prelude_derived_concept("Equatable")) {
+            for (const auto* decl : all_decls_) {
+              if (decl->kind() == NodeKind::ExtendDecl &&
+                  extend_is_visible(declaring_module(decl)) &&
+                  concept_named_at(decl->as<ExtendDecl>().target.concept_span) == eq_cand &&
+                  resolve_type_node(decl->as<ExtendDecl>().target_type) == type) {
+                return false;
+              }
+            }
+          }
+        }
         return true;
       }
     }
@@ -1339,19 +1415,8 @@ void TypeChecker::compute_derived_conformances() {
     classes.push_back({decl, &cls, struct_type});
   }
 
-  const Decl* prelude_equatable = nullptr;
-  const Decl* prelude_hashable = nullptr;
-  for (const auto* concept_decl : derived_concepts_) {
-    const auto* owner = declaring_module(concept_decl);
-    if (owner == nullptr || owner->is_prelude) {
-      const auto& cpt = concept_decl->as<ConceptDecl>();
-      if (cpt.name == "Equatable") {
-        prelude_equatable = concept_decl;
-      } else if (cpt.name == "Hashable") {
-        prelude_hashable = concept_decl;
-      }
-    }
-  }
+  const Decl* prelude_equatable = find_prelude_derived_concept("Equatable");
+  const Decl* prelude_hashable = find_prelude_derived_concept("Hashable");
 
   // Fixpoint loop: repeat until no new conformances are discovered.
   // This ensures transitive derivation is independent of declaration order.
@@ -1516,21 +1581,20 @@ void TypeChecker::check_declaration(const Decl* decl) {
       }
     }
     const auto* ext_concept = concept_named_at(ext.target.concept_span);
-    if (ctx_.self_type != nullptr && ext_concept != nullptr && ext_concept->is<ConceptDecl>() &&
-        ext_concept->as<ConceptDecl>().name == "Hashable") {
-      const auto* concept_owner = declaring_module(ext_concept);
-      if (concept_owner == nullptr || concept_owner->is_prelude) {
-        for (const auto* d : derived_concepts_) {
-          const auto* eq_owner = declaring_module(d);
-          if ((eq_owner == nullptr || eq_owner->is_prelude) &&
-              d->as<ConceptDecl>().name == "Equatable") {
-            if (!type_conforms_to(ctx_.self_type, d)) {
-              error(ext.target.concept_span,
-                    "type '" + print_type(ctx_.self_type) +
-                        "' cannot conform to 'Hashable' without conforming to 'Equatable'");
-            }
-            break;
-          }
+    if (ctx_.self_type != nullptr && is_canonical_key_concept(ext_concept) &&
+        current_module_ != nullptr && !current_module_->is_prelude &&
+        nominal_owner_module(ctx_.self_type) != current_module_) {
+      error(ext.target.concept_span,
+            "cannot extend '" + print_type(ctx_.self_type) + "' as '" +
+                std::string(ext.target.concept_name) +
+                "' outside its declaring module; wrap it in a local type");
+    } else if (ctx_.self_type != nullptr && ext_concept != nullptr &&
+               ext_concept == find_prelude_derived_concept("Hashable")) {
+      if (const auto* eq_concept = find_prelude_derived_concept("Equatable")) {
+        if (!type_conforms_to(ctx_.self_type, eq_concept)) {
+          error(ext.target.concept_span,
+                "type '" + print_type(ctx_.self_type) +
+                    "' cannot conform to 'Hashable' without conforming to 'Equatable'");
         }
       }
     }
@@ -4031,7 +4095,14 @@ void TypeChecker::build_method_table() {
     if (target == nullptr) {
       continue;
     }
+    const auto* ext_concept = concept_named_at(ext.target.concept_span);
     const auto* owner = declaring_module(decl);
+    if (is_canonical_key_concept(ext_concept)) {
+      if (!extend_decl_is_canonical(decl, target)) {
+        continue;
+      }
+      owner = nullptr;
+    }
     for (const auto* method_decl : ext.methods) {
       const auto& method = method_decl->as<FunctionDecl>();
       const auto* fn_type = build_method_fn_type(method);
