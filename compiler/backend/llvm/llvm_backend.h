@@ -13,8 +13,9 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 
-#include <memory>
 #include <functional>
+#include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -101,50 +102,50 @@ private:
   /// The source signature each extern was first declared with.
   std::unordered_map<std::string, ExternDeclaration> extern_signatures_;
   std::vector<Diagnostic> diagnostics_;
+  uint32_t next_lambda_id_ = 0;
 
   void emit_diagnostic(Span span, const std::string& message);
 
   // Function lowering
   auto lower_function(const MirFunction& fn) -> bool;
 
+  struct LocalTable {
+    // MIR LocalId → LLVM pointer (alloca for normal fns, frame GEP for generators)
+    std::unordered_map<uint32_t, llvm::Value*> slots;
+    // MIR LocalId → semantic Type* (for place resolution)
+    std::unordered_map<uint32_t, const Type*> types;
+  };
+
+  struct CalleeRefs {
+    // MIR MirValueId → builtin intrinsic name (for compiler builtins)
+    std::unordered_map<uint32_t, std::string_view> builtin_names;
+    // MIR MirValueId → named function symbol (for direct calls vs fat-callable values)
+    std::unordered_map<uint32_t, const Symbol*> fn_ref_symbols;
+  };
+
+  struct GeneratorState {
+    // MIR ValueId (from IterInit) → { frame_ptr, resume_fn_ptr } pair
+    std::unordered_map<uint32_t, std::pair<llvm::Value*, llvm::Value*>> iter_state;
+    // MIR ValueId (from IterInit inside a generator) → frame struct field index
+    std::unordered_map<uint32_t, uint32_t> iter_frame_fields;
+    // Frame pointer and struct type for the generator being lowered.
+    llvm::Value* frame_ptr = nullptr;
+    llvm::StructType* frame_type = nullptr;
+  };
+
   // Per-function state
   struct FunctionState {
     llvm::Function* llvm_fn = nullptr;
     llvm::IRBuilder<>* builder = nullptr;
-
-    // MIR LocalId → LLVM pointer (alloca for normal fns, frame GEP for generators)
-    std::unordered_map<uint32_t, llvm::Value*> locals;
-
-    // MIR LocalId → semantic Type* (for place resolution)
-    std::unordered_map<uint32_t, const Type*> local_types;
-
+    LocalTable locals;
     // MIR MirValueId → LLVM Value* (for SSA temporaries)
     std::unordered_map<uint32_t, llvm::Value*> values;
-
     // MIR MirValueId → semantic Type* (for signedness decisions)
     std::unordered_map<uint32_t, const Type*> value_types;
-
-    // MIR MirValueId → builtin intrinsic name (for compiler builtins)
-    std::unordered_map<uint32_t, std::string_view> builtin_names;
-
     // MIR BlockId → LLVM BasicBlock*
     std::unordered_map<uint32_t, llvm::BasicBlock*> blocks;
-
-    // --- Generator iteration state (consumer side) ---
-
-    // MIR ValueId (from IterInit) → { frame_ptr, resume_fn_ptr } pair
-    std::unordered_map<uint32_t, std::pair<llvm::Value*, llvm::Value*>> iter_state;
-
-    // --- Generator function state (producer side) ---
-
-    // Frame pointer (alloca/heap ptr) for the generator being lowered.
-    llvm::Value* gen_frame_ptr = nullptr;
-
-    // Frame struct type for the generator being lowered.
-    llvm::StructType* gen_frame_type = nullptr;
-
-    // Yield-point state index counter.
-    uint32_t gen_next_state = 1;
+    CalleeRefs callees;
+    GeneratorState gen;
   };
 
   // Top-level lowering phases (called by lower()).
@@ -167,33 +168,53 @@ private:
                    FunctionState& state) -> bool;
 
   // Typed instruction lowering helpers
-  auto lower_const_int(const MirConstInt& p, const MirInst& inst,
-                       FunctionState& state) -> bool;
-  auto lower_const_float(const MirConstFloat& p, const MirInst& inst,
-                         FunctionState& state) -> bool;
-  auto lower_const_bool(const MirConstBool& p, const MirInst& inst,
-                        FunctionState& state) -> bool;
-  auto lower_const_string(const MirConstString& p, const MirInst& inst,
-                          FunctionState& state) -> bool;
-  auto lower_unary(const MirUnary& p, const MirInst& inst,
-                   FunctionState& state) -> bool;
-  auto lower_binary(const MirBinary& p, const MirInst& inst,
-                    FunctionState& state) -> bool;
-  auto lower_store(const MirStore& p, const MirInst& inst,
-                   FunctionState& state) -> bool;
-  auto lower_load(const MirLoad& p, const MirInst& inst,
-                  FunctionState& state) -> bool;
-  auto lower_field_access(const MirFieldAccess& p, const MirInst& inst,
-                          FunctionState& state) -> bool;
-  auto lower_fn_ref(const MirFnRef& p, const MirInst& inst,
-                    FunctionState& state) -> bool;
-  auto lower_call(const MirCall& p, const MirInst& inst,
-                  FunctionState& state) -> bool;
-  auto lower_construct(const MirConstruct& p, const MirInst& inst,
-                       FunctionState& state) -> bool;
-  auto lower_enum_construct(const MirEnumConstruct& p, const MirInst& inst,
-                            FunctionState& state) -> bool;
-  auto lower_enum_discriminant(const MirEnumDiscriminant& p, const MirInst& inst,
+  auto lower_const_int(const MirConstInt& p, const MirInst& inst, FunctionState& state) -> bool;
+  auto lower_const_float(const MirConstFloat& p, const MirInst& inst, FunctionState& state) -> bool;
+  auto lower_const_bool(const MirConstBool& p, const MirInst& inst, FunctionState& state) -> bool;
+  auto lower_const_string(const MirConstString& p, const MirInst& inst, FunctionState& state)
+      -> bool;
+  auto lower_unary(const MirUnary& p, const MirInst& inst, FunctionState& state) -> bool;
+  auto lower_binary(const MirBinary& p, const MirInst& inst, FunctionState& state) -> bool;
+  auto lower_store(const MirStore& p, const MirInst& inst, FunctionState& state) -> bool;
+  auto lower_load(const MirLoad& p, const MirInst& inst, FunctionState& state) -> bool;
+  auto lower_field_access(const MirFieldAccess& p, const MirInst& inst, FunctionState& state)
+      -> bool;
+  auto lower_fn_ref(const MirFnRef& p, const MirInst& inst, FunctionState& state) -> bool;
+  auto lower_lambda(const MirLambdaInst& p, const MirInst& inst, FunctionState& state) -> bool;
+  struct CAbiSignature {
+    llvm::FunctionType* fn_type = nullptr;
+    llvm::StructType* sret_type = nullptr;
+    std::vector<llvm::StructType*> byval_param_types;
+  };
+
+  template <typename Target> void apply_c_abi_attrs(Target* target, const CAbiSignature& sig);
+
+  auto build_c_abi_signature(std::span<const Type* const> param_sem_types,
+                             const Type* ret_sem_type,
+                             Span span) -> CAbiSignature;
+  auto emit_c_abi_call(llvm::IRBuilder<>& builder,
+                       const CAbiSignature& sig,
+                       llvm::Value* c_callee,
+                       std::span<llvm::Value* const> dao_args,
+                       const TypeFunction* sem_fn,
+                       Span span) -> llvm::Value*;
+  auto get_or_create_c_callback_wrapper(llvm::Function* dao_fn,
+                                        const TypeFunction* sem_fn,
+                                        Span span) -> llvm::Function*;
+  auto callable_fn_type(const TypeFunction* sem_fn, Span span) -> llvm::FunctionType*;
+  auto get_or_create_fn_thunk(const Symbol& sym, const TypeFunction* sem_fn, Span span)
+      -> llvm::Function*;
+  auto get_or_create_c_fn_adapter(const TypeFunction* sem_fn, Span span) -> llvm::Function*;
+  auto wrap_c_fn_ptr(llvm::IRBuilder<>& builder,
+                     llvm::Value* raw_c_fn,
+                     const TypeFunction* sem_fn,
+                     Span span) -> llvm::Value*;
+  auto lower_call(const MirCall& p, const MirInst& inst, FunctionState& state) -> bool;
+  auto lower_construct(const MirConstruct& p, const MirInst& inst, FunctionState& state) -> bool;
+  auto lower_enum_construct(const MirEnumConstruct& p, const MirInst& inst, FunctionState& state)
+      -> bool;
+  auto lower_enum_discriminant(const MirEnumDiscriminant& p,
+                               const MirInst& inst,
                                FunctionState& state) -> bool;
   auto lower_enum_payload(const MirEnumPayload& p, const MirInst& inst,
                           FunctionState& state) -> bool;
@@ -240,7 +261,11 @@ private:
                       FunctionState& state) -> llvm::Value*;
 
   // Value lookup
-  static auto get_value(MirValueId id, FunctionState& state) -> llvm::Value*;
+  auto get_value(MirValueId id, FunctionState& state) -> llvm::Value*;
+  auto load_iter_pair(uint32_t iter_id,
+                      FunctionState& state,
+                      llvm::Value*& frame_ptr,
+                      llvm::Value*& resume_ptr) -> bool;
 };
 
 } // namespace dao

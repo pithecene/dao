@@ -9,6 +9,7 @@
 #include "support/variant.h"
 
 #include <string>
+#include <unordered_set>
 
 namespace dao {
 
@@ -232,249 +233,236 @@ void MirBuilder::lower_stmt(const HirStmt& stmt) {
     return; // Dead code after terminator.
   }
 
-  std::visit(overloaded{
-      [&](const HirLet& let_stmt) {
-        auto local_id =
-            declare_local(let_stmt.symbol, let_stmt.type, stmt.span);
+  std::visit(
+      overloaded{
+          [&](const HirLet& let_stmt) {
+            auto local_id = declare_local(let_stmt.symbol, let_stmt.type, stmt.span);
 
-        if (let_stmt.initializer != nullptr) {
-          auto val = lower_expr_value(*let_stmt.initializer);
-          auto* place = ctx_.alloc<MirPlace>();
-          place->local = local_id;
-          emit_effect(stmt.span, MirStore{place, val});
-        }
-      },
-      [&](const HirAssign& assign) {
-        auto place = lower_expr_place(*assign.target);
-        auto val = lower_expr_value(*assign.value);
-        emit_effect(stmt.span,
-                    MirStore{ctx_.alloc<MirPlace>(place), val});
-        // A store rooted at a binding a resource block copies out marks
-        // it dirty for that block: its exit copies only what was stored.
-        for (const auto& region : active_regions_) {
-          for (const auto& escape : region.escapes) {
-            if (escape.binding.id == place.local.id) {
-              auto set = emit_value(types_.bool_type(), stmt.span, MirConstBool{true});
-              auto* flag_place = ctx_.alloc<MirPlace>();
-              flag_place->local = escape.flag;
-              emit_effect(stmt.span, MirStore{flag_place, set});
+            if (let_stmt.initializer != nullptr) {
+              auto val = lower_expr_value(*let_stmt.initializer);
+              auto* place = ctx_.alloc<MirPlace>();
+              place->local = local_id;
+              emit_effect(stmt.span, MirStore{place, val});
             }
-          }
-        }
-      },
-      [&](const HirIf& hir_if) {
-        auto cond_val = lower_expr_value(*hir_if.condition);
+          },
+          [&](const HirAssign& assign) {
+            auto place = lower_expr_place(*assign.target);
+            auto val = lower_expr_value(*assign.value);
+            emit_effect(stmt.span, MirStore{ctx_.alloc<MirPlace>(place), val});
+            // A store rooted at a binding a resource block copies out marks
+            // it dirty for that block: its exit copies only what was stored.
+            for (const auto& region : active_regions_) {
+              for (const auto& escape : region.escapes) {
+                if (escape.binding.id == place.local.id) {
+                  auto set = emit_value(types_.bool_type(), stmt.span, MirConstBool{true});
+                  auto* flag_place = ctx_.alloc<MirPlace>();
+                  flag_place->local = escape.flag;
+                  emit_effect(stmt.span, MirStore{flag_place, set});
+                }
+              }
+            }
+          },
+          [&](const HirIf& hir_if) {
+            auto cond_val = lower_expr_value(*hir_if.condition);
 
-        auto* then_bb = fresh_block();
-        bool has_else = !hir_if.else_body.empty();
-        auto* else_bb = has_else ? fresh_block() : nullptr;
+            auto* then_bb = fresh_block();
+            bool has_else = !hir_if.else_body.empty();
+            auto* else_bb = has_else ? fresh_block() : nullptr;
 
-        MirBlock* merge_bb = nullptr;
-        if (!has_else) {
-          merge_bb = fresh_block();
-          else_bb = merge_bb;
-        }
-
-        emit_terminator(stmt.span,
-                        MirCondBr{cond_val, then_bb->id, else_bb->id});
-
-        // Then block.
-        switch_to_block(then_bb);
-        for (const auto* s : hir_if.then_body) {
-          lower_stmt(*s);
-        }
-        bool then_terminated = block_terminated();
-        if (!then_terminated) {
-          if (merge_bb == nullptr) {
-            merge_bb = fresh_block();
-          }
-          emit_terminator(stmt.span, MirBr{merge_bb->id});
-        }
-
-        // Else block.
-        if (has_else) {
-          switch_to_block(else_bb);
-          for (const auto* s : hir_if.else_body) {
-            lower_stmt(*s);
-          }
-          if (!block_terminated()) {
-            if (merge_bb == nullptr) {
+            MirBlock* merge_bb = nullptr;
+            if (!has_else) {
               merge_bb = fresh_block();
+              else_bb = merge_bb;
             }
-            emit_terminator(stmt.span, MirBr{merge_bb->id});
-          }
-        }
 
-        if (merge_bb != nullptr) {
-          switch_to_block(merge_bb);
-        } else {
-          current_block_ = nullptr;
-        }
+            emit_terminator(stmt.span, MirCondBr{cond_val, then_bb->id, else_bb->id});
+
+            // Then block.
+            switch_to_block(then_bb);
+            for (const auto* s : hir_if.then_body) {
+              lower_stmt(*s);
+            }
+            bool then_terminated = block_terminated();
+            if (!then_terminated) {
+              if (merge_bb == nullptr) {
+                merge_bb = fresh_block();
+              }
+              emit_terminator(stmt.span, MirBr{merge_bb->id});
+            }
+
+            // Else block.
+            if (has_else) {
+              switch_to_block(else_bb);
+              for (const auto* s : hir_if.else_body) {
+                lower_stmt(*s);
+              }
+              if (!block_terminated()) {
+                if (merge_bb == nullptr) {
+                  merge_bb = fresh_block();
+                }
+                emit_terminator(stmt.span, MirBr{merge_bb->id});
+              }
+            }
+
+            if (merge_bb != nullptr) {
+              switch_to_block(merge_bb);
+            } else {
+              current_block_ = nullptr;
+            }
+          },
+          [&](const HirWhile& hir_while) {
+            auto* cond_bb = fresh_block();
+            auto* body_bb = fresh_block();
+            auto* exit_bb = fresh_block();
+
+            emit_terminator(stmt.span, MirBr{cond_bb->id});
+
+            switch_to_block(cond_bb);
+            auto cond_val = lower_expr_value(*hir_while.condition);
+            emit_terminator(stmt.span, MirCondBr{cond_val, body_bb->id, exit_bb->id});
+
+            switch_to_block(body_bb);
+            loop_exit_stack_.push_back({exit_bb->id, active_regions_.size()});
+            for (const auto* s : hir_while.body) {
+              lower_stmt(*s);
+            }
+            loop_exit_stack_.pop_back();
+            if (!block_terminated()) {
+              emit_terminator(stmt.span, MirBr{cond_bb->id});
+            }
+
+            switch_to_block(exit_bb);
+          },
+          [&](const HirFor& hir_for) {
+            auto iter_src = lower_expr_value(*hir_for.iterable);
+            auto iter_val = emit_value(hir_for.iterable->type, stmt.span, MirIterInit{iter_src});
+
+            // Extract element type T from Generator<T>.
+            const Type* var_type = hir_for.iterable->type;
+            if (var_type != nullptr && var_type->kind() == TypeKind::Generator) {
+              var_type = static_cast<const TypeGenerator*>(var_type)->yield_type();
+            }
+            auto var_local = declare_local(hir_for.var_symbol, var_type, stmt.span);
+
+            auto* cond_bb = fresh_block();
+            auto* body_bb = fresh_block();
+            auto* exit_bb = fresh_block();
+
+            emit_terminator(stmt.span, MirBr{cond_bb->id});
+
+            switch_to_block(cond_bb);
+            auto has_next_val = emit_value(types_.bool_type(), stmt.span, MirIterHasNext{iter_val});
+            emit_terminator(stmt.span, MirCondBr{has_next_val, body_bb->id, exit_bb->id});
+
+            switch_to_block(body_bb);
+            auto next_val = emit_value(var_type, stmt.span, MirIterNext{iter_val});
+
+            auto* place = ctx_.alloc<MirPlace>();
+            place->local = var_local;
+            emit_effect(stmt.span, MirStore{place, next_val});
+
+            // Push iterator cleanup so early returns inside the body
+            // emit MirIterDestroy before the return terminator.  A `break`
+            // does not: it branches to the exit block, which destroys the
+            // iterator itself, so the loop's region depth is taken after
+            // this push.
+            active_regions_.push_back(ActiveRegion{MirIterDestroy{iter_val}, stmt.span});
+
+            loop_exit_stack_.push_back({exit_bb->id, active_regions_.size()});
+            for (const auto* s : hir_for.body) {
+              lower_stmt(*s);
+            }
+            loop_exit_stack_.pop_back();
+            if (!block_terminated()) {
+              emit_terminator(stmt.span, MirBr{cond_bb->id});
+            }
+
+            active_regions_.pop_back();
+
+            switch_to_block(exit_bb);
+            // Free the generator frame on the normal loop-exit path.
+            emit_effect(stmt.span, MirIterDestroy{iter_val});
+          },
+          [&](const HirBreak&) {
+            if (!loop_exit_stack_.empty()) {
+              // Leave the regions entered inside the loop (mode/resource
+              // cleanup) before branching out of it.  A region enclosing
+              // the loop is not left: its block continues after the loop.
+              const auto& loop = loop_exit_stack_.back();
+              emit_region_exits_from(loop.region_depth, stmt.span);
+              emit_terminator(stmt.span, MirBr{loop.exit_block});
+            }
+          },
+          [&](const HirYield& yield) {
+            auto val = lower_expr_value(*yield.value);
+            emit_effect(stmt.span, MirYieldInst{val});
+          },
+          [&](const HirReturn& ret) {
+            MirValueId ret_val;
+            bool has_val = ret.value != nullptr;
+            if (has_val) {
+              ret_val = lower_expr_value(*ret.value);
+            }
+            emit_region_exits(stmt.span,
+                              {.value = has_val ? &ret_val : nullptr,
+                               .type = has_val ? current_fn_->return_type : nullptr});
+            emit_terminator(stmt.span, MirReturn{ret_val, has_val});
+          },
+          [&](const HirExprStmt& expr_stmt) { lower_expr_value(*expr_stmt.expr); },
+          [&](const HirMode& mode) {
+            emit_effect(stmt.span, MirModeEnter{mode.mode, mode.mode_name});
+
+            active_regions_.push_back({.exit_payload = MirModeExit{mode.mode}, .span = stmt.span});
+
+            for (const auto* s : mode.body) {
+              lower_stmt(*s);
+            }
+
+            active_regions_.pop_back();
+
+            if (!block_terminated()) {
+              emit_effect(stmt.span, MirModeExit{mode.mode});
+            }
+          },
+          [&](const HirResource& res) {
+            auto domain_handle = emit_value(types_.pointer_to(types_.void_type()),
+                                            stmt.span,
+                                            MirResourceEnter{res.resource_kind, res.resource_name});
+
+            ActiveRegion region{
+                .exit_payload =
+                    MirResourceExit{res.resource_kind, res.resource_name, domain_handle},
+                .span = stmt.span,
+                .escapes = {}};
+            // One dirty flag per escaping binding, clear at entry; every
+            // store rooted at the binding inside the block sets it.
+            for (const auto* symbol : res.escapes) {
+              auto local = symbol_to_local_.find(symbol);
+              if (local == symbol_to_local_.end()) {
+                continue;
+              }
+              const Type* type = current_fn_->locals[local->second.id].type;
+              auto flag = declare_local(nullptr, types_.bool_type(), stmt.span);
+              auto clear = emit_value(types_.bool_type(), stmt.span, MirConstBool{false});
+              auto* flag_place = ctx_.alloc<MirPlace>();
+              flag_place->local = flag;
+              emit_effect(stmt.span, MirStore{flag_place, clear});
+              region.escapes.push_back({.binding = local->second, .type = type, .flag = flag});
+            }
+            active_regions_.push_back(region);
+
+            for (const auto* s : res.body) {
+              lower_stmt(*s);
+            }
+
+            active_regions_.pop_back();
+
+            if (!block_terminated()) {
+              emit_region_exit(region, stmt.span, nullptr);
+            }
+          },
       },
-      [&](const HirWhile& hir_while) {
-        auto* cond_bb = fresh_block();
-        auto* body_bb = fresh_block();
-        auto* exit_bb = fresh_block();
-
-        emit_terminator(stmt.span, MirBr{cond_bb->id});
-
-        switch_to_block(cond_bb);
-        auto cond_val = lower_expr_value(*hir_while.condition);
-        emit_terminator(stmt.span,
-                        MirCondBr{cond_val, body_bb->id, exit_bb->id});
-
-        switch_to_block(body_bb);
-        loop_exit_stack_.push_back({exit_bb->id, active_regions_.size()});
-        for (const auto* s : hir_while.body) {
-          lower_stmt(*s);
-        }
-        loop_exit_stack_.pop_back();
-        if (!block_terminated()) {
-          emit_terminator(stmt.span, MirBr{cond_bb->id});
-        }
-
-        switch_to_block(exit_bb);
-      },
-      [&](const HirFor& hir_for) {
-        auto iter_src = lower_expr_value(*hir_for.iterable);
-        auto iter_val = emit_value(
-            hir_for.iterable->type, stmt.span, MirIterInit{iter_src});
-
-        // Extract element type T from Generator<T>.
-        const Type* var_type = hir_for.iterable->type;
-        if (var_type != nullptr && var_type->kind() == TypeKind::Generator) {
-          var_type =
-              static_cast<const TypeGenerator*>(var_type)->yield_type();
-        }
-        auto var_local =
-            declare_local(hir_for.var_symbol, var_type, stmt.span);
-
-        auto* cond_bb = fresh_block();
-        auto* body_bb = fresh_block();
-        auto* exit_bb = fresh_block();
-
-        emit_terminator(stmt.span, MirBr{cond_bb->id});
-
-        switch_to_block(cond_bb);
-        auto has_next_val = emit_value(
-            types_.bool_type(), stmt.span, MirIterHasNext{iter_val});
-        emit_terminator(stmt.span,
-                        MirCondBr{has_next_val, body_bb->id, exit_bb->id});
-
-        switch_to_block(body_bb);
-        auto next_val = emit_value(
-            var_type, stmt.span, MirIterNext{iter_val});
-
-        auto* place = ctx_.alloc<MirPlace>();
-        place->local = var_local;
-        emit_effect(stmt.span, MirStore{place, next_val});
-
-        // Push iterator cleanup so early returns inside the body
-        // emit MirIterDestroy before the return terminator.  A `break`
-        // does not: it branches to the exit block, which destroys the
-        // iterator itself, so the loop's region depth is taken after
-        // this push.
-        active_regions_.push_back(
-            ActiveRegion{MirIterDestroy{iter_val}, stmt.span});
-
-        loop_exit_stack_.push_back({exit_bb->id, active_regions_.size()});
-        for (const auto* s : hir_for.body) {
-          lower_stmt(*s);
-        }
-        loop_exit_stack_.pop_back();
-        if (!block_terminated()) {
-          emit_terminator(stmt.span, MirBr{cond_bb->id});
-        }
-
-        active_regions_.pop_back();
-
-        switch_to_block(exit_bb);
-        // Free the generator frame on the normal loop-exit path.
-        emit_effect(stmt.span, MirIterDestroy{iter_val});
-      },
-      [&](const HirBreak&) {
-        if (!loop_exit_stack_.empty()) {
-          // Leave the regions entered inside the loop (mode/resource
-          // cleanup) before branching out of it.  A region enclosing
-          // the loop is not left: its block continues after the loop.
-          const auto& loop = loop_exit_stack_.back();
-          emit_region_exits_from(loop.region_depth, stmt.span);
-          emit_terminator(stmt.span, MirBr{loop.exit_block});
-        }
-      },
-      [&](const HirYield& yield) {
-        auto val = lower_expr_value(*yield.value);
-        emit_effect(stmt.span, MirYieldInst{val});
-      },
-      [&](const HirReturn& ret) {
-        MirValueId ret_val;
-        bool has_val = ret.value != nullptr;
-        if (has_val) {
-          ret_val = lower_expr_value(*ret.value);
-        }
-        emit_region_exits(stmt.span,
-                          {.value = has_val ? &ret_val : nullptr,
-                           .type = has_val ? current_fn_->return_type : nullptr});
-        emit_terminator(stmt.span, MirReturn{ret_val, has_val});
-      },
-      [&](const HirExprStmt& expr_stmt) {
-        lower_expr_value(*expr_stmt.expr);
-      },
-      [&](const HirMode& mode) {
-        emit_effect(stmt.span,
-                    MirModeEnter{mode.mode, mode.mode_name});
-
-        active_regions_.push_back(
-            {.exit_payload = MirModeExit{mode.mode},
-             .span = stmt.span});
-
-        for (const auto* s : mode.body) {
-          lower_stmt(*s);
-        }
-
-        active_regions_.pop_back();
-
-        if (!block_terminated()) {
-          emit_effect(stmt.span, MirModeExit{mode.mode});
-        }
-      },
-      [&](const HirResource& res) {
-        auto domain_handle = emit_value(
-            types_.pointer_to(types_.void_type()), stmt.span,
-            MirResourceEnter{res.resource_kind, res.resource_name});
-
-        ActiveRegion region{
-            .exit_payload = MirResourceExit{res.resource_kind, res.resource_name, domain_handle},
-            .span = stmt.span,
-            .escapes = {}};
-        // One dirty flag per escaping binding, clear at entry; every
-        // store rooted at the binding inside the block sets it.
-        for (const auto* symbol : res.escapes) {
-          auto local = symbol_to_local_.find(symbol);
-          if (local == symbol_to_local_.end()) {
-            continue;
-          }
-          const Type* type = current_fn_->locals[local->second.id].type;
-          auto flag = declare_local(nullptr, types_.bool_type(), stmt.span);
-          auto clear = emit_value(types_.bool_type(), stmt.span, MirConstBool{false});
-          auto* flag_place = ctx_.alloc<MirPlace>();
-          flag_place->local = flag;
-          emit_effect(stmt.span, MirStore{flag_place, clear});
-          region.escapes.push_back({.binding = local->second, .type = type, .flag = flag});
-        }
-        active_regions_.push_back(region);
-
-        for (const auto* s : res.body) {
-          lower_stmt(*s);
-        }
-
-        active_regions_.pop_back();
-
-        if (!block_terminated()) {
-          emit_region_exit(region, stmt.span, nullptr);
-        }
-      },
-  }, stmt.payload);
+      stmt.payload);
 }
 
 // ---------------------------------------------------------------------------
@@ -710,8 +698,102 @@ auto MirBuilder::lower_expr_value(const HirExpr& expr) -> MirValueId {
             return emit_value(expr, MirIndexAccess{obj, index_val});
           },
           [&](const HirLambda& lam) -> MirValueId {
+            // Collect free outer lexical bindings referenced anywhere inside
+            // the lambda (including nested lambdas), in deterministic order.
+            std::unordered_set<const Symbol*> bound_here;
+            for (const auto& param : lam.params) {
+              if (param.symbol != nullptr) {
+                bound_here.insert(param.symbol);
+              }
+            }
+            std::vector<const Symbol*> captured_symbols;
+            std::unordered_set<const Symbol*> captured_seen;
+            auto collect_captures = [&](auto& self,
+                                        const HirExpr* node,
+                                        std::unordered_set<const Symbol*>& local_bound) -> void {
+              if (node == nullptr) {
+                return;
+              }
+              std::visit(
+                  overloaded{
+                      [&](const HirSymbolRef& ref) {
+                        if (ref.symbol != nullptr && !local_bound.contains(ref.symbol) &&
+                            symbol_to_local_.contains(ref.symbol) &&
+                            captured_seen.insert(ref.symbol).second) {
+                          captured_symbols.push_back(ref.symbol);
+                        }
+                      },
+                      [&](const HirUnary& u) { self(self, u.operand, local_bound); },
+                      [&](const HirBinary& b) {
+                        self(self, b.left, local_bound);
+                        self(self, b.right, local_bound);
+                      },
+                      [&](const HirCall& c) {
+                        self(self, c.callee, local_bound);
+                        for (const auto* arg : c.args) {
+                          self(self, arg, local_bound);
+                        }
+                      },
+                      [&](const HirConstruct& c) {
+                        for (const auto* arg : c.args) {
+                          self(self, arg, local_bound);
+                        }
+                      },
+                      [&](const HirEnumConstruct& c) {
+                        for (const auto* arg : c.payload_args) {
+                          self(self, arg, local_bound);
+                        }
+                      },
+                      [&](const HirEnumDiscriminant& d) { self(self, d.enum_value, local_bound); },
+                      [&](const HirEnumPayload& p) { self(self, p.enum_value, local_bound); },
+                      [&](const HirField& f) { self(self, f.object, local_bound); },
+                      [&](const HirIndex& idx) {
+                        self(self, idx.object, local_bound);
+                        for (const auto* item : idx.indices) {
+                          self(self, item, local_bound);
+                        }
+                      },
+                      [&](const HirPipe& p) {
+                        self(self, p.left, local_bound);
+                        self(self, p.right, local_bound);
+                      },
+                      [&](const HirTry& t) { self(self, t.operand, local_bound); },
+                      [&](const HirPtrOp& p) {
+                        self(self, p.pointer, local_bound);
+                        self(self, p.argument, local_bound);
+                      },
+                      [&](const HirLambda& inner) {
+                        auto nested_bound = local_bound;
+                        for (const auto& param : inner.params) {
+                          if (param.symbol != nullptr) {
+                            nested_bound.insert(param.symbol);
+                          }
+                        }
+                        self(self, inner.body, nested_bound);
+                      },
+                      [](const auto&) {},
+                  },
+                  node->payload);
+            };
+            collect_captures(collect_captures, lam.body, bound_here);
+
+            // Snapshot captured values in the enclosing block at lambda
+            // creation time (by-value lexical capture).
+            auto* capture_values = ctx_.alloc<std::vector<MirValueId>>();
+            std::vector<const Type*> capture_types;
+            capture_values->reserve(captured_symbols.size());
+            capture_types.reserve(captured_symbols.size());
+            for (const auto* cap_sym : captured_symbols) {
+              LocalId outer_local = symbol_to_local_.at(cap_sym);
+              const Type* cap_type = current_fn_->locals[outer_local.id].type;
+              auto* place = ctx_.alloc<MirPlace>(MirPlace{outer_local, {}});
+              capture_values->push_back(emit_value(cap_type, expr.span, MirLoad{place}));
+              capture_types.push_back(cap_type);
+            }
+
             auto* lam_fn = ctx_.alloc<MirFunction>();
             lam_fn->span = expr.span;
+            lam_fn->capture_count = static_cast<uint32_t>(captured_symbols.size());
             if (lam.body != nullptr && lam.body->type != nullptr) {
               lam_fn->return_type = lam.body->type;
             }
@@ -722,18 +804,28 @@ auto MirBuilder::lower_expr_value(const HirExpr& expr) -> MirValueId {
             auto saved_value_id = next_value_id_;
             auto saved_block_id = next_block_id_;
             auto saved_locals = symbol_to_local_;
+            auto saved_regions = std::move(active_regions_);
+            auto saved_loops = std::move(loop_exit_stack_);
 
             current_fn_ = lam_fn;
             current_block_ = nullptr;
             next_value_id_ = 0;
             next_block_id_ = 0;
             symbol_to_local_.clear();
+            active_regions_.clear();
+            loop_exit_stack_.clear();
 
             for (const auto& param : lam.params) {
               declare_local(param.symbol,
                             param.type,
                             param.span,
                             /*is_param=*/true);
+            }
+            for (size_t i = 0; i < captured_symbols.size(); ++i) {
+              declare_local(captured_symbols[i],
+                            capture_types[i],
+                            captured_symbols[i]->decl_span,
+                            /*is_param=*/false);
             }
 
             auto* entry_bb = fresh_block();
@@ -752,12 +844,14 @@ auto MirBuilder::lower_expr_value(const HirExpr& expr) -> MirValueId {
             next_value_id_ = saved_value_id;
             next_block_id_ = saved_block_id;
             symbol_to_local_ = std::move(saved_locals);
+            active_regions_ = std::move(saved_regions);
+            loop_exit_stack_ = std::move(saved_loops);
 
-            if (current_module_ != nullptr) {
+            if (current_module_ != nullptr && !lowering_generic_template_) {
               current_module_->functions.push_back(lam_fn);
             }
 
-            return emit_value(expr, MirLambdaInst{lam_fn});
+            return emit_value(expr, MirLambdaInst{lam_fn, capture_values});
           },
       },
       expr.payload);

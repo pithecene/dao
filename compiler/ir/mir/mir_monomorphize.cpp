@@ -14,9 +14,9 @@
 #include "frontend/types/type_printer.h"
 
 #include <algorithm>
+#include <format>
 #include <string>
 #include <unordered_map>
-#include <format>
 #include <unordered_set>
 #include <vector>
 
@@ -311,10 +311,12 @@ struct SpecKeyHash {
 struct SpecializationState {
   std::unordered_map<SpecKey, MirFunction*, SpecKeyHash> cache;
   std::unordered_map<const MirFunction*, const ModuleInfo*> origin_module;
+  std::unordered_map<const MirFunction*, const ModuleInfo*> lambda_module;
   std::unordered_map<std::string, MirFunction*> derived_fns;
   std::unordered_set<const MirFunction*> fixed_up;
   MethodIndex methods;
   MangledTypeNames names;
+  std::vector<Diagnostic>* diagnostics = nullptr;
 };
 
 auto effective_dispatch_scope(const ModuleInfo* caller_module,
@@ -349,15 +351,19 @@ void register_method_entry(MethodIndex& methods, const FnEntry& entry) {
 // Clone a MirFunction with type substitution.
 // ---------------------------------------------------------------------------
 
-auto clone_function(const MirFunction* src, const TypeSubst& subst,
-                    const Symbol* new_symbol, MirContext& ctx,
-                    TypeContext& types) -> MirFunction* {
+auto clone_function(const MirFunction* src,
+                    const TypeSubst& subst,
+                    const Symbol* new_symbol,
+                    MirContext& ctx,
+                    TypeContext& types,
+                    std::vector<MirFunction*>& cloned_lambdas) -> MirFunction* {
   auto* dst = ctx.alloc<MirFunction>();
   dst->symbol = new_symbol;
   dst->extend_concept = src->extend_concept;
   dst->return_type = substitute_type(src->return_type, subst, types);
   dst->span = src->span;
   dst->is_extern = src->is_extern;
+  dst->capture_count = src->capture_count;
 
   // Clone locals with substituted types.
   dst->locals.reserve(src->locals.size());
@@ -398,6 +404,14 @@ auto clone_function(const MirFunction* src, const TypeSubst& subst,
           }
           call->explicit_type_args = new_ta;
         }
+      } else if (auto* lam = std::get_if<MirLambdaInst>(&dst_inst->payload)) {
+        if (lam->captures != nullptr) {
+          lam->captures = ctx.alloc<std::vector<MirValueId>>(*lam->captures);
+        }
+        if (lam->fn != nullptr) {
+          lam->fn = clone_function(lam->fn, subst, nullptr, ctx, types, cloned_lambdas);
+          cloned_lambdas.push_back(lam->fn);
+        }
       } else if (auto* ctor = std::get_if<MirConstruct>(&dst_inst->payload)) {
         // The instruction's own type is what the construction produces —
         // `Box(made)` inside `fn mapped<U>` is a `Box<U>`, while the
@@ -417,8 +431,7 @@ auto clone_function(const MirFunction* src, const TypeSubst& subst,
               ctx.alloc<std::vector<MirValueId>>(*ctor->field_values);
           ctor->field_values = new_fv;
         }
-      } else if (auto* econ =
-                     std::get_if<MirEnumConstruct>(&dst_inst->payload)) {
+      } else if (auto* econ = std::get_if<MirEnumConstruct>(&dst_inst->payload)) {
         if (econ->enum_type != nullptr) {
           const auto* sub_et =
               substitute_type(econ->enum_type, subst, types);
@@ -804,7 +817,12 @@ auto fixup_method_calls(MirFunction* fn,
   bool rewrote = false;
   // The module whose body is being rewritten: an `extend` of another
   // module is not in scope for it.
-  const auto* from_module = fn->symbol == nullptr ? nullptr : fn->symbol->module;
+  const auto* from_module = fn->symbol != nullptr ? fn->symbol->module : nullptr;
+  if (from_module == nullptr) {
+    if (auto lit = state.lambda_module.find(fn); lit != state.lambda_module.end()) {
+      from_module = lit->second;
+    }
+  }
 
   // Build value-type index: MirValueId.id → Type* for O(1) lookups.
   std::unordered_map<uint32_t, const Type*> value_types;
@@ -1361,7 +1379,8 @@ auto specialize_call_site(MirInst* inst,
       git->second->symbol->module; // an instantiation belongs to its template's module
 
   // Clone the generic function with type substitution.
-  auto* specialized = clone_function(git->second, subst, new_sym, ctx, types);
+  std::vector<MirFunction*> cloned_lambdas;
+  auto* specialized = clone_function(git->second, subst, new_sym, ctx, types, cloned_lambdas);
   if (caller_module != nullptr && !caller_module->is_prelude) {
     state.origin_module[specialized] = caller_module;
   }
@@ -1375,6 +1394,35 @@ auto specialize_call_site(MirInst* inst,
 
   // Resolve method calls on newly-concrete types.
   fixup_method_calls(specialized, caller_module, state, module, ctx, types);
+  for (auto* lam_fn : cloned_lambdas) {
+    size_t param_count = 0;
+    while (param_count < lam_fn->locals.size() && lam_fn->locals[param_count].is_param) {
+      ++param_count;
+    }
+    for (uint32_t ci = 0; ci < lam_fn->capture_count && param_count + ci < lam_fn->locals.size();
+         ++ci) {
+      const auto& cap_local = lam_fn->locals[param_count + ci];
+      if (holds_generator(cap_local.type) && state.diagnostics != nullptr) {
+        std::string cap_name = cap_local.symbol != nullptr ? std::string(cap_local.symbol->name)
+                                                           : std::string("<capture>");
+        state.diagnostics->push_back(
+            Diagnostic::error(lam_fn->span,
+                              "cannot capture '" + cap_name +
+                                  "' in a lambda: generator values cannot be captured by value"));
+      }
+    }
+    if (new_sym->module != nullptr) {
+      state.lambda_module[lam_fn] = new_sym->module;
+    }
+    if (caller_module != nullptr && !caller_module->is_prelude) {
+      state.origin_module[lam_fn] = caller_module;
+    } else if (new_sym->module != nullptr && !new_sym->module->is_prelude) {
+      state.origin_module[lam_fn] = new_sym->module;
+    }
+    state.fixed_up.insert(lam_fn);
+    fixup_method_calls(lam_fn, caller_module, state, module, ctx, types);
+    module.functions.push_back(lam_fn);
+  }
 
   // Rewrite the FnRef.
   fn_ref->symbol = new_sym;
@@ -1666,6 +1714,13 @@ auto expand_copy_out_calls(MirFunction* fn,
                                   print_type(type) + "' leaves one through a container"));
         continue;
       }
+      if (holds_closure(type)) {
+        diagnostics.push_back(
+            Diagnostic::error(inst->span,
+                              "a function value cannot be copied out of a resource block: a '" +
+                                  print_type(type) + "' leaves one through a container"));
+        continue;
+      }
       MirValueId value = (*call->args)[0];
       Span span = inst->span;
 
@@ -1824,6 +1879,7 @@ auto monomorphize(
 
   // Specialization cache and shared method index.
   SpecializationState state;
+  state.diagnostics = &result.diagnostics;
   for (const auto* mod_fn : module.functions) {
     if (mod_fn->symbol == nullptr) {
       continue;

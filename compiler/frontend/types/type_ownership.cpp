@@ -17,6 +17,7 @@ auto owns_heap_memory_impl(const Type* t, std::unordered_set<const Type*>& seen)
   case TypeKind::Named:
     return static_cast<const TypeNamed*>(t)->name() == "string";
   case TypeKind::Generator:
+  case TypeKind::Function:
     return true;
   case TypeKind::GenericParam:
     return true;
@@ -60,27 +61,29 @@ namespace {
 // as a container's storage.
 using Visited = std::set<std::pair<const Type*, bool>>;
 
-auto holds_generator_impl(const Type* t, bool stored, Visited& seen) -> bool {
+auto holds_kind_impl(const Type* t, TypeKind target_kind, bool stored, Visited& seen) -> bool {
   if (t == nullptr || !seen.insert({t, stored}).second) {
     return false;
   }
-  switch (t->kind()) {
-  case TypeKind::Generator:
+  if (t->kind() == target_kind) {
     return true;
+  }
+  switch (t->kind()) {
   case TypeKind::Pointer:
     return stored &&
-           holds_generator_impl(static_cast<const TypePointer*>(t)->pointee(), false, seen);
+           holds_kind_impl(static_cast<const TypePointer*>(t)->pointee(), target_kind, false, seen);
   case TypeKind::Struct: {
     const auto* st = static_cast<const TypeStruct*>(t);
     return std::ranges::any_of(st->fields(), [&](const StructField& f) {
-      return holds_generator_impl(f.type, true, seen);
+      return holds_kind_impl(f.type, target_kind, true, seen);
     });
   }
   case TypeKind::Enum: {
     const auto* en = static_cast<const TypeEnum*>(t);
     return std::ranges::any_of(en->variants(), [&](const EnumVariant& v) {
-      return std::ranges::any_of(
-          v.payload_types, [&](const Type* p) { return holds_generator_impl(p, true, seen); });
+      return std::ranges::any_of(v.payload_types, [&](const Type* p) {
+        return holds_kind_impl(p, target_kind, true, seen);
+      });
     });
   }
   default:
@@ -92,7 +95,12 @@ auto holds_generator_impl(const Type* t, bool stored, Visited& seen) -> bool {
 
 auto holds_generator(const Type* type) -> bool {
   Visited seen;
-  return holds_generator_impl(type, false, seen);
+  return holds_kind_impl(type, TypeKind::Generator, false, seen);
+}
+
+auto holds_closure(const Type* type) -> bool {
+  Visited seen;
+  return holds_kind_impl(type, TypeKind::Function, false, seen);
 }
 
 } // namespace dao

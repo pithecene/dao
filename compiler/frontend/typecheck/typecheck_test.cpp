@@ -942,7 +942,8 @@ suite<"typecheck_modules"> typecheck_modules = [] {
   "an enum holding itself behind a pointer is accepted"_test = [] {
     auto checked = check_program({
         {"main.dao",
-         "module app\nenum class Chain:\n    Link(next: Ptr<Chain>)\n    End\nfn main(): i32 -> 0\n"},
+         "module app\nenum class Chain:\n    Link(next: Ptr<Chain>)\n    End\nfn main(): i32 -> "
+         "0\n"},
     });
     expect(checked.result.diagnostics.empty()) << all_messages(checked);
   };
@@ -995,7 +996,8 @@ suite<"typecheck_modules"> typecheck_modules = [] {
         // carry the hole behind `inner`.
         constexpr std::string_view kDecls =
             "module app\nclass Base<T>:\n    v: T\nclass Inner<T>:\n    dep: IntBase\n    t: "
-            "T\nclass Outer<T>:\n    inner: Ptr<Inner<T>>\n    t: T\ntype IntBase = Base<i32>\ntype "
+            "T\nclass Outer<T>:\n    inner: Ptr<Inner<T>>\n    t: T\ntype IntBase = "
+            "Base<i32>\ntype "
             "IntOuter = Outer<i32>\n";
         auto bad = check_program({
             {"main.dao",
@@ -1337,21 +1339,19 @@ suite<"typecheck_expr_body"> typecheck_expr_body = [] {
 
 suite<"typecheck_control_flow"> typecheck_control_flow = [] {
   "if with bool condition"_test = [] {
-    auto result = check_source(
-        "fn abs(x: i32): i32\n"
-        "    if x > 0:\n"
-        "        return x\n"
-        "    0 - x\n");
+    auto result = check_source("fn abs(x: i32): i32\n"
+                               "    if x > 0:\n"
+                               "        return x\n"
+                               "    return 0 - x\n");
     expect(is_ok(result));
   };
 
   "while with bool condition"_test = [] {
-    auto result = check_source(
-        "fn countdown(n: i32): i32\n"
-        "    let x = n\n"
-        "    while x > 0:\n"
-        "        x = x - 1\n"
-        "    x\n");
+    auto result = check_source("fn countdown(n: i32): i32\n"
+                               "    let x = n\n"
+                               "    while x > 0:\n"
+                               "        x = x - 1\n"
+                               "    return x\n");
     expect(is_ok(result));
   };
 };
@@ -1978,14 +1978,13 @@ suite<"typecheck_construct"> typecheck_construct = [] {
   };
 
   "construction in let binding"_test = [] {
-    auto result = check_source(
-        "class Point:\n"
-        "    x: i32\n"
-        "    y: i32\n"
-        "\n"
-        "fn make(): i32\n"
-        "    let p: Point = Point(1, 2)\n"
-        "    p.x\n");
+    auto result = check_source("class Point:\n"
+                               "    x: i32\n"
+                               "    y: i32\n"
+                               "\n"
+                               "fn make(): i32\n"
+                               "    let p: Point = Point(1, 2)\n"
+                               "    return p.x\n");
     expect(is_ok(result)) << "let with construction should typecheck";
   };
 
@@ -4238,4 +4237,189 @@ suite<"module_extend_scoping"> module_extend_scoping = [] {
   };
 };
 
-auto main() -> int {} // NOLINT(readability-named-parameter)
+suite<"callable_and_definite_return"> callable_and_definite_return = [] {
+  "lambda infers generic return type from body"_test = [] {
+    auto result = check_source("fn map_one<T, U>(x: T, f: fn(T): U): U -> f(x)\n"
+                               "fn main(): i32 -> map_one(21, |n| -> n * 2)\n");
+    expect(is_ok(result));
+  };
+
+  "closure cannot escape resource memory block via outer assignment"_test = [] {
+    auto result = check_source("fn id(x: i32): i32 -> x\n"
+                               "fn main(): i32\n"
+                               "  let f: fn(i32): i32 = id\n"
+                               "  resource memory scratch =>\n"
+                               "    let k: i32 = 5\n"
+                               "    f = |x| -> x + k\n"
+                               "  return f(1)\n");
+    expect(has_error_containing(result, "cannot be copied out of the block"));
+  };
+
+  "closure cannot return from resource memory block"_test = [] {
+    auto result = check_source("fn leak(k: i32): fn(i32): i32\n"
+                               "  resource memory scratch =>\n"
+                               "    return |x| -> x + k\n");
+    expect(has_error_containing(result, "cannot be copied out of the block"));
+  };
+
+  "exhaustive match and diverging panic satisfy definite return"_test = [] {
+    auto checked = check_modules({
+        {"stdlib/core/panic.dao",
+         "module core::panic\n"
+         "extern fn __dao_panic(msg: string): void\n"
+         "fn panic(msg: string): void -> __dao_panic(msg)\n"},
+        {"app.dao",
+         "module app\n"
+         "enum class Outcome:\n"
+         "  Ok(val: i32)\n"
+         "  Failed\n"
+         "fn unwrap(o: Outcome): i32\n"
+         "  match o:\n"
+         "    Outcome::Ok(v):\n"
+         "      return v\n"
+         "    Outcome::Failed:\n"
+         "      panic(\"failed\")\n"},
+    });
+    expect(is_ok(checked->check_result));
+  };
+
+  "non-exhaustive match missing return is rejected"_test = [] {
+    auto result = check_source("enum Color:\n"
+                               "  Red\n"
+                               "  Green\n"
+                               "fn code(c: Color): i32\n"
+                               "  match c:\n"
+                               "    Color::Red:\n"
+                               "      return 1\n");
+    expect(has_error_containing(result, "without returning a value"));
+
+    auto repeated_arm = check_source("enum E:\n"
+                                     "  A\n"
+                                     "  B\n"
+                                     "fn f(e: E): i32\n"
+                                     "  match e:\n"
+                                     "    E::A:\n"
+                                     "      return 0\n"
+                                     "    E::A:\n"
+                                     "      let unused: i32 = 0\n"
+                                     "    E::B:\n"
+                                     "      return 1\n");
+    expect(is_ok(repeated_arm));
+  };
+
+  "yield accepts nominal generic class instantiation"_test = [] {
+    auto result = check_source("class Indexed<T>:\n"
+                               "  index: i64\n"
+                               "  value: T\n"
+                               "fn single<T>(v: T): Generator<Indexed<T>>\n"
+                               "  yield Indexed(0, v)\n");
+    expect(is_ok(result));
+  };
+
+  "void function with reachable return is not treated as divergent"_test = [] {
+    const std::string prelude_panic = "module core::panic\n"
+                                      "extern fn __dao_panic(msg: string): void\n"
+                                      "fn panic(msg: string): void -> __dao_panic(msg)\n";
+    auto check_with_panic = [&](const std::string& app_src) {
+      return check_modules({{"stdlib/core/panic.dao", prelude_panic}, {"app.dao", app_src}});
+    };
+
+    auto reachable_ret = check_with_panic("module app\n"
+                                          "fn maybe_stop(stop: bool): void\n"
+                                          "  if stop:\n"
+                                          "    return\n"
+                                          "  panic(\"stop\")\n"
+                                          "fn bad(): i32\n"
+                                          "  maybe_stop(true)\n");
+    expect(has_error_containing(reachable_ret->check_result, "without returning a value"));
+
+    auto partial_if = check_with_panic("module app\n"
+                                       "fn maybe_panic(stop: bool): void\n"
+                                       "  if stop:\n"
+                                       "    panic(\"stop\")\n"
+                                       "fn bad(): i32\n"
+                                       "  maybe_panic(true)\n");
+    expect(has_error_containing(partial_if->check_result, "without returning a value"));
+
+    auto self_cycle = check_with_panic("module app\n"
+                                       "fn spin(): void\n"
+                                       "  spin()\n"
+                                       "fn bad(): i32\n"
+                                       "  spin()\n");
+    expect(has_error_containing(self_cycle->check_result, "without returning a value"));
+
+    auto user_extern_panic = check_source("extern fn panic(p: Ptr<u8>): void\n"
+                                          "fn bad(): i32\n"
+                                          "  panic(Ptr<u8>::new())\n");
+    expect(has_error_containing(user_extern_panic, "without returning a value"));
+
+    auto unconditional_wrappers = check_with_panic("module app\n"
+                                                   "fn fail_msg(msg: string): void -> panic(msg)\n"
+                                                   "fn fail_both(c: bool): void\n"
+                                                   "  if c:\n"
+                                                   "    fail_msg(\"left\")\n"
+                                                   "  else:\n"
+                                                   "    panic(\"right\")\n"
+                                                   "fn ok_expr(): i32\n"
+                                                   "  fail_msg(\"boom\")\n"
+                                                   "fn ok_branch(c: bool): i32\n"
+                                                   "  fail_both(c)\n");
+    expect(is_ok(unconditional_wrappers->check_result));
+  };
+
+  "extern fn callback first-class values and higher-order C function types are rejected"_test = [] {
+    for (const char* bad_sig : {
+             "extern fn ho1(cb: fn(fn(i32): i32): i32): i32\n",
+             "extern fn ho2(cb: fn(): fn(i32): i32): i32\n",
+             "extern fn ho3(): fn(fn(i32): i32): i32\n",
+             "extern fn ho4(): fn(): fn(i32): i32\n",
+             "extern fn bad_str_ret(): fn(): string\n",
+             "extern fn bad_void_param(cb: fn(void): i32): i32\n",
+             "class Holder:\n  cb: fn(i32): i32\nextern fn bad_struct(h: Holder): i32\n",
+         }) {
+      auto res = check_source(bad_sig);
+      expect(has_error_containing(res, "not supported at the C ABI")) << bad_sig;
+    }
+
+    for (const char* bad_use : {
+             "extern fn run_cb(cb: fn(i32): i32): i32\n"
+             "fn main(): i32\n  let f: fn(fn(i32): i32): i32 = run_cb\n  return 0\n",
+             "extern fn run_cb(cb: fn(i32): i32): i32\n"
+             "fn leak(): fn(fn(i32): i32): i32 -> run_cb\n",
+             "extern fn run_cb(cb: fn(i32): i32): i32\n"
+             "fn inc(x: i32): i32 -> x + 1\n"
+             "fn main(): i32 -> inc |> run_cb\n",
+         }) {
+      auto res = check_source(bad_use);
+      expect(has_error_containing(
+          res, "with callback parameter cannot be used as a first-class function value"))
+          << bad_use;
+    }
+
+    auto imported_use = check_modules({
+        {"ffi.dao", "module lib::ffi\nextern fn run_cb(cb: fn(i32): i32): i32\n"},
+        {"app.dao",
+         "module app\nimport lib::ffi\n"
+         "fn main(): i32\n  let f: fn(fn(i32): i32): i32 = ffi::run_cb\n  return 0\n"},
+    });
+    expect(has_error_containing(
+        imported_use->check_result,
+        "with callback parameter cannot be used as a first-class function value"));
+
+    auto valid_first_order =
+        check_source("class Point:\n  x: i32\n  y: i32\n"
+                     "extern fn apply_pt(cb: fn(Point): Point, p: Point): Point\n"
+                     "extern fn get_pt_op(): fn(Point): Point\n"
+                     "fn flip(p: Point): Point -> Point(p.y, p.x)\n"
+                     "fn main(): i32\n"
+                     "  let a: Point = apply_pt(flip, Point(1, 2))\n"
+                     "  let maker: fn(): fn(Point): Point = get_pt_op\n"
+                     "  let op: fn(Point): Point = maker()\n"
+                     "  let b: Point = op(a)\n"
+                     "  return b.x\n");
+    expect(is_ok(valid_first_order));
+  };
+};
+
+auto main() -> int {
+} // NOLINT(readability-named-parameter)

@@ -8,12 +8,14 @@ namespace dao {
 
 namespace {
 
-/// Recursive helper for the repr-C-compatible struct predicate.
+/// Recursive helper for C-ABI boundary compatibility.
 /// `visiting` tracks struct decl_ids currently being checked to detect
-/// non-pointer self-reference cycles.
+/// non-pointer self-reference cycles. `allow_function_type` is true only
+/// at the top-level parameter/return position of an `extern fn`, disallowing
+/// fat Dao callables inside repr-C struct fields and higher-order C callbacks.
 auto is_c_abi_compatible_impl(const Type* type,
-                               std::unordered_set<const Decl*>& visiting)
-    -> bool;
+                              std::unordered_set<const Decl*>& visiting,
+                              bool allow_function_type) -> bool;
 
 using TypePair = std::pair<const Type*, const Type*>;
 
@@ -238,14 +240,14 @@ auto is_float(const Type* type) -> bool {
 
 auto is_c_abi_compatible(const Type* type) -> bool {
   std::unordered_set<const Decl*> visiting;
-  return is_c_abi_compatible_impl(type, visiting);
+  return is_c_abi_compatible_impl(type, visiting, /*allow_function_type=*/true);
 }
 
 namespace {
 
 auto is_c_abi_compatible_impl(const Type* type,
-                               std::unordered_set<const Decl*>& visiting)
-    -> bool {
+                              std::unordered_set<const Decl*>& visiting,
+                              bool allow_function_type) -> bool {
   if (type == nullptr) {
     return false;
   }
@@ -274,11 +276,11 @@ auto is_c_abi_compatible_impl(const Type* type,
   case TypeKind::Pointer:
     return true; // raw pointers — pointee type is not checked
   case TypeKind::Void:
-    return true; // void return
+    return false; // void is valid only as a return type, checked by callers
   case TypeKind::Struct: {
     // Repr-C-compatible struct predicate (CONTRACT_C_ABI_INTEROP §4.3.1):
     //   1. at least one field (no empty structs)
-    //   2. every field is recursively C-ABI-compatible
+    //   2. every field is recursively scalar, pointer, or repr-C struct
     //   3. no non-pointer self-reference cycle
     const auto* st = static_cast<const TypeStruct*>(type);
     if (st->fields().empty()) {
@@ -291,7 +293,7 @@ auto is_c_abi_compatible_impl(const Type* type,
       return false; // recursive struct through non-pointer field
     }
     for (const auto& field : st->fields()) {
-      if (!is_c_abi_compatible_impl(field.type, visiting)) {
+      if (!is_c_abi_compatible_impl(field.type, visiting, /*allow_function_type=*/false)) {
         visiting.erase(st->decl_id());
         return false;
       }
@@ -300,17 +302,20 @@ auto is_c_abi_compatible_impl(const Type* type,
     return true;
   }
   case TypeKind::Function: {
-    // Function pointer type: all param and return types must be
-    // C-ABI-compatible (CONTRACT_C_ABI_INTEROP §4.4.2).
+    if (!allow_function_type) {
+      return false;
+    }
+    // First-order C function pointer: all parameter and return types must
+    // be C-ABI scalars, pointers, or repr-C structs (or void return).
     const auto* fn_type = static_cast<const TypeFunction*>(type);
     for (const auto* param : fn_type->param_types()) {
-      if (!is_c_abi_compatible_impl(param, visiting)) {
+      if (!is_c_abi_compatible_impl(param, visiting, /*allow_function_type=*/false)) {
         return false;
       }
     }
-    if (fn_type->return_type() != nullptr &&
-        fn_type->return_type()->kind() != TypeKind::Void) {
-      return is_c_abi_compatible_impl(fn_type->return_type(), visiting);
+    if (fn_type->return_type() != nullptr && fn_type->return_type()->kind() != TypeKind::Void) {
+      return is_c_abi_compatible_impl(
+          fn_type->return_type(), visiting, /*allow_function_type=*/false);
     }
     return true;
   }

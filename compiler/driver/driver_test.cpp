@@ -857,6 +857,207 @@ suite<"driver_cli"> driver_cli_suite = [] {
     expect(broken_link.err_says("linking failed")) << broken_link.err;
   };
 
+  "closures capture by value and compose with generic sequence helpers"_test = [] {
+    const Scratch scratch("closures-and-sequence-helpers");
+    auto app = scratch.file(
+        "main.dao",
+        "module app::main\n\n"
+        "enum class Outcome:\n"
+        "  Done(total: i32)\n"
+        "  Failed\n\n"
+        "fn finish(o: Outcome): i32\n"
+        "  match o:\n"
+        "    Outcome::Done(total):\n"
+        "      return total\n"
+        "    Outcome::Failed:\n"
+        "      panic(\"unexpected failure\")\n\n"
+        "fn main(): i32\n"
+        "  let base: i32 = 10\n"
+        "  let snap: fn(i32): i32 = |x| -> x + base\n"
+        "  base = 99\n"
+        "  if snap(5) != 15:\n"
+        "    return 1\n"
+        "  let xs: Vector<i32> = Vector<i32>::new().push(1).push(2).push(3).push(4)\n"
+        "  let ys: Vector<i32> = map_vec(filter_vec(xs, |n| -> n >= 2), |n| -> n * 10)\n"
+        "  let sum: i32 = 0\n"
+        "  for item in enumerate(ys):\n"
+        "    sum = sum + i64_to_i32(item.index) + item.value\n"
+        "  if sum != 93:\n"
+        "    return 2\n"
+        "  if any_vec(xs, |n| -> n == 4) == false or all_vec(xs, |n| -> n > 0) == false:\n"
+        "    return 3\n"
+        "  match find_if(xs, |n| -> n > 2):\n"
+        "    Option::Some(v):\n"
+        "      if v != 3:\n"
+        "        return 4\n"
+        "    Option::None:\n"
+        "      return 5\n"
+        "  let streamed: i32 = 0\n"
+        "  for z in map_gen(filter_gen(xs.iter(), |n| -> n > 2), |n| -> n + 1):\n"
+        "    streamed = streamed + z\n"
+        "  if streamed != 9:\n"
+        "    return 6\n"
+        "  let other: fn(i32): i32 = |x| -> x + base\n"
+        "  if (snap == snap) == false or snap == other or (snap != other) == false:\n"
+        "    return 7\n"
+        "  return finish(Outcome::Done(total = 0))\n");
+    auto built = run_daoc(scratch, {"build", app.string()});
+    expect(built.exit_code == 0) << built.err;
+    expect(exit_status(scratch.output_for(app)) == 0);
+  };
+
+  "cloned lambda in generic function resolves owning module local extend"_test = [] {
+    const Scratch scratch("cloned-lambda-local-extend");
+    auto lib = scratch.file(
+        "fmt.dao",
+        "module lib::fmt\n\n"
+        "concept Show:\n"
+        "  fn show(self): i32\n\n"
+        "extend i32 as Show:\n"
+        "  fn show(self): i32 -> self + 100\n\n"
+        "fn deferred_show<T: Show>(x: T): fn(i32): i32 -> |delta| -> x.show() + delta\n\n"
+        "fn make_shower(x: i32): fn(i32): i32 -> deferred_show(x)\n");
+    auto app = scratch.file("main.dao",
+                            "module app::main\n"
+                            "import lib::fmt\n\n"
+                            "fn main(): i32\n"
+                            "  let f: fn(i32): i32 = fmt::make_shower(7)\n"
+                            "  return f(5) - 112\n");
+    auto built = run_daoc(scratch, {"build", "--source", lib.string(), "--source", app.string()});
+    expect(built.exit_code == 0) << built.err;
+    expect(exit_status(scratch.output_for(app)) == 0);
+  };
+
+  "reachable return in void helper is rejected while unconditional panic wrappers diverge"_test =
+      [] {
+        const Scratch scratch("divergence-and-extern-callbacks");
+        auto bad = scratch.file("bad.dao",
+                                "module app::bad\n\n"
+                                "fn maybe_stop(stop: bool): void\n"
+                                "  if stop:\n"
+                                "    return\n"
+                                "  panic(\"stop\")\n\n"
+                                "fn main(): i32\n"
+                                "  maybe_stop(true)\n");
+        auto bad_res = run_daoc(scratch, {"check", bad.string()});
+        expect(bad_res.exit_code != 0);
+        expect(bad_res.err_says("may reach end of body without returning a value")) << bad_res.err;
+
+        auto bad_cb = scratch.file("bad_cb.dao",
+                                   "module app::bad_cb\n\n"
+                                   "extern fn run_cb(cb: fn(i32): i32): i32\n\n"
+                                   "fn main(): i32\n"
+                                   "  let f: fn(fn(i32): i32): i32 = run_cb\n"
+                                   "  return 0\n");
+        auto bad_cb_res = run_daoc(scratch, {"check", bad_cb.string()});
+        expect(bad_cb_res.exit_code != 0);
+        expect(bad_cb_res.err_says(
+            "with callback parameter cannot be used as a first-class function value"))
+            << bad_cb_res.err;
+
+        auto good = scratch.file("good.dao",
+                                 "module app::good\n\n"
+                                 "fn fail_msg(msg: string): void -> panic(msg)\n\n"
+                                 "fn fail_both(c: bool): void\n"
+                                 "  if c:\n"
+                                 "    fail_msg(\"left\")\n"
+                                 "  else:\n"
+                                 "    panic(\"right\")\n\n"
+                                 "fn choose(ok: bool, x: i32): i32\n"
+                                 "  if ok:\n"
+                                 "    return x\n"
+                                 "  else:\n"
+                                 "    fail_both(ok)\n\n"
+                                 "fn main(): i32\n"
+                                 "  return choose(true, 42) - 42\n");
+        auto built = run_daoc(scratch, {"build", good.string()});
+        expect(built.exit_code == 0) << built.err;
+        expect(exit_status(scratch.output_for(good)) == 0);
+      };
+
+  "linked C callbacks execute both extern and Dao struct callbacks"_test = [] {
+    const Scratch scratch("linked-c-struct-callbacks");
+    auto c_obj = compile_object(
+        scratch,
+        "#include <stdint.h>\n"
+        "struct Point { int32_t x; int32_t y; };\n"
+        "struct Pair64 { int32_t lo; int64_t hi; };\n"
+        "struct Point c_flip(struct Point p) { return (struct Point){p.y, p.x}; }\n"
+        "struct Point c_apply(struct Point (*cb)(struct Point), struct Point p) { return cb(p); }\n"
+        "struct Pair64 c_bump_pair(struct Pair64 p) {\n"
+        "  return (struct Pair64){p.lo + 10, p.hi + 20};\n"
+        "}\n"
+        "struct Pair64 c_apply_pair(struct Pair64 (*cb)(struct Pair64), struct Pair64 p) {\n"
+        "  return cb(p);\n"
+        "}\n"
+        "typedef struct Point (*pt_op_t)(struct Point);\n"
+        "pt_op_t c_get_pt_op(void) { return c_flip; }\n"
+#if defined(__x86_64__) || defined(_M_X64)
+        "struct Big { int64_t a; int64_t b; int64_t c; };\n"
+        "struct Big c_bump_big(struct Big b) {\n"
+        "  return (struct Big){b.a + 10, b.b + 20, b.c + 30};\n"
+        "}\n"
+        "struct Big c_apply_big(struct Big (*cb)(struct Big), struct Big b) { return cb(b); }\n"
+#endif
+    );
+
+    auto app = scratch.file("app.dao",
+                            "module app\n\n"
+                            "class Point:\n"
+                            "  x: i32\n"
+                            "  y: i32\n\n"
+                            "class Pair64:\n"
+                            "  lo: i32\n"
+                            "  hi: i64\n\n"
+#if defined(__x86_64__) || defined(_M_X64)
+                            "class Big:\n"
+                            "  a: i64\n"
+                            "  b: i64\n"
+                            "  c: i64\n\n"
+                            "extern fn c_bump_big(b: Big): Big\n"
+                            "extern fn c_apply_big(cb: fn(Big): Big, b: Big): Big\n"
+                            "fn dao_shift_big(b: Big): Big -> Big(b.a + 1, b.b + 2, b.c + 3)\n\n"
+#endif
+                            "extern fn c_flip(p: Point): Point\n"
+                            "extern fn c_apply(cb: fn(Point): Point, p: Point): Point\n"
+                            "extern fn c_bump_pair(p: Pair64): Pair64\n"
+                            "extern fn c_apply_pair(cb: fn(Pair64): Pair64, p: Pair64): Pair64\n"
+                            "extern fn c_get_pt_op(): fn(Point): Point\n\n"
+                            "fn dao_scale(p: Point): Point -> Point(p.x * 10, p.y * 10)\n\n"
+                            "fn dao_shift_pair(p: Pair64): Pair64 -> Pair64(p.lo + 1, p.hi + 2)\n\n"
+                            "fn main(): i32\n"
+                            "  let p_ext = c_apply(c_flip, Point(1, 2))\n"
+                            "  if p_ext.x != 2 or p_ext.y != 1:\n"
+                            "    return 1\n"
+                            "  let p_dao = c_apply(dao_scale, p_ext)\n"
+                            "  if p_dao.x != 20 or p_dao.y != 10:\n"
+                            "    return 2\n"
+                            "  let q_ext = c_apply_pair(c_bump_pair, Pair64(3, 100))\n"
+                            "  if q_ext.lo != 13 or q_ext.hi != 120:\n"
+                            "    return 3\n"
+                            "  let q_dao = c_apply_pair(dao_shift_pair, q_ext)\n"
+                            "  if q_dao.lo != 14 or q_dao.hi != 122:\n"
+                            "    return 4\n"
+#if defined(__x86_64__) || defined(_M_X64)
+                            "  let b_ext = c_apply_big(c_bump_big, Big(1, 2, 3))\n"
+                            "  if b_ext.a != 11 or b_ext.b != 22 or b_ext.c != 33:\n"
+                            "    return 6\n"
+                            "  let b_dao = c_apply_big(dao_shift_big, b_ext)\n"
+                            "  if b_dao.a != 12 or b_dao.b != 24 or b_dao.c != 36:\n"
+                            "    return 7\n"
+#endif
+                            "  let maker: fn(): fn(Point): Point = c_get_pt_op\n"
+                            "  let op = maker()\n"
+                            "  let p_ret = op(Point(7, 9))\n"
+                            "  if p_ret.x != 9 or p_ret.y != 7:\n"
+                            "    return 5\n"
+                            "  return 0\n");
+
+    auto built = run_daoc(scratch, {"build", "--source", app.string(), c_obj.string()});
+    expect(built.exit_code == 0) << built.err;
+    expect(exit_status(scratch.output_for(app)) == 0);
+  };
+
   "HashMap<K, V> enforces key bounds, hash/eq coherence, and inline conformances"_test = [] {
     Scratch scratch("hashmap-bounds");
 

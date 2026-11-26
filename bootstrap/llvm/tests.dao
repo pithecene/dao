@@ -419,7 +419,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 50
+  let total: i32 = 57
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -1165,32 +1165,130 @@ fn main(): i32
   else:
     print("FAIL entry_and_extern_abi_fail_closed: three mains ok=" + bool_to_string(r46.ok) + ", extern ok=" + bool_to_string(r46b.ok) + " " + diags_text(r46b.diags))
 
-  // Test 47: `extend keys::Key as traits::Hashable` (and same-module
+  // Test 47: uniform %dao.fn callables, by-value lexical captures, generic
+  // callbacks with inferred return types, and nominal generic Generator yield.
+  let r47: LlvmTextResult = lower_source_to_llvm_text("class Indexed<T>:\n  index: i64\n  value: T\n\nfn single_indexed<T>(v: T): Generator<Indexed<T>>\n  let zero: i64 = 0\n  yield Indexed(zero, v)\n\nfn apply<T, U>(x: T, f: fn(T): U): U -> f(x)\n\nfn make_adder(k: i32): fn(i32): i32 -> |x| -> x + k\n\nfn main(): i32\n  let base: i32 = 10\n  let snap: fn(i32): i32 = |x| -> x + base\n  base = 99\n  let add5: fn(i32): i32 = make_adder(5)\n  let gsum: i32 = 0\n  for item in single_indexed(4):\n    gsum = gsum + item.value\n  return snap(5) + add5(3) + apply(7, |n| -> n * 2) + gsum - 41\n")
+  write_failures = write_failures + emit_ir("closures_and_generic_callbacks", r47, 0)
+  if r47.ok:
+    if check_contains(r47, "%dao.fn = type { ptr, ptr }", "closures_and_generic_callbacks"):
+      print("PASS closures_and_generic_callbacks")
+      pass_count = pass_count + 1
+    else:
+      print("FAIL closures_and_generic_callbacks: missing %dao.fn type")
+  else:
+    print("FAIL closures_and_generic_callbacks: " + diags_text(r47.diags))
+
+  // Test 48: exhaustive match with a diverging panic arm needs no trailing
+  // return, and closures cannot escape a `resource memory` block.
+  let prog48: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  prog48 = prog48.push(graph::SourceInput("stdlib/core/panic.dao", "module core::panic\nextern fn __dao_panic(msg: string): void\nfn panic(msg: string): void -> __dao_panic(msg)\n", true))
+  prog48 = prog48.push(graph::SourceInput("main.dao", "module demo::main\n\nenum class Outcome:\n  Done(val: i32)\n  Failed\n\nfn unwrap(o: Outcome): i32\n  match o:\n    Outcome::Done(val):\n      return val\n    Outcome::Failed:\n      panic(\"failed\")\n\nfn main(): i32\n  return unwrap(Outcome::Done(val = 9)) - 9\n", false))
+  let r48a: LlvmTextResult = lower_program_to_llvm_text(prog48)
+  write_failures = write_failures + emit_ir("diverging_match_arm", r48a, 0)
+  let r48b: LlvmTextResult = lower_source_to_llvm_text("fn id(x: i32): i32 -> x\n\nfn main(): i32\n  let f: fn(i32): i32 = id\n  resource memory scratch =>\n    let k: i32 = 5\n    f = |x| -> x + k\n  return f(1)\n")
+  if r48a.ok:
+    if r48b.ok == false:
+      if contains_substring(diags_text(r48b.diags), "cannot be copied out"):
+        print("PASS closure_escape_and_diverging_match")
+        pass_count = pass_count + 1
+      else:
+        print("FAIL closure_escape_and_diverging_match: wrong escape diag " + diags_text(r48b.diags))
+    else:
+      print("FAIL closure_escape_and_diverging_match: closure escape accepted")
+  else:
+    print("FAIL closure_escape_and_diverging_match: diverging match rejected " + diags_text(r48a.diags))
+
+  // Test 49: %dao.fn equality and inequality compare both fn_ptr and env_ptr.
+  let r49: LlvmTextResult = lower_source_to_llvm_text("fn same(a: fn(i32): i32, b: fn(i32): i32): bool -> a == b\n\nfn diff(a: fn(i32): i32, b: fn(i32): i32): bool -> a != b\n\nfn inc(x: i32): i32 -> x + 1\n\nfn dec(x: i32): i32 -> x - 1\n\nfn make_adder(k: i32): fn(i32): i32 -> |x| -> x + k\n\nfn main(): i32\n  let c1: fn(i32): i32 = make_adder(5)\n  let c2: fn(i32): i32 = make_adder(5)\n  if same(inc, inc) == false:\n    return 1\n  if diff(inc, dec) == false:\n    return 2\n  if same(c1, c1) == false:\n    return 3\n  if diff(c1, c2) == false:\n    return 4\n  return 0\n")
+  write_failures = write_failures + emit_ir("callable_equality", r49, 0)
+  if r49.ok:
+    print("PASS callable_equality_and_inequality")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL callable_equality_and_inequality: " + diags_text(r49.diags))
+
+  // Test 50: extern fn returning a function pointer used as a first-class value
+  // wraps its raw ptr result with a C function adapter inside the thunk.
+  let r50: LlvmTextResult = lower_source_to_llvm_text("extern fn get_op(): fn(i32): i32\n\nfn take_maker(): fn(): fn(i32): i32 -> get_op\n")
+  write_failures = write_failures + emit_ir("extern_fn_returning_fn_value_thunk", r50, -1)
+  if r50.ok:
+    if check_contains(r50, "get_op.thunk", "extern_fn_returning_fn_value_thunk"):
+      if check_contains(r50, "__dao.c_fn_adapter.", "extern_fn_returning_fn_value_thunk"):
+        print("PASS extern_fn_returning_fn_value_thunk")
+        pass_count = pass_count + 1
+      else:
+        print("FAIL extern_fn_returning_fn_value_thunk: missing C adapter")
+    else:
+      print("FAIL extern_fn_returning_fn_value_thunk: missing thunk")
+  else:
+    print("FAIL extern_fn_returning_fn_value_thunk: " + diags_text(r50.diags))
+
+  // Test 51: a cloned lambda inside a generic function resolves local extend
+  // methods declared in the template's owning module.
+  let prog51: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  prog51 = prog51.push(graph::SourceInput("fmt.dao", "module demo::fmt\n\nconcept Show:\n  fn show(self): i32\n\nextend i32 as Show:\n  fn show(self): i32 -> self + 100\n\nfn deferred_show<T: Show>(x: T): fn(i32): i32 -> |delta| -> x.show() + delta\n\nfn make_shower(x: i32): fn(i32): i32 -> deferred_show(x)\n", false))
+  prog51 = prog51.push(graph::SourceInput("main.dao", "module demo::main\nimport demo::fmt\n\nfn main(): i32\n  let f: fn(i32): i32 = fmt::make_shower(7)\n  return f(5) - 112\n", false))
+  let r51: LlvmTextResult = lower_program_to_llvm_text(prog51)
+  write_failures = write_failures + emit_ir("cloned_lambda_local_extend_dispatch", r51, 0)
+  if r51.ok:
+    print("PASS cloned_lambda_local_extend_dispatch")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL cloned_lambda_local_extend_dispatch: " + diags_text(r51.diags))
+
+  // Test 52: void helper with reachable return is NOT divergent, while
+  // unconditional expression-bodied and branching void panic wrappers diverge.
+  let panic_mod52: graph::SourceInput = graph::SourceInput("stdlib/core/panic.dao", "module core::panic\nextern fn __dao_panic(msg: string): void\nfn panic(msg: string): void -> __dao_panic(msg)\n", true)
+  let bad52: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new().push(panic_mod52).push(graph::SourceInput("main.dao", "module demo::main\nfn maybe_stop(stop: bool): void\n  if stop:\n    return\n  panic(\"stop\")\n\nfn bad(): i32\n  maybe_stop(true)\n\nfn main(): i32 -> bad()\n", false))
+  let r52_bad: LlvmTextResult = lower_program_to_llvm_text(bad52)
+  let good52: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new().push(panic_mod52).push(graph::SourceInput("main.dao", "module demo::main\nfn fail_msg(msg: string): void -> panic(msg)\n\nfn fail_both(c: bool): void\n  if c:\n    fail_msg(\"a\")\n  else:\n    panic(\"b\")\n\nfn choose(ok: bool, v: i32): i32\n  if ok:\n    return v\n  else:\n    fail_both(ok)\n\nfn main(): i32 -> choose(true, 19) - 19\n", false))
+  let r52_good: LlvmTextResult = lower_program_to_llvm_text(good52)
+  write_failures = write_failures + emit_ir("unconditional_panic_wrappers", r52_good, 0)
+  if r52_bad.ok == false and contains_substring(diags_text(r52_bad.diags), "without returning a value") and r52_good.ok:
+    print("PASS void_divergence_fixed_point")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL void_divergence_fixed_point: bad_ok=" + bool_to_string(r52_bad.ok) + " good_ok=" + bool_to_string(r52_good.ok) + " " + diags_text(r52_good.diags))
+
+  // Test 53: direct 1st-order named callback (both Dao fn and extern fn) to
+  // extern fn emits valid LLVM IR, while extern fn with callback param as
+  // first-class value and higher-order C function types fail closed.
+  let r53_ok: LlvmTextResult = lower_source_to_llvm_text("extern fn c_inc(x: i32): i32\nextern fn apply_cb(cb: fn(i32): i32, x: i32): i32\n\nfn inc(x: i32): i32 -> x + 1\n\nfn run(): i32 -> apply_cb(inc, 41) + apply_cb(c_inc, 1)\n")
+  write_failures = write_failures + emit_ir("extern_direct_named_callback", r53_ok, -1)
+  let r53_bad_val: LlvmTextResult = lower_source_to_llvm_text("extern fn apply_cb(cb: fn(i32): i32, x: i32): i32\n\nfn leak(): fn(fn(i32): i32, i32): i32 -> apply_cb\n")
+  let r53_bad_ho: LlvmTextResult = lower_source_to_llvm_text("extern fn ho(cb: fn(fn(i32): i32): i32): i32\n\nfn main(): i32 -> 0\n")
+  if r53_ok.ok and check_contains(r53_ok, "declare i32 @apply_cb(ptr %arg0, i32 %arg1)", "extern_direct_named_callback") and check_contains(r53_ok, "call i32 @apply_cb(ptr @c_inc, i32 1)", "extern_direct_named_callback") and r53_bad_val.ok == false and r53_bad_ho.ok == false:
+    print("PASS extern_callback_validation_and_lowering")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL extern_callback_validation_and_lowering: ok=" + bool_to_string(r53_ok.ok) + " bad_val=" + bool_to_string(r53_bad_val.ok) + " bad_ho=" + bool_to_string(r53_bad_ho.ok))
+
+  // Test 54: `extend keys::Key as traits::Hashable` (and same-module
   // `extend SelfKey as traits::Hashable`) keeps an imported user concept
   // distinct from prelude `Hashable`: `HashMap<keys::Key, i32>` uses the
   // derived prelude key hash/eq (never calling the division-by-zero arm on
   // `a == 2`), while `traits::custom_hash` dispatches to `traits::Hashable`.
-  let prog47 = Vector<graph::SourceInput>::new()
-  prog47 = prog47.push(graph::SourceInput("stdlib/core/builtins.dao", read_file("stdlib/core/builtins.dao"), true))
-  prog47 = prog47.push(graph::SourceInput("stdlib/core/convert.dao", read_file("stdlib/core/convert.dao"), true))
-  prog47 = prog47.push(graph::SourceInput("stdlib/core/equatable.dao", read_file("stdlib/core/equatable.dao"), true))
-  prog47 = prog47.push(graph::SourceInput("stdlib/core/hashable.dao", read_file("stdlib/core/hashable.dao"), true))
-  prog47 = prog47.push(graph::SourceInput("stdlib/core/hashmap.dao", read_file("stdlib/core/hashmap.dao"), true))
-  prog47 = prog47.push(graph::SourceInput("stdlib/core/memory.dao", read_file("stdlib/core/memory.dao"), true))
-  prog47 = prog47.push(graph::SourceInput("stdlib/core/option.dao", read_file("stdlib/core/option.dao"), true))
-  prog47 = prog47.push(graph::SourceInput("stdlib/core/overflow.dao", read_file("stdlib/core/overflow.dao"), true))
-  prog47 = prog47.push(graph::SourceInput("stdlib/core/panic.dao", read_file("stdlib/core/panic.dao"), true))
-  prog47 = prog47.push(graph::SourceInput("stdlib/core/vector.dao", read_file("stdlib/core/vector.dao"), true))
-  prog47 = prog47.push(graph::SourceInput("traits.dao", "module app::traits\nconcept Equatable:\n  fn eq(self, other: Equatable): bool\nconcept Hashable:\n  fn hash(self): i64\nfn custom_hash<T: Hashable>(x: T): i64 -> x.hash()\n", false))
-  prog47 = prog47.push(graph::SourceInput("keys.dao", "module app::keys\nimport app::traits\nclass Key:\n  a: i64\n  b: i64\nclass SelfKey:\n  a: i64\n  b: i64\nextend SelfKey as traits::Equatable:\n  fn eq(self, other: SelfKey): bool -> true\nextend SelfKey as traits::Hashable:\n  fn hash(self): i64\n    if self.a == to_i64(2):\n      let zero: i64 = 0\n      return to_i64(1) / zero\n    return to_i64(888)\nfn self_trait_hash(k: SelfKey): i64 -> traits::custom_hash(k)\n", false))
-  prog47 = prog47.push(graph::SourceInput("main.dao", "module app::main\nimport app::keys\nimport app::traits\nextend keys::Key as traits::Equatable:\n  fn eq(self, other: keys::Key): bool -> true\nextend keys::Key as traits::Hashable:\n  fn hash(self): i64\n    if self.a == to_i64(2):\n      let zero: i64 = 0\n      return to_i64(1) / zero\n    return to_i64(777)\nfn main(): i32\n  let m = HashMap<keys::Key, i32>::new()\n  m = m.set(keys::Key(to_i64(1), to_i64(10)), 11)\n  m = m.set(keys::Key(to_i64(2), to_i64(20)), 22)\n  let sm = HashMap<keys::SelfKey, i32>::new()\n  sm = sm.set(keys::SelfKey(to_i64(1), to_i64(10)), 33)\n  sm = sm.set(keys::SelfKey(to_i64(2), to_i64(20)), 44)\n  if m.length() != to_i64(2) or sm.length() != to_i64(2):\n    return 1\n  if m.get_or(keys::Key(to_i64(1), to_i64(10)), 0) != 11:\n    return 2\n  if m.get_or(keys::Key(to_i64(2), to_i64(20)), 0) != 22:\n    return 3\n  if sm.get_or(keys::SelfKey(to_i64(2), to_i64(20)), 0) != 44:\n    return 4\n  if traits::custom_hash(keys::Key(to_i64(1), to_i64(10))) != to_i64(777):\n    return 5\n  if keys::self_trait_hash(keys::SelfKey(to_i64(1), to_i64(10))) != to_i64(888):\n    return 6\n  return 0\n", false))
-  let r47: LlvmTextResult = lower_program_to_llvm_text(prog47)
-  write_failures = write_failures + emit_ir("foreign_qualified_hashable_hashmap", r47, 0)
-  if r47.ok:
+  let prog54 = Vector<graph::SourceInput>::new()
+  prog54 = prog54.push(graph::SourceInput("stdlib/core/builtins.dao", read_file("stdlib/core/builtins.dao"), true))
+  prog54 = prog54.push(graph::SourceInput("stdlib/core/convert.dao", read_file("stdlib/core/convert.dao"), true))
+  prog54 = prog54.push(graph::SourceInput("stdlib/core/equatable.dao", read_file("stdlib/core/equatable.dao"), true))
+  prog54 = prog54.push(graph::SourceInput("stdlib/core/hashable.dao", read_file("stdlib/core/hashable.dao"), true))
+  prog54 = prog54.push(graph::SourceInput("stdlib/core/hashmap.dao", read_file("stdlib/core/hashmap.dao"), true))
+  prog54 = prog54.push(graph::SourceInput("stdlib/core/memory.dao", read_file("stdlib/core/memory.dao"), true))
+  prog54 = prog54.push(graph::SourceInput("stdlib/core/option.dao", read_file("stdlib/core/option.dao"), true))
+  prog54 = prog54.push(graph::SourceInput("stdlib/core/overflow.dao", read_file("stdlib/core/overflow.dao"), true))
+  prog54 = prog54.push(graph::SourceInput("stdlib/core/panic.dao", read_file("stdlib/core/panic.dao"), true))
+  prog54 = prog54.push(graph::SourceInput("stdlib/core/vector.dao", read_file("stdlib/core/vector.dao"), true))
+  prog54 = prog54.push(graph::SourceInput("traits.dao", "module app::traits\nconcept Equatable:\n  fn eq(self, other: Equatable): bool\nconcept Hashable:\n  fn hash(self): i64\nfn custom_hash<T: Hashable>(x: T): i64 -> x.hash()\n", false))
+  prog54 = prog54.push(graph::SourceInput("keys.dao", "module app::keys\nimport app::traits\nclass Key:\n  a: i64\n  b: i64\nclass SelfKey:\n  a: i64\n  b: i64\nextend SelfKey as traits::Equatable:\n  fn eq(self, other: SelfKey): bool -> true\nextend SelfKey as traits::Hashable:\n  fn hash(self): i64\n    if self.a == to_i64(2):\n      let zero: i64 = 0\n      return to_i64(1) / zero\n    return to_i64(888)\nfn self_trait_hash(k: SelfKey): i64 -> traits::custom_hash(k)\n", false))
+  prog54 = prog54.push(graph::SourceInput("main.dao", "module app::main\nimport app::keys\nimport app::traits\nextend keys::Key as traits::Equatable:\n  fn eq(self, other: keys::Key): bool -> true\nextend keys::Key as traits::Hashable:\n  fn hash(self): i64\n    if self.a == to_i64(2):\n      let zero: i64 = 0\n      return to_i64(1) / zero\n    return to_i64(777)\nfn main(): i32\n  let m = HashMap<keys::Key, i32>::new()\n  m = m.set(keys::Key(to_i64(1), to_i64(10)), 11)\n  m = m.set(keys::Key(to_i64(2), to_i64(20)), 22)\n  let sm = HashMap<keys::SelfKey, i32>::new()\n  sm = sm.set(keys::SelfKey(to_i64(1), to_i64(10)), 33)\n  sm = sm.set(keys::SelfKey(to_i64(2), to_i64(20)), 44)\n  if m.length() != to_i64(2) or sm.length() != to_i64(2):\n    return 1\n  if m.get_or(keys::Key(to_i64(1), to_i64(10)), 0) != 11:\n    return 2\n  if m.get_or(keys::Key(to_i64(2), to_i64(20)), 0) != 22:\n    return 3\n  if sm.get_or(keys::SelfKey(to_i64(2), to_i64(20)), 0) != 44:\n    return 4\n  if traits::custom_hash(keys::Key(to_i64(1), to_i64(10))) != to_i64(777):\n    return 5\n  if keys::self_trait_hash(keys::SelfKey(to_i64(1), to_i64(10))) != to_i64(888):\n    return 6\n  return 0\n", false))
+  let r54: LlvmTextResult = lower_program_to_llvm_text(prog54)
+  write_failures = write_failures + emit_ir("foreign_qualified_hashable_hashmap", r54, 0)
+  if r54.ok:
     print("PASS foreign_qualified_hashable_hashmap")
     pass_count = pass_count + 1
   else:
-    print("FAIL foreign_qualified_hashable_hashmap: " + diags_text(r47.diags))
+    print("FAIL foreign_qualified_hashable_hashmap: " + diags_text(r54.diags))
 
   // -----------------------------------------------------------------
   // Summary

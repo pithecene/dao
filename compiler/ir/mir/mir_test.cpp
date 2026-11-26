@@ -806,6 +806,35 @@ suite<"mir_concreteness"> mir_concreteness = [] {
     }
     expect(found) << "expected concreteness invariant diagnostic";
   };
+
+  "monomorphize rejects lambda capturing generic param instantiated with generator"_test = [] {
+    auto rejects_gen_capture = [](const std::string& src) -> bool {
+      MirTestPipeline pipe(src);
+      if (pipe.module() == nullptr) {
+        return false;
+      }
+      auto mono =
+          monomorphize(*pipe.module(), pipe.mir_ctx, pipe.types, pipe.mir_result.generic_templates);
+      return std::ranges::any_of(mono.diagnostics, [](const Diagnostic& d) {
+        return d.severity == Severity::Error &&
+               d.message.find("generator values cannot be captured by value") != std::string::npos;
+      });
+    };
+    expect(rejects_gen_capture("fn count(n: i32): Generator<i32>\n"
+                               "    yield n\n"
+                               "fn capture<T>(x: T): fn(i32): T -> |unused| -> x\n"
+                               "fn main(): i32\n"
+                               "    let f: fn(i32): Generator<i32> = capture(count(1))\n"
+                               "    return 0\n"));
+    expect(rejects_gen_capture("class BoxGen:\n"
+                               "    g: Generator<i32>\n"
+                               "fn count(n: i32): Generator<i32>\n"
+                               "    yield n\n"
+                               "fn capture<T>(x: T): fn(i32): T -> |unused| -> x\n"
+                               "fn main(): i32\n"
+                               "    let f: fn(i32): BoxGen = capture(BoxGen(count(1)))\n"
+                               "    return 0\n"));
+  };
 };
 
 // NOLINTEND(readability-magic-numbers)

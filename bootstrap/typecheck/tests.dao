@@ -150,7 +150,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 355
+  let total: i32 = 368
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -2193,6 +2193,33 @@ fn main(): i32
   if tc_expect_program_errors("qualified_call_names_the_overload_of_its_arity", Vector<graph::SourceInput>::new().push(graph::SourceInput("lib.dao", "module lib::m\nfn g(a: i32): i32 -> a\nfn g(a: i32, b: i32): i32 -> a + b\n", false)), "module app::main\nimport lib::m\n\nfn f(): i32 -> m::g(1) + m::g(1, 2)\n", "main.dao", 0):
     pass_count = pass_count + 1
   if tc_expect_program_errors("prelude_overload_export_is_its_own_module", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/one.dao", "module core::one\nfn g(a: i32): i32 -> a\n", true)).push(graph::SourceInput("stdlib/core/two.dao", "module core::two\nfn g(a: i32, b: i32): i32 -> a + b\n", true)), "module app::main\nimport core::two\n\nfn f(): i32 -> two::g(1)\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("imported_extern_rejects_lambda_callback", Vector<graph::SourceInput>::new().push(graph::SourceInput("ffi.dao", "module lib::ffi\nextern fn apply(cb: fn(i32): i32, x: i32): i32\n", false)), "module app::main\nimport lib::ffi\n\nfn main(): i32 -> ffi::apply(|x| -> x + 1, 5)\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("imported_extern_rejects_closure_var_callback", Vector<graph::SourceInput>::new().push(graph::SourceInput("ffi.dao", "module lib::ffi\nextern fn apply(cb: fn(i32): i32, x: i32): i32\n", false)), "module app::main\nimport lib::ffi\n\nfn main(): i32\n  let cb: fn(i32): i32 = |x| -> x + 1\n  return ffi::apply(cb, 5)\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("imported_extern_accepts_named_fn_callback", Vector<graph::SourceInput>::new().push(graph::SourceInput("ffi.dao", "module lib::ffi\nextern fn apply(cb: fn(i32): i32, x: i32): i32\n", false)), "module app::main\nimport lib::ffi\n\nfn inc(x: i32): i32 -> x + 1\n\nfn main(): i32 -> ffi::apply(inc, 5)\n", "main.dao", 0):
+    pass_count = pass_count + 1
+  let panic_prelude: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/panic.dao", "module core::panic\nextern fn __dao_panic(msg: string): void\nfn panic(msg: string): void -> __dao_panic(msg)\n", true))
+  if tc_expect_program_errors("void_fn_with_reachable_return_not_divergent", panic_prelude, "module app::main\nfn maybe_stop(stop: bool): void\n  if stop:\n    return\n  panic(\"stop\")\n\nfn bad(): i32\n  maybe_stop(true)\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("void_fn_partial_if_not_divergent", panic_prelude, "module app::main\nfn maybe_panic(stop: bool): void\n  if stop:\n    panic(\"stop\")\n\nfn bad(): i32\n  maybe_panic(true)\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("void_fn_recursion_not_self_divergent", panic_prelude, "module app::main\nfn spin(): void\n  spin()\n\nfn bad(): i32\n  spin()\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("unconditional_panic_wrappers_diverge", panic_prelude, "module app::main\nfn fail_msg(msg: string): void -> panic(msg)\n\nfn fail_both(c: bool): void\n  if c:\n    fail_msg(\"a\")\n  else:\n    panic(\"b\")\n\nfn ok1(): i32\n  fail_msg(\"x\")\n\nfn ok2(c: bool): i32\n  fail_both(c)\n", "main.dao", 0):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("extern_callback_fn_rejected_as_first_class_value", "extern fn run_cb(cb: fn(i32): i32): i32\n\nfn main(): i32\n  let f: fn(fn(i32): i32): i32 = run_cb\n  return 0\n", "with callback parameter cannot be used as a first-class function value"):
+    pass_count = pass_count + 1
+  if tc_expect_program_errors("imported_extern_callback_fn_rejected_as_first_class_value", Vector<graph::SourceInput>::new().push(graph::SourceInput("ffi.dao", "module lib::ffi\nextern fn run_cb(cb: fn(i32): i32): i32\n", false)), "module app::main\nimport lib::ffi\n\nfn main(): i32\n  let f: fn(fn(i32): i32): i32 = ffi::run_cb\n  return 0\n", "main.dao", 1):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("extern_higher_order_callback_param_rejected", "extern fn ho(cb: fn(fn(i32): i32): i32): i32\n", "not supported at the C ABI boundary"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("extern_higher_order_fn_return_rejected", "extern fn ho(): fn(): fn(i32): i32\n", "not supported at the C ABI boundary"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("extern_string_callback_param_rejected", "extern fn bad(cb: fn(string): void): void\n", "not supported at the C ABI boundary"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("extern_struct_holding_fn_rejected", "class Holder:\n  cb: fn(i32): i32\n\nextern fn bad(h: Holder): i32\n", "not supported at the C ABI boundary"):
     pass_count = pass_count + 1
 
   // Class-level generic bounds and Hashable/Equatable coherence (host parity).

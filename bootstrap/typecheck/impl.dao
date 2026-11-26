@@ -128,7 +128,7 @@ fn registry_new(symbols: Vector<resolver::Symbol>, modules: Vector<graph::Module
       type_syms = type_syms.set(base::decl_key(sym.owner_module_id, sym.decl_node), si)
     if is_method_symbol(sym):
       callables = callables.set(base::decl_key(sym.owner_module_id, sym.decl_node), si)
-    if kind == "Param" or kind == "Field":
+    if kind == "Param" or kind == "Field" or kind == "LambdaParam":
       members = members.set(base::member_key(sym.owner_module_id, sym.decl_node, kind, sym.name), si)
     if kind == "Local":
       members = members.set(base::member_key(sym.owner_module_id, sym.decl_node, kind, ""), si)
@@ -140,7 +140,17 @@ fn registry_new(symbols: Vector<resolver::Symbol>, modules: Vector<graph::Module
     if me.is_prelude:
       preludes = preludes.set(i64_to_string(me.module_id), to_i64(1))
     mi = mi + 1
-  return Registry(HashMap<string, i64>::new(), HashMap<string, i64>::new(), conformance_empty(), HashMap<string, i64>::new(), base::ProgramIndex(type_syms, callables, members, preludes), MadeTypes(HashMap<string, i64>::new(), HashMap<string, i64>::new(), Vector<i64>::new(), HashMap<string, i64>::new(), Vector<i64>::new()))
+  return Registry(HashMap<string, i64>::new(), HashMap<string, i64>::new(), conformance_empty(), HashMap<string, i64>::new(), base::ProgramIndex(type_syms, callables, members, preludes, HashMap<string, i64>::new(), HashMap<string, i64>::new()), MadeTypes(HashMap<string, i64>::new(), HashMap<string, i64>::new(), Vector<i64>::new(), HashMap<string, i64>::new(), Vector<i64>::new()))
+
+fn reg_add_extern_fn(rg: Registry, sym_idx: i64): Registry
+  let idx: base::ProgramIndex = rg.index
+  idx.extern_fns = idx.extern_fns.set(i64_to_string(sym_idx), to_i64(1))
+  return Registry(rg.expr_types, rg.variant_set, rg.conform, rg.methods, idx, rg.made)
+
+fn reg_add_diverging_fn(rg: Registry, sym_idx: i64): Registry
+  let idx: base::ProgramIndex = rg.index
+  idx.diverging_fns = idx.diverging_fns.set(i64_to_string(sym_idx), to_i64(1))
+  return Registry(rg.expr_types, rg.variant_set, rg.conform, rg.methods, idx, rg.made)
 
 fn conformance_empty(): Conformance
   return Conformance(HashMap<string, i64>::new(), Vector<i64>::new(), HashMap<string, i64>::new(), HashMap<string, i64>::new())
@@ -393,6 +403,10 @@ fn ts_node_span(ts: TS, node_idx: i64): Span
       return ts_tok_span(ts, yield_tidx)
     parser::Node::NamedT(tidx):
       return ts_tok_span(ts, tidx)
+    parser::Node::FnT(fn_tok, params_lp, param_count, ret):
+      return ts_tok_span(ts, fn_tok)
+    parser::Node::LambdaE(params_lp, param_count, body):
+      return ts_node_span(ts, body)
     parser::Node::QualNameE(seg_lp, seg_count):
       let segs: Vector<i64> = parser::read_list(ts.tc.idx_data, seg_lp)
       if segs.length() > 0:
@@ -564,7 +578,34 @@ fn types_equal(ts: TS, a: i64, b: i64): bool
     if is_generator_kind(ta) and is_generator_kind(tb):
       if ta.pointee < 0 or tb.pointee < 0:
         return true
+    if is_function_kind(ta) and is_function_kind(tb):
+      if ta.info_count != tb.info_count:
+        return false
+      if types_equal(ts, ta.ret_type, tb.ret_type) == false:
+        return false
+      if fn_params_walkable(ts, ta) == false or fn_params_walkable(ts, tb) == false:
+        return false
+      let pi: i64 = 0
+      while pi < ta.info_count:
+        if types_equal(ts, ts.type_info.get(ta.info_lp + pi), ts.type_info.get(tb.info_lp + pi)) == false:
+          return false
+        pi = pi + 1
+      return true
   return false
+
+fn is_function_kind(t: base::DaoType): bool
+  match t.kind:
+    base::TypeKind::TFunction:
+      return true
+  return false
+
+fn make_fn_value_type(ts: TS, param_tis: Vector<i64>, ret_ti: i64): TypeR
+  let fname: string = "fn(" + spell_args(ts, param_tis, spelling_depth() - 1) + "): " + spell_type(ts, ret_ti, spelling_depth() - 1)
+  let start: i64 = ts.type_info.length()
+  let r: TS = ts_push_info_run(ts, param_tis)
+  let proto: base::DaoType = r.types.get(to_i64(0))
+  proto.name = fname
+  return ts_add_type(r, fn_type_with(proto, start, param_tis.length(), ret_ti))
 
 fn is_generator_kind(t: base::DaoType): bool
   match t.kind:
@@ -765,6 +806,24 @@ fn resolve_ast_type(ts: TS, node_idx: i64): TypeR
         if qsym >= 0:
           return TypeR(ts, sym_type_at(ts, qsym))
       return TypeR(ts, to_i64(-1))
+    parser::Node::FnT(fn_tok, params_lp, param_count, ret):
+      let pnodes: Vector<i64> = parser::read_list(ts.tc.idx_data, params_lp)
+      let param_tis: Vector<i64> = Vector<i64>::new()
+      let r: TS = ts
+      let pi: i64 = 0
+      while pi < pnodes.length():
+        let pr: TypeR = resolve_ast_type(r, pnodes.get(pi))
+        r = pr.ts
+        if pr.type_idx < 0:
+          return TypeR(r, to_i64(-1))
+        param_tis = param_tis.push(pr.type_idx)
+        pi = pi + 1
+      let rr: TypeR = resolve_ast_type(r, ret)
+      r = rr.ts
+      if rr.type_idx < 0:
+        return TypeR(r, to_i64(-1))
+      let ftr: TypeR = make_fn_value_type(r, param_tis, rr.type_idx)
+      return TypeR(ts_set_expr_type(ftr.ts, node_idx, ftr.type_idx), ftr.type_idx)
     parser::Node::ErrorT(t):
       return TypeR(ts, to_i64(-1))
   return TypeR(ts, to_i64(-1))
@@ -829,6 +888,14 @@ fn generator_spelling_diags(ts: TS, node_idx: i64): TS
         r = generator_spelling_diags(r, args.get(ai))
         ai = ai + 1
       return r
+    parser::Node::FnT(fn_tok, params_lp, param_count, ret):
+      let pnodes: Vector<i64> = parser::read_list(ts.tc.idx_data, params_lp)
+      let r: TS = ts
+      let pi: i64 = 0
+      while pi < pnodes.length():
+        r = generator_spelling_diags(r, pnodes.get(pi))
+        pi = pi + 1
+      return generator_spelling_diags(r, ret)
   return ts
 
 // The first name token of an annotation, through its pointers and
@@ -854,6 +921,15 @@ fn unknown_named_type(ts: TS, node_idx: i64): i64
         if in_arg >= 0:
           return in_arg
         ai = ai + 1
+    parser::Node::FnT(fn_tok, params_lp, param_count, ret):
+      let pnodes: Vector<i64> = parser::read_list(ts.tc.idx_data, params_lp)
+      let pi: i64 = 0
+      while pi < pnodes.length():
+        let in_p: i64 = unknown_named_type(ts, pnodes.get(pi))
+        if in_p >= 0:
+          return in_p
+        pi = pi + 1
+      return unknown_named_type(ts, ret)
     parser::Node::QualNameE(seg_lp, seg_count):
       // The resolver binds a qualified type by its last segment.
       let qsegs: Vector<i64> = parser::read_list(ts.tc.idx_data, seg_lp)
@@ -879,6 +955,15 @@ fn concept_named_by(ts: TS, ti: i64): i64
       return concept_named_by(ts, t.pointee)
     base::TypeKind::TGenerator:
       return concept_named_by(ts, t.pointee)
+    base::TypeKind::TFunction:
+      if fn_params_walkable(ts, t):
+        let pi: i64 = 0
+        while pi < t.info_count:
+          let cp: i64 = concept_named_by(ts, ts.type_info.get(t.info_lp + pi))
+          if cp >= 0:
+            return cp
+          pi = pi + 1
+      return concept_named_by(ts, t.ret_type)
   return to_i64(-1)
 
 // The first concept other than `allowed` an annotation names anywhere
@@ -913,6 +998,15 @@ fn annotation_names_concept(ts: TS, node_idx: i64, allowed: i64): i64
         if in_arg >= 0:
           return in_arg
         ai = ai + 1
+    parser::Node::FnT(fn_tok, params_lp, param_count, ret):
+      let pnodes: Vector<i64> = parser::read_list(ts.tc.idx_data, params_lp)
+      let pi: i64 = 0
+      while pi < pnodes.length():
+        let in_p: i64 = annotation_names_concept(ts, pnodes.get(pi), allowed)
+        if in_p >= 0:
+          return in_p
+        pi = pi + 1
+      return annotation_names_concept(ts, ret, allowed)
   return to_i64(-1)
 
 // concept_named_by, except that `allowed` names none.
@@ -1430,6 +1524,14 @@ fn annotation_symbol_refs(ts: TS, node_idx: i64, out: Vector<i64>): Vector<i64>
       if qsegs.length() == 0:
         return out
       return out.push(lookup_use(ts, qsegs.get(qsegs.length() - 1)))
+    parser::Node::FnT(fn_tok, params_lp, param_count, ret):
+      let pnodes: Vector<i64> = parser::read_list(ts.tc.idx_data, params_lp)
+      let acc: Vector<i64> = out
+      let pi: i64 = 0
+      while pi < pnodes.length():
+        acc = annotation_symbol_refs(ts, pnodes.get(pi), acc)
+        pi = pi + 1
+      return annotation_symbol_refs(ts, ret, acc)
   return out
 
 // An alias the walk could not bind names a concept (diagnosed as
@@ -1671,6 +1773,7 @@ fn tc_register_functions(ts: TS, decls: Vector<i64>): TS
     let decl_idx: i64 = decls.get(i)
     let node: parser::Node = r.tc.nodes.get(decl_idx)
     let is_fn: bool = false
+    let is_ext_fn: bool = false
     let fn_name_tidx: i64 = to_i64(-1)
     let fn_params_lp: i64 = to_i64(-1)
     let fn_ret_type: i64 = to_i64(-1)
@@ -1687,6 +1790,7 @@ fn tc_register_functions(ts: TS, decls: Vector<i64>): TS
         fn_ret_type = rtn
       parser::Node::ExternFnD(nt, tp, plp, rtn):
         is_fn = true
+        is_ext_fn = true
         fn_name_tidx = nt
         fn_params_lp = plp
         fn_ret_type = rtn
@@ -1694,6 +1798,9 @@ fn tc_register_functions(ts: TS, decls: Vector<i64>): TS
       let tr: TypeR = tc_register_fn_sig_core(r, decl_idx, fn_name_tidx, fn_params_lp, fn_ret_type, to_i64(-1))
       r = tr.ts
       let fn_sym: i64 = find_callable_sym_by_decl(r, decl_idx)
+      if is_ext_fn:
+        if fn_sym >= 0:
+          r.reg = reg_add_extern_fn(r.reg, fn_sym)
       fn_syms = fn_syms.push(fn_sym)
       fn_type_idxs = fn_type_idxs.push(tr.type_idx)
     i = i + 1
@@ -2428,7 +2535,7 @@ fn check_expr(ts: TS, node_idx: i64): TS
     parser::Node::TryE(operand):
       return check_expr(ts, operand)
     parser::Node::LambdaE(params_lp, param_count, body):
-      return check_expr(ts, body)
+      return ts_add_diag(ts, ts_node_span(ts, node_idx), "lambda requires expected function type context")
     parser::Node::ListLitE(elems_lp, elem_count):
       let elems: Vector<i64> = parser::read_list(ts.tc.idx_data, elems_lp)
       let r: TS = ts
@@ -2441,11 +2548,40 @@ fn check_expr(ts: TS, node_idx: i64): TS
       return ts
   return ts
 
+fn tc_extern_has_callback_param(ts: TS, sym_idx: i64, fn_ti: i64): bool
+  if sym_idx < 0 or sym_idx >= ts.tc.symbols.length():
+    return false
+  if ts.reg.index.extern_fns.contains(i64_to_string(sym_idx)) == false:
+    return false
+  if starts_with(ts.tc.symbols.get(sym_idx).name, "__"):
+    return false
+  if fn_ti < 0 or fn_ti >= ts.types.length():
+    return false
+  let ft: base::DaoType = ts.types.get(fn_ti)
+  if is_function_kind(ft) == false:
+    return false
+  if fn_params_walkable(ts, ft) == false:
+    return false
+  let pi: i64 = 0
+  while pi < ft.info_count:
+    let pti: i64 = ts.type_info.get(ft.info_lp + pi)
+    if pti >= 0 and pti < ts.types.length():
+      if is_function_kind(ts.types.get(pti)):
+        return true
+    pi = pi + 1
+  return false
+
 fn check_ident_expr(ts: TS, node_idx: i64, tidx: i64): TS
+  return check_ident_expr_mode(ts, node_idx, tidx, false)
+
+fn check_ident_expr_mode(ts: TS, node_idx: i64, tidx: i64, is_direct_callee: bool): TS
   let sym_idx: i64 = lookup_use(ts, tidx)
   if sym_idx < 0:
     return ts
   let ti: i64 = sym_type_at(ts, sym_idx)
+  if is_direct_callee == false:
+    if tc_extern_has_callback_param(ts, sym_idx, ti):
+      return ts_add_diag(ts, ts_tok_span(ts, tidx), "extern function '" + ts.tc.symbols.get(sym_idx).name + "' with callback parameter cannot be used as a first-class function value")
   if ti >= 0:
     return ts_set_expr_type(ts, node_idx, ti)
   return ts
@@ -2467,6 +2603,9 @@ fn tc_export_lookup(ts: TS, target_mid: i64, name: string): i64
   return to_i64(-1)
 
 fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
+  return check_qualname_expr_mode(ts, node_idx, seg_lp, seg_count, false)
+
+fn check_qualname_expr_mode(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64, is_direct_callee: bool): TS
   let segs: Vector<i64> = parser::read_list(ts.tc.idx_data, seg_lp)
   if segs.length() == 0:
     return ts
@@ -2527,6 +2666,9 @@ fn check_qualname_expr(ts: TS, node_idx: i64, seg_lp: i64, seg_count: i64): TS
       let sp: Span = ts_tok_span(ts, second_tidx)
       return ts_add_diag(ts, sp, "no exported symbol '" + second_name + "' in module '" + mod_name + "'")
     let exp_ti: i64 = sym_type_at(ts, exported_sym)
+    if is_direct_callee == false:
+      if tc_extern_has_callback_param(ts, exported_sym, exp_ti):
+        return ts_add_diag(ts, ts_node_span(ts, node_idx), "extern function '" + ts.tc.symbols.get(exported_sym).name + "' with callback parameter cannot be used as a first-class function value")
     if exp_ti >= 0:
       return ts_set_expr_type(ts, node_idx, exp_ti)
     return ts
@@ -3170,6 +3312,20 @@ fn infer_bindings(ts: TS, map: HashMap<string, i64>, pattern_ti: i64, concrete_t
         base::TypeKind::TGenerator:
           return infer_bindings(ts, map, pt.pointee, ct.pointee, span, own)
       return Bound(ts, map)
+    base::TypeKind::TFunction:
+      match ct.kind:
+        base::TypeKind::TFunction:
+          if pt.info_count != ct.info_count:
+            return Bound(ts, map)
+          if fn_params_walkable(ts, pt) == false or fn_params_walkable(ts, ct) == false:
+            return Bound(ts, map)
+          let walked_fn: Bound = Bound(ts, map)
+          let fpi: i64 = 0
+          while fpi < pt.info_count:
+            walked_fn = infer_bindings(walked_fn.ts, walked_fn.map, walked_fn.ts.type_info.get(pt.info_lp + fpi), walked_fn.ts.type_info.get(ct.info_lp + fpi), span, own)
+            fpi = fpi + 1
+          return infer_bindings(walked_fn.ts, walked_fn.map, pt.ret_type, ct.ret_type, span, own)
+      return Bound(ts, map)
   // `Box<T>` against `Box<i32>`, `Opt<T>` against `Opt<i64>` decides
   // `T`: two types standing for one head are matched argument by
   // argument (a head stands for its own parameters).
@@ -3232,6 +3388,32 @@ fn substitute_once(ts: TS, map: HashMap<string, i64>, ti: i64, done: HashMap<str
         return Subst(elem.ts, ti, elem.done.set(key, ti))
       let gen: TypeR = find_or_add_generator_type(elem.ts, elem.type_idx)
       return Subst(gen.ts, gen.type_idx, elem.done.set(key, gen.type_idx))
+    base::TypeKind::TFunction:
+      if fn_params_walkable(ts, t) == false:
+        return Subst(ts, ti, done.set(key, ti))
+      let f_moved: bool = false
+      let f_slots: Vector<i64> = Vector<i64>::new()
+      let f_cur: Subst = Subst(ts, ti, done)
+      let fpi: i64 = 0
+      while fpi < t.info_count:
+        let old_slot: i64 = f_cur.ts.type_info.get(t.info_lp + fpi)
+        f_cur = substitute_once(f_cur.ts, map, old_slot, f_cur.done)
+        if f_cur.type_idx != old_slot:
+          f_moved = true
+        f_slots = f_slots.push(f_cur.type_idx)
+        fpi = fpi + 1
+      let f_ret: Subst = substitute_once(f_cur.ts, map, t.ret_type, f_cur.done)
+      if f_ret.type_idx != t.ret_type:
+        f_moved = true
+      if f_moved == false:
+        return Subst(f_ret.ts, ti, f_ret.done.set(key, ti))
+      if t.decl_node < 0:
+        let mf: TypeR = make_fn_value_type(f_ret.ts, f_slots, f_ret.type_idx)
+        return Subst(mf.ts, mf.type_idx, f_ret.done.set(key, mf.type_idx))
+      let f_start: i64 = f_ret.ts.type_info.length()
+      let f_pushed: TS = ts_push_info_run(f_ret.ts, f_slots)
+      let f_added: TypeR = ts_add_type(f_pushed, fn_type_with(t, f_start, f_slots.length(), f_ret.type_idx))
+      return Subst(f_added.ts, f_added.type_idx, f_ret.done.set(key, f_added.type_idx))
   // A class or enum stands for a head and what it was given, so it is
   // rebuilt from arguments the call decided: `Box<T>` becomes
   // `Box<i32>`, `Opt<T>` becomes `Opt<i64>`.  A head stands for its own
@@ -3382,6 +3564,14 @@ fn spell_type(ts: TS, ti: i64, budget: i64): string
       return "Ptr<" + spell_type(ts, t.pointee, budget - 1) + ">"
     base::TypeKind::TGenerator:
       return "Generator<" + spell_type(ts, t.pointee, budget - 1) + ">"
+    base::TypeKind::TFunction:
+      if t.decl_node < 0 and fn_params_walkable(ts, t):
+        let f_args: Vector<i64> = Vector<i64>::new()
+        let fpi: i64 = 0
+        while fpi < t.info_count:
+          f_args = f_args.push(ts.type_info.get(t.info_lp + fpi))
+          fpi = fpi + 1
+        return "fn(" + spell_args(ts, f_args, budget - 1) + "): " + spell_type(ts, t.ret_type, budget - 1)
   let head_ti: i64 = record_head(ts, t)
   if head_ti >= 0 and head_ti != ti:
     return ts.types.get(head_ti).name + "<" + spell_args(ts, stands_for_args(ts, stands_for_of(t)), budget - 1) + ">"
@@ -3499,6 +3689,17 @@ fn type_nesting(ts: TS, ti: i64): Nesting
       let element: Nesting = type_nesting(r, t.pointee)
       r = element.ts
       depth = element.depth + 1
+    base::TypeKind::TFunction:
+      if fn_params_walkable(r, t):
+        let f_params: Vector<i64> = Vector<i64>::new()
+        let fpi: i64 = 0
+        while fpi < t.info_count:
+          f_params = f_params.push(r.type_info.get(t.info_lp + fpi))
+          fpi = fpi + 1
+        f_params = f_params.push(t.ret_type)
+        let f_deepest: Nesting = args_nesting(r, f_params)
+        r = f_deepest.ts
+        depth = f_deepest.depth + 1
   let head_ti: i64 = record_head(r, t)
   if head_ti >= 0 and head_ti != ti:
     let deepest: Nesting = args_nesting(r, stands_for_args(r, stands_for_of(t)))
@@ -3581,6 +3782,14 @@ fn callee_symbol(ts: TS, callee: i64): i64
       let last: i64 = lookup_use(ts, segs.get(segs.length() - 1))
       if last >= 0:
         return last
+      if segs.length() >= 2:
+        let head_sym: i64 = lookup_use(ts, segs.get(0))
+        if head_sym >= 0:
+          let head_obj: resolver::Symbol = ts.tc.symbols.get(head_sym)
+          if resolver::symbol_kind_name(head_obj.kind) == "Module":
+            let exp_sym: i64 = tc_export_lookup(ts, head_obj.decl_node, ts_tok_name(ts, segs.get(1)))
+            if exp_sym >= 0:
+              return exp_sym
       // `Type::method`: the resolver binds the type and leaves the
       // method to the checker, which finds it in the dispatch index as
       // the qualified name itself was typed.
@@ -3675,6 +3884,15 @@ fn mention_search(ts: TS, ti: i64, params: Vector<i64>, so_far: Mention): Mentio
       return mention_search(ts, t.pointee, params, m)
     base::TypeKind::TGenerator:
       return mention_search(ts, t.pointee, params, m)
+    base::TypeKind::TFunction:
+      if fn_params_walkable(ts, t):
+        let fpi: i64 = 0
+        while fpi < t.info_count:
+          m = mention_search(ts, ts.type_info.get(t.info_lp + fpi), params, m)
+          if m.found:
+            return m
+          fpi = fpi + 1
+      return mention_search(ts, t.ret_type, params, m)
   let args: Vector<i64> = stands_for_args(ts, stands_for_of(t))
   let i: i64 = 0
   while i < args.length():
@@ -4054,6 +4272,140 @@ class WrittenTypeArgs:
   list_lp: i64
   on_type: bool
 
+fn is_lambda_expr(ts: TS, node_idx: i64): bool
+  if node_idx < 0 or node_idx >= ts.tc.nodes.length():
+    return false
+  match ts.tc.nodes.get(node_idx):
+    parser::Node::LambdaE(p, c, b):
+      return true
+  return false
+
+fn is_extern_callable(ts: TS, callee: i64): bool
+  let sym_idx: i64 = callee_symbol(ts, callee)
+  if sym_idx < 0:
+    return false
+  return ts.reg.index.extern_fns.contains(i64_to_string(sym_idx))
+
+fn is_named_fn_expr(ts: TS, node_idx: i64): bool
+  let sym_idx: i64 = callee_symbol(ts, node_idx)
+  if sym_idx < 0 or sym_idx >= ts.tc.symbols.length():
+    return false
+  return resolver::symbol_kind_name(ts.tc.symbols.get(sym_idx).kind) == "Function"
+
+fn check_lambda_no_gen_captures(ts: TS, expr_idx: i64, bound_syms: HashMap<string, i64>): TS
+  if expr_idx < 0 or expr_idx >= ts.tc.nodes.length():
+    return ts
+  let node: parser::Node = ts.tc.nodes.get(expr_idx)
+  match node:
+    parser::Node::IdentE(tidx):
+      let sym_idx: i64 = lookup_use(ts, tidx)
+      if sym_idx >= 0:
+        if bound_syms.contains(i64_to_string(sym_idx)) == false:
+          let sym: resolver::Symbol = ts.tc.symbols.get(sym_idx)
+          let sk: string = resolver::symbol_kind_name(sym.kind)
+          if sk == "Local" or sk == "Param" or sk == "LambdaParam":
+            let sti: i64 = sym_type_at(ts, sym_idx)
+            if sti >= 0 and sti < ts.types.length():
+              if is_generator_kind(ts.types.get(sti)):
+                return ts_add_diag(ts, ts_tok_span(ts, tidx), "cannot capture generator '" + sym.name + "' in a lambda")
+      return ts
+    parser::Node::BinaryE(op, l, r2):
+      return check_lambda_no_gen_captures(check_lambda_no_gen_captures(ts, l, bound_syms), r2, bound_syms)
+    parser::Node::UnaryE(op, operand):
+      return check_lambda_no_gen_captures(ts, operand, bound_syms)
+    parser::Node::CallE(callee, args_lp, ac, tlp, nlp, tot):
+      let r: TS = check_lambda_no_gen_captures(ts, callee, bound_syms)
+      let args: Vector<i64> = parser::read_list(r.tc.idx_data, args_lp)
+      let i: i64 = 0
+      while i < args.length():
+        r = check_lambda_no_gen_captures(r, args.get(i), bound_syms)
+        i = i + 1
+      return r
+    parser::Node::FieldE(obj, ftidx):
+      return check_lambda_no_gen_captures(ts, obj, bound_syms)
+    parser::Node::PipeE(l, r2):
+      return check_lambda_no_gen_captures(check_lambda_no_gen_captures(ts, l, bound_syms), r2, bound_syms)
+    parser::Node::IndexE(obj, idx_e):
+      return check_lambda_no_gen_captures(check_lambda_no_gen_captures(ts, obj, bound_syms), idx_e, bound_syms)
+    parser::Node::TryE(operand):
+      return check_lambda_no_gen_captures(ts, operand, bound_syms)
+    parser::Node::LambdaE(sub_plp, sub_pc, sub_body):
+      let inner_bound: HashMap<string, i64> = bound_syms
+      let ptoks: Vector<i64> = parser::read_list(ts.tc.idx_data, sub_plp)
+      let pi: i64 = 0
+      while pi < ptoks.length():
+        let pname: string = ts_tok_name(ts, ptoks.get(pi))
+        let psym: i64 = member_sym_of(ts.reg.index, ts.tc.module_id, expr_idx, "LambdaParam", pname)
+        if psym >= 0:
+          inner_bound = inner_bound.set(i64_to_string(psym), to_i64(1))
+        pi = pi + 1
+      return check_lambda_no_gen_captures(ts, sub_body, inner_bound)
+  return ts
+
+fn check_lambda_with_expected(ts: TS, node_idx: i64, expected_ti: i64, open: Vector<i64>): TS
+  if expected_ti < 0 or expected_ti >= ts.types.length():
+    return ts_add_diag(ts, ts_node_span(ts, node_idx), "lambda requires expected function type context")
+  let et: base::DaoType = ts.types.get(expected_ti)
+  if is_function_kind(et) == false:
+    return ts_add_diag(ts, ts_node_span(ts, node_idx), "lambda requires expected function type context")
+  match ts.tc.nodes.get(node_idx):
+    parser::Node::LambdaE(params_lp, param_count, body):
+      let ptoks: Vector<i64> = parser::read_list(ts.tc.idx_data, params_lp)
+      if ptoks.length() != et.info_count:
+        return ts_add_diag(ts, ts_node_span(ts, node_idx), "lambda expects " + i64_to_string(et.info_count) + " parameter(s), got " + i64_to_string(ptoks.length()))
+      if fn_params_walkable(ts, et) == false:
+        return ts
+      let r: TS = ts
+      let param_tis: Vector<i64> = Vector<i64>::new()
+      let bound_syms: HashMap<string, i64> = HashMap<string, i64>::new()
+      let pi: i64 = 0
+      while pi < ptoks.length():
+        let pti: i64 = r.type_info.get(et.info_lp + pi)
+        if open.length() > 0 and type_mentions_any(r, pti, open):
+          return ts_add_diag(r, ts_tok_span(r, ptoks.get(pi)), "cannot infer lambda parameter type; provide an explicit function type context")
+        let pname: string = ts_tok_name(r, ptoks.get(pi))
+        let psym: i64 = member_sym_of(r.reg.index, r.tc.module_id, node_idx, "LambdaParam", pname)
+        if psym >= 0:
+          r = ts_set_sym_type(r, psym, pti)
+          bound_syms = bound_syms.set(i64_to_string(psym), to_i64(1))
+        param_tis = param_tis.push(pti)
+        pi = pi + 1
+      r = check_lambda_no_gen_captures(r, body, bound_syms)
+      let expected_ret: i64 = et.ret_type
+      let open_ret: bool = open.length() > 0 and type_mentions_any(r, expected_ret, open)
+      if open_ret:
+        r = check_expr(r, body)
+        let body_ti: i64 = get_expr_type(r, body)
+        if body_ti >= 0:
+          let made_open: TypeR = make_fn_value_type(r, param_tis, body_ti)
+          return ts_set_expr_type(made_open.ts, node_idx, made_open.type_idx)
+        return r
+      if is_lambda_expr(r, body):
+        r = check_lambda_with_expected(r, body, expected_ret, open)
+      else:
+        r = check_expr(r, body)
+        if expected_ret >= 0:
+          r = fit_literal(r, body, expected_ret)
+      let body_ti2: i64 = get_expr_type(r, body)
+      if body_ti2 >= 0 and expected_ret >= 0:
+        if is_void_type(r, expected_ret) == false and types_equal(r, body_ti2, expected_ret) == false:
+          r = ts_add_diag(r, ts_node_span(r, body), "lambda body has type " + type_name(r, body_ti2) + ", expected " + type_name(r, expected_ret))
+      if et.decl_node < 0:
+        return ts_set_expr_type(r, node_idx, expected_ti)
+      let made_fn: TypeR = make_fn_value_type(r, param_tis, expected_ret)
+      return ts_set_expr_type(made_fn.ts, node_idx, made_fn.type_idx)
+  return ts
+
+fn check_callee_expr(ts: TS, callee: i64): TS
+  if callee < 0 or callee >= ts.tc.nodes.length():
+    return ts
+  match ts.tc.nodes.get(callee):
+    parser::Node::IdentE(tidx):
+      return check_ident_expr_mode(ts, callee, tidx, true)
+    parser::Node::QualNameE(seg_lp, seg_count):
+      return check_qualname_expr_mode(ts, callee, seg_lp, seg_count, true)
+  return check_expr(ts, callee)
+
 fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: WrittenTypeArgs, names_lp: i64): TS
   // A pointer's operations are the compiler's own, not a declared type's
   // methods, so a call that names one is typed here — before the callee
@@ -4070,11 +4422,12 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
     let ptr_call: PtrCallR = check_ptr_method_call(rp, node_idx, callee, args0, targs.list_lp, names_lp)
     if ptr_call.handled:
       return ptr_call.ts
-  let r: TS = check_expr(named_ptr.ts, callee)
+  let r: TS = check_callee_expr(named_ptr.ts, callee)
   let args: Vector<i64> = parser::read_list(r.tc.idx_data, args_lp)
   let ai: i64 = 0
   while ai < args.length():
-    r = check_expr(r, args.get(ai))
+    if is_lambda_expr(r, args.get(ai)) == false:
+      r = check_expr(r, args.get(ai))
     ai = ai + 1
   // Try get_expr_type first; if it fails, resolve callee directly
   let callee_ti: i64 = get_expr_type(r, callee)
@@ -4236,17 +4589,30 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
       while ci2 < class_open.length():
         open = open.push(class_open.get(ci2))
         ci2 = ci2 + 1
+      let is_ext_call: bool = is_extern_callable(r, callee)
       while ci < args.length():
         if walk_params:
           let param_ti: i64 = r.type_info.get(callee_type.info_lp + param_offset + ci)
           let so_far: TypeR = substitute_type(r, decided, param_ti)
           r = so_far.ts
-          // A literal argument adopts the parameter's concrete type (host).
-          r = fit_literal(r, args.get(ci), so_far.type_idx)
-          let arg_ti: i64 = get_expr_type(r, args.get(ci))
+          let arg_node: i64 = args.get(ci)
+          if is_lambda_expr(r, arg_node):
+            r = check_lambda_with_expected(r, arg_node, so_far.type_idx, open)
+          else:
+            // A literal argument adopts the parameter's concrete type (host).
+            r = fit_literal(r, arg_node, so_far.type_idx)
+          if is_ext_call:
+            if param_ti >= 0 and param_ti < r.types.length():
+              if is_function_kind(r.types.get(param_ti)):
+                if is_lambda_expr(r, arg_node):
+                  r = ts_add_diag(r, ts_node_span(r, arg_node), "lambda cannot be passed as a C function pointer; use a named function instead")
+                else:
+                  if is_named_fn_expr(r, arg_node) == false:
+                    r = ts_add_diag(r, ts_node_span(r, arg_node), "only named functions can be passed as a C function pointer")
+          let arg_ti: i64 = get_expr_type(r, arg_node)
           if arg_ti >= 0:
             if param_ti >= 0:
-              let asp: Span = ts_node_span(r, args.get(ci))
+              let asp: Span = ts_node_span(r, arg_node)
               if open.length() > 0:
                 let bound: Bound = infer_bindings(r, decided, param_ti, arg_ti, asp, open)
                 r = bound.ts
@@ -4326,7 +4692,10 @@ fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: Writ
           // the second field of `Pair(1, x)` is read as an `i32`.
           let field_now: TypeR = substitute_type(r, built, field_type_idx)
           r = field_now.ts
-          r = fit_literal(r, args.get(ci), field_now.type_idx)
+          if is_lambda_expr(r, args.get(ci)):
+            r = check_lambda_with_expected(r, args.get(ci), field_now.type_idx, open_params)
+          else:
+            r = fit_literal(r, args.get(ci), field_now.type_idx)
           let arg_ti: i64 = get_expr_type(r, args.get(ci))
           if arg_ti >= 0:
             if field_type_idx >= 0:
@@ -4465,7 +4834,10 @@ fn check_variant_construction(ts: TS, node_idx: i64, callee: i64, enum_ti: i64, 
     // call argument does (host).
     let so_far: TypeR = substitute_type(r, decided, param_ti)
     r = so_far.ts
-    r = fit_literal(r, arg, so_far.type_idx)
+    if is_lambda_expr(r, arg):
+      r = check_lambda_with_expected(r, arg, so_far.type_idx, open)
+    else:
+      r = fit_literal(r, arg, so_far.type_idx)
     let arg_ti: i64 = get_expr_type(r, arg)
     if arg_ti >= 0 and param_ti >= 0:
       let vsp: Span = ts_node_span(r, arg)
@@ -4609,8 +4981,31 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
 
 fn check_pipe_expr(ts: TS, node_idx: i64, left: i64, right: i64): TS
   let r: TS = check_expr(ts, left)
-  r = check_expr(r, right)
   let lhs_ti: i64 = get_expr_type(r, left)
+  if is_lambda_expr(r, right):
+    if lhs_ti < 0:
+      return r
+    match r.tc.nodes.get(right):
+      parser::Node::LambdaE(params_lp, param_count, body):
+        let ptoks: Vector<i64> = parser::read_list(r.tc.idx_data, params_lp)
+        if ptoks.length() != 1:
+          return ts_add_diag(r, ts_node_span(r, right), "piped lambda expects 1 parameter, got " + i64_to_string(ptoks.length()))
+        let pname: string = ts_tok_name(r, ptoks.get(0))
+        let psym: i64 = member_sym_of(r.reg.index, r.tc.module_id, right, "LambdaParam", pname)
+        let bound_syms: HashMap<string, i64> = HashMap<string, i64>::new()
+        if psym >= 0:
+          r = ts_set_sym_type(r, psym, lhs_ti)
+          bound_syms = bound_syms.set(i64_to_string(psym), to_i64(1))
+        r = check_lambda_no_gen_captures(r, body, bound_syms)
+        r = check_expr(r, body)
+        let body_ti: i64 = get_expr_type(r, body)
+        if body_ti >= 0:
+          let one_p: Vector<i64> = Vector<i64>::new()
+          let fn_tr: TypeR = make_fn_value_type(r, one_p.push(lhs_ti), body_ti)
+          r = ts_set_expr_type(fn_tr.ts, right, fn_tr.type_idx)
+          return ts_set_expr_type(r, node_idx, body_ti)
+    return r
+  r = check_expr(r, right)
   let rhs_ti: i64 = get_expr_type(r, right)
   // A pipe target reached across the module boundary can carry a type
   // index past this module's `types`; leave such a pipe unchecked rather
@@ -4744,10 +5139,13 @@ fn check_let_stmt(ts: TS, node_idx: i64, name_tidx: i64, type_node: i64, init_no
         let sp: Span = ts_node_span(r, type_node)
         r = ts_add_diag(r, sp, "unknown type in annotation")
   if init_node >= 0:
-    r = check_expr(r, init_node)
-    // A literal initializer adopts a concrete annotated type (host).
-    if annot_ti >= 0:
-      r = fit_literal(r, init_node, annot_ti)
+    if is_lambda_expr(r, init_node):
+      r = check_lambda_with_expected(r, init_node, annot_ti, Vector<i64>::new())
+    else:
+      r = check_expr(r, init_node)
+      // A literal initializer adopts a concrete annotated type (host).
+      if annot_ti >= 0:
+        r = fit_literal(r, init_node, annot_ti)
     let init_ti: i64 = get_expr_type(r, init_node)
     // With no annotation, an enum value whose parameters are open has
     // no type to take (host).
@@ -4791,16 +5189,19 @@ fn is_lvalue(ts: TS, node_idx: i64): bool
 
 fn check_assign_stmt(ts: TS, node_idx: i64, target: i64, value: i64): TS
   let r: TS = check_expr(ts, target)
-  r = check_expr(r, value)
   // Validate lvalue
   if is_lvalue(r, target) == false:
     let sp: Span = ts_node_span(r, target)
     r = ts_add_diag(r, sp, "invalid assignment target: expected identifier, field, or index expression")
   let target_ti: i64 = get_expr_type(r, target)
-  // A literal value adopts the assignment target's concrete type (host
-  // `check_assignment` checks the value against the target as expected).
-  if target_ti >= 0:
-    r = fit_literal(r, value, target_ti)
+  if is_lambda_expr(r, value):
+    r = check_lambda_with_expected(r, value, target_ti, Vector<i64>::new())
+  else:
+    r = check_expr(r, value)
+    // A literal value adopts the assignment target's concrete type (host
+    // `check_assignment` checks the value against the target as expected).
+    if target_ti >= 0:
+      r = fit_literal(r, value, target_ti)
   let value_ti: i64 = get_expr_type(r, value)
   if target_ti >= 0:
     if value_ti >= 0:
@@ -4870,10 +5271,14 @@ fn check_return_stmt(ts: TS, val_node: i64): TS
         let sp: Span = Span(to_i64(0), to_i64(1))
         return ts_add_diag(ts, sp, "return with no value in function returning " + type_name(ts, ts.ctx.return_type))
     return ts
-  let r: TS = check_expr(ts, val_node)
-  // A literal return value adopts the function's concrete return type.
-  if r.ctx.return_type >= 0:
-    r = fit_literal(r, val_node, r.ctx.return_type)
+  let r: TS = ts
+  if is_lambda_expr(r, val_node):
+    r = check_lambda_with_expected(r, val_node, r.ctx.return_type, Vector<i64>::new())
+  else:
+    r = check_expr(r, val_node)
+    // A literal return value adopts the function's concrete return type.
+    if r.ctx.return_type >= 0:
+      r = fit_literal(r, val_node, r.ctx.return_type)
   let val_ti: i64 = get_expr_type(r, val_node)
   if val_ti >= 0:
     if r.ctx.return_type >= 0:
@@ -5094,9 +5499,13 @@ fn tc_check_expr_body_value(ts: TS, body_expr: i64): TS
     // Generator Functions): a generator produces values only by `yield`.
     let rg: TS = check_expr(ts, body_expr)
     return ts_add_diag(rg, ts_node_span(rg, body_expr), "'return value' is invalid in a generator function; use yield to produce values")
-  let r: TS = check_expr(ts, body_expr)
-  if r.ctx.return_type >= 0:
-    r = fit_literal(r, body_expr, r.ctx.return_type)
+  let r: TS = ts
+  if is_lambda_expr(r, body_expr):
+    r = check_lambda_with_expected(r, body_expr, r.ctx.return_type, Vector<i64>::new())
+  else:
+    r = check_expr(r, body_expr)
+    if r.ctx.return_type >= 0:
+      r = fit_literal(r, body_expr, r.ctx.return_type)
   let body_ti: i64 = get_expr_type(r, body_expr)
   if body_ti >= 0:
     if r.ctx.return_type >= 0:
@@ -5630,26 +6039,422 @@ fn tc_pass_satisfaction(ts: TS, file_node_idx: i64): TS
       return tc_check_concept_satisfaction(ts, parser::read_list(ts.tc.idx_data, decls_lp))
   return ts
 
+fn tc_type_holds_fn_by_value(ts: TS, ti: i64, seen: HashMap<string, i64>): bool
+  if ti < 0 or ti >= ts.types.length():
+    return false
+  let key: string = i64_to_string(ti)
+  if seen.contains(key):
+    return false
+  let seen2: HashMap<string, i64> = seen.set(key, to_i64(1))
+  let t: base::DaoType = ts.types.get(ti)
+  match t.kind:
+    base::TypeKind::TFunction:
+      return true
+    base::TypeKind::TStruct:
+      if layout_walkable(ts, t) == false:
+        return false
+      let fi: i64 = 0
+      while fi < t.info_count:
+        let fti: i64 = ts.type_info.get(t.info_lp + fi * 2 + 1)
+        if tc_type_holds_fn_by_value(ts, fti, seen2):
+          return true
+        fi = fi + 1
+  return false
+
+fn tc_is_higher_order_fn_type(ts: TS, ti: i64): bool
+  if ti < 0 or ti >= ts.types.length():
+    return false
+  let t: base::DaoType = ts.types.get(ti)
+  if is_function_kind(t) == false:
+    return false
+  if t.ret_type >= 0 and t.ret_type < ts.types.length():
+    if is_function_kind(ts.types.get(t.ret_type)):
+      return true
+  if fn_params_walkable(ts, t):
+    let pi: i64 = 0
+    while pi < t.info_count:
+      let pti: i64 = ts.type_info.get(t.info_lp + pi)
+      if pti >= 0 and pti < ts.types.length():
+        if is_function_kind(ts.types.get(pti)):
+          return true
+      pi = pi + 1
+  return false
+
+fn tc_is_c_abi_type(ts: TS, ti: i64, allow_fn: bool, seen: HashMap<string, i64>): bool
+  if ti < 0 or ti >= ts.types.length():
+    return false
+  let t: base::DaoType = ts.types.get(ti)
+  match t.kind:
+    base::TypeKind::TBuiltin:
+      return true
+    base::TypeKind::TPointer:
+      return true
+    base::TypeKind::TStruct:
+      if t.info_count <= 0:
+        return false
+      if layout_walkable(ts, t) == false:
+        return false
+      let key: string = i64_to_string(ti)
+      if seen.contains(key):
+        return false
+      let seen2: HashMap<string, i64> = seen.set(key, to_i64(1))
+      let fi: i64 = 0
+      while fi < t.info_count:
+        let fti: i64 = ts.type_info.get(t.info_lp + fi * 2 + 1)
+        if tc_is_c_abi_type(ts, fti, false, seen2) == false:
+          return false
+        fi = fi + 1
+      return true
+    base::TypeKind::TFunction:
+      if allow_fn == false:
+        return false
+      if fn_params_walkable(ts, t) == false:
+        return false
+      let pi: i64 = 0
+      while pi < t.info_count:
+        let pti: i64 = ts.type_info.get(t.info_lp + pi)
+        if tc_is_c_abi_type(ts, pti, false, seen) == false:
+          return false
+        pi = pi + 1
+      if is_void_type(ts, t.ret_type):
+        return true
+      return tc_is_c_abi_type(ts, t.ret_type, false, seen)
+  return false
+
+fn tc_check_extern_fn_decl(ts: TS, decl_idx: i64, name_tidx: i64, params_lp: i64, ret_type_node: i64): TS
+  let fname: string = ts_tok_name(ts, name_tidx)
+  if starts_with(fname, "__"):
+    return ts
+  let r: TS = ts
+  let pairs: Vector<i64> = resolver::read_pairs(r.tc.idx_data, params_lp)
+  let pi: i64 = 0
+  while pi < pairs.length():
+    let p_type_node: i64 = pairs.get(pi + 1)
+    let pt_r: TypeR = resolve_ast_type(r, p_type_node)
+    r = pt_r.ts
+    let pti: i64 = pt_r.type_idx
+    if pti >= 0:
+      if tc_type_holds_fn_by_value(r, pti, HashMap<string, i64>::new()):
+        if tc_is_c_abi_type(r, pti, true, HashMap<string, i64>::new()) == false:
+          let kind_desc: string = "parameter type"
+          if tc_is_higher_order_fn_type(r, pti):
+            kind_desc = "higher-order function type"
+          r = ts_add_diag(r, ts_node_span(r, p_type_node), "extern fn " + kind_desc + " '" + type_name(r, pti) + "' is not supported at the C ABI boundary")
+    pi = pi + 2
+  if ret_type_node >= 0:
+    let rt_r: TypeR = resolve_ast_type(r, ret_type_node)
+    r = rt_r.ts
+    let rti: i64 = rt_r.type_idx
+    if rti >= 0:
+      if is_void_type(r, rti) == false:
+        if tc_type_holds_fn_by_value(r, rti, HashMap<string, i64>::new()):
+          if tc_is_c_abi_type(r, rti, true, HashMap<string, i64>::new()) == false:
+            let rdesc: string = "return type"
+            if tc_is_higher_order_fn_type(r, rti):
+              rdesc = "higher-order function type"
+            r = ts_add_diag(r, ts_node_span(r, ret_type_node), "extern fn " + rdesc + " '" + type_name(r, rti) + "' is not supported at the C ABI boundary")
+  return r
+
+fn tc_body_has_return(ts: TS, list_pos: i64): bool
+  if list_pos < 0:
+    return false
+  let stmts: Vector<i64> = parser::read_list(ts.tc.idx_data, list_pos)
+  let i: i64 = 0
+  while i < stmts.length():
+    match ts.tc.nodes.get(stmts.get(i)):
+      parser::Node::ReturnS(v):
+        return true
+      parser::Node::IfS(c, tlp, elp):
+        if tc_body_has_return(ts, tlp):
+          return true
+        if elp >= 0:
+          if tc_body_has_return(ts, elp):
+            return true
+      parser::Node::WhileS(c, blp):
+        if tc_body_has_return(ts, blp):
+          return true
+      parser::Node::ForS(vt, it, blp):
+        if tc_body_has_return(ts, blp):
+          return true
+      parser::Node::MatchS(sc, alp):
+        let arms: Vector<i64> = resolver::read_pairs(ts.tc.idx_data, alp)
+        let ai: i64 = 0
+        while ai < arms.length():
+          if tc_body_has_return(ts, arms.get(ai + 1)):
+            return true
+          ai = ai + 2
+      parser::Node::ModeS(nt, blp):
+        if tc_body_has_return(ts, blp):
+          return true
+      parser::Node::ResourceS(kt, nt, blp):
+        if tc_body_has_return(ts, blp):
+          return true
+    i = i + 1
+  return false
+
+fn tc_expr_diverges(ts: TS, expr_idx: i64): bool
+  if expr_idx < 0 or expr_idx >= ts.tc.nodes.length():
+    return false
+  match ts.tc.nodes.get(expr_idx):
+    parser::Node::CallE(callee, alp, ac, tlp, nlp, tot):
+      let sym: i64 = callee_symbol(ts, callee)
+      if sym >= 0:
+        return ts.reg.index.diverging_fns.contains(i64_to_string(sym))
+    parser::Node::PipeE(left, right):
+      if is_lambda_expr(ts, right):
+        return false
+      let sym2: i64 = callee_symbol(ts, right)
+      if sym2 >= 0:
+        return ts.reg.index.diverging_fns.contains(i64_to_string(sym2))
+  return false
+
+fn tc_match_terminates(ts: TS, scrut_node: i64, arms_lp: i64, allow_return: bool): bool
+  let scrut_ti: i64 = get_expr_type(ts, scrut_node)
+  if scrut_ti < 0 or scrut_ti >= ts.types.length():
+    return false
+  let arms: Vector<i64> = resolver::read_pairs(ts.tc.idx_data, arms_lp)
+  if arms.length() == 0:
+    return false
+  if is_bool_type(ts, scrut_ti):
+    let has_true: bool = false
+    let has_false: bool = false
+    let bi: i64 = 0
+    while bi < arms.length() and (has_true and has_false) == false:
+      let is_dup_bool: bool = false
+      match ts.tc.nodes.get(arms.get(bi)):
+        parser::Node::BoolLitE(tidx):
+          let lex: string = ts_tok_name(ts, tidx)
+          if lex == "true":
+            if has_true:
+              is_dup_bool = true
+            else:
+              has_true = true
+          if lex == "false":
+            if has_false:
+              is_dup_bool = true
+            else:
+              has_false = true
+      if is_dup_bool == false:
+        if tc_body_terminates(ts, arms.get(bi + 1), allow_return) == false:
+          return false
+      bi = bi + 2
+    return has_true and has_false
+  let scrut_t: base::DaoType = ts.types.get(scrut_ti)
+  match scrut_t.kind:
+    base::TypeKind::TEnum:
+      let head_ti: i64 = record_head(ts, scrut_t)
+      if head_ti < 0:
+        head_ti = scrut_ti
+      let total_variants: i64 = ts.types.get(head_ti).info_count
+      if total_variants <= 0:
+        return false
+      let covered: HashMap<string, i64> = HashMap<string, i64>::new()
+      let covered_count: i64 = 0
+      let ai: i64 = 0
+      while ai < arms.length() and covered_count < total_variants:
+        let pat_node: i64 = arms.get(ai)
+        let qn_node: i64 = pat_node
+        match ts.tc.nodes.get(pat_node):
+          parser::Node::CallE(callee, calp, cac, ctlp, cnlp, ctot):
+            qn_node = callee
+        let vidx: i64 = base::hm_get_or(ts.reg.expr_types, variant_index_key(ts.tc.module_id, qn_node), to_i64(-1))
+        let is_dup_arm: bool = false
+        if vidx >= 0 and vidx < total_variants:
+          let vkey: string = i64_to_string(vidx)
+          if covered.contains(vkey):
+            is_dup_arm = true
+          else:
+            covered = covered.set(vkey, to_i64(1))
+            covered_count = covered_count + 1
+        if is_dup_arm == false:
+          if tc_body_terminates(ts, arms.get(ai + 1), allow_return) == false:
+            return false
+        ai = ai + 2
+      return covered_count == total_variants
+  return false
+
+fn tc_body_terminates(ts: TS, list_pos: i64, allow_return: bool): bool
+  if list_pos < 0:
+    return false
+  let stmts: Vector<i64> = parser::read_list(ts.tc.idx_data, list_pos)
+  let i: i64 = 0
+  while i < stmts.length():
+    if tc_stmt_terminates(ts, stmts.get(i), allow_return):
+      return true
+    i = i + 1
+  return false
+
+fn tc_stmt_terminates(ts: TS, stmt_idx: i64, allow_return: bool): bool
+  if stmt_idx < 0 or stmt_idx >= ts.tc.nodes.length():
+    return false
+  match ts.tc.nodes.get(stmt_idx):
+    parser::Node::ReturnS(v):
+      return allow_return
+    parser::Node::ExprStmtS(e):
+      return tc_expr_diverges(ts, e)
+    parser::Node::IfS(c, tlp, elp):
+      if elp < 0:
+        return false
+      if tc_body_terminates(ts, tlp, allow_return):
+        return tc_body_terminates(ts, elp, allow_return)
+      return false
+    parser::Node::MatchS(scrut, alp):
+      return tc_match_terminates(ts, scrut, alp, allow_return)
+    parser::Node::ModeS(nt, blp):
+      return tc_body_terminates(ts, blp, allow_return)
+    parser::Node::ResourceS(kt, nt, blp):
+      return tc_body_terminates(ts, blp, allow_return)
+  return false
+
+fn tc_fn_returns_void(ts: TS, sym: i64): bool
+  if sym < 0:
+    return false
+  let fti: i64 = sym_type_at(ts, sym)
+  if fti < 0 or fti >= ts.types.length():
+    return false
+  let ft: base::DaoType = ts.types.get(fti)
+  if is_function_kind(ft) == false:
+    return false
+  return is_void_type(ts, ft.ret_type)
+
+fn tc_fn_needs_value_return(ts: TS, sym: i64): bool
+  if sym < 0:
+    return false
+  let fti: i64 = sym_type_at(ts, sym)
+  if fti < 0 or fti >= ts.types.length():
+    return false
+  let ft: base::DaoType = ts.types.get(fti)
+  if is_function_kind(ft) == false:
+    return false
+  let rti: i64 = ft.ret_type
+  if rti < 0 or rti >= ts.types.length():
+    return false
+  if is_void_type(ts, rti):
+    return false
+  if is_generator_kind(ts.types.get(rti)):
+    return false
+  return true
+
+fn tc_try_mark_diverging_decl(ts: TS, decl_idx: i64, sym: i64, clean_decls: HashMap<string, i64>): TypeR
+  if sym < 0:
+    return TypeR(ts, to_i64(0))
+  if ts.reg.index.diverging_fns.contains(i64_to_string(sym)):
+    return TypeR(ts, to_i64(0))
+  if clean_decls.contains(i64_to_string(decl_idx)) == false:
+    return TypeR(ts, to_i64(0))
+  if tc_fn_returns_void(ts, sym) == false:
+    return TypeR(ts, to_i64(0))
+  let diverges: bool = false
+  match ts.tc.nodes.get(decl_idx):
+    parser::Node::ExprFnD(nt, tp, plp, rtn, body_expr):
+      diverges = tc_expr_diverges(ts, body_expr)
+    parser::Node::FnDeclD(nt, tp, plp, rtn, body_lp):
+      if tc_body_has_return(ts, body_lp) == false:
+        diverges = tc_body_terminates(ts, body_lp, false)
+  if diverges:
+    let r: TS = ts
+    r.reg = reg_add_diverging_fn(r.reg, sym)
+    return TypeR(r, to_i64(1))
+  return TypeR(ts, to_i64(0))
+
+fn tc_compute_module_diverging(ts: TS, decls: Vector<i64>, clean_decls: HashMap<string, i64>): TS
+  let r: TS = ts
+  let i: i64 = 0
+  while i < decls.length():
+    let decl_idx: i64 = decls.get(i)
+    match r.tc.nodes.get(decl_idx):
+      parser::Node::ExternFnD(name_tidx, tp, plp, rtn):
+        let fname: string = ts_tok_name(r, name_tidx)
+        let is_panic_prim: bool = false
+        if module_in_prelude(r):
+          if fname == "__dao_panic" or fname == "panic":
+            is_panic_prim = true
+        if is_panic_prim:
+          let esym: i64 = find_callable_sym_by_decl(r, decl_idx)
+          if tc_fn_returns_void(r, esym):
+            r.reg = reg_add_diverging_fn(r.reg, esym)
+    i = i + 1
+  let changed: bool = true
+  while changed:
+    changed = false
+    let j: i64 = 0
+    while j < decls.length():
+      let d_idx: i64 = decls.get(j)
+      match r.tc.nodes.get(d_idx):
+        parser::Node::FnDeclD(nt, tp, plp, rtn, blp):
+          let step: TypeR = tc_try_mark_diverging_decl(r, d_idx, find_callable_sym_by_decl(r, d_idx), clean_decls)
+          r = step.ts
+          if step.type_idx > 0:
+            changed = true
+        parser::Node::ExprFnD(nt, tp, plp, rtn, be):
+          let step2: TypeR = tc_try_mark_diverging_decl(r, d_idx, find_callable_sym_by_decl(r, d_idx), clean_decls)
+          r = step2.ts
+          if step2.type_idx > 0:
+            changed = true
+        parser::Node::ClassDeclD(nt, tp, flp, mlp):
+          if mlp >= 0:
+            let meths: Vector<i64> = parser::read_list(r.tc.idx_data, mlp)
+            let mi: i64 = 0
+            while mi < meths.length():
+              let m_idx: i64 = meths.get(mi)
+              let mstep: TypeR = tc_try_mark_diverging_decl(r, m_idx, callable_sym_of_decl(r, m_idx), clean_decls)
+              r = mstep.ts
+              if mstep.type_idx > 0:
+                changed = true
+              mi = mi + 1
+        parser::Node::ExtendDeclD(ttn, cnt, mlp2):
+          if mlp2 >= 0:
+            let emeths: Vector<i64> = parser::read_list(r.tc.idx_data, mlp2)
+            let emi: i64 = 0
+            while emi < emeths.length():
+              let em_idx: i64 = emeths.get(emi)
+              let emstep: TypeR = tc_try_mark_diverging_decl(r, em_idx, callable_sym_of_decl(r, em_idx), clean_decls)
+              r = emstep.ts
+              if emstep.type_idx > 0:
+                changed = true
+              emi = emi + 1
+      j = j + 1
+  return r
+
+fn tc_check_decl_definite_return(ts: TS, decl_idx: i64, sym: i64, name_tidx: i64, body_lp: i64, clean_decls: HashMap<string, i64>): TS
+  if clean_decls.contains(i64_to_string(decl_idx)) == false:
+    return ts
+  if tc_fn_needs_value_return(ts, sym) == false:
+    return ts
+  if tc_body_terminates(ts, body_lp, true):
+    return ts
+  return ts_add_diag(ts, ts_tok_span(ts, name_tidx), "function '" + ts_tok_name(ts, name_tidx) + "' may reach end of body without returning a value")
+
 // The bodies of a class's or an extend's methods, block- or
 // expression-bodied (their bounds were bound with the module's,
 // tc_bind_module_bounds).
-fn tc_check_owner_methods(ts: TS, owner_decl_idx: i64, methods_lp: i64): TS
+class BodyCheckR:
+  ts: TS
+  clean: HashMap<string, i64>
+
+fn tc_check_owner_methods_tracked(ts: TS, owner_decl_idx: i64, methods_lp: i64, clean: HashMap<string, i64>): BodyCheckR
   if methods_lp < 0:
-    return ts
+    return BodyCheckR(ts, clean)
   let own: TypeR = method_owner(ts, owner_decl_idx)
   let r: TS = own.ts
+  let c: HashMap<string, i64> = clean
   let meths: Vector<i64> = parser::read_list(r.tc.idx_data, methods_lp)
   let mi: i64 = 0
   while mi < meths.length():
     let meth_idx: i64 = meths.get(mi)
+    let before: i64 = r.diags.length()
     let meth_node: parser::Node = r.tc.nodes.get(meth_idx)
     match meth_node:
       parser::Node::FnDeclD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_lp):
         r = tc_check_method_body(r, own.type_idx, meth_idx, m_name_tidx, m_params_lp, m_body_lp)
+        if r.diags.length() == before:
+          c = c.set(i64_to_string(meth_idx), to_i64(1))
       parser::Node::ExprFnD(m_name_tidx, m_tparams_lp, m_params_lp, m_ret_type, m_body_expr):
         r = tc_check_method_expr_body(r, own.type_idx, meth_idx, m_name_tidx, m_params_lp, m_body_expr)
+        if r.diags.length() == before:
+          c = c.set(i64_to_string(meth_idx), to_i64(1))
     mi = mi + 1
-  return r
+  return BodyCheckR(r, c)
 
 fn tc_check_extend_coherence(ts: TS, decl_idx: i64, target_type_node: i64, concept_node: i64): TS
   let r: TS = ts
@@ -5675,21 +6480,61 @@ fn tc_pass2(ts: TS, file_node_idx: i64): TS
     parser::Node::FileN(module_decl, imports_lp, decls_lp):
       let decls: Vector<i64> = parser::read_list(ts.tc.idx_data, decls_lp)
       let r: TS = ts
+      let clean_decls: HashMap<string, i64> = HashMap<string, i64>::new()
       let i: i64 = 0
       while i < decls.length():
         let decl_idx: i64 = decls.get(i)
+        let before: i64 = r.diags.length()
         let node: parser::Node = r.tc.nodes.get(decl_idx)
         match node:
           parser::Node::FnDeclD(name_tidx, tparams_lp, params_lp, ret_type_node, body_lp):
             r = tc_check_fn_body(r, decl_idx, name_tidx, params_lp, ret_type_node, body_lp)
+            if r.diags.length() == before:
+              clean_decls = clean_decls.set(i64_to_string(decl_idx), to_i64(1))
           parser::Node::ExprFnD(name_tidx, tparams_lp, params_lp, ret_type_node, body_expr):
             r = tc_check_expr_fn_body(r, decl_idx, name_tidx, params_lp, ret_type_node, body_expr)
+            if r.diags.length() == before:
+              clean_decls = clean_decls.set(i64_to_string(decl_idx), to_i64(1))
+          parser::Node::ExternFnD(name_tidx, tparams_lp, params_lp, ret_type_node):
+            r = tc_check_extern_fn_decl(r, decl_idx, name_tidx, params_lp, ret_type_node)
           parser::Node::ClassDeclD(name_tidx, tparams_lp, fields_lp, methods_lp):
-            r = tc_check_owner_methods(r, decl_idx, methods_lp)
+            let cm: BodyCheckR = tc_check_owner_methods_tracked(r, decl_idx, methods_lp, clean_decls)
+            r = cm.ts
+            clean_decls = cm.clean
           parser::Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
             r = tc_check_extend_coherence(r, decl_idx, target_type_node, concept_name_tidx)
-            r = tc_check_owner_methods(r, decl_idx, methods_lp)
+            let em: BodyCheckR = tc_check_owner_methods_tracked(r, decl_idx, methods_lp, clean_decls)
+            r = em.ts
+            clean_decls = em.clean
         i = i + 1
+      r = tc_compute_module_diverging(r, decls, clean_decls)
+      let k: i64 = 0
+      while k < decls.length():
+        let d_idx2: i64 = decls.get(k)
+        match r.tc.nodes.get(d_idx2):
+          parser::Node::FnDeclD(name_tidx2, tp2, plp2, rtn2, body_lp2):
+            r = tc_check_decl_definite_return(r, d_idx2, find_callable_sym_by_decl(r, d_idx2), name_tidx2, body_lp2, clean_decls)
+          parser::Node::ClassDeclD(cnt2, ctp2, cflp2, cmlp2):
+            if cmlp2 >= 0:
+              let cmeths: Vector<i64> = parser::read_list(r.tc.idx_data, cmlp2)
+              let cmi: i64 = 0
+              while cmi < cmeths.length():
+                let cm_idx: i64 = cmeths.get(cmi)
+                match r.tc.nodes.get(cm_idx):
+                  parser::Node::FnDeclD(mn2, mtp2, mplp2, mrtn2, mblp2):
+                    r = tc_check_decl_definite_return(r, cm_idx, callable_sym_of_decl(r, cm_idx), mn2, mblp2, clean_decls)
+                cmi = cmi + 1
+          parser::Node::ExtendDeclD(ettn2, ecnt2, emlp2):
+            if emlp2 >= 0:
+              let emeths2: Vector<i64> = parser::read_list(r.tc.idx_data, emlp2)
+              let emi2: i64 = 0
+              while emi2 < emeths2.length():
+                let em_idx2: i64 = emeths2.get(emi2)
+                match r.tc.nodes.get(em_idx2):
+                  parser::Node::FnDeclD(emn2, emtp2, emplp2, emrtn2, emblp2):
+                    r = tc_check_decl_definite_return(r, em_idx2, callable_sym_of_decl(r, em_idx2), emn2, emblp2, clean_decls)
+                emi2 = emi2 + 1
+        k = k + 1
       return r
   return ts
 

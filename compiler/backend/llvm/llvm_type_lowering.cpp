@@ -43,20 +43,15 @@ auto LlvmTypeLowering::lower(const Type* type) -> llvm::Type* {
 
   case TypeKind::Function: {
     const auto* f = static_cast<const TypeFunction*>(type);
-    auto* ret = lower(f->return_type());
-    if (ret == nullptr) {
+    if (lower(f->return_type()) == nullptr) {
       return nullptr;
     }
-    std::vector<llvm::Type*> params;
-    params.reserve(f->param_types().size());
     for (const auto* param : f->param_types()) {
-      auto* lowered = lower(param);
-      if (lowered == nullptr) {
+      if (lower(param) == nullptr) {
         return nullptr;
       }
-      params.push_back(lowered);
     }
-    return llvm::FunctionType::get(ret, params, /*isVarArg=*/false);
+    return callable_type();
   }
 
   case TypeKind::Named: {
@@ -207,6 +202,15 @@ auto LlvmTypeLowering::generator_type() -> llvm::StructType* {
         ctx_, {ptr_type, ptr_type}, "dao.generator");
   }
   return generator_type_;
+}
+
+auto LlvmTypeLowering::callable_type() -> llvm::StructType* {
+  if (callable_type_ == nullptr) {
+    // First-class Dao callable representation: { ptr fn_ptr, ptr env_ptr }.
+    auto* ptr_type = llvm::PointerType::getUnqual(ctx_);
+    callable_type_ = llvm::StructType::create(ctx_, {ptr_type, ptr_type}, "dao.fn");
+  }
+  return callable_type_;
 }
 
 auto LlvmTypeLowering::lower_builtin(BuiltinKind kind) -> llvm::Type* {

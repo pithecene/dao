@@ -107,12 +107,6 @@ File
                     IntLiteral 0
       ReturnStatement
         Identifier head
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier panic
-        Args
-          StringLiteral "unreachable"
   FunctionDecl vec_log_values_new<T>
     Param outer: bool
     ReturnType: Ptr<Ptr<T>>
@@ -184,12 +178,6 @@ File
                 T
       ReturnStatement
         Identifier cell
-    ExpressionStatement
-      CallExpr
-        Callee
-          Identifier panic
-        Args
-          StringLiteral "unreachable"
   ClassDecl VecTrack
     Field gen: Ptr<i64>
     Field version: i64
@@ -1192,12 +1180,6 @@ File
                         Identifier self
                   Args
                     Identifier index
-      ExpressionStatement
-        CallExpr
-          Callee
-            Identifier panic
-          Args
-            StringLiteral "unreachable"
     FunctionDecl first
       Param self
       ReturnType: Option<T>
@@ -2318,3 +2300,292 @@ File
               T
             Args
               Identifier outer
+  ClassDecl Indexed<T>
+    Field index: i64
+    Field value: T
+  FunctionDecl enumerate<T>
+    Param xs: Vector<T>
+    ReturnType: Generator<Indexed<T>>
+    LetStatement i: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier xs
+      YieldStatement
+        CallExpr
+          Callee
+            Identifier Indexed
+          Args
+            Identifier i
+            CallExpr
+              Callee
+                FieldExpr .get
+                  Identifier xs
+              Args
+                Identifier i
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            IntLiteral 1
+  FunctionDecl filter_vec<T>
+    Param xs: Vector<T>
+    Param pred: fn(T): bool
+    ReturnType: Vector<T>
+    LetStatement out
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          T
+    LetStatement i: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier xs
+      LetStatement elem
+        CallExpr
+          Callee
+            FieldExpr .get
+              Identifier xs
+          Args
+            Identifier i
+      IfStatement
+        Condition
+          CallExpr
+            Callee
+              Identifier pred
+            Args
+              Identifier elem
+        Then
+          Assignment
+            Target
+              Identifier out
+            Value
+              CallExpr
+                Callee
+                  FieldExpr .push
+                    Identifier out
+                Args
+                  Identifier elem
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            IntLiteral 1
+    ReturnStatement
+      Identifier out
+  FunctionDecl map_vec<T, U>
+    Param xs: Vector<T>
+    Param f: fn(T): U
+    ReturnType: Vector<U>
+    LetStatement out
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          U
+    LetStatement i: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier xs
+      Assignment
+        Target
+          Identifier out
+        Value
+          CallExpr
+            Callee
+              FieldExpr .push
+                Identifier out
+            Args
+              CallExpr
+                Callee
+                  Identifier f
+                Args
+                  CallExpr
+                    Callee
+                      FieldExpr .get
+                        Identifier xs
+                    Args
+                      Identifier i
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            IntLiteral 1
+    ReturnStatement
+      Identifier out
+  FunctionDecl any_vec<T>
+    Param xs: Vector<T>
+    Param pred: fn(T): bool
+    ReturnType: bool
+    LetStatement i: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier xs
+      IfStatement
+        Condition
+          CallExpr
+            Callee
+              Identifier pred
+            Args
+              CallExpr
+                Callee
+                  FieldExpr .get
+                    Identifier xs
+                Args
+                  Identifier i
+        Then
+          ReturnStatement
+            BoolLiteral true
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            IntLiteral 1
+    ReturnStatement
+      BoolLiteral false
+  FunctionDecl all_vec<T>
+    Param xs: Vector<T>
+    Param pred: fn(T): bool
+    ReturnType: bool
+    LetStatement i: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier xs
+      IfStatement
+        Condition
+          BinaryExpr ==
+            CallExpr
+              Callee
+                Identifier pred
+              Args
+                CallExpr
+                  Callee
+                    FieldExpr .get
+                      Identifier xs
+                  Args
+                    Identifier i
+            BoolLiteral false
+        Then
+          ReturnStatement
+            BoolLiteral false
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            IntLiteral 1
+    ReturnStatement
+      BoolLiteral true
+  FunctionDecl find_if<T>
+    Param xs: Vector<T>
+    Param pred: fn(T): bool
+    ReturnType: Option<T>
+    LetStatement i: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier i
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier xs
+      LetStatement elem
+        CallExpr
+          Callee
+            FieldExpr .get
+              Identifier xs
+          Args
+            Identifier i
+      IfStatement
+        Condition
+          CallExpr
+            Callee
+              Identifier pred
+            Args
+              Identifier elem
+        Then
+          ReturnStatement
+            CallExpr
+              Callee
+                QualifiedName Option::Some
+              Args
+                Identifier elem
+      Assignment
+        Target
+          Identifier i
+        Value
+          BinaryExpr +
+            Identifier i
+            IntLiteral 1
+    ReturnStatement
+      QualifiedName Option::None
+  FunctionDecl filter_gen<T>
+    Param gen: Generator<T>
+    Param pred: fn(T): bool
+    ReturnType: Generator<T>
+    ForStatement elem
+      Iterable
+        Identifier gen
+      IfStatement
+        Condition
+          CallExpr
+            Callee
+              Identifier pred
+            Args
+              Identifier elem
+        Then
+          YieldStatement
+            Identifier elem
+  FunctionDecl map_gen<T, U>
+    Param gen: Generator<T>
+    Param f: fn(T): U
+    ReturnType: Generator<U>
+    ForStatement elem
+      Iterable
+        Identifier gen
+      YieldStatement
+        CallExpr
+          Callee
+            Identifier f
+          Args
+            Identifier elem

@@ -41,6 +41,7 @@ enum class Node:
   // --- Types ---
   NamedT(tok: i64)
   GenericT(name: i64, args_lp: i64, arg_count: i64)
+  FnT(fn_tok: i64, params_lp: i64, param_count: i64, ret: i64)
   // A generic type parameter.  `bounds` is a list_pos of bound type
   // nodes (`<T: A + B>`, `<T: core::Printable>`), or -1 when the
   // parameter is unbounded.  The resolver resolves each bound as a type;
@@ -291,6 +292,30 @@ fn parse_type(pc: PC, ps: PS): PR
     let ps_star: PS = ps_add_diag(ps, star_sp, "'*T' is no Dao syntax; spell a pointer type 'Ptr<T>'")
     let pointee: PR = parse_type(pc, ps_advance(pc, ps_star))
     return ps_add_node(pointee.ps, Node::ErrorT(tok = ps.pos))
+  if peek_is(pc, ps, lexer::TK::KwFn):
+    let fn_tidx: i64 = ps.pos
+    let cur: PS = expect(pc, ps_advance(pc, ps), lexer::TK::LParen)
+    let params: Vector<i64> = Vector<i64>::new()
+    if peek_is(pc, cur, lexer::TK::RParen) == false:
+      let first_p: PR = parse_type(pc, cur)
+      cur = first_p.ps
+      if first_p.node >= 0:
+        params = params.push(first_p.node)
+      let p_done: bool = false
+      while p_done == false:
+        if peek_is(pc, cur, lexer::TK::Comma):
+          cur = ps_advance(pc, cur)
+          let next_p: PR = parse_type(pc, cur)
+          cur = next_p.ps
+          if next_p.node >= 0:
+            params = params.push(next_p.node)
+        else:
+          p_done = true
+    cur = expect(pc, cur, lexer::TK::RParen)
+    cur = expect(pc, cur, lexer::TK::Colon)
+    let ret_r: PR = parse_type(pc, cur)
+    let fl: FlushResult = flush_list(ret_r.ps, params)
+    return ps_add_node(fl.ps, Node::FnT(fn_tok = fn_tidx, params_lp = fl.list_pos, param_count = params.length(), ret = ret_r.node))
   return parse_named_type(pc, ps)
 
 fn parse_named_type(pc: PC, ps: PS): PR
@@ -1915,6 +1940,8 @@ fn node_kind_name(n: Node): string
       return "NamedT"
     Node::GenericT(a, b, c):
       return "GenericT"
+    Node::FnT(a, b, c, d):
+      return "FnT"
     Node::GenericParamT(t, b):
       return "GenericParamT"
     Node::ErrorT(t):

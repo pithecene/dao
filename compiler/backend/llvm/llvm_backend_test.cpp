@@ -17,6 +17,7 @@
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/Verifier.h>
 
 #include <algorithm>
 #include <boost/ut.hpp>
@@ -1228,16 +1229,16 @@ suite<"unsupported_constructs"> unsupported_constructs = [] {
     expect(contains(ir, "deref.ptr")) << ir;
   };
 
-  "a pointer to a function value is offset and read as a ptr"_test = [] {
-    LlvmTestPipeline pipe(
-        "fn next(p: Ptr<fn(): i32>): i32\n"
-        "  mode unsafe =>\n"
-        "    let g = p.offset(1).get()\n"
-        "    return g()\n"
-        "  return 0\n");
+  "a pointer to a function value is offset and read as a fat callable"_test = [] {
+    LlvmTestPipeline pipe("fn next(p: Ptr<fn(): i32>): i32\n"
+                          "  mode unsafe =>\n"
+                          "    let g = p.offset(1).get()\n"
+                          "    return g()\n"
+                          "  return 0\n");
     auto ir = pipe.ir();
     expect(!pipe.has_errors()) << "no backend errors: " << ir;
-    expect(contains(ir, "getelementptr ptr")) << ir;
+    expect(contains(ir, "getelementptr %dao.fn")) << ir;
+    expect(contains(ir, "extractvalue %dao.fn")) << ir;
   };
 
   // The checker rejects get and offset on Ptr<void>; a generic
@@ -2088,6 +2089,104 @@ suite<"stack_temporaries"> stack_temporaries = [] {
     expect(contains(ir, "br i1")) << ir;
     auto outside = allocas_outside_entry(ir, "define i64 @\"test::spin\"");
     expect(outside.empty()) << "allocas past the entry block:\n" << outside << ir;
+  };
+};
+
+suite<"closures"> closures = [] {
+  "stateless lambda lowers with null env and zero allocation"_test = [] {
+    LlvmTestPipeline pipe("fn apply(f: fn(i32): i32, x: i32): i32 -> f(x)\n"
+                          "fn main(): i32 -> apply(|x| -> x + 1, 41)\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << ir;
+    expect(contains(ir, "%dao.fn")) << ir;
+    expect(contains(ir, "ptr null")) << ir;
+    expect(!contains(ir, "call ptr @__dao_mem_alloc(")) << ir;
+  };
+
+  "capturing lambda allocates env via __dao_mem_alloc"_test = [] {
+    LlvmTestPipeline pipe("fn make_adder(k: i32): fn(i32): i32 -> |x| -> x + k\n"
+                          "fn main(): i32\n"
+                          "  let f: fn(i32): i32 = make_adder(5)\n"
+                          "  return f(37)\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << ir;
+    expect(contains(ir, "call ptr @__dao_mem_alloc(")) << ir;
+    expect(contains(ir, "%dao.fn")) << ir;
+  };
+
+  "function value equality and inequality compare code and env pointers"_test = [] {
+    LlvmTestPipeline pipe("fn same(a: fn(i32): i32, b: fn(i32): i32): bool -> a == b\n"
+                          "fn diff(a: fn(i32): i32, b: fn(i32): i32): bool -> a != b\n"
+                          "fn inc(x: i32): i32 -> x + 1\n"
+                          "fn main(): i32\n"
+                          "  if same(inc, inc) and diff(inc, |x| -> x + 2):\n"
+                          "    return 0\n"
+                          "  return 1\n");
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << ir;
+    expect(contains(ir, "extractvalue %dao.fn")) << ir;
+    expect(contains(ir, "icmp eq ptr")) << ir;
+    expect(contains(ir, "icmp ne ptr")) << ir;
+  };
+
+  "extern fn returning function pointer used as first-class value adapts result in thunk"_test =
+      [] {
+        LlvmTestPipeline pipe("extern fn get_op(): fn(i32): i32\n"
+                              "fn main(): i32\n"
+                              "  let f: fn(): fn(i32): i32 = get_op\n"
+                              "  let op: fn(i32): i32 = f()\n"
+                              "  return op(41)\n");
+        auto ir = pipe.ir();
+        expect(!pipe.has_errors()) << ir;
+        expect(!llvm::verifyModule(*pipe.llvm_result.module, &llvm::errs())) << ir;
+        expect(contains(ir, "define internal %dao.fn @get_op.thunk(ptr %env)")) << ir;
+        expect(contains(ir, "call ptr @get_op()")) << ir;
+        expect(contains(ir, "__dao.c_fn_adapter.")) << ir;
+      };
+
+  "first-order C callbacks and returned function pointers coerce repr-C structs"_test = [] {
+    LlvmTestPipeline pipe("class Point:\n  x: i32\n  y: i32\n"
+                          "class Big:\n  a: i64\n  b: i64\n  c: i64\n"
+                          "extern fn c_flip(p: Point): Point\n"
+                          "extern fn c_id_big(b: Big): Big\n"
+                          "extern fn apply_pt(cb: fn(Point): Point, p: Point): Point\n"
+                          "extern fn apply_big(cb: fn(Big): Big, b: Big): Big\n"
+                          "extern fn get_pt_op(): fn(Point): Point\n"
+                          "extern fn get_big_op(): fn(Big): Big\n"
+                          "extern fn sum_pt(p: Point): i32\n"
+                          "fn flip(p: Point): Point -> Point(p.y, p.x)\n"
+                          "fn id_big(b: Big): Big -> b\n"
+                          "fn main(): i32\n"
+                          "  let p0: Point = apply_pt(c_flip, Point(1, 2))\n"
+                          "  let b0: Big = apply_big(c_id_big, Big(1, 2, 3))\n"
+                          "  let p1: Point = apply_pt(flip, p0)\n"
+                          "  let b1: Big = apply_big(id_big, b0)\n"
+                          "  let pt_maker: fn(): fn(Point): Point = get_pt_op\n"
+                          "  let pt_op: fn(Point): Point = pt_maker()\n"
+                          "  let p2: Point = pt_op(p1)\n"
+                          "  let big_op: fn(Big): Big = get_big_op()\n"
+                          "  let b2: Big = big_op(b1)\n"
+                          "  let sum_fn: fn(Point): i32 = sum_pt\n"
+                          "  return sum_fn(p2) + i64_to_i32(b2.a)\n",
+                          {"module core::conv\nextern fn __dao_conv_i64_to_i32(x: i64): i32\n"
+                           "fn i64_to_i32(x: i64): i32 -> __dao_conv_i64_to_i32(x)\n"});
+    auto ir = pipe.ir();
+    expect(!pipe.has_errors()) << ir;
+    expect(pipe.llvm_result.module != nullptr);
+    expect(!llvm::verifyModule(*pipe.llvm_result.module, &llvm::errs())) << ir;
+    expect(!contains(ir, "c_flip.c_cb")) << ir;
+    expect(!contains(ir, "c_id_big.c_cb")) << ir;
+    expect(contains(ir, "test::flip.c_cb")) << ir;
+    expect(contains(ir, "test::id_big.c_cb")) << ir;
+    expect(contains(ir, "sum_pt.thunk")) << ir;
+  };
+
+  "backend rejects thunk for extern fn with callback parameter"_test = [] {
+    LlvmTestPipeline pipe("extern fn run_cb(cb: fn(i32): i32): i32\n"
+                          "fn main(): i32\n"
+                          "  let f: fn(fn(i32): i32): i32 = run_cb\n"
+                          "  return 0\n");
+    expect(pipe.has_errors());
   };
 };
 

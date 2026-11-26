@@ -90,6 +90,7 @@ enum class HirNode:
   // the value written or the elements walked (-1 where there is none).
   HirPtrOp(op: i64, pointer: i64, argument: i64, typ: i64)
   HirEnumConstruct(variant: i64, payload_lp: i64, payload_count: i64, typ: i64)
+  HirLambda(params_lp: i64, param_count: i64, body: i64, typ: i64)
   HirErrorExpr(tok: i64)
 
 // =========================================================================
@@ -235,6 +236,8 @@ fn hir_expr_type(node: HirNode): i64
     HirNode::HirEnumConstruct(v, p, n, ti):
       return ti
     HirNode::HirPtrOp(op, p, a, ti):
+      return ti
+    HirNode::HirLambda(p, n, b, ti):
       return ti
   return to_i64(-1)
 
@@ -436,8 +439,20 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
       let cur: HS = hs_add_diag(hs, Span(to_i64(0), to_i64(1)), "try operator not supported in Tier A HIR")
       return hs_add_node(cur, HirNode::HirErrorExpr(tok = to_i64(0)))
     parser::Node::LambdaE(params_lp, param_count, body):
-      let cur: HS = hs_add_diag(hs, Span(to_i64(0), to_i64(1)), "lambda not supported in Tier A HIR")
-      return hs_add_node(cur, HirNode::HirErrorExpr(tok = to_i64(0)))
+      let param_toks: Vector<i64> = parser::read_list(hs.unit.idx_data, params_lp)
+      let pairs: Vector<i64> = Vector<i64>::new()
+      let pi: i64 = 0
+      while pi < param_toks.length():
+        let ptidx: i64 = param_toks.get(pi)
+        let pname: string = hs_tok_name(hs, ptidx)
+        let psym: i64 = member_sym_of(hs.typecheck.lookup.index, hs.unit.module_id, node_idx, "LambdaParam", pname)
+        let pti: i64 = hir_sym_type(hs, psym)
+        pairs = pairs.push(psym)
+        pairs = pairs.push(pti)
+        pi = pi + 1
+      let pfl: HirFlush = hir_flush_pairs(hs, pairs, param_toks.length())
+      let body_r: HirR = lower_expr(pfl.hs, body)
+      return hs_add_node(body_r.hs, HirNode::HirLambda(params_lp = pfl.list_pos, param_count = param_toks.length(), body = body_r.hir, typ = ti))
     parser::Node::ListLitE(elems_lp, elem_count):
       let cur: HS = hs_add_diag(hs, Span(to_i64(0), to_i64(1)), "list literal not supported in Tier A HIR")
       return hs_add_node(cur, HirNode::HirErrorExpr(tok = to_i64(0)))
@@ -1695,6 +1710,8 @@ fn hir_node_kind(node: HirNode): string
       return "HirPtrOp"
     HirNode::HirEnumConstruct(a, b, c, d):
       return "HirEnumConstruct"
+    HirNode::HirLambda(a, b, c, d):
+      return "HirLambda"
     HirNode::HirErrorExpr(a):
       return "HirErrorExpr"
   return "Unknown"
@@ -1978,6 +1995,10 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
       while pi2 < pairs.length():
         line = line + hir_dump_node(hr, pairs.get(pi2), indent + 1)
         pi2 = pi2 + 2
+      return line
+    HirNode::HirLambda(params_lp, param_count, body, ti2):
+      line = line + " : " + hir_type_label(hr, ti2) + "\n"
+      line = line + hir_dump_node(hr, body, indent + 1)
       return line
     HirNode::HirErrorExpr(d):
       line = line + "\n"
