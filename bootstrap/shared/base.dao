@@ -4,7 +4,7 @@ module bootstrap::base
 // bootstrap resolver, typecheck, HIR, MIR, and LLVM passes.
 
 // The value `m` holds under `key`, or `dflt` where it holds none.
-fn hm_get_or(m: HashMap<i64>, key: string, dflt: i64): i64
+fn hm_get_or(m: HashMap<string, i64>, key: string, dflt: i64): i64
   let found: Option<i64> = m.get(key)
   match found:
     Option::Some(v):
@@ -40,13 +40,13 @@ class DaoType:
 // constant-time reads in downstream passes, keyed by declaring module and
 // file-local declaration index.
 class ProgramIndex:
-  type_syms: HashMap<i64>       // decl_key(module, decl) -> the "Type" symbol declared there
-  callables: HashMap<i64>       // decl_key(module, decl) -> the callable symbol declared there
-  members: HashMap<i64>         // member_key(module, decl, kind, name) -> a Param / Field symbol; kind "Local" keyed without a name
-  prelude_modules: HashMap<i64> // module id (as text) -> 1 for a prelude module
+  type_syms: HashMap<string, i64>       // decl_key(module, decl) -> the "Type" symbol declared there
+  callables: HashMap<string, i64>       // decl_key(module, decl) -> the callable symbol declared there
+  members: HashMap<string, i64>         // member_key(module, decl, kind, name) -> a Param / Field symbol; kind "Local" keyed without a name
+  prelude_modules: HashMap<string, i64> // module id (as text) -> 1 for a prelude module
 
 fn program_index_empty(): ProgramIndex
-  return ProgramIndex(HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new())
+  return ProgramIndex(HashMap<string, i64>::new(), HashMap<string, i64>::new(), HashMap<string, i64>::new(), HashMap<string, i64>::new())
 
 fn decl_key(module_id: i64, decl_idx: i64): string
   return i64_to_string(module_id) + ":" + i64_to_string(decl_idx)
@@ -55,12 +55,12 @@ fn member_key(module_id: i64, decl_idx: i64, kind: string, name: string): string
   return decl_key(module_id, decl_idx) + ":" + kind + ":" + name
 
 class ProgramLookup:
-  expr_types: HashMap<i64>       // key: expr_id_key(module_id, node_idx)
-  methods: HashMap<i64>          // method dispatch by owner type and name (typecheck dispatch_key_*)
+  expr_types: HashMap<string, i64>       // key: expr_id_key(module_id, node_idx)
+  methods: HashMap<string, i64>          // method dispatch by owner type and name (typecheck dispatch_key_*)
   index: ProgramIndex            // the resolved program's declaration indexes
 
 fn program_lookup_empty(): ProgramLookup
-  return ProgramLookup(HashMap<i64>::new(), HashMap<i64>::new(), program_index_empty())
+  return ProgramLookup(HashMap<string, i64>::new(), HashMap<string, i64>::new(), program_index_empty())
 
 class TypeCheckData:
   initialized: bool

@@ -512,6 +512,18 @@ private:
       auto* method_sym = new_symbol(SymbolKind::Function, mangled_name, fn_decl.name_span, method);
       publish(scope, mangled_name, method_sym);
     }
+    for (const auto& conf : st.conformances) {
+      for (const auto* method : conf.methods) {
+        const auto& fn_decl = method->as<FunctionDecl>();
+        if (fn_decl.name == "copy_out") {
+          continue;
+        }
+        auto mangled_name = ctx_.intern(std::string(st.name) + "." + std::string(fn_decl.name));
+        auto* method_sym =
+            new_symbol(SymbolKind::Function, mangled_name, fn_decl.name_span, method);
+        publish(scope, mangled_name, method_sym);
+      }
+    }
   }
 
   // --- Overload helpers ---

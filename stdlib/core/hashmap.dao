@@ -1,229 +1,247 @@
 module core::hashmap
-// hashmap.dao — String-keyed hash map.
+// hashmap.dao — Generic associative hash map over Hashable + Equatable keys.
 //
-// HashMap<V> is an open-addressing hash table with linear probing.
-// Keys are fixed to string; generic key dispatch (HashMap<K, V>)
-// is deferred until concept bounds on class generics are proven.
+// `HashMap<K, V>` is an open-addressing hash table with linear probing,
+// versioned shared storage for O(1) snapshot branching, deterministic
+// first-insertion-order traversal, and domain escape (`copy_out`) across
+// both keys and values.
 //
-// Value semantics without a copy per write.  The values made from one
-// another by `set` share one storage, and every filled slot carries the
-// write stamp at which it was filled; a map value carries the stamp it
-// was made at (`version`) and reads only slots stamped at or before it.
-// `set` on the latest value -- the one whose version is the storage's
-// current stamp -- fills a fresh slot in place and bumps the stamp; an
-// update of a key adds a newer slot for it rather than overwriting, so
-// an older value still reads its own.  `set` on any other value, or
-// when the storage is full, copies the entries the value can see into
-// fresh storage.  A stale value therefore never observes a later write.
-//
-// Hash function: FNV-1a via __dao_str_hash runtime hook.
-//
+// Value semantics without a copy per write:
+//   - Map values derived by `set` share one `HashStorage<K, V>`. Every
+//     occupied slot records its write stamp (`>= 1`; `0` is empty), and
+//     each `HashMap` value carries the `version` stamp it reads at.
+//   - `set` on the latest value (`version == meta.gen`) appends a fresh
+//     stamped slot in place without mutating older slots; updating an
+//     existing key adds a newer stamped slot past the older one so
+//     earlier snapshots continue reading their own value.
+//   - `set` on an older snapshot or a full table (`> 3/4` load) compacts
+//     only the visible entries into fresh storage, preserving strict
+//     first-insertion order in `order[0 .. count)`.
 
-extern fn __dao_str_hash(s: string): i64
-
-fn hash_string(s: string): i64 -> __dao_str_hash(s)
-
-// Compute a non-negative bucket index from a hash and capacity.
 fn hash_index(h: i64, cap: i64): i64
-  let idx: i64 = h % cap
-  if idx < to_i64(0):
-    return idx + cap
-  return idx
+  let rem = h % cap
+  if rem < to_i64(0):
+    return rem + cap
+  return rem
 
-// The slots shared by the values made from one another: `cap` of them,
-// each empty (stamp 0) or filled at a write stamp, with the count of
-// filled slots and the current stamp kept beside them.
-class HashStorage<V>:
-  keys: Ptr<string>
-  vals: Ptr<V>
-  stamps: Ptr<i64>
+class MapEntry<K, V>:
+  key: K
+  value: V
+
+class HashMeta:
   cap: i64
   used: Ptr<i64>
   gen: Ptr<i64>
 
-  // `cap` empty slots and no stamp yet, in the current domain or, when
-  // `outer` is set, in the enclosing one.
-  fn fresh(cap: i64, outer: bool): HashStorage<V>
-    let key_bytes: i64 = size_of<string>() * cap
-    let val_bytes: i64 = size_of<V>() * cap
-    let stamp_bytes: i64 = size_of<i64>() * cap
-    let key_raw: Ptr<void> = Ptr<void>::new()
-    let val_raw: Ptr<void> = Ptr<void>::new()
-    let stamp_raw: Ptr<void> = Ptr<void>::new()
-    let used_raw: Ptr<void> = Ptr<void>::new()
-    let gen_raw: Ptr<void> = Ptr<void>::new()
+fn hash_meta_empty(): HashMeta
+  return HashMeta(to_i64(0), Ptr<i64>::new(), Ptr<i64>::new())
+
+fn hash_meta_fresh(cap: i64, outer: bool): HashMeta
+  let used_raw = Ptr<void>::new()
+  let gen_raw = Ptr<void>::new()
+  if outer:
+    used_raw = __dao_mem_alloc_outer(size_of<i64>(), align_of<i64>())
+    gen_raw = __dao_mem_alloc_outer(size_of<i64>(), align_of<i64>())
+  else:
+    used_raw = __dao_mem_alloc(size_of<i64>(), align_of<i64>())
+    gen_raw = __dao_mem_alloc(size_of<i64>(), align_of<i64>())
+  mode unsafe =>
+    let used = used_raw.cast<i64>()
+    used.set(to_i64(0))
+    let gen = gen_raw.cast<i64>()
+    gen.set(to_i64(0))
+    return HashMeta(cap, used, gen)
+  panic("unreachable")
+
+class HashStorage<K: Hashable + Equatable, V>:
+  keys: Ptr<K>
+  vals: Ptr<V>
+  stamps: Ptr<i64>
+  order: Ptr<K>
+  meta: HashMeta
+
+  fn fresh(cap: i64, outer: bool): HashStorage<K, V>
+    let key_bytes = size_of<K>() * cap
+    let val_bytes = size_of<V>() * cap
+    let stamp_bytes = size_of<i64>() * cap
+    let key_raw = Ptr<void>::new()
+    let val_raw = Ptr<void>::new()
+    let stamp_raw = Ptr<void>::new()
+    let order_raw = Ptr<void>::new()
     if outer:
-      key_raw = __dao_mem_alloc_outer(key_bytes, align_of<string>())
+      key_raw = __dao_mem_alloc_outer(key_bytes, align_of<K>())
       val_raw = __dao_mem_alloc_outer(val_bytes, align_of<V>())
       stamp_raw = __dao_mem_alloc_outer(stamp_bytes, align_of<i64>())
-      used_raw = __dao_mem_alloc_outer(size_of<i64>(), align_of<i64>())
-      gen_raw = __dao_mem_alloc_outer(size_of<i64>(), align_of<i64>())
+      order_raw = __dao_mem_alloc_outer(key_bytes, align_of<K>())
     else:
-      key_raw = __dao_mem_alloc(key_bytes, align_of<string>())
+      key_raw = __dao_mem_alloc(key_bytes, align_of<K>())
       val_raw = __dao_mem_alloc(val_bytes, align_of<V>())
       stamp_raw = __dao_mem_alloc(stamp_bytes, align_of<i64>())
-      used_raw = __dao_mem_alloc(size_of<i64>(), align_of<i64>())
-      gen_raw = __dao_mem_alloc(size_of<i64>(), align_of<i64>())
+      order_raw = __dao_mem_alloc(key_bytes, align_of<K>())
+    let meta = hash_meta_fresh(cap, outer)
     mode unsafe =>
-      let stamps: Ptr<i64> = stamp_raw.cast<i64>()
+      let stamps = stamp_raw.cast<i64>()
       let z: i64 = 0
       while z < cap:
         stamps.offset(z).set(to_i64(0))
         z = z + 1
-      let used: Ptr<i64> = used_raw.cast<i64>()
-      used.set(to_i64(0))
-      let gen: Ptr<i64> = gen_raw.cast<i64>()
-      gen.set(to_i64(0))
-      return HashStorage(key_raw.cast<string>(), val_raw.cast<V>(), stamps, cap, used, gen)
+      return HashStorage(key_raw.cast<K>(), val_raw.cast<V>(), stamps, order_raw.cast<K>(), meta)
     panic("unreachable")
 
-  // Fill the first empty slot from `key`'s bucket at the storage's next
-  // stamp, and make that stamp current.  The stamp is the storage's own,
-  // never a caller's: a value that does not carry the new stamp reads
-  // the slot as empty, so no existing value's view can be changed.
-  fn fill(self, key: string, value: V): void
+  fn fill(self, key: K, value: V, is_new_key: bool, order_pos: i64): void
     mode unsafe =>
-      let idx: i64 = hash_index(hash_string(key), self.cap)
+      let idx = hash_index(key.hash(), self.meta.cap)
       while self.stamps.offset(idx).get() != to_i64(0):
         idx = idx + 1
-        if idx >= self.cap:
+        if idx >= self.meta.cap:
           idx = to_i64(0)
-      let stamp: i64 = self.gen.get() + to_i64(1)
+      let stamp = self.meta.gen.get() + to_i64(1)
       self.keys.offset(idx).set(key)
       self.vals.offset(idx).set(value)
       self.stamps.offset(idx).set(stamp)
-      self.used.set(self.used.get() + to_i64(1))
-      self.gen.set(stamp)
+      if is_new_key:
+        self.order.offset(order_pos).set(key)
+      self.meta.used.set(self.meta.used.get() + to_i64(1))
+      self.meta.gen.set(stamp)
 
-class HashMap<V>:
-  storage: HashStorage<V>
-  version: i64   // the stamp this value reads at
-  count: i64     // keys visible at `version`
+class HashMap<K: Hashable + Equatable, V>:
+  storage: HashStorage<K, V>
+  version: i64
+  count: i64
 
-  fn new(): HashMap<V>
-    let none: HashStorage<V> = HashStorage(Ptr<string>::new(), Ptr<V>::new(), Ptr<i64>::new(), to_i64(0), Ptr<i64>::new(), Ptr<i64>::new())
+  fn new(): HashMap<K, V>
+    let none = HashStorage(Ptr<K>::new(), Ptr<V>::new(), Ptr<i64>::new(), Ptr<K>::new(), hash_meta_empty())
     return HashMap(none, to_i64(0), to_i64(0))
 
   fn length(self): i64 -> self.count
 
-  // The slot holding `key` as this value sees it: the filled slot with
-  // the greatest stamp not past `version`, or -1.  Probing runs to the
-  // first empty slot, since a key's newer slots sit past its older ones.
-  fn visible_slot(self, key: string): i64
-    let s: HashStorage<V> = self.storage
-    if s.cap == to_i64(0):
+  fn is_empty(self): bool -> self.count == to_i64(0)
+
+  fn visible_slot(self, key: K): i64
+    let s = self.storage
+    if s.meta.cap == to_i64(0):
       return to_i64(-1)
-    let idx: i64 = hash_index(hash_string(key), s.cap)
-    let best: i64 = to_i64(-1)
-    let best_stamp: i64 = to_i64(0)
+    let idx = hash_index(key.hash(), s.meta.cap)
+    let best = to_i64(-1)
+    let best_stamp = to_i64(0)
     mode unsafe =>
       let probes: i64 = 0
-      while probes < s.cap:
-        let stamp: i64 = s.stamps.offset(idx).get()
+      while probes < s.meta.cap:
+        let stamp = s.stamps.offset(idx).get()
         if stamp == to_i64(0):
           return best
         if stamp <= self.version:
-          if s.keys.offset(idx).get() == key:
+          if s.keys.offset(idx).get().eq(key):
             if stamp > best_stamp:
               best = idx
               best_stamp = stamp
         idx = idx + 1
-        if idx >= s.cap:
+        if idx >= s.meta.cap:
           idx = to_i64(0)
         probes = probes + 1
     return best
 
-  fn get(self, key: string): Option<V>
-    let slot: i64 = self.visible_slot(key)
+  fn get(self, key: K): Option<V>
+    let slot = self.visible_slot(key)
     if slot < to_i64(0):
       return Option::None
     mode unsafe =>
       return Option::Some(value = self.storage.vals.offset(slot).get())
     panic("unreachable")
 
-  fn contains(self, key: string): bool -> self.visible_slot(key) >= to_i64(0)
-
-  // Fresh storage of `cap` slots holding the entries this value sees,
-  // in the current domain, one slot per key at the stamp it was written
-  // at, so the compacted map reads at this value's version.  One pass
-  // over the old slots, each probed once into the fresh storage -- of
-  // expected constant length at the load bound `set` keeps -- where a
-  // key's later slot replaces its earlier one.  The fresh storage is
-  // written directly: no value reads it yet, so no view can change.
-  // No entry is copied out here, so an ordinary set never instantiates
-  // the value type's copier.
-  fn compacted(self, cap: i64): HashMap<V>
-    let fresh: HashStorage<V> = HashStorage<V>::fresh(cap, false)
-    let s: HashStorage<V> = self.storage
+  fn get_or(self, key: K, fallback: V): V
+    let slot = self.visible_slot(key)
+    if slot < to_i64(0):
+      return fallback
     mode unsafe =>
-      let j: i64 = 0
-      while j < s.cap:
-        let stamp: i64 = s.stamps.offset(j).get()
-        if stamp != to_i64(0):
-          if stamp <= self.version:
-            let key: string = s.keys.offset(j).get()
-            let idx: i64 = hash_index(hash_string(key), cap)
-            let placed: bool = false
-            while placed == false:
-              let held: i64 = fresh.stamps.offset(idx).get()
-              if held == to_i64(0):
-                fresh.keys.offset(idx).set(key)
-                fresh.vals.offset(idx).set(s.vals.offset(j).get())
-                fresh.stamps.offset(idx).set(stamp)
-                fresh.used.set(fresh.used.get() + to_i64(1))
-                placed = true
-              else:
-                if fresh.keys.offset(idx).get() == key:
-                  if stamp > held:
-                    fresh.vals.offset(idx).set(s.vals.offset(j).get())
-                    fresh.stamps.offset(idx).set(stamp)
-                  placed = true
-                else:
-                  idx = idx + 1
-                  if idx >= cap:
-                    idx = to_i64(0)
-        j = j + 1
-      fresh.gen.set(self.version)
-      return HashMap(fresh, self.version, self.count)
+      return self.storage.vals.offset(slot).get()
     panic("unreachable")
 
-  // A copy of this map's entries in the enclosing domain: what
-  // `copy_out` does for a map.  The entries are compacted first, in
-  // the current domain, so each key is copied out once.
-  fn copy_out(self): HashMap<V>
-    if self.storage.cap == to_i64(0):
-      return HashMap<V>::new()
-    let seen: HashStorage<V> = self.compacted(self.storage.cap).storage
-    let fresh: HashStorage<V> = HashStorage<V>::fresh(self.storage.cap, true)
+  fn contains(self, key: K): bool -> self.visible_slot(key) >= to_i64(0)
+
+  fn compacted(self, cap: i64): HashMap<K, V>
+    let fresh = HashStorage<K, V>::fresh(cap, false)
+    let s = self.storage
     mode unsafe =>
-      let j: i64 = 0
-      while j < seen.cap:
-        if seen.stamps.offset(j).get() != to_i64(0):
-          fresh.fill(copy_out_string(seen.keys.offset(j).get()), copy_out<V>(seen.vals.offset(j).get()))
-        j = j + 1
-      return HashMap(fresh, fresh.gen.get(), self.count)
+      let i: i64 = 0
+      while i < self.count:
+        let k = s.order.offset(i).get()
+        let slot = self.visible_slot(k)
+        fresh.fill(k, s.vals.offset(slot).get(), true, i)
+        i = i + 1
+      return HashMap(fresh, fresh.meta.gen.get(), self.count)
     panic("unreachable")
 
-  fn set(self, key: string, value: V): HashMap<V>
-    let s: HashStorage<V> = self.storage
+  fn copy_out(self): HashMap<K, V>
+    if self.count == to_i64(0):
+      return HashMap<K, V>::new()
+    let s = self.storage
+    let fresh = HashStorage<K, V>::fresh(s.meta.cap, true)
     mode unsafe =>
-      if s.cap > to_i64(0):
-        if s.gen.get() == self.version:
-          if (s.used.get() + to_i64(1)) * to_i64(4) <= s.cap * to_i64(3):
-            // Latest value with room: a fresh slot at the next stamp.
-            let known: bool = self.contains(key)
-            s.fill(key, value)
-            let count: i64 = self.count
+      let i: i64 = 0
+      while i < self.count:
+        let orig_k = s.order.offset(i).get()
+        let slot = self.visible_slot(orig_k)
+        let copied_k = copy_out<K>(orig_k)
+        let copied_v = copy_out<V>(s.vals.offset(slot).get())
+        fresh.fill(copied_k, copied_v, true, i)
+        i = i + 1
+      return HashMap(fresh, fresh.meta.gen.get(), self.count)
+    panic("unreachable")
+
+  fn set(self, key: K, value: V): HashMap<K, V>
+    let s = self.storage
+    mode unsafe =>
+      if s.meta.cap > to_i64(0):
+        if s.meta.gen.get() == self.version:
+          if (s.meta.used.get() + to_i64(1)) * to_i64(4) <= s.meta.cap * to_i64(3):
+            let known = self.contains(key)
+            s.fill(key, value, known == false, self.count)
+            let count = self.count
             if known == false:
               count = count + to_i64(1)
-            return HashMap(s, s.gen.get(), count)
-    // Another value wrote after this one, or the storage is full: fresh
-    // storage holding what this value sees, sized for the new entry,
-    // which the latest-value path above then adds at the next stamp
-    // (past the compacted slots, so an update of a key wins).
-    let new_cap: i64 = s.cap
+            return HashMap(s, s.meta.gen.get(), count)
+    let new_cap = s.meta.cap
     if new_cap < to_i64(8):
       new_cap = to_i64(8)
     while (self.count + to_i64(1)) * to_i64(4) > new_cap * to_i64(3):
       new_cap = new_cap * to_i64(2)
     return self.compacted(new_cap).set(key, value)
+
+  fn keys(self): Vector<K>
+    let out = Vector<K>::new()
+    let i: i64 = 0
+    mode unsafe =>
+      while i < self.count:
+        out = out.push(self.storage.order.offset(i).get())
+        i = i + 1
+    return out
+
+  fn values(self): Vector<V>
+    let out = Vector<V>::new()
+    let i: i64 = 0
+    mode unsafe =>
+      while i < self.count:
+        let k = self.storage.order.offset(i).get()
+        let slot = self.visible_slot(k)
+        out = out.push(self.storage.vals.offset(slot).get())
+        i = i + 1
+    return out
+
+  fn entries(self): Vector<MapEntry<K, V>>
+    let out = Vector<MapEntry<K, V>>::new()
+    let i: i64 = 0
+    mode unsafe =>
+      while i < self.count:
+        let k = self.storage.order.offset(i).get()
+        let slot = self.visible_slot(k)
+        out = out.push(MapEntry(k, self.storage.vals.offset(slot).get()))
+        i = i + 1
+    return out
+
+  fn iter_keys(self): Generator<K>
+    let ks = self.keys()
+    let i: i64 = 0
+    while i < ks.length():
+      yield ks.get(i)
+      i = i + 1

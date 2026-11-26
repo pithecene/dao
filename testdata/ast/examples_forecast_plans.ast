@@ -2737,8 +2737,8 @@ File
             ReturnStatement
               BoolLiteral false
   FunctionDecl lookup_live_device
-    Param device_env: HashMap<i64>
-    Param released: HashMap<i64>
+    Param device_env: HashMap<string, i64>
+    Param released: HashMap<string, i64>
     Param name: string
     ReturnType: Result<i64, string>
     IfStatement
@@ -2791,7 +2791,7 @@ File
                   Identifier name
                 StringLiteral "'"
   FunctionDecl lookup_host
-    Param host_env: HashMap<i64>
+    Param host_env: HashMap<string, i64>
     Param name: string
     ReturnType: Result<i64, string>
     MatchStatement
@@ -2851,23 +2851,26 @@ File
           Identifier Vector.new
         TypeArgs
           string
-    LetStatement host_env: HashMap<i64>
+    LetStatement host_env: HashMap<string, i64>
       CallExpr
         Callee
           Identifier HashMap.new
         TypeArgs
+          string
           i64
-    LetStatement device_env: HashMap<i64>
+    LetStatement device_env: HashMap<string, i64>
       CallExpr
         Callee
           Identifier HashMap.new
         TypeArgs
+          string
           i64
-    LetStatement released: HashMap<i64>
+    LetStatement released: HashMap<string, i64>
       CallExpr
         Callee
           Identifier HashMap.new
         TypeArgs
+          string
           i64
     LetStatement reply_id: i64
       CallExpr

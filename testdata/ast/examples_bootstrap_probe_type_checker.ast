@@ -2442,7 +2442,7 @@ File
   FunctionDecl check_expr
     Param arena: Vector<Node>
     Param idx: i64
-    Param table: HashMap<Symbol>
+    Param table: HashMap<string, Symbol>
     Param source: string
     ReturnType: Result<i32, string>
     LetStatement node: Node
@@ -2655,6 +2655,7 @@ File
         Callee
           Identifier HashMap.new
         TypeArgs
+          string
           Symbol
     LetStatement last_ty: i32
       IntLiteral 0

@@ -705,18 +705,18 @@ suite<"driver_cli"> driver_cli_suite = [] {
 
     // Outside any block, containers of generators are ordinary: their
     // pushes and sets copy nothing out, so no copier is instantiated.
-    auto plain =
-        scratch.file("plain.dao",
-                     "module app::plain\n\n"
-                     "fn gen(): Generator<i32>\n"
-                     "  yield 1\n\n"
-                     "fn main(): i32\n"
-                     "  let items: Vector<Generator<i32>> = Vector<Generator<i32>>::new()\n"
-                     "  items = items.push(gen())\n"
-                     "  items = items.set(0, gen())\n"
-                     "  let named: HashMap<Generator<i32>> = HashMap<Generator<i32>>::new()\n"
-                     "  named = named.set(\"g\", gen())\n"
-                     "  return 0\n");
+    auto plain = scratch.file(
+        "plain.dao",
+        "module app::plain\n\n"
+        "fn gen(): Generator<i32>\n"
+        "  yield 1\n\n"
+        "fn main(): i32\n"
+        "  let items: Vector<Generator<i32>> = Vector<Generator<i32>>::new()\n"
+        "  items = items.push(gen())\n"
+        "  items = items.set(0, gen())\n"
+        "  let named: HashMap<string, Generator<i32>> = HashMap<string, Generator<i32>>::new()\n"
+        "  named = named.set(\"g\", gen())\n"
+        "  return 0\n");
     auto lowered = run_daoc(scratch, {"mir", plain.string()});
     expect(lowered.exit_code == 0) << lowered.err;
   };
@@ -855,6 +855,317 @@ suite<"driver_cli"> driver_cli_suite = [] {
     expect(broken_link.exit_code != 0)
         << "packaged daoc linked the build-tree runtime instead of the staged archive";
     expect(broken_link.err_says("linking failed")) << broken_link.err;
+  };
+
+  "HashMap<K, V> enforces key bounds, hash/eq coherence, and inline conformances"_test = [] {
+    Scratch scratch("hashmap-bounds");
+
+    auto float_key = scratch.file("float_key.dao",
+                                  "module app::float_key\n"
+                                  "fn main(): i32\n"
+                                  "  let m = HashMap<f64, i32>::new()\n"
+                                  "  return 0\n");
+    auto r_float = run_daoc(scratch, {"check", float_key.string()});
+    expect(r_float.exit_code != 0);
+    expect(r_float.err_says("does not satisfy concept 'Hashable'")) << r_float.err;
+
+    auto orphan_hash = scratch.file("orphan_hash.dao",
+                                    "module app::orphan_hash\n"
+                                    "class OnlyHash:\n"
+                                    "  raw: Ptr<i32>\n"
+                                    "extend OnlyHash as Hashable:\n"
+                                    "  fn hash(self): i64 -> to_i64(1)\n"
+                                    "fn main(): i32 -> 0\n");
+    auto r_orphan = run_daoc(scratch, {"check", orphan_hash.string()});
+    expect(r_orphan.exit_code != 0);
+    expect(r_orphan.err_says("cannot conform to 'Hashable' without conforming to 'Equatable'"))
+        << r_orphan.err;
+
+    auto custom_eq_only =
+        scratch.file("custom_eq_only.dao",
+                     "module app::custom_eq\n"
+                     "class CustomEq:\n"
+                     "  code: i64\n"
+                     "  label: string\n"
+                     "extend CustomEq as Equatable:\n"
+                     "  fn eq(self, other: CustomEq): bool -> self.code == other.code\n"
+                     "fn main(): i32\n"
+                     "  let m = HashMap<CustomEq, i32>::new()\n"
+                     "  return 0\n");
+    auto r_custom = run_daoc(scratch, {"check", custom_eq_only.string()});
+    expect(r_custom.exit_code != 0);
+    expect(r_custom.err_says("does not satisfy concept 'Hashable'")) << r_custom.err;
+
+    auto inline_conf =
+        scratch.file("inline_conf.dao",
+                     "module app::inline_conf\n"
+                     "class InlineKey:\n"
+                     "  id: i64\n"
+                     "  tag: string\n"
+                     "  as Equatable:\n"
+                     "    fn eq(self, other: InlineKey): bool -> self.id == other.id\n"
+                     "  as Hashable:\n"
+                     "    fn hash(self): i64 -> self.id.hash()\n"
+                     "fn main(): i32\n"
+                     "  let m = HashMap<InlineKey, i32>::new()\n"
+                     "  m = m.set(InlineKey(to_i64(5), \"A\"), 11)\n"
+                     "  m = m.set(InlineKey(to_i64(5), \"a\"), 42)\n"
+                     "  print(i32_to_string(m.get_or(InlineKey(to_i64(5), \"x\"), 0)))\n"
+                     "  return 0\n");
+    auto built_inline = run_daoc(scratch, {"build", inline_conf.string()});
+    expect(built_inline.exit_code == 0) << built_inline.err;
+    expect(run_and_capture(scratch.output_for(inline_conf), scratch.dir / "inline_out.txt") ==
+           "42\n");
+
+    // Generic key class with explicit inline Equatable/Hashable uses its
+    // declared template methods rather than synthesizing field-wise ones.
+    auto generic_key =
+        scratch.file("generic_key.dao",
+                     "module app::generic_key\n"
+                     "class BucketKey<T>:\n"
+                     "  bucket: i64\n"
+                     "  payload: T\n"
+                     "  as Equatable:\n"
+                     "    fn eq(self, other: BucketKey<T>): bool -> self.bucket == other.bucket\n"
+                     "  as Hashable:\n"
+                     "    fn hash(self): i64 -> self.bucket.hash()\n"
+                     "fn main(): i32\n"
+                     "  let m = HashMap<BucketKey<string>, i32>::new()\n"
+                     "  m = m.set(BucketKey(to_i64(9), \"first\"), 10)\n"
+                     "  m = m.set(BucketKey(to_i64(9), \"second\"), 77)\n"
+                     "  print(i32_to_string(m.get_or(BucketKey(to_i64(9), \"probe\"), 0)))\n"
+                     "  return 0\n");
+    auto built_generic = run_daoc(scratch, {"build", generic_key.string()});
+    expect(built_generic.exit_code == 0) << built_generic.err;
+    expect(run_and_capture(scratch.output_for(generic_key), scratch.dir / "generic_key_out.txt") ==
+           "77\n");
+
+    // Full-domain unsigned u64 hashing (0, INT64_MAX, INT64_MAX + 1, UINT64_MAX)
+    // directly and inside derived composite keys without signed conversion traps.
+    auto u64_keys =
+        scratch.file("u64_keys.dao",
+                     "module app::u64_keys\n"
+                     "class U64Pair:\n"
+                     "  hi: u64\n"
+                     "  lo: u64\n"
+                     "fn main(): i32\n"
+                     "  let zero: u64 = 0\n"
+                     "  let one: u64 = 1\n"
+                     "  let two: u64 = 2\n"
+                     "  let max_i64_u: u64 = 9223372036854775807\n"
+                     "  let just_above = max_i64_u + one\n"
+                     "  let max_u64 = max_i64_u * two + one\n"
+                     "  let m = HashMap<u64, string>::new()\n"
+                     "  m = m.set(zero, \"zero\")\n"
+                     "  m = m.set(max_i64_u, \"i64_max\")\n"
+                     "  m = m.set(just_above, \"above\")\n"
+                     "  m = m.set(max_u64, \"u64_max\")\n"
+                     "  let pm = HashMap<U64Pair, i32>::new()\n"
+                     "  pm = pm.set(U64Pair(just_above, max_u64), 91)\n"
+                     "  print(m.get_or(zero, \"?\") + \",\" + m.get_or(max_i64_u, \"?\") + \",\" +\n"
+                     "        m.get_or(just_above, \"?\") + \",\" + m.get_or(max_u64, \"?\") + \",\" +\n"
+                     "        i32_to_string(pm.get_or(U64Pair(just_above, max_u64), 0)))\n"
+                     "  return 0\n");
+    auto built_u64 = run_daoc(scratch, {"build", u64_keys.string()});
+    expect(built_u64.exit_code == 0) << built_u64.err;
+    expect(run_and_capture(scratch.output_for(u64_keys), scratch.dir / "u64_out.txt") ==
+           "zero,i64_max,above,u64_max,91\n");
+
+    // Populated HashMap<K, V> values transferred across modules preserve
+    // canonical key equality and hashing, even when same-named Key types or
+    // unrelated local `.hash` concepts exist in producer/consumer modules.
+    auto shared_lib =
+        scratch.file("app/shared_lib.dao",
+                     "module app::shared_lib\n"
+                     "class Shared:\n"
+                     "  a: i64\n"
+                     "  b: i64\n"
+                     "class CustomTag:\n"
+                     "  id: i64\n"
+                     "  note: string\n"
+                     "extend CustomTag as Equatable:\n"
+                     "  fn eq(self, other: CustomTag): bool -> self.id == other.id\n"
+                     "extend CustomTag as Hashable:\n"
+                     "  fn hash(self): i64 -> self.id.hash()\n");
+    (void)shared_lib;
+    auto mod_one =
+        scratch.file("app/mod_one.dao",
+                     "module app::mod_one\n"
+                     "import app::shared_lib\n"
+                     "class Key:\n"
+                     "  x: i64\n"
+                     "  y: i64\n"
+                     "  as Equatable:\n"
+                     "    fn eq(self, other: Key): bool -> self.x == other.x\n"
+                     "  as Hashable:\n"
+                     "    fn hash(self): i64 -> self.x.hash()\n"
+                     "concept Sneaky:\n"
+                     "  fn hash(self): i64\n"
+                     "extend shared_lib::Shared as Sneaky:\n"
+                     "  fn hash(self): i64 -> to_i64(777)\n"
+                     "fn make_shared_map(): HashMap<shared_lib::Shared, i32>\n"
+                     "  let out = HashMap<shared_lib::Shared, i32>::new()\n"
+                     "  resource memory Build =>\n"
+                     "    let sm = HashMap<shared_lib::Shared, i32>::new()\n"
+                     "    sm = sm.set(shared_lib::Shared(to_i64(5), to_i64(1)), 10)\n"
+                     "    sm = sm.set(shared_lib::Shared(to_i64(5), to_i64(2)), 20)\n"
+                     "    out = sm\n"
+                     "  return out\n"
+                     "fn make_tag_map(): HashMap<shared_lib::CustomTag, i32>\n"
+                     "  let out = HashMap<shared_lib::CustomTag, i32>::new()\n"
+                     "  resource memory Build =>\n"
+                     "    let tm = HashMap<shared_lib::CustomTag, i32>::new()\n"
+                     "    tm = tm.set(shared_lib::CustomTag(to_i64(42), \"producer\"), 30)\n"
+                     "    out = tm\n"
+                     "  return out\n"
+                     "fn local_key_sum(): i32\n"
+                     "  let km = HashMap<Key, i32>::new()\n"
+                     "  km = km.set(Key(to_i64(1), to_i64(10)), 3)\n"
+                     "  km = km.set(Key(to_i64(1), to_i64(20)), 4)\n"
+                     "  return km.get_or(Key(to_i64(1), to_i64(99)), 0)\n");
+    (void)mod_one;
+    auto mod_two =
+        scratch.file("app/mod_two.dao",
+                     "module app::mod_two\n"
+                     "import app::shared_lib\n"
+                     "import app::mod_one\n"
+                     "class Key:\n"
+                     "  x: i64\n"
+                     "  y: i64\n"
+                     "  as Equatable:\n"
+                     "    fn eq(self, other: Key): bool -> self.y == other.y\n"
+                     "  as Hashable:\n"
+                     "    fn hash(self): i64 -> self.y.hash()\n"
+                     "fn verify_transfer(): i32\n"
+                     "  let km = HashMap<Key, i32>::new()\n"
+                     "  km = km.set(Key(to_i64(1), to_i64(10)), 3)\n"
+                     "  km = km.set(Key(to_i64(1), to_i64(20)), 4)\n"
+                     "  let sm = mod_one::make_shared_map()\n"
+                     "  sm = sm.set(shared_lib::Shared(to_i64(5), to_i64(3)), 40)\n"
+                     "  let tm = mod_one::make_tag_map()\n"
+                     "  let s1 = sm.get_or(shared_lib::Shared(to_i64(5), to_i64(1)), 0)\n"
+                     "  let s2 = sm.get_or(shared_lib::Shared(to_i64(5), to_i64(2)), 0)\n"
+                     "  let s3 = sm.get_or(shared_lib::Shared(to_i64(5), to_i64(3)), 0)\n"
+                     "  let t1 = tm.get_or(shared_lib::CustomTag(to_i64(42), \"consumer\"), 0)\n"
+                     "  return km.get_or(Key(to_i64(9), to_i64(10)), 0) + s1 + s2 + s3 + t1\n");
+    (void)mod_two;
+    auto multi_main = scratch.file("multi_main.dao",
+                                   "module app::multi_main\n"
+                                   "import app::mod_one\n"
+                                   "import app::mod_two\n"
+                                   "fn main(): i32\n"
+                                   "  print(i32_to_string(mod_one::local_key_sum()))\n"
+                                   "  print(i32_to_string(mod_two::verify_transfer()))\n"
+                                   "  return 0\n");
+    auto built_multi = run_daoc(scratch, {"build", multi_main.string()});
+    expect(built_multi.exit_code == 0) << built_multi.err;
+    expect(run_and_capture(scratch.output_for(multi_main), scratch.dir / "multi_out.txt") ==
+           "4\n103\n");
+
+    // Consumer modules cannot extend foreign or builtin types as Equatable or
+    // Hashable outside their declaring module (preventing cross-module bucket
+    // divergence and consumer-local Equatable + derived Hashable mismatches).
+    auto bad_consumer =
+        scratch.file("bad_consumer.dao",
+                     "module app::bad_consumer\n"
+                     "import app::shared_lib\n"
+                     "extend shared_lib::Shared as Equatable:\n"
+                     "  fn eq(self, other: shared_lib::Shared): bool -> self.a == other.a\n"
+                     "fn main(): i32 -> 0\n");
+    auto r_bad_consumer = run_daoc(scratch, {"check", bad_consumer.string()});
+    expect(r_bad_consumer.exit_code != 0);
+    expect(r_bad_consumer.err_says("outside its declaring module")) << r_bad_consumer.err;
+
+    auto bad_builtin =
+        scratch.file("bad_builtin.dao",
+                     "module app::bad_builtin\n"
+                     "extend i64 as Hashable:\n"
+                     "  fn hash(self): i64 -> to_i64(0)\n"
+                     "fn main(): i32 -> 0\n");
+    auto r_bad_builtin = run_daoc(scratch, {"check", bad_builtin.string()});
+    expect(r_bad_builtin.exit_code != 0);
+    expect(r_bad_builtin.err_says("outside its declaring module")) << r_bad_builtin.err;
+
+    // Non-canonical prelude concepts still prefer caller-local extend overrides
+    // over prelude defaults when specializing generic helpers.
+    auto caller_printable =
+        scratch.file("caller_printable.dao",
+                     "module app::caller_printable\n"
+                     "fn show_any<T: Printable>(x: T): string -> x.to_string()\n"
+                     "extend i32 as Printable:\n"
+                     "  fn to_string(self): string -> \"custom:\" + i32_to_string(self)\n"
+                     "fn main(): i32\n"
+                     "  print(show_any(7))\n"
+                     "  return 0\n");
+    auto built_printable = run_daoc(scratch, {"build", caller_printable.string()});
+    expect(built_printable.exit_code == 0) << built_printable.err;
+    expect(run_and_capture(scratch.output_for(caller_printable),
+                           scratch.dir / "printable_out.txt") == "custom:7\n");
+
+    // Unrelated imported concepts named `Equatable` or `Hashable` (whether
+    // extended in a consumer module or in the key's own declaring module)
+    // never masquerade as canonical prelude key conformances in `HashMap`.
+    auto unrelated_traits = scratch.file("foreign_traits/app/traits.dao",
+                                         "module app::traits\n"
+                                         "concept Equatable:\n"
+                                         "  fn eq(self, other: Equatable): bool\n"
+                                         "concept Hashable:\n"
+                                         "  fn hash(self): i64\n"
+                                         "fn custom_hash<T: Hashable>(x: T): i64 -> x.hash()\n");
+    (void)unrelated_traits;
+    auto unrelated_keys =
+        scratch.file("foreign_traits/app/keys.dao",
+                     "module app::keys\n"
+                     "import app::traits\n"
+                     "class Key:\n"
+                     "  a: i64\n"
+                     "  b: i64\n"
+                     "class SelfKey:\n"
+                     "  a: i64\n"
+                     "  b: i64\n"
+                     "extend SelfKey as traits::Equatable:\n"
+                     "  fn eq(self, other: SelfKey): bool -> true\n"
+                     "extend SelfKey as traits::Hashable:\n"
+                     "  fn hash(self): i64\n"
+                     "    if self.a == to_i64(2):\n"
+                     "      let zero: i64 = 0\n"
+                     "      return to_i64(1) / zero\n"
+                     "    return to_i64(888)\n"
+                     "fn self_trait_hash(k: SelfKey): i64 -> traits::custom_hash(k)\n");
+    (void)unrelated_keys;
+    auto unrelated_app = scratch.file(
+        "foreign_traits/main.dao",
+        "module app::foreign_traits_main\n"
+        "import app::keys\n"
+        "import app::traits\n"
+        "extend keys::Key as traits::Equatable:\n"
+        "  fn eq(self, other: keys::Key): bool -> true\n"
+        "extend keys::Key as traits::Hashable:\n"
+        "  fn hash(self): i64\n"
+        "    if self.a == to_i64(2):\n"
+        "      let zero: i64 = 0\n"
+        "      return to_i64(1) / zero\n"
+        "    return to_i64(777)\n"
+        "fn main(): i32\n"
+        "  let m = HashMap<keys::Key, i32>::new()\n"
+        "  m = m.set(keys::Key(to_i64(1), to_i64(10)), 11)\n"
+        "  m = m.set(keys::Key(to_i64(2), to_i64(20)), 22)\n"
+        "  let sm = HashMap<keys::SelfKey, i32>::new()\n"
+        "  sm = sm.set(keys::SelfKey(to_i64(1), to_i64(10)), 33)\n"
+        "  sm = sm.set(keys::SelfKey(to_i64(2), to_i64(20)), 44)\n"
+        "  let ch = traits::custom_hash(keys::Key(to_i64(1), to_i64(10)))\n"
+        "  let sch = keys::self_trait_hash(keys::SelfKey(to_i64(1), to_i64(10)))\n"
+        "  print(i64_to_string(m.length()) + \",\" +\n"
+        "        i32_to_string(m.get_or(keys::Key(to_i64(1), to_i64(10)), 0)) + \",\" +\n"
+        "        i32_to_string(m.get_or(keys::Key(to_i64(2), to_i64(20)), 0)) + \",\" +\n"
+        "        i64_to_string(sm.length()) + \",\" +\n"
+        "        i32_to_string(sm.get_or(keys::SelfKey(to_i64(2), to_i64(20)), 0)) + \",\" +\n"
+        "        i64_to_string(ch) + \",\" + i64_to_string(sch))\n"
+        "  return 0\n");
+    auto built_unrelated = run_daoc(scratch, {"build", unrelated_app.string()});
+    expect(built_unrelated.exit_code == 0) << built_unrelated.err;
+    expect(run_and_capture(scratch.output_for(unrelated_app),
+                           scratch.dir / "unrelated_traits_out.txt") == "2,11,22,2,44,777,888\n");
   };
 };
 

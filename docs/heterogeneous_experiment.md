@@ -133,5 +133,5 @@ This experiment required zero new Dao syntax or execution-mode surface:
 ## Stopgap Runner
 
 The Swift host runner in `examples/forecast_device/metal_runner.swift` remains a
-stopgap in `docs/non_dao_inventory.md` until Dao drives Metal command queues
-directly, while `dao_msl_emit` retires all handwritten Metal shader code.
+stopgap until Dao drives Metal command queues directly, while `dao_msl_emit`
+retires all handwritten Metal shader code.

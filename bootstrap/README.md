@@ -376,8 +376,8 @@ same change as the bootstrap work that closes a row.
 | §2 module identity | conforms (Task 25): explicit file lists only, no path convention |
 | §3 imports | conforms (Tasks 25–26) — one-segment binding, module-name-only exposure, cycle rejection |
 | §4 exports, same-module access | conforms (Task 26) |
-| §5 `extend` scoping | conforms (Task 26 §6.5) — module granularity, not imported |
-| §6 qualified forms | `b::f`, `b::T`, `b::E::V` conform (Task 27 D4). The bootstrap rejects `b::C` in conformance positions and `b::T::m` until it has concepts and methods (Task 33). |
+| §5 `extend` scoping | conforms (Task 26 §6.5): module granularity, not imported, with canonical prelude `Equatable` and `Hashable` ownership and cross-module visibility |
+| §6 qualified forms | `b::f`, `b::T`, and `b::E::V` conform (Task 27 D4). `extend ... as b::C` and `<T: b::C>` conform. Class-body `as b::C`, `deny b::C`, and `b::T::m` await Task 33. |
 | §7 prelude | partial (Tasks 38, 41). Scope order, shadowing, identity, reserved names, prelude method and `extend` visibility, and derived conformance through the prelude conform. Prelude files load partially. The `hir`/`mir`/`llvm` probe columns are not yet measured with the prelude. |
 | §8 entry module | not implemented: no driver or entry concept, and MIR flattens every function of every module (Task 33) |
 | §9 determinism | graph construction conforms (Task 25 §8, graph tests 7 and 8). Program-level output determinism is unverified (Task 33). |

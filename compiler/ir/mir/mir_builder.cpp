@@ -80,7 +80,7 @@ namespace {
 /// A function is generic if either:
 ///  (a) its AST declaration has own type parameters (e.g. fn f<T>), or
 ///  (b) its lowered signature contains TypeGenericParam (e.g. methods
-///      on generic classes where self: HashMap<V>).
+///      on generic classes where self: HashMap<K, V>).
 auto hir_function_is_generic(const HirFunction& fn) -> bool {
   if (fn.has_type_params) {
     return true;
@@ -182,6 +182,7 @@ auto MirBuilder::lower_function(const HirFunction& fn, Span span)
     -> MirFunction* {
   auto* mir_fn = ctx_.alloc<MirFunction>();
   mir_fn->symbol = fn.symbol;
+  mir_fn->extend_concept = fn.extend_concept;
   mir_fn->return_type = fn.return_type;
   mir_fn->span = span;
   mir_fn->is_extern = fn.is_extern;
@@ -509,260 +510,257 @@ auto MirBuilder::deref_place(const HirExpr& pointer, Span span) -> MirPlace {
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 auto MirBuilder::lower_expr_value(const HirExpr& expr) -> MirValueId {
-  return std::visit(overloaded{
-      [&](const HirIntLiteral& lit) -> MirValueId {
-        return emit_value(expr, MirConstInt{lit.value});
-      },
-      [&](const HirFloatLiteral& lit) -> MirValueId {
-        return emit_value(expr, MirConstFloat{lit.value});
-      },
-      [&](const HirBoolLiteral& lit) -> MirValueId {
-        return emit_value(expr, MirConstBool{lit.value});
-      },
-      [&](const HirStringLiteral& lit) -> MirValueId {
-        return emit_value(expr, MirConstString{lit.value});
-      },
-      [&](const HirSymbolRef& ref) -> MirValueId {
-        if (ref.symbol != nullptr) {
-          auto it = symbol_to_local_.find(ref.symbol);
-          if (it != symbol_to_local_.end()) {
-            auto* place = ctx_.alloc<MirPlace>();
-            place->local = it->second;
-            return emit_value(expr, MirLoad{place});
-          }
-        }
-        return emit_value(expr, MirFnRef{ref.symbol});
-      },
-      [&](const HirUnary& un) -> MirValueId {
-        auto val = lower_expr_value(*un.operand);
-        return emit_value(expr, MirUnary{un.op, val});
-      },
-      [&](const HirPtrOp& ptr_op) -> MirValueId {
-        // A read or a write goes through the pointee's place; the other
-        // operations produce a pointer or a flag from the pointer value.
-        if (ptr_op.op == PtrOp::Get) {
-          auto place = deref_place(*ptr_op.pointer, expr.span);
-          return emit_value(expr, MirLoad{ctx_.alloc<MirPlace>(place)});
-        }
-        if (ptr_op.op == PtrOp::Set) {
-          auto place = deref_place(*ptr_op.pointer, expr.span);
-          auto value = lower_expr_value(*ptr_op.argument);
-          emit_effect(expr.span, MirStore{ctx_.alloc<MirPlace>(place), value});
-          return {};
-        }
-        MirValueId pointer;
-        MirValueId argument;
-        if (ptr_op.pointer != nullptr) {
-          pointer = lower_expr_value(*ptr_op.pointer);
-        }
-        if (ptr_op.argument != nullptr) {
-          argument = lower_expr_value(*ptr_op.argument);
-        }
-        return emit_value(expr, MirPtrOp{ptr_op.op, pointer, argument});
-      },
-      [&](const HirBinary& bin) -> MirValueId {
-        auto left = lower_expr_value(*bin.left);
-        auto right = lower_expr_value(*bin.right);
-        return emit_value(expr, MirBinary{bin.op, left, right});
-      },
-      [&](const HirCall& call) -> MirValueId {
-        auto callee_val = lower_expr_value(*call.callee);
-        auto* args = ctx_.alloc<std::vector<MirValueId>>();
-        for (const auto* arg : call.args) {
-          args->push_back(lower_expr_value(*arg));
-        }
-        std::vector<const Type*>* type_args = nullptr;
-        if (!call.explicit_type_args.empty()) {
-          type_args = ctx_.alloc<std::vector<const Type*>>(
-              call.explicit_type_args);
-        }
-        return emit_value(expr, MirCall{callee_val, args, type_args, call.type_args_binder});
-      },
-      [&](const HirConstruct& ctor) -> MirValueId {
-        auto* field_vals = ctx_.alloc<std::vector<MirValueId>>();
-        for (const auto* arg : ctor.args) {
-          field_vals->push_back(lower_expr_value(*arg));
-        }
-        // The expression's own type is the instantiation being built —
-        // `Box(1)` is a `Box<i32>` — while the class's type as declared
-        // still stands on its parameters.  The backend lays out what is
-        // built, so the construction carries its own type.
-        const auto* built = expr.type != nullptr && expr.type->kind() == TypeKind::Struct
-                                ? static_cast<const TypeStruct*>(expr.type)
-                                : ctor.struct_type;
-        return emit_value(expr, MirConstruct{built, field_vals});
-      },
-      [&](const HirEnumConstruct& ctor) -> MirValueId {
-        // Evaluated in the order they were written; placed where their
-        // fields are.
-        auto* payload_vals = ctx_.alloc<std::vector<MirValueId>>();
-        payload_vals->resize(ctor.payload_args.size());
-        for (size_t i = 0; i < ctor.payload_args.size(); ++i) {
-          auto value = lower_expr_value(*ctor.payload_args[i]);
-          const size_t slot = i < ctor.payload_slots.size() ? ctor.payload_slots[i] : i;
-          if (slot < payload_vals->size()) {
-            (*payload_vals)[slot] = value;
-          }
-        }
-        return emit_value(expr, MirEnumConstruct{
-            ctor.enum_type, ctor.variant_index, payload_vals});
-      },
-      [&](const HirEnumDiscriminant& disc) -> MirValueId {
-        auto val = lower_expr_value(*disc.enum_value);
-        return emit_value(expr, MirEnumDiscriminant{val});
-      },
-      [&](const HirEnumPayload& pay) -> MirValueId {
-        auto val = lower_expr_value(*pay.enum_value);
-        return emit_value(expr, MirEnumPayload{
-            val, pay.variant_index, pay.field_index});
-      },
-      [&](const HirTry& try_node) -> MirValueId {
-        // Lower operand (the Result/Option value).
-        auto operand_val = lower_expr_value(*try_node.operand);
-        const auto* enum_type = try_node.enum_type;
-        bool is_result = enum_type != nullptr && enum_type->name() == "Result";
+  return std::visit(
+      overloaded{
+          [&](const HirIntLiteral& lit) -> MirValueId {
+            return emit_value(expr, MirConstInt{lit.value});
+          },
+          [&](const HirFloatLiteral& lit) -> MirValueId {
+            return emit_value(expr, MirConstFloat{lit.value});
+          },
+          [&](const HirBoolLiteral& lit) -> MirValueId {
+            return emit_value(expr, MirConstBool{lit.value});
+          },
+          [&](const HirStringLiteral& lit) -> MirValueId {
+            return emit_value(expr, MirConstString{lit.value});
+          },
+          [&](const HirSymbolRef& ref) -> MirValueId {
+            if (ref.symbol != nullptr) {
+              auto it = symbol_to_local_.find(ref.symbol);
+              if (it != symbol_to_local_.end()) {
+                auto* place = ctx_.alloc<MirPlace>();
+                place->local = it->second;
+                return emit_value(expr, MirLoad{place});
+              }
+            }
+            return emit_value(expr, MirFnRef{ref.symbol});
+          },
+          [&](const HirUnary& un) -> MirValueId {
+            auto val = lower_expr_value(*un.operand);
+            return emit_value(expr, MirUnary{un.op, val});
+          },
+          [&](const HirPtrOp& ptr_op) -> MirValueId {
+            // A read or a write goes through the pointee's place; the other
+            // operations produce a pointer or a flag from the pointer value.
+            if (ptr_op.op == PtrOp::Get) {
+              auto place = deref_place(*ptr_op.pointer, expr.span);
+              return emit_value(expr, MirLoad{ctx_.alloc<MirPlace>(place)});
+            }
+            if (ptr_op.op == PtrOp::Set) {
+              auto place = deref_place(*ptr_op.pointer, expr.span);
+              auto value = lower_expr_value(*ptr_op.argument);
+              emit_effect(expr.span, MirStore{ctx_.alloc<MirPlace>(place), value});
+              return {};
+            }
+            MirValueId pointer;
+            MirValueId argument;
+            if (ptr_op.pointer != nullptr) {
+              pointer = lower_expr_value(*ptr_op.pointer);
+            }
+            if (ptr_op.argument != nullptr) {
+              argument = lower_expr_value(*ptr_op.argument);
+            }
+            return emit_value(expr, MirPtrOp{ptr_op.op, pointer, argument});
+          },
+          [&](const HirBinary& bin) -> MirValueId {
+            auto left = lower_expr_value(*bin.left);
+            auto right = lower_expr_value(*bin.right);
+            return emit_value(expr, MirBinary{bin.op, left, right});
+          },
+          [&](const HirCall& call) -> MirValueId {
+            auto callee_val = lower_expr_value(*call.callee);
+            auto* args = ctx_.alloc<std::vector<MirValueId>>();
+            for (const auto* arg : call.args) {
+              args->push_back(lower_expr_value(*arg));
+            }
+            std::vector<const Type*>* type_args = nullptr;
+            if (!call.explicit_type_args.empty()) {
+              type_args = ctx_.alloc<std::vector<const Type*>>(call.explicit_type_args);
+            }
+            return emit_value(expr, MirCall{callee_val, args, type_args, call.type_args_binder});
+          },
+          [&](const HirConstruct& ctor) -> MirValueId {
+            auto* field_vals = ctx_.alloc<std::vector<MirValueId>>();
+            for (const auto* arg : ctor.args) {
+              field_vals->push_back(lower_expr_value(*arg));
+            }
+            // The expression's own type is the instantiation being built —
+            // `Box(1)` is a `Box<i32>` — while the class's type as declared
+            // still stands on its parameters.  The backend lays out what is
+            // built, so the construction carries its own type.
+            const auto* built = expr.type != nullptr && expr.type->kind() == TypeKind::Struct
+                                    ? static_cast<const TypeStruct*>(expr.type)
+                                    : ctor.struct_type;
+            return emit_value(expr, MirConstruct{built, field_vals});
+          },
+          [&](const HirEnumConstruct& ctor) -> MirValueId {
+            // Evaluated in the order they were written; placed where their
+            // fields are.
+            auto* payload_vals = ctx_.alloc<std::vector<MirValueId>>();
+            payload_vals->resize(ctor.payload_args.size());
+            for (size_t i = 0; i < ctor.payload_args.size(); ++i) {
+              auto value = lower_expr_value(*ctor.payload_args[i]);
+              const size_t slot = i < ctor.payload_slots.size() ? ctor.payload_slots[i] : i;
+              if (slot < payload_vals->size()) {
+                (*payload_vals)[slot] = value;
+              }
+            }
+            return emit_value(expr,
+                              MirEnumConstruct{ctor.enum_type, ctor.variant_index, payload_vals});
+          },
+          [&](const HirEnumDiscriminant& disc) -> MirValueId {
+            auto val = lower_expr_value(*disc.enum_value);
+            return emit_value(expr, MirEnumDiscriminant{val});
+          },
+          [&](const HirEnumPayload& pay) -> MirValueId {
+            auto val = lower_expr_value(*pay.enum_value);
+            return emit_value(expr, MirEnumPayload{val, pay.variant_index, pay.field_index});
+          },
+          [&](const HirTry& try_node) -> MirValueId {
+            // Lower operand (the Result/Option value).
+            auto operand_val = lower_expr_value(*try_node.operand);
+            const auto* enum_type = try_node.enum_type;
+            bool is_result = enum_type != nullptr && enum_type->name() == "Result";
 
-        // Extract discriminant (i32 — matches LLVM enum layout).
-        auto discr = emit_value(types_.builtin(BuiltinKind::I32), expr.span,
-                                MirEnumDiscriminant{operand_val});
+            // Extract discriminant (i32 — matches LLVM enum layout).
+            auto discr = emit_value(
+                types_.builtin(BuiltinKind::I32), expr.span, MirEnumDiscriminant{operand_val});
 
-        // Compare discriminant to 0 (the success variant: Ok/Some).
-        auto zero = emit_value(types_.builtin(BuiltinKind::I32), expr.span,
-                               MirConstInt{0});
-        auto cmp = emit_value(types_.bool_type(), expr.span,
-                              MirBinary{BinaryOp::EqEq, discr, zero});
+            // Compare discriminant to 0 (the success variant: Ok/Some).
+            auto zero = emit_value(types_.builtin(BuiltinKind::I32), expr.span, MirConstInt{0});
+            auto cmp =
+                emit_value(types_.bool_type(), expr.span, MirBinary{BinaryOp::EqEq, discr, zero});
 
-        // Create basic blocks.
-        auto* ok_bb = fresh_block();
-        auto* err_bb = fresh_block();
-        auto* merge_bb = fresh_block();
+            // Create basic blocks.
+            auto* ok_bb = fresh_block();
+            auto* err_bb = fresh_block();
+            auto* merge_bb = fresh_block();
 
-        emit_terminator(expr.span, MirCondBr{cmp, ok_bb->id, err_bb->id});
+            emit_terminator(expr.span, MirCondBr{cmp, ok_bb->id, err_bb->id});
 
-        // Error/None block: propagate the error or None.
-        switch_to_block(err_bb);
-        if (is_result) {
-          // Extract Err payload from variant 1, field 0.
-          auto err_payload = emit_value(
-              enum_type->variants()[1].payload_types[0], expr.span,
-              MirEnumPayload{operand_val, 1, 0});
-          // Construct Result::Err(err_payload) with the function's return type.
-          const auto* ret_enum_type = static_cast<const TypeEnum*>(
-              current_fn_->return_type);
-          auto* err_args = ctx_.alloc<std::vector<MirValueId>>();
-          err_args->push_back(err_payload);
-          auto err_result = emit_value(
-              current_fn_->return_type, expr.span,
-              MirEnumConstruct{ret_enum_type, 1, err_args});
-          emit_region_exits(expr.span, {.value = &err_result, .type = current_fn_->return_type});
-          emit_terminator(expr.span, MirReturn{err_result, true});
-        } else {
-          // Option: construct Option::None (variant 1, no payload).
-          const auto* ret_enum_type = static_cast<const TypeEnum*>(
-              current_fn_->return_type);
-          auto* empty_args = ctx_.alloc<std::vector<MirValueId>>();
-          auto none_result = emit_value(
-              current_fn_->return_type, expr.span,
-              MirEnumConstruct{ret_enum_type, 1, empty_args});
-          emit_region_exits(expr.span, {.value = &none_result, .type = current_fn_->return_type});
-          emit_terminator(expr.span, MirReturn{none_result, true});
-        }
+            // Error/None block: propagate the error or None.
+            switch_to_block(err_bb);
+            if (is_result) {
+              // Extract Err payload from variant 1, field 0.
+              auto err_payload = emit_value(enum_type->variants()[1].payload_types[0],
+                                            expr.span,
+                                            MirEnumPayload{operand_val, 1, 0});
+              // Construct Result::Err(err_payload) with the function's return type.
+              const auto* ret_enum_type = static_cast<const TypeEnum*>(current_fn_->return_type);
+              auto* err_args = ctx_.alloc<std::vector<MirValueId>>();
+              err_args->push_back(err_payload);
+              auto err_result = emit_value(current_fn_->return_type,
+                                           expr.span,
+                                           MirEnumConstruct{ret_enum_type, 1, err_args});
+              emit_region_exits(expr.span,
+                                {.value = &err_result, .type = current_fn_->return_type});
+              emit_terminator(expr.span, MirReturn{err_result, true});
+            } else {
+              // Option: construct Option::None (variant 1, no payload).
+              const auto* ret_enum_type = static_cast<const TypeEnum*>(current_fn_->return_type);
+              auto* empty_args = ctx_.alloc<std::vector<MirValueId>>();
+              auto none_result = emit_value(current_fn_->return_type,
+                                            expr.span,
+                                            MirEnumConstruct{ret_enum_type, 1, empty_args});
+              emit_region_exits(expr.span,
+                                {.value = &none_result, .type = current_fn_->return_type});
+              emit_terminator(expr.span, MirReturn{none_result, true});
+            }
 
-        // Ok/Some block: extract the success payload.
-        switch_to_block(ok_bb);
-        auto ok_payload = emit_value(
-            expr.type, expr.span,
-            MirEnumPayload{operand_val, 0, 0});
-        emit_terminator(expr.span, MirBr{merge_bb->id});
+            // Ok/Some block: extract the success payload.
+            switch_to_block(ok_bb);
+            auto ok_payload = emit_value(expr.type, expr.span, MirEnumPayload{operand_val, 0, 0});
+            emit_terminator(expr.span, MirBr{merge_bb->id});
 
-        // Merge block: the value produced by ? is the ok payload.
-        switch_to_block(merge_bb);
-        return ok_payload;
+            // Merge block: the value produced by ? is the ok payload.
+            switch_to_block(merge_bb);
+            return ok_payload;
+          },
+          [&](const HirPipe& pipe) -> MirValueId {
+            auto left_val = lower_expr_value(*pipe.left);
+            auto callee_val = lower_expr_value(*pipe.right);
+            auto* args = ctx_.alloc<std::vector<MirValueId>>();
+            args->push_back(left_val);
+            return emit_value(expr, MirCall{callee_val, args});
+          },
+          [&](const HirField& field) -> MirValueId {
+            auto obj = lower_expr_value(*field.object);
+            auto field_idx = resolve_field_index(field.object->type, field.field_name);
+            if (!field_idx) {
+              if (lowering_generic_template_ ||
+                  (expr.type != nullptr && expr.type->kind() == TypeKind::Function)) {
+                // Template body or deferred derived-concept method call
+                // callee: monomorphization resolves or synthesizes the
+                // concrete target function.
+              } else if (field.object->type != nullptr &&
+                         field.object->type->kind() == TypeKind::Struct) {
+                error(expr.span, "unresolved field '" + std::string(field.field_name) + "'");
+              } else {
+                error(expr.span, "unresolved field '" + std::string(field.field_name) + "'");
+              }
+            }
+            return emit_value(expr, MirFieldAccess{obj, field.field_name, field_idx.value_or(0)});
+          },
+          [&](const HirIndex& idx) -> MirValueId {
+            auto obj = lower_expr_value(*idx.object);
+            MirValueId index_val;
+            if (!idx.indices.empty()) {
+              index_val = lower_expr_value(*idx.indices[0]);
+            }
+            return emit_value(expr, MirIndexAccess{obj, index_val});
+          },
+          [&](const HirLambda& lam) -> MirValueId {
+            auto* lam_fn = ctx_.alloc<MirFunction>();
+            lam_fn->span = expr.span;
+            if (lam.body != nullptr && lam.body->type != nullptr) {
+              lam_fn->return_type = lam.body->type;
+            }
+
+            // Save and reset builder state.
+            auto* saved_fn = current_fn_;
+            auto* saved_block = current_block_;
+            auto saved_value_id = next_value_id_;
+            auto saved_block_id = next_block_id_;
+            auto saved_locals = symbol_to_local_;
+
+            current_fn_ = lam_fn;
+            current_block_ = nullptr;
+            next_value_id_ = 0;
+            next_block_id_ = 0;
+            symbol_to_local_.clear();
+
+            for (const auto& param : lam.params) {
+              declare_local(param.symbol,
+                            param.type,
+                            param.span,
+                            /*is_param=*/true);
+            }
+
+            auto* entry_bb = fresh_block();
+            switch_to_block(entry_bb);
+
+            if (lam.body != nullptr) {
+              auto body_val = lower_expr_value(*lam.body);
+              emit_terminator(lam.body->span, MirReturn{body_val, true});
+            } else if (!block_terminated()) {
+              emit_terminator(expr.span, MirReturn{{}, false});
+            }
+
+            // Restore builder state.
+            current_fn_ = saved_fn;
+            current_block_ = saved_block;
+            next_value_id_ = saved_value_id;
+            next_block_id_ = saved_block_id;
+            symbol_to_local_ = std::move(saved_locals);
+
+            if (current_module_ != nullptr) {
+              current_module_->functions.push_back(lam_fn);
+            }
+
+            return emit_value(expr, MirLambdaInst{lam_fn});
+          },
       },
-      [&](const HirPipe& pipe) -> MirValueId {
-        auto left_val = lower_expr_value(*pipe.left);
-        auto callee_val = lower_expr_value(*pipe.right);
-        auto* args = ctx_.alloc<std::vector<MirValueId>>();
-        args->push_back(left_val);
-        return emit_value(expr, MirCall{callee_val, args});
-      },
-      [&](const HirField& field) -> MirValueId {
-        auto obj = lower_expr_value(*field.object);
-        auto field_idx = resolve_field_index(field.object->type, field.field_name);
-        if (!field_idx) {
-          if (lowering_generic_template_) {
-            // Template body: tolerate unresolved field accesses on
-            // generic type parameters (e.g., x.to_string() where
-            // x: T: Printable).  The monomorphizer will clone this
-            // template and substitute concrete types, at which point
-            // the field access resolves normally.
-          } else if (field.object->type != nullptr &&
-                     field.object->type->kind() == TypeKind::Struct) {
-            error(expr.span, "unresolved field '" + std::string(field.field_name) + "'");
-          } else {
-            error(expr.span, "unresolved field '" + std::string(field.field_name) + "'");
-          }
-        }
-        return emit_value(expr, MirFieldAccess{
-            obj, field.field_name, field_idx.value_or(0)});
-      },
-      [&](const HirIndex& idx) -> MirValueId {
-        auto obj = lower_expr_value(*idx.object);
-        MirValueId index_val;
-        if (!idx.indices.empty()) {
-          index_val = lower_expr_value(*idx.indices[0]);
-        }
-        return emit_value(expr, MirIndexAccess{obj, index_val});
-      },
-      [&](const HirLambda& lam) -> MirValueId {
-        auto* lam_fn = ctx_.alloc<MirFunction>();
-        lam_fn->span = expr.span;
-        if (lam.body != nullptr && lam.body->type != nullptr) {
-          lam_fn->return_type = lam.body->type;
-        }
-
-        // Save and reset builder state.
-        auto* saved_fn = current_fn_;
-        auto* saved_block = current_block_;
-        auto saved_value_id = next_value_id_;
-        auto saved_block_id = next_block_id_;
-        auto saved_locals = symbol_to_local_;
-
-        current_fn_ = lam_fn;
-        current_block_ = nullptr;
-        next_value_id_ = 0;
-        next_block_id_ = 0;
-        symbol_to_local_.clear();
-
-        for (const auto& param : lam.params) {
-          declare_local(param.symbol, param.type, param.span,
-                        /*is_param=*/true);
-        }
-
-        auto* entry_bb = fresh_block();
-        switch_to_block(entry_bb);
-
-        if (lam.body != nullptr) {
-          auto body_val = lower_expr_value(*lam.body);
-          emit_terminator(lam.body->span, MirReturn{body_val, true});
-        } else if (!block_terminated()) {
-          emit_terminator(expr.span, MirReturn{{}, false});
-        }
-
-        // Restore builder state.
-        current_fn_ = saved_fn;
-        current_block_ = saved_block;
-        next_value_id_ = saved_value_id;
-        next_block_id_ = saved_block_id;
-        symbol_to_local_ = std::move(saved_locals);
-
-        if (current_module_ != nullptr) {
-          current_module_->functions.push_back(lam_fn);
-        }
-
-        return emit_value(expr, MirLambdaInst{lam_fn});
-      },
-  }, expr.payload);
+      expr.payload);
 }
 
 // ---------------------------------------------------------------------------

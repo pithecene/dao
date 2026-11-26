@@ -25,6 +25,16 @@ struct ResolveResult {
   /// at the second segment, a type's member at the third — this follows
   /// them to the last.  Null when unresolved.
   [[nodiscard]] auto symbol_for(const Expr& expr) const -> const Symbol*;
+
+  /// The concept symbol a conformance clause (`as`, `deny`, `extend ... as`)
+  /// resolved to, or null when unresolved or not a concept.
+  [[nodiscard]] auto concept_for(const ConformanceTarget& target) const -> const Symbol* {
+    auto it = uses.find(target.concept_span.offset);
+    if (it == uses.end() || it->second->kind != SymbolKind::Concept) {
+      return nullptr;
+    }
+    return it->second;
+  }
 };
 
 // Run name resolution over a program: builtins, then the prelude

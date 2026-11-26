@@ -419,7 +419,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 49
+  let total: i32 = 50
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -1164,6 +1164,33 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL entry_and_extern_abi_fail_closed: three mains ok=" + bool_to_string(r46.ok) + ", extern ok=" + bool_to_string(r46b.ok) + " " + diags_text(r46b.diags))
+
+  // Test 47: `extend keys::Key as traits::Hashable` (and same-module
+  // `extend SelfKey as traits::Hashable`) keeps an imported user concept
+  // distinct from prelude `Hashable`: `HashMap<keys::Key, i32>` uses the
+  // derived prelude key hash/eq (never calling the division-by-zero arm on
+  // `a == 2`), while `traits::custom_hash` dispatches to `traits::Hashable`.
+  let prog47 = Vector<graph::SourceInput>::new()
+  prog47 = prog47.push(graph::SourceInput("stdlib/core/builtins.dao", read_file("stdlib/core/builtins.dao"), true))
+  prog47 = prog47.push(graph::SourceInput("stdlib/core/convert.dao", read_file("stdlib/core/convert.dao"), true))
+  prog47 = prog47.push(graph::SourceInput("stdlib/core/equatable.dao", read_file("stdlib/core/equatable.dao"), true))
+  prog47 = prog47.push(graph::SourceInput("stdlib/core/hashable.dao", read_file("stdlib/core/hashable.dao"), true))
+  prog47 = prog47.push(graph::SourceInput("stdlib/core/hashmap.dao", read_file("stdlib/core/hashmap.dao"), true))
+  prog47 = prog47.push(graph::SourceInput("stdlib/core/memory.dao", read_file("stdlib/core/memory.dao"), true))
+  prog47 = prog47.push(graph::SourceInput("stdlib/core/option.dao", read_file("stdlib/core/option.dao"), true))
+  prog47 = prog47.push(graph::SourceInput("stdlib/core/overflow.dao", read_file("stdlib/core/overflow.dao"), true))
+  prog47 = prog47.push(graph::SourceInput("stdlib/core/panic.dao", read_file("stdlib/core/panic.dao"), true))
+  prog47 = prog47.push(graph::SourceInput("stdlib/core/vector.dao", read_file("stdlib/core/vector.dao"), true))
+  prog47 = prog47.push(graph::SourceInput("traits.dao", "module app::traits\nconcept Equatable:\n  fn eq(self, other: Equatable): bool\nconcept Hashable:\n  fn hash(self): i64\nfn custom_hash<T: Hashable>(x: T): i64 -> x.hash()\n", false))
+  prog47 = prog47.push(graph::SourceInput("keys.dao", "module app::keys\nimport app::traits\nclass Key:\n  a: i64\n  b: i64\nclass SelfKey:\n  a: i64\n  b: i64\nextend SelfKey as traits::Equatable:\n  fn eq(self, other: SelfKey): bool -> true\nextend SelfKey as traits::Hashable:\n  fn hash(self): i64\n    if self.a == to_i64(2):\n      let zero: i64 = 0\n      return to_i64(1) / zero\n    return to_i64(888)\nfn self_trait_hash(k: SelfKey): i64 -> traits::custom_hash(k)\n", false))
+  prog47 = prog47.push(graph::SourceInput("main.dao", "module app::main\nimport app::keys\nimport app::traits\nextend keys::Key as traits::Equatable:\n  fn eq(self, other: keys::Key): bool -> true\nextend keys::Key as traits::Hashable:\n  fn hash(self): i64\n    if self.a == to_i64(2):\n      let zero: i64 = 0\n      return to_i64(1) / zero\n    return to_i64(777)\nfn main(): i32\n  let m = HashMap<keys::Key, i32>::new()\n  m = m.set(keys::Key(to_i64(1), to_i64(10)), 11)\n  m = m.set(keys::Key(to_i64(2), to_i64(20)), 22)\n  let sm = HashMap<keys::SelfKey, i32>::new()\n  sm = sm.set(keys::SelfKey(to_i64(1), to_i64(10)), 33)\n  sm = sm.set(keys::SelfKey(to_i64(2), to_i64(20)), 44)\n  if m.length() != to_i64(2) or sm.length() != to_i64(2):\n    return 1\n  if m.get_or(keys::Key(to_i64(1), to_i64(10)), 0) != 11:\n    return 2\n  if m.get_or(keys::Key(to_i64(2), to_i64(20)), 0) != 22:\n    return 3\n  if sm.get_or(keys::SelfKey(to_i64(2), to_i64(20)), 0) != 44:\n    return 4\n  if traits::custom_hash(keys::Key(to_i64(1), to_i64(10))) != to_i64(777):\n    return 5\n  if keys::self_trait_hash(keys::SelfKey(to_i64(1), to_i64(10))) != to_i64(888):\n    return 6\n  return 0\n", false))
+  let r47: LlvmTextResult = lower_program_to_llvm_text(prog47)
+  write_failures = write_failures + emit_ir("foreign_qualified_hashable_hashmap", r47, 0)
+  if r47.ok:
+    print("PASS foreign_qualified_hashable_hashmap")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL foreign_qualified_hashable_hashmap: " + diags_text(r47.diags))
 
   // -----------------------------------------------------------------
   // Summary
