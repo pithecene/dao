@@ -34,6 +34,7 @@ Contracts and explanatory material.
 - `ARCH_INDEX.md` — this file
 - `non_dao_inventory.md` — every stopgap not written in Dao, and what replaces it
 - `hygiene_audit.md` — `DAO-H01` corpus repetition measurements, native vs. self-hosted parity matrix, and `DAO-H01`–`DAO-H06` sequencing
+- `ergonomics_design_tests.md` — four-program side-by-side design evaluation (proposed Dao, Rust, Python) across parsing, fallible file IO, lazy collection aggregation, and single-source forecast plans
 - `contracts/` — normative contracts for structure, syntax, the module system, execution contexts, compiler architecture, bootstrap/interop posture, tooling boundaries, runtime ABI, numeric semantics, and C ABI interop, with ADRs for `enum class` and the raw pointer surface
 - `bootstrap_closure_split.md` — measurement separating compiler-implementation closure from bootstrap test-harness closure
 - `ROADMAP.md` — staged implementation plan from frontend skeleton to self-hosting, tooling maturity, and GPU expansion
@@ -53,7 +54,7 @@ Contracts and explanatory material.
 Reference language material.
 
 - `grammar/` — parser-facing reference grammar, lexical surface, and indentation rules
-- `semantics/` — semantic notes and pre-contract language proposals (`aggregate_initialization.md`, `contextual_and_collection_literals.md`) below contract level and above examples
+- `semantics/` — semantic notes and pre-contract language proposals (`aggregate_initialization.md`, `contextual_and_collection_literals.md`, `control_flow_expressions.md`) below contract level and above examples
 - `syntax_probes/` — small snippets used to test readability and parser direction
 - `examples/` — reference examples housed under `spec/examples/`
 
@@ -114,6 +115,10 @@ CLI, playground, and LSP.
 - `completion.h` / `completion.cpp` — scope-aware symbol completion at cursor offset
 - `document_symbols.h` / `document_symbols.cpp` — hierarchical symbol tree from AST
 - `references.h` / `references.cpp` — find all use-sites of a symbol
+- `formatter.h` / `formatter.cpp` — source-preserving canonical Dao
+  formatter (`format_source`, `verify_format_invariants`) shared by
+  `daoc fmt`, `/api/format`, and future `dao_lsp`; tested in
+  `formatter_test.cpp`
 - `tooling_surface.h` / `tooling_surface.cpp` — the compiler's tooling
   surface: token kinds and groups, lexical categories, diagnostic
   severities, and analysis payload shapes; `tooling_surface_test.cpp`
@@ -229,8 +234,8 @@ Developer-surface tooling built on compiler analysis.
 
 - `playground/` — first-class web playground and future web-IDE surface
   - `compiler_service/` — the service as JSON route functions behind
-    `dispatch` (`service.h/.cpp`; `analyze`, `navigation`, `completions`,
-    `run`, `examples`), its transport surface (`service_surface.h/.cpp`:
+    `dispatch` (`service.h/.cpp`; `analyze`, `format`, `navigation`,
+    `completions`, `run`, `examples`), its transport surface (`service_surface.h/.cpp`:
     routes, request envelopes, response shapes; `service_surface_dump`
     renders the frontend's TypeScript from it and the analysis surface),
     program assembly in `pipeline.h/.cpp`, the HTTP adapter in `main.cpp`
@@ -241,5 +246,5 @@ Developer-surface tooling built on compiler analysis.
     HMR with API proxy, prod builds to `dist/` served by the compiler service
   - `dev.sh` — development loop: service restarted on rebuild, Vite with HMR
 - `lsp/` — reserved LSP root (not yet implemented; the analysis APIs it will wrap live in `compiler/analysis/`)
-- `formatter/` — reserved canonical formatter root
+- `formatter/` — architectural note on the shared `compiler/analysis/formatter` engine and prerequisites for a future Dao-hosted formatter CLI
 - `diagnostics/` — presentation and diagnostics tooling experiments

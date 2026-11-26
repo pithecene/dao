@@ -1,25 +1,35 @@
+import { EditorState, Transaction } from "@codemirror/state";
 import {
   addUserFile,
+  closePreludeTab,
   deleteUserFile,
   getActivePath,
   getActiveSource,
   getCurrentExampleName,
   getUserFiles,
+  getWorkspaceDiagnostics,
   getWorkspaceRevision,
+  openPreludeTab,
   renameUserFile,
+  selectTab,
   setWorkspaceProgram,
   updateActiveUserSource,
 } from "./document";
-import { loadExampleByName } from "./examples";
+import { buildUndoableReplaceTransaction } from "./editor";
+import { FALLBACK_FILES, loadExampleByName } from "./examples";
+import { doFormat } from "./format";
 import {
   applySnapshot,
+  clearDraft,
   decodeShareToken,
   encodeShareToken,
   importSnapshotJson,
   loadSavedDraft,
   normalizeSnapshot,
   saveDraft,
+  scheduleDraftSave,
 } from "./persistence";
+import { bootstrapWorkspace } from "./startup";
 
 // ---------------------------------------------------------------------------
 // Minimal deterministic test harness (pure ES2022 + Web globals, 0 npm deps)
@@ -64,14 +74,49 @@ class MemoryStorage implements Storage {
 interface Deferred<T> {
   promise: Promise<T>;
   resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
 }
 
 function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
     resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+async function withMockFetch(
+  handler: (url: string, init?: RequestInit) => Promise<Response>,
+  run: () => Promise<void>,
+): Promise<void> {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
+    handler(String(input), init)) as typeof fetch;
+  try {
+    await run();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+async function waitForCondition(
+  predicate: () => boolean,
+  label: string,
+): Promise<void> {
+  for (let i = 0; i < 50; i++) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(`Timed out waiting for ${label}`);
 }
 
 // Install in-memory localStorage for Node execution.
@@ -87,6 +132,7 @@ Object.defineProperty(globalThis, "localStorage", {
 // ---------------------------------------------------------------------------
 
 async function testOutOfOrderExampleRequestsAndEdits(): Promise<void> {
+  clearDraft();
   memoryStorage.clear();
   setWorkspaceProgram(
     [{ path: "initial.dao", source: "module initial\n" }],
@@ -94,86 +140,394 @@ async function testOutOfOrderExampleRequestsAndEdits(): Promise<void> {
   );
 
   const pendingByUrl = new Map<string, Deferred<Response>>();
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = ((input: RequestInfo | URL) => {
-    const url = String(input);
-    const gate = deferred<Response>();
-    pendingByUrl.set(url, gate);
-    return gate.promise;
-  }) as typeof fetch;
+  await withMockFetch(
+    (url) => {
+      const gate = deferred<Response>();
+      pendingByUrl.set(url, gate);
+      return gate.promise;
+    },
+    async () => {
+      // 1. Start loading slow example A, then fast example B.
+      const reqA = loadExampleByName("astar.dao", { persistDraft: true });
+      const reqB = loadExampleByName("hello.dao", { persistDraft: true });
 
-  try {
-    // 1. Start loading slow example A, then fast example B.
-    const reqA = loadExampleByName("astar.dao", { persistDraft: true });
-    const reqB = loadExampleByName("hello.dao", { persistDraft: true });
-
-    // 2. Example B arrives first and populates the workspace + draft.
-    pendingByUrl.get("/api/examples/hello.dao")!.resolve(
-      new Response(
-        JSON.stringify({
+      // 2. Example B arrives first and populates the workspace + draft.
+      pendingByUrl.get("/api/examples/hello.dao")!.resolve(
+        jsonResponse({
           name: "hello.dao",
           files: [{ path: "hello.dao", source: "module hello\nfn main(): i32 -> 0\n" }],
           document: "hello.dao",
           source: "module hello\nfn main(): i32 -> 0\n",
         }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
-    assertEqual(await reqB, true, "Example B should apply");
-    assertEqual(getActivePath(), "hello.dao", "Active path is hello.dao");
+      );
+      assertEqual(await reqB, "applied", "Example B should apply");
+      assertEqual(getActivePath(), "hello.dao", "Active path is hello.dao");
 
-    // 3. User edits example B and saves draft before stale request A completes.
-    const editedSource = "module hello\nfn main(): i32 -> 42\n";
-    updateActiveUserSource(editedSource);
-    saveDraft();
-    const revAfterEdit = getWorkspaceRevision();
+      // 3. User edits example B and saves draft before stale request A completes.
+      const editedSource = "module hello\nfn main(): i32 -> 42\n";
+      updateActiveUserSource(editedSource);
+      saveDraft();
+      const revAfterEdit = getWorkspaceRevision();
 
-    // 4. Stale request A resolves late — must NOT overwrite workspace or draft.
-    pendingByUrl.get("/api/examples/astar.dao")!.resolve(
-      new Response(
-        JSON.stringify({
+      // 4. Stale request A resolves late — must return "superseded" and preserve workspace/draft.
+      pendingByUrl.get("/api/examples/astar.dao")!.resolve(
+        jsonResponse({
           name: "astar.dao",
           files: [{ path: "astar.dao", source: "module astar\nfn main(): i32 -> 99\n" }],
           document: "astar.dao",
           source: "module astar\nfn main(): i32 -> 99\n",
         }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
-    assertEqual(await reqA, false, "Stale request A must be discarded");
-    assertEqual(getActivePath(), "hello.dao", "Active path stays hello.dao");
-    assertEqual(getCurrentExampleName(), "hello.dao", "Example name stays hello.dao");
-    assertEqual(getActiveSource(), editedSource, "User edit in B must survive");
-    assertEqual(getWorkspaceRevision(), revAfterEdit, "Revision unchanged by discarded response");
+      );
+      assertEqual(await reqA, "superseded", "Stale request A must be superseded");
+      assertEqual(getActivePath(), "hello.dao", "Active path stays hello.dao");
+      assertEqual(getCurrentExampleName(), "hello.dao", "Example name stays hello.dao");
+      assertEqual(getActiveSource(), editedSource, "User edit in B must survive");
+      assertEqual(getWorkspaceRevision(), revAfterEdit, "Revision unchanged by discarded response");
 
-    const saved = loadSavedDraft();
-    assert(saved !== null, "Saved draft exists");
-    assertEqual(saved.document, "hello.dao", "Saved draft document stays hello.dao");
-    assertEqual(saved.files[0].source, editedSource, "Saved draft keeps user edit");
+      const saved = loadSavedDraft();
+      assert(saved !== null, "Saved draft exists");
+      assertEqual(saved.document, "hello.dao", "Saved draft document stays hello.dao");
+      assertEqual(saved.files[0].source, editedSource, "Saved draft keeps user edit");
 
-    // 5. Single in-flight request superseded by a direct user edit before arrival.
-    const reqC = loadExampleByName("math.dao", { persistDraft: true });
-    const secondEdit = "module hello\nfn main(): i32 -> 77\n";
-    updateActiveUserSource(secondEdit);
-    saveDraft();
+      // 5. Single in-flight request superseded by a direct user edit before arrival.
+      const reqC = loadExampleByName("math.dao", { persistDraft: true });
+      const secondEdit = "module hello\nfn main(): i32 -> 77\n";
+      updateActiveUserSource(secondEdit);
+      saveDraft();
 
-    pendingByUrl.get("/api/examples/math.dao")!.resolve(
-      new Response(
-        JSON.stringify({
+      pendingByUrl.get("/api/examples/math.dao")!.resolve(
+        jsonResponse({
           name: "math.dao",
           files: [{ path: "math.dao", source: "module math\nfn main(): i32 -> 1\n" }],
           document: "math.dao",
           source: "module math\nfn main(): i32 -> 1\n",
         }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
+      );
+      assertEqual(await reqC, "superseded", "Request C superseded by user edit");
+      assertEqual(getActiveSource(), secondEdit, "Second user edit survives single-flight race");
+      assertEqual(loadSavedDraft()?.files[0].source, secondEdit, "Draft keeps second edit");
+
+      // 6. Non-superseded HTTP failure reports "failed", while superseded failure reports "superseded".
+      const reqFail = loadExampleByName("missing.dao", { persistDraft: false });
+      pendingByUrl.get("/api/examples/missing.dao")!.resolve(
+        jsonResponse({ error: "not found" }, 404),
+      );
+      assertEqual(await reqFail, "failed", "Unmodified failing load reports failed");
+
+      const reqSupersededFail = loadExampleByName("broken.dao", { persistDraft: false });
+      updateActiveUserSource("module hello\nfn main(): i32 -> 88\n");
+      pendingByUrl.get("/api/examples/broken.dao")!.resolve(
+        jsonResponse({ error: "not found" }, 404),
+      );
+      assertEqual(
+        await reqSupersededFail,
+        "superseded",
+        "Edited failing load reports superseded rather than failed",
+      );
+    },
+  );
+}
+
+async function testBootstrapStartupEditsAndGenuineFallback(): Promise<void> {
+  const versionPayload = {
+    commit: "deadbeef",
+    llvmVersion: "21.1.8",
+    targetTriple: "arm64-apple-darwin",
+    preludeFiles: ["stdlib/core/option.dao"],
+  };
+  const catalogPayload = {
+    examples: [{ name: "hello.dao", isMultifile: false }],
+  };
+
+  async function runStartupEditBeforeHelloSettles(
+    label: string,
+    editedSource: string,
+    settleHello: (gate: Deferred<Response>) => void,
+  ): Promise<void> {
+    clearDraft();
+    memoryStorage.clear();
+    setWorkspaceProgram([{ path: "main.dao", source: "module main\n" }], "main.dao");
+
+    let helloRequested = false;
+    const helloGate = deferred<Response>();
+    await withMockFetch(
+      (url) => {
+        if (url === "/api/version") return Promise.resolve(jsonResponse(versionPayload));
+        if (url === "/api/examples") return Promise.resolve(jsonResponse(catalogPayload));
+        if (url === "/api/examples/hello.dao") {
+          helloRequested = true;
+          return helloGate.promise;
+        }
+        return Promise.resolve(jsonResponse({ error: "unexpected" }, 404));
+      },
+      async () => {
+        const bootDone = bootstrapWorkspace();
+        await waitForCondition(() => helloRequested, `${label}: hello.dao fetch in flight`);
+
+        updateActiveUserSource(editedSource);
+        scheduleDraftSave();
+
+        settleHello(helloGate);
+        await bootDone;
+
+        assertEqual(getActivePath(), "main.dao", `${label}: keeps user file path`);
+        assertEqual(getCurrentExampleName(), "", `${label}: keeps exampleName unset`);
+        assertEqual(getActiveSource(), editedSource, `${label}: preserves user edit`);
+
+        await new Promise((resolve) => setTimeout(resolve, 430));
+        const saved = loadSavedDraft();
+        assert(saved !== null, `${label}: autosave persisted`);
+        assertEqual(saved.document, "main.dao", `${label}: autosaved document is main.dao`);
+        assertEqual(
+          saved.files[0].source,
+          editedSource,
+          `${label}: autosave persisted user edit, never FALLBACK_FILES`,
+        );
+      },
     );
-    assertEqual(await reqC, false, "Request C superseded by user edit must be discarded");
-    assertEqual(getActiveSource(), secondEdit, "Second user edit survives single-flight race");
-    assertEqual(loadSavedDraft()?.files[0].source, secondEdit, "Draft keeps second edit");
-  } finally {
-    globalThis.fetch = originalFetch;
   }
+
+  // 1. Startup `hello.dao` pending -> user edits buffer -> stale 200 OK arrives.
+  await runStartupEditBeforeHelloSettles(
+    "stale-200",
+    "module custom\nfn main(): i32 -> 123\n",
+    (gate) =>
+      gate.resolve(
+        jsonResponse({
+          name: "hello.dao",
+          files: [{ path: "hello.dao", source: "module server_hello\nfn main(): i32 -> 0\n" }],
+          document: "hello.dao",
+          source: "module server_hello\nfn main(): i32 -> 0\n",
+        }),
+      ),
+  );
+
+  // 2. Startup `hello.dao` pending -> user edits buffer -> HTTP 404 or network failure arrives.
+  await runStartupEditBeforeHelloSettles(
+    "http-404",
+    "module keep_404\nfn main(): i32 -> 9\n",
+    (gate) => gate.resolve(jsonResponse({ error: "missing hello.dao" }, 404)),
+  );
+  await runStartupEditBeforeHelloSettles(
+    "network-reject",
+    "module keep_net\nfn main(): i32 -> 10\n",
+    (gate) => gate.reject(new Error("simulated transport disconnect")),
+  );
+
+  // 3. Genuine startup load failure with NO intervening user edit installs FALLBACK_FILES.
+  clearDraft();
+  memoryStorage.clear();
+  setWorkspaceProgram([{ path: "main.dao", source: "module main\n" }], "main.dao");
+
+  await withMockFetch(
+    (url) => {
+      if (url === "/api/version") return Promise.resolve(jsonResponse(versionPayload));
+      if (url === "/api/examples") return Promise.resolve(jsonResponse(catalogPayload));
+      return Promise.resolve(jsonResponse({ error: "service unavailable" }, 404));
+    },
+    async () => {
+      await bootstrapWorkspace();
+      assertEqual(getActivePath(), "hello.dao", "Genuine startup failure installs hello.dao");
+      assertEqual(getCurrentExampleName(), "hello.dao", "Genuine startup failure sets exampleName");
+      assertEqual(
+        getActiveSource(),
+        FALLBACK_FILES[0].source,
+        "Genuine startup failure installs FALLBACK_FILES source",
+      );
+      assertEqual(
+        loadSavedDraft(),
+        null,
+        "Genuine startup fallback does not pollute localStorage draft",
+      );
+    },
+  );
+}
+
+function testUndoableReplaceTransactionInvariants(): void {
+  const unformatted = "module app\nfn main():i32->1+2\n";
+  const formatted = "module app\n\nfn main(): i32 -> 1 + 2\n";
+
+  const writableState = EditorState.create({
+    doc: unformatted,
+    selection: { anchor: unformatted.length, head: unformatted.length },
+  });
+  const tr = buildUndoableReplaceTransaction(writableState, unformatted, formatted);
+  assert(tr !== null, "Writable matching state produces an undoable transaction");
+  assert(tr.docChanged, "Transaction updates buffer text");
+  assert(
+    tr.annotation(Transaction.addToHistory) !== false,
+    "Format transaction stays in CodeMirror undo history",
+  );
+  assertEqual(tr.newDoc.toString(), formatted, "Transaction produces formatted source");
+  assertEqual(
+    tr.newSelection.main.anchor,
+    unformatted.length,
+    "Selection stays valid within formatted document",
+  );
+
+  // Stale expectedSource or identical source or readOnly state must reject without mutating.
+  assertEqual(
+    buildUndoableReplaceTransaction(writableState, "stale source", formatted),
+    null,
+    "Mismatched expectedSource returns null",
+  );
+  assertEqual(
+    buildUndoableReplaceTransaction(writableState, unformatted, unformatted),
+    null,
+    "Unchanged source returns null",
+  );
+  const readOnlyState = EditorState.create({
+    doc: unformatted,
+    extensions: [EditorState.readOnly.of(true)],
+  });
+  assertEqual(
+    buildUndoableReplaceTransaction(readOnlyState, unformatted, formatted),
+    null,
+    "Read-only state refuses undoable replacement",
+  );
+}
+
+async function testFormatterTargetsWritableFileAndGuardsStaleReplies(): Promise<void> {
+  clearDraft();
+  memoryStorage.clear();
+  setWorkspaceProgram(
+    [
+      { path: "a.dao", source: "module a\nfn f():i32->1+2\n" },
+      { path: "b.dao", source: "module b\nfn g(): i32 -> 3\n" },
+    ],
+    "a.dao",
+  );
+
+  const pendingFormatGates: Deferred<Response>[] = [];
+
+  await withMockFetch(
+    (url) => {
+      if (url === "/api/format") {
+        const gate = deferred<Response>();
+        pendingFormatGates.push(gate);
+        return gate.promise;
+      }
+      return Promise.resolve(jsonResponse({ error: "unexpected" }, 404));
+    },
+    async () => {
+      // 1. Read-only prelude tab refuses formatting without calling /api/format or mutating user files.
+      openPreludeTab({
+        path: "stdlib/core/option.dao",
+        module: "core::option",
+        source: "module core::option\n",
+        semanticTokens: [],
+        symbols: [],
+      });
+      assertEqual(await doFormat(), "readonly", "Prelude tab refuses formatting");
+      assertEqual(pendingFormatGates.length, 0, "No /api/format request issued on prelude tab");
+      closePreludeTab("stdlib/core/option.dao");
+
+      // 2. Concurrent edit + newer format request supersedes slow in-flight format via requestId & revision.
+      selectTab("a.dao");
+      const firstFormat = doFormat();
+      await waitForCondition(() => pendingFormatGates.length === 1, "first format call");
+
+      const newerUserEdit = "module a\nfn f():i32->999\n";
+      updateActiveUserSource(newerUserEdit);
+
+      const secondFormat = doFormat();
+      await waitForCondition(() => pendingFormatGates.length === 2, "second format call");
+
+      // First (stale) reply resolves late — must be discarded.
+      pendingFormatGates[0].resolve(
+        jsonResponse({
+          file: "a.dao",
+          formatted: "module a\n\nfn f(): i32 -> 1 + 2\n",
+          changed: true,
+          diagnostics: [],
+        }),
+      );
+      assertEqual(await firstFormat, "superseded", "First format superseded by edit + newer request");
+      assertEqual(getActiveSource(), newerUserEdit, "Newer edit untouched by stale reply");
+
+      // Second (current) reply resolves and formats only a.dao.
+      const formattedSecond = "module a\n\nfn f(): i32 -> 999\n";
+      pendingFormatGates[1].resolve(
+        jsonResponse({
+          file: "a.dao",
+          formatted: formattedSecond,
+          changed: true,
+          diagnostics: [],
+        }),
+      );
+      assertEqual(await secondFormat, "formatted", "Current format request applies");
+      assertEqual(getActiveSource(), formattedSecond, "a.dao receives formatted source");
+      assertEqual(getUserFiles()[1].source, "module b\nfn g(): i32 -> 3\n", "b.dao untouched");
+
+      // 3. Switching tabs while /api/format is in flight discards reply rather than clobbering active tab.
+      const switchedFormat = doFormat();
+      await waitForCondition(() => pendingFormatGates.length === 3, "third format call");
+      selectTab("b.dao");
+      pendingFormatGates[2].resolve(
+        jsonResponse({
+          file: "a.dao",
+          formatted: "module a\n\nfn f(): i32 -> 0\n",
+          changed: true,
+          diagnostics: [],
+        }),
+      );
+      assertEqual(await switchedFormat, "superseded", "Format superseded by tab switch");
+      assertEqual(getActiveSource(), "module b\nfn g(): i32 -> 3\n", "Tab b.dao untouched");
+
+      // 4. Deleting or resetting a file while /api/format is in flight invalidates the format request,
+      // even if a replacement workspace later reuses the same path and source text.
+      selectTab("a.dao");
+      const sameSourceBeforeReset = getActiveSource();
+      const resetSupersededFormat = doFormat();
+      await waitForCondition(() => pendingFormatGates.length === 4, "fourth format call");
+      setWorkspaceProgram(
+        [{ path: "a.dao", source: sameSourceBeforeReset }],
+        "a.dao",
+      );
+      pendingFormatGates[3].resolve(
+        jsonResponse({
+          file: "a.dao",
+          formatted: "module a\n\nfn clobbered(): i32 -> 0\n",
+          changed: true,
+          diagnostics: [],
+        }),
+      );
+      assertEqual(
+        await resetSupersededFormat,
+        "superseded",
+        "Format across workspace reset superseded even with identical path/source",
+      );
+      assertEqual(getActiveSource(), sameSourceBeforeReset, "Post-reset buffer preserved");
+
+      // 5. Syntax error diagnostics from /api/format preserve broken buffer and report diagnostics.
+      const brokenSource = "module a\nfn broken(: i32 -> 0\n";
+      updateActiveUserSource(brokenSource);
+      const diagFormat = doFormat();
+      await waitForCondition(() => pendingFormatGates.length === 5, "fifth format call");
+      pendingFormatGates[4].resolve(
+        jsonResponse({
+          file: "a.dao",
+          formatted: brokenSource,
+          changed: false,
+          diagnostics: [
+            {
+              severity: "error",
+              file: "a.dao",
+              offset: 19,
+              length: 1,
+              line: 2,
+              col: 11,
+              message: "expected parameter name",
+            },
+          ],
+        }),
+      );
+      assertEqual(await diagFormat, "diagnostics", "Syntax error format returns diagnostics");
+      assertEqual(getActiveSource(), brokenSource, "Broken source preserved unchanged");
+      assertEqual(getWorkspaceDiagnostics().length, 1, "Format diagnostic recorded");
+    },
+  );
+  clearDraft();
 }
 
 function testWorkspaceRevisionIncrementsOnEveryMutation(): void {
@@ -199,6 +553,7 @@ function testWorkspaceRevisionIncrementsOnEveryMutation(): void {
 }
 
 async function testMalformedAndPartialSnapshotsAreAtomic(): Promise<void> {
+  clearDraft();
   memoryStorage.clear();
   const baselineSource = "module keep\nfn main(): i32 -> 7\n";
   setWorkspaceProgram([{ path: "keep.dao", source: baselineSource }], "keep.dao", {
@@ -278,9 +633,12 @@ async function testMalformedAndPartialSnapshotsAreAtomic(): Promise<void> {
 }
 
 async function runAll(): Promise<void> {
-  await testOutOfOrderExampleRequestsAndEdits();
   testWorkspaceRevisionIncrementsOnEveryMutation();
   await testMalformedAndPartialSnapshotsAreAtomic();
+  await testOutOfOrderExampleRequestsAndEdits();
+  await testBootstrapStartupEditsAndGenuineFallback();
+  testUndoableReplaceTransactionInvariants();
+  await testFormatterTargetsWritableFileAndGuardsStaleReplies();
   console.log("workspace_state.test: all assertions passed");
 }
 

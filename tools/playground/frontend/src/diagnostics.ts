@@ -19,7 +19,9 @@ function locationLabel(d: Diagnostic): string {
 
 /** Render clickable program-wide diagnostics into the diagnostics panel. */
 export function renderDiagnostics(diagnostics: Diagnostic[]): void {
-  const container = document.getElementById("diagnostics-output")!;
+  if (typeof document === "undefined") return;
+  const container = document.getElementById("diagnostics-output");
+  if (!container) return;
   const countBadge = document.getElementById("diagnostics-count");
 
   const errors = diagnostics.filter((d) => d.severity === "error").length;

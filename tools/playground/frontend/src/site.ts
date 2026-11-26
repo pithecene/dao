@@ -249,13 +249,21 @@ function applyTheme(theme: "dark" | "light"): void {
 // Routing
 // ---------------------------------------------------------------------------
 
-export function parseLocationRoute(): {
+export function parseLocationRoute(location?: {
+  hash?: string;
+  search?: string;
+}): {
   route: SiteRoute;
   params: URLSearchParams;
   subAnchor: string;
 } {
-  const rawHash = window.location.hash.replace(/^#/, "");
-  const searchParams = new URLSearchParams(window.location.search);
+  const loc =
+    location ??
+    (typeof window !== "undefined"
+      ? window.location
+      : { hash: "", search: "" });
+  const rawHash = (loc.hash ?? "").replace(/^#/, "");
+  const searchParams = new URLSearchParams(loc.search ?? "");
 
   if (!rawHash) {
     if (searchParams.has("s") || searchParams.has("example")) {

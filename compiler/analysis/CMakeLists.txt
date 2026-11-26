@@ -1,6 +1,7 @@
 add_library(dao_analysis STATIC
   completion.cpp
   document_symbols.cpp
+  formatter.cpp
   goto_definition.cpp
   hover.cpp
   references.cpp
@@ -43,7 +44,18 @@ target_compile_definitions(tooling_surface_test PRIVATE
   DAO_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
+add_executable(formatter_test
+  formatter_test.cpp
+)
+
+target_link_libraries(formatter_test PRIVATE dao_analysis Boost::ut)
+
+target_compile_definitions(formatter_test PRIVATE
+  DAO_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+
 include(CTest)
 add_test(NAME semantic_tokens_test COMMAND semantic_tokens_test)
 add_test(NAME analysis_test COMMAND analysis_test)
 add_test(NAME tooling_surface_test COMMAND tooling_surface_test)
+add_test(NAME formatter_test COMMAND formatter_test)

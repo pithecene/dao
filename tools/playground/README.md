@@ -32,6 +32,7 @@ Declared in `compiler_service/service_surface.h` and generated into `frontend/sr
 
 - `POST /api/analyze` — tokens, semantic tokens, AST/HIR/MIR/LLVM IR dumps, and diagnostics for a multi-file `AnalyzeRequest`
 - `POST /api/run` — compile, link against `libdao_runtime.a`, and execute a multi-file `ProgramRequest`
+- `POST /api/format` — canonical trivia-preserving formatting for the active writable file
 - `POST /api/hover`, `POST /api/goto-def`, `POST /api/references`, `POST /api/completions`, `POST /api/document-symbols` — cross-file language queries
 - `GET /api/examples` and `GET /api/examples/:name` — single-file and multi-file example programs
 - `POST /api/prelude` — read-only stdlib prelude file source, semantic tokens, and symbol outline

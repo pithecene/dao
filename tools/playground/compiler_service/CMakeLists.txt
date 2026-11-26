@@ -19,6 +19,7 @@ add_library(dao_playground_service STATIC
   analyze.cpp
   completions.cpp
   examples.cpp
+  format.cpp
   navigation.cpp
   pipeline.cpp
   prelude.cpp

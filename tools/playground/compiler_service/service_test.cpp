@@ -745,6 +745,34 @@ suite<"playground_service"> playground_service_suite = [] {
     expect(scratch.body["module"].get<std::string>() == "playground");
   };
 
+  "format_route_formats_modules_scratch_buffers_and_preserves_broken_code"_test = [] {
+    auto mod_reply =
+        call("format", document_request("module app\n// comment\nfn main():i32->1+2\n"));
+    expect(mod_reply.body["changed"].get<bool>());
+    expect(mod_reply.body["diagnostics"].empty());
+    expect(mod_reply.body["formatted"].get<std::string>() ==
+           "module app\n\n// comment\nfn main(): i32 -> 1 + 2\n");
+
+    // Second pass is unchanged.
+    auto second = call("format", document_request(mod_reply.body["formatted"].get<std::string>()));
+    expect(!second.body["changed"].get<bool>());
+
+    // Scratch buffer without `module` keeps its moduleless form.
+    auto scratch_reply =
+        call("format", document_request("// scratch\nfn main():i32\n    return 0"));
+    expect(scratch_reply.body["changed"].get<bool>());
+    expect(scratch_reply.body["formatted"].get<std::string>() ==
+           "// scratch\nfn main(): i32\n  return 0\n");
+
+    // Broken input returns original source unchanged + located diagnostics.
+    const std::string broken = "fn broken(: i32\n  return 0\n";
+    auto bad_reply = call("format", document_request(broken));
+    expect(!bad_reply.body["changed"].get<bool>());
+    expect(bad_reply.body["formatted"].get<std::string>() == broken);
+    expect(!bad_reply.body["diagnostics"].empty());
+    expect(bad_reply.body["diagnostics"][0]["line"].get<uint32_t>() == 1);
+  };
+
   "generated_typescript_is_current"_test = [] {
     auto generated = repo_root() / "tools" / "playground" / "frontend" / "src" / "generated" /
                      "tooling_surface.ts";

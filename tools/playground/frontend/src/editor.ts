@@ -5,6 +5,7 @@ import {
   EditorState,
   StateEffect,
   StateField,
+  Transaction,
 } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
 import { referenceHighlights, tokenHighlighter } from "./highlighting";
@@ -209,7 +210,7 @@ export function loadEditorBuffer(
 
   editorInstance.dispatch({
     effects: readOnlyCompartment.reconfigure(EditorState.readOnly.of(readOnly)),
-    annotations: programmaticChange.of(true),
+    annotations: [programmaticChange.of(true), Transaction.addToHistory.of(false)],
   });
 
   if (selection) {
@@ -224,10 +225,56 @@ export function loadEditorBuffer(
     editorInstance.dispatch({
       selection: { anchor, head },
       effects: EditorView.scrollIntoView(anchor, { y: "center" }),
-      annotations: programmaticChange.of(true),
+      annotations: [programmaticChange.of(true), Transaction.addToHistory.of(false)],
     });
   }
   statesByPath.set(path, editorInstance.state);
+}
+
+/**
+ * Build an undoable whole-buffer replacement transaction on `state` when
+ * writable and still matching `expectedSource`, clamping selection bounds.
+ */
+export function buildUndoableReplaceTransaction(
+  state: EditorState,
+  expectedSource: string,
+  nextSource: string,
+): Transaction | null {
+  if (
+    state.readOnly ||
+    state.doc.toString() !== expectedSource ||
+    expectedSource === nextSource
+  ) {
+    return null;
+  }
+  const sel = state.selection.main;
+  const anchor = Math.min(sel.anchor, nextSource.length);
+  const head = Math.min(sel.head, nextSource.length);
+  return state.update({
+    changes: { from: 0, to: expectedSource.length, insert: nextSource },
+    selection: { anchor, head },
+  });
+}
+
+/**
+ * Apply an undoable replacement (such as formatting) to the currently tracked
+ * writable file's EditorState when `path` is active and its buffer still equals
+ * `expectedSource`. Preserves undo history and triggers user-edit listeners.
+ */
+export function applyUndoableEdit(
+  path: string,
+  expectedSource: string,
+  nextSource: string,
+): boolean {
+  if (!editorInstance || trackedPath !== path) return false;
+  const tr = buildUndoableReplaceTransaction(
+    editorInstance.state,
+    expectedSource,
+    nextSource,
+  );
+  if (!tr) return false;
+  editorInstance.dispatch(tr);
+  return true;
 }
 
 /** Jump cursor/selection inside the currently displayed buffer. */
@@ -265,6 +312,6 @@ export function setEditorDiagnostics(
   ranges.sort((a, b) => a.from - b.from || a.to - b.to);
   view.dispatch({
     effects: setDiagDecorations.of(Decoration.set(ranges, true)),
-    annotations: programmaticChange.of(true),
+    annotations: [programmaticChange.of(true), Transaction.addToHistory.of(false)],
   });
 }

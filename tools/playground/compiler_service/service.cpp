@@ -3,6 +3,7 @@
 #include "analyze.h"
 #include "completions.h"
 #include "examples.h"
+#include "format.h"
 #include "navigation.h"
 #include "prelude.h"
 #include "run.h"
@@ -29,6 +30,7 @@ struct RouteBinding {
 constexpr std::array kBindings{
     RouteBinding{"analyze", analyze},
     RouteBinding{"run", run},
+    RouteBinding{"format", format_document},
     RouteBinding{"hover", hover},
     RouteBinding{"gotoDef", goto_definition},
     RouteBinding{"documentSymbols", document_symbols},

@@ -18,6 +18,13 @@ export type ExampleCategory =
   | "Compute & Search"
   | "Multi-file Modules";
 
+export type ExampleLoadOutcome = "applied" | "superseded" | "failed";
+
+export interface WorkspaceLoadGuard {
+  readonly requestId: number;
+  readonly revision: number;
+}
+
 export interface CatalogItem {
   name: string;
   category: ExampleCategory;
@@ -101,6 +108,7 @@ fn main(): i32
 
 let catalog: CatalogItem[] = buildCatalogFromEntries([]);
 const catalogListeners: (() => void)[] = [];
+const boundCatalogSelects = new WeakSet<HTMLSelectElement>();
 let latestExampleRequestId = 0;
 
 export function onCatalogChange(fn: () => void): void {
@@ -111,9 +119,47 @@ export function getCatalog(): readonly CatalogItem[] {
   return catalog;
 }
 
+/** Snapshot the current example-request counter and workspace revision. */
+export function captureWorkspaceLoadGuard(): WorkspaceLoadGuard {
+  return {
+    requestId: latestExampleRequestId,
+    revision: getWorkspaceRevision(),
+  };
+}
+
+/** True when neither a newer example load nor a workspace mutation has occurred. */
+export function isWorkspaceLoadGuardCurrent(guard: WorkspaceLoadGuard): boolean {
+  return (
+    guard.requestId === latestExampleRequestId &&
+    guard.revision === getWorkspaceRevision()
+  );
+}
+
+/**
+ * Claim the next example-request slot when `expectedGuard` (if given) has not
+ * already been superseded by a newer request or workspace edit.
+ */
+export function beginExampleLoadGuard(
+  expectedGuard?: WorkspaceLoadGuard,
+): WorkspaceLoadGuard | null {
+  if (expectedGuard && !isWorkspaceLoadGuardCurrent(expectedGuard)) {
+    return null;
+  }
+  const revision = expectedGuard?.revision ?? getWorkspaceRevision();
+  const requestId = ++latestExampleRequestId;
+  return { requestId, revision };
+}
+
 function getExampleSelect(): HTMLSelectElement | null {
   if (typeof document === "undefined") return null;
   return document.getElementById("example-select") as HTMLSelectElement | null;
+}
+
+export function setExampleSelectValue(value: string): void {
+  const select = getExampleSelect();
+  if (select) {
+    select.value = value;
+  }
 }
 
 function buildCatalogFromEntries(entries: ExampleEntry[]): CatalogItem[] {
@@ -186,11 +232,14 @@ export async function initExampleCatalog(): Promise<void> {
   const select = getExampleSelect();
   populateExampleDropdown();
 
-  select?.addEventListener("change", () => {
-    const name = select.value;
-    if (!name) return;
-    void loadExampleByName(name, { persistDraft: true });
-  });
+  if (select && !boundCatalogSelects.has(select)) {
+    boundCatalogSelects.add(select);
+    select.addEventListener("change", () => {
+      const name = select.value;
+      if (!name) return;
+      void loadExampleByName(name, { persistDraft: true });
+    });
+  }
 
   try {
     const { examples } = await api("examples", undefined);
@@ -204,29 +253,34 @@ export async function initExampleCatalog(): Promise<void> {
 
 /**
  * Load an example (single-file or multi-file) into the workspace by name.
- * Guards against out-of-order responses and concurrent workspace edits via
- * `(reqId, startRevision)` so a late response never clobbers newer state.
+ * Distinguishes `"applied"`, `"superseded"` (discarded because a newer request
+ * or user workspace edit occurred), and `"failed"` (network/HTTP error while
+ * the workspace guard remained current).
  */
 export async function loadExampleByName(
   name: string,
-  options?: { switchRoute?: boolean; persistDraft?: boolean },
-): Promise<boolean> {
-  const reqId = ++latestExampleRequestId;
-  const startRevision = getWorkspaceRevision();
-  const select = getExampleSelect();
+  options?: {
+    switchRoute?: boolean;
+    persistDraft?: boolean;
+    guard?: WorkspaceLoadGuard;
+    expectedGuard?: WorkspaceLoadGuard;
+  },
+): Promise<ExampleLoadOutcome> {
+  const guard =
+    options?.guard ?? beginExampleLoadGuard(options?.expectedGuard);
+  if (!guard || !isWorkspaceLoadGuardCurrent(guard)) {
+    return "superseded";
+  }
 
   try {
     const data = await api("example", { name });
-    if (
-      reqId !== latestExampleRequestId ||
-      getWorkspaceRevision() !== startRevision
-    ) {
-      if (select) select.value = getCurrentExampleName();
-      return false;
+    if (!isWorkspaceLoadGuardCurrent(guard)) {
+      setExampleSelectValue(getCurrentExampleName());
+      return "superseded";
     }
 
     setWorkspaceProgram(data.files, data.document, { exampleName: name });
-    if (select) select.value = name;
+    setExampleSelectValue(name);
     if (options?.switchRoute) {
       requestPlaygroundView();
     }
@@ -234,18 +288,15 @@ export async function loadExampleByName(
     if (options?.persistDraft) {
       saveDraft();
     }
-    return true;
+    return "applied";
   } catch (err) {
-    if (
-      reqId !== latestExampleRequestId ||
-      getWorkspaceRevision() !== startRevision
-    ) {
-      return false;
+    if (!isWorkspaceLoadGuardCurrent(guard)) {
+      return "superseded";
     }
     console.error("failed to load example:", err);
-    if (select) select.value = getCurrentExampleName();
+    setExampleSelectValue(getCurrentExampleName());
     showNotice(`Could not load example '${name}'`);
-    return false;
+    return "failed";
   }
 }
 
@@ -253,14 +304,26 @@ export async function loadExampleByName(
 export async function resetWorkspace(): Promise<void> {
   clearDraft();
   const target = getCurrentExampleName() || "hello.dao";
-  const ok = await loadExampleByName(target, { persistDraft: false });
-  if (!ok && getWorkspaceRevision() === 0) {
-    setWorkspaceProgram(FALLBACK_FILES, "hello.dao", { exampleName: "hello.dao" });
-    syncEditorToActiveTab();
-  } else if (!ok) {
-    // Only fall back when the load failed without a newer workspace mutation superseding it.
-    const select = getExampleSelect();
-    if (select) select.value = getCurrentExampleName();
+  const resetGuard = beginExampleLoadGuard();
+  if (!resetGuard) return;
+
+  const outcome = await loadExampleByName(target, {
+    persistDraft: false,
+    guard: resetGuard,
+  });
+  if (outcome === "superseded") {
+    return;
+  }
+  if (outcome === "failed" && isWorkspaceLoadGuardCurrent(resetGuard)) {
+    if (getWorkspaceRevision() === 0) {
+      setWorkspaceProgram(FALLBACK_FILES, "hello.dao", {
+        exampleName: "hello.dao",
+      });
+      setExampleSelectValue("hello.dao");
+      syncEditorToActiveTab();
+    } else {
+      setExampleSelectValue(getCurrentExampleName());
+    }
   }
   showNotice("Workspace reset");
 }
@@ -272,9 +335,8 @@ export function openSnippetInPlayground(
   runImmediately = false,
 ): void {
   ++latestExampleRequestId;
-  const select = getExampleSelect();
   setWorkspaceProgram(files, documentPath, { exampleName: "" });
-  if (select) select.value = "";
+  setExampleSelectValue("");
   requestPlaygroundView();
   syncEditorToActiveTab();
   saveDraft();

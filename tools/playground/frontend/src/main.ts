@@ -1,28 +1,16 @@
 import "./style.css";
-import { api, onServiceStatus } from "./api";
+import { onServiceStatus } from "./api";
 import { initAnalysis, scheduleAnalyze } from "./analysis";
 import { initDiagnostics } from "./diagnostics";
-import {
-  onWorkspaceLifecycle,
-  setVersionInfo,
-  setWorkspaceProgram,
-  updateActiveUserSource,
-} from "./document";
+import { updateActiveUserSource } from "./document";
 import { createEditor } from "./editor";
-import {
-  FALLBACK_FILES,
-  initExampleCatalog,
-  loadExampleByName,
-  resetWorkspace,
-} from "./examples";
+import { resetWorkspace } from "./examples";
+import { doFormat, initFormat } from "./format";
 import { gotoDefAtCursor, initGotoDef } from "./goto_def";
 import { hideHoverTooltip, initHover } from "./hover";
 import {
-  applySnapshot,
   closeSnapshotModal,
-  decodeShareToken,
   initSnapshotModal,
-  loadSavedDraft,
   scheduleDraftSave,
 } from "./persistence";
 import {
@@ -31,8 +19,9 @@ import {
   initReferences,
 } from "./references";
 import { doRun } from "./run";
-import { initSiteRouter, initTheme, parseLocationRoute } from "./site";
+import { initSiteRouter, initTheme } from "./site";
 import { initSplitters } from "./splitters";
+import { bootstrapWorkspace, hydrateWorkspaceQueryParams } from "./startup";
 import {
   cancelInlineFileForms,
   initWorkspaceUi,
@@ -63,6 +52,7 @@ initDiagnostics((file, offset, length) => {
 initHover(editor);
 initGotoDef(editor);
 initReferences(editor);
+initFormat();
 initWorkspaceUi();
 initSplitters();
 initSnapshotModal(() => syncEditorToActiveTab());
@@ -71,25 +61,20 @@ initSiteRouter((params) => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. Service Status & Version Metadata
+// 3. Service Status
 // ---------------------------------------------------------------------------
 
 onServiceStatus((restarting) => {
   document.getElementById("service-status")!.hidden = !restarting;
 });
 
-async function loadServiceVersion(): Promise<void> {
-  try {
-    const info = await api("version", undefined);
-    setVersionInfo(info);
-  } catch (err) {
-    console.error("version check failed:", err);
-  }
-}
-
 // ---------------------------------------------------------------------------
 // 4. Toolbar Controls, Collapsible Panels & Global Shortcuts
 // ---------------------------------------------------------------------------
+
+document.getElementById("format-btn")!.addEventListener("click", () => {
+  void doFormat();
+});
 
 document.getElementById("run-btn")!.addEventListener("click", () => {
   void doRun();
@@ -103,6 +88,11 @@ document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
     e.preventDefault();
     void doRun();
+    return;
+  }
+  if (e.shiftKey && e.altKey && e.code === "KeyF") {
+    e.preventDefault();
+    void doFormat();
     return;
   }
   if (e.key === "F12" && e.shiftKey) {
@@ -145,105 +135,7 @@ document.querySelector(".panel-tabs")!.addEventListener("click", (e) => {
 });
 
 // ---------------------------------------------------------------------------
-// 5. Initial & Fragment Workspace Hydration (Share URL -> ?example= -> Draft)
+// 5. Initial Workspace Bootstrap
 // ---------------------------------------------------------------------------
-
-let lastHydratedQueryKey = "";
-let hydratingFromQuery = false;
-let catalogReadyPromise: Promise<void> | null = null;
-let versionReadyPromise: Promise<void> | null = null;
-
-onWorkspaceLifecycle({
-  onReset: () => {
-    if (!hydratingFromQuery) {
-      lastHydratedQueryKey = "";
-    }
-  },
-});
-
-function queryHydrationKey(params: URLSearchParams): string {
-  const share = params.get("s") ?? "";
-  const example = params.get("example") ?? "";
-  return share || example ? `s=${share}&example=${example}` : "";
-}
-
-async function hydrateWorkspaceQueryParams(
-  params: URLSearchParams,
-): Promise<boolean> {
-  const key = queryHydrationKey(params);
-  if (key === lastHydratedQueryKey) {
-    return false;
-  }
-  lastHydratedQueryKey = key;
-  if (!key) {
-    return false;
-  }
-
-  const shareParam = params.get("s");
-  const exampleParam = params.get("example");
-
-  hydratingFromQuery = true;
-  try {
-    if (versionReadyPromise) {
-      await versionReadyPromise;
-    }
-
-    if (shareParam) {
-      const decoded = await decodeShareToken(shareParam);
-      if (decoded) {
-        applySnapshot(decoded);
-        const select = document.getElementById("example-select") as HTMLSelectElement;
-        select.value = decoded.exampleName ?? "";
-        syncEditorToActiveTab();
-        return true;
-      }
-    }
-
-    if (exampleParam) {
-      if (catalogReadyPromise) {
-        await catalogReadyPromise;
-      }
-      const loaded = await loadExampleByName(exampleParam, { persistDraft: false });
-      if (loaded) {
-        return true;
-      }
-    }
-
-    return false;
-  } finally {
-    hydratingFromQuery = false;
-  }
-}
-
-async function bootstrapWorkspace(): Promise<void> {
-  versionReadyPromise = loadServiceVersion();
-  catalogReadyPromise = initExampleCatalog();
-
-  const { params } = parseLocationRoute();
-  const hydratedFromUrl = await hydrateWorkspaceQueryParams(params);
-  if (hydratedFromUrl) {
-    await catalogReadyPromise;
-    return;
-  }
-
-  await versionReadyPromise;
-
-  const draft = loadSavedDraft();
-  if (draft) {
-    applySnapshot(draft);
-    const select = document.getElementById("example-select") as HTMLSelectElement;
-    if (draft.exampleName) select.value = draft.exampleName;
-    syncEditorToActiveTab();
-    await catalogReadyPromise;
-    return;
-  }
-
-  await catalogReadyPromise;
-  const ok = await loadExampleByName("hello.dao", { persistDraft: false });
-  if (!ok) {
-    setWorkspaceProgram(FALLBACK_FILES, "hello.dao", { exampleName: "hello.dao" });
-    syncEditorToActiveTab();
-  }
-}
 
 void bootstrapWorkspace();
