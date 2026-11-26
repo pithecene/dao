@@ -80,15 +80,15 @@ File
     Param source: string
     Param pos: i64
     ReturnType: i64
-    LetStatement cur: i64
+    LetStatement cur
       Identifier pos
-    LetStatement slen: i64
+    LetStatement slen
       CallExpr
         Callee
           Identifier length
         Args
           Identifier source
-    LetStatement done: bool
+    LetStatement done
       BoolLiteral false
     WhileStatement
       Condition
@@ -131,15 +131,15 @@ File
     Param source: string
     Param pos: i64
     ReturnType: i64
-    LetStatement cur: i64
+    LetStatement cur
       Identifier pos
-    LetStatement slen: i64
+    LetStatement slen
       CallExpr
         Callee
           Identifier length
         Args
           Identifier source
-    LetStatement done: bool
+    LetStatement done
       BoolLiteral false
     WhileStatement
       Condition
@@ -183,20 +183,20 @@ File
     ReturnType: i32
     LetStatement pos: i64
       IntLiteral 0
-    LetStatement slen: i64
+    LetStatement slen
       CallExpr
         Callee
           Identifier length
         Args
           Identifier source
-    LetStatement count: i32
+    LetStatement count
       IntLiteral 0
     WhileStatement
       Condition
         BinaryExpr <
           Identifier pos
           Identifier slen
-      LetStatement ch: i32
+      LetStatement ch
         CallExpr
           Callee
             Identifier char_at
@@ -297,7 +297,7 @@ File
           Args
             StringLiteral "examples/bootstrap_probe/lex_self.dao"
       Then
-        LetStatement source: string
+        LetStatement source
           CallExpr
             Callee
               Identifier read_file

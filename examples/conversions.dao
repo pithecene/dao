@@ -1,26 +1,26 @@
 module conversions
 fn main(): i32
-  let x: i32 = 42
-  let y: f64 = to_f64(x)
+  let x = 42
+  let y = to_f64(x)
   print("i32 42 as f64:")
   print(y)
 
-  let big: i64 = to_i64(x)
+  let big = to_i64(x)
   print("i32 42 as i64:")
   print(big)
 
-  let pi: f64 = 3.14
-  let truncated: i32 = f64_to_i32(pi)
+  let pi = 3.14
+  let truncated = f64_to_i32(pi)
   print("f64 3.14 as i32 (truncated):")
   print(truncated)
 
-  let neg: f64 = 0.0 - 2.71
-  let neg_trunc: i32 = f64_to_i32(neg)
+  let neg = 0.0 - 2.71
+  let neg_trunc = f64_to_i32(neg)
   print("f64 -2.71 as i32 (truncated toward zero):")
   print(neg_trunc)
 
   let wide: i64 = 100
-  let narrow: i32 = i64_to_i32(wide)
+  let narrow = i64_to_i32(wide)
   print("i64 100 as i32:")
   print(narrow)
 

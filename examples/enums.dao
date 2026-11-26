@@ -31,7 +31,7 @@ fn direction_name(d: Direction): string
   return "?"
 
 fn main(): i32
-  let d: Direction = Direction::East
+  let d = Direction::East
   print("direction: " + direction_name(d))
   print("opposite:  " + direction_name(opposite(d)))
 

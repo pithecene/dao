@@ -68,7 +68,7 @@ File
           Token
     LetStatement pos: i64
       IntLiteral 0
-    LetStatement slen: i64
+    LetStatement slen
       CallExpr
         Callee
           Identifier length
@@ -79,7 +79,7 @@ File
         BinaryExpr <
           Identifier pos
           Identifier slen
-      LetStatement ch: i32
+      LetStatement ch
         CallExpr
           Callee
             Identifier char_at
@@ -110,7 +110,7 @@ File
                 Args
                   Identifier ch
             Then
-              LetStatement end: i64
+              LetStatement end
                 BinaryExpr +
                   Identifier pos
                   IntLiteral 1
@@ -470,7 +470,7 @@ File
       Then
         ReturnStatement
           QualifiedName TK::Eof
-    LetStatement tok: Token
+    LetStatement tok
       CallExpr
         Callee
           FieldExpr .get
@@ -494,7 +494,7 @@ File
           Identifier i
           FieldExpr .len
             Identifier tok
-      LetStatement ch: i32
+      LetStatement ch
         CallExpr
           Callee
             Identifier char_at
@@ -538,7 +538,7 @@ File
     Param arena: Vector<Expr>
     Param pos: i64
     ReturnType: ParseResult
-    LetStatement kind: TK
+    LetStatement kind
       CallExpr
         Callee
           Identifier peek
@@ -551,26 +551,26 @@ File
           Identifier kind
           QualifiedName TK::Int
       Then
-        LetStatement tok: Token
+        LetStatement tok
           CallExpr
             Callee
               FieldExpr .get
                 Identifier tokens
             Args
               Identifier pos
-        LetStatement val: i64
+        LetStatement val
           CallExpr
             Callee
               Identifier token_text_to_i64
             Args
               Identifier source
               Identifier tok
-        LetStatement idx: i64
+        LetStatement idx
           CallExpr
             Callee
               FieldExpr .length
                 Identifier arena
-        LetStatement new_arena: Vector<Expr>
+        LetStatement new_arena
           CallExpr
             Callee
               FieldExpr .push
@@ -597,7 +597,7 @@ File
           Identifier kind
           QualifiedName TK::LParen
       Then
-        LetStatement inner: ParseResult
+        LetStatement inner
           CallExpr
             Callee
               Identifier parse_expr
@@ -690,7 +690,7 @@ File
               Identifier pos
           QualifiedName TK::Minus
       Then
-        LetStatement operand: ParseResult
+        LetStatement operand
           CallExpr
             Callee
               Identifier parse_unary
@@ -713,13 +713,13 @@ File
           Then
             ReturnStatement
               Identifier operand
-        LetStatement idx: i64
+        LetStatement idx
           CallExpr
             Callee
               FieldExpr .length
                 FieldExpr .arena
                   Identifier operand
-        LetStatement new_arena: Vector<Expr>
+        LetStatement new_arena
           CallExpr
             Callee
               FieldExpr .push
@@ -757,7 +757,7 @@ File
     Param arena: Vector<Expr>
     Param pos: i64
     ReturnType: ParseResult
-    LetStatement left: ParseResult
+    LetStatement left
       CallExpr
         Callee
           Identifier parse_unary
@@ -778,16 +778,16 @@ File
       Then
         ReturnStatement
           Identifier left
-    LetStatement result: ParseResult
+    LetStatement result
       Identifier left
-    LetStatement done: bool
+    LetStatement done
       BoolLiteral false
     WhileStatement
       Condition
         BinaryExpr ==
           Identifier done
           BoolLiteral false
-      LetStatement op: TK
+      LetStatement op
         CallExpr
           Callee
             Identifier peek
@@ -805,7 +805,7 @@ File
               Identifier op
               QualifiedName TK::Slash
         Then
-          LetStatement right: ParseResult
+          LetStatement right
             CallExpr
               Callee
                 Identifier parse_unary
@@ -830,13 +830,13 @@ File
             Then
               ReturnStatement
                 Identifier right
-          LetStatement idx: i64
+          LetStatement idx
             CallExpr
               Callee
                 FieldExpr .length
                   FieldExpr .arena
                     Identifier right
-          LetStatement new_arena: Vector<Expr>
+          LetStatement new_arena
             CallExpr
               Callee
                 FieldExpr .push
@@ -878,7 +878,7 @@ File
     Param arena: Vector<Expr>
     Param pos: i64
     ReturnType: ParseResult
-    LetStatement left: ParseResult
+    LetStatement left
       CallExpr
         Callee
           Identifier parse_multiplicative
@@ -899,16 +899,16 @@ File
       Then
         ReturnStatement
           Identifier left
-    LetStatement result: ParseResult
+    LetStatement result
       Identifier left
-    LetStatement done: bool
+    LetStatement done
       BoolLiteral false
     WhileStatement
       Condition
         BinaryExpr ==
           Identifier done
           BoolLiteral false
-      LetStatement op: TK
+      LetStatement op
         CallExpr
           Callee
             Identifier peek
@@ -926,7 +926,7 @@ File
               Identifier op
               QualifiedName TK::Minus
         Then
-          LetStatement right: ParseResult
+          LetStatement right
             CallExpr
               Callee
                 Identifier parse_multiplicative
@@ -951,13 +951,13 @@ File
             Then
               ReturnStatement
                 Identifier right
-          LetStatement idx: i64
+          LetStatement idx
             CallExpr
               Callee
                 FieldExpr .length
                   FieldExpr .arena
                     Identifier right
-          LetStatement new_arena: Vector<Expr>
+          LetStatement new_arena
             CallExpr
               Callee
                 FieldExpr .push
@@ -1018,7 +1018,7 @@ File
           Identifier Vector.new
         TypeArgs
           Expr
-    LetStatement result: ParseResult
+    LetStatement result
       CallExpr
         Callee
           Identifier parse_expr
@@ -1072,7 +1072,7 @@ File
     Param arena: Vector<Expr>
     Param idx: i64
     ReturnType: i64
-    LetStatement node: Expr
+    LetStatement node
       CallExpr
         Callee
           FieldExpr .get
@@ -1090,7 +1090,7 @@ File
       Arm
         Pattern
           QualifiedName Expr::Unary
-        LetStatement operand: i64
+        LetStatement operand
           CallExpr
             Callee
               Identifier eval_node
@@ -1108,14 +1108,14 @@ File
       Arm
         Pattern
           QualifiedName Expr::Binary
-        LetStatement lval: i64
+        LetStatement lval
           CallExpr
             Callee
               Identifier eval_node
             Args
               Identifier arena
               Identifier left_idx
-        LetStatement rval: i64
+        LetStatement rval
           CallExpr
             Callee
               Identifier eval_node
@@ -1220,16 +1220,16 @@ File
     Param idx: i64
     Param depth: i32
     ReturnType: i32
-    LetStatement node: Expr
+    LetStatement node
       CallExpr
         Callee
           FieldExpr .get
             Identifier arena
         Args
           Identifier idx
-    LetStatement indent: string
+    LetStatement indent
       StringLiteral ""
-    LetStatement d: i32
+    LetStatement d
       IntLiteral 0
     WhileStatement
       Condition
@@ -1281,7 +1281,7 @@ File
               BinaryExpr +
                 Identifier indent
                 StringLiteral "NEG"
-        LetStatement unused: i32
+        LetStatement unused
           CallExpr
             Callee
               Identifier print_node
@@ -1308,7 +1308,7 @@ File
                     Identifier op_name
                   Args
                     Identifier op
-        LetStatement unused1: i32
+        LetStatement unused1
           CallExpr
             Callee
               Identifier print_node
@@ -1318,7 +1318,7 @@ File
               BinaryExpr +
                 Identifier depth
                 IntLiteral 1
-        LetStatement unused2: i32
+        LetStatement unused2
           CallExpr
             Callee
               Identifier print_node
@@ -1335,13 +1335,13 @@ File
     Param source: string
     Param expected: i64
     ReturnType: bool
-    LetStatement tokens: Vector<Token>
+    LetStatement tokens
       CallExpr
         Callee
           Identifier lex
         Args
           Identifier source
-    LetStatement result: ParseResult
+    LetStatement result
       CallExpr
         Callee
           Identifier parse
@@ -1370,7 +1370,7 @@ File
                 StringLiteral ": parse error"
         ReturnStatement
           BoolLiteral false
-    LetStatement actual: i64
+    LetStatement actual
       CallExpr
         Callee
           Identifier eval_node
@@ -1444,7 +1444,7 @@ File
           Identifier print
         Args
           StringLiteral ""
-    LetStatement pass_count: i32
+    LetStatement pass_count
       IntLiteral 0
     IfStatement
       Condition
@@ -1848,7 +1848,7 @@ File
             BinaryExpr +
               Identifier pass_count
               IntLiteral 1
-    LetStatement total: i32
+    LetStatement total
       IntLiteral 19
     ExpressionStatement
       CallExpr
@@ -1894,15 +1894,15 @@ File
           Identifier print
         Args
           StringLiteral "--- arena dump: (2 + 3) * 4 ---"
-    LetStatement demo_source: string
+    LetStatement demo_source
       StringLiteral "(2 + 3) * 4"
-    LetStatement demo_tokens: Vector<Token>
+    LetStatement demo_tokens
       CallExpr
         Callee
           Identifier lex
         Args
           Identifier demo_source
-    LetStatement demo_result: ParseResult
+    LetStatement demo_result
       CallExpr
         Callee
           Identifier parse
@@ -1935,7 +1935,7 @@ File
                             FieldExpr .arena
                               Identifier demo_result
                 StringLiteral " nodes"
-        LetStatement unused: i32
+        LetStatement unused
           CallExpr
             Callee
               Identifier print_node

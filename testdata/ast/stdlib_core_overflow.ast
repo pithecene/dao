@@ -364,7 +364,7 @@ File
     Param a: i8
     Param b: i8
     ReturnType: Option<i8>
-    LetStatement r: i32
+    LetStatement r
       BinaryExpr +
         CallExpr
           Callee
@@ -403,7 +403,7 @@ File
     Param a: i8
     Param b: i8
     ReturnType: Option<i8>
-    LetStatement r: i32
+    LetStatement r
       BinaryExpr -
         CallExpr
           Callee
@@ -442,7 +442,7 @@ File
     Param a: i8
     Param b: i8
     ReturnType: Option<i8>
-    LetStatement r: i32
+    LetStatement r
       BinaryExpr *
         CallExpr
           Callee
@@ -481,7 +481,7 @@ File
     Param a: i16
     Param b: i16
     ReturnType: Option<i16>
-    LetStatement r: i32
+    LetStatement r
       BinaryExpr +
         CallExpr
           Callee
@@ -520,7 +520,7 @@ File
     Param a: i16
     Param b: i16
     ReturnType: Option<i16>
-    LetStatement r: i32
+    LetStatement r
       BinaryExpr -
         CallExpr
           Callee
@@ -559,7 +559,7 @@ File
     Param a: i16
     Param b: i16
     ReturnType: Option<i16>
-    LetStatement r: i32
+    LetStatement r
       BinaryExpr *
         CallExpr
           Callee
@@ -598,7 +598,7 @@ File
     Param a: i32
     Param b: i32
     ReturnType: Option<i32>
-    LetStatement r: i64
+    LetStatement r
       BinaryExpr +
         CallExpr
           Callee
@@ -645,7 +645,7 @@ File
     Param a: i32
     Param b: i32
     ReturnType: Option<i32>
-    LetStatement r: i64
+    LetStatement r
       BinaryExpr -
         CallExpr
           Callee
@@ -692,7 +692,7 @@ File
     Param a: i32
     Param b: i32
     ReturnType: Option<i32>
-    LetStatement r: i64
+    LetStatement r
       BinaryExpr *
         CallExpr
           Callee
@@ -739,7 +739,7 @@ File
     Param a: i64
     Param b: i64
     ReturnType: Option<i64>
-    LetStatement r: i64
+    LetStatement r
       CallExpr
         Callee
           Identifier wrapping_add_i64
@@ -783,7 +783,7 @@ File
     Param a: i64
     Param b: i64
     ReturnType: Option<i64>
-    LetStatement r: i64
+    LetStatement r
       CallExpr
         Callee
           Identifier wrapping_sub_i64
@@ -865,7 +865,7 @@ File
                   Identifier to_i64
                 Args
                   IntLiteral 0
-    LetStatement r: i64
+    LetStatement r
       CallExpr
         Callee
           Identifier wrapping_mul_i64

@@ -73,10 +73,11 @@ export function syncEditorToActiveTab(selection?: {
   offset: number;
   length?: number;
 }): void {
+  const view = getEditorView();
+  if (!view) return;
   const path = getActivePath();
   const readOnly = isActivePrelude();
-  const view = getEditorView();
-  if (view && !readOnly) {
+  if (!readOnly) {
     setTokens([], view);
   }
   loadEditorBuffer(path, getActiveSource(), readOnly, selection);

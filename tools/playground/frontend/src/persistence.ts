@@ -7,6 +7,7 @@ import {
 } from "./document";
 import type { SourceInput } from "./generated/tooling_surface";
 import { showNotice } from "./notice";
+import { normalizeDaoPath, validateUserPath } from "./util";
 
 const DRAFT_STORAGE_KEY = "dao.workspace.draft.v1";
 
@@ -34,6 +35,7 @@ interface CompactShareV1 {
 let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
 function setDraftStatus(text: string): void {
+  if (typeof document === "undefined") return;
   const el = document.getElementById("draft-status");
   if (el) el.textContent = text;
 }
@@ -91,27 +93,109 @@ export function clearDraft(): void {
   }
 }
 
+/**
+ * Validate and normalize an untrusted snapshot object up front without
+ * mutating any workspace state. Returns `null` if any required structure,
+ * `compiler` metadata, `files` entry, path invariant, or `document` target
+ * is malformed. Missing or partial `compiler` subfields normalize to `"unknown"`.
+ */
+export function normalizeSnapshot(value: unknown): WorkspaceSnapshotV1 | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const obj = value as Record<string, unknown>;
+  if (obj.schemaVersion !== 1) {
+    return null;
+  }
+
+  let commit = "unknown";
+  let llvmVersion = "unknown";
+  let targetTriple = "unknown";
+  if (obj.compiler !== undefined) {
+    if (
+      !obj.compiler ||
+      typeof obj.compiler !== "object" ||
+      Array.isArray(obj.compiler)
+    ) {
+      return null;
+    }
+    const comp = obj.compiler as Record<string, unknown>;
+    if (comp.commit !== undefined && typeof comp.commit !== "string") {
+      return null;
+    }
+    if (comp.llvmVersion !== undefined && typeof comp.llvmVersion !== "string") {
+      return null;
+    }
+    if (comp.targetTriple !== undefined && typeof comp.targetTriple !== "string") {
+      return null;
+    }
+    commit = (comp.commit as string | undefined)?.trim() || "unknown";
+    llvmVersion = (comp.llvmVersion as string | undefined)?.trim() || "unknown";
+    targetTriple = (comp.targetTriple as string | undefined)?.trim() || "unknown";
+  }
+
+  if (obj.exampleName !== undefined && typeof obj.exampleName !== "string") {
+    return null;
+  }
+  const exampleName = (obj.exampleName as string | undefined)?.trim() || undefined;
+
+  if (!Array.isArray(obj.files) || obj.files.length === 0) {
+    return null;
+  }
+  const seenPaths = new Set<string>();
+  const normalizedFiles: SourceInput[] = [];
+  for (const rawFile of obj.files) {
+    if (!rawFile || typeof rawFile !== "object" || Array.isArray(rawFile)) {
+      return null;
+    }
+    const entry = rawFile as Record<string, unknown>;
+    if (typeof entry.path !== "string" || typeof entry.source !== "string") {
+      return null;
+    }
+    const cleanPath = normalizeDaoPath(entry.path);
+    if (validateUserPath(cleanPath) !== null || seenPaths.has(cleanPath)) {
+      return null;
+    }
+    seenPaths.add(cleanPath);
+    normalizedFiles.push({ path: cleanPath, source: entry.source });
+  }
+
+  let documentPath = normalizedFiles[0].path;
+  if (obj.document !== undefined) {
+    if (typeof obj.document !== "string") {
+      return null;
+    }
+    const trimmedDoc = obj.document.trim();
+    if (trimmedDoc) {
+      const cleanDoc = normalizeDaoPath(trimmedDoc);
+      if (!seenPaths.has(cleanDoc)) {
+        return null;
+      }
+      documentPath = cleanDoc;
+    }
+  }
+
+  return {
+    schemaVersion: 1,
+    compiler: {
+      commit,
+      llvmVersion,
+      targetTriple,
+    },
+    exampleName,
+    document: documentPath,
+    files: normalizedFiles,
+  };
+}
+
 export function loadSavedDraft(): WorkspaceSnapshotV1 | null {
   try {
     const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as WorkspaceSnapshotV1;
-    if (!isValidSnapshot(parsed)) return null;
-    return parsed;
+    return normalizeSnapshot(JSON.parse(raw) as unknown);
   } catch {
     return null;
   }
-}
-
-function isValidSnapshot(value: unknown): value is WorkspaceSnapshotV1 {
-  if (!value || typeof value !== "object") return false;
-  const obj = value as Partial<WorkspaceSnapshotV1>;
-  if (obj.schemaVersion !== 1 || !Array.isArray(obj.files) || obj.files.length === 0) {
-    return false;
-  }
-  return obj.files.every(
-    (f) => f && typeof f.path === "string" && typeof f.source === "string",
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -184,23 +268,61 @@ export async function decodeShareToken(
 
     const compact = JSON.parse(
       new TextDecoder().decode(jsonBytes),
-    ) as CompactShareV1;
+    ) as Partial<CompactShareV1>;
     if (compact.v !== 1 || !Array.isArray(compact.f) || compact.f.length === 0) {
       return null;
     }
-    return {
+    const files: SourceInput[] = [];
+    for (const pair of compact.f) {
+      if (
+        !Array.isArray(pair) ||
+        pair.length !== 2 ||
+        typeof pair[0] !== "string" ||
+        typeof pair[1] !== "string"
+      ) {
+        return null;
+      }
+      files.push({ path: pair[0], source: pair[1] });
+    }
+    return normalizeSnapshot({
       schemaVersion: 1,
       compiler: {
-        commit: compact.c || "unknown",
-        llvmVersion: compact.l || "unknown",
-        targetTriple: compact.t || "unknown",
+        commit: typeof compact.c === "string" ? compact.c : "unknown",
+        llvmVersion: typeof compact.l === "string" ? compact.l : "unknown",
+        targetTriple: typeof compact.t === "string" ? compact.t : "unknown",
       },
       document: compact.d,
-      files: compact.f.map(([path, source]) => ({ path, source })),
-    };
+      files,
+    });
   } catch {
     return null;
   }
+}
+
+/**
+ * Parse, validate, normalize, and atomically import a `.dao.json` snapshot
+ * string. Never mutates workspace, editor, or draft storage on invalid input.
+ */
+export function importSnapshotJson(
+  rawText: string,
+  onApplied?: () => void,
+): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawText) as unknown;
+  } catch {
+    showNotice("Failed to parse snapshot JSON");
+    return false;
+  }
+  const normalized = normalizeSnapshot(parsed);
+  if (!normalized) {
+    showNotice("Invalid .dao.json workspace snapshot");
+    return false;
+  }
+  applySnapshot(normalized);
+  onApplied?.();
+  saveDraft();
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -226,7 +348,7 @@ export function initSnapshotModal(onSnapshotImported: () => void): void {
     statusEl.textContent = `${snap.files.length} ${snap.files.length === 1 ? "file" : "files"}`;
     versionNote.textContent =
       snap.compiler.commit !== "unknown"
-        ? `Pinned to daoc ${snap.compiler.commit} · LLVM ${snap.compiler.llvmVersion} (${snap.compiler.targetTriple}).`
+        ? `Authored with daoc ${snap.compiler.commit} · LLVM ${snap.compiler.llvmVersion} (${snap.compiler.targetTriple}).`
         : "Share this multi-file program by URL or export a versioned JSON snapshot.";
     modal.hidden = false;
     urlInput.select();
@@ -271,27 +393,26 @@ export function initSnapshotModal(onSnapshotImported: () => void): void {
     if (!file) return;
     try {
       const text = await file.text();
-      const parsed = JSON.parse(text) as unknown;
-      if (!isValidSnapshot(parsed)) {
-        showNotice("Invalid .dao.json workspace snapshot");
-        return;
+      if (importSnapshotJson(text, onSnapshotImported)) {
+        modal.hidden = true;
       }
-      applySnapshot(parsed);
-      modal.hidden = true;
-      onSnapshotImported();
-      saveDraft();
     } catch {
-      showNotice("Failed to parse snapshot JSON");
+      showNotice("Failed to read snapshot file");
     }
   });
 }
 
 export function closeSnapshotModal(): void {
+  if (typeof document === "undefined") return;
   const modal = document.getElementById("snapshot-modal");
   if (modal) modal.hidden = true;
 }
 
-export function applySnapshot(snap: WorkspaceSnapshotV1): void {
+export function applySnapshot(input: WorkspaceSnapshotV1 | unknown): boolean {
+  const snap = normalizeSnapshot(input);
+  if (!snap) {
+    return false;
+  }
   setWorkspaceProgram(snap.files, snap.document, {
     exampleName: snap.exampleName ?? "",
   });
@@ -312,4 +433,5 @@ export function applySnapshot(snap: WorkspaceSnapshotV1): void {
         : "Loaded snapshot",
     );
   }
+  return true;
 }

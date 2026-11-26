@@ -73,15 +73,15 @@ File
     Param pos: i64
     Param pred: fn(i32): bool
     ReturnType: i64
-    LetStatement cur: i64
+    LetStatement cur
       Identifier pos
-    LetStatement slen: i64
+    LetStatement slen
       CallExpr
         Callee
           Identifier length
         Args
           Identifier source
-    LetStatement done: bool
+    LetStatement done
       BoolLiteral false
     WhileStatement
       Condition
@@ -297,7 +297,7 @@ File
     Param source: string
     Param pos: i64
     ReturnType: i64
-    LetStatement slen: i64
+    LetStatement slen
       CallExpr
         Callee
           Identifier length
@@ -311,7 +311,7 @@ File
       Then
         ReturnStatement
           Identifier pos
-    LetStatement ch: i32
+    LetStatement ch
       CallExpr
         Callee
           Identifier char_at
@@ -381,11 +381,11 @@ File
                   IntLiteral 1
             IntLiteral 47
       Then
-        LetStatement end: i64
+        LetStatement end
           BinaryExpr +
             Identifier pos
             IntLiteral 2
-        LetStatement comment_done: bool
+        LetStatement comment_done
           BoolLiteral false
         WhileStatement
           Condition
@@ -430,7 +430,7 @@ File
           Args
             Identifier ch
       Then
-        LetStatement end: i64
+        LetStatement end
           CallExpr
             Callee
               Identifier skip_while
@@ -438,7 +438,7 @@ File
               Identifier source
               Identifier pos
               Identifier is_alnum
-        LetStatement word: string
+        LetStatement word
           CallExpr
             Callee
               Identifier substring
@@ -519,7 +519,7 @@ File
           Args
             Identifier ch
       Then
-        LetStatement end: i64
+        LetStatement end
           CallExpr
             Callee
               Identifier skip_while
@@ -527,7 +527,7 @@ File
               Identifier source
               Identifier pos
               Identifier is_digit
-        LetStatement num: string
+        LetStatement num
           CallExpr
             Callee
               Identifier substring
@@ -573,7 +573,7 @@ File
             IntLiteral 1
           Identifier slen
       Then
-        LetStatement next: i32
+        LetStatement next
           CallExpr
             Callee
               Identifier char_at
@@ -1124,11 +1124,11 @@ File
           Identifier ch
           IntLiteral 34
       Then
-        LetStatement end: i64
+        LetStatement end
           BinaryExpr +
             Identifier pos
             IntLiteral 1
-        LetStatement str_done: bool
+        LetStatement str_done
           BoolLiteral false
         WhileStatement
           Condition
@@ -1167,7 +1167,7 @@ File
           Condition
             Identifier str_done
           Then
-            LetStatement text: string
+            LetStatement text
               CallExpr
                 Callee
                   Identifier substring
@@ -1251,20 +1251,20 @@ File
     ReturnType: i32
     LetStatement pos: i64
       IntLiteral 0
-    LetStatement slen: i64
+    LetStatement slen
       CallExpr
         Callee
           Identifier length
         Args
           Identifier source
-    LetStatement token_count: i32
+    LetStatement token_count
       IntLiteral 0
     WhileStatement
       Condition
         BinaryExpr <
           Identifier pos
           Identifier slen
-      LetStatement old_pos: i64
+      LetStatement old_pos
         Identifier pos
       Assignment
         Target
@@ -1311,7 +1311,7 @@ File
       Identifier token_count
   FunctionDecl main
     ReturnType: i32
-    LetStatement self_path: string
+    LetStatement self_path
       StringLiteral "examples/bootstrap_probe/dao_lexer.dao"
     IfStatement
       Condition
@@ -1333,13 +1333,13 @@ File
               Identifier print
             Args
               StringLiteral "=== self-lex ==="
-        LetStatement source: string
+        LetStatement source
           CallExpr
             Callee
               Identifier read_file
             Args
               Identifier self_path
-        LetStatement self_count: i32
+        LetStatement self_count
           CallExpr
             Callee
               Identifier lex_all

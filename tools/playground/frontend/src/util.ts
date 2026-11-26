@@ -7,9 +7,14 @@ export function escapeHtml(text: string): string {
 
 /** Normalize a user-entered file name into a clean relative `.dao` path. */
 export function normalizeDaoPath(raw: string): string {
-  let cleaned = raw.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-  cleaned = cleaned.replace(/\/+/g, "/");
-  if (!cleaned) return "";
+  const segments = raw
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\/+|\/+$/g, "")
+    .split("/")
+    .filter((seg) => seg !== "" && seg !== ".");
+  if (segments.length === 0) return "";
+  let cleaned = segments.join("/");
   if (!cleaned.endsWith(".dao")) {
     cleaned += ".dao";
   }

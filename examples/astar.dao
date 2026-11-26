@@ -9,15 +9,15 @@ fn reconstruct_path(came_from: i32, start: NodeId, goal: NodeId): i32
 fn a_star(start: NodeId, goal: NodeId): i32
   if start == goal:
     return reconstruct_path(0, start, goal)
-  let cost: i32 = heuristic(start, goal)
+  let cost = heuristic(start, goal)
   return cost
 
 fn main(): i32
-  let cost: i32 = a_star(3, 7)
+  let cost = a_star(3, 7)
   print("a_star(3, 7) cost:")
   print(cost)
 
-  let same: i32 = a_star(5, 5)
+  let same = a_star(5, 5)
   print("a_star(5, 5) cost:")
   print(same)
 

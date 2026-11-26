@@ -3,7 +3,7 @@ File
   FunctionDecl first_square_over
     Param limit: i32
     ReturnType: i32
-    LetStatement i: i32
+    LetStatement i
       IntLiteral 0
     WhileStatement
       Condition
@@ -29,7 +29,7 @@ File
   FunctionDecl sum_to
     Param n: i32
     ReturnType: i32
-    LetStatement total: i32
+    LetStatement total
       IntLiteral 0
     ForStatement k
       Iterable
@@ -72,7 +72,7 @@ File
               Identifier sum_to
             Args
               IntLiteral 10
-    LetStatement rows: i32
+    LetStatement rows
       IntLiteral 0
     WhileStatement
       Condition

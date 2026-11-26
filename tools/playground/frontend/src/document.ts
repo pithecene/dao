@@ -41,6 +41,7 @@ let preludeTabs = new Map<string, PreludeTab>();
 let activePath = DEFAULT_PATH;
 let lastUserPath = DEFAULT_PATH;
 let currentExampleName = "";
+let workspaceRevision = 0;
 let moduleByPath = new Map<string, string>();
 let diagnostics: Diagnostic[] = [];
 let versionInfo: VersionResponse | null = null;
@@ -73,6 +74,7 @@ function notify(): void {
 }
 
 function updateHeaderBadges(): void {
+  if (typeof document === "undefined") return;
   const modLabel = document.getElementById("module-label");
   const roBadge = document.getElementById("readonly-badge");
   const modName = moduleByPath.get(activePath) ?? "";
@@ -82,6 +84,10 @@ function updateHeaderBadges(): void {
   if (roBadge) {
     roBadge.hidden = !isActivePrelude();
   }
+}
+
+export function getWorkspaceRevision(): number {
+  return workspaceRevision;
 }
 
 export function getUserFiles(): readonly UserFile[] {
@@ -166,6 +172,7 @@ export function setWorkspaceProgram(
       : [{ path: DEFAULT_PATH, source: DEFAULT_SOURCE }];
 
   userFiles = nextFiles;
+  ++workspaceRevision;
   if (!options?.keepPreludeTabs) {
     preludeTabs.clear();
   }
@@ -186,8 +193,9 @@ export function setWorkspaceProgram(
 export function updateActiveUserSource(source: string): void {
   if (isActivePrelude()) return;
   const target = userFiles.find((f) => f.path === activePath);
-  if (target) {
+  if (target && target.source !== source) {
     target.source = source;
+    ++workspaceRevision;
   }
 }
 
@@ -242,6 +250,7 @@ export function addUserFile(
   const source =
     initialSource ?? `module ${mod}\n\nfn helper(): i32 -> 42\n`;
   userFiles.push({ path, source });
+  ++workspaceRevision;
   activePath = path;
   lastUserPath = path;
   notify();
@@ -266,6 +275,7 @@ export function renameUserFile(
   }
 
   target.path = newPath;
+  ++workspaceRevision;
   const oldMod = moduleByPath.get(oldPath);
   if (oldMod !== undefined) {
     moduleByPath.delete(oldPath);
@@ -284,6 +294,7 @@ export function deleteUserFile(path: string): boolean {
   const idx = userFiles.findIndex((f) => f.path === path);
   if (idx < 0) return false;
   userFiles.splice(idx, 1);
+  ++workspaceRevision;
   moduleByPath.delete(path);
   for (const h of lifecycleHooks) h.onDelete?.(path);
   if (activePath === path || lastUserPath === path) {
@@ -321,10 +332,12 @@ export function getWorkspaceDiagnostics(): readonly Diagnostic[] {
 
 export function setVersionInfo(info: VersionResponse): void {
   versionInfo = info;
-  const badge = document.getElementById("toolchain-badge");
-  if (badge) {
-    badge.textContent = `daoc ${info.commit} · LLVM ${info.llvmVersion}`;
-    badge.hidden = false;
+  if (typeof document !== "undefined") {
+    const badge = document.getElementById("toolchain-badge");
+    if (badge) {
+      badge.textContent = `daoc ${info.commit} · LLVM ${info.llvmVersion}`;
+      badge.hidden = false;
+    }
   }
   notify();
 }

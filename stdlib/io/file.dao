@@ -15,11 +15,11 @@ fn arg_count(): i64 -> __dao_io_arg_count()
 fn arg_at(index: i64): string -> __dao_io_arg_at(index)
 
 fn try_read_file(path: string): Result<string, string>
-  let status: Ptr<i32> = __dao_mem_alloc(size_of<i32>(), align_of<i32>()).cast<i32>()
+  let status = __dao_mem_alloc(size_of<i32>(), align_of<i32>()).cast<i32>()
   mode unsafe =>
     status.set(0)
-  let text: string = __dao_io_try_read_file(path, status)
-  let ok: i32 = 0
+  let text = __dao_io_try_read_file(path, status)
+  let ok = 0
   mode unsafe =>
     ok = status.get()
   __dao_mem_free(status.cast<void>())
@@ -28,9 +28,9 @@ fn try_read_file(path: string): Result<string, string>
   return Result::Err(error = text)
 
 fn args(): Vector<string>
-  let count: i64 = __dao_io_arg_count()
-  let out: Vector<string> = Vector<string>::new()
-  let i: i64 = to_i64(0)
+  let count = __dao_io_arg_count()
+  let out = Vector<string>::new()
+  let i = to_i64(0)
   while i < count:
     out = out.push(__dao_io_arg_at(i))
     i = i + to_i64(1)

@@ -1,6 +1,7 @@
 import { api } from "./api";
 import {
   getCurrentExampleName,
+  getWorkspaceRevision,
   requestPlaygroundView,
   setWorkspaceProgram,
 } from "./document";
@@ -44,6 +45,7 @@ control_flow.dao|Fundamentals|single|Indentation-significant if / else suites an
 loops.dao|Fundamentals|single|Structured while and for ... in loops with break control.
 strings.dao|Fundamentals|single|UTF-8 string literals, concatenation, and byte length.
 text_builder.dao|Fundamentals|single|Incremental text assembly using standard library helpers.
+collections_and_text.dao|Compute & Search|single|Expanded Vector operations, overflow-safe stepped ranges, Builder helpers, and integer parsing.
 pipelines.dao|Fundamentals|single|First-class left-associative |> pipelines over expression-bodied functions.
 lambdas.dao|Fundamentals|single|Expression lambdas (|x| -> ...), function types, and higher-order composition.
 structs.dao|Data & Generics|single|Nominal class declarations with value semantics and field access.
@@ -99,6 +101,7 @@ fn main(): i32
 
 let catalog: CatalogItem[] = buildCatalogFromEntries([]);
 const catalogListeners: (() => void)[] = [];
+let latestExampleRequestId = 0;
 
 export function onCatalogChange(fn: () => void): void {
   catalogListeners.push(fn);
@@ -106,6 +109,11 @@ export function onCatalogChange(fn: () => void): void {
 
 export function getCatalog(): readonly CatalogItem[] {
   return catalog;
+}
+
+function getExampleSelect(): HTMLSelectElement | null {
+  if (typeof document === "undefined") return null;
+  return document.getElementById("example-select") as HTMLSelectElement | null;
 }
 
 function buildCatalogFromEntries(entries: ExampleEntry[]): CatalogItem[] {
@@ -138,7 +146,8 @@ function buildCatalogFromEntries(entries: ExampleEntry[]): CatalogItem[] {
 }
 
 function populateExampleDropdown(): void {
-  const select = document.getElementById("example-select") as HTMLSelectElement;
+  const select = getExampleSelect();
+  if (!select) return;
   const current = getCurrentExampleName();
 
   const placeholder = document.createElement("option");
@@ -174,10 +183,10 @@ function populateExampleDropdown(): void {
 
 /** Fetch `/api/examples`, populate toolbar dropdown, and wire change handler. */
 export async function initExampleCatalog(): Promise<void> {
-  const select = document.getElementById("example-select") as HTMLSelectElement;
+  const select = getExampleSelect();
   populateExampleDropdown();
 
-  select.addEventListener("change", () => {
+  select?.addEventListener("change", () => {
     const name = select.value;
     if (!name) return;
     void loadExampleByName(name, { persistDraft: true });
@@ -193,16 +202,31 @@ export async function initExampleCatalog(): Promise<void> {
   }
 }
 
-/** Load an example (single-file or multi-file) into the workspace by name. */
+/**
+ * Load an example (single-file or multi-file) into the workspace by name.
+ * Guards against out-of-order responses and concurrent workspace edits via
+ * `(reqId, startRevision)` so a late response never clobbers newer state.
+ */
 export async function loadExampleByName(
   name: string,
   options?: { switchRoute?: boolean; persistDraft?: boolean },
 ): Promise<boolean> {
-  const select = document.getElementById("example-select") as HTMLSelectElement;
+  const reqId = ++latestExampleRequestId;
+  const startRevision = getWorkspaceRevision();
+  const select = getExampleSelect();
+
   try {
     const data = await api("example", { name });
+    if (
+      reqId !== latestExampleRequestId ||
+      getWorkspaceRevision() !== startRevision
+    ) {
+      if (select) select.value = getCurrentExampleName();
+      return false;
+    }
+
     setWorkspaceProgram(data.files, data.document, { exampleName: name });
-    select.value = name;
+    if (select) select.value = name;
     if (options?.switchRoute) {
       requestPlaygroundView();
     }
@@ -212,7 +236,14 @@ export async function loadExampleByName(
     }
     return true;
   } catch (err) {
+    if (
+      reqId !== latestExampleRequestId ||
+      getWorkspaceRevision() !== startRevision
+    ) {
+      return false;
+    }
     console.error("failed to load example:", err);
+    if (select) select.value = getCurrentExampleName();
     showNotice(`Could not load example '${name}'`);
     return false;
   }
@@ -223,9 +254,13 @@ export async function resetWorkspace(): Promise<void> {
   clearDraft();
   const target = getCurrentExampleName() || "hello.dao";
   const ok = await loadExampleByName(target, { persistDraft: false });
-  if (!ok) {
+  if (!ok && getWorkspaceRevision() === 0) {
     setWorkspaceProgram(FALLBACK_FILES, "hello.dao", { exampleName: "hello.dao" });
     syncEditorToActiveTab();
+  } else if (!ok) {
+    // Only fall back when the load failed without a newer workspace mutation superseding it.
+    const select = getExampleSelect();
+    if (select) select.value = getCurrentExampleName();
   }
   showNotice("Workspace reset");
 }
@@ -236,9 +271,10 @@ export function openSnippetInPlayground(
   documentPath: string,
   runImmediately = false,
 ): void {
-  const select = document.getElementById("example-select") as HTMLSelectElement;
+  ++latestExampleRequestId;
+  const select = getExampleSelect();
   setWorkspaceProgram(files, documentPath, { exampleName: "" });
-  select.value = "";
+  if (select) select.value = "";
   requestPlaygroundView();
   syncEditorToActiveTab();
   saveDraft();
