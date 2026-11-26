@@ -65,7 +65,7 @@ File
       IntLiteral 0
   FunctionDecl main
     ReturnType: i32
-    LetStatement t1: Token
+    LetStatement t1
       CallExpr
         Callee
           QualifiedName Token::Int
@@ -75,9 +75,9 @@ File
               Identifier to_i64
             Args
               IntLiteral 42
-    LetStatement t2: Token
+    LetStatement t2
       QualifiedName Token::Plus
-    LetStatement t3: Token
+    LetStatement t3
       CallExpr
         Callee
           QualifiedName Token::Int

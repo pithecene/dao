@@ -16,9 +16,9 @@ fn is_whitespace(ch: i32): bool
   return ch == 32 or ch == 10 or ch == 13 or ch == 9
 
 fn skip_word(source: string, pos: i64): i64
-  let cur: i64 = pos
-  let slen: i64 = length(source)
-  let done: bool = false
+  let cur = pos
+  let slen = length(source)
+  let done = false
   while cur < slen and done == false:
     if is_alnum(char_at(source, cur)):
       cur = cur + 1
@@ -27,9 +27,9 @@ fn skip_word(source: string, pos: i64): i64
   return cur
 
 fn skip_number(source: string, pos: i64): i64
-  let cur: i64 = pos
-  let slen: i64 = length(source)
-  let done: bool = false
+  let cur = pos
+  let slen = length(source)
+  let done = false
   while cur < slen and done == false:
     if is_digit(char_at(source, cur)):
       cur = cur + 1
@@ -39,13 +39,13 @@ fn skip_number(source: string, pos: i64): i64
 
 fn count_tokens(source: string): i32
   let pos: i64 = 0
-  let slen: i64 = length(source)
-  let num_idents: i32 = 0
-  let num_numbers: i32 = 0
-  let num_ops: i32 = 0
-  let num_other: i32 = 0
+  let slen = length(source)
+  let num_idents = 0
+  let num_numbers = 0
+  let num_ops = 0
+  let num_other = 0
   while pos < slen:
-    let ch: i32 = char_at(source, pos)
+    let ch = char_at(source, pos)
     if is_whitespace(ch):
       pos = pos + 1
     else:
@@ -74,10 +74,10 @@ fn count_tokens(source: string): i32
   return num_idents + num_numbers + num_ops + num_other
 
 fn main(): i32
-  let source: string = "fn add(a: i32, b: i32): i32 = a + b"
+  let source = "fn add(a: i32, b: i32): i32 = a + b"
   print("source:")
   print(source)
-  let total: i32 = count_tokens(source)
+  let total = count_tokens(source)
   print("total tokens:")
   print(total)
   return 0

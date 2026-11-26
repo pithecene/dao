@@ -36,7 +36,7 @@ File
               IntLiteral 0
               Identifier start
               Identifier goal
-    LetStatement cost: i32
+    LetStatement cost
       CallExpr
         Callee
           Identifier heuristic
@@ -47,7 +47,7 @@ File
       Identifier cost
   FunctionDecl main
     ReturnType: i32
-    LetStatement cost: i32
+    LetStatement cost
       CallExpr
         Callee
           Identifier a_star
@@ -66,7 +66,7 @@ File
           Identifier print
         Args
           Identifier cost
-    LetStatement same: i32
+    LetStatement same
       CallExpr
         Callee
           Identifier a_star

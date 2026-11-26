@@ -7,7 +7,7 @@ This note is explanatory. It evaluates Dao's proposed ergonomics surface across 
 3. **Collection transformation:** lazy `Generator<T>` streaming paired with `HashMap<EdgeKey, i64>` edge aggregation inside an explicit `resource memory` arena.
 4. **Single-source forecast kernel and plan verification:** checked scalar CPU/GPU kernels (`examples/forecast_plans.dao`) paired with typed execution-plan validation.
 
-The Dao programs exercise the existing language baseline together with the three `spec/semantics/` proposals (`aggregate_initialization.md`, `contextual_and_collection_literals.md`, and `control_flow_expressions.md`) and `DAO-H03` standard-library helpers (`lines`, `trim`, `split`, `parse_i64`, and generic `HashMap<K, V>`). Each comparison evaluates three concrete axes:
+The Dao programs exercise the existing language baseline and `core::string` helpers (`lines`, `trim`, `split`, `parse_i64`) together with the three `spec/semantics/` proposals (`aggregate_initialization.md`, `contextual_and_collection_literals.md`, and `control_flow_expressions.md`) and `DAO-H03` generic `HashMap<K, V>`. Each comparison evaluates three concrete axes:
 
 - **Remaining syntactic ceremony:** annotations, conversions, argument labels, and ownership or boilerplate noise.
 - **Maximum nesting depth:** deepest block indentation level inside any function body.
@@ -109,8 +109,8 @@ fn parse_primary(_ p: Parser): Result<StepOk, ParseError>
   let base = match tok.kind:
     TK::Int:
       let value = match parse_i64(tok.text):
-        Result::Ok(n): n
-        Result::Err(_):
+        Option::Some(n): n
+        Option::None:
           return Result::Err(ParseError(
             offset = tok.offset,
             message = "invalid integer literal"
@@ -509,8 +509,8 @@ enum class LoadError:
 
 fn parse_nonneg_i64(_ text: string, line: i64, field: string): Result<i64, LoadError>
   let value = match parse_i64(text):
-    Result::Ok(n): n
-    Result::Err(_):
+    Option::Some(n): n
+    Option::None:
       return Result::Err(LoadError::Format(
         line,
         detail = "invalid " + field + " '" + text + "'"
@@ -557,12 +557,12 @@ fn load_service_stats(path: string): Result<HashMap<string, Stats>, LoadError>
 
   let totals = HashMap<string, Stats>::new()
   let line_no: i64 = 0
-  for raw_line in lines(raw):
+  for raw_line in lines(raw).iter():
     line_no = line_no + 1
     resource memory LineScratch =>
       let trimmed = trim(raw_line)
       if length(trimmed) > 0 and !starts_with(trimmed, "#"):
-        let cols = split(trimmed, sep = "\t")
+        let cols = split(trimmed, "\t")
         if cols.length() != 3:
           return Result::Err(LoadError::Format(
             line = line_no,
@@ -1087,9 +1087,9 @@ enum class ValueExpr:
   BinaryOp(op: string, model: string, left: i64, right: i64)
 
 fn lookup_live(
+  _ name: string,
   device_env: HashMap<string, i64>,
-  released: HashMap<string, bool>,
-  _ name: string
+  released: HashMap<string, bool>
 ): Result<i64, string>
   if released.contains(name):
     return Result::Err("device buffer '" + name + "' used after release")
@@ -1097,7 +1097,7 @@ fn lookup_live(
     Option::Some(id): Result::Ok(id)
     Option::None: Result::Err("undefined device buffer '" + name + "'")
 
-fn lookup_host(host_env: HashMap<string, i64>, _ name: string): Result<i64, string>
+fn lookup_host(_ name: string, host_env: HashMap<string, i64>): Result<i64, string>
   return match host_env.get(name):
     Option::Some(id): Result::Ok(id)
     Option::None: Result::Err("undefined host value '" + name + "'")
@@ -1116,27 +1116,27 @@ fn validate_plan(_ plan: Plan): Result<Vector<ValueExpr>, string>
         nodes = nodes.push(ValueExpr::ReadSource(archive, query, visibility))
         host_env = host_env.set(output, id)
       Step::Upload(input, buffer):
-        let id = lookup_host(host_env, input)?
+        let id = lookup_host(input, host_env)?
         device_env = device_env.set(buffer, id)
       Step::Dispatch(kernel, model, left, right, output):
-        let l_id = lookup_live(device_env, released, left)?
+        let l_id = lookup_live(left, device_env, released)?
         let expr = if right == "":
           ValueExpr::UnaryOp(op = kernel, model, input = l_id)
         else:
-          let r_id = lookup_live(device_env, released, right)?
+          let r_id = lookup_live(right, device_env, released)?
           ValueExpr::BinaryOp(op = kernel, model, left = l_id, right = r_id)
         let id = nodes.length()
         nodes = nodes.push(expr)
         device_env = device_env.set(output, id)
       Step::Readback(buffer, host):
-        let id = lookup_live(device_env, released, buffer)?
+        let id = lookup_live(buffer, device_env, released)?
         host_env = host_env.set(host, id)
       Step::Release(buffer):
         if released.contains(buffer) or !device_env.contains(buffer):
           return Result::Err("invalid release of '" + buffer + "'")
         released = released.set(buffer, true)
       Step::Reply(host):
-        let _id = lookup_host(host_env, host)?
+        lookup_host(host, host_env)?
         if replied:
           return Result::Err("plan replies more than once")
         replied = true
@@ -1522,6 +1522,6 @@ def validate_plan(plan: Plan) -> list[ValueExpr]:
 | Program | Dao Max Depth | Rust Max Depth | Python Max Depth | Ceremonies Retired by Proposals | Remaining Honest Gaps |
 |---|---:|---:|---:|---|---|
 | 1. Precedence parser | 4 | 4 | 4 | `Result::Ok(x)`, `Expr::Binary(op, left, right = ...)`, `[]`, value `match` + `never` | Explicit `Parser` state threading (`StepOk`) without `&mut` parameters, plus loop `continue` |
-| 2. File processing | 4 | 2 | 2 | `LoadError::Io(path, detail)`, inline `if`, value `match`, `?` propagation | Loop `continue` (cuts depth `4` to `3`) and `DAO-H03` `lines`, `trim`, `split`, and `HashMap<K, V>` |
+| 2. File processing | 4 | 2 | 2 | `LoadError::Io(path, detail)`, inline `if`, value `match`, `?` propagation | Loop `continue` (cuts depth `4` to `3`) and `DAO-H03` generic `HashMap<K, V>` |
 | 3. Collection pipeline | 3 | 3 | 2 | `[]` literal, `EdgeSummary(edge = key, total_bytes)`, value `match` | `DAO-H03` `HashMap.entries()` generator to drop auxiliary `order` vector |
 | 4. Forecast plans | 3 | 3 | 3 | `[...]` plan literal, `high_wind` inline `if`, `?` + value `if` flattening depth `6 -> 3` | Multi-error accumulation still uses explicit `Vector<string>` when non-short-circuiting |

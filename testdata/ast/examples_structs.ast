@@ -6,10 +6,10 @@ File
   FunctionDecl manhattan
     Param p: Point
     ReturnType: i32
-    LetStatement ax: i32
+    LetStatement ax
       FieldExpr .x
         Identifier p
-    LetStatement ay: i32
+    LetStatement ay
       FieldExpr .y
         Identifier p
     IfStatement
@@ -63,21 +63,21 @@ File
               Identifier b
   FunctionDecl main
     ReturnType: i32
-    LetStatement a: Point
+    LetStatement a
       CallExpr
         Callee
           Identifier Point
         Args
           IntLiteral 3
           IntLiteral 4
-    LetStatement b: Point
+    LetStatement b
       CallExpr
         Callee
           Identifier Point
         Args
           IntLiteral 1
           IntLiteral 2
-    LetStatement c: Point
+    LetStatement c
       CallExpr
         Callee
           Identifier add_points

@@ -37,24 +37,24 @@ fn main(): i32
   // --- Option<i64> ---
   print("=== Option<T> ===")
 
-  let some_val: Option<i64> = Option::Some(value = to_i64(42))
+  let some_val = Option::Some(value = to_i64(42))
   let none_val: Option<i64> = Option::None
 
   print("unwrap Some(42): " + i64_to_string(unwrap_i64_or(some_val, to_i64(0))))
   print("unwrap None:     " + i64_to_string(unwrap_i64_or(none_val, to_i64(-1))))
 
-  let found: Option<i64> = find_first_positive(to_i64(-1), to_i64(7), to_i64(3))
+  let found = find_first_positive(to_i64(-1), to_i64(7), to_i64(3))
   print("first positive:  " + i64_to_string(unwrap_i64_or(found, to_i64(0))))
 
-  let not_found: Option<i64> = find_first_positive(to_i64(-1), to_i64(-2), to_i64(-3))
+  let not_found = find_first_positive(to_i64(-1), to_i64(-2), to_i64(-3))
   print("none found:      " + i64_to_string(unwrap_i64_or(not_found, to_i64(0))))
 
   // --- Result<i64, string> ---
   print("")
   print("=== Result<T, E> ===")
 
-  let ok_result: Result<i64, string> = safe_divide(to_i64(20), to_i64(4))
-  let err_result: Result<i64, string> = safe_divide(to_i64(10), to_i64(0))
+  let ok_result = safe_divide(to_i64(20), to_i64(4))
+  let err_result = safe_divide(to_i64(10), to_i64(0))
 
   match ok_result:
     Result::Ok(value):

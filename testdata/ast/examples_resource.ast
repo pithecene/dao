@@ -2,12 +2,12 @@ File
   Module resource_demo
   FunctionDecl compute_in_pool
     ReturnType: i32
-    LetStatement result: i32
+    LetStatement result
       IntLiteral 0
     ResourceBlock memory pool
-      LetStatement a: i32
+      LetStatement a
         IntLiteral 10
-      LetStatement b: i32
+      LetStatement b
         IntLiteral 20
       Assignment
         Target
@@ -20,13 +20,13 @@ File
       Identifier result
   FunctionDecl nested_domains
     ReturnType: i32
-    LetStatement total: i32
+    LetStatement total
       IntLiteral 0
     ResourceBlock memory outer
-      LetStatement x: i32
+      LetStatement x
         IntLiteral 100
       ResourceBlock memory inner
-        LetStatement y: i32
+        LetStatement y
           IntLiteral 50
         Assignment
           Target
@@ -49,7 +49,7 @@ File
         Then
           ReturnStatement
             Identifier flag
-      LetStatement x: i32
+      LetStatement x
         IntLiteral 42
     ReturnStatement
       IntLiteral 0
@@ -58,9 +58,9 @@ File
     LetStatement size: i64
       IntLiteral 0
     ResourceBlock memory scratch
-      LetStatement text: string
+      LetStatement text
         StringLiteral ""
-      LetStatement i: i32
+      LetStatement i
         IntLiteral 0
       WhileStatement
         Condition
@@ -97,10 +97,10 @@ File
     Field count: i32
   FunctionDecl escaping_string
     ReturnType: string
-    LetStatement out: string
+    LetStatement out
       StringLiteral "before"
     ResourceBlock memory pool
-      LetStatement inner: string
+      LetStatement inner
         StringLiteral "made"
       Assignment
         Target
@@ -118,7 +118,7 @@ File
       Identifier out
   FunctionDecl escaping_vector
     ReturnType: i64
-    LetStatement items: Vector<i64>
+    LetStatement items
       CallExpr
         Callee
           Identifier Vector.new
@@ -186,7 +186,7 @@ File
       Identifier total
   FunctionDecl escaping_field
     ReturnType: string
-    LetStatement label: Label
+    LetStatement label
       CallExpr
         Callee
           Identifier Label
@@ -215,7 +215,7 @@ File
     Param flag: i32
     ReturnType: string
     ResourceBlock memory pool
-      LetStatement made: string
+      LetStatement made
         BinaryExpr +
           StringLiteral "returned"
           StringLiteral " from inside"
@@ -231,7 +231,7 @@ File
       StringLiteral "fell through"
   FunctionDecl nested_escape
     ReturnType: string
-    LetStatement out: string
+    LetStatement out
       StringLiteral ""
     ResourceBlock memory outer
       ResourceBlock memory inner

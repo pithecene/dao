@@ -1,4 +1,11 @@
-module bootstrap::hir_tests
+module bootstrap::hir::tests
+
+import bootstrap::lexer
+import bootstrap::parser
+import bootstrap::graph
+import bootstrap::base
+import bootstrap::resolver
+
 // Test runner for the bootstrap hir.  Assembled after the
 // shared base and every library it exercises; never compiled
 // standalone.
@@ -400,8 +407,8 @@ fn main(): i32
   d7_inputs = d7_inputs.push(graph::SourceInput("math.dao", "module app::math\nfn add(a: i32, b: i32): i32 -> a + b\n", false))
   d7_inputs = d7_inputs.push(graph::SourceInput("main.dao", "module app::main\nimport app::math\nfn f(): i32\n  return math::add(1, 2)\n", false))
   let d7_pg: graph::ProgramGraph = graph::build_program(d7_inputs)
-  let d7_p: Program = program_from_graph(d7_pg)
-  d7_p = program_run_resolve(d7_p)
+  let d7_p: resolver::Program = resolver::program_from_graph(d7_pg)
+  d7_p = resolver::program_run_resolve(d7_p)
   d7_p = program_run_typecheck(d7_p)
   d7_p = program_run_hir(d7_p)
   let d7_1_ok: bool = true
@@ -423,8 +430,8 @@ fn main(): i32
   let d7_inputs2: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   d7_inputs2 = d7_inputs2.push(graph::SourceInput("a.dao", "module mod_a\nfn fa(): i32 -> 1\n", false))
   let d7_pg2: graph::ProgramGraph = graph::build_program(d7_inputs2)
-  let d7_p2: Program = program_from_graph(d7_pg2)
-  d7_p2 = program_run_resolve(d7_p2)
+  let d7_p2: resolver::Program = resolver::program_from_graph(d7_pg2)
+  d7_p2 = resolver::program_run_resolve(d7_p2)
   d7_p2 = program_run_typecheck(d7_p2)
   d7_p2 = program_run_hir(d7_p2)
   let d7_2_ok: bool = true
@@ -453,8 +460,8 @@ fn main(): i32
     hs_inputs = hs_inputs.push(graph::SourceInput("app_math.dao", read_file(hir_smoke_base + "app_math.dao"), false))
     hs_inputs = hs_inputs.push(graph::SourceInput("app_main.dao", read_file(hir_smoke_base + "app_main.dao"), false))
     let hs_pg: graph::ProgramGraph = graph::build_program(hs_inputs)
-    let hs_p: Program = program_from_graph(hs_pg)
-    hs_p = program_run_resolve(hs_p)
+    let hs_p: resolver::Program = resolver::program_from_graph(hs_pg)
+    hs_p = resolver::program_run_resolve(hs_p)
     hs_p = program_run_typecheck(hs_p)
     hs_p = program_run_hir(hs_p)
     if hs_p.hir.initialized:
@@ -531,8 +538,8 @@ fn main(): i32
   iso_inputs = iso_inputs.push(graph::SourceInput("a.dao", "module iso::a\nclass Point:\n  x: i32\n\n  fn kind(self): i32\n    return 1\n\nfn use_a(): i32\n  let p: Point = Point(0)\n  return p.kind()\n", false))
   iso_inputs = iso_inputs.push(graph::SourceInput("b.dao", "module iso::b\nclass Point:\n  y: i32\n\n  fn kind(self): i32\n    return 2\n\nfn use_b(): i32\n  let q: Point = Point(0)\n  return q.kind()\n", false))
   let iso_pg: graph::ProgramGraph = graph::build_program(iso_inputs)
-  let iso_p: Program = program_from_graph(iso_pg)
-  iso_p = program_run_resolve(iso_p)
+  let iso_p: resolver::Program = resolver::program_from_graph(iso_pg)
+  iso_p = resolver::program_run_resolve(iso_p)
   iso_p = program_run_typecheck(iso_p)
   iso_p = program_run_hir(iso_p)
   // Success criteria: both modules lowered without diagnostic storms,
@@ -617,7 +624,7 @@ fn main(): i32
   while oi < hir_count_nodes(r25):
     match r25.hir_nodes.get(oi):
       HirNode::HirEnumConstruct(variant, payload_lp, payload_count, ti):
-        let pairs25: Vector<i64> = read_pairs(r25.hir_idx, payload_lp)
+        let pairs25: Vector<i64> = resolver::read_pairs(r25.hir_idx, payload_lp)
         if payload_count == 2:
           if pairs25.get(1) == 1 and pairs25.get(3) == 0:
             match r25.hir_nodes.get(pairs25.get(0)):
@@ -734,12 +741,12 @@ fn main(): i32
   let m32_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   m32_inputs = m32_inputs.push(graph::SourceInput("a.dao", "module app::a\nclass Box:\n  x: i32\n  fn get(self): i32 -> self.x\n", false))
   m32_inputs = m32_inputs.push(graph::SourceInput("b.dao", "module app::b\nclass Box:\n  x: i64\n  fn get(self): i64 -> self.x\n", false))
-  let m32_p: Program = program_from_graph(graph::build_program(m32_inputs))
-  m32_p = program_run_resolve(m32_p)
+  let m32_p: resolver::Program = resolver::program_from_graph(graph::build_program(m32_inputs))
+  m32_p = resolver::program_run_resolve(m32_p)
   m32_p = program_run_typecheck(m32_p)
   let m32_mid: i64 = graph::find_module_by_name(m32_p.module_graph.modules, "app::b")
   let m32_hs: HS = build_module_hs(m32_p, m32_mid)
-  let m32_root: parser::Node = m32_hs.unit.nodes.get(program_file_of_module(m32_p, m32_mid).parse_output.root)
+  let m32_root: parser::Node = m32_hs.unit.nodes.get(resolver::program_file_of_module(m32_p, m32_mid).parse_output.root)
   let m32_ok: bool = false
   match m32_root:
     parser::Node::FileN(m32_md, m32_ilp, m32_dlp):
@@ -824,7 +831,7 @@ fn main(): i32
   while i36 < hir_count_nodes(r36):
     match r36.hir_nodes.get(i36):
       HirNode::HirEnum(en, etp, variants_lp):
-        let vpairs36: Vector<i64> = read_pairs(r36.hir_idx, variants_lp)
+        let vpairs36: Vector<i64> = resolver::read_pairs(r36.hir_idx, variants_lp)
         if vpairs36.length() >= 2:
           let ptys36: Vector<i64> = parser::read_list(r36.hir_idx, vpairs36.get(1))
           if ptys36.length() == 1:
@@ -846,7 +853,7 @@ fn main(): i32
   while i37 < hir_count_nodes(r37):
     match r37.hir_nodes.get(i37):
       HirNode::HirEnum(en, etp, variants_lp):
-        let vpairs37: Vector<i64> = read_pairs(r37.hir_idx, variants_lp)
+        let vpairs37: Vector<i64> = resolver::read_pairs(r37.hir_idx, variants_lp)
         if vpairs37.length() >= 2:
           let ptys37: Vector<i64> = parser::read_list(r37.hir_idx, vpairs37.get(1))
           if ptys37.length() == 1:

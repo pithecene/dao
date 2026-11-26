@@ -34,17 +34,17 @@ File
     Param source: string
     Param pos: i64
     ReturnType: i64
-    LetStatement start: i64
+    LetStatement start
       Identifier pos
-    LetStatement cur: i64
+    LetStatement cur
       Identifier pos
-    LetStatement slen: i64
+    LetStatement slen
       CallExpr
         Callee
           Identifier length
         Args
           Identifier source
-    LetStatement done: bool
+    LetStatement done
       BoolLiteral false
     WhileStatement
       Condition
@@ -55,7 +55,7 @@ File
           BinaryExpr ==
             Identifier done
             BoolLiteral false
-      LetStatement ch: i32
+      LetStatement ch
         CallExpr
           Callee
             Identifier char_at
@@ -83,7 +83,7 @@ File
               Identifier done
             Value
               BoolLiteral true
-    LetStatement value: string
+    LetStatement value
       CallExpr
         Callee
           Identifier substring
@@ -108,7 +108,7 @@ File
     ReturnType: i32
     LetStatement pos: i64
       IntLiteral 0
-    LetStatement slen: i64
+    LetStatement slen
       CallExpr
         Callee
           Identifier length
@@ -119,7 +119,7 @@ File
         BinaryExpr <
           Identifier pos
           Identifier slen
-      LetStatement ch: i32
+      LetStatement ch
         CallExpr
           Callee
             Identifier char_at
@@ -310,7 +310,7 @@ File
           Identifier print
         Args
           StringLiteral "=== Lexing: 42 + (10 - 3) * 5 ==="
-    LetStatement result: i32
+    LetStatement result
       CallExpr
         Callee
           Identifier lex
@@ -335,13 +335,13 @@ File
         Args
           StringLiteral "/tmp/dao_lex_input.txt"
           StringLiteral "100 / 20 + 7"
-    LetStatement source: string
+    LetStatement source
       CallExpr
         Callee
           Identifier read_file
         Args
           StringLiteral "/tmp/dao_lex_input.txt"
-    LetStatement result2: i32
+    LetStatement result2
       CallExpr
         Callee
           Identifier lex

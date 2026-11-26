@@ -3,7 +3,7 @@ File
   FunctionDecl join_numbers
     Param count: i64
     ReturnType: string
-    LetStatement b: Builder
+    LetStatement b
       CallExpr
         Callee
           QualifiedName Builder::new
@@ -59,7 +59,7 @@ File
   FunctionDecl bracketed
     Param inner: string
     ReturnType: string
-    LetStatement b: Builder
+    LetStatement b
       CallExpr
         Callee
           FieldExpr .push_char
@@ -86,10 +86,10 @@ File
   FunctionDecl built_in_a_block
     Param count: i64
     ReturnType: string
-    LetStatement out: string
+    LetStatement out
       StringLiteral ""
     ResourceBlock memory scratch
-      LetStatement b: Builder
+      LetStatement b
         CallExpr
           Callee
             QualifiedName Builder::new
@@ -149,7 +149,7 @@ File
               Identifier bracketed
             Args
               StringLiteral "text"
-    LetStatement long: string
+    LetStatement long
       CallExpr
         Callee
           Identifier built_in_a_block
@@ -177,7 +177,7 @@ File
               Identifier long
               IntLiteral 0
               IntLiteral 6
-    LetStatement empty: Builder
+    LetStatement empty
       CallExpr
         Callee
           QualifiedName Builder::new

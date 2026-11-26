@@ -7,12 +7,14 @@ a probe or experiment directory.
 
 ## Shared Substrate
 
-The file `shared/base.dao` holds cross-pass type-universe and program-lookup
-tables for subsystems that still assemble via `bash bootstrap/assemble.sh`.
-The modules `ascii.dao` (`module bootstrap::ascii`), `lexer/impl.dao`
-(`module bootstrap::lexer`), `parser/impl.dao` (`module bootstrap::parser`),
-and `graph/impl.dao` (`module bootstrap::graph`) compile directly as real
-modules without assembly. See `shared/README.md`.
+The file `shared/base.dao` (`module bootstrap::base`) holds cross-pass
+type-universe and program-lookup tables imported by `bootstrap::resolver` and
+downstream passes. The modules `ascii.dao` (`module bootstrap::ascii`),
+`lexer/impl.dao` (`module bootstrap::lexer`), `parser/impl.dao`
+(`module bootstrap::parser`), `graph/impl.dao` (`module bootstrap::graph`),
+`shared/base.dao` (`module bootstrap::base`), and `resolver/impl.dao`
+(`module bootstrap::resolver`) compile directly as real modules without
+assembly. See `shared/README.md`.
 
 ## Subsystems
 
@@ -135,10 +137,12 @@ daoc build --source bootstrap/graph/tests.dao --source bootstrap/graph/impl.dao 
 
 ### `resolver/`
 
-Two-pass name resolver producing scope chains, symbol tables, and a
-uses map over the bootstrap parser's AST.
+Two-pass name resolver (`module bootstrap::resolver` in `resolver/impl.dao`,
+importing `bootstrap::lexer`, `bootstrap::parser`, `bootstrap::graph`, and
+`bootstrap::base`) producing scope chains, symbol tables, and a uses map over
+the bootstrap parser's AST.
 
-**Status**: implemented (Task 22, Phase 7).
+**Status**: real multi-file module compiled directly from authored sources without `assemble.sh`.
 
 **Tier A scope**:
 
@@ -167,10 +171,10 @@ uses map over the bootstrap parser's AST.
 - `where` clauses
 - Match arm `..` (rest) and `as` (whole-variant) forms
 
-**How to run tests**:
+**Running tests**:
 
 ```sh
-bash bootstrap/assemble.sh && daoc build --source bootstrap/resolver/resolver.gen.dao --source bootstrap/ascii.dao && ./bootstrap/resolver/resolver.gen
+daoc build --source bootstrap/resolver/tests.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/resolver/tests
 ```
 
 ### `typecheck/`

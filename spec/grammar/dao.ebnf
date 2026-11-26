@@ -243,7 +243,18 @@ type :=
     | named_type
 
 function_type :=
-    "fn" "(" type_list? ")" ":" type
+    "fn" "(" fn_type_params? ")" ":" type
+
+# Proposed labeled callable types (spec/semantics/aggregate_initialization.md):
+# `type`, `_ : type`, and `_ ident : type` denote unlabeled positional slots
+# (forming a leading prefix), while `ident : type` denotes a named slot.
+fn_type_params :=
+    fn_type_param ("," fn_type_param)*
+
+fn_type_param :=
+      "_" identifier? ":" type
+    | identifier ":" type
+    | type
 
 named_type :=
     qualified_name ("[" type_list "]")?

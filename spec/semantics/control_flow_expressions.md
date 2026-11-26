@@ -54,10 +54,10 @@ let tag = match visibility:
 
 let device_id = match step:
   Step::Upload(input, buffer):
-    let host_id = lookup_host(host_env, input)?
+    let host_id = lookup_host(input, host_env)?
     bind_device(device_env, name = buffer, id = host_id)
   Step::Reply(host):
-    lookup_host(host_env, host)?
+    lookup_host(host, host_env)?
   _:
     return Result::Err("unsupported step")
 ```
