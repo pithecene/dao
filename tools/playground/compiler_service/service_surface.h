@@ -66,6 +66,10 @@ inline constexpr std::array kExampleNameFields{
     FieldSpec{"name", "string"},
 };
 
+inline constexpr std::array kPreludeRequestFields{
+    FieldSpec{"path", "string"},
+};
+
 // --- Service responses (the analysis payloads they carry are the compiler's) ---
 //
 // `file` is the document's path as the request named it; `module` is
@@ -100,6 +104,7 @@ inline constexpr std::array kFormatResponseFields{
 
 inline constexpr std::array kExampleEntryFields{
     FieldSpec{"name", "string"},
+    FieldSpec{"isMultifile", "boolean"},
 };
 
 inline constexpr std::array kExamplesListFields{
@@ -108,7 +113,24 @@ inline constexpr std::array kExamplesListFields{
 
 inline constexpr std::array kExampleSourceFields{
     FieldSpec{"name", "string"},
+    FieldSpec{"files", "SourceInput[]"},
+    FieldSpec{"document", "string"},
     FieldSpec{"source", "string"},
+};
+
+inline constexpr std::array kPreludeResponseFields{
+    FieldSpec{"file", "string"},
+    FieldSpec{"module", "string"},
+    FieldSpec{"source", "string"},
+    FieldSpec{"semanticTokens", "SemanticToken[]"},
+    FieldSpec{"symbols", "DocumentSymbol[]"},
+};
+
+inline constexpr std::array kVersionResponseFields{
+    FieldSpec{"commit", "string"},
+    FieldSpec{"llvmVersion", "string"},
+    FieldSpec{"targetTriple", "string"},
+    FieldSpec{"preludeFiles", "string[]"},
 };
 
 inline constexpr std::array kErrorReplyFields{
@@ -121,12 +143,15 @@ inline constexpr std::array kServiceShapes{
     ShapeSpec{"AnalyzeRequest", kAnalyzeRequestFields},
     ShapeSpec{"PositionRequest", kPositionRequestFields},
     ShapeSpec{"ExampleName", kExampleNameFields},
+    ShapeSpec{"PreludeRequest", kPreludeRequestFields},
     ShapeSpec{"AnalyzeResponse", kAnalyzeResponseFields},
     ShapeSpec{"RunResponse", kRunResponseFields},
     ShapeSpec{"FormatResponse", kFormatResponseFields},
     ShapeSpec{"ExampleEntry", kExampleEntryFields},
     ShapeSpec{"ExamplesList", kExamplesListFields},
     ShapeSpec{"ExampleSource", kExampleSourceFields},
+    ShapeSpec{"PreludeResponse", kPreludeResponseFields},
+    ShapeSpec{"VersionResponse", kVersionResponseFields},
     ShapeSpec{"ErrorReply", kErrorReplyFields},
 };
 
@@ -159,6 +184,8 @@ inline constexpr std::array kRoutes{
     RouteSpec{"completions", "POST", "/api/completions", "PositionRequest", "Completion[]"},
     RouteSpec{"examples", "GET", "/api/examples", "void", "ExamplesList"},
     RouteSpec{"example", "GET", "/api/examples/:name", "ExampleName", "ExampleSource"},
+    RouteSpec{"prelude", "POST", "/api/prelude", "PreludeRequest", "PreludeResponse"},
+    RouteSpec{"version", "GET", "/api/version", "void", "VersionResponse"},
 };
 
 auto find_route(std::string_view name) -> const RouteSpec*;
