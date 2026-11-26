@@ -204,6 +204,14 @@ fn main(): i32
   if expect_no_errors("ops_no_err", r_ops):
     pass_count = pass_count + 1
 
+  // Two dots are one rest marker, and a third is a dot of its own.
+  let src_rest = "(a, ..) ...\n"
+  let r_rest = lexer::lex(src_rest)
+  if expect_token("rest_marker_after_comma", r_rest, 3, lexer::TK::DotDot, src_rest):
+    pass_count = pass_count + 1
+  if expect_token("third_dot_stands_alone", r_rest, 6, lexer::TK::Dot, src_rest):
+    pass_count = pass_count + 1
+
   // -----------------------------------------------------------------
   // 7.5 String literal
   // -----------------------------------------------------------------
@@ -506,7 +514,7 @@ fn main(): i32
   // Section 9: Summary
   // =========================================================================
 
-  let total = 108
+  let total = 110
   print("")
   print("--- results ---")
   print(i32_to_string(pass_count) + " / " + i32_to_string(total) + " passed")

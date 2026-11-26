@@ -600,15 +600,33 @@ fn extend_qual_name(ps: PS, node: i64, member_tidx: i64): PR
   let fl: FlushResult = flush_list(ps, seg_toks)
   return ps_add_node(fl.ps, Node::QualNameE(seg_lp = fl.list_pos, seg_count = seg_toks.length()))
 
+// The entry a `..` rest marker leaves in a call's argument names.  It is
+// the last entry and has no argument beside it, so a call that carries
+// one has one name more than it has arguments.
+fn rest_marker(): i64 -> to_i64(-2)
+
+// Whether the call whose argument names are at `names_lp` ends in `..`.
+fn call_has_rest(idx: Vector<i64>, names_lp: i64): bool
+  if names_lp < 0:
+    return false
+  let names: Vector<i64> = read_list(idx, names_lp)
+  if names.length() == 0:
+    return false
+  return names.get(names.length() - 1) == rest_marker()
+
 // One call argument at `ps`: `name = expr` when an identifier is followed
-// by `=` (`==` is a comparison), else an expression.  The name's token
-// index rides in `names`, -1 for a positional argument.
+// by `=` (`==` is a comparison), `..` for the rest marker that ends a
+// variant pattern, else an expression.  The name's token index rides in
+// `names`: -1 for a positional argument, and `rest_marker()` for `..`,
+// which has no node.
 class CallArg:
   ps: PS
   node: i64
   name_tidx: i64
 
 fn parse_call_arg(pc: PC, ps: PS): CallArg
+  if peek_is(pc, ps, lexer::TK::DotDot):
+    return CallArg(ps_advance(pc, ps), to_i64(-1), rest_marker())
   if peek_is(pc, ps, lexer::TK::Identifier):
     let after: PS = ps_advance(pc, ps)
     if peek_is(pc, after, lexer::TK::Eq):
@@ -620,30 +638,26 @@ fn parse_call_arg(pc: PC, ps: PS): CallArg
 // The call `(args)` on `callee` at `ps`, carrying the type arguments the
 // callee was read with (`targs_lp` -1 for none) and whether they were
 // written on the type (`Type<..>::member(args)`).  The argument names
-// are a list beside the arguments, one entry each.
+// are a list beside the arguments, one entry each, and one more for a
+// trailing `..` (`rest_marker`).
 fn parse_call_suffix(pc: PC, ps: PS, callee: i64, targs_lp: i64, targs_on_type: bool): PR
   let inner: PS = expect(pc, ps, lexer::TK::LParen)
   let call_args: Vector<i64> = Vector<i64>::new()
   let arg_names: Vector<i64> = Vector<i64>::new()
-  if peek_is(pc, inner, lexer::TK::RParen) == false:
+  // A rest marker ends the list: nothing follows `..` but `)`.
+  let more: bool = peek_is(pc, inner, lexer::TK::RParen) == false
+  while more:
     let arg: CallArg = parse_call_arg(pc, inner)
     inner = arg.ps
-    if arg.node >= 0:
+    more = false
+    if arg.name_tidx == rest_marker():
+      arg_names = arg_names.push(rest_marker())
+    else if arg.node >= 0:
       call_args = call_args.push(arg.node)
       arg_names = arg_names.push(arg.name_tidx)
-      let arg_done: bool = false
-      while arg_done == false:
-        if peek_is(pc, inner, lexer::TK::Comma):
-          inner = ps_advance(pc, inner)
-          let arg2: CallArg = parse_call_arg(pc, inner)
-          inner = arg2.ps
-          if arg2.node >= 0:
-            call_args = call_args.push(arg2.node)
-            arg_names = arg_names.push(arg2.name_tidx)
-          else:
-            arg_done = true
-        else:
-          arg_done = true
+      if peek_is(pc, inner, lexer::TK::Comma):
+        inner = ps_advance(pc, inner)
+        more = true
   let call_fl: FlushResult = flush_list(inner, call_args)
   let names_fl: FlushResult = flush_list(call_fl.ps, arg_names)
   inner = expect(pc, names_fl.ps, lexer::TK::RParen)

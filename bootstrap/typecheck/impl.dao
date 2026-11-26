@@ -4407,6 +4407,10 @@ fn check_callee_expr(ts: TS, callee: i64): TS
   return check_expr(ts, callee)
 
 fn check_call_expr(ts: TS, node_idx: i64, callee: i64, args_lp: i64, targs: WrittenTypeArgs, names_lp: i64): TS
+  // A rest marker carries no value: it ends a variant pattern, and a
+  // call or a construction is no pattern.
+  if parser::call_has_rest(ts.tc.idx_data, names_lp):
+    return ts_add_diag(ts, ts_node_span(ts, node_idx), "'..' is no argument of a call; it ends a variant pattern")
   // A pointer's operations are the compiler's own, not a declared type's
   // methods, so a call that names one is typed here — before the callee
   // is read as a member or a symbol, which would report `get` as a
@@ -5298,7 +5302,8 @@ fn check_break_stmt(ts: TS, tidx: i64): TS
 // bindings are names it introduces, no arguments -- and against the
 // variant's shape in the registry: a variant without parameters is
 // written bare, and a variant with parameters binds one name per
-// parameter.  The pattern takes the callee's type.
+// parameter, or a leading run of them before a trailing `..`.  The
+// pattern takes the callee's type.
 fn check_pattern(ts: TS, pat_node: i64): TS
   match ts.tc.nodes.get(pat_node):
     parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
@@ -5327,7 +5332,11 @@ fn check_pattern(ts: TS, pat_node: i64): TS
                 return ts_add_diag(r, nsp, "a pattern binds by position: " + variant_name + "(a, b), never by name")
               ni = ni + 1
             let bindings: Vector<i64> = parser::read_list(r.tc.idx_data, args_lp)
-            if bindings.length() != param_count:
+            // A trailing `..` ignores the parameters after the bound ones.
+            if parser::call_has_rest(r.tc.idx_data, names_lp):
+              if bindings.length() > param_count:
+                return ts_add_diag(r, sp, "variant '" + variant_name + "' takes " + i64_to_string(param_count) + " parameter(s); the pattern binds " + i64_to_string(bindings.length()) + " before '..'")
+            else if bindings.length() != param_count:
               return ts_add_diag(r, sp, "variant '" + variant_name + "' takes " + i64_to_string(param_count) + " parameter(s); the pattern binds " + i64_to_string(bindings.length()))
             let bi: i64 = 0
             while bi < bindings.length():

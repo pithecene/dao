@@ -95,6 +95,10 @@ importing `bootstrap::lexer`) producing an arena-indexed AST for Dao syntax.
 - `resource <kind> <name> =>` blocks and their suites (Task 37)
 - Named call arguments (`f(name = expr)`), the names carried on `CallE`
   beside the arguments
+- A trailing `..` rest marker in a call's arguments, carried as a last
+  entry of the names with no argument beside it.  The type checker
+  accepts it only in a variant pattern, where it ignores the parameters
+  after the bound ones
 
 **Tier B deferrals** (explicitly not supported yet):
 
@@ -170,7 +174,7 @@ the bootstrap parser's AST.
 
 - Overload resolution
 - `where` clauses
-- Match arm `..` (rest) and `as` (whole-variant) forms
+- Match arm `as` (whole-variant) form
 
 **Running tests**:
 
