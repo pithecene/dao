@@ -3,7 +3,9 @@ let hideTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Show a short transient message in the header (navigation results). */
 export function showNotice(text: string): void {
-  const el = document.getElementById("nav-notice")!;
+  if (typeof document === "undefined") return;
+  const el = document.getElementById("nav-notice");
+  if (!el) return;
   el.textContent = text;
   el.hidden = false;
   if (hideTimer) clearTimeout(hideTimer);

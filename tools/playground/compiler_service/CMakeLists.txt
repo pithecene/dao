@@ -2,6 +2,17 @@ find_package(httplib REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(ut REQUIRED)
 
+execute_process(
+  COMMAND git rev-parse --short=12 HEAD
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  OUTPUT_VARIABLE DAO_GIT_COMMIT
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_QUIET
+)
+if(NOT DAO_GIT_COMMIT)
+  set(DAO_GIT_COMMIT "unknown")
+endif()
+
 # Transport-free service: every route as a JSON function.  Shared by the
 # HTTP server and the service test.
 add_library(dao_playground_service STATIC
@@ -11,6 +22,7 @@ add_library(dao_playground_service STATIC
   format.cpp
   navigation.cpp
   pipeline.cpp
+  prelude.cpp
   run.cpp
   service.cpp
   service_surface.cpp
@@ -30,6 +42,7 @@ target_link_libraries(dao_playground_service PUBLIC
 
 target_compile_definitions(dao_playground_service PRIVATE
   DAO_RUNTIME_LIB="$<TARGET_FILE:dao_runtime>"
+  DAO_GIT_COMMIT="${DAO_GIT_COMMIT}"
 )
 
 # The run route links produced objects against the runtime at request

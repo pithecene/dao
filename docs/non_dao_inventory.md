@@ -13,7 +13,7 @@ so a machine with no Dao on it can always rebuild the language:
 | Self-hosted | `bootstrap/`, in Dao | compiles itself, and still uses LLVM and the C runtime |
 | Fully hosted | not yet written | all Dao, with its own runtime and code generation |
 
-Line counts reflect the current branch over `fb5369c`, on 2026-11-25.  The table counts
+Line counts reflect the current branch over `f62f4ca`, on 2026-11-25.  The table counts
 32,927 lines of authored Dao for comparison.
 
 ## Programs
@@ -22,8 +22,8 @@ Line counts reflect the current branch over `fb5369c`, on 2026-11-25.  The table
 |---|---|---|---|---|
 | `compiler/` bootstrap tier and its tests | C++ | 117 | 45,001 | nothing: this tier stays permanently |
 | `runtime/` allocator, strings, I/O and generators | C | 11 | 1,632 | Dao over `Ptr<T>` and `mode unsafe` in the fully hosted tier, which needs direct system calls from Dao |
-| `tools/playground/compiler_service/` | C++ | 22 | 3,470 | a Dao service, which needs sockets and HTTP in the standard library |
-| `tools/playground/frontend/` | TypeScript, CSS, HTML | 21 | 1,737 | a Dao browser target, which does not exist |
+| `tools/playground/compiler_service/` | C++ | 24 | 3,748 | a Dao service, which needs sockets and HTTP in the standard library |
+| `tools/playground/frontend/` | TypeScript, CSS, HTML | 28 | 7,756 | a Dao browser target, which does not exist |
 | `examples/forecast_device/metal_runner.swift` | Swift | 1 | 977 | Dao validating kernel manifests and buffer lifetimes and driving Metal command queues directly |
 | `examples/ffi/` | C | 3 | 177 | the C side of an interoperability test, which is foreign by design and goes only if C interoperability does |
 
@@ -35,7 +35,7 @@ Line counts reflect the current branch over `fb5369c`, on 2026-11-25.  The table
 | `bootstrap/stage2.sh`, `audit_closure.sh`, `validate_ir.sh` | Shell | 1,007 | Dao programs, which need a process API in the standard library |
 | `compiler/driver/multifile_build_test.sh`, `tools/playground/dev.sh` | Shell | 194 | the same process API |
 | `Taskfile.yml` | YAML for Task | 211 | a build tool written in Dao |
-| `CMakeLists.txt` files and `CMakePresets.json` | CMake | 616 | stays with the bootstrap tier, and a Dao build tool serves the other tiers |
+| `CMakeLists.txt` files and `CMakePresets.json` | CMake | 629 | stays with the bootstrap tier, and a Dao build tool serves the other tiers |
 | `conanfile.py`, `profiles/` | Python, Conan | 101 | stays with the bootstrap tier |
 | `.github/workflows/` | YAML for GitHub Actions | 270 | Bosun orchestrating compiler and crossing validation directly |
 

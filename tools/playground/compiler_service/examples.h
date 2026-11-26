@@ -5,10 +5,11 @@
 
 namespace dao::playground {
 
-/// The `.dao` files directly under the examples directory, sorted by name.
+/// Single-file `.dao` examples and single-entry multi-file example
+/// directories under `examples/`, sorted by name.
 auto examples_list(const nlohmann::json& request, const ServiceContext& ctx) -> Reply;
 
-/// Source of one example by file name (`request["name"]`).
+/// Program files and entry document of one example by name (`request["name"]`).
 auto example_source(const nlohmann::json& request, const ServiceContext& ctx) -> Reply;
 
 } // namespace dao::playground

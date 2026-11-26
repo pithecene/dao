@@ -1,0 +1,201 @@
+/* ---------------------------------------------------------------------------
+ * Pithecene Design Tokens — Dao Language & Playground
+ *
+ * Posture: Generational infrastructure, Calm UX, explicit architectural
+ * hierarchy, 4px spatial rhythm, and compiler-owned semantic token taxonomy.
+ * Zero neon clutter, gradients, or gamification.
+ * --------------------------------------------------------------------------- */
+
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Surface hierarchy — Mineral Obsidian & Basalt */
+  --surface-canvas: #0e1013;
+  --surface-base: #13161b;
+  --surface-panel: #181c22;
+  --surface-elevated: #1f242c;
+  --surface-subtle: #252b35;
+  --surface-code: #101318;
+  --surface-overlay: rgba(8, 10, 13, 0.72);
+
+  /* Typography colors */
+  --fg-primary: #e6e8ec;
+  --fg-secondary: #a5aeb9;
+  --fg-muted: #6e7785;
+  --fg-inverse: #0e1013;
+
+  /* Architectural hairlines & borders */
+  --border-hairline: #242a33;
+  --border-strong: #353e4b;
+  --border-focus: #72a7cc;
+
+  /* Tempered primary accent — Slate Cerulean */
+  --accent-primary: #72a7cc;
+  --accent-strong: #90bfe0;
+  --accent-subtle: rgba(114, 167, 204, 0.13);
+  --accent-border: rgba(114, 167, 204, 0.34);
+
+  /* Semantic status — calm mineral tones */
+  --status-ok: #6eb38a;
+  --status-ok-subtle: rgba(110, 179, 138, 0.13);
+  --status-warn: #d4a359;
+  --status-warn-subtle: rgba(212, 163, 89, 0.14);
+  --status-error: #da7575;
+  --status-error-subtle: rgba(218, 117, 117, 0.14);
+
+  /* Editor chrome tokens (mirrored into CodeMirror theme) */
+  --editor-bg: var(--surface-base);
+  --editor-gutter-bg: #111419;
+  --editor-gutter-fg: #545d6b;
+  --editor-gutter-active-fg: #9aa4b2;
+  --editor-active-line: rgba(255, 255, 255, 0.026);
+  --editor-selection: rgba(114, 167, 204, 0.22);
+  --editor-cursor: #e6e8ec;
+  --editor-ref-use: rgba(114, 167, 204, 0.22);
+  --editor-ref-def: rgba(212, 163, 89, 0.26);
+
+  /* Semantic Token Taxonomy — mapped 1:1 to TOKEN_GROUP in tooling_surface.ts */
+  --syntax-keyword: #9ca7c7;
+  --syntax-mode: #e08a70;
+  --syntax-mode-bg: rgba(224, 138, 112, 0.12);
+  --syntax-mode-border: rgba(224, 138, 112, 0.38);
+  --syntax-resource: #dbb06b;
+  --syntax-resource-bg: rgba(219, 176, 107, 0.11);
+  --syntax-resource-border: rgba(219, 176, 107, 0.35);
+  --syntax-type: #d6be86;
+  --syntax-decl: #84b6db;
+  --syntax-variable: #e6e8ec;
+  --syntax-field: #83bfb3;
+  --syntax-module: #7cb0c4;
+  --syntax-lambda-param: #cfa195;
+  --syntax-number: #d49b6a;
+  --syntax-string: #94ba88;
+  --syntax-operator: #7fc2cf;
+  --syntax-punctuation: #737d8c;
+
+  /* Shadows */
+  --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.42), 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Surface hierarchy — Warm Archival Paper & Limestone */
+  --surface-canvas: #f5f4ef;
+  --surface-base: #fcfbf8;
+  --surface-panel: #eeece5;
+  --surface-elevated: #ffffff;
+  --surface-subtle: #e4e1d8;
+  --surface-code: #f3f1ea;
+  --surface-overlay: rgba(24, 26, 30, 0.42);
+
+  /* Typography colors */
+  --fg-primary: #191c20;
+  --fg-secondary: #49505b;
+  --fg-muted: #707885;
+  --fg-inverse: #fcfbf8;
+
+  /* Architectural hairlines & borders */
+  --border-hairline: #dad6cc;
+  --border-strong: #bdb7ab;
+  --border-focus: #265d82;
+
+  /* Tempered primary accent — Prussian Slate */
+  --accent-primary: #265d82;
+  --accent-strong: #1b4663;
+  --accent-subtle: rgba(38, 93, 130, 0.10);
+  --accent-border: rgba(38, 93, 130, 0.30);
+
+  /* Semantic status */
+  --status-ok: #266b43;
+  --status-ok-subtle: rgba(38, 107, 67, 0.10);
+  --status-warn: #8f5b12;
+  --status-warn-subtle: rgba(143, 91, 18, 0.11);
+  --status-error: #ad3434;
+  --status-error-subtle: rgba(173, 52, 52, 0.10);
+
+  /* Editor chrome tokens */
+  --editor-bg: var(--surface-base);
+  --editor-gutter-bg: #f3f1ea;
+  --editor-gutter-fg: #878e99;
+  --editor-gutter-active-fg: #3b424d;
+  --editor-active-line: rgba(25, 28, 32, 0.032);
+  --editor-selection: rgba(38, 93, 130, 0.16);
+  --editor-cursor: #191c20;
+  --editor-ref-use: rgba(38, 93, 130, 0.16);
+  --editor-ref-def: rgba(143, 91, 18, 0.20);
+
+  /* Semantic Token Taxonomy — high-contrast archival ink palette */
+  --syntax-keyword: #485078;
+  --syntax-mode: #9e3d22;
+  --syntax-mode-bg: rgba(158, 61, 34, 0.09);
+  --syntax-mode-border: rgba(158, 61, 34, 0.32);
+  --syntax-resource: #855510;
+  --syntax-resource-bg: rgba(133, 85, 16, 0.09);
+  --syntax-resource-border: rgba(133, 85, 16, 0.30);
+  --syntax-type: #785216;
+  --syntax-decl: #1d567d;
+  --syntax-variable: #191c20;
+  --syntax-field: #1e665a;
+  --syntax-module: #265970;
+  --syntax-lambda-param: #7d4233;
+  --syntax-number: #8c4712;
+  --syntax-string: #2f6626;
+  --syntax-operator: #1b6270;
+  --syntax-punctuation: #6b7380;
+
+  /* Shadows */
+  --shadow-popover: 0 8px 24px rgba(20, 22, 26, 0.12), 0 1px 3px rgba(20, 22, 26, 0.08);
+}
+
+/* Shared Geometry, Scale, and Motion Tokens */
+:root {
+  /* Font stacks */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", "Cascadia Code",
+    ui-monospace, Menlo, Consolas, monospace;
+
+  /* Typography scale */
+  --text-xs: 0.6875rem;   /* 11px */
+  --text-sm: 0.78125rem;  /* 12.5px */
+  --text-base: 0.875rem;  /* 14px */
+  --text-md: 0.96875rem;  /* 15.5px */
+  --text-lg: 1.125rem;    /* 18px */
+  --text-xl: 1.375rem;    /* 22px */
+  --text-2xl: 1.75rem;    /* 28px */
+  --text-3xl: 2.25rem;    /* 36px */
+
+  /* Line heights */
+  --leading-tight: 1.25;
+  --leading-snug: 1.4;
+  --leading-normal: 1.55;
+  --leading-relaxed: 1.68;
+
+  /* 4px Spatial rhythm */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Radii */
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+
+  /* Layout dimensions */
+  --header-height: 48px;
+  --content-max-width: 1180px;
+
+  /* Focus & transitions */
+  --focus-ring: 0 0 0 2px var(--accent-subtle), 0 0 0 1px var(--border-focus);
+  --transition-fast: 120ms cubic-bezier(0.2, 0, 0, 1);
+  --transition-base: 180ms cubic-bezier(0.2, 0, 0, 1);
+}

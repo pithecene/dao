@@ -1,4 +1,4 @@
-import { programRequest } from "./document";
+import { isActivePrelude, programRequest } from "./document";
 import {
   autocompletion,
   type Completion,
@@ -33,14 +33,11 @@ function toOption(item: ServiceCompletion): Completion {
   };
 }
 
-/**
- * Completion source backed by the service: members after `.`, symbols
- * in scope otherwise.  The request carries the start of the word being
- * typed so the service sees the `.` (if any) immediately before it.
- */
 async function daoCompletionSource(
   ctx: CompletionContext,
 ): Promise<CompletionResult | null> {
+  if (isActivePrelude()) return null;
+
   const word = ctx.matchBefore(/[A-Za-z_][A-Za-z0-9_]*/);
   const from = word ? word.from : ctx.pos;
   const afterDot = from > 0 && ctx.state.sliceDoc(from - 1, from) === ".";

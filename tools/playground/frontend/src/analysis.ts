@@ -3,14 +3,22 @@ import { api } from "./api";
 import { setTokens } from "./highlighting";
 import { renderDiagnostics } from "./diagnostics";
 import { renderOutline } from "./outline";
-import { setDocument, programRequest } from "./document";
-import { getSource } from "./editor";
+import {
+  getActivePath,
+  getActivePreludeTab,
+  getWorkspaceDiagnostics,
+  isActivePrelude,
+  programRequest,
+  setDocument,
+  setWorkspaceDiagnostics,
+} from "./document";
+import { getSource, setEditorDiagnostics } from "./editor";
 
 let analyzeTimer: ReturnType<typeof setTimeout> | null = null;
 let analyzeSeq = 0;
 let editorView: EditorView | null = null;
 
-const DEBOUNCE_MS = 300;
+const DEBOUNCE_MS = 260;
 
 /** Bind the analysis module to the editor view. */
 export function initAnalysis(view: EditorView): void {
@@ -23,7 +31,7 @@ export function initAnalysis(view: EditorView): void {
 /** Schedule a debounced analysis request. */
 export function scheduleAnalyze(): void {
   if (analyzeTimer) clearTimeout(analyzeTimer);
-  analyzeTimer = setTimeout(doAnalyze, DEBOUNCE_MS);
+  analyzeTimer = setTimeout(() => void doAnalyze(), DEBOUNCE_MS);
 }
 
 function includePrelude(): boolean {
@@ -35,18 +43,39 @@ function includePrelude(): boolean {
 export async function doAnalyze(): Promise<void> {
   if (!editorView) return;
 
+  // Read-only prelude tabs already carry their classified semantic tokens and symbols.
+  if (isActivePrelude()) {
+    const tab = getActivePreludeTab();
+    if (tab) {
+      setDocument(tab.path, tab.module);
+      setTokens(tab.semanticTokens, editorView);
+      setEditorDiagnostics(getWorkspaceDiagnostics(), editorView);
+      renderOutline(tab.symbols, editorView);
+    }
+    return;
+  }
+
+  const requestedPath = getActivePath();
   const source = getSource();
   const seq = ++analyzeSeq;
 
   try {
+    const req = programRequest(source);
     const [data, symbols] = await Promise.all([
-      api("analyze", { ...programRequest(source), includePrelude: includePrelude() }),
-      api("documentSymbols", programRequest(source)),
+      api("analyze", { ...req, includePrelude: includePrelude() }),
+      api("documentSymbols", req),
     ]);
-    if (seq !== analyzeSeq) return; // a newer edit superseded this request
+    if (seq !== analyzeSeq) return;
 
     setDocument(data.file, data.module);
-    setTokens(data.semanticTokens, editorView);
+    setWorkspaceDiagnostics(data.diagnostics);
+
+    // Only apply buffer-local tokens/outline if the user hasn't switched tabs mid-flight.
+    if (getActivePath() === requestedPath) {
+      setTokens(data.semanticTokens, editorView);
+      setEditorDiagnostics(data.diagnostics, editorView);
+      renderOutline(symbols, editorView);
+    }
 
     setText("ast-output", data.ast);
     setText("hir-output", data.hir);
@@ -54,7 +83,6 @@ export async function doAnalyze(): Promise<void> {
     setText("llvm-ir-output", data.llvm_ir);
 
     renderDiagnostics(data.diagnostics);
-    renderOutline(symbols, editorView);
   } catch (err) {
     console.error("analyze failed:", err);
   }
