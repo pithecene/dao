@@ -13,8 +13,8 @@ so a machine with no Dao on it can always rebuild the language:
 | Self-hosted | `bootstrap/`, in Dao | compiles itself, and still uses LLVM and the C runtime |
 | Fully hosted | not yet written | all Dao, with its own runtime and code generation |
 
-Line counts reflect the current branch over `73e37ba`, on 2026-11-25.  The table counts
-32,425 lines of authored Dao for comparison.
+Line counts reflect the current branch over `cc2ced0`, on 2026-11-25.  The table counts
+32,927 lines of authored Dao for comparison.
 
 ## Programs
 
