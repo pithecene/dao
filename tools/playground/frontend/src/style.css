@@ -56,6 +56,27 @@ select {
   gap: 8px;
 }
 
+#format-btn {
+  background: var(--bg-panel);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+#format-btn:hover {
+  border-color: var(--accent);
+}
+
+#format-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 #run-btn {
   background: var(--green);
   color: var(--bg-header);

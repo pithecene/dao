@@ -1,22 +1,25 @@
 #include "driver/pipeline.h"
 
+#include "analysis/formatter.h"
 #include "analysis/semantic_tokens.h"
+#include "backend/llvm/llvm_backend.h"
 #include "frontend/ast/ast_printer.h"
 #include "frontend/lexer/lexer.h"
 #include "frontend/parser/parser.h"
 #include "frontend/resolve/resolve.h"
-#include "backend/llvm/llvm_backend.h"
 #include "ir/hir/hir_printer.h"
 #include "ir/mir/mir_printer.h"
 
 #include <llvm/ADT/SmallString.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Program.h>
+#include <llvm/Support/raw_ostream.h>
 
 #include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <span>
@@ -83,6 +86,95 @@ void cmd_ast(const dao::ProgramRequest& request) {
   if (result.parse_result.file != nullptr) {
     dao::print_ast(std::cout, *result.parse_result.file);
   }
+}
+
+enum class FmtMode : std::uint8_t { Stdout, Check, Write };
+
+auto write_file_atomically(const std::filesystem::path& path, std::string_view contents) -> bool {
+  std::error_code stat_ec;
+  auto orig_status = std::filesystem::status(path, stat_ec);
+
+  llvm::SmallString<128> tmp_buffer;
+  int tmp_fd = -1;
+  if (auto create_ec =
+          llvm::sys::fs::createUniqueFile(path.string() + ".tmp.%%%%%%", tmp_fd, tmp_buffer)) {
+    std::cerr << "error: failed to create temporary file for " << path.generic_string() << ": "
+              << create_ec.message() << "\n";
+    return false;
+  }
+  std::filesystem::path tmp_path(tmp_buffer.str().str());
+
+  bool write_ok = false;
+  {
+    llvm::raw_fd_ostream out(tmp_fd, /*shouldClose=*/true);
+    out.write(contents.data(), contents.size());
+    out.flush();
+    write_ok = !out.has_error();
+    out.close();
+    write_ok = write_ok && !out.has_error();
+  }
+
+  if (!write_ok) {
+    std::error_code rm_ec;
+    std::filesystem::remove(tmp_path, rm_ec);
+    std::cerr << "error: failed to write formatted output to " << path.generic_string() << "\n";
+    return false;
+  }
+
+  if (!stat_ec) {
+    std::error_code perm_ec;
+    std::filesystem::permissions(tmp_path, orig_status.permissions(), perm_ec);
+  }
+
+  std::error_code ren_ec;
+  std::filesystem::rename(tmp_path, path, ren_ec);
+  if (ren_ec) {
+    std::error_code rm_ec;
+    std::filesystem::remove(tmp_path, rm_ec);
+    std::cerr << "error: failed to replace " << path.generic_string() << ": " << ren_ec.message()
+              << "\n";
+    return false;
+  }
+  return true;
+}
+
+void cmd_fmt_files(std::span<const std::filesystem::path> paths, FmtMode mode) {
+  bool any_failed = false;
+  for (const auto& path : paths) {
+    auto contents = dao::read_file(path);
+    dao::SourceBuffer source(path.generic_string(), contents);
+    auto result = dao::format_source(source);
+    if (!result.ok()) {
+      dao::print_error_diagnostics(source.filename(), source, result.errors);
+      any_failed = true;
+      continue;
+    }
+
+    switch (mode) {
+    case FmtMode::Stdout:
+      std::cout << result.output;
+      break;
+    case FmtMode::Check:
+      if (result.output != contents) {
+        std::cerr << path.generic_string() << ": needs formatting\n";
+        any_failed = true;
+      }
+      break;
+    case FmtMode::Write:
+      if (result.output != contents && !write_file_atomically(path, result.output)) {
+        any_failed = true;
+      }
+      break;
+    }
+  }
+  if (any_failed) {
+    std::exit(EXIT_FAILURE);
+  }
+}
+
+void cmd_fmt(const dao::ProgramRequest& request) {
+  const auto& path = single_file(request);
+  cmd_fmt_files(std::span{&path, 1}, FmtMode::Stdout);
 }
 
 /// The file a single-document dump reports on: the entry module's,
@@ -164,8 +256,7 @@ void cmd_resolve(const dao::ProgramRequest& request) {
     auto loc = source_map.locate(offset);
     std::cout << "  " << loc.line << ":" << loc.col << " "
               << source_map.text(
-                     dao::Span{.offset = offset,
-                               .length = static_cast<uint32_t>(sym->name.size())})
+                     dao::Span{.offset = offset, .length = static_cast<uint32_t>(sym->name.size())})
               << " -> " << dao::symbol_kind_name(sym->kind) << " " << sym->name;
     if (sym->decl_span.length > 0) {
       auto decl_loc = source_map.locate(sym->decl_span.offset);
@@ -347,9 +438,13 @@ void cmd_build(const dao::ProgramRequest& request,
   }
 
   std::string link_error;
-  int link_status = llvm::sys::ExecuteAndWait(
-      *cc_path, args, /*Env=*/std::nullopt, /*Redirects=*/{},
-      /*SecondsToWait=*/0, /*MemoryLimit=*/0, &link_error);
+  int link_status = llvm::sys::ExecuteAndWait(*cc_path,
+                                              args,
+                                              /*Env=*/std::nullopt,
+                                              /*Redirects=*/{},
+                                              /*SecondsToWait=*/0,
+                                              /*MemoryLimit=*/0,
+                                              &link_error);
   std::filesystem::remove(obj_path);
 
   if (link_status != 0) {
@@ -379,6 +474,7 @@ constexpr auto commands = std::array{
     Command{.name = "lex", .handler = cmd_lex},
     Command{.name = "parse", .handler = cmd_parse},
     Command{.name = "ast", .handler = cmd_ast},
+    Command{.name = "fmt", .handler = cmd_fmt},
     Command{.name = "tokens", .handler = cmd_tokens},
     Command{.name = "resolve", .handler = cmd_resolve},
     Command{.name = "check", .handler = cmd_check},
@@ -390,8 +486,9 @@ constexpr auto commands = std::array{
 void print_usage() {
   std::cerr << "usage: daoc <command> <root.dao> [--module-root DIR]... [--stdlib-root DIR]\n"
             << "       daoc <command> --source a.dao [--source b.dao]... [--entry a::b]\n"
+            << "       daoc fmt [--write | --check] <file.dao>...\n"
             << "       daoc build <inputs as above> [--] [link-inputs...]\n"
-            << "commands: lex, parse, ast, tokens, resolve, check, hir, mir, llvm-ir, build\n";
+            << "commands: lex, parse, ast, fmt, tokens, resolve, check, hir, mir, llvm-ir, build\n";
 }
 
 auto require_file(const std::filesystem::path& path) -> void {
@@ -426,7 +523,8 @@ auto main(int argc, char* argv[]) -> int {
   }
 
   dao::ProgramRequest request{.options = {.stdlib_root = default_stdlib_root(argv[0])}};
-  std::vector<std::string> extras; // build: link inputs after the sources
+  std::vector<std::string> extras; // build: link inputs after the sources; fmt: extra files
+  FmtMode fmt_mode = FmtMode::Stdout;
   for (int i = 2; i < argc; ++i) {
     std::string_view arg(argv[i]);
     auto value = [&]() -> const char* {
@@ -444,6 +542,13 @@ auto main(int argc, char* argv[]) -> int {
       request.sources.emplace_back(value());
     } else if (arg == "--entry") {
       request.options.entry = value();
+    } else if (command == "fmt" && (arg == "--check" || arg == "--write" || arg == "-w")) {
+      FmtMode requested = arg == "--check" ? FmtMode::Check : FmtMode::Write;
+      if (fmt_mode != FmtMode::Stdout && fmt_mode != requested) {
+        std::cerr << "error: --check and --write are mutually exclusive\n";
+        return EXIT_FAILURE;
+      }
+      fmt_mode = requested;
     } else if (arg == "--") {
       // Everything after `--` is a link input, verbatim.
       for (++i; i < argc; ++i) {
@@ -500,6 +605,22 @@ auto main(int argc, char* argv[]) -> int {
     // point whichever way it was given.
     request.options.entry_policy = dao::EntryPolicy::Required;
     cmd_build(request, argv[0], extras);
+    return EXIT_SUCCESS;
+  }
+  if (command == "fmt" && fmt_mode != FmtMode::Stdout) {
+    if (!request.sources.empty()) {
+      std::cerr << "error: this command takes a single file, not --source inputs\n";
+      return EXIT_FAILURE;
+    }
+    std::vector<std::filesystem::path> files;
+    files.reserve(1 + extras.size());
+    files.push_back(request.root);
+    for (const auto& extra : extras) {
+      std::filesystem::path extra_path(extra);
+      require_file(extra_path);
+      files.push_back(std::move(extra_path));
+    }
+    cmd_fmt_files(files, fmt_mode);
     return EXIT_SUCCESS;
   }
   if (!extras.empty()) {

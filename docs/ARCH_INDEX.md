@@ -115,6 +115,10 @@ CLI, playground, and LSP.
 - `completion.h` / `completion.cpp` — scope-aware symbol completion at cursor offset
 - `document_symbols.h` / `document_symbols.cpp` — hierarchical symbol tree from AST
 - `references.h` / `references.cpp` — find all use-sites of a symbol
+- `formatter.h` / `formatter.cpp` — source-preserving canonical Dao
+  formatter (`format_source`, `verify_format_invariants`) shared by
+  `daoc fmt`, `/api/format`, and future `dao_lsp`; tested in
+  `formatter_test.cpp`
 - `tooling_surface.h` / `tooling_surface.cpp` — the compiler's tooling
   surface: token kinds and groups, lexical categories, diagnostic
   severities, and analysis payload shapes; `tooling_surface_test.cpp`
@@ -230,8 +234,8 @@ Developer-surface tooling built on compiler analysis.
 
 - `playground/` — first-class web playground and future web-IDE surface
   - `compiler_service/` — the service as JSON route functions behind
-    `dispatch` (`service.h/.cpp`; `analyze`, `navigation`, `completions`,
-    `run`, `examples`), its transport surface (`service_surface.h/.cpp`:
+    `dispatch` (`service.h/.cpp`; `analyze`, `format`, `navigation`,
+    `completions`, `run`, `examples`), its transport surface (`service_surface.h/.cpp`:
     routes, request envelopes, response shapes; `service_surface_dump`
     renders the frontend's TypeScript from it and the analysis surface),
     program assembly in `pipeline.h/.cpp`, the HTTP adapter in `main.cpp`
@@ -242,5 +246,5 @@ Developer-surface tooling built on compiler analysis.
     HMR with API proxy, prod builds to `dist/` served by the compiler service
   - `dev.sh` — development loop: service restarted on rebuild, Vite with HMR
 - `lsp/` — reserved LSP root (not yet implemented; the analysis APIs it will wrap live in `compiler/analysis/`)
-- `formatter/` — reserved canonical formatter root
+- `formatter/` — architectural note on the shared `compiler/analysis/formatter` engine and prerequisites for a future Dao-hosted formatter CLI
 - `diagnostics/` — presentation and diagnostics tooling experiments
