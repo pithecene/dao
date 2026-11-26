@@ -183,9 +183,11 @@ daoc build --source bootstrap/resolver/tests.dao --source bootstrap/resolver/imp
 Type checker (`module bootstrap::typecheck` in `typecheck/impl.dao`,
 importing `bootstrap::lexer`, `bootstrap::parser`, `bootstrap::graph`,
 `bootstrap::base`, and `bootstrap::resolver`) assigning types to
-expressions and validating type correctness for Tier A Dao syntax.
+expressions and validating type correctness for Tier A Dao syntax.  Its
+test runner is the separate module `bootstrap::typecheck::tests` in
+`typecheck/tests.dao`.
 
-**Status**: real multi-file module compiled directly from authored sources without `assemble.sh`.
+**Status**: real module compiled directly from authored sources without `assemble.sh`.
 
 **Tier A scope**:
 
@@ -241,7 +243,7 @@ fn/extern fn/class/enum/type alias declarations, `resource` blocks
 **How to run tests**:
 
 ```sh
-bash bootstrap/assemble.sh && daoc build --source bootstrap/hir/hir.gen.dao --source bootstrap/ascii.dao && ./bootstrap/hir/hir.gen
+bash bootstrap/assemble.sh && daoc build --source bootstrap/hir/hir.gen.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/hir/hir.gen
 ```
 
 ### `mir/`
@@ -280,7 +282,7 @@ break/continue.  MIR rejects a `resource` block with the unsupported-statement d
 **How to run tests**:
 
 ```sh
-bash bootstrap/assemble.sh && daoc build --source bootstrap/mir/mir.gen.dao --source bootstrap/ascii.dao && ./bootstrap/mir/mir.gen
+bash bootstrap/assemble.sh && daoc build --source bootstrap/mir/mir.gen.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/mir/mir.gen
 ```
 
 ### `llvm/`
@@ -338,7 +340,7 @@ Or by hand (the suite writes its artifacts under `bootstrap/llvm/out`, which Git
 
 ```sh
 rm -rf bootstrap/llvm/out && mkdir -p bootstrap/llvm/out
-bash bootstrap/assemble.sh && daoc build --source bootstrap/llvm/llvm.gen.dao --source bootstrap/ascii.dao && ./bootstrap/llvm/llvm.gen
+bash bootstrap/assemble.sh && daoc build --source bootstrap/llvm/llvm.gen.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/llvm/llvm.gen
 bash bootstrap/validate_ir.sh build/debug
 ```
 
