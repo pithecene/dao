@@ -119,7 +119,7 @@ File
               Identifier describe_twice
             Args
               IntLiteral 21
-    LetStatement t: Tally
+    LetStatement t
       CallExpr
         Callee
           Identifier Tally

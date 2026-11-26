@@ -25,38 +25,38 @@ fn main(): i32
   print("")
 
   // Normal cases — no overflow.
-  let unused1: i32 = show_i32("checked_add(10, 20)", checked_add(10, 20))
-  let unused2: i32 = show_i32("checked_sub(100, 42)", checked_sub(100, 42))
-  let unused3: i32 = show_i32("checked_mul(7, 6)", checked_mul(7, 6))
+  let unused1 = show_i32("checked_add(10, 20)", checked_add(10, 20))
+  let unused2 = show_i32("checked_sub(100, 42)", checked_sub(100, 42))
+  let unused3 = show_i32("checked_mul(7, 6)", checked_mul(7, 6))
 
   // Overflow cases — near i32 max (2147483647).
-  let unused4: i32 = show_i32("checked_add(2147483647, 1)", checked_add(2147483647, 1))
-  let unused5: i32 = show_i32("checked_sub(-2147483648, 1)", checked_sub(-2147483648, 1))
-  let unused6: i32 = show_i32("checked_mul(2147483647, 2)", checked_mul(2147483647, 2))
+  let unused4 = show_i32("checked_add(2147483647, 1)", checked_add(2147483647, 1))
+  let unused5 = show_i32("checked_sub(-2147483648, 1)", checked_sub(-2147483648, 1))
+  let unused6 = show_i32("checked_mul(2147483647, 2)", checked_mul(2147483647, 2))
 
   // Edge: zero and identity.
-  let unused7: i32 = show_i32("checked_add(0, 0)", checked_add(0, 0))
-  let unused8: i32 = show_i32("checked_mul(0, 2147483647)", checked_mul(0, 2147483647))
+  let unused7 = show_i32("checked_add(0, 0)", checked_add(0, 0))
+  let unused8 = show_i32("checked_mul(0, 2147483647)", checked_mul(0, 2147483647))
 
   print("")
   print("=== checked i64 arithmetic ===")
   print("")
 
   // Normal cases.
-  let unused9: i32 = show_i64("checked_add_i64(100, 200)", checked_add_i64(to_i64(100), to_i64(200)))
-  let unused10: i32 = show_i64("checked_sub_i64(50, 30)", checked_sub_i64(to_i64(50), to_i64(30)))
-  let unused11: i32 = show_i64("checked_mul_i64(1000, 1000)", checked_mul_i64(to_i64(1000), to_i64(1000)))
+  let unused9 = show_i64("checked_add_i64(100, 200)", checked_add_i64(to_i64(100), to_i64(200)))
+  let unused10 = show_i64("checked_sub_i64(50, 30)", checked_sub_i64(to_i64(50), to_i64(30)))
+  let unused11 = show_i64("checked_mul_i64(1000, 1000)", checked_mul_i64(to_i64(1000), to_i64(1000)))
 
   // Overflow: MAX + 1.
-  let max64: i64 = to_i64(2147483647) * to_i64(4) + to_i64(3)
+  let max64 = to_i64(2147483647) * to_i64(4) + to_i64(3)
   // max64 = 8589934591 (well within i64 range, but useful for non-trivial test)
-  let unused12: i32 = show_i64("checked_add_i64(max64, max64)", checked_add_i64(max64, max64))
-  let unused13: i32 = show_i64("checked_mul_i64(max64, max64)", checked_mul_i64(max64, max64))
+  let unused12 = show_i64("checked_add_i64(max64, max64)", checked_add_i64(max64, max64))
+  let unused13 = show_i64("checked_mul_i64(max64, max64)", checked_mul_i64(max64, max64))
 
   // Edge: multiply by -1 (non-overflow).
-  let unused14: i32 = show_i64("checked_mul_i64(-1, 42)", checked_mul_i64(to_i64(-1), to_i64(42)))
+  let unused14 = show_i64("checked_mul_i64(-1, 42)", checked_mul_i64(to_i64(-1), to_i64(42)))
 
   // Edge: multiply by zero.
-  let unused15: i32 = show_i64("checked_mul_i64(0, 999)", checked_mul_i64(to_i64(0), to_i64(999)))
+  let unused15 = show_i64("checked_mul_i64(0, 999)", checked_mul_i64(to_i64(0), to_i64(999)))
 
   return 0
