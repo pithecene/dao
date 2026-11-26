@@ -81,7 +81,7 @@ namespace {
 /// A function is generic if either:
 ///  (a) its AST declaration has own type parameters (e.g. fn f<T>), or
 ///  (b) its lowered signature contains TypeGenericParam (e.g. methods
-///      on generic classes where self: HashMap<V>).
+///      on generic classes where self: HashMap<K, V>).
 auto hir_function_is_generic(const HirFunction& fn) -> bool {
   if (fn.has_type_params) {
     return true;
@@ -183,6 +183,7 @@ auto MirBuilder::lower_function(const HirFunction& fn, Span span)
     -> MirFunction* {
   auto* mir_fn = ctx_.alloc<MirFunction>();
   mir_fn->symbol = fn.symbol;
+  mir_fn->extend_concept = fn.extend_concept;
   mir_fn->return_type = fn.return_type;
   mir_fn->span = span;
   mir_fn->is_extern = fn.is_extern;
@@ -674,12 +675,11 @@ auto MirBuilder::lower_expr_value(const HirExpr& expr) -> MirValueId {
             auto obj = lower_expr_value(*field.object);
             auto field_idx = resolve_field_index(field.object->type, field.field_name);
             if (!field_idx) {
-              if (lowering_generic_template_) {
-                // Template body: tolerate unresolved field accesses on
-                // generic type parameters (e.g., x.to_string() where
-                // x: T: Printable).  The monomorphizer will clone this
-                // template and substitute concrete types, at which point
-                // the field access resolves normally.
+              if (lowering_generic_template_ ||
+                  (expr.type != nullptr && expr.type->kind() == TypeKind::Function)) {
+                // Template body or deferred derived-concept method call
+                // callee: monomorphization resolves or synthesizes the
+                // concrete target function.
               } else if (field.object->type != nullptr &&
                          field.object->type->kind() == TypeKind::Struct) {
                 error(expr.span, "unresolved field '" + std::string(field.field_name) + "'");

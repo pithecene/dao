@@ -1685,6 +1685,18 @@ fn parse_concept_decl(pc: PC, ps: PS, is_derived: i64): PR
   cur = expect(pc, cur, lexer::TK::Dedent)
   return ps_add_node(cur, Node::ConceptDeclD(name = name_tidx, tparams = tparams_lp, methods = methods_lp, is_derived = is_derived))
 
+fn extend_concept_tok(nodes: Vector<Node>, idx: Vector<i64>, concept_node: i64): i64
+  if concept_node < 0 or concept_node >= nodes.length():
+    return to_i64(-1)
+  match nodes.get(concept_node):
+    Node::NamedT(tidx):
+      return tidx
+    Node::QualNameE(seg_lp, seg_count):
+      let segs: Vector<i64> = read_list(idx, seg_lp)
+      if segs.length() > to_i64(0):
+        return segs.get(segs.length() - to_i64(1))
+  return to_i64(-1)
+
 fn parse_extend_decl(pc: PC, ps: PS): PR
   let ps2: PS = ps_advance(pc, ps)
 
@@ -1696,9 +1708,26 @@ fn parse_extend_decl(pc: PC, ps: PS): PR
   // Consume 'as'
   cur = expect(pc, cur, lexer::TK::KwAs)
 
-  // Parse concept name (identifier token)
-  let concept_name_tidx: i64 = cur.pos
+  // Parse concept target (`Concept` or `mod::Concept`)
+  let first_tidx: i64 = cur.pos
   cur = expect(pc, cur, lexer::TK::Identifier)
+  let concept_node: i64 = to_i64(-1)
+  if peek_is(pc, cur, lexer::TK::ColonColon):
+    let seg_toks: Vector<i64> = Vector<i64>::new().push(first_tidx)
+    while peek_is(pc, cur, lexer::TK::ColonColon):
+      cur = ps_advance(pc, cur)
+      let seg_tidx: i64 = cur.pos
+      cur = expect(pc, cur, lexer::TK::Identifier)
+      seg_toks = seg_toks.push(seg_tidx)
+    let seg_fl: FlushResult = flush_list(cur, seg_toks)
+    cur = seg_fl.ps
+    let qn: PR = ps_add_node(cur, Node::QualNameE(seg_lp = seg_fl.list_pos, seg_count = seg_toks.length()))
+    cur = qn.ps
+    concept_node = qn.node
+  else:
+    let nn: PR = ps_add_node(cur, Node::NamedT(tok = first_tidx))
+    cur = nn.ps
+    concept_node = nn.node
 
   cur = expect(pc, cur, lexer::TK::Colon)
   cur = expect(pc, cur, lexer::TK::Newline)
@@ -1730,7 +1759,7 @@ fn parse_extend_decl(pc: PC, ps: PS): PR
     methods_lp = mfl.list_pos
 
   cur = expect(pc, cur, lexer::TK::Dedent)
-  return ps_add_node(cur, Node::ExtendDeclD(target = target_type_node, concept_name = concept_name_tidx, methods = methods_lp))
+  return ps_add_node(cur, Node::ExtendDeclD(target = target_type_node, concept_name = concept_node, methods = methods_lp))
 
 // =========================================================================
 // Section 14: File-level parsing

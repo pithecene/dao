@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "test": "tsc --noEmit && vite build --ssr src/workspace_state.test.ts --outDir dist/test && node dist/test/workspace_state.test.js",
     "preview": "vite preview"
   },
   "devDependencies": {

@@ -137,12 +137,46 @@ fn mir_fn_int_consts(r: MirResult, fn_node: i64): Vector<i64>
         bi = bi + 1
   return out
 
+// For every concrete function whose symbol starts with `prefix`, collect
+// the `owner_module_id` of each `MirFnRef` inside its blocks ("1;1;").
+fn mono_fn_called_owner_mods(pc: ProgramConcrete, prefix: string): string
+  let r: MirResult = pc.mir
+  let out: string = ""
+  let mods: Vector<i64> = mir_modules(r)
+  let mi: i64 = 0
+  while mi < mods.length():
+    let fns: Vector<i64> = mir_module_fns(r, mods.get(mi), false)
+    let fi: i64 = 0
+    while fi < fns.length():
+      let fn_node = fns.get(fi)
+      let fn_name = pc.program.resolve.symbols.get(mir_fn_sym(r, fn_node)).name
+      if starts_with(fn_name, prefix):
+        match r.mir_nodes.get(fn_node):
+          MirNode::MirFunction(sym, rt, pc2, llp, lc, block_list_lp, bc, ie):
+            let blocks = read_hir_list(r.mir_idx, block_list_lp)
+            let bi: i64 = 0
+            while bi < blocks.length():
+              match r.mir_nodes.get(blocks.get(bi)):
+                MirNode::MirBlock(bid, inst_list_lp, ic):
+                  let insts = read_hir_list(r.mir_idx, inst_list_lp)
+                  let ii: i64 = 0
+                  while ii < insts.length():
+                    match r.mir_nodes.get(insts.get(ii)):
+                      MirNode::MirFnRef(ref_sym, ref_ti):
+                        if ref_sym >= 0 and ref_sym < pc.program.resolve.symbols.length():
+                          out = out + i64_to_string(pc.program.resolve.symbols.get(ref_sym).owner_module_id) + ";"
+                    ii = ii + 1
+              bi = bi + 1
+      fi = fi + 1
+    mi = mi + 1
+  return out
+
 fn main(): i32
   print("=== bootstrap/mir: Tier A MIR subsystem ===")
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 55
+  let total: i32 = 58
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -916,6 +950,48 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL generic_lambda_generator_capture_rejected: got " + i64_to_string(gen_cap_direct.mir.diags.length()) + " / " + i64_to_string(gen_cap_wrapped.mir.diags.length()) + " diagnostics")
+
+  // A caller module's local `extend` outranks a prelude default when
+  // specializing a generic prelude helper (host parity).
+  let show_inputs = Vector<graph::SourceInput>::new()
+  show_inputs = show_inputs.push(graph::SourceInput("core_show.dao", "module core::show\nconcept Show:\n  fn show(self): i32\nextend i32 as Show:\n  fn show(self): i32 -> 1\nfn render<T: Show>(x: T): i32 -> x.show()\n", true))
+  show_inputs = show_inputs.push(graph::SourceInput("main.dao", "module app::main\nextend i32 as Show:\n  fn show(self): i32 -> 99\nfn f(): i32 -> render(42)\n", false))
+  let show_pc = mono_of_program(show_inputs)
+  let show_owners = mono_fn_called_owner_mods(show_pc, "render$")
+  if show_pc.mir.diags.length() == 0 and show_owners == "1;":
+    print("PASS caller_local_extend_outranks_prelude_in_monomorphization")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL caller_local_extend_outranks_prelude_in_monomorphization: owners='" + show_owners + "', diags=" + i64_to_string(show_pc.mir.diags.length()))
+
+  // Canonical type-owned Equatable/Hashable in a prelude generic container
+  // resolves to the key's declaring module, ignoring unrelated caller `.hash`.
+  let canon_inputs = Vector<graph::SourceInput>::new()
+  canon_inputs = canon_inputs.push(graph::SourceInput("core_hash.dao", "module core::hash\nderived concept Equatable:\n  fn eq(self, other: Equatable): bool\nderived concept Hashable:\n  fn hash(self): i64\nextend i64 as Equatable:\n  fn eq(self, other: i64): bool -> self == other\nextend i64 as Hashable:\n  fn hash(self): i64 -> self\nfn bucket<K: Hashable + Equatable>(a: K, b: K): i64\n  if a.eq(b):\n    return a.hash()\n  let zero: i64 = 0\n  return zero\n", true))
+  canon_inputs = canon_inputs.push(graph::SourceInput("lib.dao", "module app::lib\nclass CustomKey:\n  id: i64\nextend CustomKey as Equatable:\n  fn eq(self, other: CustomKey): bool -> self.id == other.id\nextend CustomKey as Hashable:\n  fn hash(self): i64 -> self.id\n", false))
+  canon_inputs = canon_inputs.push(graph::SourceInput("main.dao", "module app::main\nimport app::lib\nconcept Sneaky:\n  fn hash(self): i64\nextend lib::CustomKey as Sneaky:\n  fn hash(self): i64\n    let bad: i64 = 777\n    return bad\nfn f(): i64\n  let five: i64 = 5\n  return bucket(lib::CustomKey(five), lib::CustomKey(five))\n", false))
+  let canon_pc = mono_of_program(canon_inputs)
+  let canon_owners = mono_fn_called_owner_mods(canon_pc, "bucket$")
+  if canon_pc.mir.diags.length() == 0 and canon_owners == "1;1;":
+    print("PASS canonical_key_extend_ignores_sneaky_local_hash")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL canonical_key_extend_ignores_sneaky_local_hash: owners='" + canon_owners + "', diags=" + i64_to_string(canon_pc.mir.diags.length()))
+
+  // An imported non-prelude `traits::Hashable` extended onto `keys::Key`
+  // never suppresses derived prelude `Hashable` inside a prelude container.
+  let ftrait_inputs = Vector<graph::SourceInput>::new()
+  ftrait_inputs = ftrait_inputs.push(graph::SourceInput("core_hash.dao", "module core::hash\nderived concept Equatable:\n  fn eq(self, other: Equatable): bool\nderived concept Hashable:\n  fn hash(self): i64\nextend i64 as Equatable:\n  fn eq(self, other: i64): bool -> self == other\nextend i64 as Hashable:\n  fn hash(self): i64 -> self\nfn bucket<K: Hashable + Equatable>(a: K, b: K): i64\n  if a.eq(b):\n    return a.hash()\n  let zero: i64 = 0\n  return zero\n", true))
+  ftrait_inputs = ftrait_inputs.push(graph::SourceInput("keys.dao", "module app::keys\nclass Key:\n  a: i64\n  b: i64\n", false))
+  ftrait_inputs = ftrait_inputs.push(graph::SourceInput("traits.dao", "module app::traits\nconcept Hashable:\n  fn hash(self): i64\n", false))
+  ftrait_inputs = ftrait_inputs.push(graph::SourceInput("main.dao", "module app::main\nimport app::keys\nimport app::traits\nextend keys::Key as traits::Hashable:\n  fn hash(self): i64\n    let bad: i64 = 777\n    return bad\nfn f(): i64\n  let five: i64 = 5\n  return bucket(keys::Key(five, five), keys::Key(five, five))\n", false))
+  let ftrait_pc = mono_of_program(ftrait_inputs)
+  let ftrait_owners = mono_fn_called_owner_mods(ftrait_pc, "bucket$")
+  if ftrait_pc.mir.diags.length() == 0 and ftrait_owners == "1;1;":
+    print("PASS foreign_qualified_hashable_does_not_become_canonical")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL foreign_qualified_hashable_does_not_become_canonical: owners='" + ftrait_owners + "', diags=" + i64_to_string(ftrait_pc.mir.diags.length()))
 
   // -----------------------------------------------------------------
   print("")

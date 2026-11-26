@@ -1,4 +1,4 @@
-// STOPGAP: this host driver is Swift, and docs/non_dao_inventory.md records it.
+// STOPGAP: this host driver is Swift until Dao drives Metal command queues directly.
 // All Metal compute kernels it executes are generated from authored Dao source
 // (`examples/forecast_plans.dao`) by `dao_msl_emit`; zero handwritten Metal
 // shader code or reimplemented reference formulas remain here.

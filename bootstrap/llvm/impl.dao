@@ -558,7 +558,7 @@ fn is_prelude_intrinsic_name(name: string): bool
 // mutable mini-IR output.  Mutating-field style per the post-#248
 // bootstrap convention.
 //
-// Bootstrap Dao's HashMap is HashMap<i64> only, so string-valued
+// Bootstrap Dao's HashMap is HashMap<string, i64> only, so string-valued
 // lookups (MIR node idx → "%N" text, etc.) use parallel Vector
 // side tables with linear scan.  Functions are small; this is
 // fine for Tier A.
@@ -648,10 +648,10 @@ class BsFunction:
   fn_name: string
 
   // MirFnRef node indices in this function that are used as first-class %dao.fn values.
-  value_fn_refs: HashMap<i64>
+  value_fn_refs: HashMap<string, i64>
 
   // MirFnRef node index -> target symbol index in this function.
-  fn_ref_syms: HashMap<i64>
+  fn_ref_syms: HashMap<string, i64>
 
 class BS:
   input: BsInput
@@ -675,18 +675,18 @@ class GenCtx:
   yields: i64
   // Each iterator the function makes, by its MirIterInit node: which pair
   // of frame fields holds it.
-  iters: HashMap<i64>
+  iters: HashMap<string, i64>
 
 // Positions in BS's side tables, by key: a value's and a block label's
 // by MIR node, a slot's by MirLocal node, an extern's and a struct's by
 // name / type index, and emitted callable thunks/adapters by LLVM name.
 class BsIndex:
-  values: HashMap<i64>
-  slots: HashMap<i64>
-  labels: HashMap<i64>
-  externs: HashMap<i64>
-  structs: HashMap<i64>
-  thunks: HashMap<i64>
+  values: HashMap<string, i64>
+  slots: HashMap<string, i64>
+  labels: HashMap<string, i64>
+  externs: HashMap<string, i64>
+  structs: HashMap<string, i64>
+  thunks: HashMap<string, i64>
 
 // What naming reads off the program as a whole, as the host's names
 // do (llvm_names.cpp, llvm_type_lowering.cpp): the module graph (each
@@ -697,11 +697,11 @@ class BsIndex:
 class BsProgram:
   module_graph: graph::ProgramGraph
   entry_module: i64
-  extern_syms: HashMap<i64>
-  shared_type_names: HashMap<i64>
-  diverging_syms: HashMap<i64>
+  extern_syms: HashMap<string, i64>
+  shared_type_names: HashMap<string, i64>
+  diverging_syms: HashMap<string, i64>
 
-fn bs_mir_block_diverges_raw(mir_nodes: Vector<MirNode>, mir_idx: Vector<i64>, block_node_idx: i64, diverging: HashMap<i64>): bool
+fn bs_mir_block_diverges_raw(mir_nodes: Vector<MirNode>, mir_idx: Vector<i64>, block_node_idx: i64, diverging: HashMap<string, i64>): bool
   match mir_nodes.get(block_node_idx):
     MirNode::MirBlock(block_id, inst_list_lp, inst_count):
       let insts_raw: Vector<i64> = read_mir_list(mir_idx, inst_list_lp)
@@ -716,7 +716,7 @@ fn bs_mir_block_diverges_raw(mir_nodes: Vector<MirNode>, mir_idx: Vector<i64>, b
         ii = ii + to_i64(1)
   return false
 
-fn bs_mir_void_fn_diverges(input: MirBackendInput, ret_type: i64, block_list_lp: i64, diverging: HashMap<i64>): bool
+fn bs_mir_void_fn_diverges(input: MirBackendInput, ret_type: i64, block_list_lp: i64, diverging: HashMap<string, i64>): bool
   if ret_type < 0 or ret_type >= input.types.length():
     return false
   let is_void: bool = false
@@ -728,7 +728,7 @@ fn bs_mir_void_fn_diverges(input: MirBackendInput, ret_type: i64, block_list_lp:
   let fblocks: Vector<i64> = read_mir_list(input.mir.mir_idx, block_list_lp)
   if fblocks.length() == to_i64(0):
     return false
-  let block_pos: HashMap<i64> = HashMap<i64>::new()
+  let block_pos: HashMap<string, i64> = HashMap<string, i64>::new()
   let bi: i64 = to_i64(0)
   while bi < fblocks.length():
     block_pos = block_pos.set(i64_to_string(fblocks.get(bi)), bi)
@@ -753,7 +753,7 @@ fn bs_mir_void_fn_diverges(input: MirBackendInput, ret_type: i64, block_list_lp:
                   return false
             ii = ii + to_i64(1)
     bj = bj + to_i64(1)
-  let dummy_prog: BsProgram = BsProgram(input.source.module_graph, to_i64(-1), HashMap<i64>::new(), HashMap<i64>::new(), diverging)
+  let dummy_prog: BsProgram = BsProgram(input.source.module_graph, to_i64(-1), HashMap<string, i64>::new(), HashMap<string, i64>::new(), diverging)
   let dummy_bs: BS = BS(BsInput(input.mir.mir_nodes, input.mir.mir_idx, input.symbols, input.types, input.type_info, BsSource(input.source.toks, input.source.src, dummy_prog)), BsOutput(Vector<LlGlobal>::new(), to_i64(0), Vector<LlFunction>::new(), Vector<LlFunction>::new(), Vector<Diagnostic>::new(), to_i64(0)), BsDecls(Vector<string>::new(), Vector<CallArgs>::new(), Vector<LlStructDef>::new()), bs_tables_empty(), bs_function_empty(), bs_index_empty())
   let rblocks: Vector<i64> = mir_reachable_blocks(dummy_bs, fblocks)
   if rblocks.length() == to_i64(0):
@@ -776,8 +776,8 @@ fn bs_mir_void_fn_diverges(input: MirBackendInput, ret_type: i64, block_list_lp:
 
 fn bs_program_of(input: MirBackendInput): BsProgram
   let modules: Vector<graph::ModuleEntry> = input.source.module_graph.modules
-  let externs: HashMap<i64> = HashMap<i64>::new()
-  let diverging: HashMap<i64> = HashMap<i64>::new()
+  let externs: HashMap<string, i64> = HashMap<string, i64>::new()
+  let diverging: HashMap<string, i64> = HashMap<string, i64>::new()
   let ni: i64 = to_i64(0)
   while ni < input.mir.mir_nodes.length():
     match input.mir.mir_nodes.get(ni):
@@ -824,8 +824,8 @@ fn bs_program_of(input: MirBackendInput): BsProgram
                 entry = to_i64(-2)
     si = si + to_i64(1)
   // A named type's declaring module, by its name; -2 once two differ.
-  let declared_by: HashMap<i64> = HashMap<i64>::new()
-  let shared: HashMap<i64> = HashMap<i64>::new()
+  let declared_by: HashMap<string, i64> = HashMap<string, i64>::new()
+  let shared: HashMap<string, i64> = HashMap<string, i64>::new()
   let ti: i64 = to_i64(0)
   while ti < input.types.length():
     let t: base::DaoType = input.types.get(ti)
@@ -846,16 +846,16 @@ fn bs_program_of(input: MirBackendInput): BsProgram
   return BsProgram(input.source.module_graph, entry, externs, shared, diverging)
 
 fn bs_index_empty(): BsIndex
-  return BsIndex(HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new())
+  return BsIndex(HashMap<string, i64>::new(), HashMap<string, i64>::new(), HashMap<string, i64>::new(), HashMap<string, i64>::new(), HashMap<string, i64>::new(), HashMap<string, i64>::new())
 
 fn gen_ctx_none(): GenCtx
-  return GenCtx("", "", to_i64(0), HashMap<i64>::new())
+  return GenCtx("", "", to_i64(0), HashMap<string, i64>::new())
 
 fn bs_tables_empty(): BsTables
   return BsTables(BsValues(Vector<i64>::new(), Vector<string>::new(), Vector<string>::new()), BsSlots(Vector<i64>::new(), Vector<string>::new(), Vector<string>::new()), BsLabels(Vector<i64>::new(), Vector<string>::new()))
 
 fn bs_function_empty(): BsFunction
-  return BsFunction(to_i64(0), Vector<LlInst>::new(), gen_ctx_none(), "", HashMap<i64>::new(), HashMap<i64>::new())
+  return BsFunction(to_i64(0), Vector<LlInst>::new(), gen_ctx_none(), "", HashMap<string, i64>::new(), HashMap<string, i64>::new())
 
 fn bs_new(input: MirBackendInput): BS
   let source: BsSource = BsSource(input.source.toks, input.source.src, bs_program_of(input))
@@ -867,7 +867,7 @@ fn bs_new(input: MirBackendInput): BS
 fn bs_reset_fn_state(bs: BS): BS
   bs.tables = bs_tables_empty()
   bs.func = bs_function_empty()
-  bs.index = BsIndex(HashMap<i64>::new(), HashMap<i64>::new(), HashMap<i64>::new(), bs.index.externs, bs.index.structs, bs.index.thunks)
+  bs.index = BsIndex(HashMap<string, i64>::new(), HashMap<string, i64>::new(), HashMap<string, i64>::new(), bs.index.externs, bs.index.structs, bs.index.thunks)
   return bs
 
 // Fail-closed type check: if ty is LlUnsupported, emit a diagnostic
@@ -2641,7 +2641,7 @@ fn bs_lower_generator(bs: BS, name: string, gen_ti: i64, params: Vector<LlParam>
   // Resume: every local a field of the frame; dispatch on the state.
   bs = bs_reset_fn_state(bs)
   bs.func.fn_name = resume_name
-  bs.func.gen = GenCtx("%frame", frame_ty, to_i64(0), HashMap<i64>::new())
+  bs.func.gen = GenCtx("%frame", frame_ty, to_i64(0), HashMap<string, i64>::new())
   let entry: Vector<LlInst> = Vector<LlInst>::new()
   let ie: i64 = to_i64(0)
   while ie < iter_inits.length():
@@ -2725,8 +2725,8 @@ class BlocksR:
   blocks: Vector<LlBlock>
 
 fn bs_scan_fn_refs(bs: BS, blocks_raw: Vector<i64>): BS
-  let fn_refs: HashMap<i64> = HashMap<i64>::new()
-  let value_refs: HashMap<i64> = HashMap<i64>::new()
+  let fn_refs: HashMap<string, i64> = HashMap<string, i64>::new()
+  let value_refs: HashMap<string, i64> = HashMap<string, i64>::new()
   let bi: i64 = to_i64(0)
   while bi < blocks_raw.length():
     match bs.input.mir_nodes.get(blocks_raw.get(bi)):
@@ -2959,9 +2959,9 @@ fn bs_lower_lambda(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_node: i6
 
       let saved_tables: BsTables = bs.tables
       let saved_func: BsFunction = bs.func
-      let saved_values: HashMap<i64> = bs.index.values
-      let saved_slots: HashMap<i64> = bs.index.slots
-      let saved_labels: HashMap<i64> = bs.index.labels
+      let saved_values: HashMap<string, i64> = bs.index.values
+      let saved_slots: HashMap<string, i64> = bs.index.slots
+      let saved_labels: HashMap<string, i64> = bs.index.labels
 
       bs = bs_reset_fn_state(bs)
       bs.func.fn_name = lam_name

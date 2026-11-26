@@ -404,7 +404,7 @@ fn expr_eq(a_nodes: Vector<ValueExpr>, a_id: i64, b_nodes: Vector<ValueExpr>, b_
         ValueExpr::UnaryOp(op, model, input):
           return false
 
-fn lookup_live_device(device_env: HashMap<i64>, released: HashMap<i64>, name: string): Result<i64, string>
+fn lookup_live_device(device_env: HashMap<string, i64>, released: HashMap<string, i64>, name: string): Result<i64, string>
   if released.contains(name):
     return Result::Err(error = "device buffer '" + name + "' used after release")
   match device_env.get(name):
@@ -413,7 +413,7 @@ fn lookup_live_device(device_env: HashMap<i64>, released: HashMap<i64>, name: st
     Option::None:
       return Result::Err(error = "undefined device buffer '" + name + "'")
 
-fn lookup_host(host_env: HashMap<i64>, name: string): Result<i64, string>
+fn lookup_host(host_env: HashMap<string, i64>, name: string): Result<i64, string>
   match host_env.get(name):
     Option::Some(id):
       return Result::Ok(value = id)
@@ -425,9 +425,9 @@ fn analyze_plan(p: Plan): PlanSemantics
   let reads: Vector<ReadEffect> = Vector<ReadEffect>::new()
   let observations: Vector<Observation> = Vector<Observation>::new()
   let errors: Vector<string> = Vector<string>::new()
-  let host_env: HashMap<i64> = HashMap<i64>::new()
-  let device_env: HashMap<i64> = HashMap<i64>::new()
-  let released: HashMap<i64> = HashMap<i64>::new()
+  let host_env: HashMap<string, i64> = HashMap<string, i64>::new()
+  let device_env: HashMap<string, i64> = HashMap<string, i64>::new()
+  let released: HashMap<string, i64> = HashMap<string, i64>::new()
   let reply_id: i64 = to_i64(-1)
 
   for step in p.steps.iter():

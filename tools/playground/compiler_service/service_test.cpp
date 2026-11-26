@@ -186,20 +186,21 @@ auto load_examples() -> std::vector<Example> {
   std::vector<Example> examples;
   auto list = call("examples", json::object());
   for (const auto& entry : list.body["examples"]) {
+    if (entry["isMultifile"].get<bool>()) {
+      continue;
+    }
     auto name = entry["name"].get<std::string>();
     auto source = call("example", {{"name", name}});
+    expect(source.body["files"].size() == 1_u) << name << " files: " << source.body.dump();
+    expect(source.body["document"].get<std::string>() == name) << source.body.dump();
     examples.push_back({.name = name, .source = source.body["source"].get<std::string>()});
   }
   return examples;
 }
 
-/// One multi-file example: every `.dao` file of a directory under
-/// `examples/` whose files declare a single `fn main` between them,
-/// which makes them ONE program rather than several.  A directory of
-/// independent programs — `bootstrap_probe/`, where every file has its
-/// own `fn main` — is not one, and is skipped.  The example routes list
-/// single files only, so these are read from disk; the service sees
-/// them as the program-shaped request any editor would send.
+/// One multi-file example served through `examples` (`isMultifile: true`)
+/// and `example`: every `.dao` file of a directory under `examples/`
+/// whose files declare a single `fn main` between them.
 struct MultifileExample {
   std::string name; // the directory's name
   json files = json::array();
@@ -208,37 +209,19 @@ struct MultifileExample {
 
 auto load_multifile_examples() -> std::vector<MultifileExample> {
   std::vector<MultifileExample> examples;
-  auto dir = repo_root() / "examples";
-  if (!std::filesystem::exists(dir)) {
-    return examples;
-  }
-  for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-    if (!entry.is_directory()) {
+  auto list = call("examples", json::object());
+  for (const auto& entry : list.body["examples"]) {
+    if (!entry["isMultifile"].get<bool>()) {
       continue;
     }
-    MultifileExample example{.name = entry.path().filename().string()};
-    std::vector<std::filesystem::path> paths;
-    for (const auto& file : std::filesystem::directory_iterator(entry.path())) {
-      if (file.path().extension() == ".dao") {
-        paths.push_back(file.path());
-      }
-    }
-    std::ranges::sort(paths);
-    size_t entries = 0;
-    for (const auto& path : paths) {
-      auto source = dao::read_file(path);
-      auto name = example.name + "/" + path.filename().string();
-      if (source.find("fn main(") != std::string::npos) {
-        example.document = name;
-        ++entries;
-      }
-      example.files.push_back({{"path", name}, {"source", source}});
-    }
-    if (entries == 1) {
-      examples.push_back(std::move(example));
-    }
+    auto name = entry["name"].get<std::string>();
+    auto loaded = call("example", {{"name", name}});
+    expect(!loaded.body["files"].empty()) << name << " returned no files";
+    examples.push_back({.name = name,
+                        .files = loaded.body["files"],
+                        .document = loaded.body["document"].get<std::string>()});
   }
-  std::ranges::sort(examples, {}, &MultifileExample::name);
+  expect(!examples.empty()) << "expected at least one multi-file example (modules/)";
   return examples;
 }
 
@@ -305,6 +288,9 @@ auto minimal_request(std::string_view shape_name) -> json {
   }
   if (shape_name == "ExampleName") {
     return {{"name", "hello.dao"}};
+  }
+  if (shape_name == "PreludeRequest") {
+    return {{"path", "stdlib/core/option.dao"}};
   }
   json request = json::object();
   for (const auto& field : find_service_shape(shape_name)->fields) {
@@ -600,7 +586,8 @@ suite<"playground_service"> playground_service_suite = [] {
                                      {{"path", kTestDocument}, {"source", with_header}}})},
                        {"document", kTestDocument}};
     for (const auto& route : kRoutes) {
-      if (route.request == "void" || route.request == "ExampleName") {
+      if (route.request == "void" || route.request == "ExampleName" ||
+          route.request == "PreludeRequest") {
         continue;
       }
       json request = duplicated;
@@ -1072,6 +1059,47 @@ suite<"playground_service"> playground_service_suite = [] {
             << example.name << " output differs from " << golden_path.filename().string();
       }
     }
+  };
+
+  "version_reports_compiler_and_prelude_inventory"_test = [] {
+    auto reply = call("version", json::object());
+    expect(!reply.body["commit"].get<std::string>().empty());
+    expect(!reply.body["llvmVersion"].get<std::string>().empty());
+    expect(!reply.body["targetTriple"].get<std::string>().empty());
+    const auto& prelude = reply.body["preludeFiles"];
+    expect(!prelude.empty()) << "preludeFiles must list stdlib prelude modules";
+    bool has_option = false;
+    bool has_vector = false;
+    for (const auto& entry : prelude) {
+      auto path = entry.get<std::string>();
+      expect(path.starts_with("stdlib/core/") || path.starts_with("stdlib/io/"))
+          << "unexpected prelude path: " << path;
+      has_option = has_option || path == "stdlib/core/option.dao";
+      has_vector = has_vector || path == "stdlib/core/vector.dao";
+    }
+    expect(has_option && has_vector) << prelude.dump();
+  };
+
+  "prelude_serves_classified_readonly_stdlib_files"_test = [] {
+    auto hello = call("example", {{"name", "hello.dao"}}).body["source"].get<std::string>();
+    auto print_use = static_cast<uint32_t>(hello.find("print("));
+    auto def = call("gotoDef", document_request(hello, {{"offset", print_use}}));
+    expect(!def.body.is_null());
+    auto target_path = def.body["file"].get<std::string>();
+
+    auto prelude = call("prelude", {{"path", target_path}});
+    expect(prelude.body["file"].get<std::string>() == target_path);
+    expect(!prelude.body["module"].get<std::string>().empty());
+    expect(!prelude.body["source"].get<std::string>().empty());
+    expect(!prelude.body["semanticTokens"].empty());
+    expect(!prelude.body["symbols"].empty());
+
+    expect(dispatch("prelude", {{"path", "../CMakeLists.txt"}}, service_context()).status ==
+           http_status::bad_request);
+    expect(dispatch("prelude", {{"path", "examples/hello.dao"}}, service_context()).status ==
+           http_status::bad_request);
+    expect(dispatch("prelude", {{"path", "stdlib/core/does_not_exist.dao"}}, service_context())
+               .status == http_status::not_found);
   };
 
   "examples_run_to_their_goldens"_test = [] {

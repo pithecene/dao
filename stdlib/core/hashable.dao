@@ -1,0 +1,76 @@
+module core::hashable
+// hashable.dao — Coherent value hashing paired with Equatable.
+//
+// Every Hashable type also conforms to Equatable, and equal values
+// produce identical 64-bit hashes (`a.eq(b)` implies `a.hash() == b.hash()`).
+// Scalar integers and booleans mix through a deterministic 64-bit
+// finalizer; strings use FNV-1a; classes whose fields conform to both
+// Equatable and Hashable derive coherent field-wise hashing unless
+// Equatable is overridden explicitly.
+
+extern fn __dao_str_hash(s: string): i64
+
+fn hash_i64(key: i64): i64
+  let two32: i64 = 4294967296
+  let two16: i64 = 65536
+  let mul_k: i64 = 2685821657736338717
+  let folded = wrapping_add_i64(key, key / two32)
+  let mixed = wrapping_mul_i64(folded, mul_k)
+  let hi_folded = wrapping_add_i64(mixed, mixed / two32)
+  return wrapping_add_i64(hi_folded, hi_folded / two16)
+
+fn hash_u64(key: u64): i64
+  let max_i64_u: u64 = 9223372036854775807
+  if key <= max_i64_u:
+    return hash_i64(u64_to_i64(key))
+  let one_u: u64 = 1
+  let max_i64_s: i64 = 9223372036854775807
+  let min_i64_s = wrapping_sub_i64(to_i64(0) - max_i64_s, to_i64(1))
+  let low_bits = u64_to_i64(key - max_i64_u - one_u)
+  return hash_i64(wrapping_add_i64(min_i64_s, low_bits))
+
+fn combine_hash(seed: i64, value_hash: i64): i64
+  let mul_p: i64 = 6364136223846793005
+  let add_p: i64 = 1442695040888963407
+  let combined = wrapping_add_i64(
+    wrapping_mul_i64(seed, mul_p),
+    wrapping_add_i64(value_hash, add_p))
+  return hash_i64(combined)
+
+fn hash_string(s: string): i64 -> __dao_str_hash(s)
+
+derived concept Hashable:
+  fn hash(self): i64
+
+extend i8 as Hashable:
+  fn hash(self): i64 -> hash_i64(i8_to_i64(self))
+
+extend i16 as Hashable:
+  fn hash(self): i64 -> hash_i64(i16_to_i64(self))
+
+extend i32 as Hashable:
+  fn hash(self): i64 -> hash_i64(to_i64(self))
+
+extend i64 as Hashable:
+  fn hash(self): i64 -> hash_i64(self)
+
+extend u8 as Hashable:
+  fn hash(self): i64 -> hash_u64(u8_to_u64(self))
+
+extend u16 as Hashable:
+  fn hash(self): i64 -> hash_u64(u16_to_u64(self))
+
+extend u32 as Hashable:
+  fn hash(self): i64 -> hash_i64(u32_to_i64(self))
+
+extend u64 as Hashable:
+  fn hash(self): i64 -> hash_u64(self)
+
+extend bool as Hashable:
+  fn hash(self): i64
+    if self:
+      return hash_i64(to_i64(1))
+    return hash_i64(to_i64(0))
+
+extend string as Hashable:
+  fn hash(self): i64 -> __dao_str_hash(self)

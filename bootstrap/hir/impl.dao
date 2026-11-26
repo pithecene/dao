@@ -115,7 +115,7 @@ class HS:
   unit: HirModule                // the module being lowered
   symbols: Vector<resolver::Symbol>
   typecheck: base::TypeCheckData       // the program's type tables, expression types, and method dispatch
-  uses_map: HashMap<i64>         // program-level uses_key(file_id, tok_idx) → sym_idx
+  uses_map: HashMap<string, i64>       // program-level uses_key(file_id, tok_idx) → sym_idx
   arena: HirArena
   diags: Vector<Diagnostic>
 
@@ -625,6 +625,15 @@ fn hir_is_type_param(hs: HS, node_idx: i64): bool
       return true
   return false
 
+fn hir_is_struct_expr(hs: HS, node_idx: i64): bool
+  let ti: i64 = hir_get_expr_type(hs, node_idx)
+  if ti < 0 or ti >= hs.typecheck.types.length():
+    return false
+  match hs.typecheck.types.get(ti).kind:
+    base::TypeKind::TStruct:
+      return true
+  return false
+
 // `x.to_string()` with `T: Printable`: a call whose callee is the
 // member access on the parameter, typed by the concept's signature
 // (host).  The arguments follow the receiver's access, not the receiver
@@ -687,7 +696,8 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
       // (lower_bound_call).  One provided through a derived conformance
       // has no implementation to dispatch to at all, and is rejected.
       if hir_member_concept(hs, callee) >= 0:
-        if hir_is_type_param(hs, mobj):
+        let cm_name: string = hs_tok_name(hs, mfield_tidx)
+        if hir_is_type_param(hs, mobj) or (hir_is_struct_expr(hs, mobj) and (cm_name == "eq" or cm_name == "hash")):
           return lower_bound_call(hs, callee, mobj, mfield_tidx, args_lp, callee_ti, ti)
         return hir_reject_concept_member(hs, callee, mfield_tidx, "called")
       let obj_ti: i64 = hir_get_expr_type(hs, mobj)
@@ -1560,7 +1570,7 @@ fn program_lower_hir(p: resolver::Program): ProgramHir
     ti = ti + 1
 
   // Emit HirProgram root. Build a temporary HS to use hir_flush_list.
-  let tmp_hs: HS = HS(HirModule(Vector<parser::Node>::new(), Vector<i64>::new(), Vector<lexer::Token>::new(), "", to_i64(-1), to_i64(-1)), Vector<resolver::Symbol>::new(), base::TypeCheckData(false, Vector<base::DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), base::program_lookup_empty()), HashMap<i64>::new(), HirArena(hir_nodes, hir_idx), Vector<Diagnostic>::new())
+  let tmp_hs: HS = HS(HirModule(Vector<parser::Node>::new(), Vector<i64>::new(), Vector<lexer::Token>::new(), "", to_i64(-1), to_i64(-1)), Vector<resolver::Symbol>::new(), base::TypeCheckData(false, Vector<base::DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), base::program_lookup_empty()), HashMap<string, i64>::new(), HirArena(hir_nodes, hir_idx), Vector<Diagnostic>::new())
   let mod_fl: HirFlush = hir_flush_list(tmp_hs, module_indices)
   hir_nodes = mod_fl.hs.arena.nodes
   hir_idx = mod_fl.hs.arena.idx
