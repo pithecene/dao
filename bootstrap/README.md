@@ -243,8 +243,10 @@ fn/extern fn/class/enum/type alias declarations, `resource` blocks
 **How to run tests**:
 
 ```sh
-bash bootstrap/assemble.sh && daoc build --source bootstrap/hir/hir.gen.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/hir/hir.gen
+task bootstrap-test   # every suite, this one among them
 ```
+
+The `bootstrap-test` task in `Taskfile.yml` holds the source list of `bootstrap/hir/hir.gen.dao`.
 
 ### `mir/`
 
@@ -282,8 +284,10 @@ break/continue.  MIR rejects a `resource` block with the unsupported-statement d
 **How to run tests**:
 
 ```sh
-bash bootstrap/assemble.sh && daoc build --source bootstrap/mir/mir.gen.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/mir/mir.gen
+task bootstrap-test   # every suite, this one among them
 ```
+
+The `bootstrap-test` task in `Taskfile.yml` holds the source list of `bootstrap/mir/mir.gen.dao`.
 
 ### `llvm/`
 
@@ -336,13 +340,7 @@ expressions, break/continue, LLVM C API integration,
 task bootstrap-test   # every suite, then validate_ir over bootstrap/llvm/out
 ```
 
-Or by hand (the suite writes its artifacts under `bootstrap/llvm/out`, which Git ignores, so create it first):
-
-```sh
-rm -rf bootstrap/llvm/out && mkdir -p bootstrap/llvm/out
-bash bootstrap/assemble.sh && daoc build --source bootstrap/llvm/llvm.gen.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/llvm/llvm.gen
-bash bootstrap/validate_ir.sh build/debug
-```
+The `bootstrap-test` task in `Taskfile.yml` holds the suite's source list.  The suite writes its artifacts under `bootstrap/llvm/out`, which Git ignores, and the task creates that directory first.
 
 The suite writes the IR of every fixture it lowers to
 `bootstrap/llvm/out/<test>.ll` by default, or to `<ir-dir>/<test>.ll`
