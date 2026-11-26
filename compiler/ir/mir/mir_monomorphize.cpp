@@ -354,6 +354,7 @@ auto clone_function(const MirFunction* src, const TypeSubst& subst,
                     TypeContext& types) -> MirFunction* {
   auto* dst = ctx.alloc<MirFunction>();
   dst->symbol = new_symbol;
+  dst->extend_concept = src->extend_concept;
   dst->return_type = substitute_type(src->return_type, subst, types);
   dst->span = src->span;
   dst->is_extern = src->is_extern;
@@ -466,33 +467,46 @@ auto is_inherent_method_symbol(const Symbol* sym) -> bool {
   return sym->module->exports != nullptr && sym->module->exports->lookup_local(sym->name) == sym;
 }
 
-auto is_canonical_key_extend_fn(const Symbol* sym) -> bool {
-  if (sym == nullptr || sym->decl == nullptr || sym->module == nullptr || sym->module->is_prelude ||
-      sym->module->file == nullptr || sym->module->file->parse.file == nullptr) {
+auto receiver_decl_in_module(const Type* self_type, const ModuleInfo* mod) -> bool {
+  if (self_type == nullptr || mod == nullptr || mod->exports == nullptr) {
     return false;
   }
-  const auto* method_decl = sym->decl_as_decl();
-  for (const auto* decl : sym->module->file->parse.file->declarations) {
-    if (decl->kind() != NodeKind::ExtendDecl) {
-      continue;
-    }
-    const auto& ext = decl->as<ExtendDecl>();
-    if (ext.target.concept_name != "Equatable" && ext.target.concept_name != "Hashable") {
-      continue;
-    }
-    if (sym->module->exports != nullptr) {
-      const auto* local_cpt = sym->module->exports->lookup_local(ext.target.concept_name);
-      if (local_cpt != nullptr && local_cpt->kind == SymbolKind::Concept) {
-        continue;
-      }
-    }
-    for (const auto* method : ext.methods) {
-      if (method == method_decl) {
-        return true;
-      }
-    }
+  const Decl* decl = nullptr;
+  std::string_view name;
+  if (self_type->kind() == TypeKind::Struct) {
+    const auto* st = static_cast<const TypeStruct*>(self_type);
+    decl = st->decl_id();
+    name = st->name();
+  } else if (self_type->kind() == TypeKind::Enum) {
+    const auto* en = static_cast<const TypeEnum*>(self_type);
+    decl = en->decl_id();
+    name = en->name();
   }
-  return false;
+  if (decl == nullptr) {
+    return false;
+  }
+  const auto* exported = mod->exports->lookup_local(name);
+  return exported != nullptr && exported->kind == SymbolKind::Type &&
+         exported->decl_as_decl() == decl;
+}
+
+auto is_canonical_key_extend_fn(const MirFunction* fn) -> bool {
+  if (fn == nullptr || fn->symbol == nullptr || fn->symbol->module == nullptr ||
+      fn->symbol->module->is_prelude) {
+    return false;
+  }
+  const auto* concept_sym = fn->extend_concept;
+  if (concept_sym == nullptr || concept_sym->kind != SymbolKind::Concept ||
+      concept_sym->module == nullptr || !concept_sym->module->is_prelude) {
+    return false;
+  }
+  if (concept_sym->name != "Equatable" && concept_sym->name != "Hashable") {
+    return false;
+  }
+  if (fn->locals.empty() || !fn->locals[0].is_param) {
+    return false;
+  }
+  return receiver_decl_in_module(fn->locals[0].type, fn->symbol->module);
 }
 
 auto has_struct_field(const TypeStruct* st, std::string_view name) -> bool {
@@ -1814,7 +1828,7 @@ auto monomorphize(
     if (mod_fn->symbol == nullptr) {
       continue;
     }
-    const bool canon_key = is_canonical_key_extend_fn(mod_fn->symbol);
+    const bool canon_key = is_canonical_key_extend_fn(mod_fn);
     register_method_entry(state.methods, {mod_fn->symbol, mod_fn, false, canon_key});
     if (mod_fn->symbol->name == "combine_hash" &&
         (mod_fn->symbol->module == nullptr || mod_fn->symbol->module->is_prelude)) {
@@ -1838,7 +1852,7 @@ auto monomorphize(
     if (sym == nullptr) {
       continue;
     }
-    const bool canon_key = is_canonical_key_extend_fn(sym);
+    const bool canon_key = is_canonical_key_extend_fn(tmpl_fn);
     register_method_entry(state.methods, {sym, tmpl_fn, true, canon_key});
     if (sym->module != nullptr && !sym->module->is_prelude && !is_inherent_method_symbol(sym) &&
         !canon_key) {

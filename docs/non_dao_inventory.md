@@ -14,13 +14,13 @@ so a machine with no Dao on it can always rebuild the language:
 | Fully hosted | not yet written | all Dao, with its own runtime and code generation |
 
 Line counts reflect the current branch over `f62f4ca`, on 2026-11-25.  The table counts
-33,418 lines of authored Dao for comparison.
+33,533 lines of authored Dao for comparison.
 
 ## Programs
 
 | Stopgap | Language | Files | Lines | Replacement |
 |---|---|---|---|---|
-| `compiler/` bootstrap tier and its tests | C++ | 117 | 45,950 | nothing: this tier stays permanently |
+| `compiler/` bootstrap tier and its tests | C++ | 117 | 46,048 | nothing: this tier stays permanently |
 | `runtime/` allocator, strings, I/O and generators | C | 11 | 1,632 | Dao over `Ptr<T>` and `mode unsafe` in the fully hosted tier, which needs direct system calls from Dao |
 | `tools/playground/compiler_service/` | C++ | 22 | 3,470 | a Dao service, which needs sockets and HTTP in the standard library |
 | `tools/playground/frontend/` | TypeScript, CSS, HTML | 21 | 1,737 | a Dao browser target, which does not exist |

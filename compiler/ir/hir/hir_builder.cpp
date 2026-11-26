@@ -84,12 +84,13 @@ auto HirBuilder::lower_decl(const Decl* decl) -> HirDecl* {
   case NodeKind::ClassDecl:
     return lower_class(decl);
   case NodeKind::ExtendDecl: {
-    // Lower each extend method as a standalone function.
-    // These are emitted as real functions so method dispatch can
-    // reference them via MirFnRef.
+    // Lower each extend method as a standalone function, carrying the
+    // resolved concept symbol so MIR dispatch identifies canonical key
+    // conformances by declaration rather than source spelling.
     const auto& ext = decl->as<ExtendDecl>();
+    const Symbol* extend_concept = resolve_.concept_for(ext.target);
     for (const auto* method : ext.methods) {
-      auto* hir_fn = lower_function(method);
+      auto* hir_fn = lower_function(method, extend_concept);
       if (hir_fn != nullptr) {
         extend_decls_.push_back(hir_fn);
       }
@@ -101,7 +102,7 @@ auto HirBuilder::lower_decl(const Decl* decl) -> HirDecl* {
   }
 }
 
-auto HirBuilder::lower_function(const Decl* decl) -> HirDecl* {
+auto HirBuilder::lower_function(const Decl* decl, const Symbol* extend_concept) -> HirDecl* {
   const auto& fn = decl->as<FunctionDecl>();
   const auto* sym = find_symbol_at_decl(fn.name_span.offset);
 
@@ -149,11 +150,14 @@ auto HirBuilder::lower_function(const Decl* decl) -> HirDecl* {
     hir_body = lower_body(fn.body);
   }
 
-  return ctx_.alloc<HirDecl>(
-      decl->span,
-      HirFunction{sym, std::move(hir_params), ret_type,
-                  std::move(hir_body), fn.is_extern,
-                  /*has_type_params=*/!fn.type_params.empty()});
+  return ctx_.alloc<HirDecl>(decl->span,
+                             HirFunction{.symbol = sym,
+                                         .params = std::move(hir_params),
+                                         .return_type = ret_type,
+                                         .body = std::move(hir_body),
+                                         .is_extern = fn.is_extern,
+                                         .has_type_params = !fn.type_params.empty(),
+                                         .extend_concept = extend_concept});
 }
 
 auto HirBuilder::lower_class(const Decl* decl) -> HirDecl* {

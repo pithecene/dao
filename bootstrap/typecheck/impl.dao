@@ -2143,12 +2143,20 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
     let decl_idx: i64 = decls.get(i)
     let node: parser::Node = r.tc.nodes.get(decl_idx)
     match node:
-      parser::Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
+      parser::Node::ExtendDeclD(target_type_node, concept_node, methods_lp):
         // Look up the concept type via the resolver-bound identity in
         // TC.concept_bindings, NOT by scanning symbols by name.
         // The resolver already bound the concept name to its sym_idx
         // during resolution.
-        let concept_name: string = ts_tok_name(r, concept_name_tidx)
+        let concept_name_tidx: i64 = parser::extend_concept_tok(r.tc.nodes, r.tc.idx_data, concept_node)
+        let is_qual_concept: bool = false
+        if concept_node >= 0 and concept_node < r.tc.nodes.length():
+          match r.tc.nodes.get(concept_node):
+            parser::Node::QualNameE(q_lp, q_cnt):
+              is_qual_concept = true
+        let concept_name: string = ""
+        if concept_name_tidx >= 0:
+          concept_name = ts_tok_name(r, concept_name_tidx)
         let concept_ti: i64 = to_i64(-1)
         let cb_key: string = resolver::extend_binding_key(r.tc.file_id, decl_idx)
         let cb_found: Option<i64> = r.tc.concept_bindings.get(cb_key)
@@ -2170,7 +2178,8 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
           // type that is no concept.  Diagnosed here, once; the
           // conformance pass records nothing for it.
           if concept_sym_idx < 0:
-            r = ts_add_diag(r, ts_tok_span(r, concept_name_tidx), "unknown concept '" + concept_name + "' in extend")
+            if is_qual_concept == false and concept_name_tidx >= 0:
+              r = ts_add_diag(r, ts_tok_span(r, concept_name_tidx), "unknown concept '" + concept_name + "' in extend")
           else:
             r = ts_add_diag(r, ts_tok_span(r, concept_name_tidx), "'" + concept_name + "' is not a concept")
         else:
@@ -5642,7 +5651,7 @@ fn tc_check_owner_methods(ts: TS, owner_decl_idx: i64, methods_lp: i64): TS
     mi = mi + 1
   return r
 
-fn tc_check_extend_coherence(ts: TS, decl_idx: i64, target_type_node: i64, concept_name_tidx: i64): TS
+fn tc_check_extend_coherence(ts: TS, decl_idx: i64, target_type_node: i64, concept_node: i64): TS
   let r: TS = ts
   let ecti = extend_concept_ti(r, decl_idx)
   if reg_is_prelude_concept(r.reg, r.types, ecti, "Hashable") == false:
@@ -5656,6 +5665,7 @@ fn tc_check_extend_coherence(ts: TS, decl_idx: i64, target_type_node: i64, conce
     if module_in_prelude(r) == false and target_owned_by_module(r, tr.type_idx, r.tc.module_id) == false:
       return r
     if reg_conforms(r.reg, tr.type_idx, eq_dcti, r.tc.module_id) == false:
+      let concept_name_tidx: i64 = parser::extend_concept_tok(r.tc.nodes, r.tc.idx_data, concept_node)
       r = ts_add_diag(r, ts_tok_span(r, concept_name_tidx), "type '" + type_name(r, tr.type_idx) + "' cannot conform to 'Hashable' without conforming to 'Equatable'")
   return r
 

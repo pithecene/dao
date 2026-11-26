@@ -178,6 +178,7 @@ struct MirBlock {
 
 struct MirFunction {
   const Symbol* symbol = nullptr;
+  const Symbol* extend_concept = nullptr; // set for methods lowered from `extend T as C`
   const Type* return_type = nullptr;
   std::vector<MirLocal> locals; // params first, then let-bindings
   std::vector<MirBlock*> blocks; // blocks[0] is entry

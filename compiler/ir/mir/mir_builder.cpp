@@ -182,6 +182,7 @@ auto MirBuilder::lower_function(const HirFunction& fn, Span span)
     -> MirFunction* {
   auto* mir_fn = ctx_.alloc<MirFunction>();
   mir_fn->symbol = fn.symbol;
+  mir_fn->extend_concept = fn.extend_concept;
   mir_fn->return_type = fn.return_type;
   mir_fn->span = span;
   mir_fn->is_extern = fn.is_extern;

@@ -1101,6 +1101,71 @@ suite<"driver_cli"> driver_cli_suite = [] {
     expect(built_printable.exit_code == 0) << built_printable.err;
     expect(run_and_capture(scratch.output_for(caller_printable),
                            scratch.dir / "printable_out.txt") == "custom:7\n");
+
+    // Unrelated imported concepts named `Equatable` or `Hashable` (whether
+    // extended in a consumer module or in the key's own declaring module)
+    // never masquerade as canonical prelude key conformances in `HashMap`.
+    auto unrelated_traits = scratch.file("foreign_traits/app/traits.dao",
+                                         "module app::traits\n"
+                                         "concept Equatable:\n"
+                                         "  fn eq(self, other: Equatable): bool\n"
+                                         "concept Hashable:\n"
+                                         "  fn hash(self): i64\n"
+                                         "fn custom_hash<T: Hashable>(x: T): i64 -> x.hash()\n");
+    (void)unrelated_traits;
+    auto unrelated_keys =
+        scratch.file("foreign_traits/app/keys.dao",
+                     "module app::keys\n"
+                     "import app::traits\n"
+                     "class Key:\n"
+                     "  a: i64\n"
+                     "  b: i64\n"
+                     "class SelfKey:\n"
+                     "  a: i64\n"
+                     "  b: i64\n"
+                     "extend SelfKey as traits::Equatable:\n"
+                     "  fn eq(self, other: SelfKey): bool -> true\n"
+                     "extend SelfKey as traits::Hashable:\n"
+                     "  fn hash(self): i64\n"
+                     "    if self.a == to_i64(2):\n"
+                     "      let zero: i64 = 0\n"
+                     "      return to_i64(1) / zero\n"
+                     "    return to_i64(888)\n"
+                     "fn self_trait_hash(k: SelfKey): i64 -> traits::custom_hash(k)\n");
+    (void)unrelated_keys;
+    auto unrelated_app = scratch.file(
+        "foreign_traits/main.dao",
+        "module app::foreign_traits_main\n"
+        "import app::keys\n"
+        "import app::traits\n"
+        "extend keys::Key as traits::Equatable:\n"
+        "  fn eq(self, other: keys::Key): bool -> true\n"
+        "extend keys::Key as traits::Hashable:\n"
+        "  fn hash(self): i64\n"
+        "    if self.a == to_i64(2):\n"
+        "      let zero: i64 = 0\n"
+        "      return to_i64(1) / zero\n"
+        "    return to_i64(777)\n"
+        "fn main(): i32\n"
+        "  let m = HashMap<keys::Key, i32>::new()\n"
+        "  m = m.set(keys::Key(to_i64(1), to_i64(10)), 11)\n"
+        "  m = m.set(keys::Key(to_i64(2), to_i64(20)), 22)\n"
+        "  let sm = HashMap<keys::SelfKey, i32>::new()\n"
+        "  sm = sm.set(keys::SelfKey(to_i64(1), to_i64(10)), 33)\n"
+        "  sm = sm.set(keys::SelfKey(to_i64(2), to_i64(20)), 44)\n"
+        "  let ch = traits::custom_hash(keys::Key(to_i64(1), to_i64(10)))\n"
+        "  let sch = keys::self_trait_hash(keys::SelfKey(to_i64(1), to_i64(10)))\n"
+        "  print(i64_to_string(m.length()) + \",\" +\n"
+        "        i32_to_string(m.get_or(keys::Key(to_i64(1), to_i64(10)), 0)) + \",\" +\n"
+        "        i32_to_string(m.get_or(keys::Key(to_i64(2), to_i64(20)), 0)) + \",\" +\n"
+        "        i64_to_string(sm.length()) + \",\" +\n"
+        "        i32_to_string(sm.get_or(keys::SelfKey(to_i64(2), to_i64(20)), 0)) + \",\" +\n"
+        "        i64_to_string(ch) + \",\" + i64_to_string(sch))\n"
+        "  return 0\n");
+    auto built_unrelated = run_daoc(scratch, {"build", unrelated_app.string()});
+    expect(built_unrelated.exit_code == 0) << built_unrelated.err;
+    expect(run_and_capture(scratch.output_for(unrelated_app),
+                           scratch.dir / "unrelated_traits_out.txt") == "2,11,22,2,44,777,888\n");
   };
 };
 

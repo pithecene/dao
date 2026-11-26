@@ -54,6 +54,9 @@ struct HirFunction {
   std::vector<HirStmt*> body;
   bool is_extern;
   bool has_type_params = false; // true if the AST declaration has own type params
+  /// Resolved concept symbol when lowered from `extend T as C`; null for
+  /// top-level functions, inherent class methods, and inline `as` blocks.
+  const Symbol* extend_concept = nullptr;
 };
 
 struct HirClassDecl {

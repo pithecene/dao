@@ -13,6 +13,7 @@ prose:
     - bootstrap/shared/README.md
     - examples/README.md
     - docs/building.md
+    - docs/contracts/CONTRACT_MODULE_SYSTEM.md
     - docs/ergonomics_design_tests.md
     - docs/heterogeneous_experiment.md
     - docs/hygiene_audit.md

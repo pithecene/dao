@@ -1012,15 +1012,48 @@ fn extend_target_name(rs: RS, type_node: i64): string
       return spelled
   return ""
 
-fn resolve_extend_decl(rs: RS, node_idx: i64, target_type_node: i64, concept_name_tidx: i64, methods_lp: i64): RS
+fn resolve_conformance_target(rs: RS, concept_node: i64): RS
+  if concept_node < 0 or concept_node >= rs.rc.nodes.length():
+    return rs
+  let r: RS = rs
+  match r.rc.nodes.get(concept_node):
+    parser::Node::NamedT(c_tidx):
+      let concept_name: string = tok_name(r, c_tidx)
+      let csym: i64 = scope_lookup(r, concept_name)
+      if csym >= 0:
+        r = rs_add_use(r, c_tidx, csym)
+      return r
+    parser::Node::QualNameE(seg_lp, seg_count):
+      let segs: Vector<i64> = parser::read_list(r.rc.idx_data, seg_lp)
+      if segs.length() == to_i64(0):
+        return r
+      let mod_tidx: i64 = segs.get(to_i64(0))
+      let mod_name: string = tok_name(r, mod_tidx)
+      let msym: i64 = scope_lookup(r, mod_name)
+      if msym < 0 or symbol_kind_name(r.symbols.get(msym).kind) != symbol_kind_name(SymbolKind::Module):
+        return rs_add_diag(r, tok_name_span(r, mod_tidx), "'" + mod_name + "' is not an imported module")
+      r = rs_add_use(r, mod_tidx, msym)
+      if segs.length() > to_i64(2):
+        return rs_add_diag(r, tok_name_span(r, segs.get(to_i64(2))), "a conformance path through '" + mod_name + "' has one more segment")
+      let target_mid: i64 = r.symbols.get(msym).decl_node
+      if target_mid < 0 or target_mid >= r.rc.exports.tables.length():
+        return r
+      let cpt_tidx: i64 = segs.get(to_i64(1))
+      let cpt_name: string = tok_name(r, cpt_tidx)
+      let export_tbl: ExportTable = r.rc.exports.tables.get(target_mid)
+      match export_tbl.entries.get(cpt_name):
+        Option::Some(exp_sym):
+          return rs_add_use(r, cpt_tidx, exp_sym)
+        Option::None:
+          return rs_add_diag(r, tok_name_span(r, cpt_tidx), "module '" + r.symbols.get(msym).name + "' has no concept '" + cpt_name + "'")
+  return r
+
+fn resolve_extend_decl(rs: RS, node_idx: i64, target_type_node: i64, concept_node: i64, methods_lp: i64): RS
   let r: RS = rs
   // Resolve target type
   r = resolve_type_node(r, target_type_node)
-  // Resolve concept name as a symbol lookup
-  let concept_name: string = tok_name(r, concept_name_tidx)
-  let csym: i64 = scope_lookup(r, concept_name)
-  if csym >= 0:
-    r = rs_add_use(r, concept_name_tidx, csym)
+  // Resolve concept target (`Concept` or `mod::Concept`)
+  r = resolve_conformance_target(r, concept_node)
   // Resolve each method body
   if methods_lp >= 0:
     let methods: Vector<i64> = parser::read_list(r.rc.idx_data, methods_lp)
@@ -1455,7 +1488,8 @@ fn resolve_program(pg: graph::ProgramGraph): ProgramResolveResult
           let ext_idx: i64 = ext_decls.get(edi)
           let ext_node: parser::Node = po.nodes.get(ext_idx)
           match ext_node:
-            parser::Node::ExtendDeclD(ttn2, concept_name_tidx, ml2):
+            parser::Node::ExtendDeclD(ttn2, concept_node, ml2):
+              let concept_name_tidx: i64 = parser::extend_concept_tok(po.nodes, po.idx, concept_node)
               if concept_name_tidx >= 0:
                 let ubi: i64 = uses_before
                 while ubi < rs_uses.length():

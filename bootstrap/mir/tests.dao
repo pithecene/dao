@@ -176,7 +176,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 56
+  let total: i32 = 57
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -963,6 +963,21 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL canonical_key_extend_ignores_sneaky_local_hash: owners='" + canon_owners + "', diags=" + i64_to_string(canon_pc.mir.diags.length()))
+
+  // An imported non-prelude `traits::Hashable` extended onto `keys::Key`
+  // never suppresses derived prelude `Hashable` inside a prelude container.
+  let ftrait_inputs = Vector<graph::SourceInput>::new()
+  ftrait_inputs = ftrait_inputs.push(graph::SourceInput("core_hash.dao", "module core::hash\nderived concept Equatable:\n  fn eq(self, other: Equatable): bool\nderived concept Hashable:\n  fn hash(self): i64\nextend i64 as Equatable:\n  fn eq(self, other: i64): bool -> self == other\nextend i64 as Hashable:\n  fn hash(self): i64 -> self\nfn bucket<K: Hashable + Equatable>(a: K, b: K): i64\n  if a.eq(b):\n    return a.hash()\n  let zero: i64 = 0\n  return zero\n", true))
+  ftrait_inputs = ftrait_inputs.push(graph::SourceInput("keys.dao", "module app::keys\nclass Key:\n  a: i64\n  b: i64\n", false))
+  ftrait_inputs = ftrait_inputs.push(graph::SourceInput("traits.dao", "module app::traits\nconcept Hashable:\n  fn hash(self): i64\n", false))
+  ftrait_inputs = ftrait_inputs.push(graph::SourceInput("main.dao", "module app::main\nimport app::keys\nimport app::traits\nextend keys::Key as traits::Hashable:\n  fn hash(self): i64\n    let bad: i64 = 777\n    return bad\nfn f(): i64\n  let five: i64 = 5\n  return bucket(keys::Key(five, five), keys::Key(five, five))\n", false))
+  let ftrait_pc = mono_of_program(ftrait_inputs)
+  let ftrait_owners = mono_fn_called_owner_mods(ftrait_pc, "bucket$")
+  if ftrait_pc.mir.diags.length() == 0 and ftrait_owners == "1;1;":
+    print("PASS foreign_qualified_hashable_does_not_become_canonical")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL foreign_qualified_hashable_does_not_become_canonical: owners='" + ftrait_owners + "', diags=" + i64_to_string(ftrait_pc.mir.diags.length()))
 
   // -----------------------------------------------------------------
   print("")
