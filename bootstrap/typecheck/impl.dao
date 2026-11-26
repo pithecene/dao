@@ -5297,6 +5297,11 @@ fn check_break_stmt(ts: TS, tidx: i64): TS
     return ts_add_diag(ts, sp, "break outside of loop")
   return ts
 
+// The diagnostic for a pattern that ends in `..` and names no variant:
+// the marker ignores a variant's parameters, and nothing else has any.
+fn rest_without_variant(ts: TS, pat_node: i64): TS
+  return ts_add_diag(ts, ts_node_span(ts, pat_node), "'..' ends a variant pattern; this pattern names no variant")
+
 // A match pattern: `Enum::Variant`, `Enum::Variant(bindings)`, or a
 // constant.  A pattern with bindings is checked by its callee -- the
 // bindings are names it introduces, no arguments -- and against the
@@ -5311,6 +5316,7 @@ fn check_pattern(ts: TS, pat_node: i64): TS
       let callee_ti: i64 = get_expr_type(r, callee)
       if callee_ti < 0:
         return r
+      let has_rest: bool = parser::call_has_rest(r.tc.idx_data, names_lp)
       let variant_name: string = ""
       match r.tc.nodes.get(callee):
         parser::Node::QualNameE(seg_lp, seg_count):
@@ -5322,7 +5328,9 @@ fn check_pattern(ts: TS, pat_node: i64): TS
         match registered:
           Option::Some(param_count):
             let sp: Span = ts_node_span(r, callee)
-            if param_count == to_i64(0):
+            // `Variant(..)` stays valid when the variant gains or loses
+            // every parameter, so only empty parentheses are refused.
+            if param_count == to_i64(0) and has_rest == false:
               return ts_add_diag(r, sp, "variant '" + variant_name + "' has no parameters; the pattern is written without parentheses")
             let names: Vector<i64> = parser::read_list(r.tc.idx_data, names_lp)
             let ni: i64 = 0
@@ -5333,7 +5341,7 @@ fn check_pattern(ts: TS, pat_node: i64): TS
               ni = ni + 1
             let bindings: Vector<i64> = parser::read_list(r.tc.idx_data, args_lp)
             // A trailing `..` ignores the parameters after the bound ones.
-            if parser::call_has_rest(r.tc.idx_data, names_lp):
+            if has_rest:
               if bindings.length() > param_count:
                 return ts_add_diag(r, sp, "variant '" + variant_name + "' takes " + i64_to_string(param_count) + " parameter(s); the pattern binds " + i64_to_string(bindings.length()) + " before '..'")
             else if bindings.length() != param_count:
@@ -5350,7 +5358,11 @@ fn check_pattern(ts: TS, pat_node: i64): TS
                 return ts_add_diag(r, bsp, "a pattern binds a name per parameter of '" + variant_name + "': " + variant_name + "(a, b)")
               bi = bi + 1
           Option::None:
+            if has_rest:
+              return rest_without_variant(r, pat_node)
             return r
+      else if has_rest:
+        return rest_without_variant(r, pat_node)
       return ts_set_expr_type(r, pat_node, callee_ti)
     parser::Node::QualNameE(seg_lp, seg_count):
       // A bare variant pattern: only a variant without parameters.

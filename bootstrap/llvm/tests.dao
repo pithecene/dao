@@ -1001,10 +1001,11 @@ fn main(): i32
   else:
     print("FAIL enum_payload_roundtrip: " + diags_text(r35.diags))
 
-  // A rest pattern binds the leading payloads and ignores the others:
-  // Rect(w = 3, h = 4) matched as Rect(w, ..) yields 3, and the program
-  // exits 0.
-  let rest_arm: LlvmTextResult = lower_source_to_llvm_text("enum class Shape:\n  Circle(r: i32)\n  Rect(w: i32, h: i32)\n\nfn width(s: Shape): i32\n  match s:\n    Shape::Circle(..):\n      return 0\n    Shape::Rect(w, ..):\n      return w\n  return 0\n\nfn main(): i32\n  let s: Shape = Shape::Rect(h = 4, w = 3)\n  return width(s) - 3\n")
+  // A rest pattern binds the leading payloads by position and ignores
+  // the others: Rect(w = 3, h = 4) matched as Rect(h, ..) binds `h` to
+  // the first payload, 3, whatever the binding is called, and the
+  // program exits 0.  A variant without parameters takes `(..)` too.
+  let rest_arm: LlvmTextResult = lower_source_to_llvm_text("enum class Shape:\n  Circle(r: i32)\n  Rect(w: i32, h: i32)\n  Dot\n\nfn first(s: Shape): i32\n  match s:\n    Shape::Circle(..):\n      return 0\n    Shape::Dot(..):\n      return 0\n    Shape::Rect(h, ..):\n      return h\n  return 0\n\nfn main(): i32\n  let s: Shape = Shape::Rect(h = 4, w = 3)\n  return first(s) - 3\n")
   write_failures = write_failures + emit_ir("rest_pattern_binds_leading_payloads", rest_arm, 0)
   if rest_arm.ok:
     print("PASS rest_pattern_binds_leading_payloads")

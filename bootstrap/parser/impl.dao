@@ -606,13 +606,14 @@ fn extend_qual_name(ps: PS, node: i64, member_tidx: i64): PR
 fn rest_marker(): i64 -> to_i64(-2)
 
 // Whether the call whose argument names are at `names_lp` ends in `..`.
+// The list's count sits at `names_lp` and its last entry just before
+// it (`flush_list`), so no copy of the names is read.
 fn call_has_rest(idx: Vector<i64>, names_lp: i64): bool
   if names_lp < 0:
     return false
-  let names: Vector<i64> = read_list(idx, names_lp)
-  if names.length() == 0:
+  if idx.get(names_lp) == 0:
     return false
-  return names.get(names.length() - 1) == rest_marker()
+  return idx.get(names_lp - 1) == rest_marker()
 
 // One call argument at `ps`: `name = expr` when an identifier is followed
 // by `=` (`==` is a comparison), `..` for the rest marker that ends a

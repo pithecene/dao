@@ -202,12 +202,12 @@ fn main(): i32
     print("FAIL member_call_type_arguments: expected a call on a member carrying its type arguments")
   // A trailing `..` adds a name entry and no argument, and nothing may
   // follow it.
-  let r10r = parse_expr_str("Shape::Rect(w, ..)")
+  let parsed_rest_pattern = parse_expr_str("Shape::Rect(w, ..)")
   let rest_carried = false
-  if r10r.node >= 0:
-    match r10r.ps.nodes.get(r10r.node):
+  if parsed_rest_pattern.node >= 0:
+    match parsed_rest_pattern.ps.nodes.get(parsed_rest_pattern.node):
       parser::Node::CallE(callee, list_pos, arg_count, targs_lp, names_lp, targs_on_type):
-        rest_carried = arg_count == 1 and parser::call_has_rest(r10r.ps.idx, names_lp) and r10r.ps.diags.length() == 0
+        rest_carried = arg_count == 1 and parser::call_has_rest(parsed_rest_pattern.ps.idx, names_lp) and parsed_rest_pattern.ps.diags.length() == 0
   if rest_carried:
     print("PASS call_carries_trailing_rest_marker")
     pass_count = pass_count + 1

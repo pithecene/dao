@@ -2236,12 +2236,16 @@ fn main(): i32
   // A trailing `..` ignores the parameters after the bound ones: it may
   // follow some, all, or none of them, never more than the variant has,
   // and it is no argument of a call.
-  total = total + 4
+  total = total + 6
   if tc_expect_clean("rest_pattern_ignores_trailing_parameters", "enum class Shape:\n  Rect(w: i32, h: i32)\n  Dot\n\nfn pick(s: Shape): i32\n  match s:\n    Shape::Rect(w, ..):\n      return w\n    Shape::Dot:\n      return 0\n"):
     pass_count = pass_count + 1
   if tc_expect_clean("rest_pattern_after_every_or_no_parameter", "enum class Shape:\n  Rect(w: i32, h: i32)\n  Dot\n\nfn pick(s: Shape, t: Shape): i32\n  match s:\n    Shape::Rect(w, h, ..):\n      return w + h\n    Shape::Dot:\n      return 0\n  match t:\n    Shape::Rect(..):\n      return 1\n    Shape::Dot:\n      return 0\n"):
     pass_count = pass_count + 1
   if tc_expect_diag_containing("rest_pattern_binds_too_many", "enum class Shape:\n  Rect(w: i32, h: i32)\n  Dot\n\nfn pick(s: Shape): i32\n  match s:\n    Shape::Rect(w, h, d, ..):\n      return w\n    Shape::Dot:\n      return 0\n", "the pattern binds 3 before '..'"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("rest_pattern_on_parameterless_variant", "enum class Shape:\n  Rect(w: i32, h: i32)\n  Dot\n\nfn pick(s: Shape): i32\n  match s:\n    Shape::Rect(..):\n      return 1\n    Shape::Dot(..):\n      return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("rest_pattern_names_no_variant", "fn pick(n: i32): i32\n  match n:\n    n(..):\n      return 1\n  return 0\n", "this pattern names no variant"):
     pass_count = pass_count + 1
   if tc_expect_diag_containing("rest_marker_is_no_call_argument", "fn add(a: i32, b: i32): i32 -> a + b\n\nfn f(): i32\n  return add(1, 2, ..)\n", "'..' is no argument of a call"):
     pass_count = pass_count + 1
