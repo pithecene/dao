@@ -759,6 +759,15 @@ private:
     // Declare generic type parameters (visible to field types).
     declare_type_params(st.type_params, struct_scope, decl);
 
+    // Field types resolve before any field is declared.  A field is a
+    // value, and its name must not hide a type or an imported module of
+    // the same name in a type position (`mir: mir::MirResult`).
+    for (const auto* field : st.fields) {
+      if (field->type != nullptr) {
+        resolve_type(*field->type, struct_scope);
+      }
+    }
+
     for (const auto* field : st.fields) {
       if (struct_scope->lookup_local(field->name) != nullptr) {
         diagnostics_.push_back(Diagnostic::error(
@@ -767,10 +776,6 @@ private:
       } else {
         auto* sym = new_symbol(SymbolKind::Field, field->name, field->name_span, field);
         struct_scope->declare(field->name, sym);
-      }
-
-      if (field->type != nullptr) {
-        resolve_type(*field->type, struct_scope);
       }
     }
 

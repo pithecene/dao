@@ -187,7 +187,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 368
+  let total: i32 = 369
 
   // Test 1: correct_arithmetic
   let src1: string = "fn main(): i32\n  return 1 + 2\n"
@@ -2341,6 +2341,13 @@ fn main(): i32
     pass_count = pass_count + 1
   total = total + 1
   if tc_expect_program_errors("same_module_equatable_hashable_visible_across_modules", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/hash.dao", hash_prelude, true)).push(graph::SourceInput("lib.dao", "module app::lib\nclass CustomKey:\n  id: i64\n  raw: f64\nextend CustomKey as Equatable:\n  fn eq(self, other: CustomKey): bool -> self.id == other.id\nextend CustomKey as Hashable:\n  fn hash(self): i64 -> self.id.hash()\n", false)), "module app::main\nimport app::lib\n\nfn need_both<K: Hashable + Equatable>(a: K, b: K): i64\n  if a.eq(b):\n    return a.hash()\n  let zero: i64 = 0\n  return zero\n\nfn f(): i64\n  let seven: i64 = 7\n  let k1: lib::CustomKey = lib::CustomKey(seven, 1.5)\n  let k2: lib::CustomKey = lib::CustomKey(seven, 2.5)\n  return need_both(k1, k2)\n", "main.dao", 0):
+    pass_count = pass_count + 1
+
+  // A field named like an imported module does not hide the module in a
+  // field's type, its own or a later field's.
+  let point_module = "module app::math\nclass Point:\n  x: i32\n"
+  let field_named_like_module = "module app::main\nimport app::math\n\nclass Holder:\n  math: math::Point\n  other: math::Point\n\nfn sum(h: Holder): i32\n  return h.math.x + h.other.x\n"
+  if tc_expect_program_errors("field_named_like_module_keeps_module_in_types", Vector<graph::SourceInput>::new().push(graph::SourceInput("math.dao", point_module, false)), field_named_like_module, "main.dao", 0):
     pass_count = pass_count + 1
 
   // -----------------------------------------------------------------
