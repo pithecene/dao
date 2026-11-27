@@ -60,7 +60,6 @@ fn expect_no_errors(label: string, result: lexer::LexResult): bool
   print("FAIL " + label + ": expected no errors, got " + i64_to_string(result.diagnostics.length()))
   return false
 
-// The token at `idx` is one error token over the single byte at `offset`.
 fn expect_byte_error(label: string, result: lexer::LexResult, idx: i64, offset: i64, src: string): bool
   if expect_token(label + "_kind", result, idx, lexer::TK::Error, src) == false:
     return false
