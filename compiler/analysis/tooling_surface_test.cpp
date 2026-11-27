@@ -45,8 +45,8 @@ auto contract_kinds() -> std::set<std::string> {
       << "taxonomy section not found in CONTRACT_LANGUAGE_TOOLING.md";
   auto section = text.substr(begin, end - begin);
 
-  // Kinds are dotted names; `punctuation` is the one single-word kind.
-  static const std::regex kind_pattern(R"(`([a-z]+(?:\.[a-z]+)+|punctuation)`)");
+  // Kinds are dotted names, apart from the two single-word kinds.
+  static const std::regex kind_pattern(R"(`([a-z]+(?:\.[a-z]+)+|punctuation|comment)`)");
   std::set<std::string> kinds;
   for (std::sregex_iterator it(section.begin(), section.end(), kind_pattern), last; it != last;
        ++it) {
@@ -118,7 +118,7 @@ suite<"tooling_surface"> tooling_surface_suite = [] {
           continue; // probes that do not parse are not classification input
         }
         auto resolved = resolve(program);
-        for (const auto& token : classify_tokens(user.lex.tokens, user.file(), &resolved)) {
+        for (const auto& token : classify_tokens(user.lex, user.file(), &resolved)) {
           if (!table.contains(std::string(token.kind))) {
             unlisted.emplace(token.kind);
           }

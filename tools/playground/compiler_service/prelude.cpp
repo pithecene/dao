@@ -75,7 +75,7 @@ auto prelude_source(const nlohmann::json& request, const ServiceContext& ctx) ->
     return utf16.to_utf16({.offset = target->local_offset(span.offset), .length = span.length});
   };
   nlohmann::json semantic_tokens = nlohmann::json::array();
-  for (const auto& stok : classify_tokens(target->lex.tokens, target->file(), &resolved)) {
+  for (const auto& stok : classify_tokens(target->lex, target->file(), &resolved)) {
     if (!target->contains_span(stok.span)) {
       continue;
     }

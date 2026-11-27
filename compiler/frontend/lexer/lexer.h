@@ -12,6 +12,10 @@ namespace dao {
 struct LexResult {
   std::vector<Token> tokens;
   std::vector<Diagnostic> diagnostics;
+  // Where each `//` comment is, in source order: from its slashes to the
+  // end of its line, the line ending excluded.  Comments are not tokens,
+  // and the parser never sees them; tooling reads them from here.
+  std::vector<Span> comments;
 };
 
 // Lex a source buffer. Every emitted span (tokens and diagnostics) is

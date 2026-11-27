@@ -6,6 +6,7 @@
 
 #include <boost/ut.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -34,7 +35,7 @@ auto classify_source(const std::string& name, std::string contents) -> Classifie
   if (lex_result.diagnostics.empty()) {
     parse_result = parse(lex_result.tokens);
   }
-  auto sem_tokens = classify_tokens(lex_result.tokens, parse_result.file);
+  auto sem_tokens = classify_tokens(lex_result, parse_result.file);
   return {std::move(source), std::move(lex_result), std::move(parse_result), {}, std::move(sem_tokens)};
 }
 
@@ -56,7 +57,7 @@ auto classify_source_resolved(const std::string& name, std::string contents) -> 
       << "fixture does not parse: "
       << (!lex_result.diagnostics.empty() ? lex_result.diagnostics[0].message
           : !parse_result.diagnostics.empty() ? parse_result.diagnostics[0].message : "");
-  auto sem_tokens = classify_tokens(lex_result.tokens, parse_result.file, &resolve_result);
+  auto sem_tokens = classify_tokens(lex_result, parse_result.file, &resolve_result);
   return {std::move(source), std::move(lex_result), std::move(parse_result),
           std::move(resolve_result), std::move(sem_tokens)};
 }
@@ -364,6 +365,19 @@ suite<"taxonomy_coverage"> taxonomy_coverage = [] {
 };
 
 suite<"expansion_classification"> expansion_classification = [] {
+  "comments are classified, in source order with the tokens"_test = [] {
+    auto result = classify_source("test.dao",
+                                  "// above\n"
+                                  "fn answer(): i32 // beside\n"
+                                  "    return 42\n");
+    expect(find_token_at(result, "comment", "// above") != nullptr);
+    expect(find_token_at(result, "comment", "// beside") != nullptr);
+    expect(count_tokens(result.tokens, "comment") == 2_u);
+    expect(std::ranges::is_sorted(result.tokens, {},
+                                  [](const SemanticToken& token) { return token.span.offset; }))
+        << "a comment is placed among the tokens, not after them";
+  };
+
   "parameters and let binders are declaration sites"_test = [] {
     auto result = classify_source_resolved(
         "test.dao",
@@ -561,7 +575,7 @@ auto classify_program(std::vector<std::pair<std::string, std::string>> files,
     expect(file->lex.diagnostics.empty() && file->parse.diagnostics.empty())
         << "fixture does not parse";
     classified->tokens =
-        classify_tokens(file->lex.tokens, file->file(), &classified->resolve_result);
+        classify_tokens(file->lex, file->file(), &classified->resolve_result);
   }
   return classified;
 }

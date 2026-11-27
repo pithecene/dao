@@ -7,6 +7,8 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace {
 
@@ -343,6 +345,29 @@ suite<"comment_tests"> comment_tests = [] {
       }
     }
     expect(has_slash) << "single slash should be an operator";
+  };
+
+  "each comment is recorded with the text it covers"_test = [] {
+    auto output = lex_string("// top\nfn foo(): i32 // after code\n  // own line\n  return 0\n");
+    expect(output.result.diagnostics.empty());
+    std::vector<std::string_view> texts;
+    for (const auto& comment : output.result.comments) {
+      texts.push_back(output.source->text(comment));
+    }
+    expect(texts == std::vector<std::string_view>{"// top", "// after code", "// own line"});
+  };
+
+  "a comment ends before its line ending, and at the end of the file"_test = [] {
+    auto output = lex_string("// first\r\nfn foo(): i32\r\n  return 0 // last");
+    expect(fatal(output.result.comments.size() == 2_u));
+    expect(output.source->text(output.result.comments[0]) == "// first")
+        << "the carriage return belongs to the line ending";
+    expect(output.source->text(output.result.comments[1]) == "// last");
+  };
+
+  "slashes inside a string are not a comment"_test = [] {
+    auto output = lex_string("let url = \"http://example\"\n");
+    expect(output.result.comments.empty());
   };
 };
 
