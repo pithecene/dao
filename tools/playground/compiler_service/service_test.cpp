@@ -841,6 +841,9 @@ suite<"playground_service"> playground_service_suite = [] {
     // takes nothing after it with it.
     expect(!byte_offset("\xF0\x9F\x98\x80x", 1U).has_value());
     expect(byte_offset("\xF0\x9F\x98\x80x", 2U) == std::optional<size_t>(4));
+    // The end of the text is a boundary, and past it there is none.
+    expect(byte_offset("\xF0\x9F\x98\x80x", 3U) == std::optional<size_t>(5));
+    expect(!byte_offset("\xF0\x9F\x98\x80x", 4U).has_value());
     expect(byte_offset("\xE2"
                        "ab",
                        1U) == std::optional<size_t>(1));
