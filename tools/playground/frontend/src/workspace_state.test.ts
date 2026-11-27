@@ -709,6 +709,16 @@ async function testResetAsksBeforeItDiscardsWork(): Promise<void> {
   let asked = 0;
   const refuse = (): boolean => { asked += 1; return false; };
   const accept = (): boolean => { asked += 1; return true; };
+  // What every refusal owes: one question, no request, the same files.
+  const refuseReset = async (scenario: string): Promise<void> => {
+    const askedBefore = asked;
+    const loadsBefore = loads.length;
+    const shown = contentsOf(getUserFiles());
+    await resetWorkspace(refuse);
+    assertEqual(asked, askedBefore + 1, `${scenario}: Reset asks once`);
+    assertEqual(loads.length, loadsBefore, `${scenario}: a refusal starts no load`);
+    assertEqual(contentsOf(getUserFiles()), shown, `${scenario}: a refusal keeps every file's source`);
+  };
 
   await withMockFetch(serveExamples, async () => {
     assertEqual(await loadExampleByName("hello.dao"), "applied", "The example loads");
@@ -731,10 +741,7 @@ async function testResetAsksBeforeItDiscardsWork(): Promise<void> {
     addUserFile("extra.dao", "module extra\n");
     saveDraft();
     const editedFiles = contentsOf(getUserFiles());
-    await resetWorkspace(refuse);
-    assertEqual(asked, 1, "Work raises the question");
-    assertEqual(loads.length, loadsBeforeWork, "A refusal starts no load");
-    assertEqual(contentsOf(getUserFiles()), editedFiles, "A refusal keeps every file's source");
+    await refuseReset("Edited files");
     assertEqual(contentsOf(loadSavedDraft()?.files), editedFiles, "A refusal keeps the stored draft's sources");
 
     // An acceptance restores the example and deletes the draft.
@@ -751,11 +758,8 @@ async function testResetAsksBeforeItDiscardsWork(): Promise<void> {
     saveDraft();
     const draftOnly = contentsOf(loadSavedDraft()?.files);
     assertEqual(await loadExampleByName("hello.dao"), "applied", "The example loads over the draft");
-    const shownOverDraft = contentsOf(getUserFiles());
-    await resetWorkspace(refuse);
-    assertEqual(asked, 3, "A draft the screen does not show raises the question");
+    await refuseReset("A draft the screen does not show");
     assertEqual(contentsOf(loadSavedDraft()?.files), draftOnly, "A refusal keeps that draft's sources");
-    assertEqual(contentsOf(getUserFiles()), shownOverDraft, "A refusal leaves the screen's files as they were");
 
     // A stored draft that cannot be decoded may be the only copy of its
     // sources: it raises the question, and a refusal leaves it in storage.
@@ -765,11 +769,21 @@ async function testResetAsksBeforeItDiscardsWork(): Promise<void> {
     assert(draftKey !== null, "The draft has a storage key");
     memoryStorage.setItem(draftKey, "{ not a snapshot");
     assertEqual(loadSavedDraft(), null, "The damaged draft does not decode");
-    const shownOverDamage = contentsOf(getUserFiles());
-    await resetWorkspace(refuse);
-    assertEqual(asked, 4, "A draft that cannot be decoded raises the question");
+    await refuseReset("A draft that cannot be decoded");
     assertEqual(memoryStorage.getItem(draftKey), "{ not a snapshot", "A refusal leaves the damaged draft in storage");
-    assertEqual(contentsOf(getUserFiles()), shownOverDamage, "A refusal leaves the screen's files as they were");
+
+    // Storage that refuses the read says nothing about the draft, so an
+    // untouched example whose draft cannot be read raises the question too.
+    assertEqual(await loadExampleByName("hello.dao", { persistDraft: true }), "applied", "The example loads and stores its draft");
+    assert(!resetWouldDiscardWork(), "With the draft readable, the untouched example holds no work");
+    const readItem = memoryStorage.getItem;
+    memoryStorage.getItem = (): string | null => { throw new Error("storage refused the read"); };
+    try {
+      await refuseReset("A draft that storage will not read");
+    } finally {
+      memoryStorage.getItem = readItem;
+    }
+    assertEqual(contentsOf(loadSavedDraft()?.files), contentsOf(hello.files), "A refusal leaves that draft in storage");
 
     // The files of the example loaded last, reopened under no example name,
     // as a snippet opens them: they equal the recorded files, yet Reset
@@ -782,7 +796,7 @@ async function testResetAsksBeforeItDiscardsWork(): Promise<void> {
     assert(resetWouldDiscardWork(), "The same files under no example name are work");
     const loadsBeforeUnnamed = loads.length;
     await resetWorkspace(accept);
-    assertEqual(asked, 5, "The unnamed workspace raises the question");
+    assertEqual(asked, 6, "The unnamed workspace raises the question");
     assertEqual(loads.length, loadsBeforeUnnamed + 1, "The acceptance starts one load");
     assertEqual(loads[loads.length - 1], "/api/examples/hello.dao", "Reset restores hello.dao where no example is named");
     assertEqual(contentsOf(getUserFiles()), contentsOf(hello.files), "The workspace holds hello.dao");
