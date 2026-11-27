@@ -584,7 +584,7 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
           let piped: i64 = scope_lookup_call(r, tok_name(r, ptidx), to_i64(1))
           if piped >= 0:
             return rs_add_use(r, ptidx, piped)
-      return resolve_expr(r, right)
+      return pick_qualified_overload(resolve_expr(r, right), right, to_i64(1))
     parser::Node::TryE(operand, question_tok):
       return resolve_expr(rs, operand)
     parser::Node::LambdaE(params_lp, param_count, body):

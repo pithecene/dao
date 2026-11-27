@@ -440,6 +440,14 @@ fn br_emit_terminator(br: BlockR, node: MirNode): BlockR
   br.sealed = to_i64(1)
   return br
 
+// Emit the call of the value `callee` with the values `args`, of result
+// type `type_idx`: the argument list and its count are written together.
+// `subst` is the call's record of decided type parameters, or -1.
+fn emit_call(br: BlockR, callee: i64, args: Vector<i64>, type_idx: i64, subst: i64): ExprR
+  let args_fl: MirFlush = mir_flush_list(br.ms, args)
+  br.ms = args_fl.ms
+  return br_emit_value(br, MirNode::MirCall(callee = callee, arg_list_lp = args_fl.list_pos, arg_count = args.length(), type_idx = type_idx, subst = subst))
+
 // Lower `operand?`.  Control flow:
 //   [current] --cond_br--> [ok]    the operand holds its first variant
 //                      \-> [fail]  --return
@@ -503,9 +511,7 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       // whole call.
       let piped: ExprR = lower_expr_value(br, left)
       let target: ExprR = lower_expr_value(piped.br, right)
-      let piped_fl: MirFlush = mir_flush_list(target.br.ms, Vector<i64>::new().push(piped.value))
-      target.br.ms = piped_fl.ms
-      return br_emit_value(target.br, MirNode::MirCall(callee = target.value, arg_list_lp = piped_fl.list_pos, arg_count = to_i64(1), type_idx = type_idx, subst = to_i64(-1)))
+      return emit_call(target.br, target.value, Vector<i64>::new().push(piped.value), type_idx, to_i64(-1))
     HirNode::HirPtrOp(op, pointer, argument, type_idx):
       // A read or a write goes through the pointee's place, as the
       // host's does; the other operations yield a pointer or a flag.
@@ -603,10 +609,7 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
             return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
       let callee_r: ExprR = lower_expr_value(br, callee)
       let call_args: ExprValues = lower_expr_values(callee_r.br, read_hir_list(callee_r.br.ms.hir.idx, args_lp))
-      let cur_br: BlockR = call_args.br
-      let fl: MirFlush = mir_flush_list(cur_br.ms, call_args.values)
-      cur_br.ms = fl.ms
-      return br_emit_value(cur_br, MirNode::MirCall(callee = callee_r.value, arg_list_lp = fl.list_pos, arg_count = arg_count, type_idx = type_idx, subst = call_subst))
+      return emit_call(call_args.br, callee_r.value, call_args.values, type_idx, call_subst)
     HirNode::HirFieldAccess(obj, field_tok, type_idx):
       let obj_r: ExprR = lower_expr_value(br, obj)
       // Resolve field_index from the object's struct type (Tier B).
@@ -1124,11 +1127,7 @@ fn emit_copy_out(br: BlockR, value: i64, ti: i64): ExprR
     br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "no prelude `copy_out` to copy a value out of a resource block")
     return ExprR(br, value)
   let callee: ExprR = br_emit_value(br, MirNode::MirFnRef(sym = br.ms.program.copy_out_sym, type_idx = br.ms.program.sym_types.get(br.ms.program.copy_out_sym)))
-  let arg_values: Vector<i64> = Vector<i64>::new()
-  let args: MirFlush = mir_flush_list(callee.br.ms, arg_values.push(value))
-  let cur: BlockR = callee.br
-  cur.ms = args.ms
-  return br_emit_value(cur, MirNode::MirCall(callee = callee.value, arg_list_lp = args.list_pos, arg_count = to_i64(1), type_idx = ti, subst = to_i64(-1)))
+  return emit_call(callee.br, callee.value, Vector<i64>::new().push(value), ti, to_i64(-1))
 
 // Where a store inside open memory domains is rooted at an escaping
 // binding, mark it dirty in each: that domain's exit copies it.

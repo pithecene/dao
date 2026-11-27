@@ -424,7 +424,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 62
+  let total: i32 = 63
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -1057,6 +1057,21 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL pipe_calls_its_target: " + diags_text(piped.diags))
+
+  // The piped value is evaluated before the target: `source` writes 1
+  // through the pointer, and `make_target` answers `inc` only where it
+  // reads that 1, so the pipe yields 4 and the program exits 0.  The
+  // other order would read 0, choose `add_ten`, and yield 13.
+  let ordered: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
+  ordered = ordered.push(graph::SourceInput("core_memory.dao", "module core::memory\n\nextern fn __dao_mem_alloc(size: i64, align: i64): Ptr<void>\n\nfn size_of<T>(): i64\n  let r: i64 = 0\n  return r\n", true))
+  ordered = ordered.push(graph::SourceInput("main.dao", "module app::main\n\nfn inc(x: i64): i64 -> x + 1\n\nfn add_ten(x: i64): i64 -> x + 10\n\nfn source(p: Ptr<i64>): i64\n  mode unsafe =>\n    p.set(1)\n  return 3\n\nfn make_target(p: Ptr<i64>): fn(i64): i64\n  let seen: i64 = 0\n  mode unsafe =>\n    seen = p.get()\n  if seen == 1:\n    return inc\n  return add_ten\n\nfn main(): i32\n  let got: i64 = 0\n  mode unsafe =>\n    let raw: Ptr<void> = __dao_mem_alloc(size_of<i64>(), 8)\n    let p: Ptr<i64> = raw.cast<i64>()\n    p.set(0)\n    got = source(p) |> make_target(p)\n  if got == 4:\n    return 0\n  return 1\n", false))
+  let ordered_pipe: LlvmTextResult = lower_program_to_llvm_text(ordered)
+  write_failures = write_failures + emit_ir("pipe_evaluates_its_source_first", ordered_pipe, 0)
+  if ordered_pipe.ok:
+    print("PASS pipe_evaluates_its_source_first")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL pipe_evaluates_its_source_first: " + diags_text(ordered_pipe.diags))
 
   // Test 36: pointers — allocated by the runtime, cast, walked, written
   // and read through (`p.offset(1).set(5)`, `.get()`), sized by

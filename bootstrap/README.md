@@ -431,6 +431,12 @@ probe. The probe remains as a historical artifact.
   `bootstrap::typecheck` to `bootstrap::base`, so `mir` and `llvm` read
   the codes as `base::ptr_op_*`.  Both passes still import the checker
   for its entry points.
+- Make the host refuse a pipe target of more than one parameter, as the
+  bootstrap type checker does.  The host's `check_pipe` accepts one, and
+  its MIR then calls the target with the piped value alone.
+- Give MIR's unsupported-expression diagnostic a test of its own.  Its
+  former example was a pipe, which now lowers, and no source expression
+  reaches it, so the test needs a hand-built HIR node.
 - Build each module context in `typecheck/tests.dao` with
   `typecheck::build_module_tc` in place of the six positional `TC`
   constructions.

@@ -5003,6 +5003,10 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
 fn check_pipe_expr(ts: TS, node_idx: i64, left: i64, right: i64): TS
   let r: TS = check_expr(ts, left)
   let lhs_ti: i64 = get_expr_type(r, left)
+  // The piped value is the target's argument, and a void expression has
+  // no value to pass.
+  if lhs_ti >= 0 and is_void_type(r, lhs_ti):
+    return ts_add_diag(r, ts_node_span(r, left), "pipe source has no value: it is void")
   if is_lambda_expr(r, right):
     if lhs_ti < 0:
       return r
