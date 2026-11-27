@@ -2233,6 +2233,26 @@ fn main(): i32
     pass_count = pass_count + 1
   if tc_expect_program_errors("foreign_equatable_extend_rejected_outside_declaring_module", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/hash.dao", hash_prelude, true)).push(graph::SourceInput("lib.dao", "module app::lib\nclass LibKey:\n  x: i64\n", false)), "module app::main\nimport app::lib\nextend lib::LibKey as Equatable:\n  fn eq(self, other: lib::LibKey): bool -> true\n\nfn need_hash<K: Hashable>(k: K): i64 -> k.hash()\n\nfn f(): i64\n  let seven: i64 = 7\n  return need_hash(lib::LibKey(seven))\n", "main.dao", 1):
     pass_count = pass_count + 1
+  // A trailing `..` ignores the parameters after the bound ones: it may
+  // follow some, all, or none of them, never more than the variant has,
+  // and it is no argument of a call.
+  total = total + 8
+  if tc_expect_clean("rest_pattern_ignores_trailing_parameters", "enum class Shape:\n  Rect(w: i32, h: i32)\n  Dot\n\nfn pick(s: Shape): i32\n  match s:\n    Shape::Rect(w, ..):\n      return w\n    Shape::Dot:\n      return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("rest_pattern_after_every_or_no_parameter", "enum class Shape:\n  Rect(w: i32, h: i32)\n  Dot\n\nfn pick(s: Shape, t: Shape): i32\n  match s:\n    Shape::Rect(w, h, ..):\n      return w + h\n    Shape::Dot:\n      return 0\n  match t:\n    Shape::Rect(..):\n      return 1\n    Shape::Dot:\n      return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("rest_pattern_binds_too_many", "enum class Shape:\n  Rect(w: i32, h: i32)\n  Dot\n\nfn pick(s: Shape): i32\n  match s:\n    Shape::Rect(w, h, d, ..):\n      return w\n    Shape::Dot:\n      return 0\n", "the pattern binds 3 before '..'"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("rest_pattern_on_parameterless_variant", "enum class Shape:\n  Rect(w: i32, h: i32)\n  Dot\n\nfn pick(s: Shape): i32\n  match s:\n    Shape::Rect(..):\n      return 1\n    Shape::Dot(..):\n      return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("rest_pattern_names_no_variant", "fn pick(n: i32): i32\n  match n:\n    n(..):\n      return 1\n  return 0\n", "this pattern names no variant"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("rest_pattern_on_untyped_callee", "fn pick(p: Ptr<i32>): i32\n  match p:\n    Ptr<i32>::new(..):\n      return 1\n  return 0\n", "this pattern names no variant"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("rest_pattern_on_path_past_the_enum", "enum class Shape:\n  Rect(w: i32, h: i32)\n  Dot\n\nfn pick(s: Shape): i32\n  match s:\n    Shape::Missing::Dot(..):\n      return 1\n  return 0\n", "this pattern names no variant"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("rest_marker_is_no_call_argument", "fn add(a: i32, b: i32): i32 -> a + b\n\nfn f(): i32\n  return add(1, 2, ..)\n", "'..' is no argument of a call"):
+    pass_count = pass_count + 1
   total = total + 1
   if tc_expect_program_errors("same_module_equatable_hashable_visible_across_modules", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/hash.dao", hash_prelude, true)).push(graph::SourceInput("lib.dao", "module app::lib\nclass CustomKey:\n  id: i64\n  raw: f64\nextend CustomKey as Equatable:\n  fn eq(self, other: CustomKey): bool -> self.id == other.id\nextend CustomKey as Hashable:\n  fn hash(self): i64 -> self.id.hash()\n", false)), "module app::main\nimport app::lib\n\nfn need_both<K: Hashable + Equatable>(a: K, b: K): i64\n  if a.eq(b):\n    return a.hash()\n  let zero: i64 = 0\n  return zero\n\nfn f(): i64\n  let seven: i64 = 7\n  let k1: lib::CustomKey = lib::CustomKey(seven, 1.5)\n  let k2: lib::CustomKey = lib::CustomKey(seven, 2.5)\n  return need_both(k1, k2)\n", "main.dao", 0):
     pass_count = pass_count + 1

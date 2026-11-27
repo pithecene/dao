@@ -1211,7 +1211,7 @@ fn main(): i32
   //     registration is implemented; conformance checking is deferred)
   //   - Yield-in-generator legality (a `yield` value resolves here; whether
   //     the enclosing function is a generator is the type checker's rule)
-  //   - Match arm `..` (rest) and `as` (whole-variant) forms
+  //   - Match arm `as` (whole-variant) form
   //   - Cross-file / module resolution
 
   return 0

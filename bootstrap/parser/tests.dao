@@ -107,7 +107,7 @@ fn main(): i32
   print("")
 
   let pass_count = 0
-  let total = 88
+  let total = 90
 
   // -----------------------------------------------------------------
   // Expression tests
@@ -200,6 +200,21 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL member_call_type_arguments: expected a call on a member carrying its type arguments")
+  // A trailing `..` adds a name entry and no argument, and nothing may
+  // follow it.
+  let parsed_rest_pattern = parse_expr_str("Shape::Rect(w, ..)")
+  let rest_carried = false
+  if parsed_rest_pattern.node >= 0:
+    match parsed_rest_pattern.ps.nodes.get(parsed_rest_pattern.node):
+      parser::Node::CallE(callee, list_pos, arg_count, targs_lp, names_lp, targs_on_type):
+        rest_carried = arg_count == 1 and parser::call_has_rest(parsed_rest_pattern.ps.idx, names_lp) and parsed_rest_pattern.ps.diags.length() == 0
+  if rest_carried:
+    print("PASS call_carries_trailing_rest_marker")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL call_carries_trailing_rest_marker: expected one argument and a rest marker")
+  if expect_parse_errors("rest_marker_must_come_last", parse_expr_str("Shape::Rect(.., h)"), to_i64(1)):
+    pass_count = pass_count + 1
   let r10c = parse_expr_str("p.x < y")
   if expect_node_kind("member_less_than_stays_a_comparison", r10c, r10c.node, "BinaryE"):
     pass_count = pass_count + 1

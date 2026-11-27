@@ -61,6 +61,7 @@ enum TK:
   Amp
   Bang
   Dot
+  DotDot
   Comma
   Pipe
   PipeGt
@@ -259,6 +260,8 @@ fn tk_name(kind: TK): string
       return "Bang"
     TK::Dot:
       return "Dot"
+    TK::DotDot:
+      return "DotDot"
     TK::Comma:
       return "Comma"
     TK::Pipe:
@@ -567,7 +570,7 @@ fn lex_token(st: LexState, src: string, src_len: i64): LexState
   if ch == 38:
     return lex_single(st, TK::Amp, zero)
   if ch == 46:
-    return lex_single(st, TK::Dot, zero)
+    return lex_two_or_one(st, src, src_len, 46, TK::DotDot, TK::Dot)
   if ch == 44:
     return lex_single(st, TK::Comma, zero)
   if ch == 63:
