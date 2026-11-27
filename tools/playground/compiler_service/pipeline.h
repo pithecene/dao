@@ -29,22 +29,45 @@ namespace dao::playground {
 // service's boundary is converted here, in one place per file.
 // ---------------------------------------------------------------------------
 
-/// One file's byte offsets as UTF-16 code-unit offsets, and back.
-/// Offsets fall on character boundaries.
+/// One file's byte positions in UTF-16 code units, and back.
+///
+/// A position inside a character is that character's start, in either
+/// direction: a byte offset in the middle of a UTF-8 sequence, or a
+/// code-unit offset between the halves of a surrogate pair.  A range
+/// that covers part of a character covers all of it, so a lexer error
+/// on one byte of a character marks the character.  A byte that begins
+/// no UTF-8 character is one code unit.
 class Utf16Index {
 public:
   explicit Utf16Index(std::string_view text);
   [[nodiscard]] auto to_utf16(uint32_t byte_offset) const -> uint32_t;
   [[nodiscard]] auto to_bytes(uint32_t utf16_offset) const -> uint32_t;
+  /// The code-unit range of a byte range, held inside the text.
+  [[nodiscard]] auto to_utf16(Span bytes) const -> Span;
+  /// The one-based column in code units of the position at
+  /// `byte_offset`, whose one-based column in bytes is `byte_column`.
+  [[nodiscard]] auto column(uint32_t byte_offset, uint32_t byte_column) const -> uint32_t;
 
 private:
-  /// The offset just past one character outside ASCII, in each unit.
-  /// Between two such characters the units advance together.
-  struct PastWideCharacter {
-    uint32_t bytes;
-    uint32_t units;
+  /// One character whose byte count and code-unit count differ: where it
+  /// ends in each unit and how wide it is.  Between two such characters
+  /// the units advance together.
+  struct WideCharacter {
+    uint32_t bytes_end;
+    uint32_t units_end;
+    uint32_t byte_width;
+    uint32_t unit_width;
   };
-  std::vector<PastWideCharacter> past_wide_;
+  /// The code-unit offsets of the character boundaries on either side
+  /// of a byte offset; equal when the offset is itself a boundary.
+  struct Boundaries {
+    uint32_t before;
+    uint32_t after;
+  };
+  [[nodiscard]] auto boundaries(uint32_t byte_offset) const -> Boundaries;
+
+  std::vector<WideCharacter> wide_;
+  uint32_t byte_size_ = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -95,15 +118,24 @@ struct PlaygroundProgram {
   [[nodiscard]] auto to_editor_offset(uint32_t program_offset) const -> uint32_t {
     return editor_offset_in(*user, program_offset);
   }
-  /// A span's length in the editor's unit.
+  /// A span's length in the editor's unit.  A span that starts in no
+  /// file has no position to report (add_position gives it none), so
+  /// it has no length either.
   [[nodiscard]] auto editor_length(Span span) const -> uint32_t {
     const auto* file = program.source_map.file_for(span.offset);
     if (file == nullptr) {
-      return span.length;
+      return 0;
     }
-    const auto& index = utf16.at(file);
-    auto start = file->local_offset(span.offset);
-    return index.to_utf16(start + span.length) - index.to_utf16(start);
+    return utf16.at(file)
+        .to_utf16({.offset = file->local_offset(span.offset), .length = span.length})
+        .length;
+  }
+  /// The one-based column, in the editor's unit, of a program offset
+  /// inside `file`.
+  [[nodiscard]] auto editor_column(const SourceFile& file, uint32_t program_offset) const
+      -> uint32_t {
+    return utf16.at(&file).column(file.local_offset(program_offset),
+                                  program.source_map.locate(program_offset).col);
   }
   /// True if the offset lies in the editor buffer (not prelude, not gap).
   [[nodiscard]] auto in_user_file(uint32_t program_offset) const -> bool {

@@ -671,12 +671,108 @@ suite<"playground_service"> playground_service_suite = [] {
 
     // The document's length is counted in the same unit: its end is a
     // position, and its byte length, which is past the end, is not one.
+    // Between the emoji's two units is the emoji's start.
+    const auto emoji = units_before("\xF0\x9F");
+    expect(call("hover", document_request(source, {{"offset", emoji + 1}})).body ==
+           call("hover", document_request(source, {{"offset", emoji}})).body);
     const auto end = units_of(source.size());
     expect(dispatch("hover", document_request(source, {{"offset", end}}), service_context())
                .status == http_status::ok);
     expect(dispatch("hover", document_request(source, {{"offset", source.size()}}),
                     service_context())
                .status == http_status::bad_request);
+  };
+
+  "a position inside a character is the character's start"_test = [] {
+    // A curly quote is three bytes and one unit.  A range over part of it
+    // covers all of it, wherever the range starts.
+    const Utf16Index quote("\xE2\x80\x9Cx");
+    for (uint32_t byte = 0; byte < 3; ++byte) {
+      const dao::Span marked = quote.to_utf16(dao::Span{.offset = byte, .length = 1});
+      expect(marked.offset == 0U && marked.length == 1U) << byte;
+      expect(quote.to_utf16(byte) == 0U) << byte;
+    }
+    expect(quote.to_utf16(3U) == 1U);
+    expect(quote.to_utf16(dao::Span{.offset = 1, .length = 0}).length == 0U);
+    expect(quote.to_utf16(dao::Span{.offset = 3, .length = 9}).length == 1U)
+        << "held inside the text";
+
+    // An emoji is four bytes and a surrogate pair.  The offset between
+    // the pair's halves is the emoji's start.
+    const Utf16Index emoji("a\xF0\x9F\x98\x80z");
+    expect(emoji.to_bytes(1U) == 1U);
+    expect(emoji.to_bytes(2U) == 1U);
+    expect(emoji.to_bytes(3U) == 5U);
+    expect(emoji.to_utf16(5U) == 3U);
+
+    // A lead byte with no continuation is one unit and takes nothing
+    // after it with it.
+    const Utf16Index malformed("\xE2"
+                               "ab");
+    expect(malformed.to_utf16(1U) == 1U);
+    expect(malformed.to_utf16(3U) == 3U);
+  };
+
+  "a lexer error on part of a character marks the character"_test = [] {
+    // The lexer reports a curly quote outside a string byte by byte.  Each
+    // report marks the whole quote: one unit at the quote's offset.
+    const std::string source = "module app\n\nfn main(): i32\n  let x = \xE2\x80\x9C\n  return 0\n";
+    const auto quote = editor_offset(source, source.find("\xE2"));
+    size_t marked = 0;
+    // Read through dispatch: the reply's numbers are what is under test.
+    auto reply = dispatch("analyze", document_request(source), service_context());
+    for (const auto& diag : reply.body["diagnostics"]) {
+      if (diag["severity"] == "error" && diag["offset"] == quote) {
+        ++marked;
+        expect(diag["length"] == 1U) << diag["length"];
+      }
+    }
+    expect(marked >= 1U) << "no error at the quote";
+  };
+
+  "a column counts the editor's unit along its line"_test = [] {
+    // Wide characters on earlier lines do not move a column; one on the
+    // same line does.
+    const std::string source =
+        "module app\n\n// caf\xC3\xA9\nfn main(): i32\n"
+        "  print(\"h\xC3\xA9\" + missing)\n  return 0\n";
+    const auto at = source.find("missing");
+    const auto line_start = source.rfind('\n', at) + 1;
+    const auto column = 1U + editor_offset(source, at) - editor_offset(source, line_start);
+    expect(column + 1U == at - line_start + 1U) << "the fixture must differ by one on this line";
+    bool found = false;
+    for (const auto& diag : call("analyze", document_request(source)).body["diagnostics"]) {
+      if (diag["offset"] == editor_offset(source, at)) {
+        found = true;
+        expect(diag["col"] == column) << diag.dump();
+      }
+    }
+    expect(found) << "no diagnostic at the unknown name";
+  };
+
+  "positions in another file use that file's own count"_test = [] {
+    // The two files differ in how far bytes and units have drifted: by one
+    // in the document, by four in the library.
+    const std::string lib =
+        "module lib\n\n// \xF0\x9F\x98\x80 \xF0\x9F\x98\x80\nfn helper(): i32\n  return 41\n";
+    const std::string main =
+        "module app\nimport lib\n\n// caf\xC3\xA9\nfn main(): i32\n  return lib::helper() + 1\n";
+    json request = {{"files",
+                     json::array({{{"path", "lib.dao"}, {"source", lib}},
+                                  {{"path", kTestDocument}, {"source", main}}})},
+                    {"document", kTestDocument}};
+    const auto use = editor_offset(main, main.find("helper()"));
+    const auto declaration = editor_offset(lib, lib.find("helper()"));
+    request["offset"] = use;
+    auto definition = call("gotoDef", request).body;
+    expect(definition.value("file", "") == "lib.dao") << definition.dump();
+    expect(definition.value("offset", 0U) == declaration) << definition.dump();
+    std::set<std::pair<std::string, uint32_t>> referenced;
+    for (const auto& ref : call("references", request).body) {
+      referenced.emplace(ref["file"].get<std::string>(), ref["offset"].get<uint32_t>());
+    }
+    expect(referenced == std::set<std::pair<std::string, uint32_t>>{
+                             {"lib.dao", declaration}, {std::string(kTestDocument), use}});
   };
 
   "document offsets are range checked"_test = [] {
