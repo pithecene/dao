@@ -1052,7 +1052,11 @@ pre {
   align-items: stretch;
   overflow-x: auto;
   scrollbar-width: none;
-  min-width: 0;
+  /* Room for one tab's name at the narrowest editor (240px), which still
+     leaves the read-only badge its whole width beside the strip. */
+  min-width: 80px;
+  /* The strip scrolls, so it gives up width ahead of the label. */
+  flex: 0 4 auto;
 }
 
 #editor-tabs::-webkit-scrollbar {
@@ -1107,11 +1111,18 @@ pre {
   background: var(--surface-subtle);
 }
 
+/* The meta bar takes the room the tabs leave.  Its hint is the least needed
+   text in the bar and yields all of its width first.  Past that, the module
+   label truncates and the tab strip scrolls, and the read-only badge keeps
+   its width. */
 .editor-meta-bar {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  flex-shrink: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
@@ -1119,6 +1130,10 @@ pre {
 #module-label {
   color: var(--accent-primary);
   font-weight: 500;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #readonly-badge {
@@ -1132,6 +1147,24 @@ pre {
 .panel-hint {
   color: var(--fg-muted);
   font-size: var(--text-xs);
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: right;
+}
+
+#readonly-badge {
+  flex-shrink: 0;
+}
+
+/* The bar's first visible item sits at the right while there is room.  An
+   auto margin collapses when there is none, so what overflows is the end of
+   the label, which truncates, and never the badge or the tabs. */
+#readonly-badge,
+#readonly-badge[hidden] + #module-label {
+  margin-left: auto;
 }
 
 #editor-container {

@@ -195,6 +195,16 @@ export function loadEditorBuffer(
 ): void {
   if (!editorInstance) return;
 
+  // The completion extension outlives `setState`: a query still running for
+  // the outgoing buffer would deliver its options, or its failure, into the
+  // incoming one.  It aborts its queries and closes its popup on any
+  // transaction that sets the selection, so the outgoing buffer gets one
+  // that sets the selection it already has.
+  editorInstance.dispatch({
+    selection: editorInstance.state.selection,
+    annotations: [programmaticChange.of(true), Transaction.addToHistory.of(false)],
+  });
+
   if (trackedPath && statesByPath.has(trackedPath)) {
     statesByPath.set(trackedPath, editorInstance.state);
   }

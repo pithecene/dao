@@ -33,7 +33,13 @@ function toOption(item: ServiceCompletion): Completion {
   };
 }
 
-async function daoCompletionSource(
+/**
+ * The completions at the context's position, from the compiler service.  A
+ * query the editor aborted while it waited settles to nothing, whether the
+ * service answered or failed: the editor has moved on, and a rejection would
+ * close the menu of whatever it shows now.
+ */
+export async function daoCompletionSource(
   ctx: CompletionContext,
 ): Promise<CompletionResult | null> {
   if (isActivePrelude()) return null;
@@ -43,10 +49,16 @@ async function daoCompletionSource(
   const afterDot = from > 0 && ctx.state.sliceDoc(from - 1, from) === ".";
   if (!ctx.explicit && !word && !afterDot) return null;
 
-  const items = await api("completions", {
-    ...programRequest(ctx.state.doc.toString()),
-    offset: from,
-  });
+  let items: ServiceCompletion[];
+  try {
+    items = await api("completions", {
+      ...programRequest(ctx.state.doc.toString()),
+      offset: from,
+    });
+  } catch (err) {
+    if (ctx.aborted) return null;
+    throw err;
+  }
   if (ctx.aborted || items.length === 0) return null;
 
   return {
