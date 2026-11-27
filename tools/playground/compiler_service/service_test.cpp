@@ -740,6 +740,19 @@ suite<"playground_service"> playground_service_suite = [] {
     auto comment = token_at(units_before("// caf"));
     expect(comment.value("kind", "") == "comment") << analyzed["semanticTokens"].dump();
     expect(comment.value("length", 0U) == 10U) << "a comment of thirteen bytes is ten units";
+    // A comment after the wide characters starts at a different offset in
+    // each unit, so its start is converted too.
+    const std::string trailing = "module app\n\n// caf\xC3\xA9\nfn main(): i32 -> 0 // tail\n";
+    const auto tail_bytes = trailing.find("// tail");
+    const auto tail_units = editor_offset(trailing, tail_bytes);
+    expect(fatal(tail_units + 1U == tail_bytes));
+    bool tail_found = false;
+    for (const auto& token : call("analyze", document_request(trailing)).body["semanticTokens"]) {
+      if (token.value("kind", "") == "comment" && token["offset"] == tail_units) {
+        tail_found = token.value("length", 0U) == 7U;
+      }
+    }
+    expect(tail_found) << "the trailing comment starts at its offset in the editor's unit";
 
     // Requests: an offset in the editor's unit finds the token there, and
     // the reply names the declaration in the same unit.
