@@ -22,14 +22,16 @@ interface EditorProbe {
   tokens: [string, string][];
   tabTitles: string[];
   activeTab: number;
-  /** Whether the instruction for leaving the editor is drawn. */
-  exitHintShown: boolean;
+  /** Whether the instruction for leaving the editor is drawn, and under the editor, not over it. */
+  exitHintUnderEditor: boolean;
 }
 
 function probe(page: Page): Promise<EditorProbe> {
   return page.evaluate(() => {
     const outline = getComputedStyle(document.querySelector(".cm-editor")!);
     const tabs = [...document.querySelectorAll(".editor-tab")];
+    const hint = document.querySelector("#editor-exit-hint")!.getBoundingClientRect();
+    const editor = document.querySelector("#editor-container")!.getBoundingClientRect();
     return {
       theme: document.documentElement.dataset.theme,
       focused: document.activeElement?.classList.contains("cm-content") ?? false,
@@ -45,8 +47,8 @@ function probe(page: Page): Promise<EditorProbe> {
       ),
       tabTitles: tabs.map((tab) => tab.textContent?.trim() ?? ""),
       activeTab: tabs.findIndex((tab) => tab.classList.contains("active")),
-      exitHintShown:
-        getComputedStyle(document.querySelector("#editor-exit-hint")!).display !== "none",
+      // Half a pixel of slack: the two boxes share an edge at a fractional offset.
+      exitHintUnderEditor: hint.height > 0 && hint.top >= editor.bottom - 0.5,
     };
   });
 }
@@ -146,8 +148,8 @@ async function tabIndentsAndEscapeLeaves(page: Page): Promise<void> {
 
   await replaceEditorText(page, flat.join("\n"));
   await eventually(page, "the text is in the editor", (editor) => shows(editor, flat));
-  await eventually(page, "the way out shows while the editor has focus", (editor) =>
-    editor.exitHintShown,
+  await eventually(page, "the way out is stated under the editor", (editor) =>
+    editor.exitHintUnderEditor,
   );
 
   // Select from the second line's start to the third line's end.
@@ -172,8 +174,8 @@ async function tabIndentsAndEscapeLeaves(page: Page): Promise<void> {
   await leaveEditor(page);
   await eventually(
     page,
-    "leaving changes no text and hides the way out",
-    (editor) => shows(editor, flat) && !editor.exitHintShown,
+    "leaving changes no text",
+    (editor) => shows(editor, flat),
   );
 }
 
