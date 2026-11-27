@@ -689,7 +689,7 @@ fn main(): i32
   let exports_a = twin_rr.module_exports.tables.get(graph::find_module_by_name(twin_pg.modules, "app::a")).entries
   let exports_b = twin_rr.module_exports.tables.get(graph::find_module_by_name(twin_pg.modules, "app::b")).entries
   let sites_apart = false
-  if class_a >= 0 and concept_a >= 0 and class_a != class_b and concept_a != concept_b:
+  if class_a >= 0 and class_b >= 0 and concept_a >= 0 and concept_b >= 0 and class_a != class_b and concept_a != concept_b:
     let a_names_its_own = class_a == exports_a.get_or("K", to_i64(-1)) and concept_a == exports_a.get_or("Shown", to_i64(-1))
     let b_names_its_own = class_b == exports_b.get_or("K", to_i64(-1)) and concept_b == exports_b.get_or("Shown", to_i64(-1))
     sites_apart = a_names_its_own and b_names_its_own
