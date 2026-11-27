@@ -1108,15 +1108,15 @@ pre {
   background: var(--surface-subtle);
 }
 
-/* The meta bar gives way before the tabs do: its hint is the least needed
-   text in the bar, and a squeezed tab hides the file's name. */
+/* The meta bar takes the room the tabs leave.  Its hint is the least needed
+   text in the bar and yields all of its width; the module label and the
+   read-only badge keep theirs, and the tab strip scrolls once they meet. */
 .editor-meta-bar {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--space-3);
-  flex: 0 1000 auto;
-  min-width: 0;
-  overflow: hidden;
+  flex: 1 0 auto;
   white-space: nowrap;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
@@ -1138,9 +1138,12 @@ pre {
 .panel-hint {
   color: var(--fg-muted);
   font-size: var(--text-xs);
+  flex: 1 1 0;
+  width: 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: right;
 }
 
 #module-label,

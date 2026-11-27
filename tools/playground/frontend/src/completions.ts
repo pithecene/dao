@@ -6,7 +6,6 @@ import {
   type CompletionResult,
 } from "@codemirror/autocomplete";
 import { api } from "./api";
-import { getBufferGeneration } from "./editor";
 import type { Completion as ServiceCompletion } from "./generated/tooling_surface";
 
 /** CodeMirror completion icon for a service symbol kind. */
@@ -44,14 +43,10 @@ async function daoCompletionSource(
   const afterDot = from > 0 && ctx.state.sliceDoc(from - 1, from) === ".";
   if (!ctx.explicit && !word && !afterDot) return null;
 
-  const generation = getBufferGeneration();
   const items = await api("completions", {
     ...programRequest(ctx.state.doc.toString()),
     offset: from,
   });
-  // A swap to another file or example does not abort the context, and its
-  // offsets would land in the buffer that replaced this one.
-  if (generation !== getBufferGeneration()) return null;
   if (ctx.aborted || items.length === 0) return null;
 
   return {
