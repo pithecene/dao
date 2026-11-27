@@ -61,16 +61,18 @@ body is an ordinary statement suite that reads the same under any header.
 
 ### 1.3 Bindings
 
-**New.**  No record states this rule.
-
-A pattern's bindings are in scope in that arm's body alone.  Selection
-initializes them once, and neither a later arm nor the code after the
-`match` can see them.
+A pattern's bindings are in scope in that arm's body alone, and neither a
+later arm nor the code after the `match` can see them.  Both resolvers
+already work this way: `docs/task_specs/TASK_39_BOOTSTRAP_MATCH_ARM_BINDINGS.md`
+records that the arm opens a block scope and declares each binding into
+it.  Adoption would make that a language rule.  **New:** selection
+initializes the bindings once.
 
 ### 1.4 Result
 
-- In statement position a `match` yields nothing, and arm bodies are
-  suites.
+- In statement position a `match` yields nothing.  Both compilers accept
+  an indented suite alone as an arm's body.  **Proposed:** an arm's body
+  may also be an inline expression, in either position.
 - **Proposed.**  In value position each arm yields a value or diverges,
   all yielding arms agree on one type `T`, and the `match` has type `T`,
   or `never` when every arm diverges.  A value arm is an inline expression
@@ -78,8 +80,8 @@ initializes them once, and neither a later arm nor the code after the
 
 ### 1.5 Control Transfer
 
-**Proposed** for `return`, and **new** for the rest.  A `match` is not a
-callable boundary.  `return` in an arm returns from
+**Proposed** (`control_flow_expressions.md` §1.3 and §2.3).  A `match` is
+not a callable boundary.  `return` in an arm returns from
 the enclosing function, and `break` leaves the enclosing loop.  An arm's
 value is the value of the `match` expression, never of the function.
 
@@ -97,9 +99,10 @@ has a variant with a payload, the host compares the subject's
 discriminant with the tag of the variant that the pattern names.  The
 bindings decide only whether it extracts payload fields, so `Option::None`
 takes this path too.  The host checks every other pattern as an
-expression against the subject's type, and compares that expression's
-value with the subject.  The host compiler at this note's date gives
-these results:
+expression against the subject's type, and lowers it as that expression.
+The comparison's other operand stays the discriminant for such an enum,
+and is the subject's value for every other subject.  The host compiler
+at this note's date gives these results:
 
 | Program | Observed |
 | --- | --- |
@@ -114,9 +117,11 @@ these results:
 
 So an expression pattern can run user code today, against rule 1.1.4.
 The wildcard is a proposal that neither compiler implements.  The host
-accepts `as` on a fieldless variant alone, so the contract's use of `as`,
-access to a payload's fields without destructuring, works in neither
-compiler.  The bootstrap parser lacks the `as` syntax: it expects `:`
+accepts `as` after a fieldless variant and after a full destructuring,
+such as `V::Pair(count, label) as whole:`.  It rejects the contract's
+bare form, `V::Pair as whole:`, which gives access to a payload's fields
+without destructuring, so that form works in neither compiler.
+The bootstrap parser lacks the `as` syntax: it expects `:`
 directly after the pattern.  The host checker types a binding by a
 matching field name before position, against the contract's
 declaration-order rule, while its lowering extracts fields by position.
@@ -183,7 +188,7 @@ Under these meanings:
 - The `match` header meets the `=>` sentence and fails the `:` sentence,
   by section 1.2: its body follows the pattern grammar, takes its types
   from the subject, and owes coverage.
-- A suite arm, in either position, meets the `:` sentence when the
+- A suite arm in statement position meets the `:` sentence when the
   pattern counts as a declaration of names with a suite under it, as a
   `for` header declares its loop variable.
 - An inline value arm meets the `->` sentence.  So does each branch of an
