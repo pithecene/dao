@@ -21,6 +21,14 @@ For frontend HMR against a live backend:
 task playground-dev
 ```
 
+To run the browser suite, which drives the built playground in headless Chromium:
+
+```sh
+task playground-browser-test
+```
+
+It keeps the browser inside `frontend/node_modules` and starts the service on port `8099` (`DAO_PLAYGROUND_TEST_PORT` sets another).
+
 ## Architecture
 
 - `compiler_service/` — C++ HTTP service (`cpp-httplib`) exposing program-shaped analysis, execution, example discovery, stdlib prelude inspection, and toolchain metadata
