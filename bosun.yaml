@@ -22,3 +22,4 @@ prose:
     - spec/semantics/aggregate_initialization.md
     - spec/semantics/contextual_and_collection_literals.md
     - spec/semantics/control_flow_expressions.md
+    - spec/semantics/match_and_arrow_taxonomy.md

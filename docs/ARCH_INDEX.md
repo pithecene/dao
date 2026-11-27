@@ -53,7 +53,7 @@ Contracts and explanatory material.
 Reference language material.
 
 - `grammar/` — parser-facing reference grammar, lexical surface, and indentation rules
-- `semantics/` — semantic notes and pre-contract language proposals (`aggregate_initialization.md`, `contextual_and_collection_literals.md`, `control_flow_expressions.md`) below contract level and above examples
+- `semantics/` — semantic notes and pre-contract language proposals (`aggregate_initialization.md`, `contextual_and_collection_literals.md`, `control_flow_expressions.md`, `match_and_arrow_taxonomy.md`) below contract level and above examples
 - `syntax_probes/` — small snippets used to test readability and parser direction
 - `examples/` — reference examples housed under `spec/examples/`
 
