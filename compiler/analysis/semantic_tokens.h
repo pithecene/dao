@@ -3,7 +3,7 @@
 
 #include "frontend/ast/ast.h"
 #include "frontend/diagnostics/source.h"
-#include "frontend/lexer/token.h"
+#include "frontend/lexer/lexer.h"
 #include "frontend/resolve/resolve.h"
 
 #include <string_view>
@@ -29,8 +29,10 @@ struct SemanticToken {
 /// symbols gain resolve-driven classifications (use.variable.param,
 /// use.variable.local, use.function, use.module, decl.module).
 ///
+/// Each comment the lexer recorded is classified `comment`.
+///
 /// The returned vector is sorted by span offset.
-auto classify_tokens(const std::vector<Token>& tokens,
+auto classify_tokens(const LexResult& lexed,
                      const FileNode* file,
                      const ResolveResult* resolve_result = nullptr)
     -> std::vector<SemanticToken>;

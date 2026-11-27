@@ -261,7 +261,7 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   // diagnostic was never parsed, so it has no file node.  Without this
   // reply's tokens the editor would show such a document plain.
   if (has_error_severity(prog.program.diagnostics) || prog.user->file() == nullptr) {
-    add_semantic_tokens(out, classify_tokens(prog.user->lex.tokens, prog.user->file()), prog);
+    add_semantic_tokens(out, classify_tokens(prog.user->lex, prog.user->file()), prog);
     return out.reply();
   }
   // Lowering needs every file lexed and parsed cleanly; the document's
@@ -283,7 +283,7 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
 
   // Semantic tokens — always classified once lex/parse produced a file.
   add_semantic_tokens(
-      out, classify_tokens(prog.user->lex.tokens, prog.user->file(), &resolve_result), prog);
+      out, classify_tokens(prog.user->lex, prog.user->file(), &resolve_result), prog);
 
   if (has_error_severity(resolve_result.diagnostics)) {
     return out.reply();
