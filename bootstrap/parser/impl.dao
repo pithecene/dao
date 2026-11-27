@@ -733,7 +733,7 @@ fn parse_postfix(pc: PC, ps: PS): PR
           else:
             if tk_eq(k, lexer::TK::Question):
               let ps2: PS = ps_advance(pc, cur_ps)
-              let try_r: PR = ps_add_node(ps2, Node::TryE(operand = cur_node, question_tok = cur_ps.pos))
+              let try_r = ps_add_node(ps2, Node::TryE(operand = cur_node, question_tok = cur_ps.pos))
               cur_ps = try_r.ps
               cur_node = try_r.node
 

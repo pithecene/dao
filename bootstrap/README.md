@@ -243,7 +243,8 @@ type-checked AST.
 - Expression-bodied fns desugared to block + return
 - Match desugared to if/else chain
 - Every HIR expression carries its resolved type index
-- Pipe preserved as first-class node (MIR lowers it)
+- Pipe preserved as first-class node.  MIR lowers `left |> right` to
+  the call `right(left)`, for a target of one parameter
 - `operand?` kept as one `HirTry` node carrying the type the function
   returns and the error a failing `Result` holds.  MIR lowers it to a
   test of the operand's first variant and a return of the function's
@@ -430,6 +431,10 @@ probe. The probe remains as a historical artifact.
   `bootstrap::typecheck` to `bootstrap::base`, so `mir` and `llvm` read
   the codes as `base::ptr_op_*`.  Both passes still import the checker
   for its entry points.
+- Make the host refuse a pipe target of more than one parameter.  The
+  bootstrap type checker already refuses such a target.  The host's
+  `check_pipe` accepts it, and its MIR then calls the target with the
+  piped value alone.
 - Build each module context in `typecheck/tests.dao` with
   `typecheck::build_module_tc` in place of the six positional `TC`
   constructions.
