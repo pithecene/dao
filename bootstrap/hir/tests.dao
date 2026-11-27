@@ -6,6 +6,7 @@ import bootstrap::graph
 import bootstrap::base
 import bootstrap::resolver
 import bootstrap::typecheck
+import bootstrap::hir
 
 // Test runner for the bootstrap hir.  Assembled after the
 // shared base and every library it exercises; never compiled
@@ -15,47 +16,47 @@ import bootstrap::typecheck
 // Section 61: Tests
 // =========================================================================
 
-fn hir_get_kind_at(hr: HirResult, idx: i64): string
+fn hir_get_kind_at(hr: hir::HirResult, idx: i64): string
   if idx < 0:
     return "invalid"
   if idx >= hr.hir_nodes.length():
     return "invalid"
-  return hir_node_kind(hr.hir_nodes.get(idx))
+  return hir::hir_node_kind(hr.hir_nodes.get(idx))
 
-fn hir_count_nodes(hr: HirResult): i64
+fn hir_count_nodes(hr: hir::HirResult): i64
   return hr.hir_nodes.length()
 
-fn hir_count_diags(hr: HirResult): i64
+fn hir_count_diags(hr: hir::HirResult): i64
   return hr.diags.length()
 
-fn hir_count_kind(hr: HirResult, kind: string): i64
+fn hir_count_kind(hr: hir::HirResult, kind: string): i64
   let n: i64 = 0
   let i: i64 = 0
   while i < hr.hir_nodes.length():
-    if hir_node_kind(hr.hir_nodes.get(i)) == kind:
+    if hir::hir_node_kind(hr.hir_nodes.get(i)) == kind:
       n = n + 1
     i = i + 1
   return n
 
 // "variant=<v> field=<f> : <type>" for each HirEnumPayload, in order.
-fn hir_payloads(hr: HirResult): string
+fn hir_payloads(hr: hir::HirResult): string
   let out: string = ""
   let i: i64 = 0
   while i < hr.hir_nodes.length():
     match hr.hir_nodes.get(i):
-      HirNode::HirEnumPayload(value, variant, field, ti):
-        out = out + "variant=" + i64_to_string(variant) + " field=" + i64_to_string(field) + " : " + hir_type_label(hr, ti) + ";"
+      hir::HirNode::HirEnumPayload(value, variant, field, ti):
+        out = out + "variant=" + i64_to_string(variant) + " field=" + i64_to_string(field) + " : " + hir::hir_type_label(hr, ti) + ";"
     i = i + 1
   return out
 
 // The value of each HirIntLit whose type is named `type_name`, in order.
-fn hir_int_lits_of(hr: HirResult, type_name: string): string
+fn hir_int_lits_of(hr: hir::HirResult, type_name: string): string
   let out: string = ""
   let i: i64 = 0
   while i < hr.hir_nodes.length():
     match hr.hir_nodes.get(i):
-      HirNode::HirIntLit(value, ti):
-        if hir_type_label(hr, ti) == type_name:
+      hir::HirNode::HirIntLit(value, ti):
+        if hir::hir_type_label(hr, ti) == type_name:
           out = out + i64_to_string(value) + ";"
     i = i + 1
   return out
@@ -69,7 +70,7 @@ fn main(): i32
 
   // Test 1: simple_fn
   let src1: string = "fn add(a: i32, b: i32): i32\n  return a + b\n"
-  let r1: HirResult = lower_to_hir(src1)
+  let r1: hir::HirResult = hir::lower_to_hir(src1)
   if r1.root >= 0:
     if hir_get_kind_at(r1, r1.root) == "HirFile":
       print("PASS simple_fn")
@@ -81,13 +82,13 @@ fn main(): i32
 
   // Test 2: let_binding
   let src2: string = "fn main(): i32\n  let x: i32 = 42\n  return x\n"
-  let r2: HirResult = lower_to_hir(src2)
+  let r2: hir::HirResult = hir::lower_to_hir(src2)
   if r2.root >= 0:
     // Check that we have HirLet somewhere
     let found_let: bool = false
     let i2: i64 = 0
     while i2 < hir_count_nodes(r2):
-      if hir_node_kind(r2.hir_nodes.get(i2)) == "HirLet":
+      if hir::hir_node_kind(r2.hir_nodes.get(i2)) == "HirLet":
         found_let = true
       i2 = i2 + 1
     if found_let:
@@ -100,12 +101,12 @@ fn main(): i32
 
   // Test 3: if_else
   let src3: string = "fn check(x: i32): i32\n  if x > 0:\n    return 1\n  else:\n    return 0\n"
-  let r3: HirResult = lower_to_hir(src3)
+  let r3: hir::HirResult = hir::lower_to_hir(src3)
   if r3.root >= 0:
     let found_if: bool = false
     let i3: i64 = 0
     while i3 < hir_count_nodes(r3):
-      if hir_node_kind(r3.hir_nodes.get(i3)) == "HirIf":
+      if hir::hir_node_kind(r3.hir_nodes.get(i3)) == "HirIf":
         found_if = true
       i3 = i3 + 1
     if found_if:
@@ -118,12 +119,12 @@ fn main(): i32
 
   // Test 4: while_loop
   let src4: string = "fn count(): i32\n  let i: i32 = 0\n  while i < 10:\n    i = i + 1\n  return i\n"
-  let r4: HirResult = lower_to_hir(src4)
+  let r4: hir::HirResult = hir::lower_to_hir(src4)
   if r4.root >= 0:
     let found_while: bool = false
     let i4: i64 = 0
     while i4 < hir_count_nodes(r4):
-      if hir_node_kind(r4.hir_nodes.get(i4)) == "HirWhile":
+      if hir::hir_node_kind(r4.hir_nodes.get(i4)) == "HirWhile":
         found_while = true
       i4 = i4 + 1
     if found_while:
@@ -136,17 +137,17 @@ fn main(): i32
 
   // Test 5: binary_expr
   let src5: string = "fn calc(): i32\n  return 1 + 2 * 3\n"
-  let r5: HirResult = lower_to_hir(src5)
+  let r5: hir::HirResult = hir::lower_to_hir(src5)
   if r5.root >= 0:
     let found_bin: bool = false
     let bin_has_type: bool = false
     let i5: i64 = 0
     while i5 < hir_count_nodes(r5):
-      let n5: HirNode = r5.hir_nodes.get(i5)
-      if hir_node_kind(n5) == "HirBinary":
+      let n5: hir::HirNode = r5.hir_nodes.get(i5)
+      if hir::hir_node_kind(n5) == "HirBinary":
         found_bin = true
         match n5:
-          HirNode::HirBinary(op, l, r6, ti):
+          hir::HirNode::HirBinary(op, l, r6, ti):
             if ti >= 0:
               bin_has_type = true
       i5 = i5 + 1
@@ -163,12 +164,12 @@ fn main(): i32
 
   // Test 6: fn_call
   let src6: string = "fn double(x: i32): i32\n  return x * 2\nfn main(): i32\n  return double(5)\n"
-  let r6: HirResult = lower_to_hir(src6)
+  let r6: hir::HirResult = hir::lower_to_hir(src6)
   if r6.root >= 0:
     let found_call: bool = false
     let i6: i64 = 0
     while i6 < hir_count_nodes(r6):
-      if hir_node_kind(r6.hir_nodes.get(i6)) == "HirCall":
+      if hir::hir_node_kind(r6.hir_nodes.get(i6)) == "HirCall":
         found_call = true
       i6 = i6 + 1
     if found_call:
@@ -181,12 +182,12 @@ fn main(): i32
 
   // Test 7: struct_decl
   let src7: string = "class Point:\n  x: i32\n  y: i32\nfn main(): i32\n  return 0\n"
-  let r7: HirResult = lower_to_hir(src7)
+  let r7: hir::HirResult = hir::lower_to_hir(src7)
   if r7.root >= 0:
     let found_struct: bool = false
     let i7: i64 = 0
     while i7 < hir_count_nodes(r7):
-      if hir_node_kind(r7.hir_nodes.get(i7)) == "HirStruct":
+      if hir::hir_node_kind(r7.hir_nodes.get(i7)) == "HirStruct":
         found_struct = true
       i7 = i7 + 1
     if found_struct:
@@ -199,17 +200,17 @@ fn main(): i32
 
   // Test 8: struct_constructor
   let src8: string = "class Point:\n  x: i32\n  y: i32\nfn main(): i32\n  let p: Point = Point(1, 2)\n  return 0\n"
-  let r8: HirResult = lower_to_hir(src8)
+  let r8: hir::HirResult = hir::lower_to_hir(src8)
   if r8.root >= 0:
     let found_construct8: bool = false
     let construct_has_type8: bool = false
     let i8: i64 = 0
     while i8 < hir_count_nodes(r8):
-      let n8: HirNode = r8.hir_nodes.get(i8)
-      if hir_node_kind(n8) == "HirConstruct":
+      let n8: hir::HirNode = r8.hir_nodes.get(i8)
+      if hir::hir_node_kind(n8) == "HirConstruct":
         found_construct8 = true
         match n8:
-          HirNode::HirConstruct(args_lp, ac, ti):
+          hir::HirNode::HirConstruct(args_lp, ac, ti):
             if ti >= 0:
               construct_has_type8 = true
       i8 = i8 + 1
@@ -226,12 +227,12 @@ fn main(): i32
 
   // Test 9: field_access
   let src9: string = "class Point:\n  x: i32\n  y: i32\nfn get_x(p: Point): i32\n  return p.x\n"
-  let r9: HirResult = lower_to_hir(src9)
+  let r9: hir::HirResult = hir::lower_to_hir(src9)
   if r9.root >= 0:
     let found_field: bool = false
     let i9: i64 = 0
     while i9 < hir_count_nodes(r9):
-      if hir_node_kind(r9.hir_nodes.get(i9)) == "HirFieldAccess":
+      if hir::hir_node_kind(r9.hir_nodes.get(i9)) == "HirFieldAccess":
         found_field = true
       i9 = i9 + 1
     if found_field:
@@ -244,12 +245,12 @@ fn main(): i32
 
   // Test 10: enum_decl
   let src10: string = "enum Color:\n  Red\n  Green\n  Blue\nfn main(): i32\n  return 0\n"
-  let r10: HirResult = lower_to_hir(src10)
+  let r10: hir::HirResult = hir::lower_to_hir(src10)
   if r10.root >= 0:
     let found_enum: bool = false
     let i10: i64 = 0
     while i10 < hir_count_nodes(r10):
-      if hir_node_kind(r10.hir_nodes.get(i10)) == "HirEnum":
+      if hir::hir_node_kind(r10.hir_nodes.get(i10)) == "HirEnum":
         found_enum = true
       i10 = i10 + 1
     if found_enum:
@@ -262,17 +263,17 @@ fn main(): i32
 
   // Test 11: expr_fn (desugared to block + return)
   let src11: string = "fn square(x: i32): i32 = x * x\nfn main(): i32\n  return 0\n"
-  let r11: HirResult = lower_to_hir(src11)
+  let r11: hir::HirResult = hir::lower_to_hir(src11)
   if r11.root >= 0:
     // The expr fn should be desugared: HirFunction body contains HirReturn
     let found_fn11: bool = false
     let found_ret11: bool = false
     let i11: i64 = 0
     while i11 < hir_count_nodes(r11):
-      let n11: HirNode = r11.hir_nodes.get(i11)
-      if hir_node_kind(n11) == "HirFunction":
+      let n11: hir::HirNode = r11.hir_nodes.get(i11)
+      if hir::hir_node_kind(n11) == "HirFunction":
         found_fn11 = true
-      if hir_node_kind(n11) == "HirReturn":
+      if hir::hir_node_kind(n11) == "HirReturn":
         found_ret11 = true
       i11 = i11 + 1
     if found_fn11:
@@ -288,14 +289,14 @@ fn main(): i32
 
   // Test 12: extern_fn
   let src12: string = "extern fn puts(s: string): i32\nfn main(): i32\n  return 0\n"
-  let r12: HirResult = lower_to_hir(src12)
+  let r12: hir::HirResult = hir::lower_to_hir(src12)
   if r12.root >= 0:
     let found_extern: bool = false
     let i12: i64 = 0
     while i12 < hir_count_nodes(r12):
-      let n12: HirNode = r12.hir_nodes.get(i12)
+      let n12: hir::HirNode = r12.hir_nodes.get(i12)
       match n12:
-        HirNode::HirFunction(nt, tp, plp, rti, blp, is_ext, co):
+        hir::HirNode::HirFunction(nt, tp, plp, rti, blp, is_ext, co):
           if is_ext > 0:
             found_extern = true
       i12 = i12 + 1
@@ -309,14 +310,14 @@ fn main(): i32
 
   // Test 13: full_program
   let src13: string = "enum Dir:\n  Up\n  Down\nclass Vec2:\n  x: i32\n  y: i32\nfn add(a: Vec2, b: Vec2): Vec2\n  return Vec2(a.x + b.x, a.y + b.y)\nfn main(): i32\n  let v: Vec2 = Vec2(1, 2)\n  return v.x\n"
-  let r13: HirResult = lower_to_hir(src13)
+  let r13: hir::HirResult = hir::lower_to_hir(src13)
   if r13.root >= 0:
     let has_enum13: bool = false
     let has_struct13: bool = false
     let has_fn13: bool = false
     let i13: i64 = 0
     while i13 < hir_count_nodes(r13):
-      let k13: string = hir_node_kind(r13.hir_nodes.get(i13))
+      let k13: string = hir::hir_node_kind(r13.hir_nodes.get(i13))
       if k13 == "HirEnum":
         has_enum13 = true
       if k13 == "HirStruct":
@@ -340,15 +341,15 @@ fn main(): i32
 
   // Test 14: generic_fn_lower — fn identity<T> lowers with type params in HIR
   let src14g: string = "fn identity<T>(x: T): T\n  return x\n"
-  let r14g: HirResult = lower_to_hir(src14g)
+  let r14g: hir::HirResult = hir::lower_to_hir(src14g)
   if r14g.root >= 0:
     let found_fn14: bool = false
     let has_tparams14: bool = false
     let i14g: i64 = 0
     while i14g < hir_count_nodes(r14g):
-      let n14g: HirNode = r14g.hir_nodes.get(i14g)
+      let n14g: hir::HirNode = r14g.hir_nodes.get(i14g)
       match n14g:
-        HirNode::HirFunction(nm, tp_lp, pl, rt, bl, ie, co2):
+        hir::HirNode::HirFunction(nm, tp_lp, pl, rt, bl, ie, co2):
           found_fn14 = true
           if tp_lp >= 0:
             let tps: Vector<i64> = parser::read_list(r14g.hir_idx, tp_lp)
@@ -368,15 +369,15 @@ fn main(): i32
 
   // Test 15: extend methods lower to HirFunction nodes
   let src15e: string = "class Foo:\n  x: i32\n\nconcept Printable:\n  fn to_string(self): string\n\nextend Foo as Printable:\n  fn to_string(self): string\n    return \"Foo\"\n"
-  let r15e: HirResult = lower_to_hir(src15e)
+  let r15e: hir::HirResult = hir::lower_to_hir(src15e)
   if r15e.root >= 0:
     // Count HirFunction nodes — should have at least one for the extend method
     let fn_count_15e: i64 = 0
     let i15e: i64 = 0
     while i15e < hir_count_nodes(r15e):
-      let n15e: HirNode = r15e.hir_nodes.get(i15e)
+      let n15e: hir::HirNode = r15e.hir_nodes.get(i15e)
       match n15e:
-        HirNode::HirFunction(nm, tp_lp, pl, rt, bl, ie, co):
+        hir::HirNode::HirFunction(nm, tp_lp, pl, rt, bl, ie, co):
           fn_count_15e = fn_count_15e + 1
       i15e = i15e + 1
     if fn_count_15e >= 1:
@@ -389,7 +390,7 @@ fn main(): i32
 
   // Test 16: self_lower_smoke
   let self_src: string = "fn id(x: i32): i32\n  return x\nfn main(): i32\n  let a: i32 = id(42)\n  return a\n"
-  let r15: HirResult = lower_to_hir(self_src)
+  let r15: hir::HirResult = hir::lower_to_hir(self_src)
   if r15.root >= 0:
     if hir_count_nodes(r15) > 5:
       print("PASS self_lower_smoke")
@@ -411,7 +412,7 @@ fn main(): i32
   let d7_p: resolver::Program = resolver::program_from_graph(d7_pg)
   d7_p = resolver::program_run_resolve(d7_p)
   d7_p = typecheck::program_run_typecheck(d7_p)
-  d7_p = program_run_hir(d7_p)
+  d7_p = hir::program_run_hir(d7_p)
   let d7_1_ok: bool = true
   if d7_p.hir.initialized == false:
     d7_1_ok = false
@@ -434,7 +435,7 @@ fn main(): i32
   let d7_p2: resolver::Program = resolver::program_from_graph(d7_pg2)
   d7_p2 = resolver::program_run_resolve(d7_p2)
   d7_p2 = typecheck::program_run_typecheck(d7_p2)
-  d7_p2 = program_run_hir(d7_p2)
+  d7_p2 = hir::program_run_hir(d7_p2)
   let d7_2_ok: bool = true
   if d7_p2.hir.root < 0:
     d7_2_ok = false
@@ -464,7 +465,7 @@ fn main(): i32
     let hs_p: resolver::Program = resolver::program_from_graph(hs_pg)
     hs_p = resolver::program_run_resolve(hs_p)
     hs_p = typecheck::program_run_typecheck(hs_p)
-    hs_p = program_run_hir(hs_p)
+    hs_p = hir::program_run_hir(hs_p)
     if hs_p.hir.initialized:
       if hs_p.hir.root >= 0:
         if hs_p.hir.module_count == 3:
@@ -484,7 +485,7 @@ fn main(): i32
   // obj.method(args) should desugar to HirCall(HirIdent(mangled_sym), [obj, args])
   // instead of HirCall(HirFieldAccess(obj, method), [args]).
   let src20: string = "class Point:\n  x: i32\n  y: i32\n\n  fn sum(self): i32\n    return self.x + self.y\n\nfn main(): i32\n  let p: Point = Point(1, 2)\n  return p.sum()\n"
-  let r20: HirResult = lower_to_hir(src20)
+  let r20: hir::HirResult = hir::lower_to_hir(src20)
   // After desugaring, the call p.sum() should produce:
   //   HirCall(HirIdent(sym=Point.sum), [p])
   // NOT:
@@ -495,17 +496,17 @@ fn main(): i32
   let found_field_callee: bool = false
   let i20: i64 = 0
   while i20 < hir_count_nodes(r20):
-    let n20: HirNode = r20.hir_nodes.get(i20)
+    let n20: hir::HirNode = r20.hir_nodes.get(i20)
     match n20:
-      HirNode::HirCall(callee20, a20, n20c, t20, s20):
-        let callee_node20: HirNode = r20.hir_nodes.get(callee20)
+      hir::HirNode::HirCall(callee20, a20, n20c, t20, s20):
+        let callee_node20: hir::HirNode = r20.hir_nodes.get(callee20)
         match callee_node20:
-          HirNode::HirIdent(sym20, ti20, tok20):
+          hir::HirNode::HirIdent(sym20, ti20, tok20):
             // Desugared method call: callee is a symbol ref.
             // Check arg_count > 0 (self was prepended).
             if n20c > 0:
               found_ident_callee = true
-          HirNode::HirFieldAccess(o20, f20, ft20):
+          hir::HirNode::HirFieldAccess(o20, f20, ft20):
             // Undesugared dot-call — this should NOT happen for
             // method calls after desugaring.  (Field accesses
             // inside the method body like self.x are fine — they
@@ -542,7 +543,7 @@ fn main(): i32
   let iso_p: resolver::Program = resolver::program_from_graph(iso_pg)
   iso_p = resolver::program_run_resolve(iso_p)
   iso_p = typecheck::program_run_typecheck(iso_p)
-  iso_p = program_run_hir(iso_p)
+  iso_p = hir::program_run_hir(iso_p)
   // Success criteria: both modules lowered without diagnostic storms,
   // two HirModules produced, and HIR nodes accumulated beyond the
   // minimum.  If hir_find_method_sym had module-leaking behavior,
@@ -571,7 +572,7 @@ fn main(): i32
   // unconditionally prepended, producing two consecutive module
   // declarations and a parse error.
   let src22: string = "module app\nfn main(): i32\n  return 42\n"
-  let r22: HirResult = lower_to_hir(src22)
+  let r22: hir::HirResult = hir::lower_to_hir(src22)
   // Success means it lowered without error — root is valid.
   if r22.root >= 0:
     if hir_count_nodes(r22) > 0:
@@ -587,7 +588,7 @@ fn main(): i32
   // HIR (HirResource) with its body lowered.
   // -----------------------------------------------------------------
   let src23: string = "fn f(): i64\n  let n: i64 = 0\n  resource memory pool =>\n    n = 1\n  return n\n"
-  let r23: HirResult = lower_to_hir(src23)
+  let r23: hir::HirResult = hir::lower_to_hir(src23)
   let has_resource: bool = false
   let hi: i64 = 0
   while hi < hir_count_nodes(r23):
@@ -606,7 +607,7 @@ fn main(): i32
   // constructor is an enum construction, as the host's is.
   // -----------------------------------------------------------------
   let src24: string = "enum class Shape:\n  Circle(r: i32)\n  Dot\n\nfn area(s: Shape): i32\n  match s:\n    Shape::Circle(r):\n      return r\n    Shape::Dot:\n      return 0\n  return 0\n\nfn main(): i32\n  let c: Shape = Shape::Circle(r = 3)\n  return 0\n"
-  let r24: HirResult = lower_to_hir(src24)
+  let r24: hir::HirResult = hir::lower_to_hir(src24)
   if r24.root >= 0 and hir_count_kind(r24, "HirEnumConstruct") == 1 and hir_count_kind(r24, "HirQualName") == 0 and hir_count_diags(r24) == 0:
     print("PASS qualified_variant_lowers")
     pass_count = pass_count + 1
@@ -619,17 +620,17 @@ fn main(): i32
   // it fills (the host evaluates them in source order).
   // -----------------------------------------------------------------
   let src25: string = "enum class Pair:\n  Both(a: i64, b: i64)\n\nfn main(): i32\n  let p: Pair = Pair::Both(b = 2, a = 1)\n  return 0\n"
-  let r25: HirResult = lower_to_hir(src25)
+  let r25: hir::HirResult = hir::lower_to_hir(src25)
   let order_ok: bool = false
   let oi: i64 = 0
   while oi < hir_count_nodes(r25):
     match r25.hir_nodes.get(oi):
-      HirNode::HirEnumConstruct(variant, payload_lp, payload_count, ti):
+      hir::HirNode::HirEnumConstruct(variant, payload_lp, payload_count, ti):
         let pairs25: Vector<i64> = resolver::read_pairs(r25.hir_idx, payload_lp)
         if payload_count == 2:
           if pairs25.get(1) == 1 and pairs25.get(3) == 0:
             match r25.hir_nodes.get(pairs25.get(0)):
-              HirNode::HirIntLit(lit_value, lit_ti):
+              hir::HirNode::HirIntLit(lit_value, lit_ti):
                 if lit_value == 2:
                   order_ok = true
     oi = oi + 1
@@ -644,7 +645,7 @@ fn main(): i32
   // the concept's default method with `self` substituted) — never
   // lowered as a call on a field access.
   let src26d: string = "derived concept Show:\n  fn show(self): string\n\nextend i64 as Show:\n  fn show(self): string\n    return \"n\"\n\nclass P:\n  x: i64\n\nfn f(p: P): string\n  return p.show()\n"
-  let r26d: HirResult = lower_to_hir(src26d)
+  let r26d: hir::HirResult = hir::lower_to_hir(src26d)
   if hir_count_diags(r26d) >= 1:
     print("PASS derived_dispatch_rejected_in_hir")
     pass_count = pass_count + 1
@@ -655,12 +656,12 @@ fn main(): i32
   // into HIR as the host carries it — a call whose callee is the member
   // access — for an instantiation to resolve (MIR rejects it until then).
   let src27b: string = "concept Printable:\n  fn to_string(self): string\n\nfn show<T: Printable>(x: T): string\n  return x.to_string()\n"
-  let r27b: HirResult = lower_to_hir(src27b)
+  let r27b: hir::HirResult = hir::lower_to_hir(src27b)
   let bound_call_carried: bool = false
   let i27b: i64 = 0
   while i27b < hir_count_nodes(r27b):
     match r27b.hir_nodes.get(i27b):
-      HirNode::HirCall(c27, a27, n27, t27, s27):
+      hir::HirNode::HirCall(c27, a27, n27, t27, s27):
         if hir_get_kind_at(r27b, c27) == "HirFieldAccess":
           bound_call_carried = true
     i27b = i27b + 1
@@ -674,7 +675,7 @@ fn main(): i32
   // rejected too — there is no field to read and no implementation to
   // name, so it must never lower as a field access.
   let src28v: string = "derived concept Show:\n  fn show(self): string\n\nextend i64 as Show:\n  fn show(self): string\n    return \"n\"\n\nclass P:\n  x: i64\n\nfn f(p: P): i64\n  let g = p.show\n  return 0\n"
-  let r28v: HirResult = lower_to_hir(src28v)
+  let r28v: hir::HirResult = hir::lower_to_hir(src28v)
   if hir_count_diags(r28v) >= 1:
     print("PASS derived_method_value_rejected_in_hir")
     pass_count = pass_count + 1
@@ -684,12 +685,12 @@ fn main(): i32
   // Test 29: an expression-bodied method of a class and of an extend
   // lowers to an owned HirFunction like a block-bodied one.
   let src29m: string = "class C:\n  x: i64\n  fn get(self): i64 -> self.x\n\nconcept Show:\n  fn show(self): string\n\nextend C as Show:\n  fn show(self): string -> \"c\"\n"
-  let r29m: HirResult = lower_to_hir(src29m)
+  let r29m: hir::HirResult = hir::lower_to_hir(src29m)
   let owned_29m: i64 = 0
   let i29m: i64 = 0
   while i29m < hir_count_nodes(r29m):
     match r29m.hir_nodes.get(i29m):
-      HirNode::HirFunction(nm, tp_lp, pl, rt, bl, ie, co):
+      hir::HirNode::HirFunction(nm, tp_lp, pl, rt, bl, ie, co):
         if co >= 0:
           owned_29m = owned_29m + 1
     i29m = i29m + 1
@@ -703,19 +704,19 @@ fn main(): i32
   // call of the method symbol with the receiver as its first argument —
   // never a field access on the builtin.
   let src30b: string = "concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string -> \"n\"\n\nfn f(n: i32): string\n  return n.show()\n"
-  let r30b: HirResult = lower_to_hir(src30b)
+  let r30b: hir::HirResult = hir::lower_to_hir(src30b)
   let method_calls_30b: i64 = 0
   let field_accesses_30b: i64 = 0
   let i30b: i64 = 0
   while i30b < hir_count_nodes(r30b):
     match r30b.hir_nodes.get(i30b):
-      HirNode::HirCall(callee, args_lp, arg_count, ct, csubst):
+      hir::HirNode::HirCall(callee, args_lp, arg_count, ct, csubst):
         if arg_count == 1:
           match r30b.hir_nodes.get(callee):
-            HirNode::HirIdent(sym, typ, tok):
+            hir::HirNode::HirIdent(sym, typ, tok):
               if sym >= 0:
                 method_calls_30b = method_calls_30b + 1
-      HirNode::HirFieldAccess(obj, field, ft):
+      hir::HirNode::HirFieldAccess(obj, field, ft):
         field_accesses_30b = field_accesses_30b + 1
     i30b = i30b + 1
   if method_calls_30b == 1 and field_accesses_30b == 0 and hir_count_diags(r30b) == 0:
@@ -727,9 +728,9 @@ fn main(): i32
   // Test 31: a method taken as a value — a class's own, or one an
   // extend gave a builtin — is rejected, never lowered as a field read.
   let src31v: string = "class C:\n  x: i64\n  fn get(self): i64 -> self.x\n\nfn f(c: C): i64\n  let g = c.get\n  return 0\n"
-  let r31v: HirResult = lower_to_hir(src31v)
+  let r31v: hir::HirResult = hir::lower_to_hir(src31v)
   let src31w: string = "concept Show:\n  fn show(self): string\n\nextend i32 as Show:\n  fn show(self): string -> \"n\"\n\nfn f(n: i32): i32\n  let g = n.show\n  return 0\n"
-  let r31w: HirResult = lower_to_hir(src31w)
+  let r31w: hir::HirResult = hir::lower_to_hir(src31w)
   if hir_count_diags(r31v) >= 1 and hir_count_diags(r31w) >= 1:
     print("PASS method_value_rejected_in_hir")
     pass_count = pass_count + 1
@@ -746,7 +747,7 @@ fn main(): i32
   m32_p = resolver::program_run_resolve(m32_p)
   m32_p = typecheck::program_run_typecheck(m32_p)
   let m32_mid: i64 = graph::find_module_by_name(m32_p.module_graph.modules, "app::b")
-  let m32_hs: HS = build_module_hs(m32_p, m32_mid)
+  let m32_hs: hir::HS = hir::build_module_hs(m32_p, m32_mid)
   let m32_root: parser::Node = m32_hs.unit.nodes.get(resolver::program_file_of_module(m32_p, m32_mid).parse_output.root)
   let m32_ok: bool = false
   match m32_root:
@@ -756,8 +757,8 @@ fn main(): i32
       match m32_class:
         parser::Node::ClassDeclD(m32_nt, m32_tp, m32_fl, m32_ml):
           let m32_meths: Vector<i64> = parser::read_list(m32_hs.unit.idx_data, m32_ml)
-          let m32_self: i64 = hir_find_param_sym(m32_hs, m32_meths.get(to_i64(0)), "self")
-          let m32_field: i64 = hir_find_field_sym(m32_hs, m32_decls.get(to_i64(0)), "x")
+          let m32_self: i64 = hir::hir_find_param_sym(m32_hs, m32_meths.get(to_i64(0)), "self")
+          let m32_field: i64 = hir::hir_find_field_sym(m32_hs, m32_decls.get(to_i64(0)), "x")
           if m32_self >= 0 and m32_field >= 0:
             if m32_hs.symbols.get(m32_self).owner_module_id == m32_mid:
               if m32_hs.symbols.get(m32_field).owner_module_id == m32_mid:
@@ -772,7 +773,7 @@ fn main(): i32
   // method called through a value is reported, not desugared with an
   // invented receiver.
   let src33s: string = "class C:\n  x: i32\n  fn make(): i32 -> 7\n\nfn f(c: C): i32\n  return c.make()\n"
-  let r33s: HirResult = lower_to_hir(src33s)
+  let r33s: hir::HirResult = hir::lower_to_hir(src33s)
   if hir_count_diags(r33s) >= 1:
     print("PASS checker_diagnostic_reaches_hir")
     pass_count = pass_count + 1
@@ -782,12 +783,12 @@ fn main(): i32
   // Test 34: a generator function's HIR return type is its generator
   // type, never void.
   let src34g: string = "fn g(): Generator<i32>\n  yield 1\n  return\n"
-  let r34g: HirResult = lower_to_hir(src34g)
+  let r34g: hir::HirResult = hir::lower_to_hir(src34g)
   let gen_ret34: string = ""
   let i34g: i64 = 0
   while i34g < hir_count_nodes(r34g):
     match r34g.hir_nodes.get(i34g):
-      HirNode::HirFunction(nm, tp_lp, pl, rt, bl, ie, co):
+      hir::HirNode::HirFunction(nm, tp_lp, pl, rt, bl, ie, co):
         if rt >= 0 and rt < r34g.types.length():
           gen_ret34 = r34g.types.get(rt).name
     i34g = i34g + 1
@@ -800,20 +801,20 @@ fn main(): i32
   // Test 35: `mode` and `yield` are preserved in HIR: the mode's name,
   // its body, and the yielded operand.
   let src35: string = "fn g(): Generator<i32>\n  mode unsafe =>\n    yield 7\n  return\n"
-  let r35: HirResult = lower_to_hir(src35)
+  let r35: hir::HirResult = hir::lower_to_hir(src35)
   let mode_name35: string = ""
   let yields_in_mode35: i64 = 0
   let i35: i64 = 0
   while i35 < hir_count_nodes(r35):
     match r35.hir_nodes.get(i35):
-      HirNode::HirMode(name_tidx, body_lp):
+      hir::HirNode::HirMode(name_tidx, body_lp):
         let mt35: lexer::Token = r35.toks.get(name_tidx)
         mode_name35 = substring(r35.src, mt35.offset, mt35.len)
         let body35: Vector<i64> = parser::read_list(r35.hir_idx, body_lp)
         let b35: i64 = 0
         while b35 < body35.length():
           match r35.hir_nodes.get(body35.get(b35)):
-            HirNode::HirYield(value):
+            hir::HirNode::HirYield(value):
               if value >= 0:
                 yields_in_mode35 = yields_in_mode35 + 1
           b35 = b35 + 1
@@ -826,12 +827,12 @@ fn main(): i32
 
   // Test 36: an enum payload annotated `Generator<i64>` carries the
   // checker's generator type into HIR.
-  let r36: HirResult = lower_to_hir("enum class E:\n  Item(values: Generator<i64>)\n\nfn main(): i32\n  return 0\n")
+  let r36: hir::HirResult = hir::lower_to_hir("enum class E:\n  Item(values: Generator<i64>)\n\nfn main(): i32\n  return 0\n")
   let payload36: string = ""
   let i36: i64 = 0
   while i36 < hir_count_nodes(r36):
     match r36.hir_nodes.get(i36):
-      HirNode::HirEnum(en, etp, variants_lp):
+      hir::HirNode::HirEnum(en, etp, variants_lp):
         let vpairs36: Vector<i64> = resolver::read_pairs(r36.hir_idx, variants_lp)
         if vpairs36.length() >= 2:
           let ptys36: Vector<i64> = parser::read_list(r36.hir_idx, vpairs36.get(1))
@@ -848,12 +849,12 @@ fn main(): i32
 
   // Test 37: an enum payload annotated `Box<i32>` carries the checker's
   // instantiation into HIR, not the head it was made from.
-  let r37: HirResult = lower_to_hir("class Box<T>:\n  value: T\n\nenum class E:\n  Item(b: Box<i32>)\n\nfn main(): i32\n  return 0\n")
+  let r37: hir::HirResult = hir::lower_to_hir("class Box<T>:\n  value: T\n\nenum class E:\n  Item(b: Box<i32>)\n\nfn main(): i32\n  return 0\n")
   let payload37: string = ""
   let i37: i64 = 0
   while i37 < hir_count_nodes(r37):
     match r37.hir_nodes.get(i37):
-      HirNode::HirEnum(en, etp, variants_lp):
+      hir::HirNode::HirEnum(en, etp, variants_lp):
         let vpairs37: Vector<i64> = resolver::read_pairs(r37.hir_idx, variants_lp)
         if vpairs37.length() >= 2:
           let ptys37: Vector<i64> = parser::read_list(r37.hir_idx, vpairs37.get(1))
@@ -873,26 +874,26 @@ fn main(): i32
   // on its discriminant against each arm's variant index, each binding a
   // `let` of its payload value; a classification enum and an integer are
   // tested by value, a variant's value being its index.
-  let r38: HirResult = lower_to_hir("enum class Shape:\n  Circle(r: i32)\n  Empty\n\nfn s(x: Shape): i32\n  match x:\n    Shape::Empty:\n      return 0\n    Shape::Circle(r):\n      return r\n  return 9\n")
+  let r38: hir::HirResult = hir::lower_to_hir("enum class Shape:\n  Circle(r: i32)\n  Empty\n\nfn s(x: Shape): i32\n  match x:\n    Shape::Empty:\n      return 0\n    Shape::Circle(r):\n      return r\n  return 9\n")
   let lets38: i64 = hir_count_kind(r38, "HirLet")
   if hir_count_diags(r38) == 0 and hir_count_kind(r38, "HirEnumDiscriminant") == 2 and hir_payloads(r38) == "variant=0 field=0 : i32;" and hir_int_lits_of(r38, "Shape") == "1;0;" and lets38 == 2:
     print("PASS match_tests_discriminant_and_binds_payload")
     pass_count = pass_count + 1
   else:
     print("FAIL match_tests_discriminant_and_binds_payload: got payloads '" + hir_payloads(r38) + "', tags '" + hir_int_lits_of(r38, "Shape") + "', " + i64_to_string(lets38) + " lets, " + i64_to_string(hir_count_diags(r38)) + " diagnostics")
-  let r39: HirResult = lower_to_hir("enum Color:\n  Red\n  Green\n\nfn c(x: Color): i32\n  match x:\n    Color::Red:\n      return 1\n    Color::Green:\n      return 2\n  return 0\n")
+  let r39: hir::HirResult = hir::lower_to_hir("enum Color:\n  Red\n  Green\n\nfn c(x: Color): i32\n  match x:\n    Color::Red:\n      return 1\n    Color::Green:\n      return 2\n  return 0\n")
   if hir_count_diags(r39) == 0 and hir_count_kind(r39, "HirEnumDiscriminant") == 0 and hir_int_lits_of(r39, "Color") == "0;1;" and hir_count_kind(r39, "HirQualName") == 0:
     print("PASS match_on_classification_enum_tests_value")
     pass_count = pass_count + 1
   else:
     print("FAIL match_on_classification_enum_tests_value: got tags '" + hir_int_lits_of(r39, "Color") + "', " + i64_to_string(hir_count_kind(r39, "HirEnumDiscriminant")) + " discriminants")
-  let r40: HirResult = lower_to_hir("enum class Opt<T>:\n  Some(v: T)\n  Nothing\n\nfn o(x: Opt<i64>): i64\n  match x:\n    Opt::Some(v):\n      return v\n    Opt::Nothing:\n      return 0\n  return 0\n")
+  let r40: hir::HirResult = hir::lower_to_hir("enum class Opt<T>:\n  Some(v: T)\n  Nothing\n\nfn o(x: Opt<i64>): i64\n  match x:\n    Opt::Some(v):\n      return v\n    Opt::Nothing:\n      return 0\n  return 0\n")
   if hir_count_diags(r40) == 0 and hir_payloads(r40) == "variant=0 field=0 : i64;":
     print("PASS match_payload_typed_by_instantiation")
     pass_count = pass_count + 1
   else:
     print("FAIL match_payload_typed_by_instantiation: got payloads '" + hir_payloads(r40) + "', " + i64_to_string(hir_count_diags(r40)) + " diagnostics")
-  let r41: HirResult = lower_to_hir("fn n(k: i32): i32\n  match k:\n    1:\n      return 10\n    2:\n      return 20\n  return 0\n")
+  let r41: hir::HirResult = hir::lower_to_hir("fn n(k: i32): i32\n  match k:\n    1:\n      return 10\n    2:\n      return 20\n  return 0\n")
   if hir_count_diags(r41) == 0 and hir_count_kind(r41, "HirEnumDiscriminant") == 0 and hir_count_kind(r41, "HirIf") == 2 and hir_count_kind(r41, "HirLet") == 1:
     print("PASS match_on_integer_tests_value")
     pass_count = pass_count + 1
@@ -901,7 +902,7 @@ fn main(): i32
 
   // Test 42: a payload named `index` does not shadow its variant's
   // index: `E::Value(x)` tests discriminant 1 and reads variant 1.
-  let r42: HirResult = lower_to_hir("enum class E:\n  Empty\n  Value(index: i32)\n\nfn f(e: E): i32\n  match e:\n    E::Value(x):\n      return x\n  return 0\n")
+  let r42: hir::HirResult = hir::lower_to_hir("enum class E:\n  Empty\n  Value(index: i32)\n\nfn f(e: E): i32\n  match e:\n    E::Value(x):\n      return x\n  return 0\n")
   if hir_count_diags(r42) == 0 and hir_payloads(r42) == "variant=1 field=0 : i32;" and hir_int_lits_of(r42, "E") == "1;":
     print("PASS payload_named_index_keeps_variant")
     pass_count = pass_count + 1
@@ -909,8 +910,8 @@ fn main(): i32
     print("FAIL payload_named_index_keeps_variant: got payloads '" + hir_payloads(r42) + "', tags '" + hir_int_lits_of(r42, "E") + "'")
   // Test 43: a literal past 64 bits is reported, never accumulated into
   // an overflowing value.
-  let r43: HirResult = lower_to_hir("fn f(): i64\n  return 9223372036854775808\n")
-  let r43_ok: HirResult = lower_to_hir("fn f(): i64\n  return 9223372036854775807\n")
+  let r43: hir::HirResult = hir::lower_to_hir("fn f(): i64\n  return 9223372036854775808\n")
+  let r43_ok: hir::HirResult = hir::lower_to_hir("fn f(): i64\n  return 9223372036854775807\n")
   if hir_count_diags(r43) >= 1 and hir_count_diags(r43_ok) == 0:
     print("PASS oversized_literal_reported")
     pass_count = pass_count + 1
@@ -918,7 +919,7 @@ fn main(): i32
     print("FAIL oversized_literal_reported: got " + i64_to_string(hir_count_diags(r43)) + " and " + i64_to_string(hir_count_diags(r43_ok)) + " diagnostics")
   // The digits of the signed minimum do not fit alone, and its negation
   // does: the literal lowers to the value itself.
-  let min_literal: HirResult = lower_to_hir("fn f(): i64\n  return -9223372036854775808\n")
+  let min_literal: hir::HirResult = hir::lower_to_hir("fn f(): i64\n  return -9223372036854775808\n")
   if hir_count_diags(min_literal) == 0 and hir_count_kind(min_literal, "HirUnary") == 0:
     print("PASS i64_minimum_literal")
     pass_count = pass_count + 1
@@ -928,25 +929,25 @@ fn main(): i32
   // class call builds the class, `Box<i32>(3)` its instantiation; a
   // classification variant is its index; a payload-bearing enum's
   // variant, with or without payload, is an enum construction.
-  let r44: HirResult = lower_to_hir("class P:\n  x: i32\n  y: i64\n\nclass Box<T>:\n  v: T\n\nfn main(): i32\n  let p: P = P(1, 2)\n  let b: Box<i32> = Box<i32>(3)\n  return 0\n")
+  let r44: hir::HirResult = hir::lower_to_hir("class P:\n  x: i32\n  y: i64\n\nclass Box<T>:\n  v: T\n\nfn main(): i32\n  let p: P = P(1, 2)\n  let b: Box<i32> = Box<i32>(3)\n  return 0\n")
   let construct_types: string = ""
   let ci44: i64 = 0
   while ci44 < hir_count_nodes(r44):
     match r44.hir_nodes.get(ci44):
-      HirNode::HirConstruct(args_lp, arg_count, cti):
-        construct_types = construct_types + hir_type_label(r44, cti) + "/" + i64_to_string(arg_count) + ";"
+      hir::HirNode::HirConstruct(args_lp, arg_count, cti):
+        construct_types = construct_types + hir::hir_type_label(r44, cti) + "/" + i64_to_string(arg_count) + ";"
     ci44 = ci44 + 1
   if hir_count_diags(r44) == 0 and construct_types == "P/2;Box<i32>/1;" and hir_count_kind(r44, "HirCall") == 0:
     print("PASS class_call_constructs")
     pass_count = pass_count + 1
   else:
     print("FAIL class_call_constructs: got '" + construct_types + "', " + i64_to_string(hir_count_kind(r44, "HirCall")) + " calls, " + i64_to_string(hir_count_diags(r44)) + " diagnostics")
-  let r45: HirResult = lower_to_hir("enum Color:\n  Red\n  Green\n\nenum class Shape:\n  Circle(r: i32)\n  Rect(w: i32, h: i32)\n  Empty\n\nfn main(): i32\n  let c: Color = Color::Green\n  let s: Shape = Shape::Rect(h = 2, w = 1)\n  let e: Shape = Shape::Empty\n  return 0\n")
+  let r45: hir::HirResult = hir::lower_to_hir("enum Color:\n  Red\n  Green\n\nenum class Shape:\n  Circle(r: i32)\n  Rect(w: i32, h: i32)\n  Empty\n\nfn main(): i32\n  let c: Color = Color::Green\n  let s: Shape = Shape::Rect(h = 2, w = 1)\n  let e: Shape = Shape::Empty\n  return 0\n")
   let variants45: string = ""
   let vi45: i64 = 0
   while vi45 < hir_count_nodes(r45):
     match r45.hir_nodes.get(vi45):
-      HirNode::HirEnumConstruct(variant, payload_lp, payload_count, eti):
+      hir::HirNode::HirEnumConstruct(variant, payload_lp, payload_count, eti):
         variants45 = variants45 + i64_to_string(variant) + "/" + i64_to_string(payload_count) + ";"
     vi45 = vi45 + 1
   if hir_count_diags(r45) == 0 and hir_int_lits_of(r45, "Color") == "1;" and variants45 == "1/2;2/0;" and hir_count_kind(r45, "HirQualName") == 0:
@@ -957,7 +958,7 @@ fn main(): i32
 
   // Test 46: pointer operations are HirPtrOp, as the host's (`daoc hir`),
   // never a call of `Ptr::new` or of a member.
-  let r46: HirResult = lower_to_hir("fn f(): i64\n  let v: i64 = 0\n  mode unsafe =>\n    let p: Ptr<i64> = Ptr<i64>::new()\n    let r: Ptr<i64> = p.offset(2)\n    r.set(5)\n    v = r.get()\n  return v\n")
+  let r46: hir::HirResult = hir::lower_to_hir("fn f(): i64\n  let v: i64 = 0\n  mode unsafe =>\n    let p: Ptr<i64> = Ptr<i64>::new()\n    let r: Ptr<i64> = p.offset(2)\n    r.set(5)\n    v = r.get()\n  return v\n")
   if hir_count_diags(r46) == 0 and hir_count_kind(r46, "HirPtrOp") == 4 and hir_count_kind(r46, "HirCall") == 0 and hir_count_kind(r46, "HirQualName") == 0:
     print("PASS pointer_operations_are_ptr_ops")
     pass_count = pass_count + 1
@@ -967,13 +968,13 @@ fn main(): i32
   // `operand?` lowers to one HirTry.  A `?` the checker rejected carries
   // the checker's diagnostic alone, and one it never reached (a lambda
   // passed to a value that is no function) is reported by HIR.
-  let try_lowered = lower_to_hir("enum class Option<T>:\n  Some(value: T)\n  None\n\nfn half(n: i32): Option<i32>\n  return Option::Some(value = n / 2)\n\nfn quarter(n: i32): Option<i32>\n  let h: i32 = half(n)?\n  return half(h)\n")
+  let try_lowered = hir::lower_to_hir("enum class Option<T>:\n  Some(value: T)\n  None\n\nfn half(n: i32): Option<i32>\n  return Option::Some(value = n / 2)\n\nfn quarter(n: i32): Option<i32>\n  let h: i32 = half(n)?\n  return half(h)\n")
   if hir_count_kind(try_lowered, "HirTry") == 1 and hir_count_diags(try_lowered) == 0:
     print("PASS try_lowers_to_one_node")
     pass_count = pass_count + 1
   else:
     print("FAIL try_lowers_to_one_node: got " + i64_to_string(hir_count_kind(try_lowered, "HirTry")) + " HirTry, " + i64_to_string(hir_count_diags(try_lowered)) + " diagnostics")
-  let try_rejected = lower_to_hir("fn f(n: i32): i32\n  return n?\n")
+  let try_rejected = hir::lower_to_hir("fn f(n: i32): i32\n  return n?\n")
   let rejected_once = false
   if hir_count_diags(try_rejected) == 1 and hir_count_kind(try_rejected, "HirTry") == 0:
     rejected_once = index_of(try_rejected.diags.get(0).message, "requires an Option or Result type") >= 0
@@ -982,7 +983,7 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL rejected_try_is_reported_once: expected the checker's diagnostic alone, got " + i64_to_string(hir_count_diags(try_rejected)) + " diagnostics")
-  let try_unreached = lower_to_hir("fn f(n: i32): i32\n  n(|x| -> x?)\n  return n\n")
+  let try_unreached = hir::lower_to_hir("fn f(n: i32): i32\n  n(|x| -> x?)\n  return n\n")
   let unreached_reported = false
   let ud: i64 = 0
   while ud < try_unreached.diags.length():

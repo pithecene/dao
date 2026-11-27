@@ -6,6 +6,7 @@ import bootstrap::graph
 import bootstrap::base
 import bootstrap::resolver
 import bootstrap::typecheck
+import bootstrap::hir
 
 // bootstrap/llvm/impl.dao — bootstrap LLVM backend.
 //
@@ -1389,7 +1390,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
     MirNode::MirBinary(op_tok, lhs, rhs, type_idx):
       // A comparison `match` synthesized has no source token: it is `==`.
       let tk: lexer::Token = lexer::Token(lexer::TK::EqEq, to_i64(0), to_i64(0))
-      if op_tok != synthesized_equality_op():
+      if op_tok != hir::synthesized_equality_op():
         tk = bs.input.source.toks.get(op_tok)
       return bs_lower_binary(bs, insts, mir_node_idx, lexer::tk_name(tk.kind), lhs, rhs)
 
@@ -2326,7 +2327,7 @@ fn mir_match_test(bs: BS, cond: i64): MatchTest
     return none
   match bs.input.mir_nodes.get(cond):
     MirNode::MirBinary(op_tok, lhs, rhs, type_idx):
-      if op_tok != synthesized_equality_op():
+      if op_tok != hir::synthesized_equality_op():
         return none
       let tested: i64 = lhs
       match bs.input.mir_nodes.get(lhs):

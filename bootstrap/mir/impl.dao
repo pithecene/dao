@@ -6,6 +6,7 @@ import bootstrap::graph
 import bootstrap::base
 import bootstrap::resolver
 import bootstrap::typecheck
+import bootstrap::hir
 
 // bootstrap/mir/impl.dao — Tier A MIR subsystem.
 //
@@ -166,7 +167,7 @@ enum class MirNode:
 // Mutable state threaded through lowering.
 // The arena of the current HIR, read-only.
 class MsHir:
-  nodes: Vector<HirNode>
+  nodes: Vector<hir::HirNode>
   idx: Vector<i64>
 
 // The whole program's types and symbols, read-only once lowering starts.
@@ -275,8 +276,8 @@ fn mir_flush_list(ms: MS, items: Vector<i64>): MirFlush
 
 // The type of a lowered HIR expression: HIR's own accessor, so every
 // expression kind HIR has is covered.
-fn ms_get_hir_type(ms: MS, hir_node: HirNode): i64
-  return hir_expr_type(hir_node)
+fn ms_get_hir_type(ms: MS, hir_node: hir::HirNode): i64
+  return hir::hir_expr_type(hir_node)
 
 // =========================================================================
 // Section 63: Per-function state management
@@ -458,7 +459,7 @@ fn lower_try(br: BlockR, operand: i64, error_ti: i64, return_ti: i64, value_ti: 
   let tag_ti = typecheck::builtin_type_index("i32")
   let held = br_emit_value(tried.br, MirNode::MirEnumDiscriminant(value = tried.value, type_idx = tag_ti))
   let first = br_emit_value(held.br, MirNode::MirConstInt(value = to_i64(0), type_idx = tag_ti))
-  let succeeded = br_emit_value(first.br, MirNode::MirBinary(op_tok = synthesized_equality_op(), lhs = held.value, rhs = first.value, type_idx = mir_bool_type()))
+  let succeeded = br_emit_value(first.br, MirNode::MirBinary(op_tok = hir::synthesized_equality_op(), lhs = held.value, rhs = first.value, type_idx = mir_bool_type()))
   let cur = succeeded.br
   let ok_r = ms_new_block(cur.ms)
   cur.ms = ok_r.ms
@@ -521,19 +522,19 @@ fn lower_short_circuit(br: BlockR, is_and: bool, left: i64, right: i64, type_idx
 fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
   if hir_node_idx < 0:
     return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
-  let node: HirNode = br.ms.hir.nodes.get(hir_node_idx)
+  let node: hir::HirNode = br.ms.hir.nodes.get(hir_node_idx)
   match node:
-    HirNode::HirIntLit(value, type_idx):
+    hir::HirNode::HirIntLit(value, type_idx):
       return br_emit_value(br, MirNode::MirConstInt(value = value, type_idx = type_idx))
-    HirNode::HirEnumDiscriminant(value, type_idx):
+    hir::HirNode::HirEnumDiscriminant(value, type_idx):
       let disc_of: ExprR = lower_expr_value(br, value)
       return br_emit_value(disc_of.br, MirNode::MirEnumDiscriminant(value = disc_of.value, type_idx = type_idx))
-    HirNode::HirEnumPayload(value, variant, field, type_idx):
+    hir::HirNode::HirEnumPayload(value, variant, field, type_idx):
       let payload_of: ExprR = lower_expr_value(br, value)
       return br_emit_value(payload_of.br, MirNode::MirEnumPayload(value = payload_of.value, variant = variant, field = field, type_idx = type_idx))
-    HirNode::HirTry(operand, error_ti, return_ti, type_idx):
+    hir::HirNode::HirTry(operand, error_ti, return_ti, type_idx):
       return lower_try(br, operand, error_ti, return_ti, type_idx)
-    HirNode::HirPipe(left, right, type_idx):
+    hir::HirNode::HirPipe(left, right, type_idx):
       // `left |> right` is the call `right(left)`, with the piped value
       // evaluated before the target, in source order (host).  The checker
       // admits only a target of one parameter, so the one argument is the
@@ -541,7 +542,7 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       let piped = lower_expr_value(br, left)
       let target = lower_expr_value(piped.br, right)
       return emit_call(target.br, target.value, Vector<i64>::new().push(piped.value), type_idx, to_i64(-1))
-    HirNode::HirPtrOp(op, pointer, argument, type_idx):
+    hir::HirNode::HirPtrOp(op, pointer, argument, type_idx):
       // A read or a write goes through the pointee's place, as the
       // host's does; the other operations yield a pointer or a flag.
       if op == typecheck::ptr_op_get():
@@ -564,12 +565,12 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
         ptr_cur = ar.br
         arg_val = ar.value
       return br_emit_value(ptr_cur, MirNode::MirPtrOp(op = op, pointer = ptr_val, argument = arg_val, type_idx = type_idx))
-    HirNode::HirConstruct(args_lp, arg_count, type_idx):
+    hir::HirNode::HirConstruct(args_lp, arg_count, type_idx):
       let fields: ExprValues = lower_expr_values(br, read_hir_list(br.ms.hir.idx, args_lp))
       let cfl: MirFlush = mir_flush_list(fields.br.ms, fields.values)
       fields.br.ms = cfl.ms
       return br_emit_value(fields.br, MirNode::MirConstruct(arg_list_lp = cfl.list_pos, arg_count = arg_count, type_idx = type_idx))
-    HirNode::HirEnumConstruct(variant, payload_lp, payload_count, type_idx):
+    hir::HirNode::HirEnumConstruct(variant, payload_lp, payload_count, type_idx):
       // Evaluated in source order, placed in declaration order.
       let pairs: Vector<i64> = resolver::read_pairs(br.ms.hir.idx, payload_lp)
       let exprs: Vector<i64> = Vector<i64>::new()
@@ -588,7 +589,7 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       let efl: MirFlush = mir_flush_list(payload.br.ms, placed)
       payload.br.ms = efl.ms
       return br_emit_value(payload.br, MirNode::MirEnumConstruct(variant = variant, arg_list_lp = efl.list_pos, arg_count = payload_count, type_idx = type_idx))
-    HirNode::HirBoolLit(tok, type_idx):
+    hir::HirNode::HirBoolLit(tok, type_idx):
       if tok < to_i64(0) or tok >= br.ms.source.toks.length():
         br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "unsupported in Tier A MIR lowering: bool literal without a source token (synthesized HIR)")
         return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
@@ -598,11 +599,11 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       if lex == "true":
         v = to_i64(1)
       return br_emit_value(br, MirNode::MirConstBool(value = v, type_idx = type_idx))
-    HirNode::HirFloatLit(tok, type_idx):
+    hir::HirNode::HirFloatLit(tok, type_idx):
       return br_emit_value(br, MirNode::MirConstFloat(tok = tok, type_idx = type_idx))
-    HirNode::HirStringLit(tok, type_idx):
+    hir::HirNode::HirStringLit(tok, type_idx):
       return br_emit_value(br, MirNode::MirConstString(tok = tok, type_idx = type_idx))
-    HirNode::HirIdent(sym, type_idx, tok):
+    hir::HirNode::HirIdent(sym, type_idx, tok):
       let slot: i64 = ms_lookup_local(br.ms, sym)
       if slot >= 0:
         return emit_load(br, MirPlace(slot, Vector<i64>::new()), type_idx)
@@ -615,7 +616,7 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
           br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "'" + named.name + "' has no local slot in MIR")
           return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
       return br_emit_value(br, MirNode::MirFnRef(sym = sym, type_idx = type_idx))
-    HirNode::HirBinary(op_tok, left, right, type_idx):
+    hir::HirNode::HirBinary(op_tok, left, right, type_idx):
       // An operator the compiler synthesized has no token and is never logical.
       if op_tok >= 0 and op_tok < br.ms.source.toks.length():
         let op_kind = br.ms.source.toks.get(op_tok).kind
@@ -624,10 +625,10 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       let lhs_r: ExprR = lower_expr_value(br, left)
       let rhs_r: ExprR = lower_expr_value(lhs_r.br, right)
       return br_emit_value(rhs_r.br, MirNode::MirBinary(op_tok = op_tok, lhs = lhs_r.value, rhs = rhs_r.value, type_idx = type_idx))
-    HirNode::HirUnary(op_tok, operand, type_idx):
+    hir::HirNode::HirUnary(op_tok, operand, type_idx):
       let operand_r: ExprR = lower_expr_value(br, operand)
       return br_emit_value(operand_r.br, MirNode::MirUnary(op_tok = op_tok, operand = operand_r.value, type_idx = type_idx))
-    HirNode::HirCall(callee, args_lp, arg_count, type_idx, call_subst):
+    hir::HirNode::HirCall(callee, args_lp, arg_count, type_idx, call_subst):
       // A call on a member access is a call through a type parameter's
       // bound (lower_bound_call): which function it calls is decided by
       // an instantiation.  A template carries it, as the host's template
@@ -636,7 +637,7 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       // has a type parameter's value to call through, so there it is
       // rejected rather than lowered as a field.
       match br.ms.hir.nodes.get(callee):
-        HirNode::HirFieldAccess(bound_obj, bound_field, bound_ti):
+        hir::HirNode::HirFieldAccess(bound_obj, bound_field, bound_ti):
           if br.ms.func.in_template == false and mir_is_type_param(br.ms, ms_get_hir_type(br.ms, br.ms.hir.nodes.get(bound_obj))):
             br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)),
               "unsupported in Tier A MIR lowering: a call through a type parameter's bound (HirCall on HirFieldAccess) needs an instantiation to name its function")
@@ -644,23 +645,23 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       let callee_r: ExprR = lower_expr_value(br, callee)
       let call_args: ExprValues = lower_expr_values(callee_r.br, read_hir_list(callee_r.br.ms.hir.idx, args_lp))
       return emit_call(call_args.br, callee_r.value, call_args.values, type_idx, call_subst)
-    HirNode::HirFieldAccess(obj, field_tok, type_idx):
+    hir::HirNode::HirFieldAccess(obj, field_tok, type_idx):
       let obj_r: ExprR = lower_expr_value(br, obj)
       // Resolve field_index from the object's struct type (Tier B).
-      let obj_hir: HirNode = obj_r.br.ms.hir.nodes.get(obj)
+      let obj_hir: hir::HirNode = obj_r.br.ms.hir.nodes.get(obj)
       let obj_ti: i64 = ms_get_hir_type(obj_r.br.ms, obj_hir)
       let fidx: i64 = mir_resolve_field_index(obj_r.br.ms, obj_ti, field_tok)
       return br_emit_value(obj_r.br, MirNode::MirFieldAccess(obj = obj_r.value, field_tok = field_tok, field_index = fidx, type_idx = type_idx))
-    HirNode::HirLambda(params_lp, param_count, body, type_idx):
+    hir::HirNode::HirLambda(params_lp, param_count, body, type_idx):
       return mir_lower_lambda(br, params_lp, body, type_idx)
-    HirNode::HirErrorExpr(err_tok):
+    hir::HirNode::HirErrorExpr(err_tok):
       // HIR reported this expression already.
       return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
   // An expression kind with no Tier A lowering is reported, as an
   // unsupported statement is: its subexpressions are not lowered, so a
   // failure inside them (a call through a bound) must not vanish with it.
   br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)),
-    "unsupported expression kind in Tier A MIR lowering: " + hir_node_kind(node))
+    "unsupported expression kind in Tier A MIR lowering: " + hir::hir_node_kind(node))
   return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
 
 // Expressions lowered in order: the block after them and their values.
@@ -697,19 +698,19 @@ fn collect_lambda_captures(ms: MS, hir_idx: i64, bound: HashMap<string, i64>, sc
     return scan
   let cur: CaptureScan = scan
   match ms.hir.nodes.get(hir_idx):
-    HirNode::HirIdent(sym, typ, tok):
+    hir::HirNode::HirIdent(sym, typ, tok):
       if sym >= 0:
         let key: string = i64_to_string(sym)
         if bound.contains(key) == false and cur.seen.contains(key) == false:
           if ms_lookup_local(ms, sym) >= 0:
             cur = CaptureScan(cur.seen.set(key, to_i64(1)), cur.syms.push(sym))
       return cur
-    HirNode::HirBinary(op, l, r, ti):
+    hir::HirNode::HirBinary(op, l, r, ti):
       cur = collect_lambda_captures(ms, l, bound, cur)
       return collect_lambda_captures(ms, r, bound, cur)
-    HirNode::HirUnary(op, operand, ti):
+    hir::HirNode::HirUnary(op, operand, ti):
       return collect_lambda_captures(ms, operand, bound, cur)
-    HirNode::HirCall(callee, args_lp, ac, ti, sb):
+    hir::HirNode::HirCall(callee, args_lp, ac, ti, sb):
       cur = collect_lambda_captures(ms, callee, bound, cur)
       let args: Vector<i64> = read_hir_list(ms.hir.idx, args_lp)
       let i: i64 = to_i64(0)
@@ -717,38 +718,38 @@ fn collect_lambda_captures(ms: MS, hir_idx: i64, bound: HashMap<string, i64>, sc
         cur = collect_lambda_captures(ms, args.get(i), bound, cur)
         i = i + to_i64(1)
       return cur
-    HirNode::HirFieldAccess(obj, ft, ti):
+    hir::HirNode::HirFieldAccess(obj, ft, ti):
       return collect_lambda_captures(ms, obj, bound, cur)
-    HirNode::HirPipe(l, r, ti):
+    hir::HirNode::HirPipe(l, r, ti):
       cur = collect_lambda_captures(ms, l, bound, cur)
       return collect_lambda_captures(ms, r, bound, cur)
-    HirNode::HirTry(operand, et, rt, ti):
+    hir::HirNode::HirTry(operand, et, rt, ti):
       return collect_lambda_captures(ms, operand, bound, cur)
-    HirNode::HirEnumDiscriminant(v, ti):
+    hir::HirNode::HirEnumDiscriminant(v, ti):
       return collect_lambda_captures(ms, v, bound, cur)
-    HirNode::HirEnumPayload(v, vi, fi, ti):
+    hir::HirNode::HirEnumPayload(v, vi, fi, ti):
       return collect_lambda_captures(ms, v, bound, cur)
-    HirNode::HirConstruct(args_lp, ac, ti):
+    hir::HirNode::HirConstruct(args_lp, ac, ti):
       let cargs: Vector<i64> = read_hir_list(ms.hir.idx, args_lp)
       let ci: i64 = to_i64(0)
       while ci < cargs.length():
         cur = collect_lambda_captures(ms, cargs.get(ci), bound, cur)
         ci = ci + to_i64(1)
       return cur
-    HirNode::HirEnumConstruct(v, payload_lp, pc, ti):
+    hir::HirNode::HirEnumConstruct(v, payload_lp, pc, ti):
       let epairs: Vector<i64> = resolver::read_pairs(ms.hir.idx, payload_lp)
       let ei: i64 = to_i64(0)
       while ei < epairs.length():
         cur = collect_lambda_captures(ms, epairs.get(ei), bound, cur)
         ei = ei + to_i64(2)
       return cur
-    HirNode::HirPtrOp(op, p, a, ti):
+    hir::HirNode::HirPtrOp(op, p, a, ti):
       if p >= 0:
         cur = collect_lambda_captures(ms, p, bound, cur)
       if a >= 0:
         cur = collect_lambda_captures(ms, a, bound, cur)
       return cur
-    HirNode::HirLambda(sub_plp, sub_pc, sub_body, sub_ti):
+    hir::HirNode::HirLambda(sub_plp, sub_pc, sub_body, sub_ti):
       let inner_bound: HashMap<string, i64> = bound
       let spcount: i64 = read_hir_list_count(ms.hir.idx, sub_plp)
       let spstart: i64 = sub_plp - spcount * to_i64(2)
@@ -856,9 +857,9 @@ fn mir_lower_lambda(br: BlockR, params_lp: i64, body: i64, type_idx: i64): ExprR
 fn mir_lower_stmt(br: BlockR, hir_node_idx: i64): BlockR
   if hir_node_idx < 0:
     return br
-  let node: HirNode = br.ms.hir.nodes.get(hir_node_idx)
+  let node: hir::HirNode = br.ms.hir.nodes.get(hir_node_idx)
   match node:
-    HirNode::HirLet(let_sym, type_idx, init):
+    hir::HirNode::HirLet(let_sym, type_idx, init):
       let dl: MirR = ms_declare_local(br.ms, let_sym, type_idx, false)
       br.ms = dl.ms
       let slot: i64 = dl.mir
@@ -866,7 +867,7 @@ fn mir_lower_stmt(br: BlockR, hir_node_idx: i64): BlockR
         let init_r: ExprR = lower_expr_value(br, init)
         return emit_store(init_r.br, MirPlace(slot, Vector<i64>::new()), init_r.value)
       return br
-    HirNode::HirAssign(target, value):
+    hir::HirNode::HirAssign(target, value):
       // The place first, then the value, as the host lowers them.
       let place: PlaceR = lower_place(br.ms, target)
       br.ms = place.ms
@@ -875,7 +876,7 @@ fn mir_lower_stmt(br: BlockR, hir_node_idx: i64): BlockR
       let val_r: ExprR = lower_expr_value(br, value)
       let stored: BlockR = emit_store(val_r.br, place.place, val_r.value)
       return mark_escapes_dirty(stored, place.place.local)
-    HirNode::HirBreak(t):
+    hir::HirNode::HirBreak(t):
       let loop_count: i64 = br.ms.flow.loops.length()
       if loop_count == 0:
         br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "break outside a loop")
@@ -884,17 +885,17 @@ fn mir_lower_stmt(br: BlockR, hir_node_idx: i64): BlockR
       let lp: LoopExit = br.ms.flow.loops.get(loop_count - 1)
       let left: RegionExitR = emit_region_exits(br, lp.region_depth, false, to_i64(-1), to_i64(-1))
       return br_emit_terminator(left.br, MirNode::MirBr(target_block = lp.block))
-    HirNode::HirMode(name, body_lp):
+    hir::HirNode::HirMode(name, body_lp):
       return lower_mode(br, hir_node_idx, name, body_lp)
-    HirNode::HirYield(value):
+    hir::HirNode::HirYield(value):
       if value < 0:
         br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "yield without a value")
         return br
       let yielded: ExprR = lower_expr_value(br, value)
       return emit_effect(yielded.br, MirNode::MirYield(value = yielded.value))
-    HirNode::HirFor(var_sym, iter, body_lp):
+    hir::HirNode::HirFor(var_sym, iter, body_lp):
       return lower_for(br, hir_node_idx, var_sym, iter, body_lp)
-    HirNode::HirReturn(value):
+    hir::HirNode::HirReturn(value):
       // Every open region is left; a memory domain's exit copies the
       // returned value out first.
       if value >= 0:
@@ -904,22 +905,22 @@ fn mir_lower_stmt(br: BlockR, hir_node_idx: i64): BlockR
         return br_emit_terminator(ret_left.br, MirNode::MirReturn(value = ret_left.carried, has_value = to_i64(1)))
       let left_void: RegionExitR = emit_region_exits(br, to_i64(0), true, to_i64(-1), to_i64(-1))
       return br_emit_terminator(left_void.br, MirNode::MirReturn(value = to_i64(-1), has_value = to_i64(0)))
-    HirNode::HirExprStmt(expr):
+    hir::HirNode::HirExprStmt(expr):
       let expr_r: ExprR = lower_expr_value(br, expr)
       return expr_r.br
-    HirNode::HirErrorStmt(t):
+    hir::HirNode::HirErrorStmt(t):
       return br
-    HirNode::HirIf(cond, then_lp, else_lp):
+    hir::HirNode::HirIf(cond, then_lp, else_lp):
       return mir_lower_if_stmt(br, cond, then_lp, else_lp)
-    HirNode::HirWhile(cond, body_lp):
+    hir::HirNode::HirWhile(cond, body_lp):
       return mir_lower_while_stmt(br, cond, body_lp)
-    HirNode::HirResource(kind, name, body_lp):
+    hir::HirNode::HirResource(kind, name, body_lp):
       return lower_resource(br, hir_node_idx, kind, name, body_lp)
   // Unsupported statement kind (Tier A).  Emit
   // a diagnostic so downstream consumers observe the failure instead
   // of seeing valid-looking MIR with silently-dropped control flow.
   br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)),
-    "unsupported statement kind in Tier A MIR lowering: " + hir_node_kind(node))
+    "unsupported statement kind in Tier A MIR lowering: " + hir::hir_node_kind(node))
   return br
 
 // A place a store writes: a local slot and the field-index path from it.
@@ -938,11 +939,11 @@ class PlaceR:
 fn lower_place(ms: MS, target: i64): PlaceR
   let none: MirPlace = MirPlace(to_i64(-1), Vector<i64>::new())
   match ms.hir.nodes.get(target):
-    HirNode::HirIdent(sym, ti, tok):
+    hir::HirNode::HirIdent(sym, ti, tok):
       let slot: i64 = ms_lookup_local(ms, sym)
       if slot >= 0:
         return PlaceR(ms, MirPlace(slot, Vector<i64>::new()))
-    HirNode::HirFieldAccess(obj, field_tok, ti):
+    hir::HirNode::HirFieldAccess(obj, field_tok, ti):
       let base: PlaceR = lower_place(ms, obj)
       if base.place.local < 0:
         return base
@@ -951,7 +952,7 @@ fn lower_place(ms: MS, target: i64): PlaceR
         let ft: lexer::Token = base.ms.source.toks.get(field_tok)
         return PlaceR(ms_add_diag(base.ms, Span(ft.offset, ft.len), "unresolved field '" + substring(base.ms.source.src, ft.offset, ft.len) + "' in assignment target"), none)
       return PlaceR(base.ms, MirPlace(base.place.local, base.place.path.push(field)))
-  return PlaceR(ms_add_diag(ms, Span(to_i64(0), to_i64(1)), "unsupported assignment target: " + hir_node_kind(ms.hir.nodes.get(target))), none)
+  return PlaceR(ms_add_diag(ms, Span(to_i64(0), to_i64(1)), "unsupported assignment target: " + hir::hir_node_kind(ms.hir.nodes.get(target))), none)
 
 // The step of a place path to the value a pointer addresses.
 fn mir_deref_step(): i64
@@ -1114,9 +1115,9 @@ fn emit_region_exits(br: BlockR, depth: i64, leaving_fn: bool, carried: i64, car
 
 fn emit_region_exit(br: BlockR, region: ActiveRegion, leaving_fn: bool, carried: i64, carried_ti: i64): RegionExitR
   match br.ms.hir.nodes.get(region.stmt):
-    HirNode::HirMode(name_tok, body_lp):
+    hir::HirNode::HirMode(name_tok, body_lp):
       return RegionExitR(emit_effect(br, MirNode::MirModeExit(name_tok = name_tok)), carried)
-    HirNode::HirResource(kind_tok, name_tok, body_lp):
+    hir::HirNode::HirResource(kind_tok, name_tok, body_lp):
       let cur: BlockR = br
       let out: i64 = carried
       if mir_tok_text(br.ms, kind_tok) == "memory":
@@ -1132,7 +1133,7 @@ fn emit_region_exit(br: BlockR, region: ActiveRegion, leaving_fn: bool, carried:
             ei = ei + to_i64(1)
       let exit: BlockR = emit_effect(cur, MirNode::MirResourceExit(kind_tok = kind_tok, name_tok = name_tok, handle = region.handle))
       return RegionExitR(exit, out)
-    HirNode::HirFor(var_sym, iter, body_lp):
+    hir::HirNode::HirFor(var_sym, iter, body_lp):
       return RegionExitR(emit_effect(br, MirNode::MirIterDestroy(iter = region.handle)), carried)
   return RegionExitR(br, carried)
 
@@ -1189,20 +1190,20 @@ fn resource_escapes(ms: MS, list_pos: i64, found: Vector<i64>): Vector<i64>
   let i: i64 = to_i64(0)
   while i < stmts.length():
     match ms.hir.nodes.get(stmts.get(i)):
-      HirNode::HirAssign(target, value):
+      hir::HirNode::HirAssign(target, value):
         let root: i64 = place_root_local(ms, target)
         if root >= 0 and mir_owns_heap(ms, mir_local_type(ms, root)) and vec_contains(out, root) == false:
           out = out.push(root)
-      HirNode::HirIf(cond, then_lp, else_lp):
+      hir::HirNode::HirIf(cond, then_lp, else_lp):
         out = resource_escapes(ms, then_lp, out)
         out = resource_escapes(ms, else_lp, out)
-      HirNode::HirWhile(cond, body_lp):
+      hir::HirNode::HirWhile(cond, body_lp):
         out = resource_escapes(ms, body_lp, out)
-      HirNode::HirMode(name, body_lp):
+      hir::HirNode::HirMode(name, body_lp):
         out = resource_escapes(ms, body_lp, out)
-      HirNode::HirResource(kind, name, body_lp):
+      hir::HirNode::HirResource(kind, name, body_lp):
         out = resource_escapes(ms, body_lp, out)
-      HirNode::HirFor(var_sym, iter, body_lp):
+      hir::HirNode::HirFor(var_sym, iter, body_lp):
         out = resource_escapes(ms, body_lp, out)
     i = i + to_i64(1)
   return out
@@ -1210,9 +1211,9 @@ fn resource_escapes(ms: MS, list_pos: i64, found: Vector<i64>): Vector<i64>
 // The local slot an assignment target is rooted at, or -1.
 fn place_root_local(ms: MS, target: i64): i64
   match ms.hir.nodes.get(target):
-    HirNode::HirIdent(sym, ti, tok):
+    hir::HirNode::HirIdent(sym, ti, tok):
       return ms_lookup_local(ms, sym)
-    HirNode::HirFieldAccess(obj, field_tok, ti):
+    hir::HirNode::HirFieldAccess(obj, field_tok, ti):
       return place_root_local(ms, obj)
   return to_i64(-1)
 
@@ -1507,9 +1508,9 @@ fn read_hir_list_count(hir_idx: Vector<i64>, list_pos: i64): i64
   return hir_idx.get(list_pos)
 
 fn lower_function(ms: MS, hir_fn_idx: i64): MirR
-  let node: HirNode = ms.hir.nodes.get(hir_fn_idx)
+  let node: hir::HirNode = ms.hir.nodes.get(hir_fn_idx)
   match node:
-    HirNode::HirFunction(fn_sym, tparams, params_lp, ret_ti, body_lp, is_extern_i, class_owner):
+    hir::HirNode::HirFunction(fn_sym, tparams, params_lp, ret_ti, body_lp, is_extern_i, class_owner):
       ms = ms_reset_fn_state(ms)
 
       // Placeholder MirFunction — fields updated after lowering.
@@ -1643,18 +1644,18 @@ fn find_prelude_copy_out(p: resolver::Program, ms: MS): i64
   if p.hir.root < 0 or p.hir.root >= ms.hir.nodes.length():
     return to_i64(-1)
   match ms.hir.nodes.get(p.hir.root):
-    HirNode::HirProgram(module_list_lp):
+    hir::HirNode::HirProgram(module_list_lp):
       let modules: Vector<i64> = read_hir_list(ms.hir.idx, module_list_lp)
       let mi: i64 = to_i64(0)
       while mi < modules.length():
         match ms.hir.nodes.get(modules.get(mi)):
-          HirNode::HirModule(name_tok, decls_lp, module_id):
+          hir::HirNode::HirModule(name_tok, decls_lp, module_id):
             if resolver::program_module(p, module_id).is_prelude:
               let decls: Vector<i64> = read_hir_list(ms.hir.idx, decls_lp)
               let di: i64 = to_i64(0)
               while di < decls.length():
                 match ms.hir.nodes.get(decls.get(di)):
-                  HirNode::HirFunction(sym, tparams_lp, params_lp, ret_ti, body_lp, is_extern, class_owner):
+                  hir::HirNode::HirFunction(sym, tparams_lp, params_lp, ret_ti, body_lp, is_extern, class_owner):
                     if class_owner < 0 and sym >= 0:
                       if ms.program.symbols.get(sym).name == "copy_out" and read_hir_list_count(ms.hir.idx, params_lp) == 1:
                         return sym
@@ -1688,7 +1689,7 @@ fn lower_module(ms: MS, sf: graph::SourceFile, decls: Vector<i64>): ModuleLoweri
   while i < decls.length():
     let decl_idx: i64 = decls.get(i)
     match ms.hir.nodes.get(decl_idx):
-      HirNode::HirFunction(n, tparams_lp, params_lp, ret_ti, b, ie, co):
+      hir::HirNode::HirFunction(n, tparams_lp, params_lp, ret_ti, b, ie, co):
         ms.func.in_template = mir_function_is_generic(ms, tparams_lp, params_lp, ret_ti)
         let r: MirR = lower_function(ms, decl_idx)
         ms = r.ms
@@ -1711,7 +1712,7 @@ fn ms_function_empty(): MsFunction
   return MsFunction(to_i64(-1), Vector<i64>::new(), Vector<i64>::new(), HashMap<string, i64>::new(), to_i64(0), false)
 
 fn program_run_mir(p: resolver::Program): ProgramMir
-  let ph: ProgramHir = program_lower_hir(p)
+  let ph: hir::ProgramHir = hir::program_lower_hir(p)
   let hp: resolver::Program = ph.program
   let ms: MS = MS(
     MsHir(ph.arena.nodes, ph.arena.idx),
@@ -1725,12 +1726,12 @@ fn program_run_mir(p: resolver::Program): ProgramMir
   let module_nodes: Vector<i64> = Vector<i64>::new()
   if hp.hir.root >= 0 and hp.hir.root < ms.hir.nodes.length():
     match ms.hir.nodes.get(hp.hir.root):
-      HirNode::HirProgram(module_list_lp):
+      hir::HirNode::HirProgram(module_list_lp):
         let modules: Vector<i64> = read_hir_list(ms.hir.idx, module_list_lp)
         let mi: i64 = to_i64(0)
         while mi < modules.length():
           match ms.hir.nodes.get(modules.get(mi)):
-            HirNode::HirModule(name_tok, decls_lp, module_id):
+            hir::HirNode::HirModule(name_tok, decls_lp, module_id):
               let sf: graph::SourceFile = resolver::program_file_of_module(hp, module_id)
               let before: i64 = ms.out.diags.length()
               let lowered: ModuleLowering = lower_module(ms, sf, read_hir_list(ms.hir.idx, decls_lp))
@@ -3293,7 +3294,7 @@ fn mono_expand_enum_copy(m: Mono, fn_node: i64, block: i64, call: i64, callee: i
     if vi + to_i64(1) < t.info_count:
       m.tables.nodes = m.tables.nodes.push(MirNode::MirConstInt(value = vi, type_idx = i32_ti))
       let tag: i64 = m.tables.nodes.length() - to_i64(1)
-      m.tables.nodes = m.tables.nodes.push(MirNode::MirBinary(op_tok = synthesized_equality_op(), lhs = discr, rhs = tag, type_idx = bool_ti))
+      m.tables.nodes = m.tables.nodes.push(MirNode::MirBinary(op_tok = hir::synthesized_equality_op(), lhs = discr, rhs = tag, type_idx = bool_ti))
       let is_v: i64 = m.tables.nodes.length() - to_i64(1)
       let next_test: MonoBlock = mono_new_block(m, next_id, Vector<i64>::new())
       m = next_test.m

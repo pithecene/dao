@@ -17,13 +17,14 @@ recursive-descent parsing live in `bootstrap/parser/impl.dao`
 (`module bootstrap::parser`), which imports `bootstrap::lexer`
 (`bootstrap/lexer/impl.dao`), which imports `bootstrap::ascii`
 (`bootstrap/ascii.dao`). Name resolution lives in `bootstrap/resolver/impl.dao`
-(`module bootstrap::resolver`), and type checking lives in
-`bootstrap/typecheck/impl.dao` (`module bootstrap::typecheck`).
+(`module bootstrap::resolver`), type checking lives in
+`bootstrap/typecheck/impl.dao` (`module bootstrap::typecheck`), and HIR
+lowering lives in `bootstrap/hir/impl.dao` (`module bootstrap::hir`).
 
 ## Assembly
 
-The modules `bootstrap::base`, `bootstrap::resolver`, and
-`bootstrap::typecheck` compile directly from authored sources without `bootstrap/assemble.sh`. Subsystems not yet extracted
+The modules `bootstrap::base`, `bootstrap::resolver`,
+`bootstrap::typecheck`, and `bootstrap::hir` compile directly from authored sources without `bootstrap/assemble.sh`. Subsystems not yet extracted
 into standalone modules still compose upstream fragments via
 `bootstrap/assemble.sh`:
 
@@ -31,9 +32,9 @@ into standalone modules still compose upstream fragments via
 bash bootstrap/assemble.sh
 ```
 
-This produces `<subsystem>.gen.dao` for `hir`, `mir`, `llvm`,
+This produces `<subsystem>.gen.dao` for `mir`, `llvm`,
 `driver_tests`, and `driver`. The `ascii`, `lexer`, `parser`, `graph`, `base`,
-`resolver`, and `typecheck` modules compile directly from authored sources
+`resolver`, `typecheck`, and `hir` modules compile directly from authored sources
 without assembly:
 
 ```sh
@@ -45,7 +46,7 @@ Git ignores `*.gen.dao` files because they are build artifacts.
 ## Editing Rules
 
 1. **Edit authored `.dao` sources** (`base.dao`, `impl.dao`, `tests.dao`, `main.dao`), never `.gen.dao` files.
-2. **Run `bash bootstrap/assemble.sh`** after editing any assembled input (`hir`, `mir`, `llvm`, `driver`).
+2. **Run `bash bootstrap/assemble.sh`** after editing any assembled input (`mir`, `llvm`, `driver`).
 3. **Verify subsystems** via `task bootstrap-test` or `task bootstrap-crossing`.
 
 ## Rationale
