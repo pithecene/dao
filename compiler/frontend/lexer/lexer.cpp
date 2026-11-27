@@ -119,13 +119,16 @@ private:
   std::vector<Span> comments_;
 
   // Skips the `//` comment that begins at `start` and records where it is.
-  // It runs to the end of its line.  A carriage return ends a line as a line
-  // feed does, with or without one after it, and is left for the caller.
+  // The skip runs to the next line feed.  The recorded comment ends at the
+  // end of its line, which a carriage return marks as well.
   void skip_line_comment(uint32_t start) {
-    while (pos_ < src_.size() && src_[pos_] != '\n' && src_[pos_] != '\r') {
+    while (pos_ < src_.size() && src_[pos_] != '\n') {
       ++pos_;
     }
-    comments_.push_back({.offset = base_ + start, .length = pos_ - start});
+    const auto skipped = src_.substr(start, pos_ - start);
+    const auto line_end = skipped.find('\r');
+    const auto length = line_end == std::string_view::npos ? skipped.size() : line_end;
+    comments_.push_back({.offset = base_ + start, .length = static_cast<uint32_t>(length)});
   }
 
   // `offset` and `length` are buffer-local; the recorded span is program-wide.

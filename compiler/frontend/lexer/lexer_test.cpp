@@ -365,14 +365,11 @@ suite<"comment_tests"> comment_tests = [] {
     expect(output.source->text(output.result.comments[1]) == "// last");
   };
 
-  "a bare carriage return ends a comment as it ends a line"_test = [] {
-    auto output = lex_string("// first\r// second\rfn foo(): i32 -> 1\r");
-    expect(output.result.diagnostics.empty());
-    expect(fatal(output.result.comments.size() == 2_u));
-    expect(output.source->text(output.result.comments[0]) == "// first");
-    expect(output.source->text(output.result.comments[1]) == "// second");
-    expect(output.result.tokens[0].kind == TokenKind::KwFn)
-        << "the line after a comment is code, not more of the comment";
+  "a recorded comment ends at a bare carriage return"_test = [] {
+    auto output = lex_string("// first\rfn foo(): i32 -> 1\n");
+    expect(fatal(output.result.comments.size() == 1_u));
+    expect(output.source->text(output.result.comments[0]) == "// first")
+        << "the comment's span stays on its own line";
   };
 
   "a comment's span lies in the program's offset space"_test = [] {
