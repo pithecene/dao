@@ -9,3 +9,4 @@ Contents:
 - `aggregate_initialization.md`: proposed unified call binding (`_ name: Type` positional prefix, `name = expr` labels, same-name elision, labeled callable types), dotless structural aggregate initialization, and `_` pattern wildcards
 - `contextual_and_collection_literals.md`: proposed contextual literal sinks and homogeneous `Vector<T>` collection literals
 - `control_flow_expressions.md`: proposed value-producing `if` and `match` expressions, bottom type `never` for diverging arms, and definite-divergence rules
+- `match_and_arrow_taxonomy.md`: proposed semantics of `match`, where the compilers differ from the contracts today, and the candidate meanings of `:`, `->` and `=>`
