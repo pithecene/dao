@@ -238,6 +238,13 @@ suite<"indentation_tests"> indentation_tests = [] {
         {"a continuation byte with no lead", "\x9C\n", {"unexpected byte: 0x9C"}},
         {"a character cut short", "\xE2\x80\n", {"unexpected byte: 0xE2", "unexpected byte: 0x80"}},
         {"an overlong form", "\xC0\xAF\n", {"unexpected byte: 0xC0", "unexpected byte: 0xAF"}},
+        {"an overlong form of three bytes",
+         "\xE0\x9F\xBF\n",
+         {"unexpected byte: 0xE0", "unexpected byte: 0x9F", "unexpected byte: 0xBF"}},
+        {"an overlong form of four bytes",
+         "\xF0\x8F\xBF\xBF\n",
+         {"unexpected byte: 0xF0", "unexpected byte: 0x8F", "unexpected byte: 0xBF",
+          "unexpected byte: 0xBF"}},
         {"a surrogate",
          "\xED\xA0\x80\n",
          {"unexpected byte: 0xED", "unexpected byte: 0xA0", "unexpected byte: 0x80"}},
@@ -258,12 +265,17 @@ suite<"indentation_tests"> indentation_tests = [] {
   };
 
   "characters of two, three, and four bytes are each one error token"_test = [] {
-    // U+00E9, U+201C, U+1F600.
-    for (const std::string_view character : {"\xC3\xA9", "\xE2\x80\x9C", "\xF0\x9F\x98\x80"}) {
+    // U+00E9, U+201C, U+1F600, then the first and last characters that the
+    // second byte's narrower ranges admit: U+0800, U+D7FF, U+10000, U+10FFFF.
+    for (const std::string_view character :
+         {"\xC3\xA9", "\xE2\x80\x9C", "\xF0\x9F\x98\x80", "\xE0\xA0\x80", "\xED\x9F\xBF",
+          "\xF0\x90\x80\x80", "\xF4\x8F\xBF\xBF"}) {
       auto output = lex_string("x " + std::string(character) + " y\n");
       expect(count_kind(output.result.tokens, TokenKind::Error) == 1);
       expect(fatal(output.result.diagnostics.size() == 1U));
-      expect(output.result.diagnostics.front().span.length == character.size());
+      const auto& diag = output.result.diagnostics.front();
+      expect(diag.span.length == character.size());
+      expect(diag.message == "unexpected character: " + std::string(character)) << diag.message;
     }
   };
 

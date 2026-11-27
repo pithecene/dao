@@ -393,9 +393,10 @@ private:
   /// bytes there are not one: a stray continuation byte, a character cut
   /// short, an overlong form, a surrogate, or a value past U+10FFFF.
   [[nodiscard]] auto utf8_character_length(uint32_t start) const -> uint32_t {
-    // 0 past the end of the source, which no range below admits.
+    // peek_at answers 0 past the end of the source, which no range below
+    // admits.
     auto byte_at = [&](uint32_t offset) -> uint32_t {
-      return offset < src_.size() ? static_cast<unsigned char>(src_[offset]) : 0U;
+      return static_cast<unsigned char>(peek_at(offset));
     };
     const uint32_t lead = byte_at(start);
     if (lead < 0x80U) {

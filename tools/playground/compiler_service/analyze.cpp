@@ -256,11 +256,12 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   add_lexical_tokens(out, prog);
   // A program that stops at assembly has no resolution to draw on, but
   // the document's own tokens, and its syntax tree when it parsed, still
-  // classify.  Two conditions stop it.  An error anywhere in the
-  // submitted program, such as an import that names a module whose file
-  // did not lex, skips resolution for every document.  A document with a
-  // lexer diagnostic was never parsed, so it has no file node.  Without
-  // this reply's tokens the editor would show such a document plain.
+  // classify.  Two conditions stop it.  A load or module-graph error,
+  // such as an import that names a module whose file did not lex, skips
+  // resolution for every document; a parse error in one file is not
+  // such an error, and resolution runs past it.  A document with a lexer
+  // diagnostic was never parsed, so it has no file node.  Without this
+  // reply's tokens the editor would show such a document plain.
   if (has_error_severity(prog.program.diagnostics) || prog.user->file() == nullptr) {
     add_semantic_tokens(out, classify_tokens(prog.user->lex.tokens, prog.user->file()), prog);
     return out.reply();

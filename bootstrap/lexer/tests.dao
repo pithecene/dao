@@ -457,6 +457,29 @@ fn main(): i32
   if expect_token_span("uc_four_byte_span", r_four, 1, 2, 4):
     pass_count = pass_count + 1
 
+  // Bytes that are not UTF-8 are reported one at a time.  A surrogate's
+  // encoding (ED A0 80) and an overlong form (E0 9F BF) each have the
+  // length of a character and are not one: a rule that only counted
+  // continuation bytes would group them.
+  let src_surrogate = Builder::new().push("x ").push_char(237).push_char(160).push_char(128).push(" y\n").to_string()
+  let r_surrogate = lexer::lex(src_surrogate)
+  if expect_token_span("uc_surrogate_first", r_surrogate, 1, 2, 1):
+    pass_count = pass_count + 1
+  if expect_token_span("uc_surrogate_second", r_surrogate, 2, 3, 1):
+    pass_count = pass_count + 1
+  if expect_token_span("uc_surrogate_third", r_surrogate, 3, 4, 1):
+    pass_count = pass_count + 1
+  if expect_token("uc_surrogate_y", r_surrogate, 4, lexer::TK::Identifier, src_surrogate):
+    pass_count = pass_count + 1
+  if expect_error_count("uc_surrogate_count", r_surrogate, 3):
+    pass_count = pass_count + 1
+  let src_overlong = Builder::new().push("x ").push_char(224).push_char(159).push_char(191).push(" y\n").to_string()
+  let r_overlong = lexer::lex(src_overlong)
+  if expect_error_count("uc_overlong_count", r_overlong, 3):
+    pass_count = pass_count + 1
+  if expect_token("uc_overlong_y", r_overlong, 4, lexer::TK::Identifier, src_overlong):
+    pass_count = pass_count + 1
+
   // -----------------------------------------------------------------
   // 7.20 Empty source
   // -----------------------------------------------------------------
@@ -535,7 +558,7 @@ fn main(): i32
   // Section 9: Summary
   // =========================================================================
 
-  let total = 116
+  let total = 123
   print("")
   print("--- results ---")
   print(i32_to_string(pass_count) + " / " + i32_to_string(total) + " passed")
