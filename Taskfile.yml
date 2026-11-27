@@ -47,6 +47,8 @@ tasks:
   playground-install:
     desc: Install the playground frontend's pinned dependencies
     dir: tools/playground/frontend
+    # A task that builds the frontend and then uses its tools installs once.
+    run: once
     cmds:
       - npm ci --ignore-scripts
 

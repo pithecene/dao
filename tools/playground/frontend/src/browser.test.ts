@@ -140,19 +140,40 @@ async function exitIsStatedAtEveryWidth(page: Page): Promise<void> {
     if (!/\bEsc\b.*\bTab\b/.test((await hint.innerText()).trim())) {
       throw new Error(`${width} wide: the visible hint does not give both keys`);
     }
-    // The narrow layout scrolls, so the hint is first brought into view.
-    await hint.scrollIntoViewIfNeeded();
-    // Drawn, and the element a reader meets at its centre: nothing covers
-    // it, no ancestor clips it, and it lies inside the window.
     const readable = await hint.evaluate((element) => {
-      const box = element.getBoundingClientRect();
-      const atCentre = document.elementFromPoint(
-        box.left + box.width / 2,
-        box.top + box.height / 2,
+      // Brought into view only as a reader can: by the page's own scroll,
+      // and only where the page scrolls, which the wide layout does not.
+      const scrolls = (box: Element): boolean =>
+        !["hidden", "clip"].includes(getComputedStyle(box).overflowY);
+      if (scrolls(document.body) && scrolls(document.documentElement)) {
+        window.scrollBy(0, Math.max(0, element.getBoundingClientRect().bottom - innerHeight));
+      }
+      // The words themselves, which sit at the row's right edge.
+      const words = document.createRange();
+      words.selectNodeContents(element);
+      const text = words.getBoundingClientRect();
+      const inside = (edge: { left: number; top: number; right: number; bottom: number }) =>
+        text.width > 0 &&
+        text.left >= edge.left - 0.5 &&
+        text.right <= edge.right + 0.5 &&
+        text.top >= edge.top - 0.5 &&
+        text.bottom <= edge.bottom + 0.5;
+      let unclipped = inside({ left: 0, top: 0, right: innerWidth, bottom: innerHeight });
+      for (let box: Element | null = element; box && unclipped; box = box.parentElement) {
+        if (getComputedStyle(box).overflow !== "visible") {
+          unclipped = inside(box.getBoundingClientRect());
+        }
+      }
+      // The pointer's target at the middle of the words is the hint: no
+      // element that takes the pointer lies over them.
+      const target = document.elementFromPoint(
+        text.left + text.width / 2,
+        text.top + text.height / 2,
       );
       return (
         element.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
-        atCentre === element
+        unclipped &&
+        target === element
       );
     });
     if (!readable) throw new Error(`${width} wide: the hint is not drawn where it can be read`);
