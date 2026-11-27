@@ -17,12 +17,13 @@ async function run(): Promise<void> {
     const base = server.resolvedUrls?.local[0];
     if (!base) throw new Error("the dev server reported no local address");
     // The server's root is this frontend, three directories below the
-    // repository's.
-    // The server decodes a request's path with `decodeURI`, so the
-    // checkout's path is encoded with its inverse: a `%` or a space arrives
-    // as that character, and an `@` stays as it is.
-    const repoRoot = new URL("../../../", `file://${encodeURI(server.config.root)}/`).pathname;
-    const inRepo = (path: string): string => `${base}@fs${repoRoot}${path}?raw`;
+    // repository's.  The path is cut as a path, never parsed as a URL, and
+    // then encoded as the server decodes it (`decodeURI`): an `@` stays as
+    // it is, and a `%`, a space, a `#`, or a `?` in the checkout's path
+    // arrives as that character.
+    const repoRoot = server.config.root.split("/").slice(0, -3).join("/");
+    const inRepo = (path: string): string =>
+      `${base}@fs${encodeURI(`${repoRoot}/${path}`).replace(/[?#]/g, encodeURIComponent)}?raw`;
 
     const example = await statusAndBody(inRepo("examples/geometry/geom.dao"));
     if (example.status !== 200 || example.body !== geomSource) {
