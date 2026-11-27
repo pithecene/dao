@@ -132,11 +132,6 @@ pre {
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-sm);
   background: var(--surface-base);
-  white-space: nowrap;
-  /* The first thing to give way when the header runs short of room. */
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* The links never shrink: a link pushed out of a narrowed row cannot be
@@ -178,6 +173,25 @@ pre {
   flex-shrink: 0;
 }
 
+/* The two messages that come and go sit just below the header, out of
+   its row: in the row they would cover the links they have no room
+   beside.  The notice is at the right edge, the service status at the
+   left. */
+#nav-notice,
+#service-status {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  max-width: min(300px, calc(100vw - 2 * var(--space-4)));
+}
+
+#nav-notice {
+  right: var(--space-4);
+}
+
+#service-status {
+  left: var(--space-4);
+}
+
 #nav-notice {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
@@ -186,10 +200,6 @@ pre {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   padding: 3px var(--space-2);
-  max-width: 300px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 #service-status {
@@ -201,7 +211,6 @@ pre {
   border: 1px solid var(--syntax-resource-border);
   border-radius: var(--radius-sm);
   padding: 3px var(--space-2);
-  white-space: nowrap;
 }
 
 .btn {
@@ -523,6 +532,12 @@ pre {
   color: var(--fg-primary);
 }
 
+/* A table wider than its column scrolls inside this wrapper, which
+   leaves the table its own layout and its meaning to a screen reader. */
+.table-scroll {
+  overflow-x: auto;
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;
@@ -811,10 +826,6 @@ pre {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--fg-muted);
-  white-space: nowrap;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 #workspace-main {
@@ -907,12 +918,20 @@ pre {
   border-left-color: var(--accent-primary);
 }
 
-.file-item-label {
-  flex: 1;
+/* One line that gives way with an ellipsis when its row runs short. */
+.file-item-label,
+.brand-meta,
+#draft-status,
+#nav-notice,
+#service-status {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.file-item-label {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1778,10 +1797,19 @@ pre {
     overflow-y: auto;
   }
 
+  /* Wrapped, the header is several rows tall.  It scrolls away with the
+     page: stuck, it would cover a third of a phone screen and the
+     heading a reference link scrolls to. */
   #site-header {
     height: auto;
     flex-wrap: wrap;
     padding: var(--space-2) var(--space-3);
+    /* Not sticky, and still the box the two messages are placed against. */
+    position: relative;
+  }
+
+  .ref-section {
+    scroll-margin-top: var(--space-4);
   }
 
   /* The links wrap onto rows of their own: a row that scrolls sideways
@@ -1794,12 +1822,6 @@ pre {
   .site-nav {
     flex: 1 1 100%;
     flex-wrap: wrap;
-  }
-
-  /* A table wider than the screen scrolls inside itself. */
-  .data-table {
-    display: block;
-    overflow-x: auto;
   }
 
   .site-container code {
@@ -1815,6 +1837,10 @@ pre {
     height: auto;
     flex-wrap: wrap;
     padding: var(--space-2);
+  }
+
+  .workspace-toolbar-left {
+    flex-wrap: wrap;
   }
 
   #workspace-main {
