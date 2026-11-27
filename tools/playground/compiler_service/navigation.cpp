@@ -86,7 +86,8 @@ auto goto_definition(const nlohmann::json& request, const ServiceContext& ctx) -
   // The definition may live in another file of the program (the
   // prelude today); the reply says which, and the consumer decides
   // whether it can show it.
-  nlohmann::json body = {{"length", result->length}};
+  const Span defined{.offset = result->offset, .length = result->length};
+  nlohmann::json body = {{"length", query.pipe.prog.editor_length(defined)}};
   add_position(body, query.pipe.prog, result->offset);
   return {.status = http_status::ok, .body = std::move(body)};
 }
@@ -112,7 +113,7 @@ auto document_symbols(const nlohmann::json& request, const ServiceContext& ctx) 
         {"kind", sym.kind},
         {"file", pipe.prog.user->display_path},
         {"offset", pipe.prog.to_editor_offset(sym.span.offset)},
-        {"length", sym.span.length},
+        {"length", pipe.prog.editor_length(sym.span)},
         {"children", children},
     };
   };
@@ -134,7 +135,8 @@ auto references(const nlohmann::json& request, const ServiceContext& ctx) -> Rep
   }
   nlohmann::json refs = nlohmann::json::array();
   for (const auto& ref : query_references(query.token_offset, query.pipe.resolve_result)) {
-    nlohmann::json entry = {{"length", ref.span.length}, {"isDefinition", ref.is_definition}};
+    nlohmann::json entry = {{"length", query.pipe.prog.editor_length(ref.span)},
+                            {"isDefinition", ref.is_definition}};
     add_position(entry, query.pipe.prog, ref.span.offset);
     refs.push_back(std::move(entry));
   }

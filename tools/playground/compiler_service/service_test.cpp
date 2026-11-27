@@ -18,12 +18,17 @@
 #include "support/test_utils.h"
 
 #include <boost/ut.hpp>
+#include <llvm/Support/ConvertUTF.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include <algorithm>
+#include <csignal>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -50,6 +55,36 @@ auto document_request(const std::string& source, json extra = json::object()) ->
                   {"document", kTestDocument}};
   request.update(extra);
   return request;
+}
+
+/// The editor's offset of a byte offset in `text`: UTF-16 code units,
+/// by a count that shares nothing with the service's.
+auto editor_offset(std::string_view text, size_t bytes) -> uint32_t {
+  uint32_t units = 0;
+  for (size_t i = 0; i < bytes; ++i) {
+    const auto byte = static_cast<unsigned char>(text[i]);
+    units += (byte & 0xC0U) != 0x80U ? 1U : 0U; // every byte but a continuation
+    units += byte >= 0xF0U ? 1U : 0U;           // the second half of a surrogate pair
+  }
+  return units;
+}
+
+/// The byte offset in `text` of an editor offset, for reading back the
+/// text a reply's range covers; nothing when the offset falls inside a
+/// character or past the text, where no text starts.
+auto byte_offset(std::string_view text, uint32_t units) -> std::optional<size_t> {
+  const auto* cursor = reinterpret_cast<const llvm::UTF8*>(text.data()); // NOLINT
+  const auto* end = cursor + text.size();                                // NOLINT
+  size_t bytes = 0;
+  uint32_t passed = 0;
+  while (passed < units && cursor < end) {
+    // A byte that begins no character is one unit, as in the service.
+    const size_t width = std::max(1U, llvm::getUTF8SequenceSize(cursor, end));
+    passed += width == 4 ? 2U : 1U;
+    cursor += width; // NOLINT
+    bytes += width;
+  }
+  return passed == units ? std::optional<size_t>(bytes) : std::nullopt;
 }
 
 auto golden_dir() -> std::filesystem::path {
@@ -529,10 +564,17 @@ suite<"playground_service"> playground_service_suite = [] {
       expect(nothrow([&] { (void)reply.body.dump(); })) << "the reply does not serialize";
       std::multimap<std::string, std::string> text_by_kind;
       for (const auto& token : reply.body["semanticTokens"]) {
-        auto offset = token["offset"].get<size_t>();
-        auto length = token["length"].get<size_t>();
-        expect(offset + length <= document.size()) << "a span outside the document";
-        text_by_kind.emplace(token["kind"].get<std::string>(), document.substr(offset, length));
+        auto offset = token["offset"].get<uint32_t>();
+        auto length = token["length"].get<uint32_t>();
+        // The end in a wider type: a length near the type's limit must
+        // not wrap back inside the document.
+        expect(fatal(uint64_t{offset} + length <= editor_offset(document, document.size())))
+            << "a span outside the document";
+        auto first = byte_offset(document, offset);
+        auto past = byte_offset(document, offset + length);
+        expect(fatal(first.has_value() && past.has_value())) << "a span that splits a character";
+        text_by_kind.emplace(token["kind"].get<std::string>(),
+                             document.substr(*first, *past - *first));
       }
       return text_by_kind;
     };
@@ -664,6 +706,220 @@ suite<"playground_service"> playground_service_suite = [] {
     }
   };
 
+  "positions cross the boundary in the editor's unit"_test = [] {
+    // The editor counts UTF-16 code units and the compiler counts bytes.
+    // "é" is two bytes and one unit, and the emoji four bytes and two
+    // units, so past the comment the two counts differ by three.
+    const std::string source = "module app\n\n// caf\xC3\xA9 \xF0\x9F\x98\x80\n"
+                               "fn one(): i32 -> 1\n\n"
+                               "fn main(): i32\n  print(\"h\xC3\xA9\")\n  return one()\n";
+    auto units_of = [&](size_t bytes) -> uint32_t { return editor_offset(source, bytes); };
+    auto units_before = [&](std::string_view text) -> uint32_t {
+      auto bytes = source.find(text);
+      expect(fatal(bytes != std::string::npos)) << text;
+      return units_of(bytes);
+    };
+    expect(units_of(source.size()) + 4U == source.size())
+        << "the fixture must hold wide characters";
+
+    // Replies: a token's offset and length.
+    auto analyzed = call("analyze", document_request(source)).body;
+    auto token_at = [&](uint32_t offset) -> json {
+      for (const auto& token : analyzed["semanticTokens"]) {
+        if (token["offset"].get<uint32_t>() == offset) {
+          return token;
+        }
+      }
+      return json::object();
+    };
+    auto declared = token_at(units_before("main"));
+    expect(declared.value("kind", "") == "decl.function") << analyzed["semanticTokens"].dump();
+    expect(declared.value("length", 0U) == 4U);
+    expect(token_at(units_before("\"h")).value("length", 0U) == 4U)
+        << "a string literal of five bytes is four units";
+
+    // Requests: an offset in the editor's unit finds the token there, and
+    // the reply names the declaration in the same unit.
+    const auto declaration = units_before("one(): i32");
+    const auto use = units_before("one()\n");
+    auto definition = call("gotoDef", document_request(source, {{"offset", use}})).body;
+    expect(definition.value("offset", 0U) == declaration) << definition.dump();
+    expect(definition.value("length", 0U) == 3U) << definition.dump();
+    std::set<uint32_t> referenced;
+    for (const auto& ref : call("references", document_request(source, {{"offset", use}})).body) {
+      referenced.insert(ref["offset"].get<uint32_t>());
+      expect(ref["length"] == 3U) << ref.dump();
+    }
+    expect(referenced == std::set<uint32_t>{declaration, use});
+    bool outlined = false;
+    for (const auto& symbol : call("documentSymbols", document_request(source)).body) {
+      if (symbol["name"] == "main") {
+        outlined = true;
+        // The symbol spans its declaration, which holds the wide string
+        // and runs to the end of the source.
+        const auto start = units_before("fn main");
+        expect(symbol["offset"] == start) << symbol.dump();
+        expect(symbol["length"] == units_of(source.size()) - start) << symbol.dump();
+      }
+    }
+    expect(outlined) << "the outline must list main";
+
+    // The document's length is counted in the same unit: its end is a
+    // position, and its byte length, which is past the end, is not one.
+    // Between the emoji's two units is the emoji's start: the request's
+    // offset becomes the program offset of the emoji's first byte, not of
+    // a byte inside it.
+    const auto emoji = units_before("\xF0\x9F");
+    auto inputs = parse_program_request(document_request(source));
+    expect(fatal(inputs.has_value()));
+    auto prog = build_playground_program(service_context().repo_root, std::move(*inputs));
+    expect(fatal(prog.user != nullptr));
+    const auto emoji_byte = prog.user->base_offset + source.find("\xF0\x9F");
+    expect(prog.to_program_offset(emoji) == emoji_byte);
+    expect(prog.to_program_offset(emoji + 1) == emoji_byte);
+    expect(prog.to_program_offset(emoji + 2) == emoji_byte + 4);
+    expect(call("hover", document_request(source, {{"offset", emoji + 1}})).body.is_null());
+    const auto end = units_of(source.size());
+    expect(dispatch("hover", document_request(source, {{"offset", end}}), service_context())
+               .status == http_status::ok);
+    expect(dispatch("hover", document_request(source, {{"offset", source.size()}}),
+                    service_context())
+               .status == http_status::bad_request);
+  };
+
+  "a position inside a character is the character's start"_test = [] {
+    // A curly quote is three bytes and one unit.  A range over part of it
+    // covers all of it, wherever the range starts.
+    const Utf16Index quote("\xE2\x80\x9Cx");
+    for (uint32_t byte = 0; byte < 3; ++byte) {
+      const dao::Span marked = quote.to_utf16(dao::Span{.offset = byte, .length = 1});
+      expect(marked.offset == 0U && marked.length == 1U) << byte;
+      expect(quote.to_utf16(byte) == 0U) << byte;
+    }
+    expect(quote.to_utf16(3U) == 1U);
+    expect(quote.to_utf16(dao::Span{.offset = 1, .length = 0}).length == 0U);
+    expect(quote.to_utf16(dao::Span{.offset = 3, .length = 9}).length == 1U)
+        << "held inside the text";
+
+    // An emoji is four bytes and a surrogate pair.  The offset between
+    // the pair's halves is the emoji's start.
+    const Utf16Index emoji("a\xF0\x9F\x98\x80z");
+    expect(emoji.to_bytes(1U) == 1U);
+    expect(emoji.to_bytes(2U) == 1U);
+    expect(emoji.to_bytes(3U) == 5U);
+    expect(emoji.to_utf16(5U) == 3U);
+
+    // A lead byte with no continuation is one unit and takes nothing
+    // after it with it.
+    const Utf16Index malformed("\xE2"
+                               "ab");
+    expect(malformed.to_utf16(1U) == 1U);
+    expect(malformed.to_utf16(3U) == 3U);
+  };
+
+  "a character outside ASCII in rejected syntax is marked whole"_test = [] {
+    // A curly quote outside a string is three bytes and one unit.  The
+    // editor receives the reply as text, so the reply is read back from
+    // its serialized form: one error, over the quote and nothing else.
+    const std::string source =
+        "module app\n\nfn main(): i32\n  let x = \xE2\x80\x9C\n  return 0\n";
+    const auto quote = editor_offset(source, source.find("\xE2"));
+    auto sent = json::parse(call("analyze", document_request(source)).body.dump());
+    std::vector<json> errors;
+    for (const auto& diag : sent["diagnostics"]) {
+      if (diag["severity"] == "error") {
+        errors.push_back(diag);
+      }
+    }
+    expect(fatal(errors.size() == 1U)) << sent["diagnostics"].dump();
+    expect(errors.front()["offset"] == quote) << errors.front().dump();
+    expect(errors.front()["length"] == 1U) << errors.front().dump();
+    expect(errors.front()["col"] == 11U) << errors.front().dump();
+    // The text just past the quote starts on a character boundary.
+    expect(byte_offset("\xE2\x80\x9Cx", 1U) == std::optional<size_t>(3));
+    // Between an emoji's two units no text starts, and a lone lead byte
+    // takes nothing after it with it.
+    expect(!byte_offset("\xF0\x9F\x98\x80x", 1U).has_value());
+    expect(byte_offset("\xF0\x9F\x98\x80x", 2U) == std::optional<size_t>(4));
+    // The end of the text is a boundary, and past it there is none.
+    expect(byte_offset("\xF0\x9F\x98\x80x", 3U) == std::optional<size_t>(5));
+    expect(!byte_offset("\xF0\x9F\x98\x80x", 4U).has_value());
+    expect(byte_offset("\xE2"
+                       "ab",
+                       1U) == std::optional<size_t>(1));
+  };
+
+#ifndef NDEBUG
+  "a located span that runs past its file is refused"_test = [] {
+    // A span lies within one file.  The length conversion asserts it,
+    // where shortening the span would hide the broken one.
+    const std::string source = "module app\n";
+    auto inputs = parse_program_request(document_request(source));
+    expect(fatal(inputs.has_value()));
+    auto prog = build_playground_program(service_context().repo_root, std::move(*inputs));
+    expect(fatal(prog.user != nullptr));
+    const uint32_t last = prog.user->eof_offset() - 1;
+    expect(prog.editor_length({.offset = last, .length = 0}) == 0U);
+    expect(prog.editor_length({.offset = last, .length = 1}) == 1U);
+    // In a child process, which must end by the assertion's abort and
+    // by nothing else.
+    const pid_t child = fork();
+    expect(fatal(child >= 0));
+    if (child == 0) {
+      (void)prog.editor_length({.offset = last, .length = 2});
+      _exit(0);
+    }
+    int status = 0;
+    expect(waitpid(child, &status, 0) == child);
+    expect(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT) << status;
+  };
+#endif
+
+  "a column counts the editor's unit along its line"_test = [] {
+    // Wide characters on earlier lines do not move a column; one on the
+    // same line does.
+    const std::string source =
+        "module app\n\n// caf\xC3\xA9\nfn main(): i32\n"
+        "  print(\"h\xC3\xA9\" + missing)\n  return 0\n";
+    const auto at = source.find("missing");
+    const auto line_start = source.rfind('\n', at) + 1;
+    const auto column = 1U + editor_offset(source, at) - editor_offset(source, line_start);
+    expect(column + 1U == at - line_start + 1U) << "the fixture must differ by one on this line";
+    bool found = false;
+    for (const auto& diag : call("analyze", document_request(source)).body["diagnostics"]) {
+      if (diag["offset"] == editor_offset(source, at)) {
+        found = true;
+        expect(diag["col"] == column) << diag.dump();
+      }
+    }
+    expect(found) << "no diagnostic at the unknown name";
+  };
+
+  "positions in another file use that file's own count"_test = [] {
+    // The two files differ in how far bytes and units have drifted: by one
+    // in the document, by four in the library.
+    const std::string lib =
+        "module lib\n\n// \xF0\x9F\x98\x80 \xF0\x9F\x98\x80\nfn helper(): i32\n  return 41\n";
+    const std::string main =
+        "module app\nimport lib\n\n// caf\xC3\xA9\nfn main(): i32\n  return lib::helper() + 1\n";
+    json request = {{"files",
+                     json::array({{{"path", "lib.dao"}, {"source", lib}},
+                                  {{"path", kTestDocument}, {"source", main}}})},
+                    {"document", kTestDocument}};
+    const auto use = editor_offset(main, main.find("helper()"));
+    const auto declaration = editor_offset(lib, lib.find("helper()"));
+    request["offset"] = use;
+    auto definition = call("gotoDef", request).body;
+    expect(definition.value("file", "") == "lib.dao") << definition.dump();
+    expect(definition.value("offset", 0U) == declaration) << definition.dump();
+    std::set<std::pair<std::string, uint32_t>> referenced;
+    for (const auto& ref : call("references", request).body) {
+      referenced.emplace(ref["file"].get<std::string>(), ref["offset"].get<uint32_t>());
+    }
+    expect(referenced == std::set<std::pair<std::string, uint32_t>>{
+                             {"lib.dao", declaration}, {std::string(kTestDocument), use}});
+  };
+
   "document offsets are range checked"_test = [] {
     const std::string source = "module t\nfn main(): i32\n  return 0\n";
     const auto length = static_cast<int64_t>(source.size());
@@ -763,14 +1019,17 @@ suite<"playground_service"> playground_service_suite = [] {
       // only shape-checked above.)
       auto main_refs =
           call("references",
-               document_request(example.source, {{"offset", example.source.find("fn main") + 3}}));
+               document_request(example.source,
+                                {{"offset",
+                                  editor_offset(example.source,
+                                                example.source.find("fn main") + 3)}}));
       expect(!main_refs.body.empty()) << example.name << ": no references for main";
 
       // Scope completion at the end of the buffer, and member completion
       // just after the first `.`.  Members are guaranteed only for class
       // receivers (structs.dao's first `.` reads a field); builtin
       // receivers offer none yet.
-      auto end = static_cast<uint32_t>(example.source.size());
+      auto end = editor_offset(example.source, example.source.size());
       call("completions", document_request(example.source, {{"offset", end}}));
       auto dots = sample_offsets(semantic_tokens, "operator.member", 1);
       if (!dots.empty()) {

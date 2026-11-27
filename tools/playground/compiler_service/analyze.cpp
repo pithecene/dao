@@ -87,14 +87,13 @@ void add_lexical_tokens(AnalyzeOutput& out, const PlaygroundProgram& prog) {
     if (is_synthetic_token(tok.kind) || !prog.in_editor_text(tok.span.offset)) {
       continue;
     }
-    auto loc = prog.program.source_map.locate(tok.span.offset);
     out.tokens.push_back({
         {"kind", token_kind_name(tok.kind)},
         {"category", token_category(tok.kind)},
         {"offset", prog.to_editor_offset(tok.span.offset)},
-        {"length", tok.span.length},
+        {"length", prog.editor_length(tok.span)},
         {"line", prog.editor_line(tok.span.offset)},
-        {"col", loc.col},
+        {"col", prog.editor_column(*prog.user, tok.span.offset)},
         {"text", std::string(tok.text)},
     });
   }
@@ -107,13 +106,12 @@ void add_semantic_tokens(AnalyzeOutput& out,
     if (!prog.in_editor_text(stok.span.offset)) {
       continue;
     }
-    auto loc = prog.program.source_map.locate(stok.span.offset);
     out.semantic_tokens.push_back({
         {"kind", stok.kind},
         {"offset", prog.to_editor_offset(stok.span.offset)},
-        {"length", stok.span.length},
+        {"length", prog.editor_length(stok.span)},
         {"line", prog.editor_line(stok.span.offset)},
-        {"col", loc.col},
+        {"col", prog.editor_column(*prog.user, stok.span.offset)},
     });
   }
 }

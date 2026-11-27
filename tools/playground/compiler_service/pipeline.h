@@ -11,13 +11,65 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cassert>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace dao::playground {
+
+// ---------------------------------------------------------------------------
+// The editor counts a position in UTF-16 code units, as its buffer and
+// the language-server protocol do, and the compiler's spans count
+// bytes.  The two agree until the first character outside ASCII and
+// differ after it, so every offset and length that crosses the
+// service's boundary is converted here, in one place per file.
+// ---------------------------------------------------------------------------
+
+/// One file's byte positions in UTF-16 code units, and back.
+///
+/// A position inside a character is that character's start, in either
+/// direction: a byte offset in the middle of a UTF-8 sequence, or a
+/// code-unit offset between the halves of a surrogate pair.  A range
+/// that covers part of a character covers all of it, so a lexer error
+/// on one byte of a character marks the character.  A byte that begins
+/// no UTF-8 character is one code unit.
+class Utf16Index {
+public:
+  explicit Utf16Index(std::string_view text);
+  [[nodiscard]] auto to_utf16(uint32_t byte_offset) const -> uint32_t;
+  [[nodiscard]] auto to_bytes(uint32_t utf16_offset) const -> uint32_t;
+  /// The code-unit range of a byte range, held inside the text.
+  [[nodiscard]] auto to_utf16(Span bytes) const -> Span;
+  /// The one-based column in code units of the position at
+  /// `byte_offset`, whose one-based column in bytes is `byte_column`.
+  [[nodiscard]] auto column(uint32_t byte_offset, uint32_t byte_column) const -> uint32_t;
+
+private:
+  /// One character whose byte count and code-unit count differ: where it
+  /// ends in each unit and how wide it is.  Between two such characters
+  /// the units advance together.
+  struct WideCharacter {
+    uint32_t bytes_end;
+    uint32_t units_end;
+    uint32_t byte_width;
+    uint32_t unit_width;
+  };
+  /// The code-unit offsets of the character boundaries on either side
+  /// of a byte offset; equal when the offset is itself a boundary.
+  struct Boundaries {
+    uint32_t before;
+    uint32_t after;
+  };
+  [[nodiscard]] auto boundaries(uint32_t byte_offset) const -> Boundaries;
+
+  std::vector<WideCharacter> wide_;
+  uint32_t byte_size_ = 0;
+};
 
 // ---------------------------------------------------------------------------
 // Program assembly and diagnostic serialization shared by the endpoints.
@@ -38,25 +90,56 @@ struct PlaygroundProgram {
   const SourceFile* user = nullptr; // the document's file
   uint32_t header_bytes = 0;        // synthetic module header length, 0 if the user wrote one
   uint32_t header_lines = 0;
+  /// Every file's offsets in the editor's unit, built with the program.
+  std::unordered_map<const SourceFile*, Utf16Index> utf16;
 
-  /// Length of the document as the editor sees it (without the
-  /// synthetic module header).  The header was prepended to this file's
-  /// own text, so it cannot exceed the buffer; the guard keeps a
-  /// mistake from underflowing into a four-billion-byte document that
-  /// would let every offset through.
+  /// Length of the document as the editor sees it: in the editor's
+  /// unit, without the synthetic module header.  The header is ASCII
+  /// and was prepended to this file's own text, so it cannot exceed the
+  /// buffer; the guard keeps a mistake from underflowing into a
+  /// four-billion-unit document that would let every offset through.
   [[nodiscard]] auto document_length() const -> uint32_t {
-    auto size = static_cast<uint32_t>(user->buffer.size());
+    auto size = utf16.at(user).to_utf16(static_cast<uint32_t>(user->buffer.size()));
     return size >= header_bytes ? size - header_bytes : 0;
   }
   /// Program offset of an editor-buffer offset, which must be at most
   /// document_length() (document_offset checks a request's).
   [[nodiscard]] auto to_program_offset(uint32_t editor_offset) const -> uint32_t {
-    return user->base_offset + header_bytes + editor_offset;
+    return user->base_offset + utf16.at(user).to_bytes(header_bytes + editor_offset);
+  }
+  /// The editor's offset, within `file`, of a program offset inside it.
+  /// The document's offsets leave out its synthetic header.
+  [[nodiscard]] auto editor_offset_in(const SourceFile& file, uint32_t program_offset) const
+      -> uint32_t {
+    auto units = utf16.at(&file).to_utf16(file.local_offset(program_offset));
+    auto skipped = &file == user ? header_bytes : 0;
+    return units >= skipped ? units - skipped : 0;
   }
   /// Editor-buffer offset of a program offset inside the user file.
   [[nodiscard]] auto to_editor_offset(uint32_t program_offset) const -> uint32_t {
-    auto local = user->local_offset(program_offset);
-    return local >= header_bytes ? local - header_bytes : 0;
+    return editor_offset_in(*user, program_offset);
+  }
+  /// A span's length in the editor's unit.  A span that starts in no
+  /// file has no position to report (add_position gives it none), so
+  /// it has no length either.  One that starts in a file lies wholly in
+  /// it: a span that runs past its file is an internal error
+  /// (SourceMap::owner_of), not a range to shorten.
+  [[nodiscard]] auto editor_length(Span span) const -> uint32_t {
+    const auto* file = program.source_map.file_for(span.offset);
+    if (file == nullptr) {
+      return 0;
+    }
+    assert(program.source_map.owner_of(span) == file && "a located span runs past its file");
+    return utf16.at(file)
+        .to_utf16({.offset = file->local_offset(span.offset), .length = span.length})
+        .length;
+  }
+  /// The one-based column, in the editor's unit, of a program offset
+  /// inside `file`.
+  [[nodiscard]] auto editor_column(const SourceFile& file, uint32_t program_offset) const
+      -> uint32_t {
+    return utf16.at(&file).column(file.local_offset(program_offset),
+                                  program.source_map.locate(program_offset).col);
   }
   /// True if the offset lies in the editor buffer (not prelude, not gap).
   [[nodiscard]] auto in_user_file(uint32_t program_offset) const -> bool {

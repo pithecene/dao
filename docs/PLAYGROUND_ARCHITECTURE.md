@@ -99,7 +99,13 @@ silently unstyled token.
 
 **Program-shaped requests, file identity on replies.** A request
 carries the files of the program and names the one it is about
-(`files`, `document`; offsets are local to the document).  This UI
+(`files`, `document`; offsets are local to the document).  Offsets,
+lengths, and columns, in requests and replies, count UTF-16 code units,
+as the editor's buffer does; the service converts the compiler's byte
+spans at its boundary.  The service converts and not the client,
+because a reply can name a position in a file the client does not
+hold, such as a definition in the prelude: the client could not convert
+it without first fetching that file's text.  This UI
 sends one file; a workspace sends them all, and the service is the
 same.  Every position a reply carries names its file (`file`, the
 display path) with file-local offset and line — diagnostics, symbols,
