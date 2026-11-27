@@ -177,7 +177,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 59
+  let total: i32 = 60
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -901,6 +901,21 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL both_branches_break_drop_the_rest: got " + i64_to_string(mir_count_kind(both_break, "MirCall")) + " calls, " + i64_to_string(both_break.diags.length()) + " diagnostics")
+
+  // An expression kind with no lowering is reported, never dropped: a
+  // path past a class reaches MIR as a qualified name.
+  let unlowered: MirResult = lower_to_mir("class C:\n  n: i32\n\nfn f(): C -> C::missing::member\n")
+  let unlowered_reported = false
+  let ui: i64 = 0
+  while ui < unlowered.diags.length():
+    if index_of(unlowered.diags.get(ui).message, "unsupported expression kind in Tier A MIR lowering") >= 0:
+      unlowered_reported = true
+    ui = ui + 1
+  if unlowered_reported:
+    print("PASS unsupported_expression_kind_reported_in_mir")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL unsupported_expression_kind_reported_in_mir: got " + i64_to_string(unlowered.diags.length()) + " diagnostics, none naming the kind")
 
   // A pipe lowers to a call of its target with the piped value: two
   // pipes, two calls, and no diagnostic.

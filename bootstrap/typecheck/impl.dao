@@ -393,6 +393,9 @@ fn ts_node_span(ts: TS, node_idx: i64): Span
       return ts_tok_span(ts, op_tidx)
     parser::Node::TryE(operand, question_tok):
       return ts_tok_span(ts, question_tok)
+    parser::Node::PipeE(left, right):
+      // A pipe's value is its last stage's.
+      return ts_node_span(ts, right)
     parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
       return ts_node_span(ts, callee)
     parser::Node::FieldE(obj, field_tidx):
