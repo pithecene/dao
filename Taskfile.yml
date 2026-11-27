@@ -44,11 +44,17 @@ tasks:
     cmds:
       - ctest --test-dir {{.BUILD_DIR}} --output-on-failure
 
+  playground-install:
+    desc: Install the playground frontend's pinned dependencies
+    dir: tools/playground/frontend
+    cmds:
+      - npm ci --ignore-scripts
+
   playground-build:
     desc: Build playground frontend assets
     dir: tools/playground/frontend
     cmds:
-      - npm ci --ignore-scripts
+      - task: playground-install
       - npm run build
     # Task resolves these against the task's directory.  The site imports
     # its snippets from the example corpus, so the examples are inputs too.
@@ -77,11 +83,11 @@ tasks:
     # cache, so nothing outside the repository changes, and not in
     # node_modules, which `npm ci` empties.
     env:
-      PLAYWRIGHT_BROWSERS_PATH: "{{.ROOT_DIR}}/{{.BUILD_DIR}}/playwright-browsers"
+      PLAYWRIGHT_BROWSERS_PATH: "{{if not (isAbs .BUILD_DIR)}}{{.ROOT_DIR}}/{{end}}{{.BUILD_DIR}}/playwright-browsers"
     cmds:
       # The frontend's build is skipped when its sources are unchanged,
       # whether or not its tools are still installed.
-      - cd tools/playground/frontend && (test -x node_modules/.bin/playwright || npm ci --ignore-scripts)
+      - task: playground-install
       # Only the headless shell, which is the browser the suite launches.
       - cd tools/playground/frontend && npx --no-install playwright install --only-shell chromium
       - DAO_BUILD_DIR={{.BUILD_DIR}} bash tools/playground/browser_test.sh
@@ -90,7 +96,7 @@ tasks:
     desc: Start playground in dev mode (Vite HMR on :5173, backend on :8090, backend restarts on rebuild)
     deps: [build]
     cmds:
-      - cd tools/playground/frontend && npm ci --ignore-scripts
+      - task: playground-install
       - DAO_BUILD_DIR={{.BUILD_DIR}} bash tools/playground/dev.sh
 
   gen-tooling-surface:

@@ -33,9 +33,12 @@ trap 'kill "$service_pid" 2>/dev/null || true; wait "$service_pid" 2>/dev/null |
 
 deadline=$((SECONDS + STARTUP_SECONDS))
 answered=""
-while [ "$SECONDS" -lt "$deadline" ]; do
+while true; do
+  # Read once: curl takes a limit of zero to mean no limit.
+  remaining=$((deadline - SECONDS))
+  [ "$remaining" -gt 0 ] || break
   kill -0 "$service_pid" 2>/dev/null || fail "the service exited before it answered on port $PORT"
-  if curl -fs -o /dev/null --max-time "$((deadline - SECONDS))" "$URL"; then
+  if curl -fs -o /dev/null --max-time "$remaining" "$URL"; then
     answered=yes
     break
   fi

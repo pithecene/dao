@@ -29,6 +29,12 @@ function probe(page: Page): Promise<EditorProbe> {
     const outline = getComputedStyle(document.querySelector(".cm-editor")!);
     const tabs = [...document.querySelectorAll(".editor-tab")];
     const outlineWidth = parseFloat(outline.outlineWidth);
+    // The colour may be written in any syntax, so the browser paints it and
+    // the opacity is read from the painted pixel.
+    const paint = document.createElement("canvas").getContext("2d")!;
+    paint.fillStyle = outline.outlineColor;
+    paint.fillRect(0, 0, 1, 1);
+    const outlineOpacity = paint.getImageData(0, 0, 1, 1).data[3];
     return {
       theme: document.documentElement.dataset.theme,
       focused: document.activeElement?.classList.contains("cm-content") ?? false,
@@ -38,7 +44,7 @@ function probe(page: Page): Promise<EditorProbe> {
         outline.outlineStyle !== "none" &&
         outlineWidth > 0 &&
         parseFloat(outline.outlineOffset) <= -outlineWidth &&
-        !/^rgba\(.*, 0\)$|^transparent$/.test(outline.outlineColor),
+        outlineOpacity > 0,
       lines: [...document.querySelectorAll(".cm-content .cm-line")].map(
         (line) => line.textContent ?? "",
       ),
@@ -113,12 +119,15 @@ async function editorIsNamedOnEveryFile(page: Page): Promise<void> {
   for (const [index, title] of loaded.tabTitles.entries()) {
     await page.locator(".editor-tab").nth(index).click();
     await eventually(page, `${title} becomes the open file`, (editor) => editor.activeTab === index);
-    // Found by role and name, as assistive technology finds it.
-    const named = page.getByRole("textbox", { name: "Source editor", exact: true });
-    if ((await named.count()) !== 1) throw new Error(`no text box named Source editor on ${title}`);
-    const description = (await named.getAttribute("aria-description")) ?? "";
-    if (!/\bEscape\b.*\bTab\b/.test(description)) {
-      throw new Error(`the editor does not give both keys for leaving it on ${title}`);
+    // Found by role, name, and description, as assistive technology
+    // receives them, whichever attributes supply them.
+    const named = { name: "Source editor", exact: true };
+    if ((await page.getByRole("textbox", named).count()) !== 1) {
+      throw new Error(`no text box named Source editor on ${title}`);
+    }
+    const described = { ...named, description: /\bEscape\b.*\bTab\b/ };
+    if ((await page.getByRole("textbox", described).count()) !== 1) {
+      throw new Error(`the editor's description does not give both keys for leaving it on ${title}`);
     }
   }
 }
@@ -131,14 +140,28 @@ async function exitIsStatedAtEveryWidth(page: Page): Promise<void> {
     if (!/\bEsc\b.*\bTab\b/.test((await hint.innerText()).trim())) {
       throw new Error(`${width} wide: the visible hint does not give both keys`);
     }
+    // The narrow layout scrolls, so the hint is first brought into view.
+    await hint.scrollIntoViewIfNeeded();
+    // Drawn, and the element a reader meets at its centre: nothing covers
+    // it, no ancestor clips it, and it lies inside the window.
+    const readable = await hint.evaluate((element) => {
+      const box = element.getBoundingClientRect();
+      const atCentre = document.elementFromPoint(
+        box.left + box.width / 2,
+        box.top + box.height / 2,
+      );
+      return (
+        element.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
+        atCentre === element
+      );
+    });
+    if (!readable) throw new Error(`${width} wide: the hint is not drawn where it can be read`);
     const hintBox = await hint.boundingBox();
     const editorBox = await page.locator("#editor-container").boundingBox();
     if (!hintBox || !editorBox) throw new Error(`${width} wide: the hint or the editor has no box`);
     // Half a pixel of slack: the two boxes share an edge at a fractional offset.
-    const underEditor = hintBox.y >= editorBox.y + editorBox.height - 0.5;
-    const inView = hintBox.x >= 0 && hintBox.x + hintBox.width <= width;
-    if (!underEditor || !inView) {
-      throw new Error(`${width} wide: the hint must sit under the editor, inside the window`);
+    if (hintBox.y < editorBox.y + editorBox.height - 0.5) {
+      throw new Error(`${width} wide: the hint must sit under the editor, not over it`);
     }
   }
 }
