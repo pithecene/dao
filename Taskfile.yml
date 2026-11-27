@@ -70,6 +70,17 @@ tasks:
     cmds:
       - "{{.BUILD_DIR}}/tools/playground/compiler_service/dao_playground {{.CLI_ARGS}}"
 
+  playground-browser-test:
+    desc: Run the playground's browser suite against the built service and frontend
+    deps: [build, playground-build]
+    # The browser is kept inside the frontend's node_modules, not in the
+    # user's cache, so nothing outside the repository changes.
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: "0"
+    cmds:
+      - cd tools/playground/frontend && npx --no-install playwright install chromium
+      - DAO_BUILD_DIR={{.BUILD_DIR}} bash tools/playground/browser_test.sh
+
   playground-dev:
     desc: Start playground in dev mode (Vite HMR on :5173, backend on :8090, backend restarts on rebuild)
     deps: [build]

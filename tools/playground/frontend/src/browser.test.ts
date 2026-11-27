@@ -22,6 +22,8 @@ interface EditorProbe {
   tokens: [string, string][];
   tabTitles: string[];
   activeTab: number;
+  /** Whether the instruction for leaving the editor is drawn. */
+  exitHintShown: boolean;
 }
 
 function probe(page: Page): Promise<EditorProbe> {
@@ -43,6 +45,8 @@ function probe(page: Page): Promise<EditorProbe> {
       ),
       tabTitles: tabs.map((tab) => tab.textContent?.trim() ?? ""),
       activeTab: tabs.findIndex((tab) => tab.classList.contains("active")),
+      exitHintShown:
+        getComputedStyle(document.querySelector("#editor-exit-hint")!).display !== "none",
     };
   });
 }
@@ -134,24 +138,59 @@ async function tokensCoverTheirOwnText(page: Page): Promise<void> {
 }
 
 async function tabIndentsAndEscapeLeaves(page: Page): Promise<void> {
-  await replaceEditorText(page, "fn main(): i32\nreturn 0\n");
+  const flat = ["fn main(): i32", "return 0", "let x = 1", ""];
+  // Two spaces a level: a tab character is not legal in Dao source.
+  const indented = ["fn main(): i32", "  return 0", "  let x = 1", ""];
+  const shows = (editor: EditorProbe, lines: string[]): boolean =>
+    editor.lines.join("\n") === lines.join("\n");
+
+  await replaceEditorText(page, flat.join("\n"));
+  await eventually(page, "the text is in the editor", (editor) => shows(editor, flat));
+  await eventually(page, "the way out shows while the editor has focus", (editor) =>
+    editor.exitHintShown,
+  );
+
+  // Select from the second line's start to the third line's end.
   await page.keyboard.press("ControlOrMeta+Home");
   await page.keyboard.press("ArrowDown");
-  const secondLine = (editor: EditorProbe): string | undefined => editor.lines[1];
-  await eventually(page, "the text is in the editor", (editor) => secondLine(editor) === "return 0");
+  await page.keyboard.press("Shift+ArrowDown");
+  await page.keyboard.press("Shift+End");
   await page.keyboard.press("Tab");
   await eventually(
     page,
-    "Tab indents the line and keeps focus",
-    (editor) => editor.focused && secondLine(editor) === "  return 0",
+    "Tab indents every selected line and keeps focus",
+    (editor) => editor.focused && shows(editor, indented),
   );
   await page.keyboard.press("Shift+Tab");
   await eventually(
     page,
     "Shift+Tab removes the indentation and keeps focus",
-    (editor) => editor.focused && secondLine(editor) === "return 0",
+    (editor) => editor.focused && shows(editor, flat),
   );
+
+  // The selection is still held, and a binding takes Escape to drop it.
   await leaveEditor(page);
+  await eventually(
+    page,
+    "leaving changes no text and hides the way out",
+    (editor) => shows(editor, flat) && !editor.exitHintShown,
+  );
+}
+
+async function tabPassesThroughReadOnlyFile(page: Page): Promise<void> {
+  await page.click(".sidebar-header.collapsible-header");
+  await page.locator("#prelude-list li").first().click();
+  await eventually(page, "a prelude file opens", (editor) => editor.tabTitles.length === 2);
+  await page.click(".cm-content");
+  const opened = await eventually(page, "the read-only editor takes focus", (editor) =>
+    editor.focused,
+  );
+  await page.keyboard.press("Tab");
+  await eventually(
+    page,
+    "Tab moves focus on from a read-only file and changes nothing",
+    (editor) => !editor.focused && editor.lines.join("\n") === opened.lines.join("\n"),
+  );
 }
 
 async function run(): Promise<void> {
@@ -161,6 +200,7 @@ async function run(): Promise<void> {
     editorIsNamedOnEveryFile,
     tokensCoverTheirOwnText,
     tabIndentsAndEscapeLeaves,
+    tabPassesThroughReadOnlyFile,
   ];
   const browser = await chromium.launch();
   try {
@@ -177,7 +217,7 @@ async function run(): Promise<void> {
   console.log("browser.test: all assertions passed");
 }
 
-run().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
+void run().catch((err: unknown) => {
+  console.error(err);
+  throw err;
 });
