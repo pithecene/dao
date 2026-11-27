@@ -432,8 +432,9 @@ probe. The probe remains as a historical artifact.
   the codes as `base::ptr_op_*`.  Both passes still import the checker
   for its entry points.
 - Make the host refuse a pipe target of more than one parameter.  The
-  bootstrap type checker refuses one.  The host's `check_pipe` accepts
-  it, and its MIR then calls the target with the piped value alone.
+  bootstrap type checker already refuses such a target.  The host's
+  `check_pipe` accepts it, and its MIR then calls the target with the
+  piped value alone.
 - Build each module context in `typecheck/tests.dao` with
   `typecheck::build_module_tc` in place of the six positional `TC`
   constructions.
