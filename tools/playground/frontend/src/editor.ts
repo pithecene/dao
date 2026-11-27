@@ -98,6 +98,10 @@ const pitheceneEditorTheme = EditorView.theme({
     fontStyle: "normal",
     marginLeft: "10px",
   },
+  // The selected row is tinted, and muted text does not stand out on it.
+  ".cm-tooltip-autocomplete ul li[aria-selected] .cm-completionDetail": {
+    color: "var(--fg-secondary)",
+  },
   ".cm-panels": {
     backgroundColor: "var(--surface-panel)",
     color: "var(--fg-primary)",

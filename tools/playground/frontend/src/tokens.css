@@ -22,7 +22,7 @@
   /* Typography colors */
   --fg-primary: #e6e8ec;
   --fg-secondary: #a5aeb9;
-  --fg-muted: #7e8692;
+  --fg-muted: #8c939d;
   --fg-inverse: #0e1013;
 
   /* Architectural hairlines & borders */
@@ -72,7 +72,7 @@
   --syntax-number: #d49b6a;
   --syntax-string: #94ba88;
   --syntax-operator: #7fc2cf;
-  --syntax-punctuation: #788290;
+  --syntax-punctuation: #7b8592;
 
   /* Shadows */
   --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.42), 0 1px 3px rgba(0, 0, 0, 0.3);
@@ -93,7 +93,7 @@
   /* Typography colors */
   --fg-primary: #191c20;
   --fg-secondary: #49505b;
-  --fg-muted: #636a76;
+  --fg-muted: #5d646f;
   --fg-inverse: #fcfbf8;
 
   /* Architectural hairlines & borders */
@@ -143,7 +143,7 @@
   --syntax-number: #8c4712;
   --syntax-string: #2f6626;
   --syntax-operator: #1b6270;
-  --syntax-punctuation: #6b7380;
+  --syntax-punctuation: #676f7c;
 
   /* Shadows */
   --shadow-popover: 0 8px 24px rgba(20, 22, 26, 0.12), 0 1px 3px rgba(20, 22, 26, 0.08);
