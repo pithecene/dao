@@ -13,8 +13,6 @@ import {
 import type { SourceInput } from "./generated/tooling_surface";
 import { escapeHtml } from "./util";
 import domainsSource from "../../../../examples/domains.dao?raw";
-import geometryGeomSource from "../../../../examples/geometry/geom.dao?raw";
-import geometryMainSource from "../../../../examples/geometry/main.dao?raw";
 import resourcePipelineSource from "../../../../examples/resource_pipeline.dao?raw";
 import structuredVariantsSource from "../../../../examples/structured_variants.dao?raw";
 import unsafePtrSource from "../../../../examples/unsafe_ptr.dao?raw";
@@ -59,6 +57,18 @@ function singleFileSnippet(id: string, path: string, source: string): SnippetSpe
   return { id, label: path, document: path, files: [{ path, source }] };
 }
 
+// Every file of `examples/geometry/`, as the service loads that directory:
+// a file added there joins the snippet without an edit here.
+const GEOMETRY_FILES: SourceInput[] = Object.entries(
+  import.meta.glob<string>("../../../../examples/geometry/*.dao", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }),
+)
+  .map(([path, source]) => ({ path: path.slice(path.lastIndexOf("/") + 1), source }))
+  .sort((a, b) => a.path.localeCompare(b.path));
+
 // Each snippet is a program of the example corpus, read from `examples/`
 // when the site is built, so the site shows what the compiler's tests run.
 const SNIPPETS: Record<string, SnippetSpec> = {
@@ -68,12 +78,9 @@ const SNIPPETS: Record<string, SnippetSpec> = {
   enumClass: singleFileSnippet("enumClass", "structured_variants.dao", structuredVariantsSource),
   multifileSnippet: {
     id: "multifileSnippet",
-    label: "geometry/ (2 files)",
+    label: `geometry/ (${GEOMETRY_FILES.length} files)`,
     document: "main.dao",
-    files: [
-      { path: "geom.dao", source: geometryGeomSource },
-      { path: "main.dao", source: geometryMainSource },
-    ],
+    files: GEOMETRY_FILES,
   },
 };
 

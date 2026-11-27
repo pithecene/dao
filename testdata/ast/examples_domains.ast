@@ -3,7 +3,7 @@ File
   FunctionDecl collect_squares
     Param limit: i64
     ReturnType: Vector<i64>
-    LetStatement out: Vector<i64>
+    LetStatement out
       CallExpr
         Callee
           Identifier Vector.new

@@ -9,7 +9,7 @@ fn increment_cell(ptr: Ptr<i32>): i32
   return out
 
 fn main(): i32
-  let cell: Ptr<i32> = __dao_mem_alloc(size_of<i32>(), align_of<i32>()).cast<i32>()
+  let cell = __dao_mem_alloc(size_of<i32>(), align_of<i32>()).cast<i32>()
   let result: i32 = 0
   mode unsafe =>
     cell.set(41)

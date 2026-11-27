@@ -1,7 +1,7 @@
 module domains
 
 fn collect_squares(limit: i64): Vector<i64>
-  let out: Vector<i64> = Vector<i64>::new()
+  let out = Vector<i64>::new()
   resource memory scratch =>
     let tmp: string = ""
     let i: i64 = 1

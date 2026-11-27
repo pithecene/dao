@@ -32,7 +32,7 @@ File
       Identifier out
   FunctionDecl main
     ReturnType: i32
-    LetStatement cell: Ptr<i32>
+    LetStatement cell
       CallExpr
         Callee
           FieldExpr .cast

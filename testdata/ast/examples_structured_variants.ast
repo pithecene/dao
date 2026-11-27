@@ -29,7 +29,7 @@ File
           IntLiteral 0
   FunctionDecl main
     ReturnType: i32
-    LetStatement a: Expr
+    LetStatement a
       CallExpr
         Callee
           QualifiedName Expr::Add

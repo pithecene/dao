@@ -37,7 +37,7 @@ File
     LetStatement report: string
       StringLiteral ""
     ResourceBlock memory scratch
-      LetStatement val: i32
+      LetStatement val
         CallExpr
           Callee
             Identifier evaluate

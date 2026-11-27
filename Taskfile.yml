@@ -54,6 +54,9 @@ tasks:
       - tools/playground/frontend/src/**/*
       - tools/playground/frontend/index.html
       - tools/playground/frontend/package-lock.json
+      # The site imports its snippets from the example corpus (this
+      # pattern is relative to the task's directory).
+      - ../../../examples/**/*.dao
     generates:
       - tools/playground/frontend/dist/index.html
 

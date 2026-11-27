@@ -16,7 +16,7 @@ fn evaluate(r: Reading): i32
 fn summarize(): string
   let report: string = ""
   resource memory scratch =>
-    let val: i32 = evaluate(Reading::Sample(wind_kt = 12, gust_kt = 6))
+    let val = evaluate(Reading::Sample(wind_kt = 12, gust_kt = 6))
     report = "score=" + i32_to_string(val)
   return report
 
