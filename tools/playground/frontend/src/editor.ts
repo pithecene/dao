@@ -1,4 +1,5 @@
 import { basicSetup } from "codemirror";
+import { indentWithTab } from "@codemirror/commands";
 import {
   Annotation,
   Compartment,
@@ -7,7 +8,7 @@ import {
   StateField,
   Transaction,
 } from "@codemirror/state";
-import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
+import { Decoration, type DecorationSet, EditorView, keymap } from "@codemirror/view";
 import { referenceHighlights, tokenHighlighter } from "./highlighting";
 import { daoCompletions } from "./completions";
 import type { Diagnostic } from "./generated/tooling_surface";
@@ -113,6 +114,13 @@ function createTabState(doc: string, readOnly: boolean): EditorState {
     doc,
     extensions: [
       basicSetup,
+      // Tab indents, so it no longer moves focus on its own.  Escape and
+      // then Tab does, which the editor provides; the description tells a
+      // screen reader so, and the hint bar tells a sighted reader.
+      keymap.of([indentWithTab]),
+      EditorView.contentAttributes.of({
+        "aria-description": "Press Escape, then Tab, to leave the editor.",
+      }),
       pitheceneEditorTheme,
       EditorView.contentAttributes.of({ "aria-label": "Source editor" }),
       readOnlyCompartment.of(EditorState.readOnly.of(readOnly)),
