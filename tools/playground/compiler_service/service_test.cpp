@@ -64,6 +64,16 @@ auto editor_offset(std::string_view text, size_t bytes) -> uint32_t {
   return units;
 }
 
+/// The byte offset in `text` of an editor offset: the inverse of
+/// editor_offset, for reading back the text a reply's range covers.
+auto byte_offset(std::string_view text, uint32_t units) -> size_t {
+  size_t bytes = 0;
+  while (bytes < text.size() && editor_offset(text, bytes) < units) {
+    ++bytes;
+  }
+  return bytes;
+}
+
 auto golden_dir() -> std::filesystem::path {
   return repo_root() / "testdata" / "examples";
 }
@@ -541,10 +551,14 @@ suite<"playground_service"> playground_service_suite = [] {
       expect(nothrow([&] { (void)reply.body.dump(); })) << "the reply does not serialize";
       std::multimap<std::string, std::string> text_by_kind;
       for (const auto& token : reply.body["semanticTokens"]) {
-        auto offset = token["offset"].get<size_t>();
-        auto length = token["length"].get<size_t>();
-        expect(offset + length <= document.size()) << "a span outside the document";
-        text_by_kind.emplace(token["kind"].get<std::string>(), document.substr(offset, length));
+        auto offset = token["offset"].get<uint32_t>();
+        auto length = token["length"].get<uint32_t>();
+        expect(offset + length <= editor_offset(document, document.size()))
+            << "a span outside the document";
+        auto first = byte_offset(document, offset);
+        auto past = byte_offset(document, offset + length);
+        text_by_kind.emplace(token["kind"].get<std::string>(),
+                             document.substr(first, past - first));
       }
       return text_by_kind;
     };
@@ -736,10 +750,19 @@ suite<"playground_service"> playground_service_suite = [] {
 
     // The document's length is counted in the same unit: its end is a
     // position, and its byte length, which is past the end, is not one.
-    // Between the emoji's two units is the emoji's start.
+    // Between the emoji's two units is the emoji's start: the request's
+    // offset becomes the program offset of the emoji's first byte, not of
+    // a byte inside it.
     const auto emoji = units_before("\xF0\x9F");
-    expect(call("hover", document_request(source, {{"offset", emoji + 1}})).body ==
-           call("hover", document_request(source, {{"offset", emoji}})).body);
+    auto inputs = parse_program_request(document_request(source));
+    expect(fatal(inputs.has_value()));
+    auto prog = build_playground_program(service_context().repo_root, std::move(*inputs));
+    expect(fatal(prog.user != nullptr));
+    const auto emoji_byte = prog.user->base_offset + source.find("\xF0\x9F");
+    expect(prog.to_program_offset(emoji) == emoji_byte);
+    expect(prog.to_program_offset(emoji + 1) == emoji_byte);
+    expect(prog.to_program_offset(emoji + 2) == emoji_byte + 4);
+    expect(call("hover", document_request(source, {{"offset", emoji + 1}})).body.is_null());
     const auto end = units_of(source.size());
     expect(dispatch("hover", document_request(source, {{"offset", end}}), service_context())
                .status == http_status::ok);
@@ -778,21 +801,23 @@ suite<"playground_service"> playground_service_suite = [] {
     expect(malformed.to_utf16(3U) == 3U);
   };
 
-  "a lexer error on part of a character marks the character"_test = [] {
-    // The lexer reports a curly quote outside a string byte by byte.  Each
-    // report marks the whole quote: one unit at the quote's offset.
-    const std::string source = "module app\n\nfn main(): i32\n  let x = \xE2\x80\x9C\n  return 0\n";
+  "a character outside ASCII in rejected syntax is marked whole"_test = [] {
+    // A curly quote outside a string is three bytes and one unit.  The
+    // editor receives the reply as text, so the reply is read back from
+    // its serialized form: one error, over the quote and nothing else.
+    const std::string source =
+        "module app\n\nfn main(): i32\n  let x = \xE2\x80\x9C\n  return 0\n";
     const auto quote = editor_offset(source, source.find("\xE2"));
+    auto sent = json::parse(call("analyze", document_request(source)).body.dump());
     size_t marked = 0;
-    // Read through dispatch: the reply's numbers are what is under test.
-    auto reply = dispatch("analyze", document_request(source), service_context());
-    for (const auto& diag : reply.body["diagnostics"]) {
+    for (const auto& diag : sent["diagnostics"]) {
       if (diag["severity"] == "error" && diag["offset"] == quote) {
         ++marked;
-        expect(diag["length"] == 1U) << diag["length"];
+        expect(diag["length"] == 1U) << diag.dump();
+        expect(diag["col"] == 11U) << diag.dump();
       }
     }
-    expect(marked >= 1U) << "no error at the quote";
+    expect(marked == 1U) << sent["diagnostics"].dump();
   };
 
   "a column counts the editor's unit along its line"_test = [] {

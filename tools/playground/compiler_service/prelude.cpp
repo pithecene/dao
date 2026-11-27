@@ -80,10 +80,11 @@ auto prelude_source(const nlohmann::json& request, const ServiceContext& ctx) ->
       continue;
     }
     auto loc = program.source_map.locate(stok.span.offset);
+    const Span shown = editor_span(stok.span);
     semantic_tokens.push_back({
         {"kind", stok.kind},
-        {"offset", editor_span(stok.span).offset},
-        {"length", editor_span(stok.span).length},
+        {"offset", shown.offset},
+        {"length", shown.length},
         {"line", loc.line},
         {"col", utf16.column(target->local_offset(stok.span.offset), loc.col)},
     });
@@ -95,12 +96,13 @@ auto prelude_source(const nlohmann::json& request, const ServiceContext& ctx) ->
     for (const auto& child : sym.children) {
       children.push_back(symbol_to_json(child));
     }
+    const Span shown = editor_span(sym.span);
     return {
         {"name", sym.name},
         {"kind", sym.kind},
         {"file", target->display_path},
-        {"offset", editor_span(sym.span).offset},
-        {"length", editor_span(sym.span).length},
+        {"offset", shown.offset},
+        {"length", shown.length},
         {"children", std::move(children)},
     };
   };

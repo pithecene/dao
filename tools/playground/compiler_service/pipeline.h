@@ -11,6 +11,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cassert>
 #include <cstdint>
 #include <expected>
 #include <filesystem>
@@ -120,12 +121,15 @@ struct PlaygroundProgram {
   }
   /// A span's length in the editor's unit.  A span that starts in no
   /// file has no position to report (add_position gives it none), so
-  /// it has no length either.
+  /// it has no length either.  One that starts in a file lies wholly in
+  /// it: a span that runs past its file is an internal error
+  /// (SourceMap::owner_of), not a range to shorten.
   [[nodiscard]] auto editor_length(Span span) const -> uint32_t {
     const auto* file = program.source_map.file_for(span.offset);
     if (file == nullptr) {
       return 0;
     }
+    assert(program.source_map.owner_of(span) == file && "a located span runs past its file");
     return utf16.at(file)
         .to_utf16({.offset = file->local_offset(span.offset), .length = span.length})
         .length;
