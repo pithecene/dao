@@ -159,13 +159,28 @@ async function exitIsStatedAtEveryWidth(page: Page): Promise<void> {
         text.top >= edge.top - 0.5 &&
         text.bottom <= edge.bottom + 0.5;
       let unclipped = inside({ left: 0, top: 0, right: innerWidth, bottom: innerHeight });
-      for (let box: Element | null = element; box && unclipped; box = box.parentElement) {
+      // Each box that clips, up to the body: the body's overflow belongs to
+      // the window, which the line above has measured.  A box clips at its
+      // padding edge, inside its border and any scrollbar.
+      for (
+        let box: Element | null = element;
+        box && box !== document.body && unclipped;
+        box = box.parentElement
+      ) {
         if (getComputedStyle(box).overflow !== "visible") {
-          unclipped = inside(box.getBoundingClientRect());
+          const border = box.getBoundingClientRect();
+          const left = border.left + box.clientLeft;
+          const top = border.top + box.clientTop;
+          unclipped = inside({
+            left,
+            top,
+            right: left + box.clientWidth,
+            bottom: top + box.clientHeight,
+          });
         }
       }
-      // The pointer's target at the middle of the words is the hint: no
-      // element that takes the pointer lies over them.
+      // The pointer's target at the middle of the words is the hint or a
+      // part of it: no other element that takes the pointer lies over them.
       const target = document.elementFromPoint(
         text.left + text.width / 2,
         text.top + text.height / 2,
@@ -173,7 +188,7 @@ async function exitIsStatedAtEveryWidth(page: Page): Promise<void> {
       return (
         element.checkVisibility({ opacityProperty: true, visibilityProperty: true }) &&
         unclipped &&
-        target === element
+        element.contains(target)
       );
     });
     if (!readable) throw new Error(`${width} wide: the hint is not drawn where it can be read`);
