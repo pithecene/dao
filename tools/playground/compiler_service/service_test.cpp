@@ -52,6 +52,18 @@ auto document_request(const std::string& source, json extra = json::object()) ->
   return request;
 }
 
+/// The editor's offset of a byte offset in `text`: UTF-16 code units,
+/// by a count that shares nothing with the service's.
+auto editor_offset(std::string_view text, size_t bytes) -> uint32_t {
+  uint32_t units = 0;
+  for (size_t i = 0; i < bytes; ++i) {
+    const auto byte = static_cast<unsigned char>(text[i]);
+    units += (byte & 0xC0U) != 0x80U ? 1U : 0U; // every byte but a continuation
+    units += byte >= 0xF0U ? 1U : 0U;           // the second half of a surrogate pair
+  }
+  return units;
+}
+
 auto golden_dir() -> std::filesystem::path {
   return repo_root() / "testdata" / "examples";
 }
@@ -599,6 +611,74 @@ suite<"playground_service"> playground_service_suite = [] {
     }
   };
 
+  "positions cross the boundary in the editor's unit"_test = [] {
+    // The editor counts UTF-16 code units and the compiler counts bytes.
+    // "é" is two bytes and one unit, and the emoji four bytes and two
+    // units, so past the comment the two counts differ by three.
+    const std::string source = "module app\n\n// caf\xC3\xA9 \xF0\x9F\x98\x80\n"
+                               "fn one(): i32 -> 1\n\n"
+                               "fn main(): i32\n  print(\"h\xC3\xA9\")\n  return one()\n";
+    auto units_of = [&](size_t bytes) -> uint32_t { return editor_offset(source, bytes); };
+    auto units_before = [&](std::string_view text) -> uint32_t {
+      auto bytes = source.find(text);
+      expect(fatal(bytes != std::string::npos)) << text;
+      return units_of(bytes);
+    };
+    expect(units_of(source.size()) + 4U == source.size())
+        << "the fixture must hold wide characters";
+
+    // Replies: a token's offset and length.
+    auto analyzed = call("analyze", document_request(source)).body;
+    auto token_at = [&](uint32_t offset) -> json {
+      for (const auto& token : analyzed["semanticTokens"]) {
+        if (token["offset"].get<uint32_t>() == offset) {
+          return token;
+        }
+      }
+      return json::object();
+    };
+    auto declared = token_at(units_before("main"));
+    expect(declared.value("kind", "") == "decl.function") << analyzed["semanticTokens"].dump();
+    expect(declared.value("length", 0U) == 4U);
+    expect(token_at(units_before("\"h")).value("length", 0U) == 4U)
+        << "a string literal of five bytes is four units";
+
+    // Requests: an offset in the editor's unit finds the token there, and
+    // the reply names the declaration in the same unit.
+    const auto declaration = units_before("one(): i32");
+    const auto use = units_before("one()\n");
+    auto definition = call("gotoDef", document_request(source, {{"offset", use}})).body;
+    expect(definition.value("offset", 0U) == declaration) << definition.dump();
+    expect(definition.value("length", 0U) == 3U) << definition.dump();
+    std::set<uint32_t> referenced;
+    for (const auto& ref : call("references", document_request(source, {{"offset", use}})).body) {
+      referenced.insert(ref["offset"].get<uint32_t>());
+      expect(ref["length"] == 3U) << ref.dump();
+    }
+    expect(referenced == std::set<uint32_t>{declaration, use});
+    bool outlined = false;
+    for (const auto& symbol : call("documentSymbols", document_request(source)).body) {
+      if (symbol["name"] == "main") {
+        outlined = true;
+        // The symbol spans its declaration, which holds the wide string
+        // and runs to the end of the source.
+        const auto start = units_before("fn main");
+        expect(symbol["offset"] == start) << symbol.dump();
+        expect(symbol["length"] == units_of(source.size()) - start) << symbol.dump();
+      }
+    }
+    expect(outlined) << "the outline must list main";
+
+    // The document's length is counted in the same unit: its end is a
+    // position, and its byte length, which is past the end, is not one.
+    const auto end = units_of(source.size());
+    expect(dispatch("hover", document_request(source, {{"offset", end}}), service_context())
+               .status == http_status::ok);
+    expect(dispatch("hover", document_request(source, {{"offset", source.size()}}),
+                    service_context())
+               .status == http_status::bad_request);
+  };
+
   "document offsets are range checked"_test = [] {
     const std::string source = "module t\nfn main(): i32\n  return 0\n";
     const auto length = static_cast<int64_t>(source.size());
@@ -698,14 +778,17 @@ suite<"playground_service"> playground_service_suite = [] {
       // only shape-checked above.)
       auto main_refs =
           call("references",
-               document_request(example.source, {{"offset", example.source.find("fn main") + 3}}));
+               document_request(example.source,
+                                {{"offset",
+                                  editor_offset(example.source,
+                                                example.source.find("fn main") + 3)}}));
       expect(!main_refs.body.empty()) << example.name << ": no references for main";
 
       // Scope completion at the end of the buffer, and member completion
       // just after the first `.`.  Members are guaranteed only for class
       // receivers (structs.dao's first `.` reads a field); builtin
       // receivers offer none yet.
-      auto end = static_cast<uint32_t>(example.source.size());
+      auto end = editor_offset(example.source, example.source.size());
       call("completions", document_request(example.source, {{"offset", end}}));
       auto dots = sample_offsets(semantic_tokens, "operator.member", 1);
       if (!dots.empty()) {

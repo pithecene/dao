@@ -92,7 +92,7 @@ void add_lexical_tokens(AnalyzeOutput& out, const PlaygroundProgram& prog) {
         {"kind", token_kind_name(tok.kind)},
         {"category", token_category(tok.kind)},
         {"offset", prog.to_editor_offset(tok.span.offset)},
-        {"length", tok.span.length},
+        {"length", prog.editor_length(tok.span)},
         {"line", prog.editor_line(tok.span.offset)},
         {"col", loc.col},
         {"text", std::string(tok.text)},
@@ -111,7 +111,7 @@ void add_semantic_tokens(AnalyzeOutput& out,
     out.semantic_tokens.push_back({
         {"kind", stok.kind},
         {"offset", prog.to_editor_offset(stok.span.offset)},
-        {"length", stok.span.length},
+        {"length", prog.editor_length(stok.span)},
         {"line", prog.editor_line(stok.span.offset)},
         {"col", loc.col},
     });

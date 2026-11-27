@@ -15,9 +15,37 @@
 #include <expected>
 #include <filesystem>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace dao::playground {
+
+// ---------------------------------------------------------------------------
+// The editor counts a position in UTF-16 code units, as its buffer and
+// the language-server protocol do, and the compiler's spans count
+// bytes.  The two agree until the first character outside ASCII and
+// differ after it, so every offset and length that crosses the
+// service's boundary is converted here, in one place per file.
+// ---------------------------------------------------------------------------
+
+/// One file's byte offsets as UTF-16 code-unit offsets, and back.
+/// Offsets fall on character boundaries.
+class Utf16Index {
+public:
+  explicit Utf16Index(std::string_view text);
+  [[nodiscard]] auto to_utf16(uint32_t byte_offset) const -> uint32_t;
+  [[nodiscard]] auto to_bytes(uint32_t utf16_offset) const -> uint32_t;
+
+private:
+  /// The offset just past one character outside ASCII, in each unit.
+  /// Between two such characters the units advance together.
+  struct PastWideCharacter {
+    uint32_t bytes;
+    uint32_t units;
+  };
+  std::vector<PastWideCharacter> past_wide_;
+};
 
 // ---------------------------------------------------------------------------
 // Program assembly and diagnostic serialization shared by the endpoints.
@@ -38,25 +66,44 @@ struct PlaygroundProgram {
   const SourceFile* user = nullptr; // the document's file
   uint32_t header_bytes = 0;        // synthetic module header length, 0 if the user wrote one
   uint32_t header_lines = 0;
+  /// Every file's offsets in the editor's unit, built with the program.
+  std::unordered_map<const SourceFile*, Utf16Index> utf16;
 
-  /// Length of the document as the editor sees it (without the
-  /// synthetic module header).  The header was prepended to this file's
-  /// own text, so it cannot exceed the buffer; the guard keeps a
-  /// mistake from underflowing into a four-billion-byte document that
-  /// would let every offset through.
+  /// Length of the document as the editor sees it: in the editor's
+  /// unit, without the synthetic module header.  The header is ASCII
+  /// and was prepended to this file's own text, so it cannot exceed the
+  /// buffer; the guard keeps a mistake from underflowing into a
+  /// four-billion-unit document that would let every offset through.
   [[nodiscard]] auto document_length() const -> uint32_t {
-    auto size = static_cast<uint32_t>(user->buffer.size());
+    auto size = utf16.at(user).to_utf16(static_cast<uint32_t>(user->buffer.size()));
     return size >= header_bytes ? size - header_bytes : 0;
   }
   /// Program offset of an editor-buffer offset, which must be at most
   /// document_length() (document_offset checks a request's).
   [[nodiscard]] auto to_program_offset(uint32_t editor_offset) const -> uint32_t {
-    return user->base_offset + header_bytes + editor_offset;
+    return user->base_offset + utf16.at(user).to_bytes(header_bytes + editor_offset);
+  }
+  /// The editor's offset, within `file`, of a program offset inside it.
+  /// The document's offsets leave out its synthetic header.
+  [[nodiscard]] auto editor_offset_in(const SourceFile& file, uint32_t program_offset) const
+      -> uint32_t {
+    auto units = utf16.at(&file).to_utf16(file.local_offset(program_offset));
+    auto skipped = &file == user ? header_bytes : 0;
+    return units >= skipped ? units - skipped : 0;
   }
   /// Editor-buffer offset of a program offset inside the user file.
   [[nodiscard]] auto to_editor_offset(uint32_t program_offset) const -> uint32_t {
-    auto local = user->local_offset(program_offset);
-    return local >= header_bytes ? local - header_bytes : 0;
+    return editor_offset_in(*user, program_offset);
+  }
+  /// A span's length in the editor's unit.
+  [[nodiscard]] auto editor_length(Span span) const -> uint32_t {
+    const auto* file = program.source_map.file_for(span.offset);
+    if (file == nullptr) {
+      return span.length;
+    }
+    const auto& index = utf16.at(file);
+    auto start = file->local_offset(span.offset);
+    return index.to_utf16(start + span.length) - index.to_utf16(start);
   }
   /// True if the offset lies in the editor buffer (not prelude, not gap).
   [[nodiscard]] auto in_user_file(uint32_t program_offset) const -> bool {

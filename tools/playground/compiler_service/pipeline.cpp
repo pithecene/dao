@@ -71,11 +71,59 @@ auto build_playground_program(const std::filesystem::path& repo_root,
   }
   prog.program = build_program(std::move(inputs), {}, entry_policy);
   for (const auto& file : prog.program.files) {
+    prog.utf16.emplace(file.get(), Utf16Index(file->buffer.contents()));
     if (!file->is_prelude && file->display_path == request.document) {
       prog.user = file.get();
     }
   }
   return prog;
+}
+
+Utf16Index::Utf16Index(std::string_view text) {
+  uint32_t units = 0;
+  uint32_t bytes = 0;
+  while (bytes < text.size()) {
+    const auto lead = static_cast<unsigned char>(text[bytes]);
+    if (lead < 0x80U) {
+      ++bytes;
+      ++units;
+      continue;
+    }
+    // Two and three bytes are one code unit; four bytes are a surrogate
+    // pair.  A byte that begins no character counts as one unit, so the
+    // index stays total over text that is not UTF-8.
+    uint32_t encoded_bytes = 1;
+    uint32_t encoded_units = 1;
+    if (lead >= 0xF0U) {
+      encoded_bytes = 4;
+      encoded_units = 2;
+    } else if (lead >= 0xE0U) {
+      encoded_bytes = 3;
+    } else if (lead >= 0xC0U) {
+      encoded_bytes = 2;
+    }
+    bytes = std::min(bytes + encoded_bytes, static_cast<uint32_t>(text.size()));
+    units += encoded_units;
+    past_wide_.push_back({.bytes = bytes, .units = units});
+  }
+}
+
+auto Utf16Index::to_utf16(uint32_t byte_offset) const -> uint32_t {
+  auto after = std::ranges::upper_bound(past_wide_, byte_offset, {}, &PastWideCharacter::bytes);
+  if (after == past_wide_.begin()) {
+    return byte_offset;
+  }
+  const auto& last = *std::prev(after);
+  return last.units + (byte_offset - last.bytes);
+}
+
+auto Utf16Index::to_bytes(uint32_t utf16_offset) const -> uint32_t {
+  auto after = std::ranges::upper_bound(past_wide_, utf16_offset, {}, &PastWideCharacter::units);
+  if (after == past_wide_.begin()) {
+    return utf16_offset;
+  }
+  const auto& last = *std::prev(after);
+  return last.bytes + (utf16_offset - last.units);
 }
 
 auto run_frontend_pipeline(const std::filesystem::path& repo_root, ProgramRequest request)
@@ -151,8 +199,7 @@ void add_position(nlohmann::json& out, const PlaygroundProgram& prog, uint32_t p
   auto loc = prog.program.source_map.locate(program_offset);
   const bool in_document = file == prog.user;
   out["file"] = file->display_path;
-  out["offset"] =
-      in_document ? prog.to_editor_offset(program_offset) : file->local_offset(program_offset);
+  out["offset"] = prog.editor_offset_in(*file, program_offset);
   out["line"] = in_document ? prog.editor_line(program_offset) : loc.line;
   out["col"] = loc.col;
 }
@@ -181,7 +228,7 @@ void collect_diagnostics(nlohmann::json& out,
   for (const auto& diag : diags) {
     nlohmann::json entry = {
         {"severity", diag.severity == Severity::Warning ? "warning" : "error"},
-        {"length", diag.span.length},
+        {"length", prog.editor_length(diag.span)},
         {"message", diag.message},
     };
     add_position(entry, prog, diag.span.offset);

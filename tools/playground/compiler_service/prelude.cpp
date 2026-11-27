@@ -4,6 +4,7 @@
 #include "analysis/semantic_tokens.h"
 #include "frontend/module/program.h"
 #include "frontend/resolve/resolve.h"
+#include "pipeline.h"
 
 #include <llvm/Config/llvm-config.h>
 
@@ -68,6 +69,14 @@ auto prelude_source(const nlohmann::json& request, const ServiceContext& ctx) ->
   }
 
   auto resolved = resolve(program);
+  // Offsets and lengths in the editor's unit, within the target file.
+  const Utf16Index utf16(target->buffer.contents());
+  auto editor_offset = [&](uint32_t program_offset) -> uint32_t {
+    return utf16.to_utf16(target->local_offset(program_offset));
+  };
+  auto editor_length = [&](Span span) -> uint32_t {
+    return editor_offset(span.offset + span.length) - editor_offset(span.offset);
+  };
   nlohmann::json semantic_tokens = nlohmann::json::array();
   for (const auto& stok : classify_tokens(target->lex.tokens, target->file(), &resolved)) {
     if (!target->contains_span(stok.span)) {
@@ -76,8 +85,8 @@ auto prelude_source(const nlohmann::json& request, const ServiceContext& ctx) ->
     auto loc = program.source_map.locate(stok.span.offset);
     semantic_tokens.push_back({
         {"kind", stok.kind},
-        {"offset", target->local_offset(stok.span.offset)},
-        {"length", stok.span.length},
+        {"offset", editor_offset(stok.span.offset)},
+        {"length", editor_length(stok.span)},
         {"line", loc.line},
         {"col", loc.col},
     });
@@ -93,8 +102,8 @@ auto prelude_source(const nlohmann::json& request, const ServiceContext& ctx) ->
         {"name", sym.name},
         {"kind", sym.kind},
         {"file", target->display_path},
-        {"offset", target->local_offset(sym.span.offset)},
-        {"length", sym.span.length},
+        {"offset", editor_offset(sym.span.offset)},
+        {"length", editor_length(sym.span)},
         {"children", std::move(children)},
     };
   };
