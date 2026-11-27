@@ -215,8 +215,9 @@ test runner is the separate module `bootstrap::typecheck::tests` in
   a bound (typed, and rejected fail-closed at HIR)
 - Lambda contextual typing, list literal inference
 - Addr-of, index expressions
-- `?` in a lambda whose return type is still being inferred from its
-  body (diagnosed: the lambda has no return type to propagate into)
+- `?` in a lambda whose return type the checker still infers from its
+  body.  The checker reports it: the lambda has no return type to
+  propagate into
 - A type argument left undecided below a value's outermost enum, as in
   `Option::Some(value = Option::None)`: a `let` and a `?` report only
   the outermost one.  MIR's concreteness check reports what remains in
