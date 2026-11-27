@@ -336,7 +336,9 @@ constants (int/float/bool/string), binary/unary ops, let/assign,
 calls, returns, if/else, while.
 
 **Tier B coverage (added)**: struct layout and field access
-(construction, field reads, struct-typed params and returns).
+(construction, field reads, struct-typed params and returns), enum
+payloads (construction, discriminant and payload reads),
+`resource memory` domains, and `?` propagation through them.
 
 **Tier B deferrals**: monomorphization, generators,
 mode hooks, lambdas, for-over-iterable, index

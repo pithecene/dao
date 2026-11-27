@@ -5939,6 +5939,10 @@ fn check_try_expr(ts: TS, node_idx: i64, operand: i64): TS
   let family: string = try_family(r, operand_ti)
   if family == "":
     return ts_add_diag(r, sp, "'?' operator requires an Option or Result type, got '" + type_name(r, operand_ti) + "'")
+  // An operand such as `Option::None` still stands for its head's own
+  // parameter: nothing decided what the `?` would yield.
+  if open_enum_head(r, operand_ti) >= 0:
+    return ts_add_diag(r, sp, "'?' cannot tell which " + family + " its operand is: '" + type_name(r, operand_ti) + "' leaves a type argument undecided")
   let return_ti: i64 = r.ctx.return_type
   if return_ti < 0:
     return ts_add_diag(r, sp, "'?' operator can only be used inside a function with a return type")
@@ -5946,6 +5950,8 @@ fn check_try_expr(ts: TS, node_idx: i64, operand: i64): TS
   if enum_head(r, return_ti) != head_ti:
     if try_family(r, return_ti) == family:
       return ts_add_diag(r, sp, "'?' on " + family + " needs the enclosing function to return the same declaration of " + family + ", but it returns '" + type_name(r, return_ti) + "' of another declaration with that name")
+    if enum_head(r, return_ti) < 0 and return_ti < r.types.length() and r.types.get(return_ti).name == family:
+      return ts_add_diag(r, sp, "'?' on " + family + " needs the enclosing function to return that enum, but it returns '" + type_name(r, return_ti) + "', which is another declaration and no enum")
     return ts_add_diag(r, sp, "enclosing function must return " + family + " to use '?' on " + family + ", but returns '" + type_name(r, return_ti) + "'")
   // Exactly two variants: any value that is not the first is the second,
   // which is the one the lowering reads the error from.
