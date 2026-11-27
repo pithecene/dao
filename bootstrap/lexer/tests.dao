@@ -436,6 +436,27 @@ fn main(): i32
   if expect_error_count("uc_err_count", r_uc, 1):
     pass_count = pass_count + 1
 
+  // A character outside ASCII is one error token over all its bytes:
+  // two for U+00E9, three for U+201C, four for U+1F600.
+  let src_two = "x é y\n"
+  let r_two = lexer::lex(src_two)
+  if expect_token_span("uc_two_byte_span", r_two, 1, 2, 2):
+    pass_count = pass_count + 1
+  let src_three = "x “ y\n"
+  let r_three = lexer::lex(src_three)
+  if expect_token("uc_three_byte_err", r_three, 1, lexer::TK::Error, src_three):
+    pass_count = pass_count + 1
+  if expect_token_span("uc_three_byte_span", r_three, 1, 2, 3):
+    pass_count = pass_count + 1
+  if expect_token("uc_three_byte_y", r_three, 2, lexer::TK::Identifier, src_three):
+    pass_count = pass_count + 1
+  if expect_error_count("uc_three_byte_count", r_three, 1):
+    pass_count = pass_count + 1
+  let src_four = "x 😀 y\n"
+  let r_four = lexer::lex(src_four)
+  if expect_token_span("uc_four_byte_span", r_four, 1, 2, 4):
+    pass_count = pass_count + 1
+
   // -----------------------------------------------------------------
   // 7.20 Empty source
   // -----------------------------------------------------------------
@@ -514,7 +535,7 @@ fn main(): i32
   // Section 9: Summary
   // =========================================================================
 
-  let total = 110
+  let total = 116
   print("")
   print("--- results ---")
   print(i32_to_string(pass_count) + " / " + i32_to_string(total) + " passed")

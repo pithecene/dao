@@ -389,34 +389,63 @@ private:
     emit_unexpected_character(start);
   }
 
+  /// Length in bytes of the UTF-8 character at `start`, or 0 when the
+  /// bytes there are not one: a stray continuation byte, a character cut
+  /// short, an overlong form, a surrogate, or a value past U+10FFFF.
+  [[nodiscard]] auto utf8_character_length(uint32_t start) const -> uint32_t {
+    // 0 past the end of the source, which no range below admits.
+    auto byte_at = [&](uint32_t offset) -> uint32_t {
+      return offset < src_.size() ? static_cast<unsigned char>(src_[offset]) : 0U;
+    };
+    const uint32_t lead = byte_at(start);
+    if (lead < 0x80U) {
+      return 1;
+    }
+    // The second byte's range depends on the lead: the narrower ranges
+    // exclude overlong forms, surrogates, and values past U+10FFFF.
+    uint32_t length = 0;
+    uint32_t second_low = 0x80U;
+    uint32_t second_high = 0xBFU;
+    if (lead >= 0xC2U && lead <= 0xDFU) {
+      length = 2;
+    } else if (lead >= 0xE0U && lead <= 0xEFU) {
+      length = 3;
+      second_low = lead == 0xE0U ? 0xA0U : second_low;
+      second_high = lead == 0xEDU ? 0x9FU : second_high;
+    } else if (lead >= 0xF0U && lead <= 0xF4U) {
+      length = 4;
+      second_low = lead == 0xF0U ? 0x90U : second_low;
+      second_high = lead == 0xF4U ? 0x8FU : second_high;
+    } else {
+      return 0;
+    }
+    const uint32_t second = byte_at(start + 1);
+    if (second < second_low || second > second_high) {
+      return 0;
+    }
+    for (uint32_t offset = 2; offset < length; ++offset) {
+      const uint32_t continuation = byte_at(start + offset);
+      if (continuation < 0x80U || continuation > 0xBFU) {
+        return 0;
+      }
+    }
+    return length;
+  }
+
   /// Report the character at `start`, already advanced past its first
   /// byte, as one error token.  A character outside ASCII spans several
   /// bytes, and reporting each byte alone would put part of a character
   /// into a token's text and a diagnostic's message, which then are not
-  /// text any more.
+  /// text any more.  Bytes that are not UTF-8 are reported one at a time,
+  /// each named by its value rather than repeated.
   void emit_unexpected_character(uint32_t start) {
-    const auto lead = static_cast<unsigned char>(src_[start]);
-    uint32_t encoded_length = 1;
-    if (lead >= 0xF0) {
-      encoded_length = 4;
-    } else if (lead >= 0xE0) {
-      encoded_length = 3;
-    } else if (lead >= 0xC0) {
-      encoded_length = 2;
-    }
-    uint32_t length = 1;
-    while (length < encoded_length && start + length < src_.size() &&
-           (static_cast<unsigned char>(src_[start + length]) & 0xC0U) == 0x80U) {
-      ++length;
-    }
-    // A byte that begins no character, or a character cut short, is not
-    // UTF-8: name the byte by its value rather than repeat it.
-    const bool begins_no_character = (lead >= 0x80 && lead < 0xC0) || lead >= 0xF8;
-    if (begins_no_character || length != encoded_length) {
+    const uint32_t length = utf8_character_length(start);
+    if (length == 0) {
       constexpr std::string_view hex_digits = "0123456789ABCDEF";
+      const auto byte = static_cast<unsigned char>(src_[start]);
       std::string message = "unexpected byte: 0x";
-      message += hex_digits[lead >> 4U];
-      message += hex_digits[lead & 0x0FU];
+      message += hex_digits[byte >> 4U];
+      message += hex_digits[byte & 0x0FU];
       emit_error(start, 1, std::move(message));
       return;
     }

@@ -222,22 +222,48 @@ suite<"indentation_tests"> indentation_tests = [] {
     // each hold part of a character, in their text and in their message.
     auto output = lex_string("let x = \xE2\x80\x9C\n");
     expect(count_kind(output.result.tokens, TokenKind::Error) == 1);
-    expect(output.result.diagnostics.size() == 1U);
+    expect(fatal(output.result.diagnostics.size() == 1U));
     const auto& diag = output.result.diagnostics.front();
     expect(diag.span.length == 3U) << diag.span.length;
     expect(diag.message == "unexpected character: \xE2\x80\x9C") << diag.message;
   };
 
-  "a byte that is not UTF-8 is named by its value"_test = [] {
-    // A continuation byte with no character before it, and a character
-    // cut short by the end of the line.
-    for (const auto* source : {"let x = \x9C\n", "let x = \xE2\x80\n"}) {
-      auto output = lex_string(source);
-      expect(!output.result.diagnostics.empty());
+  "bytes that are not UTF-8 are each named by value"_test = [] {
+    struct Malformed {
+      std::string_view what;
+      std::string source;
+      std::vector<std::string> messages;
+    };
+    const std::vector<Malformed> cases = {
+        {"a continuation byte with no lead", "\x9C\n", {"unexpected byte: 0x9C"}},
+        {"a character cut short", "\xE2\x80\n", {"unexpected byte: 0xE2", "unexpected byte: 0x80"}},
+        {"an overlong form", "\xC0\xAF\n", {"unexpected byte: 0xC0", "unexpected byte: 0xAF"}},
+        {"a surrogate",
+         "\xED\xA0\x80\n",
+         {"unexpected byte: 0xED", "unexpected byte: 0xA0", "unexpected byte: 0x80"}},
+        {"a value past U+10FFFF",
+         "\xF4\x90\x80\x80\n",
+         {"unexpected byte: 0xF4", "unexpected byte: 0x90", "unexpected byte: 0x80",
+          "unexpected byte: 0x80"}},
+    };
+    for (const auto& malformed : cases) {
+      auto output = lex_string(malformed.source);
+      std::vector<std::string> messages;
       for (const auto& diag : output.result.diagnostics) {
-        expect(diag.span.length == 1U) << diag.span.length;
-        expect(diag.message.starts_with("unexpected byte: 0x")) << diag.message;
+        expect(diag.span.length == 1U) << malformed.what << ": " << diag.span.length;
+        messages.push_back(diag.message);
       }
+      expect(messages == malformed.messages) << malformed.what;
+    }
+  };
+
+  "characters of two, three, and four bytes are each one error token"_test = [] {
+    // U+00E9, U+201C, U+1F600.
+    for (const std::string_view character : {"\xC3\xA9", "\xE2\x80\x9C", "\xF0\x9F\x98\x80"}) {
+      auto output = lex_string("x " + std::string(character) + " y\n");
+      expect(count_kind(output.result.tokens, TokenKind::Error) == 1);
+      expect(fatal(output.result.diagnostics.size() == 1U));
+      expect(output.result.diagnostics.front().span.length == character.size());
     }
   };
 
