@@ -4,7 +4,7 @@ import { initAnalysis, scheduleAnalyze } from "./analysis";
 import { initDiagnostics } from "./diagnostics";
 import { updateActiveUserSource } from "./document";
 import { createEditor } from "./editor";
-import { resetWorkspace } from "./examples";
+import { resetWorkspace, resetWouldDiscardWork } from "./examples";
 import { doFormat, initFormat } from "./format";
 import { gotoDefAtCursor, initGotoDef } from "./goto_def";
 import { hideHoverTooltip, initHover } from "./hover";
@@ -81,6 +81,14 @@ document.getElementById("run-btn")!.addEventListener("click", () => {
 });
 
 document.getElementById("reset-workspace-btn")!.addEventListener("click", () => {
+  // Reset deletes the draft and every file the user added, and nothing
+  // brings them back, so it asks first when the workspace holds work.
+  if (
+    resetWouldDiscardWork() &&
+    !window.confirm("Discard your edits and restore the example? This cannot be undone.")
+  ) {
+    return;
+  }
   void resetWorkspace();
 });
 

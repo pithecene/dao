@@ -1,6 +1,7 @@
 import { api } from "./api";
 import {
   getCurrentExampleName,
+  getUserFiles,
   getWorkspaceRevision,
   requestPlaygroundView,
   setWorkspaceProgram,
@@ -285,6 +286,7 @@ export async function loadExampleByName(
     }
 
     setWorkspaceProgram(data.files, data.document, { exampleName: name });
+    loadedExampleFiles = filesFingerprint(data.files);
     setExampleSelectValue(name);
     if (options?.switchRoute) {
       requestPlaygroundView();
@@ -303,6 +305,24 @@ export async function loadExampleByName(
     showNotice(`Could not load example '${name}'`);
     return "failed";
   }
+}
+
+/** The files' paths and sources as one comparable string. */
+function filesFingerprint(files: readonly SourceInput[]): string {
+  return JSON.stringify(files.map((file) => [file.path, file.source]));
+}
+
+// The files of the example the workspace was last loaded from, as the
+// service gave them.  A workspace restored from a draft, a share link, or a
+// snippet has no such record.
+let loadedExampleFiles: string | null = null;
+
+/**
+ * Whether Reset would throw work away: the workspace's files differ from the
+ * example it would restore, or nothing records that they came from it.
+ */
+export function resetWouldDiscardWork(): boolean {
+  return loadedExampleFiles !== filesFingerprint(getUserFiles());
 }
 
 /** Reset workspace: discard local draft and reload active example or hello.dao. */

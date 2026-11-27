@@ -18,7 +18,7 @@ import {
   updateActiveUserSource,
 } from "./document";
 import { buildUndoableReplaceTransaction } from "./editor";
-import { FALLBACK_FILES, loadExampleByName } from "./examples";
+import { FALLBACK_FILES, loadExampleByName, resetWouldDiscardWork } from "./examples";
 import { doFormat } from "./format";
 import {
   applySnapshot,
@@ -690,6 +690,27 @@ async function testCompletionSourceSettlesQuietlyOnceAborted(): Promise<void> {
   });
 }
 
+async function testResetKnowsWhetherTheWorkspaceHoldsWork(): Promise<void> {
+  clearDraft();
+  const example = { name: "hello.dao", document: "hello.dao", files: [{ path: "hello.dao", source: "module hello\n" }] };
+  await withMockFetch(async () => jsonResponse(example), async () => {
+    assertEqual(await loadExampleByName("hello.dao"), "applied", "The example loads");
+  });
+  assert(!resetWouldDiscardWork(), "A freshly loaded example holds no work");
+
+  updateActiveUserSource("module hello\n// an edit\n");
+  assert(resetWouldDiscardWork(), "An edit is work");
+  updateActiveUserSource("module hello\n");
+  assert(!resetWouldDiscardWork(), "An edit taken back leaves no work");
+
+  addUserFile("extra.dao", "module extra\n");
+  assert(resetWouldDiscardWork(), "An added file is work");
+
+  // A workspace that did not come from the example: Reset would replace it.
+  setWorkspaceProgram([{ path: "shared.dao", source: "module shared\n" }], "shared.dao");
+  assert(resetWouldDiscardWork(), "A workspace from elsewhere is work");
+}
+
 async function runAll(): Promise<void> {
   testWorkspaceRevisionIncrementsOnEveryMutation();
   await testMalformedAndPartialSnapshotsAreAtomic();
@@ -698,6 +719,7 @@ async function runAll(): Promise<void> {
   testUndoableReplaceTransactionInvariants();
   await testFormatterTargetsWritableFileAndGuardsStaleReplies();
   await testCompletionSourceSettlesQuietlyOnceAborted();
+  await testResetKnowsWhetherTheWorkspaceHoldsWork();
   console.log("workspace_state.test: all assertions passed");
 }
 
