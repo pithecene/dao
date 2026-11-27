@@ -20,6 +20,8 @@ const readOnlyCompartment = new Compartment();
 const programmaticChange = Annotation.define<boolean>();
 const statesByPath = new Map<string, EditorState>();
 let trackedPath = "";
+/** Counts buffer swaps, so an awaited request can tell its buffer was replaced. */
+let bufferGeneration = 0;
 
 const setDiagDecorations = StateEffect.define<DecorationSet>();
 const errorDiagMark = Decoration.mark({ class: "dao-diag-mark-error" });
@@ -179,6 +181,15 @@ export function getEditorView(): EditorView | null {
 }
 
 /** Get the current editor buffer source. */
+/**
+ * The number of buffer swaps so far.  A request captures it before it awaits
+ * and discards its response when the number has moved: the response describes
+ * a buffer the editor no longer shows.
+ */
+export function getBufferGeneration(): number {
+  return bufferGeneration;
+}
+
 export function getSource(): string {
   return editorInstance?.state.doc.toString() ?? "";
 }
@@ -206,6 +217,7 @@ export function loadEditorBuffer(
 
   trackedPath = path;
   statesByPath.set(path, nextState);
+  bufferGeneration += 1;
   editorInstance.setState(nextState);
 
   editorInstance.dispatch({

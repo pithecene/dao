@@ -1053,6 +1053,7 @@ pre {
   overflow-x: auto;
   scrollbar-width: none;
   min-width: 0;
+  flex: 0 1 auto;
 }
 
 #editor-tabs::-webkit-scrollbar {
@@ -1107,11 +1108,16 @@ pre {
   background: var(--surface-subtle);
 }
 
+/* The meta bar gives way before the tabs do: its hint is the least needed
+   text in the bar, and a squeezed tab hides the file's name. */
 .editor-meta-bar {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  flex-shrink: 0;
+  flex: 0 1000 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
@@ -1132,6 +1138,14 @@ pre {
 .panel-hint {
   color: var(--fg-muted);
   font-size: var(--text-xs);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#module-label,
+#readonly-badge {
+  flex-shrink: 0;
 }
 
 #editor-container {

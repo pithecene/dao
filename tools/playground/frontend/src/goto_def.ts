@@ -13,6 +13,12 @@ let boundView: EditorView | null = null;
  */
 export function initGotoDef(view: EditorView): void {
   boundView = view;
+  // macOS turns Ctrl+click into the context menu, so the click that reaches
+  // this handler there is Cmd+click.
+  if (/Mac|iPhone|iPad/.test(navigator.platform)) {
+    const hint = document.getElementById("goto-def-click-hint");
+    if (hint) hint.textContent = "⌘+Click";
+  }
   view.dom.addEventListener("click", (e: MouseEvent) => {
     if (!e.ctrlKey && !e.metaKey) return;
     e.preventDefault();
