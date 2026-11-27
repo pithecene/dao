@@ -41,20 +41,26 @@ Additional structural counts across `bootstrap/`:
 ## State Since the Audit
 
 The counts and the parity matrix in this note are the audit's
-measurements, and they stay as the audit took them. Five of its findings
-have since changed:
+measurements, and they stay as the audit took them. This section covers
+six findings that have since changed, and it does not survey the rest:
 
 - **Map keys.** `HashMap<K, V>` now takes any key that is `Hashable` and
   `Equatable`, so the `IntMap<V>` that this note recommends has no
-  purpose. A composite key is a class of its parts, which derives both
-  concepts. The resolver's two program tables use such keys (`UseSite`,
-  `ExtendSite`). The other composite string keys still wait for the
-  same treatment.
+  purpose. The resolver's two program tables take a class of two `i64`
+  fields as their key (`UseSite`, `ExtendSite`). Such a class derives
+  both concepts because each of its fields conforms and it declares
+  neither concept itself. The other composite string keys still wait
+  for the same treatment.
+- **`Vector<T>` operations.** `stdlib/core/vector.dao` now has the seven
+  operations that this note recommends.
 - **Payload `enum class` equality.** The bootstrap type checker rejects
   `==` and `!=` on a payload-bearing `enum class`.
 - **Partial destructuring.** The bootstrap compiler compiles
   `Node::CallE(callee, ..)`.
-- **Try propagation.** The bootstrap compiler compiles `operand?`.
+- **Try propagation.** The audit's probe now passes: the bootstrap
+  compiler compiles `operand?` on an `Option` or a `Result`, into a
+  function that returns the same declaration. It still rejects `?` in a
+  lambda whose return type it infers from the body.
 - **Pipeline.** The bootstrap compiler compiles `left |> right`, for a
   target of one parameter.
 

@@ -292,15 +292,14 @@ struct-typed call/return edges to the bootstrap MIR → LLVM path.
 Next: `llc`/`clang` validation of emitted IR (Task 30.5), then
 further Tier B bootstrap feature slices.
 
-The paragraph above records the state at the end of Tier A, with its
-own test counts.  The compiler has since crossed: the host builds the
+The paragraph above records the state after the first Tier B slice,
+with its own test counts.  The compiler has since crossed: the host builds the
 bootstrap compiler, that compiler builds itself, and the result builds
 itself again to the same LLVM text.  On 26 November 2026 the nine
 suites passed under the stage-2 compiler with 861 tests: lexer 110,
 parser 90, graph 12, resolver 65, type checker 399, HIR 50, MIR 60,
 LLVM 63, and driver 12.  LLVM accepted all 53 emitted IR files, and 44
-of them ran.  `bootstrap/README.md` holds the current feature coverage
-and the deferred work.
+of them ran.  `bootstrap/README.md` describes each subsystem.
 
 Goals:
 - begin implementing non-trivial compiler subsystems in Dao itself
