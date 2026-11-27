@@ -2364,8 +2364,9 @@ fn reach_block(r: Reach, target: i64, incoming: Ruled): Reach
 // block, which no value reaches.
 //
 // Size bound: MIR opens a block per arm and merge point of a
-// function's `if`/`while` bodies, so a function has as many blocks as
-// it has branches -- tens, not thousands -- and the membership scans
+// function's `if`/`while` bodies, and two per `and` or `or`, so a
+// function has as many blocks as it has branches and logical operators
+// -- tens, not thousands -- and the membership scans
 // below cost blocks x edges of that size.  A scan is also what Dao's
 // value semantics make cheap: Vector.set and HashMap.set copy their
 // storage, so an indexed table would cost the same order and allocate

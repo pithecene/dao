@@ -511,8 +511,7 @@ fn main(): i32
   two22 = two22.push(graph::SourceInput("main.dao", "module app::main\n\nclass P:\n  x: i32\n\nfn mk(): P -> P(1)\n\nfn main(): i32\n  mk().x = 2\n  return add(1, 2)\n", false))
   let pm22: ProgramMir = mir_of_program(two22)
   let d22: Vector<graph::FileDiagnostic> = pm22.program.diags
-  // `mk().x = 2` stores to no local: MIR reports the target.  (`and`
-  // evaluates both sides, so the diagnostic is read only when present.)
+  // `mk().x = 2` stores to no local: MIR reports the target.
   let on_main22: bool = false
   if d22.length() == 1:
     on_main22 = d22.get(0).path == "main.dao" and index_of(d22.get(0).diag.message, "unsupported assignment target") >= 0
@@ -1017,10 +1016,10 @@ fn main(): i32
   // `and` and `or` branch around their right operand and leave no binary
   // instruction (host: cond_br, then a load of the temporary).
   // -----------------------------------------------------------------
-  let src_logical: string = "fn both(a: bool, b: bool): bool -> a and b\n\nfn either(a: bool, b: bool): bool -> a or b\n\nfn main(): i32\n  return 0\n"
-  let r_logical: MirResult = lower_to_mir(src_logical)
-  let logical_branches: i64 = mir_count_kind(r_logical, "MirCondBr")
-  let logical_binaries: i64 = mir_count_kind(r_logical, "MirBinary")
+  let src_logical = "fn both(a: bool, b: bool): bool -> a and b\n\nfn either(a: bool, b: bool): bool -> a or b\n\nfn main(): i32\n  return 0\n"
+  let r_logical = lower_to_mir(src_logical)
+  let logical_branches = mir_count_kind(r_logical, "MirCondBr")
+  let logical_binaries = mir_count_kind(r_logical, "MirBinary")
   if r_logical.diags.length() == 0 and logical_branches == 2 and logical_binaries == 0:
     print("PASS logical_operators_branch_around_right_operand")
     pass_count = pass_count + 1
