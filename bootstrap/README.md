@@ -214,7 +214,7 @@ test runner is the separate module `bootstrap::typecheck::tests` in
 - Lowering a member a concept provides through a derived conformance or
   a bound (typed, and rejected fail-closed at HIR)
 - Lambda contextual typing, list literal inference
-- Try operator, addr-of, index expressions
+- Addr-of, index expressions
 
 **How to run tests**:
 
@@ -236,6 +236,10 @@ type-checked AST.
 - Match desugared to if/else chain
 - Every HIR expression carries its resolved type index
 - Pipe preserved as first-class node (MIR lowers it)
+- `operand?` kept as one `HirTry` node carrying the type the function
+  returns and the error a failing `Result` holds.  MIR lowers it to a
+  test of the operand's first variant and a return of the function's
+  failing variant, which leaves every open region as a `return` does
 - HirMatch reserved for Tier B pattern compilation
 
 **Tier A coverage**: literals, identifiers, binary/unary ops, calls,
@@ -281,7 +285,7 @@ if/else, while.
 
 **Tier B deferrals**: generators, monomorphization, `resource` blocks,
 `mode` blocks, enum construction/discriminant/payload, lambda
-/ closures, try operator, for-over-iterable, index expressions,
+/ closures, for-over-iterable, index expressions,
 break/continue.  MIR rejects a `resource` block with the unsupported-statement diagnostic, fail-closed, until MIR holds the domain
 (`CONTRACT_MIR_BOUNDARY.md` §4, Task 37 §5).
 

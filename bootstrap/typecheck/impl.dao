@@ -35,7 +35,6 @@ import bootstrap::resolver
 //   - Concept default method bodies (unchecked, as in the host)
 //   - Lambda contextual typing
 //   - List literal type inference
-//   - Try operator (requires generic Option/Result)
 //   - Index expressions
 //   - Checking rules of `mode gpu` / `mode parallel` (their bodies are
 //     checked as blocks); resource-block domain semantics beyond `yield`
@@ -293,6 +292,9 @@ fn sym_type_at(ts: TS, sym_idx: i64): i64
 fn ts_set_sym_type(ts: TS, sym_idx: i64, type_idx: i64): TS
   ts.sym_types = vec_i64_set(ts.sym_types, sym_idx, type_idx)
   return ts
+
+fn ctx_with_return(c: CheckCtx, v: i64): CheckCtx
+  return CheckCtx(v, c.loop_depth, c.in_generator, c.gen_elem, c.unsafe_depth, c.resource_depth)
 
 fn ctx_with_loop(c: CheckCtx, v: i64): CheckCtx
   return CheckCtx(c.return_type, v, c.in_generator, c.gen_elem, c.unsafe_depth, c.resource_depth)
@@ -2533,7 +2535,7 @@ fn check_expr(ts: TS, node_idx: i64): TS
       r = check_expr(r, idx_expr)
       return r
     parser::Node::TryE(operand):
-      return check_expr(ts, operand)
+      return check_try_expr(ts, node_idx, operand)
     parser::Node::LambdaE(params_lp, param_count, body):
       return ts_add_diag(ts, ts_node_span(ts, node_idx), "lambda requires expected function type context")
     parser::Node::ListLitE(elems_lp, elem_count):
@@ -4342,6 +4344,17 @@ fn check_lambda_no_gen_captures(ts: TS, expr_idx: i64, bound_syms: HashMap<strin
       return check_lambda_no_gen_captures(ts, sub_body, inner_bound)
   return ts
 
+// A lambda's body, checked as the body of a function returning `ret_ti`
+// (-1 while that type is still being inferred): a `?` in it returns from
+// the lambda, never from the function that wrote the lambda.
+fn check_lambda_body(ts: TS, body: i64, ret_ti: i64): TS
+  let outer_ret: i64 = ts.ctx.return_type
+  let r: TS = ts
+  r.ctx = ctx_with_return(r.ctx, ret_ti)
+  r = check_expr(r, body)
+  r.ctx = ctx_with_return(r.ctx, outer_ret)
+  return r
+
 fn check_lambda_with_expected(ts: TS, node_idx: i64, expected_ti: i64, open: Vector<i64>): TS
   if expected_ti < 0 or expected_ti >= ts.types.length():
     return ts_add_diag(ts, ts_node_span(ts, node_idx), "lambda requires expected function type context")
@@ -4374,7 +4387,7 @@ fn check_lambda_with_expected(ts: TS, node_idx: i64, expected_ti: i64, open: Vec
       let expected_ret: i64 = et.ret_type
       let open_ret: bool = open.length() > 0 and type_mentions_any(r, expected_ret, open)
       if open_ret:
-        r = check_expr(r, body)
+        r = check_lambda_body(r, body, to_i64(-1))
         let body_ti: i64 = get_expr_type(r, body)
         if body_ti >= 0:
           let made_open: TypeR = make_fn_value_type(r, param_tis, body_ti)
@@ -4383,7 +4396,7 @@ fn check_lambda_with_expected(ts: TS, node_idx: i64, expected_ti: i64, open: Vec
       if is_lambda_expr(r, body):
         r = check_lambda_with_expected(r, body, expected_ret, open)
       else:
-        r = check_expr(r, body)
+        r = check_lambda_body(r, body, expected_ret)
         if expected_ret >= 0:
           r = fit_literal(r, body, expected_ret)
       let body_ti2: i64 = get_expr_type(r, body)
@@ -5842,6 +5855,89 @@ fn record_variant_index(ts: TS, node_idx: i64, vkey: string): TS
     return ts
   ts.reg = reg_with_expr_types(ts.reg, ts.reg.expr_types.set(variant_index_key(ts.tc.module_id, node_idx), index))
   return ts
+
+// The keys under which the registry holds what a `?` at `node_idx`
+// returns when its operand fails: the type the enclosing function (or
+// lambda) returns, and the type of the error it carries there — absent
+// for an `Option`, whose `None` carries nothing.
+fn try_return_key(module_id: i64, node_idx: i64): string
+  return base::expr_id_key(module_id, node_idx) + ":try_return"
+
+fn try_error_key(module_id: i64, node_idx: i64): string
+  return base::expr_id_key(module_id, node_idx) + ":try_error"
+
+// The enum `?` unwraps a value of: "Option" or "Result" when `ti` is an
+// enum of that name or an instantiation of one (the host's rule), else "".
+fn try_family(ts: TS, ti: i64): string
+  if ti < 0 or ti >= ts.types.length():
+    return ""
+  let t: base::DaoType = ts.types.get(ti)
+  match t.kind:
+    base::TypeKind::TEnum:
+      let name: string = t.name
+      let head_ti: i64 = record_head(ts, t)
+      if head_ti >= 0:
+        name = ts.types.get(head_ti).name
+      if name == "Option" or name == "Result":
+        return name
+  return ""
+
+// The type of the first parameter of variant `variant_name` for a value
+// of the enum type `enum_ti`, with an instantiation's arguments in place
+// of its head's parameters; -1 where the variant declares none.
+fn variant_payload_type(ts: TS, enum_ti: i64, variant_name: string): TypeR
+  let decided: Bound = instantiation_decided(ts, enum_ti, HashMap<string, i64>::new())
+  let declared_ti: i64 = base::hm_get_or(decided.ts.reg.variant_set, variant_key(decided.ts, enum_ti, variant_name) + ":#0:type", to_i64(-1))
+  if declared_ti < 0:
+    return TypeR(decided.ts, to_i64(-1))
+  return substitute_type(decided.ts, decided.map, declared_ti)
+
+// `operand?`: the operand is an `Option` or a `Result`, and the
+// enclosing function returns the same enum, so the failing variant can
+// be returned from it — `None`, or `Err` with the operand's error, whose
+// type must be the function's own error type.  The expression has the
+// type of the succeeding variant's value (host: check_try).  The lowering
+// tests the first variant and returns the second, so the declaration
+// order is checked here rather than assumed there.
+fn check_try_expr(ts: TS, node_idx: i64, operand: i64): TS
+  let r: TS = check_expr(ts, operand)
+  let operand_ti: i64 = get_expr_type(r, operand)
+  if operand_ti < 0:
+    return r
+  let sp: Span = ts_node_span(r, node_idx)
+  let family: string = try_family(r, operand_ti)
+  if family == "":
+    return ts_add_diag(r, sp, "'?' operator requires an Option or Result type, got '" + type_name(r, operand_ti) + "'")
+  let return_ti: i64 = r.ctx.return_type
+  if return_ti < 0:
+    return ts_add_diag(r, sp, "'?' operator can only be used inside a function with a return type")
+  if try_family(r, return_ti) != family:
+    return ts_add_diag(r, sp, "enclosing function must return " + family + " to use '?' on " + family + ", but returns '" + type_name(r, return_ti) + "'")
+  let success: string = "Some"
+  let failure: string = "None"
+  if family == "Result":
+    success = "Ok"
+    failure = "Err"
+  let unexpected: string = family + " type has unexpected variant structure"
+  if base::hm_get_or(r.reg.variant_set, variant_index_entry(variant_key(r, operand_ti, success)), to_i64(-1)) != to_i64(0):
+    return ts_add_diag(r, sp, unexpected)
+  if base::hm_get_or(r.reg.variant_set, variant_index_entry(variant_key(r, operand_ti, failure)), to_i64(-1)) != to_i64(1):
+    return ts_add_diag(r, sp, unexpected)
+  let value: TypeR = variant_payload_type(r, operand_ti, success)
+  r = value.ts
+  if value.type_idx < 0:
+    return ts_add_diag(r, sp, unexpected)
+  if family == "Result":
+    let error: TypeR = variant_payload_type(r, operand_ti, failure)
+    let fn_error: TypeR = variant_payload_type(error.ts, return_ti, failure)
+    r = fn_error.ts
+    if error.type_idx < 0 or fn_error.type_idx < 0:
+      return ts_add_diag(r, sp, unexpected)
+    if types_equal(r, error.type_idx, fn_error.type_idx) == false:
+      return ts_add_diag(r, sp, "error type '" + type_name(r, error.type_idx) + "' is not assignable to function return error type '" + type_name(r, fn_error.type_idx) + "'")
+    r.reg = reg_with_expr_types(r.reg, r.reg.expr_types.set(try_error_key(r.tc.module_id, node_idx), error.type_idx))
+  r.reg = reg_with_expr_types(r.reg, r.reg.expr_types.set(try_return_key(r.tc.module_id, node_idx), return_ti))
+  return ts_set_expr_type(r, node_idx, value.type_idx)
 
 fn concept_member_key(module_id: i64, node_idx: i64): string
   return base::expr_id_key(module_id, node_idx) + ":concept"
