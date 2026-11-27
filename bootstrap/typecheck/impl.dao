@@ -5314,9 +5314,11 @@ fn check_pattern(ts: TS, pat_node: i64): TS
     parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
       let r: TS = check_expr(ts, callee)
       let callee_ti: i64 = get_expr_type(r, callee)
-      if callee_ti < 0:
-        return r
       let has_rest: bool = parser::call_has_rest(r.tc.idx_data, names_lp)
+      if callee_ti < 0:
+        if has_rest:
+          return rest_without_variant(r, pat_node)
+        return r
       let variant_name: string = ""
       match r.tc.nodes.get(callee):
         parser::Node::QualNameE(seg_lp, seg_count):
@@ -5328,6 +5330,11 @@ fn check_pattern(ts: TS, pat_node: i64): TS
         match registered:
           Option::Some(param_count):
             let sp: Span = ts_node_span(r, callee)
+            // The last segment alone may spell a variant on a path that
+            // reaches none, so a rest marker needs the variant the whole
+            // callee was resolved to.
+            if has_rest and base::hm_get_or(r.reg.expr_types, variant_index_key(r.tc.module_id, callee), to_i64(-1)) < 0:
+              return rest_without_variant(r, pat_node)
             // `Variant(..)` stays valid when the variant gains or loses
             // every parameter, so only empty parentheses are refused.
             if param_count == to_i64(0) and has_rest == false:

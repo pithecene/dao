@@ -1004,8 +1004,9 @@ fn main(): i32
   // A rest pattern binds the leading payloads by position and ignores
   // the others: Rect(w = 3, h = 4) matched as Rect(h, ..) binds `h` to
   // the first payload, 3, whatever the binding is called, and the
-  // program exits 0.  A variant without parameters takes `(..)` too.
-  let rest_arm: LlvmTextResult = lower_source_to_llvm_text("enum class Shape:\n  Circle(r: i32)\n  Rect(w: i32, h: i32)\n  Dot\n\nfn first(s: Shape): i32\n  match s:\n    Shape::Circle(..):\n      return 0\n    Shape::Dot(..):\n      return 0\n    Shape::Rect(h, ..):\n      return h\n  return 0\n\nfn main(): i32\n  let s: Shape = Shape::Rect(h = 4, w = 3)\n  return first(s) - 3\n")
+  // program exits 0.  A variant without parameters takes `(..)` too, and
+  // its arm is the one that answers for it.
+  let rest_arm: LlvmTextResult = lower_source_to_llvm_text("enum class Shape:\n  Circle(r: i32)\n  Rect(w: i32, h: i32)\n  Dot\n\nfn first(s: Shape): i32\n  match s:\n    Shape::Circle(..):\n      return 0\n    Shape::Dot(..):\n      return 7\n    Shape::Rect(h, ..):\n      return h\n  return 0\n\nfn main(): i32\n  let s: Shape = Shape::Rect(h = 4, w = 3)\n  let d: Shape = Shape::Dot\n  return first(s) - 3 + first(d) - 7\n")
   write_failures = write_failures + emit_ir("rest_pattern_binds_leading_payloads", rest_arm, 0)
   if rest_arm.ok:
     print("PASS rest_pattern_binds_leading_payloads")
