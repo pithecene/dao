@@ -1,0 +1,20 @@
+module structured_variants
+
+enum class Expr:
+  Const(value: i32)
+  Add(left: i32, right: i32)
+  Zero
+
+fn eval(e: Expr): i32
+  match e:
+    Expr::Const(value):
+      return value
+    Expr::Add(left, right):
+      return left + right
+    Expr::Zero:
+      return 0
+
+fn main(): i32
+  let a: Expr = Expr::Add(left = 18, right = 24)
+  print(eval(a))
+  return 0

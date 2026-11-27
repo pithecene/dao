@@ -1,0 +1,19 @@
+module unsafe_ptr
+
+fn increment_cell(ptr: Ptr<i32>): i32
+  let out: i32 = 0
+  mode unsafe =>
+    let cur: i32 = ptr.get()
+    ptr.set(cur + 1)
+    out = ptr.get()
+  return out
+
+fn main(): i32
+  let cell: Ptr<i32> = __dao_mem_alloc(size_of<i32>(), align_of<i32>()).cast<i32>()
+  let result: i32 = 0
+  mode unsafe =>
+    cell.set(41)
+    result = increment_cell(cell)
+  __dao_mem_free(cell.cast<void>())
+  print(result)
+  return 0

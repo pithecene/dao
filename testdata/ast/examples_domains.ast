@@ -1,0 +1,91 @@
+File
+  Module domains
+  FunctionDecl collect_squares
+    Param limit: i64
+    ReturnType: Vector<i64>
+    LetStatement out: Vector<i64>
+      CallExpr
+        Callee
+          Identifier Vector.new
+        TypeArgs
+          i64
+    ResourceBlock memory scratch
+      LetStatement tmp: string
+        StringLiteral ""
+      LetStatement i: i64
+        IntLiteral 1
+      WhileStatement
+        Condition
+          BinaryExpr <=
+            Identifier i
+            Identifier limit
+        Assignment
+          Target
+            Identifier tmp
+          Value
+            BinaryExpr +
+              Identifier tmp
+              StringLiteral "step;"
+        Assignment
+          Target
+            Identifier out
+          Value
+            CallExpr
+              Callee
+                FieldExpr .push
+                  Identifier out
+              Args
+                BinaryExpr *
+                  Identifier i
+                  Identifier i
+        Assignment
+          Target
+            Identifier i
+          Value
+            BinaryExpr +
+              Identifier i
+              IntLiteral 1
+    ReturnStatement
+      Identifier out
+  FunctionDecl main
+    ReturnType: i32
+    LetStatement vals: Vector<i64>
+      CallExpr
+        Callee
+          Identifier collect_squares
+        Args
+          CallExpr
+            Callee
+              Identifier to_i64
+            Args
+              IntLiteral 4
+    LetStatement idx: i64
+      IntLiteral 0
+    WhileStatement
+      Condition
+        BinaryExpr <
+          Identifier idx
+          CallExpr
+            Callee
+              FieldExpr .length
+                Identifier vals
+      ExpressionStatement
+        CallExpr
+          Callee
+            Identifier print
+          Args
+            CallExpr
+              Callee
+                FieldExpr .get
+                  Identifier vals
+              Args
+                Identifier idx
+      Assignment
+        Target
+          Identifier idx
+        Value
+          BinaryExpr +
+            Identifier idx
+            IntLiteral 1
+    ReturnStatement
+      IntLiteral 0

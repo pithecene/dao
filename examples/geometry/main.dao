@@ -1,0 +1,8 @@
+module main
+
+import geom
+
+fn main(): i32
+  let frame = geom::Box(7, 5)
+  print(geom::perimeter(frame))
+  return 0

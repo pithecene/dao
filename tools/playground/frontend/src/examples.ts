@@ -76,6 +76,11 @@ hashmap.dao|Compute & Search|single|Prelude HashMap<V> insertion, lookup, and Op
 hashmap_aliasing.dao|Compute & Search|single|Value-isolated HashMap<V> mutation and domain escape behavior.
 astar.dao|Compute & Search|single|Grid A* pathfinding combining classes, vectors, loops, and structured state.
 forecast_plans.dao|Compute & Search|single|Point-in-time heterogeneous DAG verifier & single-source CPU / Metal kernel workload.
+resource_pipeline.dao|Systems & Memory|single|The site's opening program: an enum class reading scored through a pipeline inside a resource memory domain.
+unsafe_ptr.dao|Systems & Memory|single|One heap cell allocated, written, and read through Ptr<T> inside mode unsafe =>.
+domains.dao|Systems & Memory|single|A Vector<i64> built inside a resource memory domain and copied out as the domain ends.
+structured_variants.dao|Data & Generics|single|An enum class expression evaluated by an exhaustive match over its named fields.
+geometry|Multi-file Modules|multi|Two-file program (main.dao, geom.dao): a class and a function reached through an import.
 modules|Multi-file Modules|multi|Three-file program (main.dao, shapes.dao, report.dao) demonstrating module identity and :: imports.
 `.trim();
 

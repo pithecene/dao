@@ -1,0 +1,92 @@
+File
+  Module unsafe_ptr
+  FunctionDecl increment_cell
+    Param ptr: Ptr<i32>
+    ReturnType: i32
+    LetStatement out: i32
+      IntLiteral 0
+    ModeBlock unsafe
+      LetStatement cur: i32
+        CallExpr
+          Callee
+            FieldExpr .get
+              Identifier ptr
+      ExpressionStatement
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier ptr
+          Args
+            BinaryExpr +
+              Identifier cur
+              IntLiteral 1
+      Assignment
+        Target
+          Identifier out
+        Value
+          CallExpr
+            Callee
+              FieldExpr .get
+                Identifier ptr
+    ReturnStatement
+      Identifier out
+  FunctionDecl main
+    ReturnType: i32
+    LetStatement cell: Ptr<i32>
+      CallExpr
+        Callee
+          FieldExpr .cast
+            CallExpr
+              Callee
+                Identifier __dao_mem_alloc
+              Args
+                CallExpr
+                  Callee
+                    Identifier size_of
+                  TypeArgs
+                    i32
+                CallExpr
+                  Callee
+                    Identifier align_of
+                  TypeArgs
+                    i32
+        TypeArgs
+          i32
+    LetStatement result: i32
+      IntLiteral 0
+    ModeBlock unsafe
+      ExpressionStatement
+        CallExpr
+          Callee
+            FieldExpr .set
+              Identifier cell
+          Args
+            IntLiteral 41
+      Assignment
+        Target
+          Identifier result
+        Value
+          CallExpr
+            Callee
+              Identifier increment_cell
+            Args
+              Identifier cell
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier __dao_mem_free
+        Args
+          CallExpr
+            Callee
+              FieldExpr .cast
+                Identifier cell
+            TypeArgs
+              void
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          Identifier result
+    ReturnStatement
+      IntLiteral 0
