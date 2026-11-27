@@ -194,6 +194,21 @@ suite<"resolve_modules"> resolve_modules = [] {
     expect(add != nullptr && add->module != nullptr && add->module->display == "app::math");
   };
 
+  "a field named like an imported module keeps the module in field types"_test = [] {
+    auto resolved = resolve_program({
+        {"main.dao",
+         "module app::main\nimport app::math\n"
+         "class Holder:\n  math: math::Point\n  other: math::Point\n"},
+        {"math.dao", kMathModule},
+        {"util.dao", kUtilModule},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+    const auto* own = use_in(resolved, "main.dao", "math::Point", 0);
+    expect(own != nullptr && own->kind == SymbolKind::Module) << "the field's own type";
+    const auto* later = use_in(resolved, "main.dao", "math::Point", 1);
+    expect(later != nullptr && later->kind == SymbolKind::Module) << "a later field's type";
+  };
+
   "qualified_static_method_and_variant"_test = [] {
     auto resolved = resolve_program({
         {"main.dao",
