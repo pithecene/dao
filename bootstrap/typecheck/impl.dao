@@ -35,7 +35,6 @@ import bootstrap::resolver
 //   - Concept default method bodies (unchecked, as in the host)
 //   - Lambda contextual typing
 //   - List literal type inference
-//   - Try operator (requires generic Option/Result)
 //   - Index expressions
 //   - Checking rules of `mode gpu` / `mode parallel` (their bodies are
 //     checked as blocks); resource-block domain semantics beyond `yield`
@@ -62,9 +61,9 @@ class TC:
   src: string
   symbols: Vector<resolver::Symbol>
   scopes: Vector<resolver::Scope>
-  uses_map: HashMap<string, i64>       // program-level uses_key(file_id, tok_idx) → sym_idx
+  uses_map: HashMap<resolver::UseSite, i64>  // the symbol each use site names, program-wide
   file_id: i64                   // module-level file provenance (-1 for dummy)
-  concept_bindings: HashMap<string, i64> // program-level extend_binding_key → concept sym_idx
+  concept_bindings: HashMap<resolver::ExtendSite, i64>  // the concept symbol each extend block names
   module_id: i64                 // module identity for owner_module_id filtering (D2)
   exports: resolver::ExportTables          // cross-module export lookup (D4)
 
@@ -294,6 +293,9 @@ fn ts_set_sym_type(ts: TS, sym_idx: i64, type_idx: i64): TS
   ts.sym_types = vec_i64_set(ts.sym_types, sym_idx, type_idx)
   return ts
 
+fn ctx_with_return(c: CheckCtx, v: i64): CheckCtx
+  return CheckCtx(v, c.loop_depth, c.in_generator, c.gen_elem, c.unsafe_depth, c.resource_depth)
+
 fn ctx_with_loop(c: CheckCtx, v: i64): CheckCtx
   return CheckCtx(c.return_type, v, c.in_generator, c.gen_elem, c.unsafe_depth, c.resource_depth)
 
@@ -389,6 +391,11 @@ fn ts_node_span(ts: TS, node_idx: i64): Span
       return ts_tok_span(ts, op_tidx)
     parser::Node::UnaryE(op_tidx, operand):
       return ts_tok_span(ts, op_tidx)
+    parser::Node::TryE(operand, question_tok):
+      return ts_tok_span(ts, question_tok)
+    parser::Node::PipeE(left, right):
+      // A pipe's value is its last stage's.
+      return ts_node_span(ts, right)
     parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
       return ts_node_span(ts, callee)
     parser::Node::FieldE(obj, field_tidx):
@@ -419,13 +426,7 @@ fn ts_node_span(ts: TS, node_idx: i64): Span
 // =========================================================================
 
 fn lookup_use(ts: TS, tok_idx: i64): i64
-  let key: string = resolver::uses_key(ts.tc.file_id, tok_idx)
-  let result: Option<i64> = ts.tc.uses_map.get(key)
-  match result:
-    Option::Some(sym_idx):
-      return sym_idx
-    Option::None:
-      return to_i64(-1)
+  return ts.tc.uses_map.get_or(resolver::UseSite(ts.tc.file_id, tok_idx), to_i64(-1))
 
 // =========================================================================
 // Section 38: Builtin type registration
@@ -475,9 +476,9 @@ fn program_init_typecheck(p: resolver::Program): resolver::Program
     "",
     Vector<resolver::Symbol>::new(),
     Vector<resolver::Scope>::new(),
-    HashMap<string, i64>::new(),  // uses_map
+    HashMap<resolver::UseSite, i64>::new(),  // uses_map
     to_i64(-1),
-    HashMap<string, i64>::new(),  // concept_bindings
+    HashMap<resolver::ExtendSite, i64>::new(),  // concept_bindings
     to_i64(-1),
     resolver::ExportTables(Vector<resolver::ExportTable>::new()))
   let dummy_ts: TS = ts_new(dummy_tc, Vector<base::DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), registry_empty())
@@ -2192,7 +2193,7 @@ fn target_owned_by_module(ts: TS, target_ti: i64, mod_id: i64): bool
   return false
 
 fn extend_concept_ti(ts: TS, decl_idx: i64): i64
-  let cb_found = ts.tc.concept_bindings.get(resolver::extend_binding_key(ts.tc.file_id, decl_idx))
+  let cb_found = ts.tc.concept_bindings.get(resolver::ExtendSite(ts.tc.file_id, decl_idx))
   match cb_found:
     Option::Some(sym):
       return concept_named_by(ts, sym_type_at(ts, sym))
@@ -2265,8 +2266,7 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
         if concept_name_tidx >= 0:
           concept_name = ts_tok_name(r, concept_name_tidx)
         let concept_ti: i64 = to_i64(-1)
-        let cb_key: string = resolver::extend_binding_key(r.tc.file_id, decl_idx)
-        let cb_found: Option<i64> = r.tc.concept_bindings.get(cb_key)
+        let cb_found = r.tc.concept_bindings.get(resolver::ExtendSite(r.tc.file_id, decl_idx))
         let concept_sym_idx: i64 = to_i64(-1)
         match cb_found:
           Option::Some(sym):
@@ -2532,8 +2532,8 @@ fn check_expr(ts: TS, node_idx: i64): TS
       let r: TS = check_expr(ts, obj)
       r = check_expr(r, idx_expr)
       return r
-    parser::Node::TryE(operand):
-      return check_expr(ts, operand)
+    parser::Node::TryE(operand, question_tok):
+      return check_try_expr(ts, node_idx, operand)
     parser::Node::LambdaE(params_lp, param_count, body):
       return ts_add_diag(ts, ts_node_span(ts, node_idx), "lambda requires expected function type context")
     parser::Node::ListLitE(elems_lp, elem_count):
@@ -2920,7 +2920,9 @@ fn check_compare_binop(ts: TS, node_idx: i64, op_tidx: i64, lt: i64, rt: i64, op
           return ts_add_diag(ts, sp, "'" + op_str + "' requires numeric operands")
   return ts_set_expr_type(ts, node_idx, to_i64(10))
 
-fn enum_base_name(ts: TS, ti: i64): string
+// The name a class or an enum type was declared under: its head's for
+// an instantiation (`Option` for `Option<i32>`), its own otherwise.
+fn nominal_name(ts: TS, ti: i64): string
   if ti < 0 or ti >= ts.types.length():
     return ""
   let t: base::DaoType = ts.types.get(ti)
@@ -2959,7 +2961,7 @@ fn check_equality_binop(ts: TS, node_idx: i64, op_tidx: i64, lt: i64, rt: i64, o
       if types_equal(ts, lt, rt):
         if enum_has_payload(ts, lt):
           let sp: Span = ts_node_span(ts, node_idx)
-          return ts_add_diag(ts, sp, "equality comparison is not yet supported for payload-bearing enum '" + enum_base_name(ts, lt) + "'; use match to inspect variants")
+          return ts_add_diag(ts, sp, "equality comparison is not yet supported for payload-bearing enum '" + nominal_name(ts, lt) + "'; use match to inspect variants")
         return ts_set_expr_type(ts, node_idx, to_i64(10))
       else:
         let sp: Span = ts_tok_span(ts, op_tidx)
@@ -4327,7 +4329,7 @@ fn check_lambda_no_gen_captures(ts: TS, expr_idx: i64, bound_syms: HashMap<strin
       return check_lambda_no_gen_captures(check_lambda_no_gen_captures(ts, l, bound_syms), r2, bound_syms)
     parser::Node::IndexE(obj, idx_e):
       return check_lambda_no_gen_captures(check_lambda_no_gen_captures(ts, obj, bound_syms), idx_e, bound_syms)
-    parser::Node::TryE(operand):
+    parser::Node::TryE(operand, question_tok):
       return check_lambda_no_gen_captures(ts, operand, bound_syms)
     parser::Node::LambdaE(sub_plp, sub_pc, sub_body):
       let inner_bound: HashMap<string, i64> = bound_syms
@@ -4341,6 +4343,17 @@ fn check_lambda_no_gen_captures(ts: TS, expr_idx: i64, bound_syms: HashMap<strin
         pi = pi + 1
       return check_lambda_no_gen_captures(ts, sub_body, inner_bound)
   return ts
+
+// A lambda's body, checked as the body of a function returning `ret_ti`
+// (-1 while that type is still being inferred): a `?` in it returns from
+// the lambda, never from the function that wrote the lambda.
+fn check_lambda_body(ts: TS, body: i64, ret_ti: i64): TS
+  let outer_ret = ts.ctx.return_type
+  let r = ts
+  r.ctx = ctx_with_return(r.ctx, ret_ti)
+  r = check_expr(r, body)
+  r.ctx = ctx_with_return(r.ctx, outer_ret)
+  return r
 
 fn check_lambda_with_expected(ts: TS, node_idx: i64, expected_ti: i64, open: Vector<i64>): TS
   if expected_ti < 0 or expected_ti >= ts.types.length():
@@ -4374,7 +4387,7 @@ fn check_lambda_with_expected(ts: TS, node_idx: i64, expected_ti: i64, open: Vec
       let expected_ret: i64 = et.ret_type
       let open_ret: bool = open.length() > 0 and type_mentions_any(r, expected_ret, open)
       if open_ret:
-        r = check_expr(r, body)
+        r = check_lambda_body(r, body, to_i64(-1))
         let body_ti: i64 = get_expr_type(r, body)
         if body_ti >= 0:
           let made_open: TypeR = make_fn_value_type(r, param_tis, body_ti)
@@ -4383,7 +4396,7 @@ fn check_lambda_with_expected(ts: TS, node_idx: i64, expected_ti: i64, open: Vec
       if is_lambda_expr(r, body):
         r = check_lambda_with_expected(r, body, expected_ret, open)
       else:
-        r = check_expr(r, body)
+        r = check_lambda_body(r, body, expected_ret)
         if expected_ret >= 0:
           r = fit_literal(r, body, expected_ret)
       let body_ti2: i64 = get_expr_type(r, body)
@@ -4986,6 +4999,10 @@ fn check_field_expr(ts: TS, node_idx: i64, obj: i64, field_tidx: i64): TS
 fn check_pipe_expr(ts: TS, node_idx: i64, left: i64, right: i64): TS
   let r: TS = check_expr(ts, left)
   let lhs_ti: i64 = get_expr_type(r, left)
+  // The piped value is the target's argument, and a void expression has
+  // no value to pass.
+  if lhs_ti >= 0 and is_void_type(r, lhs_ti):
+    return ts_add_diag(r, ts_node_span(r, left), "pipe source has no value: it is void")
   if is_lambda_expr(r, right):
     if lhs_ti < 0:
       return r
@@ -5001,7 +5018,7 @@ fn check_pipe_expr(ts: TS, node_idx: i64, left: i64, right: i64): TS
           r = ts_set_sym_type(r, psym, lhs_ti)
           bound_syms = bound_syms.set(i64_to_string(psym), to_i64(1))
         r = check_lambda_no_gen_captures(r, body, bound_syms)
-        r = check_expr(r, body)
+        r = check_lambda_body(r, body, to_i64(-1))
         let body_ti: i64 = get_expr_type(r, body)
         if body_ti >= 0:
           let one_p: Vector<i64> = Vector<i64>::new()
@@ -5025,6 +5042,10 @@ fn check_pipe_expr(ts: TS, node_idx: i64, left: i64, right: i64): TS
           let sp: Span = ts_node_span(r, right)
           r = ts_add_diag(r, sp, "pipe target function takes no arguments")
           return r
+        // The pipe is the call `right(left)`, and it supplies that one
+        // argument alone.
+        if rhs_type.info_count > 1:
+          return ts_add_diag(r, ts_node_span(r, right), "pipe target takes " + i64_to_string(rhs_type.info_count) + " parameters; a pipe supplies one")
         // Check LHS type against first param type.  Read the param slot
         // only when the function's params live in this module's type_info
         // (`info_lp` >= 0 and in range); a cross-module target's slot would
@@ -5843,6 +5864,144 @@ fn record_variant_index(ts: TS, node_idx: i64, vkey: string): TS
   ts.reg = reg_with_expr_types(ts.reg, ts.reg.expr_types.set(variant_index_key(ts.tc.module_id, node_idx), index))
   return ts
 
+// The keys under which the registry holds what a `?` at `node_idx`
+// returns when its operand fails: the type the enclosing function (or
+// lambda) returns, and the type of the error it carries there — absent
+// for an `Option`, whose `None` carries nothing.
+fn try_return_key(module_id: i64, node_idx: i64): string
+  return base::expr_id_key(module_id, node_idx) + ":try_return"
+
+fn try_error_key(module_id: i64, node_idx: i64): string
+  return base::expr_id_key(module_id, node_idx) + ":try_error"
+
+// What `try_return_key` holds for a `?` the checker reported: no type,
+// and distinct from the absent entry of a `?` it never reached.
+fn try_rejected(): i64 -> to_i64(-2)
+
+// The enum `?` unwraps a value of: "Option" or "Result" when `ti` is an
+// enum of that name or an instantiation of one (the host's rule), else "".
+fn try_family(ts: TS, ti: i64): string
+  let head_ti = enum_head(ts, ti)
+  if head_ti < 0:
+    return ""
+  let name = ts.types.get(head_ti).name
+  if name == "Option" or name == "Result":
+    return name
+  return ""
+
+// The declaration an enum type is a value of: the type itself, or the
+// head an instantiation was made from; -1 for any other type.
+fn enum_head(ts: TS, ti: i64): i64
+  if ti < 0 or ti >= ts.types.length():
+    return to_i64(-1)
+  let t = ts.types.get(ti)
+  match t.kind:
+    base::TypeKind::TEnum:
+      let head_ti = record_head(ts, t)
+      if head_ti >= 0:
+        return head_ti
+      return ti
+  return to_i64(-1)
+
+// A variant as its enum's head declares it: how many parameters it
+// takes, and the declared type of the first (-1 where it takes none).
+class VariantShape:
+  param_count: i64
+  first_ti: i64
+
+// The variant at position `index` of the enum head `head_ti`, read from
+// the head's records (per variant: name, parameter count, then a name
+// and a type per parameter); a parameter count of -1 where the head
+// declares no such variant.
+fn variant_at(ts: TS, head_ti: i64, index: i64): VariantShape
+  let head = ts.types.get(head_ti)
+  if index >= head.info_count:
+    return VariantShape(to_i64(-1), to_i64(-1))
+  let at = head.info_lp
+  let vi: i64 = 0
+  while vi < index:
+    at = at + 2 + ts.type_info.get(at + 1) * 2
+    vi = vi + 1
+  let param_count = ts.type_info.get(at + 1)
+  if param_count == 0:
+    return VariantShape(param_count, to_i64(-1))
+  return VariantShape(param_count, ts.type_info.get(at + 3))
+
+// `operand?`: the operand is an `Option` or a `Result`, and the
+// enclosing function returns a value of the same declaration, so the
+// failing variant can be returned from it — `None`, or `Err` with the
+// operand's error, whose type must be the function's own error type.
+// The expression has the type of the succeeding variant's value (host:
+// check_try).  As in the host, the succeeding variant is the first and
+// the failing one the second, whatever they are called; the lowering
+// returns the second with the operand's error or with nothing, so the
+// shape it builds is checked here rather than assumed there.
+fn check_try_expr(ts: TS, node_idx: i64, operand: i64): TS
+  let r = check_try_shape(ts, node_idx, operand)
+  // Every path that records no return type reported the expression, so
+  // HIR can tell it from one the checker never reached.
+  let key = try_return_key(r.tc.module_id, node_idx)
+  if base::hm_get_or(r.reg.expr_types, key, to_i64(-1)) < 0:
+    r.reg = reg_with_expr_types(r.reg, r.reg.expr_types.set(key, try_rejected()))
+  return r
+
+fn check_try_shape(ts: TS, node_idx: i64, operand: i64): TS
+  let diags_before = ts.diags.length()
+  let r = check_expr(ts, operand)
+  let sp = ts_node_span(r, node_idx)
+  let operand_ti = get_expr_type(r, operand)
+  if operand_ti < 0:
+    // An operand may be left untyped without a diagnostic of its own.
+    if r.diags.length() == diags_before:
+      return ts_add_diag(r, sp, "'?' operator requires an Option or Result type, and its operand has no type")
+    return r
+  let family = try_family(r, operand_ti)
+  if family == "":
+    return ts_add_diag(r, sp, "'?' operator requires an Option or Result type, got '" + type_name(r, operand_ti) + "'")
+  // An operand such as `Option::None` still stands for its head's own
+  // parameter: nothing decided what the `?` would yield.
+  if open_enum_head(r, operand_ti) >= 0:
+    return ts_add_diag(r, sp, "'?' cannot tell which " + family + " its operand is: '" + type_name(r, operand_ti) + "' leaves a type argument undecided")
+  let return_ti = r.ctx.return_type
+  if return_ti < 0:
+    return ts_add_diag(r, sp, "'?' operator can only be used inside a function with a return type")
+  let head_ti = enum_head(r, operand_ti)
+  if enum_head(r, return_ti) != head_ti:
+    if try_family(r, return_ti) == family:
+      return ts_add_diag(r, sp, "'?' on " + family + " needs the enclosing function to return the same declaration of " + family + ", but it returns '" + type_name(r, return_ti) + "' of another declaration with that name")
+    if enum_head(r, return_ti) < 0 and nominal_name(r, return_ti) == family:
+      return ts_add_diag(r, sp, "'?' on " + family + " needs the enclosing function to return that enum, but it returns '" + type_name(r, return_ti) + "', which is another declaration and no enum")
+    return ts_add_diag(r, sp, "enclosing function must return " + family + " to use '?' on " + family + ", but returns '" + type_name(r, return_ti) + "'")
+  // Exactly two variants: any value that is not the first is the second,
+  // which is the one the lowering reads the error from.
+  let unexpected = family + " type has unexpected variant structure"
+  if r.types.get(head_ti).info_count != 2:
+    return ts_add_diag(r, sp, unexpected)
+  let succeeding = variant_at(r, head_ti, to_i64(0))
+  let failing = variant_at(r, head_ti, to_i64(1))
+  let carried_count: i64 = 0
+  if family == "Result":
+    carried_count = 1
+  if succeeding.param_count < 1 or failing.param_count != carried_count:
+    return ts_add_diag(r, sp, unexpected)
+  let operand_args = instantiation_decided(r, operand_ti, HashMap<string, i64>::new())
+  let value = substitute_type(operand_args.ts, operand_args.map, succeeding.first_ti)
+  r = value.ts
+  if value.type_idx < 0:
+    return ts_add_diag(r, sp, unexpected)
+  if family == "Result":
+    let error = substitute_type(r, operand_args.map, failing.first_ti)
+    let return_args = instantiation_decided(error.ts, return_ti, HashMap<string, i64>::new())
+    let fn_error = substitute_type(return_args.ts, return_args.map, failing.first_ti)
+    r = fn_error.ts
+    if error.type_idx < 0 or fn_error.type_idx < 0:
+      return ts_add_diag(r, sp, unexpected)
+    if types_equal(r, error.type_idx, fn_error.type_idx) == false:
+      return ts_add_diag(r, sp, "error type '" + type_name(r, error.type_idx) + "' is not assignable to function return error type '" + type_name(r, fn_error.type_idx) + "'")
+    r.reg = reg_with_expr_types(r.reg, r.reg.expr_types.set(try_error_key(r.tc.module_id, node_idx), error.type_idx))
+  r.reg = reg_with_expr_types(r.reg, r.reg.expr_types.set(try_return_key(r.tc.module_id, node_idx), return_ti))
+  return ts_set_expr_type(r, node_idx, value.type_idx)
+
 fn concept_member_key(module_id: i64, node_idx: i64): string
   return base::expr_id_key(module_id, node_idx) + ":concept"
 
@@ -5887,8 +6046,7 @@ fn tc_collect_conformances(ts: TS, decls: Vector<i64>): TS
             if cti >= 0:
               r = ts_add_derived_concept(r, cti)
       parser::Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
-        let cb_key: string = resolver::extend_binding_key(r.tc.file_id, decl_idx)
-        let cb_found: Option<i64> = r.tc.concept_bindings.get(cb_key)
+        let cb_found = r.tc.concept_bindings.get(resolver::ExtendSite(r.tc.file_id, decl_idx))
         let esym: i64 = to_i64(-1)
         match cb_found:
           Option::Some(sym):

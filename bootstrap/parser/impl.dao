@@ -34,7 +34,7 @@ enum class Node:
   IndexE(obj: i64, idx: i64)
   FieldE(obj: i64, field: i64)
   PipeE(left: i64, right: i64)
-  TryE(operand: i64)
+  TryE(operand: i64, question_tok: i64)
   LambdaE(params_lp: i64, param_count: i64, body: i64)
   ListLitE(elems_lp: i64, elem_count: i64)
   ErrorE(tok: i64)
@@ -733,7 +733,7 @@ fn parse_postfix(pc: PC, ps: PS): PR
           else:
             if tk_eq(k, lexer::TK::Question):
               let ps2: PS = ps_advance(pc, cur_ps)
-              let try_r: PR = ps_add_node(ps2, Node::TryE(operand = cur_node))
+              let try_r = ps_add_node(ps2, Node::TryE(operand = cur_node, question_tok = cur_ps.pos))
               cur_ps = try_r.ps
               cur_node = try_r.node
 
@@ -1943,7 +1943,7 @@ fn node_kind_name(n: Node): string
       return "FieldE"
     Node::PipeE(a, b):
       return "PipeE"
-    Node::TryE(a):
+    Node::TryE(a, b):
       return "TryE"
     Node::LambdaE(a, b, c):
       return "LambdaE"

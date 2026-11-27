@@ -49,6 +49,24 @@ fn tc_expect_rejected(label: string, src: string): bool
 // `needle`.  A source may fail for more than one reason at once — a
 // conflicting type parameter also leaves an argument that does not fit
 // — and the reason under test is the one named here.
+// Typecheck `src`, which opens with its own `module` line so offsets
+// are the source's, and report whether a diagnostic containing `needle`
+// sits where `anchor` first appears.
+fn tc_expect_diag_at(label: string, src: string, needle: string, anchor: string): bool
+  let res = typecheck::typecheck(src)
+  let i: i64 = 0
+  while i < res.diags.length():
+    if index_of(res.diags.get(i).message, needle) >= 0 and res.diags.get(i).span.offset == index_of(src, anchor):
+      print("PASS " + label)
+      return true
+    i = i + 1
+  print("FAIL " + label + ": expected a diagnostic containing '" + needle + "' at '" + anchor + "', got " + i64_to_string(tc_count_diags(res)))
+  let j: i64 = 0
+  while j < res.diags.length():
+    print("  diag: " + res.diags.get(j).message)
+    j = j + 1
+  return false
+
 fn tc_expect_some_diag_containing(label: string, src: string, needle: string): bool
   let res: typecheck::TypeCheckResult = typecheck::typecheck(src)
   let i: i64 = 0
@@ -90,15 +108,19 @@ fn test_dispatch_index(): HashMap<string, i64>
   m = m.set(typecheck::dispatch_key_extend(to_i64(2), "show", to_i64(0)), to_i64(1))
   return m
 
+// The program made of `libs` and a main file `main_src` at main.dao,
+// resolved and typechecked.
+fn tc_checked_program(libs: Vector<graph::SourceInput>, main_src: string): resolver::Program
+  let inputs = libs.push(graph::SourceInput("main.dao", main_src, false))
+  let p = resolver::program_run_resolve(resolver::program_from_graph(graph::build_program(inputs)))
+  return typecheck::program_run_typecheck(p)
+
 // Resolve and typecheck a program — the library files `libs` (each
 // marked prelude or not) and a main file — and report whether main.dao
 // and report whether the file at `in_path` carries exactly `n` error
 // diagnostics and every other file none, printing them otherwise.
 fn tc_expect_program_errors(label: string, libs: Vector<graph::SourceInput>, main_src: string, in_path: string, n: i64): bool
-  let inputs: Vector<graph::SourceInput> = libs.push(graph::SourceInput("main.dao", main_src, false))
-  let p: resolver::Program = resolver::program_from_graph(graph::build_program(inputs))
-  p = resolver::program_run_resolve(p)
-  p = typecheck::program_run_typecheck(p)
+  let p = tc_checked_program(libs, main_src)
   let errs: i64 = 0
   let lib_errs: i64 = 0
   let i: i64 = 0
@@ -114,6 +136,22 @@ fn tc_expect_program_errors(label: string, libs: Vector<graph::SourceInput>, mai
     print("PASS " + label)
     return true
   print("FAIL " + label + ": expected " + i64_to_string(n) + " errors in " + in_path + " and none elsewhere, got " + i64_to_string(errs) + " and " + i64_to_string(lib_errs))
+  let j: i64 = 0
+  while j < p.diags.length():
+    print("  diag: " + p.diags.get(j).path + ": " + p.diags.get(j).diag.message)
+    j = j + 1
+  return false
+
+// Resolve and typecheck `libs` and a main file, and report whether the
+// program's only diagnostic is an error in main.dao containing `needle`.
+fn tc_expect_program_error_containing(label: string, libs: Vector<graph::SourceInput>, main_src: string, needle: string): bool
+  let p = tc_checked_program(libs, main_src)
+  if p.diags.length() == 1:
+    let only = p.diags.get(0)
+    if only.path == "main.dao" and only.diag.severity == Severity::Error and index_of(only.diag.message, needle) >= 0:
+      print("PASS " + label)
+      return true
+  print("FAIL " + label + ": expected one error in main.dao containing '" + needle + "', got " + i64_to_string(p.diags.length()) + " diagnostic(s)")
   let j: i64 = 0
   while j < p.diags.length():
     print("  diag: " + p.diags.get(j).path + ": " + p.diags.get(j).diag.message)
@@ -1717,20 +1755,9 @@ fn main(): i32
   // conforming type there too.
   if tc_expect_clean("generator_signature_substitutes_concept", "concept Copies:\n  fn copies(self): Generator<Copies>\n\nextend i32 as Copies:\n  fn copies(self): Generator<i32>\n    yield self\n    return\n"):
     pass_count = pass_count + 1
-  // A `yield` diagnostic points at its keyword, whatever the operand:
-  // the source is wrapped as `module test`, so `yield` sits at 26.
-  let r_ys: typecheck::TypeCheckResult = typecheck::typecheck("fn g(): i64\n  yield [1]\n  return 0\n")
-  let ys_at: i64 = to_i64(-1)
-  let ysi: i64 = 0
-  while ysi < r_ys.diags.length():
-    if index_of(r_ys.diags.get(ysi).message, "only valid inside a generator") >= 0:
-      ys_at = r_ys.diags.get(ysi).span.offset
-    ysi = ysi + 1
-  if ys_at == to_i64(26):
-    print("PASS yield_diagnostic_located")
+  // A `yield` diagnostic points at its keyword, whatever the operand.
+  if tc_expect_diag_at("yield_diagnostic_located", "module app::main\nfn g(): i64\n  yield [1]\n  return 0\n", "only valid inside a generator", "yield"):
     pass_count = pass_count + 1
-  else:
-    print("FAIL yield_diagnostic_located: expected the yield legality diagnostic at offset 26, got " + i64_to_string(ys_at))
   if tc_expect_diag_containing("generator_alias_unknown_element_rejected", "type Bad = Generator<Missing>\n", "unknown type 'Missing'"):
     pass_count = pass_count + 1
   if tc_expect_diag_containing("generator_pointer_unknown_element_rejected", "fn g(): Generator<Ptr<Missing>>\n  return\n", "unknown type 'Missing'"):
@@ -2252,6 +2279,65 @@ fn main(): i32
   if tc_expect_some_diag_containing("rest_pattern_on_path_past_the_enum", "enum class Shape:\n  Rect(w: i32, h: i32)\n  Dot\n\nfn pick(s: Shape): i32\n  match s:\n    Shape::Missing::Dot(..):\n      return 1\n  return 0\n", "this pattern names no variant"):
     pass_count = pass_count + 1
   if tc_expect_diag_containing("rest_marker_is_no_call_argument", "fn add(a: i32, b: i32): i32 -> a + b\n\nfn f(): i32\n  return add(1, 2, ..)\n", "'..' is no argument of a call"):
+    pass_count = pass_count + 1
+  // `operand?` has the type of the operand's succeeding value where the
+  // function returns the same enum, and a `Result`'s error type must be
+  // the function's.  In a lambda it returns from the lambda.
+  total = total + 17
+  if tc_expect_clean("try_unwraps_an_option", "enum class Option<T>:\n  Some(value: T)\n  None\n\nfn half(n: i32): Option<i32>\n  if n % 2 == 0:\n    return Option::Some(value = n / 2)\n  return Option::None\n\nfn quarter(n: i32): Option<i32>\n  let h: i32 = half(n)?\n  return half(h)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("try_unwraps_a_result", "enum class Result<T, E>:\n  Ok(value: T)\n  Err(error: E)\n\nfn parse(n: i32): Result<i32, i32>\n  if n < 0:\n    return Result::Err(error = 7)\n  return Result::Ok(value = n)\n\nfn twice(n: i32): Result<i32, i32>\n  let v: i32 = parse(n)?\n  return Result::Ok(value = v + v)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("try_needs_an_option_or_result", "fn f(n: i32): i32\n  return n?\n", "'?' operator requires an Option or Result type"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("try_needs_the_function_to_return_its_enum", "enum class Option<T>:\n  Some(value: T)\n  None\n\nfn half(n: i32): Option<i32>\n  if n % 2 == 0:\n    return Option::Some(value = n / 2)\n  return Option::None\n\nfn f(n: i32): i32\n  let h: i32 = half(n)?\n  return h\n", "enclosing function must return Option to use '?' on Option"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("try_needs_the_function_error_type", "enum class Result<T, E>:\n  Ok(value: T)\n  Err(error: E)\n\nfn parse(n: i32): Result<i32, i32>\n  if n < 0:\n    return Result::Err(error = 7)\n  return Result::Ok(value = n)\n\nfn other(n: i32): Result<i32, bool>\n  let v: i32 = parse(n)?\n  return Result::Ok(value = v)\n", "is not assignable to function return error type"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("try_in_a_lambda_returns_from_the_lambda", "enum class Option<T>:\n  Some(value: T)\n  None\n\nfn half(n: i32): Option<i32>\n  if n % 2 == 0:\n    return Option::Some(value = n / 2)\n  return Option::None\n\nfn apply(f: fn(i32): Option<i32>, n: i32): Option<i32> -> f(n)\n\nfn f(n: i32): i32\n  match apply(|x| -> half(half(x)?), n):\n    Option::Some(v):\n      return v\n    Option::None:\n      return 0\n  return 0\n"):
+    pass_count = pass_count + 1
+  if tc_expect_clean("try_reads_variants_by_position", "enum class Option<T>:\n  Present(value: T)\n  Absent\n\nfn half(n: i32): Option<i32>\n  if n % 2 == 0:\n    return Option::Present(value = n / 2)\n  return Option::Absent\n\nfn quarter(n: i32): Option<i32>\n  let h: i32 = half(n)?\n  return half(h)\n"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("try_refuses_a_failing_variant_with_a_payload", "enum class Option:\n  Some(value: i32)\n  None(reason: i32)\n\nfn half(n: i32): Option\n  return Option::None(reason = n)\n\nfn quarter(n: i32): Option\n  let h: i32 = half(n)?\n  return half(h)\n", "Option type has unexpected variant structure"):
+    pass_count = pass_count + 1
+  // The diagnostic sits on the `?`, whatever its operand is: an untyped
+  // operand, a payload whose type never resolved, an operand whose type
+  // argument nothing decided.
+  if tc_expect_diag_at("try_refuses_an_untyped_operand", "module app::main\nfn f(): i32\n  let x: i32 = [1]?\n  return x\n", "its operand has no type", "?"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_at("try_refuses_an_unresolved_value_type", "module app::main\nenum class Option:\n  Some(value: Missing)\n  None\n\nfn get(): Option\n  return Option::None\n\nfn f(): Option\n  let x: i32 = get()?\n  return Option::None\n", "Option type has unexpected variant structure", "?"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_at("try_refuses_an_unresolved_error_type", "module app::main\nenum class Result:\n  Ok(value: i32)\n  Err(error: Missing)\n\nfn get(): Result\n  return Result::Ok(value = 1)\n\nfn f(): Result\n  let x: i32 = get()?\n  return Result::Ok(value = x)\n", "Result type has unexpected variant structure", "?"):
+    pass_count = pass_count + 1
+  if tc_expect_diag_at("try_refuses_an_operand_with_an_undecided_argument", "module app::main\nenum class Option<T>:\n  Some(value: T)\n  None\n\nfn f(): Option<i32>\n  let x = Option::None?\n  return Option::None\n", "leaves a type argument undecided", "?"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("try_refuses_a_third_variant", "enum class Result:\n  Passed(value: i32)\n  Failed(error: i32)\n  Cancelled\n\nfn run(n: i32): Result\n  return Result::Cancelled\n\nfn twice(n: i32): Result\n  let v: i32 = run(n)?\n  return Result::Passed(value = v + v)\n", "Result type has unexpected variant structure"):
+    pass_count = pass_count + 1
+  // Two modules each declare an `Option`: a `?` on one cannot return the
+  // other, enum or class, and the diagnostic says how they differ.
+  let option_lib = Vector<graph::SourceInput>::new().push(graph::SourceInput("lib.dao", "module app::lib\nenum class Option<T>:\n  Some(value: T)\n  None\n\nfn half(n: i32): Option<i32>\n  if n % 2 == 0:\n    return Option::Some(value = n / 2)\n  return Option::None\n\n", false))
+  if tc_expect_program_error_containing("try_refuses_another_declaration_of_the_enum", option_lib, "module app::main\nimport app::lib\nenum class Option<T>:\n  Some(value: T)\n  None\n\nfn f(n: i32): Option<i32>\n  let h: i32 = lib::half(n)?\n  return Option::Some(value = h)\n", "of another declaration with that name"):
+    pass_count = pass_count + 1
+  if tc_expect_program_error_containing("try_refuses_a_class_of_the_same_name", option_lib, "module app::main\nimport app::lib\nclass Option:\n  n: i32\n\nfn f(n: i32): Option\n  let h: i32 = lib::half(n)?\n  return Option(h)\n", "which is another declaration and no enum"):
+    pass_count = pass_count + 1
+  if tc_expect_program_error_containing("try_refuses_a_generic_class_of_the_same_name", option_lib, "module app::main\nimport app::lib\nclass Option<T>:\n  n: T\n\nfn f(n: i32): Option<i32>\n  let h: i32 = lib::half(n)?\n  return Option<i32>(h)\n", "which is another declaration and no enum"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("try_in_a_piped_lambda_has_no_return_type", "enum class Option<T>:\n  Some(value: T)\n  None\n\nfn half(n: i32): Option<i32>\n  if n % 2 == 0:\n    return Option::Some(value = n / 2)\n  return Option::None\n\nfn f(n: i32): Option<i32>\n  let h: i32 = n |> |x| -> half(x)?\n  return half(h)\n", "'?' operator can only be used inside a function with a return type"):
+    pass_count = pass_count + 1
+  // A pipe is a call with one argument, so its target takes one parameter.
+  total = total + 5
+  if tc_expect_clean("pipe_into_a_one_parameter_function", "fn inc(x: i32): i32 -> x + 1\n\nfn f(): i32\n  return 3 |> inc\n"):
+    pass_count = pass_count + 1
+  if tc_expect_some_diag_containing("pipe_source_has_a_value", "fn noop(): void\n  return\n\nfn f(): i32\n  return noop() |> |x| -> 42\n", "pipe source has no value"):
+    pass_count = pass_count + 1
+  // In a chain, the diagnostic sits on the stage that yields no value.
+  if tc_expect_diag_at("void_pipe_stage_is_reported_at_the_stage", "module app::main\nfn sink(x: i32): void\n  return\n\nfn next(x: i32): i32 -> x\n\nfn f(): i32\n  return 1 |> sink |> next\n", "pipe source has no value", "sink |>"):
+    pass_count = pass_count + 1
+  // A qualified target with overloads is its one-argument overload,
+  // whichever the module declares first.
+  if tc_expect_program_errors("pipe_picks_the_one_argument_overload_of_a_qualified_target", Vector<graph::SourceInput>::new().push(graph::SourceInput("lib.dao", "module app::lib\nfn g(a: i32, b: i32): i32 -> a + b\n\nfn g(a: i32): i32 -> a\n", false)), "module app::main\nimport app::lib\n\nfn f(): i32 -> 1 |> lib::g\n", "main.dao", 0):
+    pass_count = pass_count + 1
+  if tc_expect_diag_containing("pipe_target_takes_one_parameter", "fn add(a: i32, b: i32): i32 -> a + b\n\nfn f(): i32\n  return 3 |> add\n", "pipe target takes 2 parameters; a pipe supplies one"):
     pass_count = pass_count + 1
   total = total + 1
   if tc_expect_program_errors("same_module_equatable_hashable_visible_across_modules", Vector<graph::SourceInput>::new().push(graph::SourceInput("stdlib/core/hash.dao", hash_prelude, true)).push(graph::SourceInput("lib.dao", "module app::lib\nclass CustomKey:\n  id: i64\n  raw: f64\nextend CustomKey as Equatable:\n  fn eq(self, other: CustomKey): bool -> self.id == other.id\nextend CustomKey as Hashable:\n  fn hash(self): i64 -> self.id.hash()\n", false)), "module app::main\nimport app::lib\n\nfn need_both<K: Hashable + Equatable>(a: K, b: K): i64\n  if a.eq(b):\n    return a.hash()\n  let zero: i64 = 0\n  return zero\n\nfn f(): i64\n  let seven: i64 = 7\n  let k1: lib::CustomKey = lib::CustomKey(seven, 1.5)\n  let k2: lib::CustomKey = lib::CustomKey(seven, 2.5)\n  return need_both(k1, k2)\n", "main.dao", 0):

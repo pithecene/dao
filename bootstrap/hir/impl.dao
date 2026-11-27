@@ -20,7 +20,6 @@ import bootstrap::typecheck
 // Tier B deferrals:
 //   - Lambda lowering
 //   - List literal lowering
-//   - Try operator
 //   - Index expressions
 //   - Generics / monomorphization
 //   - Methods / extend
@@ -73,6 +72,11 @@ enum class HirNode:
   HirCall(callee: i64, args_lp: i64, arg_count: i64, typ: i64, subst: i64)
   HirFieldAccess(obj: i64, field: i64, typ: i64)
   HirPipe(left: i64, right: i64, typ: i64)
+  // `operand?`: the value of the operand's succeeding variant, of type
+  // `typ`.  Where the operand fails, the function returns its failing
+  // variant as a `return_typ`, carrying the operand's error of type
+  // `error_typ` (-1 for an `Option`, whose `None` carries nothing).
+  HirTry(operand: i64, error_typ: i64, return_typ: i64, typ: i64)
   HirQualName(segs_lp: i64, seg_count: i64, typ: i64)
   // The declaration index of the variant an enum value holds, and the
   // `field`-th payload value of its `variant`-th variant: what `match`
@@ -116,7 +120,7 @@ class HS:
   unit: HirModule                // the module being lowered
   symbols: Vector<resolver::Symbol>
   typecheck: base::TypeCheckData       // the program's type tables, expression types, and method dispatch
-  uses_map: HashMap<string, i64>       // program-level uses_key(file_id, tok_idx) → sym_idx
+  uses_map: HashMap<resolver::UseSite, i64>  // the symbol each use site names, program-wide
   arena: HirArena
   diags: Vector<Diagnostic>
 
@@ -226,6 +230,8 @@ fn hir_expr_type(node: HirNode): i64
       return ti
     HirNode::HirPipe(l, r, ti):
       return ti
+    HirNode::HirTry(o, et, rt, ti):
+      return ti
     HirNode::HirQualName(t, n, ti):
       return ti
     HirNode::HirEnumDiscriminant(v, ti):
@@ -290,13 +296,7 @@ fn hir_get_expr_type(hs: HS, ast_node_idx: i64): i64
       return to_i64(-1)
 
 fn hir_lookup_use(hs: HS, tok_idx: i64): i64
-  let key: string = resolver::uses_key(hs.unit.file_id, tok_idx)
-  let result: Option<i64> = hs.uses_map.get(key)
-  match result:
-    Option::Some(sym_idx):
-      return sym_idx
-    Option::None:
-      return to_i64(-1)
+  return hs.uses_map.get_or(resolver::UseSite(hs.unit.file_id, tok_idx), to_i64(-1))
 
 fn hir_sym_type(hs: HS, sym_idx: i64): i64
   if sym_idx < 0:
@@ -435,10 +435,20 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
       // Preserve all segment token indices in HIR idx.
       let seg_fl: HirFlush = hir_flush_list(hs, segs)
       return hs_add_node(seg_fl.hs, HirNode::HirQualName(segs_lp = seg_fl.list_pos, seg_count = segs.length(), typ = ti))
-    parser::Node::TryE(operand):
-      // Tier B deferral — lower operand, emit error
-      let cur: HS = hs_add_diag(hs, Span(to_i64(0), to_i64(1)), "try operator not supported in Tier A HIR")
-      return hs_add_node(cur, HirNode::HirErrorExpr(tok = to_i64(0)))
+    parser::Node::TryE(operand, question_tok):
+      // The checker recorded what a failing operand returns.  A `?` it
+      // reported lowers to the error expression without a second
+      // diagnostic; one it never reached has no record at all, and is
+      // reported here rather than lowered unchecked.
+      let return_ti = base::hm_get_or(hs.typecheck.lookup.expr_types, typecheck::try_return_key(hs.unit.module_id, node_idx), to_i64(-1))
+      if return_ti == typecheck::try_rejected():
+        return hs_add_node(hs, HirNode::HirErrorExpr(tok = to_i64(0)))
+      if return_ti < 0:
+        let unchecked = hs_add_diag(hs, hs_tok_span(hs, question_tok), "'?' was never type checked, so there is no return type to propagate a failure as")
+        return hs_add_node(unchecked, HirNode::HirErrorExpr(tok = to_i64(0)))
+      let error_ti = base::hm_get_or(hs.typecheck.lookup.expr_types, typecheck::try_error_key(hs.unit.module_id, node_idx), to_i64(-1))
+      let tried = lower_expr(hs, operand)
+      return hs_add_node(tried.hs, HirNode::HirTry(operand = tried.hir, error_typ = error_ti, return_typ = return_ti, typ = ti))
     parser::Node::LambdaE(params_lp, param_count, body):
       let param_toks: Vector<i64> = parser::read_list(hs.unit.idx_data, params_lp)
       let pairs: Vector<i64> = Vector<i64>::new()
@@ -1571,7 +1581,7 @@ fn program_lower_hir(p: resolver::Program): ProgramHir
     ti = ti + 1
 
   // Emit HirProgram root. Build a temporary HS to use hir_flush_list.
-  let tmp_hs: HS = HS(HirModule(Vector<parser::Node>::new(), Vector<i64>::new(), Vector<lexer::Token>::new(), "", to_i64(-1), to_i64(-1)), Vector<resolver::Symbol>::new(), base::TypeCheckData(false, Vector<base::DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), base::program_lookup_empty()), HashMap<string, i64>::new(), HirArena(hir_nodes, hir_idx), Vector<Diagnostic>::new())
+  let tmp_hs = HS(HirModule(Vector<parser::Node>::new(), Vector<i64>::new(), Vector<lexer::Token>::new(), "", to_i64(-1), to_i64(-1)), Vector<resolver::Symbol>::new(), base::TypeCheckData(false, Vector<base::DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), base::program_lookup_empty()), HashMap<resolver::UseSite, i64>::new(), HirArena(hir_nodes, hir_idx), Vector<Diagnostic>::new())
   let mod_fl: HirFlush = hir_flush_list(tmp_hs, module_indices)
   hir_nodes = mod_fl.hs.arena.nodes
   hir_idx = mod_fl.hs.arena.idx
@@ -1699,6 +1709,8 @@ fn hir_node_kind(node: HirNode): string
       return "HirFieldAccess"
     HirNode::HirPipe(a, b, c):
       return "HirPipe"
+    HirNode::HirTry(a, b, c, d):
+      return "HirTry"
     HirNode::HirQualName(a, b, c):
       return "HirQualName"
     HirNode::HirEnumDiscriminant(a, b):
@@ -1964,6 +1976,10 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
       line = line + " : " + hir_type_label(hr, ti2) + "\n"
       line = line + hir_dump_node(hr, left, indent + 1)
       line = line + hir_dump_node(hr, right, indent + 1)
+      return line
+    HirNode::HirTry(operand, error_ti, return_ti, ti2):
+      line = line + " : " + hir_type_label(hr, ti2) + "\n"
+      line = line + hir_dump_node(hr, operand, indent + 1)
       return line
     HirNode::HirQualName(first_tok, seg_count, ti2):
       line = line + " : " + hir_type_label(hr, ti2) + "\n"
