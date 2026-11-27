@@ -438,7 +438,7 @@ fn br_emit_terminator(br: BlockR, node: MirNode): BlockR
 // type `type_idx`: the argument list and its count are written together.
 // `subst` is the call's record of decided type parameters, or -1.
 fn emit_call(br: BlockR, callee: i64, args: Vector<i64>, type_idx: i64, subst: i64): ExprR
-  let args_fl: MirFlush = mir_flush_list(br.ms, args)
+  let args_fl = mir_flush_list(br.ms, args)
   br.ms = args_fl.ms
   return br_emit_value(br, MirNode::MirCall(callee = callee, arg_list_lp = args_fl.list_pos, arg_count = args.length(), type_idx = type_idx, subst = subst))
 
@@ -453,32 +453,32 @@ fn emit_call(br: BlockR, callee: i64, args: Vector<i64>, type_idx: i64, subst: i
 // `Option`), `return_ti` the type the function returns, and `value_ti`
 // the type of the succeeding variant's value.
 fn lower_try(br: BlockR, operand: i64, error_ti: i64, return_ti: i64, value_ti: i64): ExprR
-  let tried: ExprR = lower_expr_value(br, operand)
+  let tried = lower_expr_value(br, operand)
   // An enum's discriminant is an i32.
-  let tag_ti: i64 = typecheck::builtin_type_index("i32")
-  let held: ExprR = br_emit_value(tried.br, MirNode::MirEnumDiscriminant(value = tried.value, type_idx = tag_ti))
-  let first: ExprR = br_emit_value(held.br, MirNode::MirConstInt(value = to_i64(0), type_idx = tag_ti))
-  let succeeded: ExprR = br_emit_value(first.br, MirNode::MirBinary(op_tok = synthesized_equality_op(), lhs = held.value, rhs = first.value, type_idx = mir_bool_type()))
-  let cur: BlockR = succeeded.br
-  let ok_r: MirR = ms_new_block(cur.ms)
+  let tag_ti = typecheck::builtin_type_index("i32")
+  let held = br_emit_value(tried.br, MirNode::MirEnumDiscriminant(value = tried.value, type_idx = tag_ti))
+  let first = br_emit_value(held.br, MirNode::MirConstInt(value = to_i64(0), type_idx = tag_ti))
+  let succeeded = br_emit_value(first.br, MirNode::MirBinary(op_tok = synthesized_equality_op(), lhs = held.value, rhs = first.value, type_idx = mir_bool_type()))
+  let cur = succeeded.br
+  let ok_r = ms_new_block(cur.ms)
   cur.ms = ok_r.ms
-  let fail_r: MirR = ms_new_block(cur.ms)
+  let fail_r = ms_new_block(cur.ms)
   cur.ms = fail_r.ms
   cur = br_emit_terminator(cur, MirNode::MirCondBr(cond = succeeded.value, then_block = ok_r.mir, else_block = fail_r.mir))
 
-  let fail_br: BlockR = block_open(block_seal(cur), fail_r.mir)
-  let carried: Vector<i64> = Vector<i64>::new()
+  let fail_br = block_open(block_seal(cur), fail_r.mir)
+  let carried = Vector<i64>::new()
   if error_ti >= 0:
-    let error: ExprR = br_emit_value(fail_br, MirNode::MirEnumPayload(value = tried.value, variant = to_i64(1), field = to_i64(0), type_idx = error_ti))
+    let error = br_emit_value(fail_br, MirNode::MirEnumPayload(value = tried.value, variant = to_i64(1), field = to_i64(0), type_idx = error_ti))
     fail_br = error.br
     carried = carried.push(error.value)
-  let carried_fl: MirFlush = mir_flush_list(fail_br.ms, carried)
+  let carried_fl = mir_flush_list(fail_br.ms, carried)
   fail_br.ms = carried_fl.ms
-  let failure: ExprR = br_emit_value(fail_br, MirNode::MirEnumConstruct(variant = to_i64(1), arg_list_lp = carried_fl.list_pos, arg_count = carried.length(), type_idx = return_ti))
-  let left: RegionExitR = emit_region_exits(failure.br, to_i64(0), true, failure.value, return_ti)
-  let returned: BlockR = br_emit_terminator(left.br, MirNode::MirReturn(value = left.carried, has_value = to_i64(1)))
+  let failure = br_emit_value(fail_br, MirNode::MirEnumConstruct(variant = to_i64(1), arg_list_lp = carried_fl.list_pos, arg_count = carried.length(), type_idx = return_ti))
+  let left = emit_region_exits(failure.br, to_i64(0), true, failure.value, return_ti)
+  let returned = br_emit_terminator(left.br, MirNode::MirReturn(value = left.carried, has_value = to_i64(1)))
 
-  let ok_br: BlockR = block_open(block_seal(returned), ok_r.mir)
+  let ok_br = block_open(block_seal(returned), ok_r.mir)
   return br_emit_value(ok_br, MirNode::MirEnumPayload(value = tried.value, variant = to_i64(0), field = to_i64(0), type_idx = value_ti))
 
 // Lower an expression.  Returns an ExprR containing the updated BlockR
@@ -503,8 +503,8 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       // evaluated before the target, in source order (host).  The checker
       // admits only a target of one parameter, so the one argument is the
       // whole call.
-      let piped: ExprR = lower_expr_value(br, left)
-      let target: ExprR = lower_expr_value(piped.br, right)
+      let piped = lower_expr_value(br, left)
+      let target = lower_expr_value(piped.br, right)
       return emit_call(target.br, target.value, Vector<i64>::new().push(piped.value), type_idx, to_i64(-1))
     HirNode::HirPtrOp(op, pointer, argument, type_idx):
       // A read or a write goes through the pointee's place, as the

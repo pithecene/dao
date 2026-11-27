@@ -70,7 +70,7 @@ fn program_use_of(pg: graph::ProgramGraph, rr: resolver::ProgramResolveResult, p
       while ti < toks.length():
         let tok: lexer::Token = toks.get(ti)
         if substring(sf.source_text, tok.offset, tok.len) == name:
-          let found: Option<i64> = rr.uses.get(resolver::UseSite(sf.file_id, ti))
+          let found = rr.uses.get(resolver::UseSite(sf.file_id, ti))
           match found:
             Option::Some(sym_idx):
               return sym_idx
@@ -720,7 +720,7 @@ fn main(): i32
       let tok_count: i64 = main_sf.parse_output.toks.length()
       let tti: i64 = 0
       while tti < tok_count:
-        let probe_found: Option<i64> = cf_r2.uses.get(resolver::UseSite(main_fid, tti))
+        let probe_found = cf_r2.uses.get(resolver::UseSite(main_fid, tti))
         match probe_found:
           Option::Some(v):
             uses_ok = true
