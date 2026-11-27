@@ -130,11 +130,14 @@ function createTabState(doc: string, readOnly: boolean): EditorState {
       }),
       // The editor opens that way out on Escape itself, but only when no
       // binding takes the key first, and one does whenever text is selected
-      // or the completion list is open.  An observer sees every Escape, and
-      // the key's release comes after the editor has set its own shorter wait.
+      // or the completion list is open.  An observer sees every Escape.  It
+      // defers to the end of the key's handling, after the editor has set its
+      // own shorter wait and before the next key can arrive.
       EditorView.domEventObservers({
-        keyup(event, view) {
-          if (event.key === "Escape") view.setTabFocusMode(LEAVE_WINDOW_MS);
+        keydown(event, view) {
+          if (event.key === "Escape") {
+            queueMicrotask(() => view.setTabFocusMode(LEAVE_WINDOW_MS));
+          }
         },
       }),
       pitheceneEditorTheme,
