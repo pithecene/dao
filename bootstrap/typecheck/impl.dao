@@ -391,8 +391,8 @@ fn ts_node_span(ts: TS, node_idx: i64): Span
       return ts_tok_span(ts, op_tidx)
     parser::Node::UnaryE(op_tidx, operand):
       return ts_tok_span(ts, op_tidx)
-    parser::Node::TryE(operand):
-      return ts_node_span(ts, operand)
+    parser::Node::TryE(operand, question_tok):
+      return ts_tok_span(ts, question_tok)
     parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
       return ts_node_span(ts, callee)
     parser::Node::FieldE(obj, field_tidx):
@@ -2536,7 +2536,7 @@ fn check_expr(ts: TS, node_idx: i64): TS
       let r: TS = check_expr(ts, obj)
       r = check_expr(r, idx_expr)
       return r
-    parser::Node::TryE(operand):
+    parser::Node::TryE(operand, question_tok):
       return check_try_expr(ts, node_idx, operand)
     parser::Node::LambdaE(params_lp, param_count, body):
       return ts_add_diag(ts, ts_node_span(ts, node_idx), "lambda requires expected function type context")
@@ -4331,7 +4331,7 @@ fn check_lambda_no_gen_captures(ts: TS, expr_idx: i64, bound_syms: HashMap<strin
       return check_lambda_no_gen_captures(check_lambda_no_gen_captures(ts, l, bound_syms), r2, bound_syms)
     parser::Node::IndexE(obj, idx_e):
       return check_lambda_no_gen_captures(check_lambda_no_gen_captures(ts, obj, bound_syms), idx_e, bound_syms)
-    parser::Node::TryE(operand):
+    parser::Node::TryE(operand, question_tok):
       return check_lambda_no_gen_captures(ts, operand, bound_syms)
     parser::Node::LambdaE(sub_plp, sub_pc, sub_body):
       let inner_bound: HashMap<string, i64> = bound_syms
@@ -5944,22 +5944,33 @@ fn check_try_expr(ts: TS, node_idx: i64, operand: i64): TS
     return ts_add_diag(r, sp, "'?' operator can only be used inside a function with a return type")
   let head_ti: i64 = enum_head(r, operand_ti)
   if enum_head(r, return_ti) != head_ti:
+    if try_family(r, return_ti) == family:
+      return ts_add_diag(r, sp, "'?' on " + family + " needs the enclosing function to return the same declaration of " + family + ", but it returns '" + type_name(r, return_ti) + "' of another declaration with that name")
     return ts_add_diag(r, sp, "enclosing function must return " + family + " to use '?' on " + family + ", but returns '" + type_name(r, return_ti) + "'")
+  // Exactly two variants: any value that is not the first is the second,
+  // which is the one the lowering reads the error from.
+  let unexpected: string = family + " type has unexpected variant structure"
+  if r.types.get(head_ti).info_count != 2:
+    return ts_add_diag(r, sp, unexpected)
   let succeeding: VariantShape = variant_at(r, head_ti, to_i64(0))
   let failing: VariantShape = variant_at(r, head_ti, to_i64(1))
   let carried_count: i64 = 0
   if family == "Result":
     carried_count = 1
   if succeeding.param_count < 1 or failing.param_count != carried_count:
-    return ts_add_diag(r, sp, family + " type has unexpected variant structure")
+    return ts_add_diag(r, sp, unexpected)
   let operand_args: Bound = instantiation_decided(r, operand_ti, HashMap<string, i64>::new())
   let value: TypeR = substitute_type(operand_args.ts, operand_args.map, succeeding.first_ti)
   r = value.ts
+  if value.type_idx < 0:
+    return ts_add_diag(r, sp, unexpected)
   if family == "Result":
     let error: TypeR = substitute_type(r, operand_args.map, failing.first_ti)
     let return_args: Bound = instantiation_decided(error.ts, return_ti, HashMap<string, i64>::new())
     let fn_error: TypeR = substitute_type(return_args.ts, return_args.map, failing.first_ti)
     r = fn_error.ts
+    if error.type_idx < 0 or fn_error.type_idx < 0:
+      return ts_add_diag(r, sp, unexpected)
     if types_equal(r, error.type_idx, fn_error.type_idx) == false:
       return ts_add_diag(r, sp, "error type '" + type_name(r, error.type_idx) + "' is not assignable to function return error type '" + type_name(r, fn_error.type_idx) + "'")
     r.reg = reg_with_expr_types(r.reg, r.reg.expr_types.set(try_error_key(r.tc.module_id, node_idx), error.type_idx))

@@ -441,7 +441,7 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
       // Preserve all segment token indices in HIR idx.
       let seg_fl: HirFlush = hir_flush_list(hs, segs)
       return hs_add_node(seg_fl.hs, HirNode::HirQualName(segs_lp = seg_fl.list_pos, seg_count = segs.length(), typ = ti))
-    parser::Node::TryE(operand):
+    parser::Node::TryE(operand, question_tok):
       // The checker recorded what a failing operand returns; without that
       // record it rejected the expression, and there is nothing to lower.
       let return_ti: i64 = base::hm_get_or(hs.typecheck.lookup.expr_types, typecheck::try_return_key(hs.unit.module_id, node_idx), to_i64(-1))

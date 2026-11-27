@@ -452,8 +452,10 @@ fn br_emit_terminator(br: BlockR, node: MirNode): BlockR
 // the type of the succeeding variant's value.
 fn lower_try(br: BlockR, operand: i64, error_ti: i64, return_ti: i64, value_ti: i64): ExprR
   let tried: ExprR = lower_expr_value(br, operand)
-  let held: ExprR = br_emit_value(tried.br, MirNode::MirEnumDiscriminant(value = tried.value, type_idx = mir_i32_type()))
-  let first: ExprR = br_emit_value(held.br, MirNode::MirConstInt(value = to_i64(0), type_idx = mir_i32_type()))
+  // An enum's discriminant is an i32.
+  let tag_ti: i64 = typecheck::builtin_type_index("i32")
+  let held: ExprR = br_emit_value(tried.br, MirNode::MirEnumDiscriminant(value = tried.value, type_idx = tag_ti))
+  let first: ExprR = br_emit_value(held.br, MirNode::MirConstInt(value = to_i64(0), type_idx = tag_ti))
   let succeeded: ExprR = br_emit_value(first.br, MirNode::MirBinary(op_tok = synthesized_equality_op(), lhs = held.value, rhs = first.value, type_idx = mir_bool_type()))
   let cur: BlockR = succeeded.br
   let ok_r: MirR = ms_new_block(cur.ms)
@@ -952,11 +954,6 @@ fn emit_store(br: BlockR, place: MirPlace, value: i64): BlockR
 // outward at the exit (through the prelude's `copy_out`) when a store
 // marked it dirty; a `return` through it copies the returned value
 // instead.
-
-fn mir_i32_type(): i64
-  // ts_init registers the builtins first; i32 is the third, and an
-  // enum's discriminant has its type.
-  return to_i64(2)
 
 fn mir_bool_type(): i64
   // ts_init registers the builtins first; bool is the eleventh.

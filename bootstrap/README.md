@@ -286,7 +286,7 @@ calls (with `MirFnRef` callees), returns, field-access reads,
 if/else, while.
 
 **Tier B deferrals**: generators, monomorphization,
-`mode` blocks, enum construction/discriminant/payload, lambda
+`mode` blocks, lambda
 / closures, for-over-iterable, index expressions,
 break/continue.
 
@@ -338,8 +338,8 @@ calls, returns, if/else, while.
 **Tier B coverage (added)**: struct layout and field access
 (construction, field reads, struct-typed params and returns).
 
-**Tier B deferrals**: enum payloads, monomorphization, generators,
-mode/resource hooks, lambdas, for-over-iterable, index
+**Tier B deferrals**: monomorphization, generators,
+mode hooks, lambdas, for-over-iterable, index
 expressions, break/continue, LLVM C API integration,
 `llc`/`clang` validation in CI.
 
