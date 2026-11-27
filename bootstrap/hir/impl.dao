@@ -1581,7 +1581,7 @@ fn program_lower_hir(p: resolver::Program): ProgramHir
     ti = ti + 1
 
   // Emit HirProgram root. Build a temporary HS to use hir_flush_list.
-  let tmp_hs: HS = HS(HirModule(Vector<parser::Node>::new(), Vector<i64>::new(), Vector<lexer::Token>::new(), "", to_i64(-1), to_i64(-1)), Vector<resolver::Symbol>::new(), base::TypeCheckData(false, Vector<base::DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), base::program_lookup_empty()), HashMap<resolver::UseSite, i64>::new(), HirArena(hir_nodes, hir_idx), Vector<Diagnostic>::new())
+  let tmp_hs = HS(HirModule(Vector<parser::Node>::new(), Vector<i64>::new(), Vector<lexer::Token>::new(), "", to_i64(-1), to_i64(-1)), Vector<resolver::Symbol>::new(), base::TypeCheckData(false, Vector<base::DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), base::program_lookup_empty()), HashMap<resolver::UseSite, i64>::new(), HirArena(hir_nodes, hir_idx), Vector<Diagnostic>::new())
   let mod_fl: HirFlush = hir_flush_list(tmp_hs, module_indices)
   hir_nodes = mod_fl.hs.arena.nodes
   hir_idx = mod_fl.hs.arena.idx
