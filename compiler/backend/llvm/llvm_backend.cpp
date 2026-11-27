@@ -975,12 +975,11 @@ auto LlvmBackend::lower_binary(const MirBinary& p, const MirInst& inst,
     }
     break;
 
-  // Boolean logic
+  // MIR lowers `and` and `or` into branches (CONTRACT_MIR_BOUNDARY.md), so
+  // neither reaches here as an instruction.
   case BinaryOp::And:
-    result = state.builder->CreateAnd(lhs, rhs, "and");
-    break;
   case BinaryOp::Or:
-    result = state.builder->CreateOr(lhs, rhs, "or");
+    emit_diagnostic(inst.span, "a logical operator reached the backend as a binary instruction");
     break;
   }
 

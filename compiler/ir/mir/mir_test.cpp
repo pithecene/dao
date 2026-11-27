@@ -12,9 +12,13 @@
 #include "ir/mir/mir_printer.h"
 #include "support/test_utils.h"
 
+#include <algorithm>
 #include <boost/ut.hpp>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <variant>
+#include <vector>
 
 using namespace boost::ut;
 using namespace dao;
@@ -79,7 +83,130 @@ auto count_of(const std::string& haystack, std::string_view needle) -> size_t {
   return count;
 }
 
+/// The function named `name`, or nullptr when the module has none.
+auto function_named(const MirModule& module, std::string_view name)
+    -> const MirFunction* {
+  for (const auto* fn : module.functions) {
+    if (fn->symbol != nullptr && fn->symbol->name == name) {
+      return fn;
+    }
+  }
+  return nullptr;
+}
+
+/// The block of `fn` with identifier `id`, or nullptr.
+auto block_with_id(const MirFunction& fn, BlockId id) -> const MirBlock* {
+  for (const auto* block : fn.blocks) {
+    if (block->id.id == id.id) {
+      return block;
+    }
+  }
+  return nullptr;
+}
+
+template <typename Payload>
+auto block_holds(const MirBlock& block) -> bool {
+  for (const auto* inst : block.insts) {
+    if (std::holds_alternative<Payload>(inst->payload)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// The two successors of the branch that ends the entry block of `test`,
+/// which a logical operator's left operand decides.
+struct LogicalBranch {
+  const MirFunction* fn = nullptr;
+  const MirBlock* when_true = nullptr;
+  const MirBlock* when_false = nullptr;
+};
+
+auto logical_branch_of_test(const MirTestPipeline& pipe) -> LogicalBranch {
+  LogicalBranch found;
+  if (pipe.module() == nullptr) {
+    return found;
+  }
+  found.fn = function_named(*pipe.module(), "test");
+  if (found.fn == nullptr || found.fn->blocks.empty() ||
+      found.fn->blocks[0]->insts.empty()) {
+    return found;
+  }
+  const auto* branch =
+      std::get_if<MirCondBr>(&found.fn->blocks[0]->insts.back()->payload);
+  if (branch != nullptr) {
+    found.when_true = block_with_id(*found.fn, branch->then_block);
+    found.when_false = block_with_id(*found.fn, branch->else_block);
+  }
+  return found;
+}
+
 } // namespace
+
+// ---------------------------------------------------------------------------
+// Logical operators
+// ---------------------------------------------------------------------------
+
+suite<"mir_logical_operators"> mir_logical_operators = [] {
+  "and evaluates its right operand only after a true left operand"_test = [] {
+    MirTestPipeline pipe("fn probe(): bool -> true\n"
+                         "fn test(a: bool): bool -> a and probe()\n");
+    auto branch = logical_branch_of_test(pipe);
+    expect(fatal(branch.when_true != nullptr && branch.when_false != nullptr))
+        << pipe.dump();
+    expect(!block_holds<MirCall>(*branch.fn->blocks[0])) << pipe.dump();
+    expect(block_holds<MirCall>(*branch.when_true)) << pipe.dump();
+    expect(!block_holds<MirCall>(*branch.when_false)) << pipe.dump();
+  };
+
+  "or evaluates its right operand only after a false left operand"_test = [] {
+    MirTestPipeline pipe("fn probe(): bool -> true\n"
+                         "fn test(a: bool): bool -> a or probe()\n");
+    auto branch = logical_branch_of_test(pipe);
+    expect(fatal(branch.when_true != nullptr && branch.when_false != nullptr))
+        << pipe.dump();
+    expect(!block_holds<MirCall>(*branch.fn->blocks[0])) << pipe.dump();
+    expect(block_holds<MirCall>(*branch.when_false)) << pipe.dump();
+    expect(!block_holds<MirCall>(*branch.when_true)) << pipe.dump();
+  };
+
+  "a logical operator leaves no binary instruction"_test = [] {
+    MirTestPipeline pipe(
+        "fn test(a: bool, b: bool, c: bool): bool -> a or (b and c)\n");
+    expect(fatal(pipe.module() != nullptr));
+    const auto* fn = function_named(*pipe.module(), "test");
+    expect(fatal(fn != nullptr)) << pipe.dump();
+    for (const auto* block : fn->blocks) {
+      expect(!block_holds<MirBinary>(*block)) << pipe.dump();
+    }
+  };
+
+  // The bootstrap backend reads a branch to an earlier block as a loop.
+  "a nested logical operator branches only to later blocks"_test = [] {
+    MirTestPipeline pipe(
+        "fn test(a: bool, b: bool, c: bool): bool -> a or (b and c)\n");
+    expect(fatal(pipe.module() != nullptr));
+    const auto* fn = function_named(*pipe.module(), "test");
+    expect(fatal(fn != nullptr)) << pipe.dump();
+    for (size_t at = 0; at < fn->blocks.size(); ++at) {
+      const auto& payload = fn->blocks[at]->insts.back()->payload;
+      std::vector<BlockId> targets;
+      if (const auto* jump = std::get_if<MirBr>(&payload)) {
+        targets = {jump->target};
+      } else if (const auto* branch = std::get_if<MirCondBr>(&payload)) {
+        targets = {branch->then_block, branch->else_block};
+      }
+      for (auto target : targets) {
+        const auto* to = block_with_id(*fn, target);
+        expect(fatal(to != nullptr)) << pipe.dump();
+        auto to_at = static_cast<size_t>(
+            std::find(fn->blocks.begin(), fn->blocks.end(), to) -
+            fn->blocks.begin());
+        expect(to_at > at) << pipe.dump();
+      }
+    }
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Control flow: if

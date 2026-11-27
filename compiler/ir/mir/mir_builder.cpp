@@ -551,6 +551,9 @@ auto MirBuilder::lower_expr_value(const HirExpr& expr) -> MirValueId {
             return emit_value(expr, MirPtrOp{ptr_op.op, pointer, argument});
           },
           [&](const HirBinary& bin) -> MirValueId {
+            if (bin.op == BinaryOp::And || bin.op == BinaryOp::Or) {
+              return lower_short_circuit(expr, bin);
+            }
             auto left = lower_expr_value(*bin.left);
             auto right = lower_expr_value(*bin.right);
             return emit_value(expr, MirBinary{bin.op, left, right});
@@ -908,6 +911,39 @@ auto MirBuilder::lower_expr_place(const HirExpr& expr) -> MirPlace {
         return {};
       },
   }, expr.payload);
+}
+
+auto MirBuilder::lower_short_circuit(const HirExpr& expr, const HirBinary& logical)
+    -> MirValueId {
+  // The result lives in a temporary, since each path gives it a value of
+  // its own: the left operand's where that decides, the right operand's
+  // otherwise.
+  auto left = lower_expr_value(*logical.left);
+  auto* result = ctx_.alloc<MirPlace>();
+  result->local = declare_local(nullptr, expr.type, expr.span);
+  emit_effect(expr.span, MirStore{result, left});
+  auto* left_bb = current_block_;
+
+  // The merge block is made after the right operand is lowered, so every
+  // block the operand adds lies before it and each edge runs to a later
+  // block.  The left block therefore gets its branch last.
+  auto* right_bb = fresh_block();
+  switch_to_block(right_bb);
+  auto right = lower_expr_value(*logical.right);
+  emit_effect(expr.span, MirStore{result, right});
+  auto* merge_bb = fresh_block();
+  emit_terminator(expr.span, MirBr{merge_bb->id});
+
+  switch_to_block(left_bb);
+  // `and` is decided by a false left operand, `or` by a true one.
+  if (logical.op == BinaryOp::And) {
+    emit_terminator(expr.span, MirCondBr{left, right_bb->id, merge_bb->id});
+  } else {
+    emit_terminator(expr.span, MirCondBr{left, merge_bb->id, right_bb->id});
+  }
+
+  switch_to_block(merge_bb);
+  return emit_value(expr, MirLoad{result});
 }
 
 // ---------------------------------------------------------------------------

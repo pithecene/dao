@@ -721,6 +721,59 @@ fn bs_mir_block_diverges_raw(mir_nodes: Vector<MirNode>, mir_idx: Vector<i64>, b
         ii = ii + to_i64(1)
   return false
 
+// Whether the branches among a function's blocks form a cycle.  A block
+// retires once every edge into it comes from a retired block, and the
+// blocks of a cycle never do.  A join that lies earlier in the list than
+// a block branching to it is no cycle: an `if` makes its merge block
+// before its arms, and a nested join then branches back to it.  A branch
+// to a block outside the function, or to no block at all, counts as a
+// cycle, so the caller claims no divergence for it.
+fn bs_mir_blocks_cycle(bs: BS, fblocks: Vector<i64>): bool
+  let position = HashMap<string, i64>::new()
+  let incoming = Vector<i64>::new()
+  let bi = to_i64(0)
+  while bi < fblocks.length():
+    position = position.set(i64_to_string(fblocks.get(bi)), bi)
+    incoming = incoming.push(to_i64(0))
+    bi = bi + to_i64(1)
+  bi = to_i64(0)
+  while bi < fblocks.length():
+    let exit = mir_block_exit(bs, fblocks.get(bi))
+    let side = to_i64(0)
+    while side < exit.branches:
+      let target = exit.target
+      if side == to_i64(1):
+        target = exit.else_block
+      let at = base::hm_get_or(position, i64_to_string(target), to_i64(-1))
+      if at < 0:
+        return true
+      incoming = incoming.set(at, incoming.get(at) + to_i64(1))
+      side = side + to_i64(1)
+    bi = bi + to_i64(1)
+  let ready = Vector<i64>::new()
+  bi = to_i64(0)
+  while bi < fblocks.length():
+    if incoming.get(bi) == to_i64(0):
+      ready = ready.push(bi)
+    bi = bi + to_i64(1)
+  let retired = to_i64(0)
+  while retired < ready.length():
+    let exit = mir_block_exit(bs, fblocks.get(ready.get(retired)))
+    let side = to_i64(0)
+    while side < exit.branches:
+      let target = exit.target
+      if side == to_i64(1):
+        target = exit.else_block
+      // The first walk found every named block in the function.
+      let at = base::hm_get_or(position, i64_to_string(target), to_i64(-1))
+      let left = incoming.get(at) - to_i64(1)
+      incoming = incoming.set(at, left)
+      if left == to_i64(0):
+        ready = ready.push(at)
+      side = side + to_i64(1)
+    retired = retired + to_i64(1)
+  return retired < fblocks.length()
+
 fn bs_mir_void_fn_diverges(input: MirBackendInput, ret_type: i64, block_list_lp: i64, diverging: HashMap<string, i64>): bool
   if ret_type < 0 or ret_type >= input.types.length():
     return false
@@ -733,33 +786,11 @@ fn bs_mir_void_fn_diverges(input: MirBackendInput, ret_type: i64, block_list_lp:
   let fblocks: Vector<i64> = read_mir_list(input.mir.mir_idx, block_list_lp)
   if fblocks.length() == to_i64(0):
     return false
-  let block_pos: HashMap<string, i64> = HashMap<string, i64>::new()
-  let bi: i64 = to_i64(0)
-  while bi < fblocks.length():
-    block_pos = block_pos.set(i64_to_string(fblocks.get(bi)), bi)
-    bi = bi + to_i64(1)
-  // Reject any function with backward/self CFG edges (loops do not definitely diverge).
-  let bj: i64 = to_i64(0)
-  while bj < fblocks.length():
-    match input.mir.mir_nodes.get(fblocks.get(bj)):
-      MirNode::MirBlock(bid, ilp, ic):
-        if bs_mir_block_diverges_raw(input.mir.mir_nodes, input.mir.mir_idx, fblocks.get(bj), diverging) == false:
-          let insts: Vector<i64> = read_mir_list(input.mir.mir_idx, ilp)
-          let ii: i64 = to_i64(0)
-          while ii < insts.length():
-            match input.mir.mir_nodes.get(insts.get(ii)):
-              MirNode::MirBr(tb):
-                if base::hm_get_or(block_pos, i64_to_string(tb), to_i64(-1)) <= bj:
-                  return false
-              MirNode::MirCondBr(c, tb1, tb2):
-                if base::hm_get_or(block_pos, i64_to_string(tb1), to_i64(-1)) <= bj:
-                  return false
-                if base::hm_get_or(block_pos, i64_to_string(tb2), to_i64(-1)) <= bj:
-                  return false
-            ii = ii + to_i64(1)
-    bj = bj + to_i64(1)
   let dummy_prog: BsProgram = BsProgram(input.source.module_graph, to_i64(-1), HashMap<string, i64>::new(), HashMap<string, i64>::new(), diverging)
   let dummy_bs: BS = BS(BsInput(input.mir.mir_nodes, input.mir.mir_idx, input.symbols, input.types, input.type_info, BsSource(input.source.toks, input.source.src, dummy_prog)), BsOutput(Vector<LlGlobal>::new(), to_i64(0), Vector<LlFunction>::new(), Vector<LlFunction>::new(), Vector<Diagnostic>::new(), to_i64(0)), BsDecls(Vector<string>::new(), Vector<CallArgs>::new(), Vector<LlStructDef>::new()), bs_tables_empty(), bs_function_empty(), bs_index_empty())
+  // A loop does not definitely diverge.
+  if bs_mir_blocks_cycle(dummy_bs, fblocks):
+    return false
   let rblocks: Vector<i64> = mir_reachable_blocks(dummy_bs, fblocks)
   if rblocks.length() == to_i64(0):
     return false
@@ -1995,7 +2026,8 @@ fn ll_cmp_pred(op: string, is_float: bool, unsigned: bool): string
     return sign + "ge"
   return ""
 
-// The instruction of an arithmetic or logical operator, "" for none.
+// The instruction of an arithmetic operator, "" for none.  `and` and `or`
+// have none: MIR lowers them into branches.
 fn ll_arith_instr(op: string, is_float: bool, unsigned: bool): string
   if is_float:
     if op == "Plus":
@@ -2015,10 +2047,6 @@ fn ll_arith_instr(op: string, is_float: bool, unsigned: bool): string
     return "sub"
   if op == "Star":
     return "mul"
-  if op == "KwAnd":
-    return "and"
-  if op == "KwOr":
-    return "or"
   if unsigned:
     if op == "Slash":
       return "udiv"
@@ -2243,11 +2271,13 @@ fn ll_inst_is_unreachable(inst: LlInst): bool
 
 // The blocks one block branches to.
 // How a block leaves: `br target` (else_block -1), or `cond_br cond,
-// then_block, else_block`; target -1 when it returns.
+// then_block, else_block`; target -1 when it returns.  `branches` counts
+// the blocks that the terminator names, valid or not: 0, 1 or 2.
 class BlockExit:
   cond: i64
   target: i64
   else_block: i64
+  branches: i64
 
 fn mir_block_diverges(bs: BS, block_node_idx: i64): bool
   match bs.input.mir_nodes.get(block_node_idx):
@@ -2266,8 +2296,8 @@ fn mir_block_diverges(bs: BS, block_node_idx: i64): bool
 
 fn mir_block_exit(bs: BS, block_node_idx: i64): BlockExit
   if mir_block_diverges(bs, block_node_idx):
-    return BlockExit(to_i64(-1), to_i64(-1), to_i64(-1))
-  let exit: BlockExit = BlockExit(to_i64(-1), to_i64(-1), to_i64(-1))
+    return BlockExit(to_i64(-1), to_i64(-1), to_i64(-1), to_i64(0))
+  let exit: BlockExit = BlockExit(to_i64(-1), to_i64(-1), to_i64(-1), to_i64(0))
   match bs.input.mir_nodes.get(block_node_idx):
     MirNode::MirBlock(block_id, inst_list_lp, inst_count):
       let insts_raw: Vector<i64> = read_mir_list(bs.input.mir_idx, inst_list_lp)
@@ -2275,9 +2305,9 @@ fn mir_block_exit(bs: BS, block_node_idx: i64): BlockExit
       while ii < insts_raw.length():
         match bs.input.mir_nodes.get(insts_raw.get(ii)):
           MirNode::MirBr(target_block):
-            exit = BlockExit(to_i64(-1), target_block, to_i64(-1))
+            exit = BlockExit(to_i64(-1), target_block, to_i64(-1), to_i64(1))
           MirNode::MirCondBr(cond, then_block, else_block):
-            exit = BlockExit(cond, then_block, else_block)
+            exit = BlockExit(cond, then_block, else_block, to_i64(2))
         ii = ii + to_i64(1)
   return exit
 
@@ -2367,8 +2397,9 @@ fn reach_block(r: Reach, target: i64, incoming: Ruled): Reach
 // block, which no value reaches.
 //
 // Size bound: MIR opens a block per arm and merge point of a
-// function's `if`/`while` bodies, so a function has as many blocks as
-// it has branches -- tens, not thousands -- and the membership scans
+// function's `if`/`while` bodies, and two per `and` or `or`, so a
+// function has as many blocks as it has branches and logical operators
+// -- tens, not thousands -- and the membership scans
 // below cost blocks x edges of that size.  A scan is also what Dao's
 // value semantics make cheap: Vector.set and HashMap.set copy their
 // storage, so an indexed table would cost the same order and allocate

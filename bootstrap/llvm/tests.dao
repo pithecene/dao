@@ -424,7 +424,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 63
+  let total: i32 = 64
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -1314,18 +1314,22 @@ fn main(): i32
     print("FAIL cloned_lambda_local_extend_dispatch: " + diags_text(r51.diags))
 
   // Test 52: void helper with reachable return is NOT divergent, while
-  // unconditional expression-bodied and branching void panic wrappers diverge.
+  // unconditional expression-bodied and branching void panic wrappers diverge,
+  // two of them after logical expressions, whose joins are not loops.
   let panic_mod52: graph::SourceInput = graph::SourceInput("stdlib/core/panic.dao", "module core::panic\nextern fn __dao_panic(msg: string): void\nfn panic(msg: string): void -> __dao_panic(msg)\n", true)
   let bad52: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new().push(panic_mod52).push(graph::SourceInput("main.dao", "module demo::main\nfn maybe_stop(stop: bool): void\n  if stop:\n    return\n  panic(\"stop\")\n\nfn bad(): i32\n  maybe_stop(true)\n\nfn main(): i32 -> bad()\n", false))
   let r52_bad: LlvmTextResult = lower_program_to_llvm_text(bad52)
-  let good52: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new().push(panic_mod52).push(graph::SourceInput("main.dao", "module demo::main\nfn fail_msg(msg: string): void -> panic(msg)\n\nfn fail_both(c: bool): void\n  if c:\n    fail_msg(\"a\")\n  else:\n    panic(\"b\")\n\nfn choose(ok: bool, v: i32): i32\n  if ok:\n    return v\n  else:\n    fail_both(ok)\n\nfn main(): i32 -> choose(true, 19) - 19\n", false))
+  // A helper that loops before its panic is not taken to diverge.
+  let looping_helper = Vector<graph::SourceInput>::new().push(panic_mod52).push(graph::SourceInput("main.dao", "module demo::main\nfn spin_then_stop(n: i32): void\n  let i = 0\n  while i < n:\n    i = i + 1\n  panic(\"stop\")\n\nfn bad(): i32\n  spin_then_stop(3)\n\nfn main(): i32 -> bad()\n", false))
+  let looping_result = lower_program_to_llvm_text(looping_helper)
+  let good52: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new().push(panic_mod52).push(graph::SourceInput("main.dao", "module demo::main\nfn fail_msg(msg: string): void -> panic(msg)\n\nfn fail_both(c: bool): void\n  if c:\n    fail_msg(\"a\")\n  else:\n    panic(\"b\")\n\nfn fail_noting(a: bool, b: bool, c: bool): void\n  let noted = a or (b and c)\n  if noted:\n    fail_msg(\"a\")\n  else:\n    panic(\"b\")\n\nfn fail_after_arm(a: bool, b: bool, c: bool): void\n  if a:\n    let noted = b and c\n  panic(\"c\")\n\nfn choose(ok: bool, v: i32): i32\n  if ok:\n    return v\n  else:\n    fail_both(ok)\n\nfn pick(ok: bool, v: i32): i32\n  if ok:\n    return v\n  else:\n    fail_noting(ok, ok, ok)\n\nfn keep(ok: bool, v: i32): i32\n  if ok:\n    return v\n  else:\n    fail_after_arm(ok, ok, ok)\n\nfn main(): i32 -> choose(true, 19) - 19 + pick(true, 0) + keep(true, 0)\n", false))
   let r52_good: LlvmTextResult = lower_program_to_llvm_text(good52)
   write_failures = write_failures + emit_ir("unconditional_panic_wrappers", r52_good, 0)
-  if r52_bad.ok == false and contains_substring(diags_text(r52_bad.diags), "without returning a value") and r52_good.ok:
+  if r52_bad.ok == false and contains_substring(diags_text(r52_bad.diags), "without returning a value") and looping_result.ok == false and contains_substring(diags_text(looping_result.diags), "without returning a value") and r52_good.ok:
     print("PASS void_divergence_fixed_point")
     pass_count = pass_count + 1
   else:
-    print("FAIL void_divergence_fixed_point: bad_ok=" + bool_to_string(r52_bad.ok) + " good_ok=" + bool_to_string(r52_good.ok) + " " + diags_text(r52_good.diags))
+    print("FAIL void_divergence_fixed_point: bad_ok=" + bool_to_string(r52_bad.ok) + " looping_ok=" + bool_to_string(looping_result.ok) + " good_ok=" + bool_to_string(r52_good.ok) + " " + diags_text(r52_good.diags))
 
   // Test 53: direct 1st-order named callback (both Dao fn and extern fn) to
   // extern fn emits valid LLVM IR, while extern fn with callback param as
@@ -1366,6 +1370,18 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL foreign_qualified_hashable_hashmap: " + diags_text(r54.diags))
+
+  // `and` and `or` skip a right operand the left one makes
+  // irrelevant, and otherwise yield the right operand's value.  `tripped`
+  // ends the program when it is evaluated.
+  let short_circuit_source = "extern fn exit(code: i32): void\n\nfn tripped(): bool\n  exit(7)\n  return true\n\nfn same(value: bool): bool -> value\n\nfn main(): i32\n  if same(false) and tripped():\n    return 1\n  if (same(true) or tripped()) == false:\n    return 2\n  if same(true) and same(false):\n    return 3\n  if (same(false) or same(true)) == false:\n    return 4\n  if (same(true) and same(true)) == false:\n    return 5\n  if same(false) or same(false):\n    return 6\n  return 0\n"
+  let short_circuit_result = lower_source_to_llvm_text(short_circuit_source)
+  write_failures = write_failures + emit_ir("logical_operators_short_circuit", short_circuit_result, 0)
+  if short_circuit_result.ok:
+    print("PASS logical_operators_short_circuit")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL logical_operators_short_circuit: " + diags_text(short_circuit_result.diags))
 
   // -----------------------------------------------------------------
   // Summary

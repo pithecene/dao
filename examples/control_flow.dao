@@ -18,6 +18,11 @@ fn fibonacci(n: i32): i32
     i = i + 1
   return a
 
+// Announces that it ran, so the output shows which operands did.
+fn announced(label: string, value: bool): bool
+  print(label)
+  return value
+
 fn main(): i32
   print("abs(-7):")
   print(abs(0 - 7))
@@ -30,5 +35,19 @@ fn main(): i32
 
   print("fibonacci(10):")
   print(fibonacci(10))
+
+  // `and` and `or` evaluate the right operand only when the left one
+  // does not decide the result.
+  print("false and ...:")
+  if announced("left", false) and announced("right", true):
+    print("both")
+
+  print("true or ...:")
+  if announced("left", true) or announced("right", false):
+    print("either")
+
+  print("true and ...:")
+  if announced("left", true) and announced("right", true):
+    print("both")
 
   return 0

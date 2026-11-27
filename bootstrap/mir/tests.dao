@@ -177,7 +177,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 60
+  let total: i32 = 61
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -511,8 +511,7 @@ fn main(): i32
   two22 = two22.push(graph::SourceInput("main.dao", "module app::main\n\nclass P:\n  x: i32\n\nfn mk(): P -> P(1)\n\nfn main(): i32\n  mk().x = 2\n  return add(1, 2)\n", false))
   let pm22: ProgramMir = mir_of_program(two22)
   let d22: Vector<graph::FileDiagnostic> = pm22.program.diags
-  // `mk().x = 2` stores to no local: MIR reports the target.  (`and`
-  // evaluates both sides, so the diagnostic is read only when present.)
+  // `mk().x = 2` stores to no local: MIR reports the target.
   let on_main22: bool = false
   if d22.length() == 1:
     on_main22 = d22.get(0).path == "main.dao" and index_of(d22.get(0).diag.message, "unsupported assignment target") >= 0
@@ -1012,6 +1011,20 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL foreign_qualified_hashable_does_not_become_canonical: owners='" + ftrait_owners + "', diags=" + i64_to_string(ftrait_pc.mir.diags.length()))
+
+  // -----------------------------------------------------------------
+  // `and` and `or` branch around their right operand and leave no binary
+  // instruction (host: cond_br, then a load of the temporary).
+  // -----------------------------------------------------------------
+  let src_logical = "fn both(a: bool, b: bool): bool -> a and b\n\nfn either(a: bool, b: bool): bool -> a or b\n\nfn main(): i32\n  return 0\n"
+  let r_logical = lower_to_mir(src_logical)
+  let logical_branches = mir_count_kind(r_logical, "MirCondBr")
+  let logical_binaries = mir_count_kind(r_logical, "MirBinary")
+  if r_logical.diags.length() == 0 and logical_branches == 2 and logical_binaries == 0:
+    print("PASS logical_operators_branch_around_right_operand")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL logical_operators_branch_around_right_operand: " + i64_to_string(logical_branches) + " branches, " + i64_to_string(logical_binaries) + " binaries, " + i64_to_string(r_logical.diags.length()) + " diagnostics")
 
   // -----------------------------------------------------------------
   print("")

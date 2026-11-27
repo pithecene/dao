@@ -50,6 +50,15 @@ The baseline must not assume broad implicit numeric promotion.
 
 Conditions in `if` and `while` must type-check as `bool`.
 
+### Logical operators
+
+`and` and `or` take `bool` operands and yield `bool`.
+
+The left operand is evaluated first. The right operand is evaluated
+only when the left one does not decide the result: for `and`, when the
+left operand is `true`; for `or`, when it is `false`. An operand that
+is not evaluated has no effect.
+
 ## 6. Function checking baseline
 
 Functions must have explicit return types in the current baseline.
