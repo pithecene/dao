@@ -616,9 +616,11 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
           return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
       return br_emit_value(br, MirNode::MirFnRef(sym = sym, type_idx = type_idx))
     HirNode::HirBinary(op_tok, left, right, type_idx):
-      let op_kind = mir_tok_kind_name(br.ms, op_tok)
-      if op_kind == "KwAnd" or op_kind == "KwOr":
-        return lower_short_circuit(br, op_kind == "KwAnd", left, right, type_idx)
+      // An operator the compiler synthesized has no token and is never logical.
+      if op_tok >= 0 and op_tok < br.ms.source.toks.length():
+        let op_kind = br.ms.source.toks.get(op_tok).kind
+        if op_kind == lexer::TK::KwAnd or op_kind == lexer::TK::KwOr:
+          return lower_short_circuit(br, op_kind == lexer::TK::KwAnd, left, right, type_idx)
       let lhs_r: ExprR = lower_expr_value(br, left)
       let rhs_r: ExprR = lower_expr_value(lhs_r.br, right)
       return br_emit_value(rhs_r.br, MirNode::MirBinary(op_tok = op_tok, lhs = lhs_r.value, rhs = rhs_r.value, type_idx = type_idx))
@@ -1304,13 +1306,6 @@ fn mir_local_name(ms: MS, slot: i64): string
       if sym >= 0 and sym < ms.program.symbols.length():
         return ms.program.symbols.get(sym).name
   return ""
-
-// The lexer's name for a token's kind in the module being lowered, "" for
-// an operator the compiler synthesized, which has no token.
-fn mir_tok_kind_name(ms: MS, tok: i64): string
-  if tok < 0 or tok >= ms.source.toks.length():
-    return ""
-  return lexer::tk_name(ms.source.toks.get(tok).kind)
 
 // A token's text in the module being lowered.
 fn mir_tok_text(ms: MS, tok: i64): string
