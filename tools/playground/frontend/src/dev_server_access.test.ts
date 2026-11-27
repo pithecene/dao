@@ -19,13 +19,10 @@ async function run(): Promise<void> {
     // The server's root is this frontend, three directories below the
     // repository's.  The path is cut as a path, never parsed as a URL.
     const repoRoot = server.config.root.split("/").slice(0, -3).join("/");
-    // The server decodes a request's path with `decodeURI`, which gives back
-    // every character `encodeURI` encodes and leaves an encoded `#` or `?`
-    // as it is.  A checkout whose path holds one cannot be probed, and the
-    // test says so instead of reporting the allowlist.
-    if (/[#?]/.test(repoRoot)) {
-      throw new Error(`the dev server cannot be probed from a checkout path that holds '#' or '?': ${repoRoot}`);
-    }
+    // The server decodes a request's path with `decodeURI`, the inverse of
+    // the `encodeURI` applied here.  A checkout whose path holds `#` or `?`
+    // never reaches this point: Vite cuts such a path short when it resolves
+    // a file, so it cannot bundle this suite there.
     // The route is `/@fs/` followed by the path without its leading slash,
     // which a drive-letter path does not have.
     const inRepo = (path: string): string =>
