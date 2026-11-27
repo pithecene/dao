@@ -4348,8 +4348,8 @@ fn check_lambda_no_gen_captures(ts: TS, expr_idx: i64, bound_syms: HashMap<strin
 // (-1 while that type is still being inferred): a `?` in it returns from
 // the lambda, never from the function that wrote the lambda.
 fn check_lambda_body(ts: TS, body: i64, ret_ti: i64): TS
-  let outer_ret: i64 = ts.ctx.return_type
-  let r: TS = ts
+  let outer_ret = ts.ctx.return_type
+  let r = ts
   r.ctx = ctx_with_return(r.ctx, ret_ti)
   r = check_expr(r, body)
   r.ctx = ctx_with_return(r.ctx, outer_ret)
@@ -5881,10 +5881,10 @@ fn try_rejected(): i64 -> to_i64(-2)
 // The enum `?` unwraps a value of: "Option" or "Result" when `ti` is an
 // enum of that name or an instantiation of one (the host's rule), else "".
 fn try_family(ts: TS, ti: i64): string
-  let head_ti: i64 = enum_head(ts, ti)
+  let head_ti = enum_head(ts, ti)
   if head_ti < 0:
     return ""
-  let name: string = ts.types.get(head_ti).name
+  let name = ts.types.get(head_ti).name
   if name == "Option" or name == "Result":
     return name
   return ""
@@ -5894,10 +5894,10 @@ fn try_family(ts: TS, ti: i64): string
 fn enum_head(ts: TS, ti: i64): i64
   if ti < 0 or ti >= ts.types.length():
     return to_i64(-1)
-  let t: base::DaoType = ts.types.get(ti)
+  let t = ts.types.get(ti)
   match t.kind:
     base::TypeKind::TEnum:
-      let head_ti: i64 = record_head(ts, t)
+      let head_ti = record_head(ts, t)
       if head_ti >= 0:
         return head_ti
       return ti
@@ -5914,15 +5914,15 @@ class VariantShape:
 // and a type per parameter); a parameter count of -1 where the head
 // declares no such variant.
 fn variant_at(ts: TS, head_ti: i64, index: i64): VariantShape
-  let head: base::DaoType = ts.types.get(head_ti)
+  let head = ts.types.get(head_ti)
   if index >= head.info_count:
     return VariantShape(to_i64(-1), to_i64(-1))
-  let at: i64 = head.info_lp
+  let at = head.info_lp
   let vi: i64 = 0
   while vi < index:
     at = at + 2 + ts.type_info.get(at + 1) * 2
     vi = vi + 1
-  let param_count: i64 = ts.type_info.get(at + 1)
+  let param_count = ts.type_info.get(at + 1)
   if param_count == 0:
     return VariantShape(param_count, to_i64(-1))
   return VariantShape(param_count, ts.type_info.get(at + 3))
@@ -5937,35 +5937,35 @@ fn variant_at(ts: TS, head_ti: i64, index: i64): VariantShape
 // returns the second with the operand's error or with nothing, so the
 // shape it builds is checked here rather than assumed there.
 fn check_try_expr(ts: TS, node_idx: i64, operand: i64): TS
-  let r: TS = check_try_shape(ts, node_idx, operand)
+  let r = check_try_shape(ts, node_idx, operand)
   // Every path that records no return type reported the expression, so
   // HIR can tell it from one the checker never reached.
-  let key: string = try_return_key(r.tc.module_id, node_idx)
+  let key = try_return_key(r.tc.module_id, node_idx)
   if base::hm_get_or(r.reg.expr_types, key, to_i64(-1)) < 0:
     r.reg = reg_with_expr_types(r.reg, r.reg.expr_types.set(key, try_rejected()))
   return r
 
 fn check_try_shape(ts: TS, node_idx: i64, operand: i64): TS
-  let diags_before: i64 = ts.diags.length()
-  let r: TS = check_expr(ts, operand)
-  let sp: Span = ts_node_span(r, node_idx)
-  let operand_ti: i64 = get_expr_type(r, operand)
+  let diags_before = ts.diags.length()
+  let r = check_expr(ts, operand)
+  let sp = ts_node_span(r, node_idx)
+  let operand_ti = get_expr_type(r, operand)
   if operand_ti < 0:
     // An operand may be left untyped without a diagnostic of its own.
     if r.diags.length() == diags_before:
       return ts_add_diag(r, sp, "'?' operator requires an Option or Result type, and its operand has no type")
     return r
-  let family: string = try_family(r, operand_ti)
+  let family = try_family(r, operand_ti)
   if family == "":
     return ts_add_diag(r, sp, "'?' operator requires an Option or Result type, got '" + type_name(r, operand_ti) + "'")
   // An operand such as `Option::None` still stands for its head's own
   // parameter: nothing decided what the `?` would yield.
   if open_enum_head(r, operand_ti) >= 0:
     return ts_add_diag(r, sp, "'?' cannot tell which " + family + " its operand is: '" + type_name(r, operand_ti) + "' leaves a type argument undecided")
-  let return_ti: i64 = r.ctx.return_type
+  let return_ti = r.ctx.return_type
   if return_ti < 0:
     return ts_add_diag(r, sp, "'?' operator can only be used inside a function with a return type")
-  let head_ti: i64 = enum_head(r, operand_ti)
+  let head_ti = enum_head(r, operand_ti)
   if enum_head(r, return_ti) != head_ti:
     if try_family(r, return_ti) == family:
       return ts_add_diag(r, sp, "'?' on " + family + " needs the enclosing function to return the same declaration of " + family + ", but it returns '" + type_name(r, return_ti) + "' of another declaration with that name")
@@ -5974,25 +5974,25 @@ fn check_try_shape(ts: TS, node_idx: i64, operand: i64): TS
     return ts_add_diag(r, sp, "enclosing function must return " + family + " to use '?' on " + family + ", but returns '" + type_name(r, return_ti) + "'")
   // Exactly two variants: any value that is not the first is the second,
   // which is the one the lowering reads the error from.
-  let unexpected: string = family + " type has unexpected variant structure"
+  let unexpected = family + " type has unexpected variant structure"
   if r.types.get(head_ti).info_count != 2:
     return ts_add_diag(r, sp, unexpected)
-  let succeeding: VariantShape = variant_at(r, head_ti, to_i64(0))
-  let failing: VariantShape = variant_at(r, head_ti, to_i64(1))
+  let succeeding = variant_at(r, head_ti, to_i64(0))
+  let failing = variant_at(r, head_ti, to_i64(1))
   let carried_count: i64 = 0
   if family == "Result":
     carried_count = 1
   if succeeding.param_count < 1 or failing.param_count != carried_count:
     return ts_add_diag(r, sp, unexpected)
-  let operand_args: Bound = instantiation_decided(r, operand_ti, HashMap<string, i64>::new())
-  let value: TypeR = substitute_type(operand_args.ts, operand_args.map, succeeding.first_ti)
+  let operand_args = instantiation_decided(r, operand_ti, HashMap<string, i64>::new())
+  let value = substitute_type(operand_args.ts, operand_args.map, succeeding.first_ti)
   r = value.ts
   if value.type_idx < 0:
     return ts_add_diag(r, sp, unexpected)
   if family == "Result":
-    let error: TypeR = substitute_type(r, operand_args.map, failing.first_ti)
-    let return_args: Bound = instantiation_decided(error.ts, return_ti, HashMap<string, i64>::new())
-    let fn_error: TypeR = substitute_type(return_args.ts, return_args.map, failing.first_ti)
+    let error = substitute_type(r, operand_args.map, failing.first_ti)
+    let return_args = instantiation_decided(error.ts, return_ti, HashMap<string, i64>::new())
+    let fn_error = substitute_type(return_args.ts, return_args.map, failing.first_ti)
     r = fn_error.ts
     if error.type_idx < 0 or fn_error.type_idx < 0:
       return ts_add_diag(r, sp, unexpected)
