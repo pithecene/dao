@@ -38,6 +38,39 @@ Additional structural counts across `bootstrap/`:
 - **Two-letter state classes**: `10` classes (`PC`, `PS`, `PR`, `RC`, `RS`, `TC`, `TS`, `HS`, `MS`, `BS`).
 - **Whole-aggregate reconstruction wrappers** (`ps_set_*`, `reg_with_*`, `ctx_with_*`, `bs_set_*`): `24+` helpers.
 
+## State Since the Audit
+
+The counts and the parity matrix in this note are the audit's
+measurements, and they stay as the audit took them. This section covers
+six findings that have since changed, and it does not survey the rest:
+
+- **Map keys.** `HashMap<K, V>` now takes any key that is `Hashable` and
+  `Equatable`, so the `IntMap<V>` that this note recommends has no
+  purpose. The resolver's two program tables take a class of two `i64`
+  fields as their key (`UseSite`, `ExtendSite`). Such a class derives
+  both concepts because each of its fields conforms, and because no
+  explicit implementation of either concept exists for it, in its body
+  or in an `extend` block. The other composite string keys still wait
+  for the same treatment.
+- **`Vector<T>` operations.** `stdlib/core/vector.dao` now has the seven
+  operations that this note recommends.
+- **Payload `enum class` equality.** The bootstrap type checker rejects
+  `==` and `!=` on a payload-bearing `enum class`.
+- **Partial destructuring.** The bootstrap compiler compiles
+  `Node::CallE(callee, ..)`.
+- **Try propagation.** The audit's probe now passes: the bootstrap
+  compiler compiles `operand?` on an `Option` or a `Result`, into a
+  function that returns the same declaration. For a `Result`, the
+  function's error type must equal the operand's, and the two success
+  types may differ. The compiler still rejects `?` in a lambda whose
+  return type it infers from the body.
+- **Pipeline.** The bootstrap compiler compiles `left |> right`, for a
+  target of one parameter.
+
+The type checker is now the real module `bootstrap::typecheck`, so
+`assemble.sh` concatenates only the `hir`, `mir`, `llvm`, and `driver`
+programs.
+
 ## Native vs. Bootstrap Parity Matrix
 
 Each probe below ran through both `daoc` (`compiler/`) and `stage2` (`bootstrap/`):
@@ -73,7 +106,7 @@ Each probe below ran through both `daoc` (`compiler/`) and `stage2` (`bootstrap/
 ### Foundational Standard Library (`DAO-H03`)
 
 1. **`Vector<T>` operations:** `filled(count, value)`, `with_capacity`, `is_empty`, `last`, `pop`, `reverse`, and `append_all` retire manual flag loops and cursor stacks.
-2. **`IntMap<V>` and sorting:** `stdlib/core/hashmap.dao` currently fixes keys to `string`, forcing `269` `"a:b"` string allocations across hot compiler passes and inflating self-hosted RSS. A deterministic `i64`-keyed map and standard `O(n log n)` sort retire ad hoc string keys and quadratic insertion sorts.
+2. **`IntMap<V>` and sorting.** `HashMap<K, V>` has superseded the map, as State Since the Audit records. At the audit, `stdlib/core/hashmap.dao` fixed keys to `string`, forcing `269` `"a:b"` string allocations across hot compiler passes and inflating self-hosted RSS. A deterministic `i64`-keyed map and standard `O(n log n)` sort retire ad hoc string keys and quadratic insertion sorts.
 3. **`Option<T>` and `Result<T, E>` methods:** both files currently hold 4-line declarations with zero methods (`is_some`, `is_none`, `is_ok`, `is_err`, `unwrap_or`).
 4. **String and `Builder` composition:** `split`, `trim`, `join`, `parse_i64`, `parse_i32`, and `Builder.push_i64` replace `1,750` `+` concatenations and bespoke integer parsers.
 
