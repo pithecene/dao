@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "test": "tsc --noEmit && vite build --ssr src/workspace_state.test.ts --outDir dist/test && node dist/test/workspace_state.test.js && vite build --ssr src/dev_server_access.test.ts --outDir dist/test && node dist/test/dev_server_access.test.js",
+    "test": "tsc --noEmit && for suite in workspace_state dev_server_access contrast; do vite build --ssr src/$suite.test.ts --outDir dist/test && node dist/test/$suite.test.js || exit 1; done",
     "preview": "vite preview"
   },
   "devDependencies": {

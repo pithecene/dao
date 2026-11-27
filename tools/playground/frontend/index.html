@@ -24,12 +24,17 @@
     </div>
 
     <div class="header-controls">
-      <span id="nav-notice" hidden></span>
-      <span id="service-status" hidden>compiler restarting…</span>
       <a href="#playground" id="header-open-playground" class="btn btn-primary">Open Playground</a>
       <button id="theme-toggle" class="btn btn-ghost" type="button" title="Switch color theme" aria-label="Switch color theme">Light</button>
     </div>
   </header>
+
+  <!-- Messages that come and go.  They sit over the page's bottom corner
+       and let clicks through to whatever is under them. -->
+  <div id="feedback-region">
+    <span id="nav-notice" hidden></span>
+    <span id="service-status" hidden>compiler restarting…</span>
+  </div>
 
   <!-- Product Site Views -->
   <div id="site-view" hidden>

@@ -472,6 +472,7 @@ task playground   # build frontend &amp; start http://localhost:8090</code></pre
         The <code>daoc</code> driver exposes every compiler phase directly for inspection,
         verification, and native executable linking:
       </p>
+      <div class="table-scroll">
       <table class="data-table">
         <thead>
           <tr>
@@ -523,6 +524,7 @@ task playground   # build frontend &amp; start http://localhost:8090</code></pre
           </tr>
         </tbody>
       </table>
+      </div>
     </div>
 
     <div class="prose-grid">
@@ -604,6 +606,7 @@ function renderReferenceHtml(): string {
             Dao uses indentation-significant blocks with strict punctuation roles so control flow,
             expressions, namespaces, and execution contexts never blur:
           </p>
+          <div class="table-scroll">
           <table class="data-table">
             <thead>
               <tr><th>Form</th><th>Role</th><th>Examples</th></tr>
@@ -616,6 +619,7 @@ function renderReferenceHtml(): string {
               <tr><td><code>::</code> vs <code>.</code></td><td>Module/type namespace qualification vs runtime value member</td><td><code>shapes::Rect</code>, <code>Option::Some</code> vs <code>rect.width</code></td></tr>
             </tbody>
           </table>
+          </div>
         </section>
 
         <section id="ref-numerics" class="ref-section">
@@ -894,6 +898,7 @@ function renderDownloadsHtml(): string {
     <div class="prose-grid">
       <div class="info-panel">
         <h2>Supported Host Targets</h2>
+        <div class="table-scroll">
         <table class="data-table">
           <thead>
             <tr><th>Target</th><th>Architecture &amp; ABI</th><th>Tooling &amp; Backends</th></tr>
@@ -911,6 +916,7 @@ function renderDownloadsHtml(): string {
             </tr>
           </tbody>
         </table>
+        </div>
       </div>
 
       <div class="info-panel">

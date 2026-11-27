@@ -81,7 +81,7 @@ document.getElementById("run-btn")!.addEventListener("click", () => {
 });
 
 document.getElementById("reset-workspace-btn")!.addEventListener("click", () => {
-  void resetWorkspace();
+  void resetWorkspace((question) => window.confirm(question));
 });
 
 document.addEventListener("keydown", (e) => {
