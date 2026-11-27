@@ -492,6 +492,53 @@ fn lex_single(st: LexState, kind: TK, depth_delta: i64): LexState
   st.cursor = ScanCursor(pos + to_i64(1), next_depth, false)
   return st
 
+// Length in bytes of the UTF-8 character at `pos`, or 0 when the bytes
+// there are not one: a stray continuation byte, a character cut short,
+// an overlong form, a surrogate, or a value past U+10FFFF.
+fn utf8_char_len(src: string, src_len: i64, pos: i64): i64
+  let zero = to_i64(0)
+  let lead = char_at(src, pos)
+  if lead < 128:
+    return to_i64(1)
+  // The second byte's range depends on the lead: the narrower ranges
+  // exclude overlong forms, surrogates, and values past U+10FFFF.
+  let len = zero
+  let second_low = 128
+  let second_high = 191
+  if lead >= 194:
+    if lead <= 223:
+      len = to_i64(2)
+    else if lead <= 239:
+      len = to_i64(3)
+      if lead == 224:
+        second_low = 160
+      if lead == 237:
+        second_high = 159
+    else if lead <= 244:
+      len = to_i64(4)
+      if lead == 240:
+        second_low = 144
+      if lead == 244:
+        second_high = 143
+  if len == zero:
+    return zero
+  if pos + len > src_len:
+    return zero
+  let second = char_at(src, pos + to_i64(1))
+  if second < second_low:
+    return zero
+  if second > second_high:
+    return zero
+  let i = to_i64(2)
+  while i < len:
+    let continuation = char_at(src, pos + i)
+    if continuation < 128:
+      return zero
+    if continuation > 191:
+      return zero
+    i = i + to_i64(1)
+  return len
+
 fn lex_token(st: LexState, src: string, src_len: i64): LexState
   let one = to_i64(1)
   let zero = to_i64(0)
@@ -585,9 +632,14 @@ fn lex_token(st: LexState, src: string, src_len: i64): LexState
   if ch == 93:
     return lex_single(st, TK::RBracket, to_i64(-1))
 
-  st.diags = st.diags.push(make_error(Span(pos, one), "unexpected character"))
-  st.tokens = emit1(st.tokens, TK::Error, pos)
-  st.cursor = ScanCursor(pos + one, st.cursor.paren_depth, false)
+  // One error token over the whole character, as the host lexer emits.
+  // Bytes that are not UTF-8 are reported one at a time.
+  let char_len = utf8_char_len(src, src_len, pos)
+  if char_len == zero:
+    char_len = one
+  st.diags = st.diags.push(make_error(Span(pos, char_len), "unexpected character"))
+  st.tokens = st.tokens.push(Token(TK::Error, pos, char_len))
+  st.cursor = ScanCursor(pos + char_len, st.cursor.paren_depth, false)
   return st
 
 fn lex(src: string): LexResult

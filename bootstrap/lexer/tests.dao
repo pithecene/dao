@@ -60,6 +60,11 @@ fn expect_no_errors(label: string, result: lexer::LexResult): bool
   print("FAIL " + label + ": expected no errors, got " + i64_to_string(result.diagnostics.length()))
   return false
 
+fn expect_byte_error(label: string, result: lexer::LexResult, idx: i64, offset: i64, src: string): bool
+  if expect_token(label + "_kind", result, idx, lexer::TK::Error, src) == false:
+    return false
+  return expect_token_span(label + "_span", result, idx, offset, 1)
+
 fn expect_error_count(label: string, result: lexer::LexResult, expected: i64): bool
   if result.diagnostics.length() == expected:
     print("PASS " + label)
@@ -436,6 +441,56 @@ fn main(): i32
   if expect_error_count("uc_err_count", r_uc, 1):
     pass_count = pass_count + 1
 
+  // A character outside ASCII is one error token over all its bytes:
+  // two for U+00E9, three for U+201C, four for U+1F600.
+  let src_two = "x é y\n"
+  let r_two = lexer::lex(src_two)
+  if expect_token_span("uc_two_byte_span", r_two, 1, 2, 2):
+    pass_count = pass_count + 1
+  let src_three = "x “ y\n"
+  let r_three = lexer::lex(src_three)
+  if expect_token("uc_three_byte_err", r_three, 1, lexer::TK::Error, src_three):
+    pass_count = pass_count + 1
+  if expect_token_span("uc_three_byte_span", r_three, 1, 2, 3):
+    pass_count = pass_count + 1
+  if expect_token("uc_three_byte_y", r_three, 2, lexer::TK::Identifier, src_three):
+    pass_count = pass_count + 1
+  if expect_error_count("uc_three_byte_count", r_three, 1):
+    pass_count = pass_count + 1
+  let src_four = "x 😀 y\n"
+  let r_four = lexer::lex(src_four)
+  if expect_token_span("uc_four_byte_span", r_four, 1, 2, 4):
+    pass_count = pass_count + 1
+
+  // Bytes that are not UTF-8 are reported one at a time.  A surrogate's
+  // encoding (ED A0 80) and an overlong form (E0 9F BF) each have the
+  // length of a character and are not one: a rule that only counted
+  // continuation bytes would group them.
+  let src_surrogate = Builder::new().push("x ").push_char(237).push_char(160).push_char(128).push(" y\n").to_string()
+  let r_surrogate = lexer::lex(src_surrogate)
+  if expect_byte_error("uc_surrogate_first", r_surrogate, 1, 2, src_surrogate):
+    pass_count = pass_count + 1
+  if expect_byte_error("uc_surrogate_second", r_surrogate, 2, 3, src_surrogate):
+    pass_count = pass_count + 1
+  if expect_byte_error("uc_surrogate_third", r_surrogate, 3, 4, src_surrogate):
+    pass_count = pass_count + 1
+  if expect_token("uc_surrogate_y", r_surrogate, 4, lexer::TK::Identifier, src_surrogate):
+    pass_count = pass_count + 1
+  if expect_error_count("uc_surrogate_count", r_surrogate, 3):
+    pass_count = pass_count + 1
+  let src_overlong = Builder::new().push("x ").push_char(224).push_char(159).push_char(191).push(" y\n").to_string()
+  let r_overlong = lexer::lex(src_overlong)
+  if expect_byte_error("uc_overlong_first", r_overlong, 1, 2, src_overlong):
+    pass_count = pass_count + 1
+  if expect_byte_error("uc_overlong_second", r_overlong, 2, 3, src_overlong):
+    pass_count = pass_count + 1
+  if expect_byte_error("uc_overlong_third", r_overlong, 3, 4, src_overlong):
+    pass_count = pass_count + 1
+  if expect_error_count("uc_overlong_count", r_overlong, 3):
+    pass_count = pass_count + 1
+  if expect_token("uc_overlong_y", r_overlong, 4, lexer::TK::Identifier, src_overlong):
+    pass_count = pass_count + 1
+
   // -----------------------------------------------------------------
   // 7.20 Empty source
   // -----------------------------------------------------------------
@@ -514,7 +569,7 @@ fn main(): i32
   // Section 9: Summary
   // =========================================================================
 
-  let total = 110
+  let total = 126
   print("")
   print("--- results ---")
   print(i32_to_string(pass_count) + " / " + i32_to_string(total) + " passed")
