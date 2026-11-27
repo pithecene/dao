@@ -8,7 +8,7 @@ import {
 } from "./document";
 import type { ExampleEntry, SourceInput } from "./generated/tooling_surface";
 import { showNotice } from "./notice";
-import { clearDraft, saveDraft } from "./persistence";
+import { clearDraft, loadSavedDraft, saveDraft } from "./persistence";
 import { syncEditorToActiveTab } from "./workspace_ui";
 import { doRun } from "./run";
 
@@ -286,7 +286,7 @@ export async function loadExampleByName(
     }
 
     setWorkspaceProgram(data.files, data.document, { exampleName: name });
-    loadedExampleFiles = filesFingerprint(data.files);
+    loadedExample = { name, files: filesFingerprint(data.files) };
     setExampleSelectValue(name);
     if (options?.switchRoute) {
       requestPlaygroundView();
@@ -312,23 +312,42 @@ function filesFingerprint(files: readonly SourceInput[]): string {
   return JSON.stringify(files.map((file) => [file.path, file.source]));
 }
 
-// The files of the example the workspace was last loaded from, as the
-// service gave them.  A workspace restored from a draft, a share link, or a
-// snippet has no such record.
-let loadedExampleFiles: string | null = null;
+// The last example the service delivered into the workspace, and its files
+// as delivered.
+let loadedExample: { name: string; files: string } | null = null;
 
-/**
- * Whether Reset would throw work away: the workspace's files differ from the
- * example it would restore, or nothing records that they came from it.
- */
-export function resetWouldDiscardWork(): boolean {
-  return loadedExampleFiles !== filesFingerprint(getUserFiles());
+/** The example that Reset restores. */
+function resetTarget(): string {
+  return getCurrentExampleName() || "hello.dao";
 }
 
-/** Reset workspace: discard local draft and reload active example or hello.dao. */
-export async function resetWorkspace(): Promise<void> {
+/**
+ * Whether Reset would throw work away.  It would not only where the files on
+ * screen are the files of the example it restores, as the service delivered
+ * them, and the stored draft, which Reset deletes, holds nothing else.
+ */
+export function resetWouldDiscardWork(): boolean {
+  const onScreen = filesFingerprint(getUserFiles());
+  const untouched =
+    loadedExample !== null && loadedExample.name === resetTarget() && loadedExample.files === onScreen;
+  const draft = loadSavedDraft();
+  const draftHoldsMore = draft !== null && filesFingerprint(draft.files) !== onScreen;
+  return !untouched || draftHoldsMore;
+}
+
+const RESET_QUESTION = "Discard your edits and restore the example? This cannot be undone.";
+
+/**
+ * Reset the workspace: discard the local draft and reload the active example
+ * or hello.dao.  Where that would throw work away, `confirmDiscard` is asked
+ * first, and a refusal leaves the workspace and the draft as they are.
+ */
+export async function resetWorkspace(
+  confirmDiscard: (question: string) => boolean,
+): Promise<void> {
+  if (resetWouldDiscardWork() && !confirmDiscard(RESET_QUESTION)) return;
   clearDraft();
-  const target = getCurrentExampleName() || "hello.dao";
+  const target = resetTarget();
   const resetGuard = beginExampleLoadGuard();
   if (!resetGuard) return;
 

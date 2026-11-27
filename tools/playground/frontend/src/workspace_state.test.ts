@@ -18,7 +18,7 @@ import {
   updateActiveUserSource,
 } from "./document";
 import { buildUndoableReplaceTransaction } from "./editor";
-import { FALLBACK_FILES, loadExampleByName, resetWouldDiscardWork } from "./examples";
+import { FALLBACK_FILES, loadExampleByName, resetWorkspace, resetWouldDiscardWork } from "./examples";
 import { doFormat } from "./format";
 import {
   applySnapshot,
@@ -690,25 +690,60 @@ async function testCompletionSourceSettlesQuietlyOnceAborted(): Promise<void> {
   });
 }
 
-async function testResetKnowsWhetherTheWorkspaceHoldsWork(): Promise<void> {
+async function testResetAsksBeforeItDiscardsWork(): Promise<void> {
   clearDraft();
   const example = { name: "hello.dao", document: "hello.dao", files: [{ path: "hello.dao", source: "module hello\n" }] };
-  await withMockFetch(async () => jsonResponse(example), async () => {
+  let loads = 0;
+  const serveExample = async (): Promise<Response> => {
+    loads += 1;
+    return jsonResponse(example);
+  };
+  let asked = 0;
+  const refuse = (): boolean => { asked += 1; return false; };
+  const accept = (): boolean => { asked += 1; return true; };
+
+  await withMockFetch(serveExample, async () => {
     assertEqual(await loadExampleByName("hello.dao"), "applied", "The example loads");
+
+    // An untouched example resets without a question.
+    await resetWorkspace(refuse);
+    assertEqual(asked, 0, "An untouched example raises no question");
+    assertEqual(loads, 2, "An untouched example reloads");
+
+    // An edited, multi-file workspace: a refusal changes nothing.
+    updateActiveUserSource("module hello\n// an edit\n");
+    addUserFile("extra.dao", "module extra\n");
+    saveDraft();
+    await resetWorkspace(refuse);
+    assertEqual(asked, 1, "Work raises the question");
+    assertEqual(loads, 2, "A refusal starts no load");
+    assertEqual(getUserFiles().length, 2, "A refusal keeps the files");
+    assertEqual(loadSavedDraft()?.files.length, 2, "A refusal keeps the stored draft");
+
+    // An acceptance restores the example and deletes the draft.
+    await resetWorkspace(accept);
+    assertEqual(asked, 2, "Work raises the question again");
+    assertEqual(loads, 3, "An acceptance reloads the example");
+    assertEqual(getUserFiles().length, 1, "An acceptance restores the example's files");
+    assertEqual(loadSavedDraft(), null, "An acceptance deletes the stored draft");
+
+    // A stored draft that the screen does not show is still work: Reset
+    // deletes it.
+    updateActiveUserSource("module hello\n// kept only in the draft\n");
+    saveDraft();
+    assertEqual(await loadExampleByName("hello.dao"), "applied", "The example loads over the draft");
+    await resetWorkspace(refuse);
+    assertEqual(asked, 3, "A draft the screen does not show raises the question");
+    assert(loadSavedDraft() !== null, "A refusal keeps that draft");
+
+    // The files of another example, opened under no example name: Reset
+    // would restore hello.dao in their place, so it asks.
+    clearDraft();
+    assertEqual(await loadExampleByName("pipelines.dao"), "applied", "Another example loads");
+    assert(!resetWouldDiscardWork(), "That example, untouched, holds no work");
+    setWorkspaceProgram(example.files, "hello.dao", { exampleName: "" });
+    assert(resetWouldDiscardWork(), "The same files under no example name are work");
   });
-  assert(!resetWouldDiscardWork(), "A freshly loaded example holds no work");
-
-  updateActiveUserSource("module hello\n// an edit\n");
-  assert(resetWouldDiscardWork(), "An edit is work");
-  updateActiveUserSource("module hello\n");
-  assert(!resetWouldDiscardWork(), "An edit taken back leaves no work");
-
-  addUserFile("extra.dao", "module extra\n");
-  assert(resetWouldDiscardWork(), "An added file is work");
-
-  // A workspace that did not come from the example: Reset would replace it.
-  setWorkspaceProgram([{ path: "shared.dao", source: "module shared\n" }], "shared.dao");
-  assert(resetWouldDiscardWork(), "A workspace from elsewhere is work");
 }
 
 async function runAll(): Promise<void> {
@@ -719,7 +754,7 @@ async function runAll(): Promise<void> {
   testUndoableReplaceTransactionInvariants();
   await testFormatterTargetsWritableFileAndGuardsStaleReplies();
   await testCompletionSourceSettlesQuietlyOnceAborted();
-  await testResetKnowsWhetherTheWorkspaceHoldsWork();
+  await testResetAsksBeforeItDiscardsWork();
   console.log("workspace_state.test: all assertions passed");
 }
 
