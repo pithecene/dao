@@ -7,9 +7,11 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "test": "tsc --noEmit && for suite in workspace_state dev_server_access contrast; do vite build --ssr src/$suite.test.ts --outDir dist/test && node dist/test/$suite.test.js || exit 1; done",
+    "test:browser": "vite build --ssr src/browser.test.ts --outDir dist/test && node dist/test/browser.test.js",
     "preview": "vite preview"
   },
   "devDependencies": {
+    "playwright": "1.65.1",
     "typescript": "^5.7.0",
     "vite": "^7.3.7"
   },
