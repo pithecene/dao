@@ -61,9 +61,9 @@ class TC:
   src: string
   symbols: Vector<resolver::Symbol>
   scopes: Vector<resolver::Scope>
-  uses_map: HashMap<string, i64>       // program-level uses_key(file_id, tok_idx) → sym_idx
+  uses_map: HashMap<resolver::UseSite, i64>  // the symbol each use site names, program-wide
   file_id: i64                   // module-level file provenance (-1 for dummy)
-  concept_bindings: HashMap<string, i64> // program-level extend_binding_key → concept sym_idx
+  concept_bindings: HashMap<resolver::ExtendSite, i64>  // the concept symbol each extend block names
   module_id: i64                 // module identity for owner_module_id filtering (D2)
   exports: resolver::ExportTables          // cross-module export lookup (D4)
 
@@ -426,13 +426,7 @@ fn ts_node_span(ts: TS, node_idx: i64): Span
 // =========================================================================
 
 fn lookup_use(ts: TS, tok_idx: i64): i64
-  let key: string = resolver::uses_key(ts.tc.file_id, tok_idx)
-  let result: Option<i64> = ts.tc.uses_map.get(key)
-  match result:
-    Option::Some(sym_idx):
-      return sym_idx
-    Option::None:
-      return to_i64(-1)
+  return ts.tc.uses_map.get_or(resolver::UseSite(ts.tc.file_id, tok_idx), to_i64(-1))
 
 // =========================================================================
 // Section 38: Builtin type registration
@@ -482,9 +476,9 @@ fn program_init_typecheck(p: resolver::Program): resolver::Program
     "",
     Vector<resolver::Symbol>::new(),
     Vector<resolver::Scope>::new(),
-    HashMap<string, i64>::new(),  // uses_map
+    HashMap<resolver::UseSite, i64>::new(),  // uses_map
     to_i64(-1),
-    HashMap<string, i64>::new(),  // concept_bindings
+    HashMap<resolver::ExtendSite, i64>::new(),  // concept_bindings
     to_i64(-1),
     resolver::ExportTables(Vector<resolver::ExportTable>::new()))
   let dummy_ts: TS = ts_new(dummy_tc, Vector<base::DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), registry_empty())
@@ -2199,7 +2193,7 @@ fn target_owned_by_module(ts: TS, target_ti: i64, mod_id: i64): bool
   return false
 
 fn extend_concept_ti(ts: TS, decl_idx: i64): i64
-  let cb_found = ts.tc.concept_bindings.get(resolver::extend_binding_key(ts.tc.file_id, decl_idx))
+  let cb_found = ts.tc.concept_bindings.get(resolver::ExtendSite(ts.tc.file_id, decl_idx))
   match cb_found:
     Option::Some(sym):
       return concept_named_by(ts, sym_type_at(ts, sym))
@@ -2272,8 +2266,7 @@ fn tc_check_concept_satisfaction(ts: TS, decls: Vector<i64>): TS
         if concept_name_tidx >= 0:
           concept_name = ts_tok_name(r, concept_name_tidx)
         let concept_ti: i64 = to_i64(-1)
-        let cb_key: string = resolver::extend_binding_key(r.tc.file_id, decl_idx)
-        let cb_found: Option<i64> = r.tc.concept_bindings.get(cb_key)
+        let cb_found = r.tc.concept_bindings.get(resolver::ExtendSite(r.tc.file_id, decl_idx))
         let concept_sym_idx: i64 = to_i64(-1)
         match cb_found:
           Option::Some(sym):
@@ -6053,8 +6046,7 @@ fn tc_collect_conformances(ts: TS, decls: Vector<i64>): TS
             if cti >= 0:
               r = ts_add_derived_concept(r, cti)
       parser::Node::ExtendDeclD(target_type_node, concept_name_tidx, methods_lp):
-        let cb_key: string = resolver::extend_binding_key(r.tc.file_id, decl_idx)
-        let cb_found: Option<i64> = r.tc.concept_bindings.get(cb_key)
+        let cb_found = r.tc.concept_bindings.get(resolver::ExtendSite(r.tc.file_id, decl_idx))
         let esym: i64 = to_i64(-1)
         match cb_found:
           Option::Some(sym):

@@ -120,7 +120,7 @@ class HS:
   unit: HirModule                // the module being lowered
   symbols: Vector<resolver::Symbol>
   typecheck: base::TypeCheckData       // the program's type tables, expression types, and method dispatch
-  uses_map: HashMap<string, i64>       // program-level uses_key(file_id, tok_idx) → sym_idx
+  uses_map: HashMap<resolver::UseSite, i64>  // the symbol each use site names, program-wide
   arena: HirArena
   diags: Vector<Diagnostic>
 
@@ -296,13 +296,7 @@ fn hir_get_expr_type(hs: HS, ast_node_idx: i64): i64
       return to_i64(-1)
 
 fn hir_lookup_use(hs: HS, tok_idx: i64): i64
-  let key: string = resolver::uses_key(hs.unit.file_id, tok_idx)
-  let result: Option<i64> = hs.uses_map.get(key)
-  match result:
-    Option::Some(sym_idx):
-      return sym_idx
-    Option::None:
-      return to_i64(-1)
+  return hs.uses_map.get_or(resolver::UseSite(hs.unit.file_id, tok_idx), to_i64(-1))
 
 fn hir_sym_type(hs: HS, sym_idx: i64): i64
   if sym_idx < 0:
@@ -1587,7 +1581,7 @@ fn program_lower_hir(p: resolver::Program): ProgramHir
     ti = ti + 1
 
   // Emit HirProgram root. Build a temporary HS to use hir_flush_list.
-  let tmp_hs: HS = HS(HirModule(Vector<parser::Node>::new(), Vector<i64>::new(), Vector<lexer::Token>::new(), "", to_i64(-1), to_i64(-1)), Vector<resolver::Symbol>::new(), base::TypeCheckData(false, Vector<base::DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), base::program_lookup_empty()), HashMap<string, i64>::new(), HirArena(hir_nodes, hir_idx), Vector<Diagnostic>::new())
+  let tmp_hs = HS(HirModule(Vector<parser::Node>::new(), Vector<i64>::new(), Vector<lexer::Token>::new(), "", to_i64(-1), to_i64(-1)), Vector<resolver::Symbol>::new(), base::TypeCheckData(false, Vector<base::DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), base::program_lookup_empty()), HashMap<resolver::UseSite, i64>::new(), HirArena(hir_nodes, hir_idx), Vector<Diagnostic>::new())
   let mod_fl: HirFlush = hir_flush_list(tmp_hs, module_indices)
   hir_nodes = mod_fl.hs.arena.nodes
   hir_idx = mod_fl.hs.arena.idx

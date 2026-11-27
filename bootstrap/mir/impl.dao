@@ -175,7 +175,7 @@ class MsProgram:
   type_info: Vector<i64>
   symbols: Vector<resolver::Symbol>
   sym_types: Vector<i64>
-  uses_map: HashMap<string, i64>    // program-level uses_key(file_id, tok_idx) → sym_idx
+  uses_map: HashMap<resolver::UseSite, i64>  // the symbol each use site names, program-wide
   copy_out_sym: i64         // the prelude's `copy_out`, for resource exits (-1 when absent)
 
 // The current module.
@@ -321,13 +321,7 @@ fn ms_lookup_local(ms: MS, sym: i64): i64
 fn ms_tok_to_sym(ms: MS, tok_idx: i64): i64
   if tok_idx < 0:
     return to_i64(-1)
-  let key: string = resolver::uses_key(ms.source.file_id, tok_idx)
-  let found: Option<i64> = ms.program.uses_map.get(key)
-  match found:
-    Option::Some(sym):
-      return sym
-    Option::None:
-      return to_i64(-1)
+  return ms.program.uses_map.get_or(resolver::UseSite(ms.source.file_id, tok_idx), to_i64(-1))
 
 // Create a new basic block, append it to the current function's
 // block list, and return its node index.
