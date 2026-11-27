@@ -90,10 +90,12 @@
           <div class="editor-meta-bar">
             <span id="readonly-badge" hidden>stdlib · read-only</span>
             <span id="module-label"></span>
-            <span class="panel-hint">Esc, Tab: leave editor · <span id="goto-def-click-hint">Ctrl+Click</span> / F12: def · Alt+Click: refs · Ctrl+Space: complete</span>
+            <span class="panel-hint"><span id="goto-def-click-hint">Ctrl+Click</span> / F12: def · Alt+Click: refs · Ctrl+Space: complete</span>
           </div>
         </div>
-        <div id="editor-container"></div>
+        <div id="editor-container">
+          <span id="editor-exit-hint" aria-hidden="true">Esc, then Tab: leave editor</span>
+        </div>
         <div id="references-drawer" hidden>
           <div class="panel-header">
             <span id="references-title">References</span>

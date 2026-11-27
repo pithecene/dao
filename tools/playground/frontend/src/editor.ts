@@ -109,17 +109,33 @@ const pitheceneEditorTheme = EditorView.theme({
   },
 });
 
+/**
+ * How long after Escape a Tab still leaves the editor.  Any other key ends
+ * the wait at once, so the length only has to cover reading the hint and
+ * reaching for the key, which the editor's own two seconds may not.
+ */
+const LEAVE_WINDOW_MS = 10_000;
+
 function createTabState(doc: string, readOnly: boolean): EditorState {
   return EditorState.create({
     doc,
     extensions: [
       basicSetup,
       // Tab indents, so it no longer moves focus on its own.  Escape and
-      // then Tab does, which the editor provides; the description tells a
-      // screen reader so, and the hint bar tells a sighted reader.
+      // then Tab does: the description tells a screen reader so, and
+      // `#editor-exit-hint` tells a sighted reader.
       keymap.of([indentWithTab]),
       EditorView.contentAttributes.of({
         "aria-description": "Press Escape, then Tab, to leave the editor.",
+      }),
+      // The editor opens that way out on Escape itself, but only when no
+      // binding takes the key first, and one does whenever text is selected
+      // or the completion list is open.  An observer sees every Escape, and
+      // the key's release comes after the editor has set its own shorter wait.
+      EditorView.domEventObservers({
+        keyup(event, view) {
+          if (event.key === "Escape") view.setTabFocusMode(LEAVE_WINDOW_MS);
+        },
       }),
       pitheceneEditorTheme,
       readOnlyCompartment.of(EditorState.readOnly.of(readOnly)),

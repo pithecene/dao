@@ -1168,9 +1168,31 @@ pre {
 }
 
 #editor-container {
+  position: relative;
   flex: 1;
   overflow: auto;
   min-height: 0;
+}
+
+/* Tab indents inside the editor, so the way out shows for as long as the
+   editor holds focus, at every width. */
+#editor-exit-hint {
+  display: none;
+  position: absolute;
+  right: 16px;
+  bottom: 8px;
+  z-index: 1;
+  padding: 2px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-elevated);
+  color: var(--fg-secondary);
+  font-size: var(--text-xs);
+  pointer-events: none;
+}
+
+#editor-container:has(.cm-editor.cm-focused) #editor-exit-hint {
+  display: block;
 }
 
 /* Cross-file References Drawer */
