@@ -122,6 +122,7 @@ const SYNTAX_COLORS = [
   "--syntax-string",
   "--syntax-operator",
   "--syntax-punctuation",
+  "--syntax-comment",
 ];
 
 const PAIRINGS: { text: string[]; surfaces: string[][] }[] = [
