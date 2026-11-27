@@ -493,13 +493,12 @@ auto lower_single_kernel(const MirFunction& fn,
             return std::nullopt;
           }
           break;
+        // MIR lowers `and` and `or` into branches (CONTRACT_MIR_BOUNDARY.md),
+        // so neither reaches a kernel as an instruction.
         case BinaryOp::And:
         case BinaryOp::Or:
-          if (!lhs_bool || !rhs_bool) {
-            reject_inst(inst, "logical operator in Metal kernel slice supports only bool operands");
-            return std::nullopt;
-          }
-          break;
+          reject_inst(inst, "a logical operator reached the Metal backend as a binary instruction");
+          return std::nullopt;
         }
         if (!record_result(inst.type)) {
           return std::nullopt;
@@ -617,11 +616,9 @@ auto lower_single_kernel(const MirFunction& fn,
       case BinaryOp::GtEq:
         out << indent << lhs << " = (" << a << " >= " << b << ");\n";
         break;
+      // Rejected when the kernel was validated.
       case BinaryOp::And:
-        out << indent << lhs << " = (" << a << " && " << b << ");\n";
-        break;
       case BinaryOp::Or:
-        out << indent << lhs << " = (" << a << " || " << b << ");\n";
         break;
       }
     }

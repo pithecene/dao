@@ -85,6 +85,35 @@ auto count_of(const std::string& haystack, std::string_view needle) -> size_t {
 // Control flow: if
 // ---------------------------------------------------------------------------
 
+suite<"mir_logical_operators"> mir_logical_operators = [] {
+  "and reaches its right operand only from a true left operand"_test = [] {
+    MirTestPipeline pipe("fn test(a: bool, b: bool): bool -> a and b\n");
+    auto dump = pipe.dump();
+    // bb1 holds the right operand and bb2 is the merge.
+    expect(contains(dump, "cond_br %0, bb1, bb2")) << dump;
+    expect(!contains(dump, "binary and")) << dump;
+  };
+
+  "or reaches its right operand only from a false left operand"_test = [] {
+    MirTestPipeline pipe("fn test(a: bool, b: bool): bool -> a or b\n");
+    auto dump = pipe.dump();
+    expect(contains(dump, "cond_br %0, bb2, bb1")) << dump;
+    expect(!contains(dump, "binary or")) << dump;
+  };
+
+  "a call in the right operand lies in the right operand's block"_test = [] {
+    MirTestPipeline pipe("fn probe(): bool -> true\n"
+                         "fn test(a: bool): bool -> a and probe()\n");
+    auto dump = pipe.dump();
+    auto branch = dump.find("cond_br");
+    auto call = dump.find("call", branch);
+    auto merge = dump.find("bb2:", branch);
+    expect(fatal(branch != std::string::npos && call != std::string::npos)) << dump;
+    expect(call < merge) << "the call must come before the merge block\n" << dump;
+    expect(count_of(dump, "call") == 1_u) << dump;
+  };
+};
+
 suite<"mir_if"> mir_if = [] {
   "if lowers to cond_br with then and merge blocks"_test = [] {
     MirTestPipeline pipe(

@@ -65,6 +65,18 @@ File
             IntLiteral 1
     ReturnStatement
       Identifier a
+  FunctionDecl announced
+    Param label: string
+    Param value: bool
+    ReturnType: bool
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          Identifier label
+    ReturnStatement
+      Identifier value
   FunctionDecl main
     ReturnType: i32
     ExpressionStatement
@@ -134,5 +146,89 @@ File
               Identifier fibonacci
             Args
               IntLiteral 10
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          StringLiteral "false and ...:"
+    IfStatement
+      Condition
+        BinaryExpr and
+          CallExpr
+            Callee
+              Identifier announced
+            Args
+              StringLiteral "left"
+              BoolLiteral false
+          CallExpr
+            Callee
+              Identifier announced
+            Args
+              StringLiteral "right"
+              BoolLiteral true
+      Then
+        ExpressionStatement
+          CallExpr
+            Callee
+              Identifier print
+            Args
+              StringLiteral "both"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          StringLiteral "true or ...:"
+    IfStatement
+      Condition
+        BinaryExpr or
+          CallExpr
+            Callee
+              Identifier announced
+            Args
+              StringLiteral "left"
+              BoolLiteral true
+          CallExpr
+            Callee
+              Identifier announced
+            Args
+              StringLiteral "right"
+              BoolLiteral false
+      Then
+        ExpressionStatement
+          CallExpr
+            Callee
+              Identifier print
+            Args
+              StringLiteral "either"
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          StringLiteral "true and ...:"
+    IfStatement
+      Condition
+        BinaryExpr and
+          CallExpr
+            Callee
+              Identifier announced
+            Args
+              StringLiteral "left"
+              BoolLiteral true
+          CallExpr
+            Callee
+              Identifier announced
+            Args
+              StringLiteral "right"
+              BoolLiteral true
+      Then
+        ExpressionStatement
+          CallExpr
+            Callee
+              Identifier print
+            Args
+              StringLiteral "both"
     ReturnStatement
       IntLiteral 0

@@ -109,6 +109,9 @@ private:
 
   // --- Expression lowering ---
   auto lower_expr_value(const HirExpr& expr) -> MirValueId;
+  /// `and` / `or`: the right operand is lowered into a block that only
+  /// the undecided path reaches.
+  auto lower_short_circuit(const HirExpr& expr, const HirBinary& logical) -> MirValueId;
   auto lower_expr_place(const HirExpr& expr) -> MirPlace;
   auto deref_place(const HirExpr& pointer, Span span) -> MirPlace;
 

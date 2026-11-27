@@ -44,6 +44,11 @@ MIR may lower:
 - structured control flow into branches and blocks
 - nested expressions into explicit temporaries
 
+MIR must lower `and` and `or` into branches, so that the right
+operand's instructions lie only on the path that evaluates it
+(`CONTRACT_TYPECHECKING_BASELINE.md`, "Logical operators"). MIR holds
+no binary instruction for either operator.
+
 ## 6. MIR must not contain
 
 - parser-only syntax structure

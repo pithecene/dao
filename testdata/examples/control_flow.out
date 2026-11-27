@@ -6,3 +6,12 @@ factorial(6):
 720
 fibonacci(10):
 55
+false and ...:
+left
+true or ...:
+left
+either
+true and ...:
+left
+right
+both

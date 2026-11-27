@@ -177,7 +177,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 60
+  let total: i32 = 61
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -1012,6 +1012,20 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL foreign_qualified_hashable_does_not_become_canonical: owners='" + ftrait_owners + "', diags=" + i64_to_string(ftrait_pc.mir.diags.length()))
+
+  // -----------------------------------------------------------------
+  // `and` and `or` branch around their right operand and leave no binary
+  // instruction (host: cond_br, then a load of the temporary).
+  // -----------------------------------------------------------------
+  let src_logical: string = "fn both(a: bool, b: bool): bool -> a and b\n\nfn either(a: bool, b: bool): bool -> a or b\n\nfn main(): i32\n  return 0\n"
+  let r_logical: MirResult = lower_to_mir(src_logical)
+  let logical_branches: i64 = mir_count_kind(r_logical, "MirCondBr")
+  let logical_binaries: i64 = mir_count_kind(r_logical, "MirBinary")
+  if r_logical.diags.length() == 0 and logical_branches == 2 and logical_binaries == 0:
+    print("PASS logical_operators_branch_around_right_operand")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL logical_operators_branch_around_right_operand: " + i64_to_string(logical_branches) + " branches, " + i64_to_string(logical_binaries) + " binaries, " + i64_to_string(r_logical.diags.length()) + " diagnostics")
 
   // -----------------------------------------------------------------
   print("")

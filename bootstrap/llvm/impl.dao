@@ -1995,7 +1995,8 @@ fn ll_cmp_pred(op: string, is_float: bool, unsigned: bool): string
     return sign + "ge"
   return ""
 
-// The instruction of an arithmetic or logical operator, "" for none.
+// The instruction of an arithmetic operator, "" for none.  `and` and `or`
+// have none: MIR lowers them into branches.
 fn ll_arith_instr(op: string, is_float: bool, unsigned: bool): string
   if is_float:
     if op == "Plus":
@@ -2015,10 +2016,6 @@ fn ll_arith_instr(op: string, is_float: bool, unsigned: bool): string
     return "sub"
   if op == "Star":
     return "mul"
-  if op == "KwAnd":
-    return "and"
-  if op == "KwOr":
-    return "or"
   if unsigned:
     if op == "Slash":
       return "udiv"

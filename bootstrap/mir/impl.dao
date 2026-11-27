@@ -481,6 +481,36 @@ fn lower_try(br: BlockR, operand: i64, error_ti: i64, return_ti: i64, value_ti: 
   let ok_br = block_open(block_seal(returned), ok_r.mir)
   return br_emit_value(ok_br, MirNode::MirEnumPayload(value = tried.value, variant = to_i64(0), field = to_i64(0), type_idx = value_ti))
 
+// Lower `left and right` or `left or right`.  Control flow:
+//   [current] --cond_br--> [right] --br--> [merge]
+//                      \-----------------> [merge]
+// The right operand is lowered into [right], which only the path the
+// left operand leaves undecided reaches: a true left for `and`, a false
+// one for `or`.  The result lives in a temporary, since each path gives
+// it a value of its own.  The returned BlockR is positioned on [merge].
+fn lower_short_circuit(br: BlockR, is_and: bool, left: i64, right: i64, type_idx: i64): ExprR
+  let lhs: ExprR = lower_expr_value(br, left)
+  let temp: MirR = ms_declare_local(lhs.br.ms, to_i64(-1), type_idx, false)
+  let cur: BlockR = lhs.br
+  cur.ms = temp.ms
+  let result = MirPlace(temp.mir, Vector<i64>::new())
+  cur = emit_store(cur, result, lhs.value)
+
+  let right_r: MirR = ms_new_block(cur.ms)
+  cur.ms = right_r.ms
+  let merge_r: MirR = ms_new_block(cur.ms)
+  cur.ms = merge_r.ms
+  if is_and:
+    cur = br_emit_terminator(cur, MirNode::MirCondBr(cond = lhs.value, then_block = right_r.mir, else_block = merge_r.mir))
+  else:
+    cur = br_emit_terminator(cur, MirNode::MirCondBr(cond = lhs.value, then_block = merge_r.mir, else_block = right_r.mir))
+
+  let rhs: ExprR = lower_expr_value(block_open(block_seal(cur), right_r.mir), right)
+  let stored: BlockR = emit_store(rhs.br, result, rhs.value)
+  let joined: BlockR = br_emit_terminator(stored, MirNode::MirBr(target_block = merge_r.mir))
+
+  return emit_load(block_open(block_seal(joined), merge_r.mir), result, type_idx)
+
 // Lower an expression.  Returns an ExprR containing the updated BlockR
 // (accumulated MIR state + current block insts) and the produced value id.
 fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
@@ -581,6 +611,9 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
           return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
       return br_emit_value(br, MirNode::MirFnRef(sym = sym, type_idx = type_idx))
     HirNode::HirBinary(op_tok, left, right, type_idx):
+      let logical: string = mir_tok_text(br.ms, op_tok)
+      if logical == "and" or logical == "or":
+        return lower_short_circuit(br, logical == "and", left, right, type_idx)
       let lhs_r: ExprR = lower_expr_value(br, left)
       let rhs_r: ExprR = lower_expr_value(lhs_r.br, right)
       return br_emit_value(rhs_r.br, MirNode::MirBinary(op_tok = op_tok, lhs = lhs_r.value, rhs = rhs_r.value, type_idx = type_idx))
