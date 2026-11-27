@@ -11,7 +11,8 @@ Each rule carries one of three sources.  **Contract** marks a rule that
 `CONTRACT_SYNTAX_SURFACE.md`, `CONTRACT_TYPE_SYSTEM_FOUNDATIONS.md` or
 `ADR_ENUM_CLASS.md` states.  **Proposed** marks a rule from
 `control_flow_expressions.md` or `aggregate_initialization.md`.  **New** marks
-a rule that this note proposes.  Section 1.6 records the behavior of the two
+a rule that no record states and that this note proposes, so adoption
+would newly commit to it.  Section 1.6 records the behavior of the two
 compilers.
 
 ## 1. Semantics of `match`
@@ -20,13 +21,15 @@ None of these rules depends on punctuation.
 
 ### 1.1 Evaluation
 
+**New.**  No record states these four rules.
+
 1. The program evaluates the subject expression exactly once, before any arm.
 2. It tests the arms against the subject's value in written order, and
    selects the first arm whose pattern accepts the value.
 3. It initializes the selected arm's bindings from the value, and then
    runs that arm's body.  No other arm's body runs, and control does not
    fall from one arm into the next.
-4. **New.**  Testing a pattern has no effect that a program can observe: a
+4. Testing a pattern has no effect that a program can observe: a
    pattern holds no call and no user code.
 
 ### 1.2 Obligations of the Arm List
@@ -47,8 +50,8 @@ that text and the duties of that text, in three ways.
    whole variant, for field access without destructuring.
 3. **Coverage.**  **Contract:** over an `enum class`, the arms must cover
    all variants.  **Proposed:** a value-position `match` over any type
-   covers every value, with a trailing `_:` arm for a scalar or `string`
-   subject.  **Proposed:** an arm after `_:` is an error, and so is a `_:`
+   covers every value.  A scalar or `string` subject needs a trailing
+   `_:` arm, except that arms for `true` and `false` cover a `bool`.  **Proposed:** an arm after `_:` is an error, and so is a `_:`
    arm after arms that cover every variant.  No record states a coverage
    rule for a statement-position `match` over a scalar or `string`
    subject, or a rule for two arms that name the same variant.
@@ -57,6 +60,8 @@ An `if`, `while` or `for` header imposes none of these on its body: the
 body is an ordinary statement suite that reads the same under any header.
 
 ### 1.3 Bindings
+
+**New.**  No record states this rule.
 
 A pattern's bindings are in scope in that arm's body alone.  Selection
 initializes them once, and neither a later arm nor the code after the
@@ -73,7 +78,8 @@ initializes them once, and neither a later arm nor the code after the
 
 ### 1.5 Control Transfer
 
-A `match` is not a callable boundary.  `return` in an arm returns from
+**Proposed** for `return`, and **new** for the rest.  A `match` is not a
+callable boundary.  `return` in an arm returns from
 the enclosing function, and `break` leaves the enclosing loop.  An arm's
 value is the value of the `match` expression, never of the function.
 
@@ -82,15 +88,18 @@ value is the value of the `match` expression, never of the function.
 Both compilers analyze coverage to decide whether control can fall out of
 a `match`: `TypeChecker::match_terminates_all_paths` in the host, and
 `mir_reachable_blocks` in `bootstrap/llvm/impl.dao`.  Each therefore
-rejects a non-`void` function that ends in a partial `match`.  Neither
+rejects a function that must return a value and whose partial `match`
+lets control reach its end.  Neither
 reports a partial `match` whose fall-through is otherwise legal.
 
-The host compiler has two paths for a pattern.  For a variant pattern
-with bindings, such as `Result::Ok(v)`, it compares the subject's
-discriminant with the variant's tag and extracts the payload.  It checks
-any other pattern as an expression against the subject's type, and
-compares that expression's value with the subject.  The host compiler at
-this note's date gives these results:
+The host compiler has two paths for a pattern.  When the subject's enum
+has a variant with a payload, the host compares the subject's
+discriminant with the tag of the variant that the pattern names.  The
+bindings decide only whether it extracts payload fields, so `Option::None`
+takes this path too.  The host checks every other pattern as an
+expression against the subject's type, and compares that expression's
+value with the subject.  The host compiler at this note's date gives
+these results:
 
 | Program | Observed |
 | --- | --- |
@@ -100,11 +109,17 @@ this note's date gives these results:
 | an arm `noisy(Color::Blue):` whose callee prints | compiles, and the call runs when the program tests the arm |
 | an arm `_:` | error: unknown identifier `_` |
 | an arm `Shape::Circle as c:` for a variant with one field | error: the variant expects one binding |
+| an arm `V::Empty as whole:` for a fieldless variant | compiles, and `whole` has the subject's type |
+| an arm `V::Pair(label, n):` for `Pair(count: i32, label: string)` | compiles, and the checker gives `label` the type `string` |
 
 So an expression pattern can run user code today, against rule 1.1.4.
-The wildcard is a proposal that neither compiler implements, and the
-whole-variant binding is a contract rule that neither compiler
-implements: the bootstrap parser expects `:` directly after the pattern.
+The wildcard is a proposal that neither compiler implements.  The host
+accepts `as` on a fieldless variant alone, so the contract's use of `as`,
+access to a payload's fields without destructuring, works in neither
+compiler.  The bootstrap parser lacks the `as` syntax: it expects `:`
+directly after the pattern.  The host checker types a binding by a
+matching field name before position, against the contract's
+declaration-order rule, while its lowering extracts fields by position.
 Neither compiler accepts an inline arm `P: expr`, since both parse a
 suite after an arm's `:`.
 
@@ -114,8 +129,11 @@ does:
 
 - whether the grammar restricts a pattern to a variant path with
   bindings, a literal, or `_`, which makes rule 1.1.4 true by construction
-- whether a statement-position `match` must cover its subject's type,
-  for an `enum` subject and for a scalar or `string` subject
+- whether a statement-position `match` must cover its subject's type.
+  For a scalar or `string` subject no record answers.  For an `enum` or
+  `enum class` subject, `ADR_ENUM_CLASS.md` says that `enum` contributes
+  "closedness and exhaustive matching", so accepting a partial `match`
+  there would revise that record.
 - whether a second arm for one variant is an error
 
 ## 2. Two Positions for a Mark
@@ -171,9 +189,12 @@ Under these meanings:
 - An inline value arm meets the `->` sentence.  So does each branch of an
   inline value `if` (`if c: a else: b`), which
   `control_flow_expressions.md` writes with `:`.
-- A value arm with an indented suite meets the `:` sentence and not the
-  `->` sentence: its tail expression is the value, and statements come
-  before it.
+- A value arm with an indented suite meets neither sentence as written.
+  It is no single expression, so `->` does not fit.  The same suite
+  yields its tail in value position and nothing in statement position,
+  so its reading depends on its position, and `:` does not fit either.
+  The `:` sentence would need a second clause: a suite's tail expression
+  is its value in value position.
 
 ## 4. Candidate Surfaces
 
@@ -201,6 +222,11 @@ user-defined names, and that a `resource` block binds a named domain.  A
 `match` on `=>` would be a third context: one whose body binds names per
 arm.
 
+The proposal also admits an inline arm in statement position, such as an
+arm that only calls `print`.  Candidate B gives that arm no mark: `->`
+there would mark an expression whose value the program discards.
+Candidates A, C and D give it the mark of their inline value arm.
+
 ## 5. Open Decisions
 
 1. The three questions of section 1.6, which fix the semantics of `match`.
@@ -209,9 +235,12 @@ arm.
    in section 3.
 3. Whether an arm takes `=>` in place of the header (C).
 4. Whether an inline value arm takes the form `P: expr` or `P -> expr`,
-   and, with `->`, whether the inline value `if` follows.
-5. Whether `match` joins `CONTRACT_EXECUTION_CONTEXTS.md` as a context,
+   and, with `->`, whether the inline value `if` follows and which mark
+   an inline arm in statement position takes.
+5. Whether the meaning of `:` gains the clause for a value suite's tail
+   that section 3 describes.
+6. Whether `match` joins `CONTRACT_EXECUTION_CONTEXTS.md` as a context,
    or the syntax contract alone defines `=>`.
-6. The order of work for a syntax revision: the contract first, then both
+7. The order of work for a syntax revision: the contract first, then both
    parsers accepting the new form, then a formatter-driven migration,
    then removal of the old form.
