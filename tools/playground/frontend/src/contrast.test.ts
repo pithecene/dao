@@ -1,3 +1,4 @@
+import editorSource from "./editor.ts?raw";
 import tokensSource from "./tokens.css?raw";
 
 // Text must stand 4.5 to 1 against the surface behind it, in both
@@ -5,6 +6,11 @@ import tokensSource from "./tokens.css?raw";
 // theme draw; each ratio is computed from the tokens, with a tint
 // composited onto the surface under it, so a palette may change freely
 // as long as the text stays legible.
+//
+// Not covered: text inside a selection, a reference highlight, or a
+// search match.  Punctuation measures between 2.8 and 4.2 to 1 on those
+// tints, and holding it there asks for a palette decision: punctuation
+// as bright as keywords, or lighter tints.
 
 const MINIMUM_RATIO = 4.5;
 
@@ -20,7 +26,9 @@ type Tokens = Map<string, string>;
 /** The custom properties declared for one theme. */
 function themeTokens(theme: string): Tokens {
   const tokens: Tokens = new Map();
-  for (const rule of tokensSource.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+  // A declaration inside a comment is not one the browser applies.
+  const applied = tokensSource.replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const rule of applied.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
     if (!rule[1].includes(`[data-theme="${theme}"]`)) continue;
     for (const declaration of rule[2].matchAll(/(--[\w-]+):\s*([^;]+);/g)) {
       tokens.set(declaration[1], declaration[2].trim());
@@ -53,6 +61,29 @@ function composite(top: Color, under: Color): Color {
   return { r: mix(top.r, under.r), g: mix(top.g, under.g), b: mix(top.b, under.b), alpha: 1 };
 }
 
+/** A text colour, which must be opaque: the ratio is measured on the token itself. */
+function textColorOf(tokens: Tokens, name: string): Color {
+  const color = colorOf(tokens, name);
+  if (color.alpha !== 1) throw new Error(`${name} is a text colour and must be opaque`);
+  return color;
+}
+
+/**
+ * The token the editor's theme gives the detail text of the selected
+ * completion row.  Read from the theme's own rule, so removing the rule
+ * fails this test instead of leaving it measuring a colour nothing uses.
+ */
+function selectedCompletionDetailToken(): string {
+  const selector = '".cm-tooltip-autocomplete ul li[aria-selected] .cm-completionDetail"';
+  const start = editorSource.indexOf(selector);
+  const rule =
+    start < 0
+      ? null
+      : /^:\s*\{\s*color:\s*"var\((--[\w-]+)\)"/.exec(editorSource.slice(start + selector.length));
+  if (!rule) throw new Error("the editor theme no longer colours the selected completion's detail");
+  return rule[1];
+}
+
 /** Relative luminance, as the accessibility guidelines define it. */
 function luminance(color: Color): number {
   const linear = (channel: number): number => {
@@ -73,6 +104,8 @@ const PLAIN_SURFACES = [
 ];
 const SELECTED_COMPLETION = [["--surface-elevated", "--accent-subtle"]];
 const EDITOR_LINES = [["--editor-bg"], ["--editor-bg", "--editor-active-line"]];
+/** The editor's lines under a token's own background, which mode and resource names carry. */
+const tintedLines = (tint: string): string[][] => EDITOR_LINES.map((line) => [...line, tint]);
 const WARNING_BADGES = [
   ["--surface-base", "--status-warn-subtle"],
   ["--surface-panel", "--status-warn-subtle"],
@@ -81,8 +114,6 @@ const WARNING_BADGES = [
 
 const SYNTAX_COLORS = [
   "--syntax-keyword",
-  "--syntax-mode",
-  "--syntax-resource",
   "--syntax-type",
   "--syntax-decl",
   "--syntax-variable",
@@ -97,8 +128,10 @@ const SYNTAX_COLORS = [
 
 const PAIRINGS: { text: string[]; surfaces: string[][] }[] = [
   { text: ["--fg-primary", "--fg-secondary", "--fg-muted"], surfaces: PLAIN_SURFACES },
-  { text: ["--fg-primary", "--fg-secondary"], surfaces: SELECTED_COMPLETION },
+  { text: ["--fg-primary", selectedCompletionDetailToken()], surfaces: SELECTED_COMPLETION },
   { text: SYNTAX_COLORS, surfaces: EDITOR_LINES },
+  { text: ["--syntax-mode"], surfaces: tintedLines("--syntax-mode-bg") },
+  { text: ["--syntax-resource"], surfaces: tintedLines("--syntax-resource-bg") },
   { text: ["--editor-gutter-fg"], surfaces: [["--editor-gutter-bg"]] },
   {
     text: ["--editor-gutter-active-fg"],
@@ -111,14 +144,15 @@ function run(): void {
   const failures: string[] = [];
   for (const theme of ["dark", "light"]) {
     const tokens = themeTokens(theme);
-    for (const { text, surfaces } of PAIRINGS) {
+    for (const { text: names, surfaces } of PAIRINGS) {
       for (const layers of surfaces) {
         const surface = layers
           .map((layer) => colorOf(tokens, layer))
           .reduce((under, top) => composite(top, under));
-        for (const name of text) {
-          const lighter = Math.max(luminance(colorOf(tokens, name)), luminance(surface));
-          const darker = Math.min(luminance(colorOf(tokens, name)), luminance(surface));
+        for (const name of names) {
+          const text = luminance(textColorOf(tokens, name));
+          const lighter = Math.max(text, luminance(surface));
+          const darker = Math.min(text, luminance(surface));
           const ratio = (lighter + 0.05) / (darker + 0.05);
           if (ratio < MINIMUM_RATIO) {
             failures.push(`${theme}: ${name} on ${layers.join(" + ")} is ${ratio.toFixed(2)} to 1`);
