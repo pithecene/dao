@@ -904,7 +904,7 @@ fn main(): i32
 
   // An expression kind with no lowering is reported, never dropped: a
   // path past a class reaches MIR as a qualified name.
-  let unlowered: MirResult = lower_to_mir("class C:\n  n: i32\n\nfn f(): C -> C::missing::member\n")
+  let unlowered = lower_to_mir("class C:\n  n: i32\n\nfn f(): C -> C::missing::member\n")
   if mir_diag_mentions(unlowered, "unsupported expression kind in Tier A MIR lowering: HirQualName"):
     print("PASS unsupported_expression_kind_reported_in_mir")
     pass_count = pass_count + 1
@@ -913,7 +913,7 @@ fn main(): i32
 
   // A pipe lowers to a call of its target with the piped value: two
   // pipes, two calls, and no diagnostic.
-  let piped: MirResult = lower_to_mir("fn inc(x: i32): i32 -> x + 1\n\nfn f(): i32\n  return 3 |> inc |> inc\n")
+  let piped = lower_to_mir("fn inc(x: i32): i32 -> x + 1\n\nfn f(): i32\n  return 3 |> inc |> inc\n")
   if piped.diags.length() == 0 and mir_count_kind(piped, "MirCall") == 2:
     print("PASS pipe_lowers_to_a_call")
     pass_count = pass_count + 1
