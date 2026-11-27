@@ -82,6 +82,27 @@ fn program_use_of(pg: graph::ProgramGraph, rr: resolver::ProgramResolveResult, p
     fi = fi + 1
   return to_i64(-1)
 
+// The concept symbol bound to the first `extend` block of the file at
+// `path`, or -1 where the file has none or the resolver bound none.
+fn program_extend_concept_of(pg: graph::ProgramGraph, rr: resolver::ProgramResolveResult, path: string): i64
+  let fi: i64 = 0
+  while fi < pg.files.length():
+    let sf = pg.files.get(fi)
+    if sf.path == path:
+      let po = sf.parse_output
+      match po.nodes.get(po.root):
+        parser::Node::FileN(module_decl, imports_lp, decls_lp):
+          let decls = parser::read_list(po.idx, decls_lp)
+          let di: i64 = 0
+          while di < decls.length():
+            match po.nodes.get(decls.get(di)):
+              parser::Node::ExtendDeclD(target, concept_node, methods_lp):
+                return rr.extend_concept_bindings.get_or(resolver::ExtendSite(sf.file_id, decls.get(di)), to_i64(-1))
+            di = di + 1
+      return to_i64(-1)
+    fi = fi + 1
+  return to_i64(-1)
+
 fn resolve_inputs(inputs: Vector<graph::SourceInput>): resolver::ProgramResolveResult
   return resolver::resolve_program(graph::build_program(inputs))
 
@@ -94,7 +115,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 64
+  let total: i32 = 65
 
   // -----------------------------------------------------------------
   // Test 1: forward_ref — fn calls fn defined later in file; no diagnostic
@@ -651,6 +672,28 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL no_transitive_builtin_export: builtins should not be exported")
+
+  // Two files of one shape hold their names and their `extend` blocks at
+  // the same token and declaration indices.  Each site resolves to its
+  // own file's symbol, so the file is part of a site's identity.
+  let twin: string = "concept Shown:\n  fn show(self): i64\n\nclass K:\n  n: i64\n\nextend K as Shown:\n  fn show(self): i64 -> self.n\n"
+  let twins = Vector<graph::SourceInput>::new().push(graph::SourceInput("a.dao", "module app::a\n" + twin, false)).push(graph::SourceInput("b.dao", "module app::b\n" + twin, false))
+  let twin_pg = graph::build_program(twins)
+  let twin_rr = resolver::resolve_program(twin_pg)
+  let class_a: i64 = program_use_of(twin_pg, twin_rr, "a.dao", "K")
+  let class_b: i64 = program_use_of(twin_pg, twin_rr, "b.dao", "K")
+  let concept_a: i64 = program_extend_concept_of(twin_pg, twin_rr, "a.dao")
+  let concept_b: i64 = program_extend_concept_of(twin_pg, twin_rr, "b.dao")
+  let sites_apart = false
+  if class_a >= 0 and class_b >= 0 and concept_a >= 0 and concept_b >= 0:
+    let owner_a: i64 = twin_rr.symbols.get(class_a).owner_module_id
+    let owner_b: i64 = twin_rr.symbols.get(class_b).owner_module_id
+    sites_apart = owner_a != owner_b and twin_rr.symbols.get(concept_a).owner_module_id == owner_a and twin_rr.symbols.get(concept_b).owner_module_id == owner_b and twin_rr.symbols.get(concept_a).name == "Shown"
+  if sites_apart:
+    print("PASS equal_indices_in_two_files_resolve_apart")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL equal_indices_in_two_files_resolve_apart: class symbols " + i64_to_string(class_a) + ", " + i64_to_string(class_b) + "; concept symbols " + i64_to_string(concept_a) + ", " + i64_to_string(concept_b))
 
   // Test 33: uses carry file provenance (composite key format)
   // Reuse cf_r2 (two-module qualified call).  Uses are now a

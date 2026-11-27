@@ -321,12 +321,7 @@ fn ms_lookup_local(ms: MS, sym: i64): i64
 fn ms_tok_to_sym(ms: MS, tok_idx: i64): i64
   if tok_idx < 0:
     return to_i64(-1)
-  let found: Option<i64> = ms.program.uses_map.get(resolver::UseSite(ms.source.file_id, tok_idx))
-  match found:
-    Option::Some(sym):
-      return sym
-    Option::None:
-      return to_i64(-1)
+  return ms.program.uses_map.get_or(resolver::UseSite(ms.source.file_id, tok_idx), to_i64(-1))
 
 // Create a new basic block, append it to the current function's
 // block list, and return its node index.

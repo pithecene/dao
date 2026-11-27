@@ -426,12 +426,7 @@ fn ts_node_span(ts: TS, node_idx: i64): Span
 // =========================================================================
 
 fn lookup_use(ts: TS, tok_idx: i64): i64
-  let result: Option<i64> = ts.tc.uses_map.get(resolver::UseSite(ts.tc.file_id, tok_idx))
-  match result:
-    Option::Some(sym_idx):
-      return sym_idx
-    Option::None:
-      return to_i64(-1)
+  return ts.tc.uses_map.get_or(resolver::UseSite(ts.tc.file_id, tok_idx), to_i64(-1))
 
 // =========================================================================
 // Section 38: Builtin type registration

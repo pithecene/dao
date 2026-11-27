@@ -296,12 +296,7 @@ fn hir_get_expr_type(hs: HS, ast_node_idx: i64): i64
       return to_i64(-1)
 
 fn hir_lookup_use(hs: HS, tok_idx: i64): i64
-  let result: Option<i64> = hs.uses_map.get(resolver::UseSite(hs.unit.file_id, tok_idx))
-  match result:
-    Option::Some(sym_idx):
-      return sym_idx
-    Option::None:
-      return to_i64(-1)
+  return hs.uses_map.get_or(resolver::UseSite(hs.unit.file_id, tok_idx), to_i64(-1))
 
 fn hir_sym_type(hs: HS, sym_idx: i64): i64
   if sym_idx < 0:
