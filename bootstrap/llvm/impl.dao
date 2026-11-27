@@ -5,6 +5,7 @@ import bootstrap::parser
 import bootstrap::graph
 import bootstrap::base
 import bootstrap::resolver
+import bootstrap::typecheck
 
 // bootstrap/llvm/impl.dao — bootstrap LLVM backend.
 //
@@ -1703,20 +1704,20 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
 
     // ---------- pointers (the host's lower_ptr_op) ----------
     MirNode::MirPtrOp(op, pointer, argument, type_idx):
-      if op == ptr_op_new():
+      if op == typecheck::ptr_op_new():
         bs = bs_set_value(bs, mir_node_idx, "null", "ptr")
         return LowerStepR(bs, insts)
-      if op == ptr_op_cast():
+      if op == typecheck::ptr_op_cast():
         // Opaque pointers carry no pointee: the cast is the value itself.
         bs = bs_set_value(bs, mir_node_idx, bs_get_value_text(bs, pointer), "ptr")
         return LowerStepR(bs, insts)
-      if op == ptr_op_is_null():
+      if op == typecheck::ptr_op_is_null():
         let is_null: FreshR = bs_fresh_value(bs)
         bs = is_null.bs
         insts = insts.push(LlInst(LlInstKind::LlText(rhs = "icmp eq ptr " + bs_get_value_text(bs, pointer) + ", null"), is_null.name))
         bs = bs_set_value(bs, mir_node_idx, is_null.name, "i1")
         return LowerStepR(bs, insts)
-      if op == ptr_op_offset():
+      if op == typecheck::ptr_op_offset():
         let pointee: i64 = to_i64(-1)
         if type_idx >= 0 and type_idx < bs.input.types.length():
           pointee = bs.input.types.get(type_idx).pointee
@@ -3362,9 +3363,9 @@ fn lower_to_mir_backend_input(src: string): MirBackendInput
   // Each stage in its own domain: its scratch is reclaimed at the exit and the result is copied out.
   resource memory resolve =>
     p = resolver::program_run_resolve(p)
-  let pt: ProgramTyped = ProgramTyped(p, registry_new(p.resolve.symbols, p.module_graph.modules))
+  let pt: typecheck::ProgramTyped = typecheck::ProgramTyped(p, typecheck::registry_new(p.resolve.symbols, p.module_graph.modules))
   resource memory typecheck =>
-    pt = program_check(p)
+    pt = typecheck::program_check(p)
   let pm: ProgramMir = ProgramMir(pt.program, mir_result_empty())
   resource memory mir =>
     pm = program_run_mir(pt.program)
@@ -3397,9 +3398,9 @@ fn lower_program_to_llvm(inputs: Vector<graph::SourceInput>): ProgramLlvm
   let p: resolver::Program = resolver::program_from_graph(pg)
   resource memory resolve =>
     p = resolver::program_run_resolve(p)
-  let pt: ProgramTyped = ProgramTyped(p, registry_new(p.resolve.symbols, p.module_graph.modules))
+  let pt: typecheck::ProgramTyped = typecheck::ProgramTyped(p, typecheck::registry_new(p.resolve.symbols, p.module_graph.modules))
   resource memory typecheck =>
-    pt = program_check(p)
+    pt = typecheck::program_check(p)
   let pm: ProgramMir = ProgramMir(pt.program, mir_result_empty())
   resource memory mir =>
     pm = program_run_mir(pt.program)

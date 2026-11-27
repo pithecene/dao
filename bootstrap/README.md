@@ -12,8 +12,9 @@ type-universe and program-lookup tables imported by `bootstrap::resolver` and
 downstream passes. The modules `ascii.dao` (`module bootstrap::ascii`),
 `lexer/impl.dao` (`module bootstrap::lexer`), `parser/impl.dao`
 (`module bootstrap::parser`), `graph/impl.dao` (`module bootstrap::graph`),
-`shared/base.dao` (`module bootstrap::base`), and `resolver/impl.dao`
-(`module bootstrap::resolver`) compile directly as real modules without
+`shared/base.dao` (`module bootstrap::base`), `resolver/impl.dao`
+(`module bootstrap::resolver`), and `typecheck/impl.dao`
+(`module bootstrap::typecheck`) compile directly as real modules without
 assembly. See `shared/README.md`.
 
 ## Subsystems
@@ -179,10 +180,14 @@ daoc build --source bootstrap/resolver/tests.dao --source bootstrap/resolver/imp
 
 ### `typecheck/`
 
-Type checker assigning types to expressions and validating type
-correctness for Tier A Dao syntax.
+Type checker (`module bootstrap::typecheck` in `typecheck/impl.dao`,
+importing `bootstrap::lexer`, `bootstrap::parser`, `bootstrap::graph`,
+`bootstrap::base`, and `bootstrap::resolver`) assigning types to
+expressions and validating type correctness for Tier A Dao syntax.  Its
+test runner is the separate module `bootstrap::typecheck::tests` in
+`typecheck/tests.dao`.
 
-**Status**: implemented (Task 23, Phase 7).
+**Status**: real module compiled directly from authored sources without `assemble.sh`.
 
 **Tier A scope**:
 
@@ -210,7 +215,7 @@ correctness for Tier A Dao syntax.
 **How to run tests**:
 
 ```sh
-bash bootstrap/assemble.sh && daoc build --source bootstrap/typecheck/typecheck.gen.dao --source bootstrap/ascii.dao && ./bootstrap/typecheck/typecheck.gen
+daoc build --source bootstrap/typecheck/tests.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/typecheck/tests
 ```
 
 ### `hir/`
@@ -238,8 +243,10 @@ fn/extern fn/class/enum/type alias declarations, `resource` blocks
 **How to run tests**:
 
 ```sh
-bash bootstrap/assemble.sh && daoc build --source bootstrap/hir/hir.gen.dao --source bootstrap/ascii.dao && ./bootstrap/hir/hir.gen
+task bootstrap-test   # every suite, this one among them
 ```
+
+The `bootstrap-test` task in `Taskfile.yml` holds the source list of `bootstrap/hir/hir.gen.dao`.
 
 ### `mir/`
 
@@ -277,8 +284,10 @@ break/continue.  MIR rejects a `resource` block with the unsupported-statement d
 **How to run tests**:
 
 ```sh
-bash bootstrap/assemble.sh && daoc build --source bootstrap/mir/mir.gen.dao --source bootstrap/ascii.dao && ./bootstrap/mir/mir.gen
+task bootstrap-test   # every suite, this one among them
 ```
+
+The `bootstrap-test` task in `Taskfile.yml` holds the source list of `bootstrap/mir/mir.gen.dao`.
 
 ### `llvm/`
 
@@ -331,13 +340,7 @@ expressions, break/continue, LLVM C API integration,
 task bootstrap-test   # every suite, then validate_ir over bootstrap/llvm/out
 ```
 
-Or by hand (the suite writes its artifacts under `bootstrap/llvm/out`, which Git ignores, so create it first):
-
-```sh
-rm -rf bootstrap/llvm/out && mkdir -p bootstrap/llvm/out
-bash bootstrap/assemble.sh && daoc build --source bootstrap/llvm/llvm.gen.dao --source bootstrap/ascii.dao && ./bootstrap/llvm/llvm.gen
-bash bootstrap/validate_ir.sh build/debug
-```
+The `bootstrap-test` task in `Taskfile.yml` holds the suite's source list.  The suite writes its artifacts under `bootstrap/llvm/out`, which Git ignores, and the task clears and recreates that directory first.
 
 The suite writes the IR of every fixture it lowers to
 `bootstrap/llvm/out/<test>.ll` by default, or to `<ir-dir>/<test>.ll`
@@ -397,3 +400,19 @@ probe. The probe remains as a historical artifact.
 - Tier B expansion (generics, concepts, extend, mode/resource)
 - Diagnostic formatting integration
 - Multi-file compilation (eliminate assembly workaround)
+- Count the closure probe's `lex`, `parse`, `resolve`, `typecheck`, `hir`,
+  and `mir` columns over every authored file of an extracted program.  The
+  probe in `llvm/tests.dao` limits those columns to `tests.dao` for
+  `lexer`, `parser`, `graph`, `resolver`, and `typecheck`, so a diagnostic
+  in an `impl.dao` goes uncounted.  The `mono` and `llvm` columns already
+  count the whole program.
+- Correct the sentence that `audit_closure.sh` writes about measuring the
+  `*.gen.dao` programs, then regenerate `docs/bootstrap_closure.md` with
+  `task bootstrap-audit` on Linux.
+- Move the pointer-operation codes (`ptr_op_new` and its siblings) from
+  `bootstrap::typecheck` to `bootstrap::base`, so `mir` and `llvm` read
+  the codes as `base::ptr_op_*`.  Both passes still import the checker
+  for its entry points.
+- Build each module context in `typecheck/tests.dao` with
+  `typecheck::build_module_tc` in place of the six positional `TC`
+  constructions.

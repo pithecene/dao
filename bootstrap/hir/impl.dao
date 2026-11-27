@@ -5,6 +5,7 @@ import bootstrap::parser
 import bootstrap::graph
 import bootstrap::base
 import bootstrap::resolver
+import bootstrap::typecheck
 
 // =========================================================================
 // Section 49: HIR node definitions
@@ -13,8 +14,8 @@ import bootstrap::resolver
 // Bootstrap HIR lowering — Task 24.
 //
 // Imports `bootstrap::lexer`, `bootstrap::parser`, `bootstrap::graph`,
-// `bootstrap::base`, and `bootstrap::resolver` as real modules, and
-// composes with `bootstrap/typecheck/impl.dao` via `bootstrap/assemble.sh`.
+// `bootstrap::base`, `bootstrap::resolver`, and `bootstrap::typecheck` as
+// real modules.
 //
 // Tier B deferrals:
 //   - Lambda lowering
@@ -249,7 +250,7 @@ fn hir_expr_type(node: HirNode): i64
 // synthesized for the receiver (derivation) or the parameter is
 // instantiated (generic inference), so lowering rejects it.
 fn hir_member_concept(hs: HS, field_node_idx: i64): i64
-  return base::hm_get_or(hs.typecheck.lookup.expr_types, concept_member_key(hs.unit.module_id, field_node_idx), to_i64(-1))
+  return base::hm_get_or(hs.typecheck.lookup.expr_types, typecheck::concept_member_key(hs.unit.module_id, field_node_idx), to_i64(-1))
 
 // Whether the field expression `node_idx` (`obj.field`) names a method
 // of the receiver's type rather than a field: its type is a function
@@ -313,8 +314,8 @@ fn hir_sym_type(hs: HS, sym_idx: i64): i64
 // that very type visible from this module — so HIR desugars a dot-call
 // to the symbol the checker typed it with, never a same-named one.
 fn hir_find_method_sym(hs: HS, name: string, receiver_ti: i64): i64
-  let owner_ti: i64 = dispatch_owner(hs.typecheck.types, hs.typecheck.type_info, receiver_ti)
-  return find_method_sym_for_receiver(hs.typecheck.lookup.methods, hs.unit.module_id, name, receiver_ti, owner_ti)
+  let owner_ti: i64 = typecheck::dispatch_owner(hs.typecheck.types, hs.typecheck.type_info, receiver_ti)
+  return typecheck::find_method_sym_for_receiver(hs.typecheck.lookup.methods, hs.unit.module_id, name, receiver_ti, owner_ti)
 
 // =========================================================================
 // Section 54: Expression lowering
@@ -395,7 +396,7 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
       let or2: HirR = lower_expr(hs, operand)
       return hs_add_node(or2.hs, HirNode::HirUnary(op = op_tidx, operand = or2.hir, typ = ti))
     parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
-      return with_call_subst(lower_call_expr(hs, node_idx, callee, args_lp, names_lp, ti), base::hm_get_or(hs.typecheck.lookup.expr_types, call_subst_key(hs.unit.module_id, node_idx), to_i64(-1)))
+      return with_call_subst(lower_call_expr(hs, node_idx, callee, args_lp, names_lp, ti), base::hm_get_or(hs.typecheck.lookup.expr_types, typecheck::call_subst_key(hs.unit.module_id, node_idx), to_i64(-1)))
     parser::Node::FieldE(obj, field_tidx):
       // A concept-provided member taken as a value has no field to read
       // and no implementation to name (see hir_member_concept).
@@ -445,7 +446,7 @@ fn lower_expr(hs: HS, node_idx: i64): HirR
       while pi < param_toks.length():
         let ptidx: i64 = param_toks.get(pi)
         let pname: string = hs_tok_name(hs, ptidx)
-        let psym: i64 = member_sym_of(hs.typecheck.lookup.index, hs.unit.module_id, node_idx, "LambdaParam", pname)
+        let psym: i64 = typecheck::member_sym_of(hs.typecheck.lookup.index, hs.unit.module_id, node_idx, "LambdaParam", pname)
         let pti: i64 = hir_sym_type(hs, psym)
         pairs = pairs.push(psym)
         pairs = pairs.push(pti)
@@ -496,7 +497,7 @@ fn lower_ptr_op(hs: HS, op: i64, callee: i64, args_lp: i64, ti: i64): HirR
 // The declaration index of the variant the name at `node_idx` denotes,
 // as the checker recorded it; -1 when it names no variant.
 fn hir_named_variant(hs: HS, node_idx: i64): i64
-  return base::hm_get_or(hs.typecheck.lookup.expr_types, variant_index_key(hs.unit.module_id, node_idx), to_i64(-1))
+  return base::hm_get_or(hs.typecheck.lookup.expr_types, typecheck::variant_index_key(hs.unit.module_id, node_idx), to_i64(-1))
 
 // The value of variant `variant` of the enum `ti`, its payload the
 // lowered `hir_args` of the AST arguments `args`: a classification
@@ -584,7 +585,7 @@ fn hir_qualified_method_sym(hs: HS, segs: Vector<i64>): i64
   let head_ti: i64 = hir_sym_type(hs, head_sym)
   if head_ti < 0:
     return to_i64(-1)
-  return find_inherent_method_sym(hs.typecheck.lookup.methods, hs_tok_name(hs, segs.get(to_i64(1))), head_ti)
+  return typecheck::find_inherent_method_sym(hs.typecheck.lookup.methods, hs_tok_name(hs, segs.get(to_i64(1))), head_ti)
 
 // Emit a call of the method symbol `msym` (its type names the result):
 // the receiver, when there is one, then the arguments in order.
@@ -673,7 +674,7 @@ fn lower_call_expr(hs: HS, node_idx: i64, callee: i64, args_lp: i64, names_lp: i
   // type is the field's type, not a function type.
   // An operation of `Ptr<T>`, as the checker recorded it: never a
   // method call or a call of a qualified name.
-  let ptr_op: i64 = base::hm_get_or(hs.typecheck.lookup.expr_types, ptr_op_key(hs.unit.module_id, node_idx), to_i64(-1))
+  let ptr_op: i64 = base::hm_get_or(hs.typecheck.lookup.expr_types, typecheck::ptr_op_key(hs.unit.module_id, node_idx), to_i64(-1))
   if ptr_op >= 0:
     return lower_ptr_op(hs, ptr_op, callee, args_lp, ti)
   let callee_node: parser::Node = hs.unit.nodes.get(callee)
@@ -832,7 +833,7 @@ fn lower_let_stmt(hs: HS, node_idx: i64, name_tidx: i64, type_node: i64, init_no
   // declaration index — keyed by module, since a declaration's node index
   // is only unique within its module.  Stored on HirLet so MIR binds the
   // slot to the symbol every read and store of the name resolves to.
-  let let_sym: i64 = member_sym_of(hs.typecheck.lookup.index, hs.unit.module_id, node_idx, "Local", "")
+  let let_sym: i64 = typecheck::member_sym_of(hs.typecheck.lookup.index, hs.unit.module_id, node_idx, "Local", "")
   let let_ti: i64 = to_i64(-1)
   if let_sym >= 0:
     let_ti = hir_sym_type(hs, let_sym)
@@ -864,7 +865,7 @@ fn lower_while_stmt(hs: HS, cond: i64, body_lp: i64): HirR
 // The loop variable is the Local the resolver declared for the `for`
 // statement itself.
 fn lower_for_stmt(hs: HS, for_node: i64, iter_node: i64, body_lp: i64): HirR
-  let var_sym: i64 = member_sym_of(hs.typecheck.lookup.index, hs.unit.module_id, for_node, "Local", "")
+  let var_sym: i64 = typecheck::member_sym_of(hs.typecheck.lookup.index, hs.unit.module_id, for_node, "Local", "")
   let ir: HirR = lower_expr(hs, iter_node)
   let cur: HS = ir.hs
   if var_sym < 0:
@@ -1064,7 +1065,7 @@ fn lower_arm_bindings(hs: HS, pat_node: i64, scrut_sym: i64, scrut_ti: i64, vari
       let binders: Vector<i64> = parser::read_list(cur.unit.idx_data, args_lp)
       let bi: i64 = 0
       while bi < binders.length():
-        let binding_sym: i64 = member_sym_of(cur.typecheck.lookup.index, cur.unit.module_id, binders.get(bi), "Local", "")
+        let binding_sym: i64 = typecheck::member_sym_of(cur.typecheck.lookup.index, cur.unit.module_id, binders.get(bi), "Local", "")
         if binding_sym < 0:
           cur = hs_add_diag(cur, Span(to_i64(0), to_i64(1)), "match arm binding has no symbol")
         else:
@@ -1085,7 +1086,7 @@ fn hir_pattern_variant(hs: HS, pat_node: i64): i64
   match hs.unit.nodes.get(pat_node):
     parser::Node::CallE(callee, args_lp, arg_count, targs_lp, names_lp, targs_on_type):
       named = callee
-  return base::hm_get_or(hs.typecheck.lookup.expr_types, variant_index_key(hs.unit.module_id, named), to_i64(-1))
+  return base::hm_get_or(hs.typecheck.lookup.expr_types, typecheck::variant_index_key(hs.unit.module_id, named), to_i64(-1))
 
 // Whether `ti` is an enum with a variant that carries a payload: its
 // values are tagged, and `match` tests their discriminant.  Variants
@@ -1412,10 +1413,10 @@ fn hir_find_type_sym_by_decl(hs: HS, decl_idx: i64): i64
   return base::hm_get_or(hs.typecheck.lookup.index.type_syms, base::decl_key(hs.unit.module_id, decl_idx), to_i64(-1))
 
 fn hir_find_param_sym(hs: HS, decl_idx: i64, param_name: string): i64
-  return member_sym_of(hs.typecheck.lookup.index, hs.unit.module_id, decl_idx, "Param", param_name)
+  return typecheck::member_sym_of(hs.typecheck.lookup.index, hs.unit.module_id, decl_idx, "Param", param_name)
 
 fn hir_find_field_sym(hs: HS, decl_idx: i64, field_name: string): i64
-  return member_sym_of(hs.typecheck.lookup.index, hs.unit.module_id, decl_idx, "Field", field_name)
+  return typecheck::member_sym_of(hs.typecheck.lookup.index, hs.unit.module_id, decl_idx, "Field", field_name)
 
 // =========================================================================
 // Section 58: File lowering and public API
@@ -1601,7 +1602,7 @@ fn lower_to_hir(src: string): HirResult
   resource memory resolve =>
     p = resolver::program_run_resolve(p)
   resource memory typecheck =>
-    p = program_run_typecheck(p)
+    p = typecheck::program_run_typecheck(p)
 
   // Single module at mid=0.
   let mid: i64 = to_i64(0)
@@ -1984,7 +1985,7 @@ fn hir_dump_node(hr: HirResult, idx: i64, indent: i64): string
         ci = ci + 1
       return line
     HirNode::HirPtrOp(op, pointer, argument, ti2):
-      line = line + " " + ptr_op_name(op) + " : " + hir_type_label(hr, ti2) + "\n"
+      line = line + " " + typecheck::ptr_op_name(op) + " : " + hir_type_label(hr, ti2) + "\n"
       line = line + hir_dump_node(hr, pointer, indent + 1)
       line = line + hir_dump_node(hr, argument, indent + 1)
       return line

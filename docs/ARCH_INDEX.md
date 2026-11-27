@@ -152,9 +152,9 @@ Self-hosting compiler subsystems written in Dao.
 - `ascii.dao` — `bootstrap::ascii`, character-classification module
   imported by `bootstrap::lexer`
 - `assemble.sh` — concatenates remaining unextracted subsystem fragments
-  (`typecheck`, `hir`, `mir`, `llvm`, `driver`) to produce `*.gen.dao`
-  outputs under `bootstrap/` or an explicit per-run output root (`ascii`,
-  `lexer`, `parser`, `graph`, `base`, and `resolver` compile directly
+  (`hir`, `mir`, `llvm`, `driver`) to produce `*.gen.dao` outputs under
+  `bootstrap/` or an explicit per-run output root (`ascii`, `lexer`,
+  `parser`, `graph`, `base`, `resolver`, and `typecheck` compile directly
   without assembly)
 - `validate_ir.sh` — compiles, links, and runs the IR the LLVM suite
   emits under `llvm/out/` or a per-run directory, comparing exit codes
@@ -180,8 +180,11 @@ Self-hosting compiler subsystems written in Dao.
   `bootstrap::lexer`, `bootstrap::parser`, `bootstrap::graph`, and
   `bootstrap::base`) and `bootstrap::resolver::tests` (`tests.dao`),
   compiled directly as real modules without `assemble.sh`
-- `typecheck/` — type checker assigning types to expressions and
-  validating type correctness; logic + tests in `impl.dao` (Task 23)
+- `typecheck/` — `bootstrap::typecheck` (`impl.dao`, importing
+  `bootstrap::lexer`, `bootstrap::parser`, `bootstrap::graph`,
+  `bootstrap::base`, and `bootstrap::resolver`) and
+  `bootstrap::typecheck::tests` (`tests.dao`), compiled directly as real
+  modules without `assemble.sh`
 - `hir/` — HIR lowering pass producing compiler-owned typed IR from
   the type-checked AST; logic + tests in `impl.dao` (Task 24)
 - `mir/` — Tier A MIR lowering pass producing basic-block MIR from

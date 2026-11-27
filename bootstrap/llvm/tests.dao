@@ -5,6 +5,7 @@ import bootstrap::parser
 import bootstrap::graph
 import bootstrap::base
 import bootstrap::resolver
+import bootstrap::typecheck
 
 // Test runner for the bootstrap llvm.  Assembled after the
 // shared base and every library it exercises; never compiled
@@ -181,7 +182,7 @@ fn closure_prelude_inputs(): Vector<graph::SourceInput>
 // the resolve and typecheck columns it reports.
 class ProbedProgram:
   program: resolver::Program
-  typed: ProgramTyped
+  typed: typecheck::ProgramTyped
   cols: string
 
 // The program pipeline, with the prelude, through typecheck: the columns
@@ -200,6 +201,8 @@ fn closure_program_checked(name: string, path: string, src: string, report: bool
       if name != "graph":
         inputs = inputs.push(graph::SourceInput("bootstrap/shared/base.dao", read_file("bootstrap/shared/base.dao"), false))
         inputs = inputs.push(graph::SourceInput("bootstrap/resolver/impl.dao", read_file("bootstrap/resolver/impl.dao"), false))
+        if name != "resolver":
+          inputs = inputs.push(graph::SourceInput("bootstrap/typecheck/impl.dao", read_file("bootstrap/typecheck/impl.dao"), false))
   inputs = inputs.push(graph::SourceInput(path, base::wrap_test_module(src), false))
   let pg: graph::ProgramGraph = graph::program_graph_empty()
   resource memory graph =>
@@ -207,9 +210,9 @@ fn closure_program_checked(name: string, path: string, src: string, report: bool
   let p: resolver::Program = resolver::program_from_graph(pg)
   resource memory resolve =>
     p = resolver::program_run_resolve(p)
-  let pt: ProgramTyped = ProgramTyped(p, registry_new(p.resolve.symbols, p.module_graph.modules))
+  let pt: typecheck::ProgramTyped = typecheck::ProgramTyped(p, typecheck::registry_new(p.resolve.symbols, p.module_graph.modules))
   resource memory typecheck =>
-    pt = program_check(p)
+    pt = typecheck::program_check(p)
   p = pt.program
   if report == false:
     return ProbedProgram(p, pt, "")
@@ -346,7 +349,7 @@ fn closure_probe_prelude(): string
     eprint("probe: prelude file\t" + path + "\tparse=" + i64_to_string(parsed.count) + "\tresolve=" + i64_to_string(resolved.count) + "\tfirst=" + first)
     i = i + to_i64(1)
   resource memory typecheck =>
-    p = program_run_typecheck(p)
+    p = typecheck::program_run_typecheck(p)
   let carried_into_typecheck: i64 = p.resolve.diags.length()
   i = to_i64(0)
   while i < inputs.length():
@@ -399,6 +402,8 @@ fn closure_probe(marker: string): void
     line = closure_probe_stage(which, "bootstrap/graph/tests.dao", stage)
   else if which == "resolver":
     line = closure_probe_stage(which, "bootstrap/resolver/tests.dao", stage)
+  else if which == "typecheck":
+    line = closure_probe_stage(which, "bootstrap/typecheck/tests.dao", stage)
   else:
     line = closure_probe_stage(which, "bootstrap/" + which + "/" + which + ".gen.dao", stage)
   let closure_txt: string = llvm_out_dir() + "/closure.txt"
