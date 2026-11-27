@@ -1,4 +1,5 @@
 import { createServer } from "vite";
+import geomSource from "../../../../examples/geometry/geom.dao?raw";
 
 // The dev server may read the frontend and the example corpus, and nothing
 // else in the repository.  This starts it with the project's own config and
@@ -17,11 +18,15 @@ async function run(): Promise<void> {
     if (!base) throw new Error("the dev server reported no local address");
     // The server's root is this frontend, three directories below the
     // repository's.
-    const repoRoot = new URL("../../../", `file://${server.config.root}/`).pathname;
+    // Each segment is encoded, so a `%` or a space in the checkout's path
+    // reaches the server as that character.
+    const root = server.config.root.split("/").map(encodeURIComponent).join("/");
+    const repoRoot = new URL("../../../", `file://${root}/`).pathname;
     const inRepo = (path: string): string => `${base}@fs${repoRoot}${path}?raw`;
 
     const example = await statusAndBody(inRepo("examples/geometry/geom.dao"));
-    if (example.status !== 200 || !example.body.includes("fn perimeter")) {
+    // The reply is a module whose default export is the file's text.
+    if (example.status !== 200 || !example.body.includes(JSON.stringify(geomSource))) {
       throw new Error(`an imported example must be served with its text, got ${example.status}`);
     }
 

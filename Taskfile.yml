@@ -55,11 +55,14 @@ tasks:
     sources:
       - src/**/*
       - index.html
+      - package.json
       - package-lock.json
+      - tsconfig.json
       - vite.config.ts
       - ../../../examples/**/*.dao
     generates:
       - dist/index.html
+      - dist/assets/*
 
   playground:
     desc: Build and start the playground server (http://localhost:8090)
