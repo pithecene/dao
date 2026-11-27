@@ -7,6 +7,8 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace {
 
@@ -217,6 +219,71 @@ suite<"indentation_tests"> indentation_tests = [] {
     expect(output.result.diagnostics.empty()) << "no errors expected";
   };
 
+  "a character outside ASCII is one error token"_test = [] {
+    // A curly quote is three bytes.  Three one-byte error tokens would
+    // each hold part of a character, in their text and in their message.
+    auto output = lex_string("let x = \xE2\x80\x9C\n");
+    expect(count_kind(output.result.tokens, TokenKind::Error) == 1);
+    expect(fatal(output.result.diagnostics.size() == 1U));
+    const auto& diag = output.result.diagnostics.front();
+    expect(diag.span.length == 3U) << diag.span.length;
+    expect(diag.message == "unexpected character: \xE2\x80\x9C") << diag.message;
+  };
+
+  "bytes that are not UTF-8 are each named by value"_test = [] {
+    struct Malformed {
+      std::string_view what;
+      std::string source;
+      std::vector<std::string> messages;
+    };
+    const std::vector<Malformed> cases = {
+        {"a continuation byte with no lead", "\x9C\n", {"unexpected byte: 0x9C"}},
+        {"a character cut short", "\xE2\x80\n", {"unexpected byte: 0xE2", "unexpected byte: 0x80"}},
+        {"a character cut short by the end of the source",
+         "\xE2\x80",
+         {"unexpected byte: 0xE2", "unexpected byte: 0x80"}},
+        {"an overlong form", "\xC0\xAF\n", {"unexpected byte: 0xC0", "unexpected byte: 0xAF"}},
+        {"an overlong form of three bytes",
+         "\xE0\x9F\xBF\n",
+         {"unexpected byte: 0xE0", "unexpected byte: 0x9F", "unexpected byte: 0xBF"}},
+        {"an overlong form of four bytes",
+         "\xF0\x8F\xBF\xBF\n",
+         {"unexpected byte: 0xF0", "unexpected byte: 0x8F", "unexpected byte: 0xBF",
+          "unexpected byte: 0xBF"}},
+        {"a surrogate",
+         "\xED\xA0\x80\n",
+         {"unexpected byte: 0xED", "unexpected byte: 0xA0", "unexpected byte: 0x80"}},
+        {"a value past U+10FFFF",
+         "\xF4\x90\x80\x80\n",
+         {"unexpected byte: 0xF4", "unexpected byte: 0x90", "unexpected byte: 0x80",
+          "unexpected byte: 0x80"}},
+    };
+    for (const auto& malformed : cases) {
+      auto output = lex_string(malformed.source);
+      std::vector<std::string> messages;
+      for (const auto& diag : output.result.diagnostics) {
+        expect(diag.span.length == 1U) << malformed.what << ": " << diag.span.length;
+        messages.push_back(diag.message);
+      }
+      expect(messages == malformed.messages) << malformed.what;
+    }
+  };
+
+  "characters of two, three, and four bytes are each one error token"_test = [] {
+    // U+00E9, U+201C, U+1F600, then the first and last characters that the
+    // second byte's narrower ranges admit: U+0800, U+D7FF, U+10000, U+10FFFF.
+    for (const std::string_view character :
+         {"\xC3\xA9", "\xE2\x80\x9C", "\xF0\x9F\x98\x80", "\xE0\xA0\x80", "\xED\x9F\xBF",
+          "\xF0\x90\x80\x80", "\xF4\x8F\xBF\xBF"}) {
+      auto output = lex_string("x " + std::string(character) + " y\n");
+      expect(count_kind(output.result.tokens, TokenKind::Error) == 1);
+      expect(fatal(output.result.diagnostics.size() == 1U));
+      const auto& diag = output.result.diagnostics.front();
+      expect(diag.span.length == character.size());
+      expect(diag.message == "unexpected character: " + std::string(character)) << diag.message;
+    }
+  };
+
   "tabs rejected"_test = [] {
     auto output = lex_string("fn f(): i32\n\t0\n");
     expect(!output.result.diagnostics.empty()) << "tabs must produce a diagnostic";
@@ -278,6 +345,44 @@ suite<"comment_tests"> comment_tests = [] {
       }
     }
     expect(has_slash) << "single slash should be an operator";
+  };
+
+  "each comment is recorded with the text it covers"_test = [] {
+    auto output = lex_string("// top\nfn foo(): i32 // after code\n  // own line\n  return 0\n");
+    expect(output.result.diagnostics.empty());
+    std::vector<std::string_view> texts;
+    for (const auto& comment : output.result.comments) {
+      texts.push_back(output.source->text(comment));
+    }
+    expect(texts == std::vector<std::string_view>{"// top", "// after code", "// own line"});
+  };
+
+  "a comment ends before its line ending, and at the end of the file"_test = [] {
+    auto output = lex_string("// first\r\nfn foo(): i32\r\n  return 0 // last");
+    expect(fatal(output.result.comments.size() == 2_u));
+    expect(output.source->text(output.result.comments[0]) == "// first")
+        << "the carriage return belongs to the line ending";
+    expect(output.source->text(output.result.comments[1]) == "// last");
+  };
+
+  "a recorded comment ends at a bare carriage return"_test = [] {
+    auto output = lex_string("// first\rfn foo(): i32 -> 1\n");
+    expect(fatal(output.result.comments.size() == 1_u));
+    expect(output.source->text(output.result.comments[0]) == "// first")
+        << "the comment's span stays on its own line";
+  };
+
+  "a comment's span lies in the program's offset space"_test = [] {
+    SourceBuffer source("lib.dao", "fn foo(): i32 -> 1 // beside\n");
+    auto result = lex(source, 100);
+    expect(fatal(result.comments.size() == 1_u));
+    expect(result.comments[0].offset == 119_u);
+    expect(result.comments[0].length == 9_u);
+  };
+
+  "slashes inside a string are not a comment"_test = [] {
+    auto output = lex_string("let url = \"http://example\"\n");
+    expect(output.result.comments.empty());
   };
 };
 

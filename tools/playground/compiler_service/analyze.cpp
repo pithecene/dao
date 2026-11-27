@@ -87,14 +87,13 @@ void add_lexical_tokens(AnalyzeOutput& out, const PlaygroundProgram& prog) {
     if (is_synthetic_token(tok.kind) || !prog.in_editor_text(tok.span.offset)) {
       continue;
     }
-    auto loc = prog.program.source_map.locate(tok.span.offset);
     out.tokens.push_back({
         {"kind", token_kind_name(tok.kind)},
         {"category", token_category(tok.kind)},
         {"offset", prog.to_editor_offset(tok.span.offset)},
-        {"length", tok.span.length},
+        {"length", prog.editor_length(tok.span)},
         {"line", prog.editor_line(tok.span.offset)},
-        {"col", loc.col},
+        {"col", prog.editor_column(*prog.user, tok.span.offset)},
         {"text", std::string(tok.text)},
     });
   }
@@ -107,13 +106,12 @@ void add_semantic_tokens(AnalyzeOutput& out,
     if (!prog.in_editor_text(stok.span.offset)) {
       continue;
     }
-    auto loc = prog.program.source_map.locate(stok.span.offset);
     out.semantic_tokens.push_back({
         {"kind", stok.kind},
         {"offset", prog.to_editor_offset(stok.span.offset)},
-        {"length", stok.span.length},
+        {"length", prog.editor_length(stok.span)},
         {"line", prog.editor_line(stok.span.offset)},
-        {"col", loc.col},
+        {"col", prog.editor_column(*prog.user, stok.span.offset)},
     });
   }
 }
@@ -249,15 +247,21 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
     out.unlocated.push_back(make_unlocated_diagnostic(diag.message, diag.severity));
   }
   out.add(assembly.located);
-  if (prog.user == nullptr || has_error_severity(prog.program.diagnostics)) {
+  if (prog.user == nullptr) {
     return out.reply();
   }
 
   add_lexical_tokens(out, prog);
-  if (!prog.user->lex.diagnostics.empty()) {
-    return out.reply();
-  }
-  if (prog.user->file() == nullptr) {
+  // A program that stops at assembly has no resolution to draw on, but
+  // the document's own tokens, and its syntax tree when it parsed, still
+  // classify.  Two conditions stop it.  A load or module-graph error,
+  // such as an import that names a module whose file did not lex, skips
+  // resolution for every document; a parse error in one file is not
+  // such an error, and resolution runs past it.  A document with a lexer
+  // diagnostic was never parsed, so it has no file node.  Without this
+  // reply's tokens the editor would show such a document plain.
+  if (has_error_severity(prog.program.diagnostics) || prog.user->file() == nullptr) {
+    add_semantic_tokens(out, classify_tokens(prog.user->lex, prog.user->file()), prog);
     return out.reply();
   }
   // Lowering needs every file lexed and parsed cleanly; the document's
@@ -279,7 +283,7 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
 
   // Semantic tokens — always classified once lex/parse produced a file.
   add_semantic_tokens(
-      out, classify_tokens(prog.user->lex.tokens, prog.user->file(), &resolve_result), prog);
+      out, classify_tokens(prog.user->lex, prog.user->file(), &resolve_result), prog);
 
   if (has_error_severity(resolve_result.diagnostics)) {
     return out.reply();

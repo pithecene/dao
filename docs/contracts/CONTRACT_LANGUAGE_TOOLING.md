@@ -124,6 +124,11 @@ Literals and uses:
 - `use.variant` — an enum variant referenced through its enum
   (`Color::Red`, `Option::Some` in expressions and patterns)
 
+Comments:
+- `comment` — a `//` line comment, from its slashes to the end of its
+  line. A comment is not a token of the grammar: the lexer records
+  where each one is, and the token stream the parser reads holds none.
+
 ## Frozen Initial LSP Capability Slice
 
 The first supported LSP capability slice must include:

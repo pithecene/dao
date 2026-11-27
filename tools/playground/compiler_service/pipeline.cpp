@@ -1,6 +1,8 @@
 #include "pipeline.h"
 #include "support/module_utils.h"
 
+#include <llvm/Support/ConvertUTF.h>
+
 #include <algorithm>
 #include <format>
 #include <iterator>
@@ -71,11 +73,80 @@ auto build_playground_program(const std::filesystem::path& repo_root,
   }
   prog.program = build_program(std::move(inputs), {}, entry_policy);
   for (const auto& file : prog.program.files) {
+    prog.utf16.emplace(file.get(), Utf16Index(file->buffer.contents()));
     if (!file->is_prelude && file->display_path == request.document) {
       prog.user = file.get();
     }
   }
   return prog;
+}
+
+Utf16Index::Utf16Index(std::string_view text) : byte_size_(static_cast<uint32_t>(text.size())) {
+  const auto* cursor = reinterpret_cast<const llvm::UTF8*>(text.data()); // NOLINT
+  const auto* end = cursor + text.size();                                // NOLINT
+  uint32_t bytes = 0;
+  uint32_t units = 0;
+  while (cursor < end) {
+    // 0 for a byte that begins no character: it is one unit, like ASCII.
+    const uint32_t width = llvm::getUTF8SequenceSize(cursor, end);
+    if (width <= 1) {
+      ++cursor; // NOLINT
+      ++bytes;
+      ++units;
+      continue;
+    }
+    // Two and three bytes are one code unit; four are a surrogate pair.
+    const uint32_t unit_width = width == 4 ? 2 : 1;
+    cursor += width; // NOLINT
+    bytes += width;
+    units += unit_width;
+    wide_.push_back(
+        {.bytes_end = bytes, .units_end = units, .byte_width = width, .unit_width = unit_width});
+  }
+}
+
+auto Utf16Index::boundaries(uint32_t byte_offset) const -> Boundaries {
+  // The first wide character that ends past the offset: the offset is
+  // inside it, or in the run of one-unit bytes before it.
+  auto next = std::ranges::upper_bound(wide_, byte_offset, {}, &WideCharacter::bytes_end);
+  if (next != wide_.end() && byte_offset > next->bytes_end - next->byte_width) {
+    return {.before = next->units_end - next->unit_width, .after = next->units_end};
+  }
+  uint32_t units = byte_offset;
+  if (next != wide_.begin()) {
+    const auto& last = *std::prev(next);
+    units = last.units_end + (byte_offset - last.bytes_end);
+  }
+  return {.before = units, .after = units};
+}
+
+auto Utf16Index::to_utf16(uint32_t byte_offset) const -> uint32_t {
+  return boundaries(std::min(byte_offset, byte_size_)).before;
+}
+
+auto Utf16Index::to_utf16(Span bytes) const -> Span {
+  const uint32_t first = std::min(bytes.offset, byte_size_);
+  const uint32_t last = first + std::min(bytes.length, byte_size_ - first);
+  const uint32_t start = boundaries(first).before;
+  const uint32_t stop = last == first ? start : boundaries(last).after;
+  return {.offset = start, .length = stop - start};
+}
+
+auto Utf16Index::to_bytes(uint32_t utf16_offset) const -> uint32_t {
+  auto next = std::ranges::upper_bound(wide_, utf16_offset, {}, &WideCharacter::units_end);
+  if (next != wide_.end() && utf16_offset > next->units_end - next->unit_width) {
+    return next->bytes_end - next->byte_width;
+  }
+  if (next == wide_.begin()) {
+    return utf16_offset;
+  }
+  const auto& last = *std::prev(next);
+  return last.bytes_end + (utf16_offset - last.units_end);
+}
+
+auto Utf16Index::column(uint32_t byte_offset, uint32_t byte_column) const -> uint32_t {
+  const uint32_t line_start = byte_offset - std::min(byte_offset, byte_column - 1);
+  return 1 + to_utf16(byte_offset) - to_utf16(line_start);
 }
 
 auto run_frontend_pipeline(const std::filesystem::path& repo_root, ProgramRequest request)
@@ -151,10 +222,9 @@ void add_position(nlohmann::json& out, const PlaygroundProgram& prog, uint32_t p
   auto loc = prog.program.source_map.locate(program_offset);
   const bool in_document = file == prog.user;
   out["file"] = file->display_path;
-  out["offset"] =
-      in_document ? prog.to_editor_offset(program_offset) : file->local_offset(program_offset);
+  out["offset"] = prog.editor_offset_in(*file, program_offset);
   out["line"] = in_document ? prog.editor_line(program_offset) : loc.line;
-  out["col"] = loc.col;
+  out["col"] = prog.editor_column(*file, program_offset);
 }
 
 auto without_prelude_warnings(const std::vector<Diagnostic>& diags, const PlaygroundProgram& prog)
@@ -181,7 +251,7 @@ void collect_diagnostics(nlohmann::json& out,
   for (const auto& diag : diags) {
     nlohmann::json entry = {
         {"severity", diag.severity == Severity::Warning ? "warning" : "error"},
-        {"length", diag.span.length},
+        {"length", prog.editor_length(diag.span)},
         {"message", diag.message},
     };
     add_position(entry, prog, diag.span.offset);

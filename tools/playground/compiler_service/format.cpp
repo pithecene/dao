@@ -70,9 +70,12 @@ auto format_document(const nlohmann::json& request, const ServiceContext& /*ctx*
 
   if (!result.ok()) {
     nlohmann::json diagnostics = nlohmann::json::array();
+    // Positions in the editor's unit; the header is ASCII.
+    const Utf16Index utf16(buffer.contents());
     for (const auto& diag : result.errors) {
       auto loc = buffer.line_col(diag.span.offset);
-      uint32_t offset = diag.span.offset;
+      const Span marked = utf16.to_utf16(diag.span);
+      uint32_t offset = marked.offset;
       uint32_t line = loc.line;
       if (injected_module) {
         offset = offset >= kSyntheticHeaderBytes ? offset - kSyntheticHeaderBytes : 0;
@@ -82,9 +85,9 @@ auto format_document(const nlohmann::json& request, const ServiceContext& /*ctx*
           {"severity", diag.severity == Severity::Warning ? "warning" : "error"},
           {"file", inputs->document},
           {"offset", offset},
-          {"length", diag.span.length},
+          {"length", marked.length},
           {"line", line},
-          {"col", loc.col},
+          {"col", utf16.column(diag.span.offset, loc.col)},
           {"message", diag.message},
       });
     }

@@ -101,7 +101,9 @@ public:
 
     emit(TokenKind::Eof, pos_, 0);
 
-    return {.tokens = std::move(tokens_), .diagnostics = std::move(diagnostics_)};
+    return {.tokens = std::move(tokens_),
+            .diagnostics = std::move(diagnostics_),
+            .comments = std::move(comments_)};
   }
 
 private:
@@ -114,6 +116,20 @@ private:
   bool at_line_start_ = true;
   std::vector<Token> tokens_;
   std::vector<Diagnostic> diagnostics_;
+  std::vector<Span> comments_;
+
+  // Skips the `//` comment that begins at `start` and records where it is.
+  // The skip runs to the next line feed.  The recorded comment ends at the
+  // end of its line, which a carriage return marks as well.
+  void skip_line_comment(uint32_t start) {
+    while (pos_ < src_.size() && src_[pos_] != '\n') {
+      ++pos_;
+    }
+    const auto skipped = src_.substr(start, pos_ - start);
+    const auto line_end = skipped.find('\r');
+    const auto length = line_end == std::string_view::npos ? skipped.size() : line_end;
+    comments_.push_back({.offset = base_ + start, .length = static_cast<uint32_t>(length)});
+  }
 
   // `offset` and `length` are buffer-local; the recorded span is program-wide.
   void emit(TokenKind kind, uint32_t offset, uint32_t length) {
@@ -187,10 +203,7 @@ private:
 
     // Comment-only line — treat like a blank line.
     if (pos_ + 1 < src_.size() && src_[pos_] == '/' && src_[pos_ + 1] == '/') {
-      // Skip comment text to end of line.
-      while (pos_ < src_.size() && src_[pos_] != '\n') {
-        ++pos_;
-      }
+      skip_line_comment(pos_);
       // Fall through to blank-line handling below.
     }
 
@@ -357,10 +370,7 @@ private:
       return;
     case '/':
       if (peek() == '/') {
-        // Line comment: skip to end of line (or end of file).
-        while (pos_ < src_.size() && src_[pos_] != '\n') {
-          ++pos_;
-        }
+        skip_line_comment(start);
         return;
       }
       emit(TokenKind::Slash, start, 1);
@@ -386,7 +396,72 @@ private:
       return;
     }
 
-    emit_error(start, 1, std::string("unexpected character: ") + cur);
+    emit_unexpected_character(start);
+  }
+
+  /// Length in bytes of the UTF-8 character at `start`, or 0 when the
+  /// bytes there are not one: a stray continuation byte, a character cut
+  /// short, an overlong form, a surrogate, or a value past U+10FFFF.
+  [[nodiscard]] auto utf8_character_length(uint32_t start) const -> uint32_t {
+    // peek_at answers 0 past the end of the source, which no range below
+    // admits.
+    auto byte_at = [&](uint32_t offset) -> uint32_t {
+      return static_cast<unsigned char>(peek_at(offset));
+    };
+    const uint32_t lead = byte_at(start);
+    if (lead < 0x80U) {
+      return 1;
+    }
+    // The second byte's range depends on the lead: the narrower ranges
+    // exclude overlong forms, surrogates, and values past U+10FFFF.
+    uint32_t length = 0;
+    uint32_t second_low = 0x80U;
+    uint32_t second_high = 0xBFU;
+    if (lead >= 0xC2U && lead <= 0xDFU) {
+      length = 2;
+    } else if (lead >= 0xE0U && lead <= 0xEFU) {
+      length = 3;
+      second_low = lead == 0xE0U ? 0xA0U : second_low;
+      second_high = lead == 0xEDU ? 0x9FU : second_high;
+    } else if (lead >= 0xF0U && lead <= 0xF4U) {
+      length = 4;
+      second_low = lead == 0xF0U ? 0x90U : second_low;
+      second_high = lead == 0xF4U ? 0x8FU : second_high;
+    } else {
+      return 0;
+    }
+    const uint32_t second = byte_at(start + 1);
+    if (second < second_low || second > second_high) {
+      return 0;
+    }
+    for (uint32_t offset = 2; offset < length; ++offset) {
+      const uint32_t continuation = byte_at(start + offset);
+      if (continuation < 0x80U || continuation > 0xBFU) {
+        return 0;
+      }
+    }
+    return length;
+  }
+
+  /// Report the character at `start`, already advanced past its first
+  /// byte, as one error token.  A character outside ASCII spans several
+  /// bytes, and reporting each byte alone would put part of a character
+  /// into a token's text and a diagnostic's message, which then are not
+  /// text any more.  Bytes that are not UTF-8 are reported one at a time,
+  /// each named by its value rather than repeated.
+  void emit_unexpected_character(uint32_t start) {
+    const uint32_t length = utf8_character_length(start);
+    if (length == 0) {
+      constexpr std::string_view hex_digits = "0123456789ABCDEF";
+      const auto byte = static_cast<unsigned char>(src_[start]);
+      std::string message = "unexpected byte: 0x";
+      message += hex_digits[byte >> 4U];
+      message += hex_digits[byte & 0x0FU];
+      emit_error(start, 1, std::move(message));
+      return;
+    }
+    pos_ = start + length;
+    emit_error(start, length, "unexpected character: " + std::string(src_.substr(start, length)));
   }
 
   void lex_string(uint32_t start) {
