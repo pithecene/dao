@@ -974,7 +974,12 @@ fn main(): i32
   else:
     print("FAIL try_lowers_to_one_node: got " + i64_to_string(hir_count_kind(try_lowered, "HirTry")) + " HirTry, " + i64_to_string(hir_count_diags(try_lowered)) + " diagnostics")
   let try_rejected = lower_to_hir("fn f(n: i32): i32\n  return n?\n")
-  if hir_count_diags(try_rejected) == 1 and hir_count_kind(try_rejected, "HirTry") == 0 and index_of(try_rejected.diags.get(0).message, "requires an Option or Result type") >= 0:
+  // `and` evaluates both sides, so the message is read only once the
+  // count says there is one.
+  let rejected_once = false
+  if hir_count_diags(try_rejected) == 1 and hir_count_kind(try_rejected, "HirTry") == 0:
+    rejected_once = index_of(try_rejected.diags.get(0).message, "requires an Option or Result type") >= 0
+  if rejected_once:
     print("PASS rejected_try_is_reported_once")
     pass_count = pass_count + 1
   else:
