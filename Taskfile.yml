@@ -50,12 +50,19 @@ tasks:
     cmds:
       - npm ci --ignore-scripts
       - npm run build
+    # Task resolves these against the task's directory.  The site imports
+    # its snippets from the example corpus, so the examples are inputs too.
     sources:
-      - tools/playground/frontend/src/**/*
-      - tools/playground/frontend/index.html
-      - tools/playground/frontend/package-lock.json
+      - src/**/*
+      - index.html
+      - package.json
+      - package-lock.json
+      - tsconfig.json
+      - vite.config.ts
+      - ../../../examples/**/*.dao
     generates:
-      - tools/playground/frontend/dist/index.html
+      - dist/index.html
+      - dist/assets/*
 
   playground:
     desc: Build and start the playground server (http://localhost:8090)

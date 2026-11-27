@@ -1,0 +1,50 @@
+File
+  Module structured_variants
+  EnumClassDecl Expr
+    Variant Const
+    Variant Add
+    Variant Zero
+  FunctionDecl eval
+    Param e: Expr
+    ReturnType: i32
+    MatchStatement
+      Scrutinee
+        Identifier e
+      Arm
+        Pattern
+          QualifiedName Expr::Const
+        ReturnStatement
+          Identifier value
+      Arm
+        Pattern
+          QualifiedName Expr::Add
+        ReturnStatement
+          BinaryExpr +
+            Identifier left
+            Identifier right
+      Arm
+        Pattern
+          QualifiedName Expr::Zero
+        ReturnStatement
+          IntLiteral 0
+  FunctionDecl main
+    ReturnType: i32
+    LetStatement a
+      CallExpr
+        Callee
+          QualifiedName Expr::Add
+        Args
+          IntLiteral 18
+          IntLiteral 24
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier eval
+            Args
+              Identifier a
+    ReturnStatement
+      IntLiteral 0

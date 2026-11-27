@@ -1,0 +1,75 @@
+File
+  Module demo
+  EnumClassDecl Reading
+    Variant Sample
+    Variant Missing
+  FunctionDecl score
+    Param wind: i32
+    ReturnType: i32
+    ExprBody
+      BinaryExpr +
+        BinaryExpr *
+          Identifier wind
+          IntLiteral 3
+        IntLiteral 10
+  FunctionDecl evaluate
+    Param r: Reading
+    ReturnType: i32
+    MatchStatement
+      Scrutinee
+        Identifier r
+      Arm
+        Pattern
+          QualifiedName Reading::Sample
+        ReturnStatement
+          PipeExpr
+            BinaryExpr +
+              Identifier wind_kt
+              Identifier gust_kt
+            Identifier score
+      Arm
+        Pattern
+          QualifiedName Reading::Missing
+        ReturnStatement
+          IntLiteral 0
+  FunctionDecl summarize
+    ReturnType: string
+    LetStatement report
+      StringLiteral ""
+    ResourceBlock memory scratch
+      LetStatement val
+        CallExpr
+          Callee
+            Identifier evaluate
+          Args
+            CallExpr
+              Callee
+                QualifiedName Reading::Sample
+              Args
+                IntLiteral 12
+                IntLiteral 6
+      Assignment
+        Target
+          Identifier report
+        Value
+          BinaryExpr +
+            StringLiteral "score="
+            CallExpr
+              Callee
+                Identifier i32_to_string
+              Args
+                Identifier val
+    ReturnStatement
+      Identifier report
+  FunctionDecl main
+    ReturnType: i32
+    ExpressionStatement
+      CallExpr
+        Callee
+          Identifier print
+        Args
+          CallExpr
+            Callee
+              Identifier summarize
+    ReturnStatement
+      IntLiteral 0
