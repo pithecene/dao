@@ -511,7 +511,10 @@ suite<"playground_service"> playground_service_suite = [] {
     const std::string uses_helper =
         "module app\nimport helper\n\nfn main(): i32\n  return helper::one()\n";
     const std::string helper = "module helper\n\nfn one(): i32 -> 1\n";
-    auto kinds_of = [&](const std::string& document, const std::string& other) {
+    /// The text each kind covers in the document, read back through the
+    /// reply's own offsets: the editor places colour by those, and drops a
+    /// span that falls outside the document.
+    auto classified = [&](const std::string& document, const std::string& other) {
       auto reply = call("analyze",
                         json{{"files",
                               json::array({{{"path", kTestDocument}, {"source", document}},
@@ -521,27 +524,48 @@ suite<"playground_service"> playground_service_suite = [] {
                                  [](const json& diag) { return diag["severity"] == "error"; }))
           << "the program must stop at assembly: " << reply.body["diagnostics"].dump();
       expect(!reply.body["tokens"].empty()) << "no lexical tokens: " << reply.body.dump();
-      std::set<std::string> kinds;
+      // What the service sends: a reply that does not serialize never
+      // reaches the editor.
+      expect(nothrow([&] { (void)reply.body.dump(); })) << "the reply does not serialize";
+      std::multimap<std::string, std::string> text_by_kind;
       for (const auto& token : reply.body["semanticTokens"]) {
-        kinds.insert(token["kind"].get<std::string>());
+        auto offset = token["offset"].get<size_t>();
+        auto length = token["length"].get<size_t>();
+        expect(offset + length <= document.size()) << "a span outside the document";
+        text_by_kind.emplace(token["kind"].get<std::string>(), document.substr(offset, length));
       }
-      return kinds;
+      return text_by_kind;
+    };
+    auto covers = [](const std::multimap<std::string, std::string>& text_by_kind,
+                     const std::string& kind, const std::string& text) {
+      auto [first, last] = text_by_kind.equal_range(kind);
+      return std::ranges::any_of(first, last,
+                                 [&](const auto& entry) { return entry.second == text; });
     };
 
     // The document's own lexer error: no syntax tree, so the lexical
     // kinds, on both sides of the error.
     auto unlexable =
-        kinds_of("module app\n\nfn main(): i32\n  print(\"oops)\n  return 0\n", helper);
-    expect(unlexable.contains("keyword.fn")) << "nothing before the lexer error is classified";
-    expect(unlexable.contains("keyword.return")) << "nothing after the lexer error is classified";
+        classified("module app\n\nfn main(): i32\n  print(\"oops)\n  return 0\n", helper);
+    expect(covers(unlexable, "keyword.fn", "fn")) << "nothing before the lexer error is classified";
+    expect(covers(unlexable, "keyword.return", "return"))
+        << "nothing after the lexer error is classified";
 
-    // Another file's lexer error, and a module declared twice: the
-    // document parsed, so its declarations classify from its syntax tree.
-    auto beside_unlexable = kinds_of(uses_helper, "module helper\n\nfn one(): i32 -> @\n");
-    expect(beside_unlexable.contains("decl.function"))
-        << "another file's lexer error hid the document's declarations";
-    auto declared_twice = kinds_of(uses_helper, "module app\n\nfn one(): i32 -> 1\n");
-    expect(declared_twice.contains("decl.function"))
+    // A character outside ASCII where none belongs, as a pasted curly
+    // quote is.
+    auto curly_quote =
+        classified("module app\n\nfn main(): i32\n  let x = \xE2\x80\x9C\n  return 0\n", helper);
+    expect(covers(curly_quote, "keyword.return", "return"))
+        << "nothing after the curly quote is classified";
+
+    // A lexer error in a module the document imports, and a module
+    // declared twice: the document parsed, so its declarations classify
+    // from its syntax tree.
+    auto beside_unlexable = classified(uses_helper, "module helper\n\nfn one(): i32 -> @\n");
+    expect(covers(beside_unlexable, "decl.function", "main"))
+        << "an imported module's lexer error hid the document's declarations";
+    auto declared_twice = classified(uses_helper, "module app\n\nfn one(): i32 -> 1\n");
+    expect(covers(declared_twice, "decl.function", "main"))
         << "a module declared twice hid the document's declarations";
   };
 

@@ -217,6 +217,30 @@ suite<"indentation_tests"> indentation_tests = [] {
     expect(output.result.diagnostics.empty()) << "no errors expected";
   };
 
+  "a character outside ASCII is one error token"_test = [] {
+    // A curly quote is three bytes.  Three one-byte error tokens would
+    // each hold part of a character, in their text and in their message.
+    auto output = lex_string("let x = \xE2\x80\x9C\n");
+    expect(count_kind(output.result.tokens, TokenKind::Error) == 1);
+    expect(output.result.diagnostics.size() == 1U);
+    const auto& diag = output.result.diagnostics.front();
+    expect(diag.span.length == 3U) << diag.span.length;
+    expect(diag.message == "unexpected character: \xE2\x80\x9C") << diag.message;
+  };
+
+  "a byte that is not UTF-8 is named by its value"_test = [] {
+    // A continuation byte with no character before it, and a character
+    // cut short by the end of the line.
+    for (const auto* source : {"let x = \x9C\n", "let x = \xE2\x80\n"}) {
+      auto output = lex_string(source);
+      expect(!output.result.diagnostics.empty());
+      for (const auto& diag : output.result.diagnostics) {
+        expect(diag.span.length == 1U) << diag.span.length;
+        expect(diag.message.starts_with("unexpected byte: 0x")) << diag.message;
+      }
+    }
+  };
+
   "tabs rejected"_test = [] {
     auto output = lex_string("fn f(): i32\n\t0\n");
     expect(!output.result.diagnostics.empty()) << "tabs must produce a diagnostic";

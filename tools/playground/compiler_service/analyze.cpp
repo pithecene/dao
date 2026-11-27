@@ -256,9 +256,11 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
   add_lexical_tokens(out, prog);
   // A program that stops at assembly has no resolution to draw on, but
   // the document's own tokens, and its syntax tree when it parsed, still
-  // classify.  Without them one unterminated string in any file would
-  // leave every file of the program uncoloured.  A document with a lexer
-  // diagnostic was never parsed, so it has no file node.
+  // classify.  Without them an unterminated string would leave uncoloured
+  // its own file and every file whose imports reach it; a file that does
+  // not import the broken module assembles and resolves as before.  A
+  // document with a lexer diagnostic was never parsed, so it has no file
+  // node.
   if (has_error_severity(prog.program.diagnostics) || prog.user->file() == nullptr) {
     add_semantic_tokens(out, classify_tokens(prog.user->lex.tokens, prog.user->file()), prog);
     return out.reply();

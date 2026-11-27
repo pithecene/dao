@@ -386,7 +386,42 @@ private:
       return;
     }
 
-    emit_error(start, 1, std::string("unexpected character: ") + cur);
+    emit_unexpected_character(start);
+  }
+
+  /// Report the character at `start`, already advanced past its first
+  /// byte, as one error token.  A character outside ASCII spans several
+  /// bytes, and reporting each byte alone would put part of a character
+  /// into a token's text and a diagnostic's message, which then are not
+  /// text any more.
+  void emit_unexpected_character(uint32_t start) {
+    const auto lead = static_cast<unsigned char>(src_[start]);
+    uint32_t encoded_length = 1;
+    if (lead >= 0xF0) {
+      encoded_length = 4;
+    } else if (lead >= 0xE0) {
+      encoded_length = 3;
+    } else if (lead >= 0xC0) {
+      encoded_length = 2;
+    }
+    uint32_t length = 1;
+    while (length < encoded_length && start + length < src_.size() &&
+           (static_cast<unsigned char>(src_[start + length]) & 0xC0U) == 0x80U) {
+      ++length;
+    }
+    // A byte that begins no character, or a character cut short, is not
+    // UTF-8: name the byte by its value rather than repeat it.
+    const bool begins_no_character = (lead >= 0x80 && lead < 0xC0) || lead >= 0xF8;
+    if (begins_no_character || length != encoded_length) {
+      constexpr std::string_view hex_digits = "0123456789ABCDEF";
+      std::string message = "unexpected byte: 0x";
+      message += hex_digits[lead >> 4U];
+      message += hex_digits[lead & 0x0FU];
+      emit_error(start, 1, std::move(message));
+      return;
+    }
+    pos_ = start + length;
+    emit_error(start, length, "unexpected character: " + std::string(src_.substr(start, length)));
   }
 
   void lex_string(uint32_t start) {
