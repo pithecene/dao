@@ -1,4 +1,5 @@
 import { basicSetup } from "codemirror";
+import { indentWithTab } from "@codemirror/commands";
 import {
   Annotation,
   Compartment,
@@ -7,7 +8,7 @@ import {
   StateField,
   Transaction,
 } from "@codemirror/state";
-import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
+import { Decoration, type DecorationSet, EditorView, keymap } from "@codemirror/view";
 import { referenceHighlights, tokenHighlighter } from "./highlighting";
 import { daoCompletions } from "./completions";
 import { editorThemeRules } from "./editor_theme";
@@ -40,11 +41,37 @@ const diagnosticHighlights = StateField.define<DecorationSet>({
 
 const pitheceneEditorTheme = EditorView.theme(editorThemeRules);
 
+/**
+ * How long after Escape a Tab still leaves the editor.  Any other key ends
+ * the wait at once, so the length only has to cover reading the hint and
+ * reaching for the key, which the editor's own two seconds may not.
+ */
+const LEAVE_WINDOW_MS = 10_000;
+
 function createTabState(doc: string, readOnly: boolean): EditorState {
   return EditorState.create({
     doc,
     extensions: [
       basicSetup,
+      // Tab indents, so it no longer moves focus on its own.  Escape and
+      // then Tab does: the description tells a screen reader so, and
+      // `#editor-exit-hint` tells a sighted reader.
+      keymap.of([indentWithTab]),
+      EditorView.contentAttributes.of({
+        "aria-description": "Press Escape, then Tab, to leave the editor.",
+      }),
+      // The editor opens that way out on Escape itself, but only when no
+      // binding takes the key first, and one does whenever text is selected
+      // or the completion list is open.  An observer sees every Escape.  It
+      // defers to the end of the key's handling, after the editor has set its
+      // own shorter wait and before the next key can arrive.
+      EditorView.domEventObservers({
+        keydown(event, view) {
+          if (event.key === "Escape") {
+            queueMicrotask(() => view.setTabFocusMode(LEAVE_WINDOW_MS));
+          }
+        },
+      }),
       pitheceneEditorTheme,
       EditorView.contentAttributes.of({ "aria-label": "Source editor" }),
       readOnlyCompartment.of(EditorState.readOnly.of(readOnly)),

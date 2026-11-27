@@ -1200,6 +1200,18 @@ pre {
   min-height: 0;
 }
 
+/* Tab indents inside the editor, so the way out is stated at every width,
+   in a row of its own: drawn over the editor it would cover the text. */
+#editor-exit-hint {
+  flex: 0 0 auto;
+  padding: 2px var(--space-3);
+  border-top: 1px solid var(--border-hairline);
+  background: var(--surface-panel);
+  color: var(--fg-secondary);
+  font-size: var(--text-xs);
+  text-align: right;
+}
+
 /* Cross-file References Drawer */
 #references-drawer {
   flex: 0 0 auto;
