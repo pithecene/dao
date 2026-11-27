@@ -3,7 +3,7 @@ module domains
 fn collect_squares(limit: i64): Vector<i64>
   let out = Vector<i64>::new()
   resource memory scratch =>
-    let tmp: string = ""
+    let tmp = ""
     let i: i64 = 1
     while i <= limit:
       tmp = tmp + "step;"
@@ -13,7 +13,7 @@ fn collect_squares(limit: i64): Vector<i64>
   return out
 
 fn main(): i32
-  let vals: Vector<i64> = collect_squares(to_i64(4))
+  let vals = collect_squares(to_i64(4))
   let idx: i64 = 0
   while idx < vals.length():
     print(vals.get(idx))

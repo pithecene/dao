@@ -3,7 +3,7 @@ module unsafe_ptr
 fn increment_cell(ptr: Ptr<i32>): i32
   let out: i32 = 0
   mode unsafe =>
-    let cur: i32 = ptr.get()
+    let cur = ptr.get()
     ptr.set(cur + 1)
     out = ptr.get()
   return out

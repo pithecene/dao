@@ -35,7 +35,7 @@ It stays here as the regression input for that fix, and `testdata/examples/known
 | `collections_and_text.dao` | `Vector::filled`/`pop`/`reverse`/`slice`, stepped ranges, `Builder` helpers, and string/number parsing utilities |
 | `resource.dao`, `unsafe.dao`, `raw_memory.dao` | `resource memory` domains, `mode unsafe`, pointers and allocation |
 | `resource_pipeline.dao`, `unsafe_ptr.dao`, `domains.dao`, `structured_variants.dao` | the short programs that the site shows on its overview and reference pages |
-| `geometry/` | the site's two-file program: a class and a function reached through an import |
+| `geometry/` | the site's multi-file program: a class and a function reached through an import |
 | `astar.dao` | a small search algorithm using several of these features |
 | `ffi/` | calling C from Dao (needs the C helpers alongside) |
 | `modules/` | a multi-file program: `module`, `import`, and names reached through a module binding |

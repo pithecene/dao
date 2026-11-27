@@ -10,7 +10,7 @@ File
         TypeArgs
           i64
     ResourceBlock memory scratch
-      LetStatement tmp: string
+      LetStatement tmp
         StringLiteral ""
       LetStatement i: i64
         IntLiteral 1
@@ -49,7 +49,7 @@ File
       Identifier out
   FunctionDecl main
     ReturnType: i32
-    LetStatement vals: Vector<i64>
+    LetStatement vals
       CallExpr
         Callee
           Identifier collect_squares

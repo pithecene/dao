@@ -6,7 +6,7 @@ File
     LetStatement out: i32
       IntLiteral 0
     ModeBlock unsafe
-      LetStatement cur: i32
+      LetStatement cur
         CallExpr
           Callee
             FieldExpr .get

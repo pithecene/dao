@@ -80,7 +80,7 @@ resource_pipeline.dao|Systems & Memory|single|The site's opening program: an enu
 unsafe_ptr.dao|Systems & Memory|single|One heap cell allocated and cast outside mode unsafe =>, then written and read through Ptr<T> inside it.
 domains.dao|Systems & Memory|single|A Vector<i64> built inside a resource memory domain and copied out as the domain ends.
 structured_variants.dao|Data & Generics|single|An enum class expression evaluated by an exhaustive match over its named fields.
-geometry|Multi-file Modules|multi|Two-file program (main.dao, geom.dao): a class and a function reached through an import.
+geometry|Multi-file Modules|multi|A class and a function that the entry module reaches through an import.
 modules|Multi-file Modules|multi|Three-file program (main.dao, shapes.dao, report.dao) demonstrating module identity and :: imports.
 `.trim();
 

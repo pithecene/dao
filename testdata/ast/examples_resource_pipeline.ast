@@ -34,7 +34,7 @@ File
           IntLiteral 0
   FunctionDecl summarize
     ReturnType: string
-    LetStatement report: string
+    LetStatement report
       StringLiteral ""
     ResourceBlock memory scratch
       LetStatement val

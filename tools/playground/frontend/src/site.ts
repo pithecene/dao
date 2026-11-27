@@ -57,17 +57,27 @@ function singleFileSnippet(id: string, path: string, source: string): SnippetSpe
   return { id, label: path, document: path, files: [{ path, source }] };
 }
 
-// Every file of `examples/geometry/`, as the service loads that directory:
-// a file added there joins the snippet without an edit here.
+// Every `.dao` file of `examples/geometry/`, dot-prefixed ones included, as
+// the service loads that directory: a file added there joins the snippet
+// without an edit here.
 const GEOMETRY_FILES: SourceInput[] = Object.entries(
   import.meta.glob<string>("../../../../examples/geometry/*.dao", {
     query: "?raw",
     import: "default",
     eager: true,
+    exhaustive: true,
   }),
 )
   .map(([path, source]) => ({ path: path.slice(path.lastIndexOf("/") + 1), source }))
   .sort((a, b) => a.path.localeCompare(b.path));
+
+// The snippet opens on the program's entry file.  Were that file renamed,
+// the workspace would open on another tab without a word, so the site
+// refuses to load instead.
+const GEOMETRY_ENTRY = "main.dao";
+if (!GEOMETRY_FILES.some((file) => file.path === GEOMETRY_ENTRY)) {
+  throw new Error(`examples/geometry/ holds no ${GEOMETRY_ENTRY} for the site's two-module snippet`);
+}
 
 // Each snippet is a program of the example corpus, read from `examples/`
 // when the site is built, so the site shows what the compiler's tests run.
@@ -79,7 +89,7 @@ const SNIPPETS: Record<string, SnippetSpec> = {
   multifileSnippet: {
     id: "multifileSnippet",
     label: `geometry/ (${GEOMETRY_FILES.length} files)`,
-    document: "main.dao",
+    document: GEOMETRY_ENTRY,
     files: GEOMETRY_FILES,
   },
 };
