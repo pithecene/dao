@@ -33,11 +33,13 @@ and a mechanical definition of "bootstrapped":
 - Stage 2: that Dao-built compiler compiles the same sources
 - Stage 3: the Stage-2 compiler does it again
 
-The sources are the compiler assembled into one file
-(`bootstrap/driver/driver.gen.dao`), so the crossing does not exercise
-self-hosted imports, module identity or entry selection across the
-compiler's own files.  Order 6 still owes that: the same crossing over
-the sources as real modules.
+The crossing began over the compiler assembled into one file
+(`bootstrap/driver/driver.gen.dao`).  Seven parts of it are now real
+modules that the crossing compiles from their own sources and reaches
+through imports: `bootstrap::ascii`, `lexer`, `parser`, `graph`, `base`,
+`resolver`, and `typecheck`.  The `hir`, `mir`, `llvm`, and `driver`
+sources are still assembled into that file.  Order 6 still owes those
+four: the same crossing over every source as a real module.
 
 with every bootstrap semantic suite passing under Stage 2, native
 compilation succeeding at each generation, deterministic outputs where
@@ -289,6 +291,16 @@ definitions, struct construction, `extractvalue` field reads, and
 struct-typed call/return edges to the bootstrap MIR → LLVM path.
 Next: `llc`/`clang` validation of emitted IR (Task 30.5), then
 further Tier B bootstrap feature slices.
+
+The paragraph above records the state at the end of Tier A, with its
+own test counts.  The compiler has since crossed: the host builds the
+bootstrap compiler, that compiler builds itself, and the result builds
+itself again to the same LLVM text.  On 26 November 2026 the nine
+suites passed under the stage-2 compiler with 861 tests: lexer 110,
+parser 90, graph 12, resolver 65, type checker 399, HIR 50, MIR 60,
+LLVM 63, and driver 12.  LLVM accepted all 53 emitted IR files, and 44
+of them ran.  `bootstrap/README.md` holds the current feature coverage
+and the deferred work.
 
 Goals:
 - begin implementing non-trivial compiler subsystems in Dao itself
