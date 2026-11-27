@@ -1,4 +1,4 @@
-import editorSource from "./editor.ts?raw";
+import { editorThemeRules } from "./editor_theme";
 import tokensSource from "./tokens.css?raw";
 
 // Text must stand 4.5 to 1 against the surface behind it, in both
@@ -69,19 +69,17 @@ function textColorOf(tokens: Tokens, name: string): Color {
 }
 
 /**
- * The token the editor's theme gives the detail text of the selected
- * completion row.  Read from the theme's own rule, so removing the rule
- * fails this test instead of leaving it measuring a colour nothing uses.
+ * The token that colours the detail text of the selected completion row:
+ * the theme's rule for that row, or without one the rule for every row,
+ * as the cascade would choose.
  */
 function selectedCompletionDetailToken(): string {
-  const selector = '".cm-tooltip-autocomplete ul li[aria-selected] .cm-completionDetail"';
-  const start = editorSource.indexOf(selector);
-  const rule =
-    start < 0
-      ? null
-      : /^:\s*\{\s*color:\s*"var\((--[\w-]+)\)"/.exec(editorSource.slice(start + selector.length));
-  if (!rule) throw new Error("the editor theme no longer colours the selected completion's detail");
-  return rule[1];
+  const color =
+    editorThemeRules[".cm-tooltip-autocomplete ul li[aria-selected] .cm-completionDetail"]
+      ?.color ?? editorThemeRules[".cm-completionDetail"]?.color;
+  const token = /^var\((--[\w-]+)\)$/.exec(color ?? "");
+  if (!token) throw new Error(`the completion detail's colour is not a token: ${color}`);
+  return token[1];
 }
 
 /** Relative luminance, as the accessibility guidelines define it. */
