@@ -365,6 +365,24 @@ suite<"comment_tests"> comment_tests = [] {
     expect(output.source->text(output.result.comments[1]) == "// last");
   };
 
+  "a bare carriage return ends a comment as it ends a line"_test = [] {
+    auto output = lex_string("// first\r// second\rfn foo(): i32 -> 1\r");
+    expect(output.result.diagnostics.empty());
+    expect(fatal(output.result.comments.size() == 2_u));
+    expect(output.source->text(output.result.comments[0]) == "// first");
+    expect(output.source->text(output.result.comments[1]) == "// second");
+    expect(output.result.tokens[0].kind == TokenKind::KwFn)
+        << "the line after a comment is code, not more of the comment";
+  };
+
+  "a comment's span lies in the program's offset space"_test = [] {
+    SourceBuffer source("lib.dao", "fn foo(): i32 -> 1 // beside\n");
+    auto result = lex(source, 100);
+    expect(fatal(result.comments.size() == 1_u));
+    expect(result.comments[0].offset == 119_u);
+    expect(result.comments[0].length == 9_u);
+  };
+
   "slashes inside a string are not a comment"_test = [] {
     auto output = lex_string("let url = \"http://example\"\n");
     expect(output.result.comments.empty());

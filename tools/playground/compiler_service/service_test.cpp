@@ -737,6 +737,9 @@ suite<"playground_service"> playground_service_suite = [] {
     expect(declared.value("length", 0U) == 4U);
     expect(token_at(units_before("\"h")).value("length", 0U) == 4U)
         << "a string literal of five bytes is four units";
+    auto comment = token_at(units_before("// caf"));
+    expect(comment.value("kind", "") == "comment") << analyzed["semanticTokens"].dump();
+    expect(comment.value("length", 0U) == 10U) << "a comment of thirteen bytes is ten units";
 
     // Requests: an offset in the editor's unit finds the token there, and
     // the reply names the declaration in the same unit.
