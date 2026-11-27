@@ -1,4 +1,6 @@
+import { CompletionContext } from "@codemirror/autocomplete";
 import { EditorState, Transaction } from "@codemirror/state";
+import { daoCompletionSource } from "./completions";
 import {
   addUserFile,
   closePreludeTab,
@@ -16,7 +18,7 @@ import {
   updateActiveUserSource,
 } from "./document";
 import { buildUndoableReplaceTransaction } from "./editor";
-import { FALLBACK_FILES, loadExampleByName } from "./examples";
+import { FALLBACK_FILES, loadExampleByName, resetWorkspace, resetWouldDiscardWork } from "./examples";
 import { doFormat } from "./format";
 import {
   applySnapshot,
@@ -632,6 +634,175 @@ async function testMalformedAndPartialSnapshotsAreAtomic(): Promise<void> {
   assertEqual(decoded.files.length, 2, "Share token preserves file count");
 }
 
+/**
+ * A completion context over `source` at its end, with the abort the editor
+ * performs on a buffer swap under the test's control.
+ */
+function completionContextFor(source: string): { ctx: CompletionContext; abort: () => void } {
+  const state = EditorState.create({ doc: source });
+  const ctx = new CompletionContext(state, source.length, false);
+  let aborted = false;
+  Object.defineProperty(ctx, "aborted", { get: () => aborted });
+  return { ctx, abort: () => { aborted = true; } };
+}
+
+async function testCompletionSourceSettlesQuietlyOnceAborted(): Promise<void> {
+  setWorkspaceProgram([{ path: "app.dao", source: "module app\nfn main(): i32 -> pri" }], "app.dao");
+  const source = getActiveSource();
+  const options = [{ label: "print", kind: "function", type: "fn(string): void" }];
+
+  // A live query delivers the service's options.
+  await withMockFetch(async () => jsonResponse(options), async () => {
+    const live = await daoCompletionSource(completionContextFor(source).ctx);
+    assert(live !== null, "A live query yields a result");
+    assertEqual(live.options[0].label, "print", "A live query yields the service's option");
+  });
+
+  // A query aborted while the service is answering delivers nothing.
+  const lateAnswer = deferred<Response>();
+  await withMockFetch(() => lateAnswer.promise, async () => {
+    const { ctx, abort } = completionContextFor(source);
+    const pending = daoCompletionSource(ctx);
+    abort();
+    lateAnswer.resolve(jsonResponse(options));
+    assertEqual(await pending, null, "An aborted query drops a late answer");
+  });
+
+  // A query aborted before the service refuses it delivers nothing either.
+  const lateRefusal = deferred<Response>();
+  await withMockFetch(() => lateRefusal.promise, async () => {
+    const { ctx, abort } = completionContextFor(source);
+    const pending = daoCompletionSource(ctx);
+    abort();
+    lateRefusal.resolve(jsonResponse({ error: "bad offset" }, 400));
+    assertEqual(await pending, null, "An aborted query swallows a late refusal");
+  });
+
+  // A live query still reports the refusal.
+  await withMockFetch(async () => jsonResponse({ error: "bad offset" }, 400), async () => {
+    let reported = "";
+    try {
+      await daoCompletionSource(completionContextFor(source).ctx);
+    } catch (err) {
+      reported = String(err);
+    }
+    assert(reported.includes("bad offset"), "A live query reports the service's refusal");
+  });
+}
+
+/** The paths and sources of `files`, as one comparable string. */
+function contentsOf(files: readonly { path: string; source: string }[] | undefined): string {
+  return JSON.stringify((files ?? []).map((file) => [file.path, file.source]));
+}
+
+async function testResetAsksBeforeItDiscardsWork(): Promise<void> {
+  clearDraft();
+  const hello = { name: "hello.dao", document: "hello.dao", files: [{ path: "hello.dao", source: "module hello\n" }] };
+  const pipelines = { name: "pipelines.dao", document: "pipelines.dao", files: [{ path: "pipelines.dao", source: "module pipelines\n" }] };
+  const loads: string[] = [];
+  const serveExamples = async (url: string): Promise<Response> => {
+    loads.push(url);
+    if (url.endsWith("/hello.dao")) return jsonResponse(hello);
+    if (url.endsWith("/pipelines.dao")) return jsonResponse(pipelines);
+    return jsonResponse({ error: "no such example" }, 404);
+  };
+  let asked = 0;
+  const refuse = (): boolean => { asked += 1; return false; };
+  const accept = (): boolean => { asked += 1; return true; };
+  // What every refusal owes: one question, no request, the same files.
+  const refuseReset = async (scenario: string): Promise<void> => {
+    const askedBefore = asked;
+    const loadsBefore = loads.length;
+    const shown = contentsOf(getUserFiles());
+    await resetWorkspace(refuse);
+    assertEqual(asked, askedBefore + 1, `${scenario}: Reset asks once`);
+    assertEqual(loads.length, loadsBefore, `${scenario}: a refusal starts no load`);
+    assertEqual(contentsOf(getUserFiles()), shown, `${scenario}: a refusal keeps every file's source`);
+  };
+
+  await withMockFetch(serveExamples, async () => {
+    assertEqual(await loadExampleByName("hello.dao"), "applied", "The example loads");
+
+    // An untouched example resets without a question, with no draft stored
+    // and with the draft that choosing an example stores.
+    await resetWorkspace(refuse);
+    assertEqual(asked, 0, "An untouched example raises no question");
+    assertEqual(loads.length, 2, "An untouched example reloads");
+    assertEqual(await loadExampleByName("hello.dao", { persistDraft: true }), "applied", "The example loads and stores its draft");
+    assert(loadSavedDraft() !== null, "Choosing an example stores a draft");
+    await resetWorkspace(refuse);
+    assertEqual(asked, 0, "A stored draft equal to the untouched example raises no question");
+    assertEqual(loads.length, 4, "That example reloads too");
+    const loadsBeforeWork = loads.length;
+
+    // An edited, multi-file workspace: a refusal changes nothing, on the
+    // screen or in storage.
+    updateActiveUserSource("module hello\n// an edit\n");
+    addUserFile("extra.dao", "module extra\n");
+    saveDraft();
+    const editedFiles = contentsOf(getUserFiles());
+    await refuseReset("Edited files");
+    assertEqual(contentsOf(loadSavedDraft()?.files), editedFiles, "A refusal keeps the stored draft's sources");
+
+    // An acceptance restores the example and deletes the draft.
+    await resetWorkspace(accept);
+    assertEqual(asked, 2, "Work raises the question again");
+    assertEqual(loads.length, loadsBeforeWork + 1, "An acceptance starts one load");
+    assertEqual(loads[loads.length - 1], "/api/examples/hello.dao", "An acceptance reloads the current example");
+    assertEqual(contentsOf(getUserFiles()), contentsOf(hello.files), "An acceptance restores the example's files");
+    assertEqual(loadSavedDraft(), null, "An acceptance deletes the stored draft");
+
+    // A stored draft that the screen does not show is still work: Reset
+    // deletes it.
+    updateActiveUserSource("module hello\n// kept only in the draft\n");
+    saveDraft();
+    const draftOnly = contentsOf(loadSavedDraft()?.files);
+    assertEqual(await loadExampleByName("hello.dao"), "applied", "The example loads over the draft");
+    await refuseReset("A draft the screen does not show");
+    assertEqual(contentsOf(loadSavedDraft()?.files), draftOnly, "A refusal keeps that draft's sources");
+
+    // A stored draft that cannot be decoded may be the only copy of its
+    // sources: it raises the question, and a refusal leaves it in storage.
+    memoryStorage.clear();
+    saveDraft();
+    const draftKey = memoryStorage.key(0);
+    assert(draftKey !== null, "The draft has a storage key");
+    memoryStorage.setItem(draftKey, "{ not a snapshot");
+    assertEqual(loadSavedDraft(), null, "The damaged draft does not decode");
+    await refuseReset("A draft that cannot be decoded");
+    assertEqual(memoryStorage.getItem(draftKey), "{ not a snapshot", "A refusal leaves the damaged draft in storage");
+
+    // Storage that refuses the read says nothing about the draft, so an
+    // untouched example whose draft cannot be read raises the question too.
+    assertEqual(await loadExampleByName("hello.dao", { persistDraft: true }), "applied", "The example loads and stores its draft");
+    assert(!resetWouldDiscardWork(), "With the draft readable, the untouched example holds no work");
+    const readItem = memoryStorage.getItem;
+    memoryStorage.getItem = (): string | null => { throw new Error("storage refused the read"); };
+    try {
+      await refuseReset("A draft that storage will not read");
+    } finally {
+      memoryStorage.getItem = readItem;
+    }
+    assertEqual(contentsOf(loadSavedDraft()?.files), contentsOf(hello.files), "A refusal leaves that draft in storage");
+
+    // The files of the example loaded last, reopened under no example name,
+    // as a snippet opens them: they equal the recorded files, yet Reset
+    // would put hello.dao in their place.  So it asks, and an acceptance
+    // asks the service for hello.dao.
+    clearDraft();
+    assertEqual(await loadExampleByName("pipelines.dao"), "applied", "Another example loads");
+    assert(!resetWouldDiscardWork(), "That example, untouched and named, holds no work");
+    setWorkspaceProgram(pipelines.files, "pipelines.dao", { exampleName: "" });
+    assert(resetWouldDiscardWork(), "The same files under no example name are work");
+    const loadsBeforeUnnamed = loads.length;
+    await resetWorkspace(accept);
+    assertEqual(asked, 6, "The unnamed workspace raises the question");
+    assertEqual(loads.length, loadsBeforeUnnamed + 1, "The acceptance starts one load");
+    assertEqual(loads[loads.length - 1], "/api/examples/hello.dao", "Reset restores hello.dao where no example is named");
+    assertEqual(contentsOf(getUserFiles()), contentsOf(hello.files), "The workspace holds hello.dao");
+  });
+}
+
 async function runAll(): Promise<void> {
   testWorkspaceRevisionIncrementsOnEveryMutation();
   await testMalformedAndPartialSnapshotsAreAtomic();
@@ -639,6 +810,8 @@ async function runAll(): Promise<void> {
   await testBootstrapStartupEditsAndGenuineFallback();
   testUndoableReplaceTransactionInvariants();
   await testFormatterTargetsWritableFileAndGuardsStaleReplies();
+  await testCompletionSourceSettlesQuietlyOnceAborted();
+  await testResetAsksBeforeItDiscardsWork();
   console.log("workspace_state.test: all assertions passed");
 }
 

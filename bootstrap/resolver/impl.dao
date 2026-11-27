@@ -584,7 +584,7 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
           let piped: i64 = scope_lookup_call(r, tok_name(r, ptidx), to_i64(1))
           if piped >= 0:
             return rs_add_use(r, ptidx, piped)
-      return resolve_expr(r, right)
+      return pick_qualified_overload(resolve_expr(r, right), right, to_i64(1))
     parser::Node::TryE(operand, question_tok):
       return resolve_expr(rs, operand)
     parser::Node::LambdaE(params_lp, param_count, body):
@@ -1242,22 +1242,20 @@ fn resolve(src: string): ResolveResult
 // Section 30b: Program-level resolver API
 // =========================================================================
 
-// Program uses are keyed by `uses_key(file_id, tok_idx)` so the same
-// tok_idx in different files does not collide.  Consumers construct
-// the key via the helper and call .get() directly.
+// Program uses are keyed by `UseSite(file_id, tok_idx)` so the same
+// tok_idx in different files does not collide.
 //
-// `extend_concept_bindings` is the Task 27 D3 side table: each
-// `extend T as C:` block gets a binding from
-// `extend_binding_key(file_id, decl_idx)` to the concept's
-// resolver-bound sym_idx.  Typecheck reads this via
-// `program_extend_concept_sym` instead of scanning symbols by name.
+// `extend_concept_bindings` holds, for each `extend T as C:` block, the
+// symbol the resolver bound `C` to, under
+// `ExtendSite(file_id, decl_idx)`.  Typecheck reads it instead of
+// scanning symbols by name.
 class ProgramResolveResult:
   symbols: Vector<Symbol>
   scopes: Vector<Scope>
-  uses: HashMap<string, i64>      // keyed by uses_key(file_id, tok_idx) → sym_idx
+  uses: HashMap<UseSite, i64>     // the symbol each use site names
   diags: Vector<graph::FileDiagnostic>
   module_exports: ExportTables
-  extend_concept_bindings: HashMap<string, i64>
+  extend_concept_bindings: HashMap<ExtendSite, i64>
 
 // Build export table by walking the file's declarations and looking up
 // each declared name in the scope.  This exports only the module's own
@@ -1319,18 +1317,17 @@ fn build_export_table(rs: RS, file_node_idx: i64): HashMap<string, i64>
         i = i + 1
   return exports
 
-// Composite key for ProgramResolveResult.extend_concept_bindings:
-// "<file_id>:<decl_idx>".  Both the resolver write side (D3) and the
-// typecheck read side (`program_extend_concept_sym`) go through this
-// helper so the key format stays in one place.
-fn extend_binding_key(file_id: i64, decl_idx: i64): string
-  return i64_to_string(file_id) + ":" + i64_to_string(decl_idx)
+// An `extend T as C:` block: one declaration of one file.  The key of a
+// program's concept bindings.
+class ExtendSite:
+  file_id: i64
+  decl_idx: i64
 
-// Composite key for ProgramResolveResult.uses:
-// "<file_id>:<tok_idx>".  Disambiguates identical token indices
-// across different files.
-fn uses_key(file_id: i64, tok_idx: i64): string
-  return i64_to_string(file_id) + ":" + i64_to_string(tok_idx)
+// Where a name is used: one token of one file.  The key of a program's
+// uses, since two files hold tokens of the same index.
+class UseSite:
+  file_id: i64
+  tok_idx: i64
 
 fn resolve_program(pg: graph::ProgramGraph): ProgramResolveResult
   // Shared mutable state across all modules — symbols and scopes
@@ -1339,14 +1336,14 @@ fn resolve_program(pg: graph::ProgramGraph): ProgramResolveResult
   // with file provenance.  Module exports accumulate per-module.
   let all_symbols: Vector<Symbol> = Vector<Symbol>::new()
   let all_scopes: Vector<Scope> = Vector<Scope>::new()
-  let all_uses: HashMap<string, i64> = HashMap<string, i64>::new()
+  let all_uses = HashMap<UseSite, i64>::new()
   // Internal pair-format uses passed to RS; snapshot length before
   // each module to extract the per-module delta.
   let rs_uses: Vector<i64> = Vector<i64>::new()
   let all_diags: Vector<graph::FileDiagnostic> = Vector<graph::FileDiagnostic>::new()
   let export_tables: Vector<ExportTable> = Vector<ExportTable>::new()
   // D3: concept bindings accumulated during Pass 2 body resolution.
-  let all_extend_bindings: HashMap<string, i64> = HashMap<string, i64>::new()
+  let all_extend_bindings = HashMap<ExtendSite, i64>::new()
 
   // Initialize empty export tables for all modules.
   let mi: i64 = 0
@@ -1441,10 +1438,10 @@ fn resolve_program(pg: graph::ProgramGraph): ProgramResolveResult
     all_scopes = rs.scopes
     rs_uses = rs.uses
     // Merge new uses (pairs) into the program-level HashMap keyed by
-    // uses_key(file_id, tok_idx).
+    // UseSite(file_id, tok_idx).
     let ui: i64 = uses_before
     while ui < rs_uses.length():
-      all_uses = all_uses.set(uses_key(sf.file_id, rs_uses.get(ui)), rs_uses.get(ui + 1))
+      all_uses = all_uses.set(UseSite(sf.file_id, rs_uses.get(ui)), rs_uses.get(ui + 1))
       ui = ui + 2
     // Merge per-file diagnostics with provenance.
     let pdi: i64 = 0
@@ -1479,14 +1476,14 @@ fn resolve_program(pg: graph::ProgramGraph): ProgramResolveResult
     // Merge new uses into the program-level HashMap.
     let ui: i64 = uses_before
     while ui < rs_uses.length():
-      all_uses = all_uses.set(uses_key(sf.file_id, rs_uses.get(ui)), rs_uses.get(ui + 1))
+      all_uses = all_uses.set(UseSite(sf.file_id, rs_uses.get(ui)), rs_uses.get(ui + 1))
       ui = ui + 2
 
     // D3: Extract concept bindings for this module's extend decls.
     // For each ExtendDeclD, the resolver recorded a use for the
     // concept name token during resolve_extend_decl.  Find that use
     // in the per-module delta and store the binding under
-    // extend_binding_key(file_id, decl_idx).
+    // ExtendSite(file_id, decl_idx).
     let root_node_p2: parser::Node = po.nodes.get(po.root)
     match root_node_p2:
       parser::Node::FileN(md2, imp_lp2, dec_lp2):
@@ -1503,8 +1500,7 @@ fn resolve_program(pg: graph::ProgramGraph): ProgramResolveResult
                 while ubi < rs_uses.length():
                   if rs_uses.get(ubi) == concept_name_tidx:
                     let concept_sym: i64 = rs_uses.get(ubi + 1)
-                    let bkey: string = extend_binding_key(sf.file_id, ext_idx)
-                    all_extend_bindings = all_extend_bindings.set(bkey, concept_sym)
+                    all_extend_bindings = all_extend_bindings.set(ExtendSite(sf.file_id, ext_idx), concept_sym)
                     ubi = rs_uses.length()
                   else:
                     ubi = ubi + 2
@@ -1539,10 +1535,10 @@ fn program_from_graph(pg: graph::ProgramGraph): Program
   let empty_resolve: ProgramResolveResult = ProgramResolveResult(
     Vector<Symbol>::new(),
     Vector<Scope>::new(),
-    HashMap<string, i64>::new(),
+    HashMap<UseSite, i64>::new(),
     Vector<graph::FileDiagnostic>::new(),
     ExportTables(Vector<ExportTable>::new()),
-    HashMap<string, i64>::new())
+    HashMap<ExtendSite, i64>::new())
   let empty_tc: base::TypeCheckData = base::TypeCheckData(false, Vector<base::DaoType>::new(), Vector<i64>::new(), Vector<i64>::new(), base::program_lookup_empty())
   let empty_hir: base::HirData = base::HirData(false, to_i64(-1), to_i64(0), to_i64(0))
   return Program(pg, empty_resolve, empty_tc, empty_hir, Vector<graph::FileDiagnostic>::new())
@@ -1586,27 +1582,12 @@ fn program_exported_symbol(p: Program, mid: i64, name: string): i64
     Option::None:
       return to_i64(-1)
 
-// Resolve a use site to its target symbol index.  The resolver emits
-// program-level uses as a flat triple stream
-// `[file_id, tok_idx, sym_idx, ...]`; this helper is the only place
-// typecheck/HIR should consult that stream.  Returns -1 if no
-// matching triple exists.
+// The symbol the name at token `tok_idx` of file `file_id` resolved to,
+// or -1 where the resolver bound none.
 fn program_resolved_use(p: Program, file_id: i64, tok_idx: i64): i64
-  let key: string = uses_key(file_id, tok_idx)
-  let found: Option<i64> = p.resolve.uses.get(key)
-  match found:
-    Option::Some(sym_idx):
-      return sym_idx
-    Option::None:
-      return to_i64(-1)
+  return p.resolve.uses.get_or(UseSite(file_id, tok_idx), to_i64(-1))
 
 // Look up the concept sym_idx bound to an `extend T as C:` block.
 // Returns -1 if no binding exists.
 fn program_extend_concept_sym(p: Program, file_id: i64, extend_decl_idx: i64): i64
-  let key: string = extend_binding_key(file_id, extend_decl_idx)
-  let found: Option<i64> = p.resolve.extend_concept_bindings.get(key)
-  match found:
-    Option::Some(sym_idx):
-      return sym_idx
-    Option::None:
-      return to_i64(-1)
+  return p.resolve.extend_concept_bindings.get_or(ExtendSite(file_id, extend_decl_idx), to_i64(-1))

@@ -12,6 +12,10 @@ import {
 } from "./examples";
 import type { SourceInput } from "./generated/tooling_surface";
 import { escapeHtml } from "./util";
+import domainsSource from "../../../../examples/domains.dao?raw";
+import resourcePipelineSource from "../../../../examples/resource_pipeline.dao?raw";
+import structuredVariantsSource from "../../../../examples/structured_variants.dao?raw";
+import unsafePtrSource from "../../../../examples/unsafe_ptr.dao?raw";
 
 export type SiteRoute =
   | "overview"
@@ -48,165 +52,45 @@ interface SnippetSpec {
   files: SourceInput[];
 }
 
+/** A snippet of one file: the example `path` under `examples/`. */
+function singleFileSnippet(id: string, path: string, source: string): SnippetSpec {
+  return { id, label: path, document: path, files: [{ path, source }] };
+}
+
+// Every `.dao` file of `examples/geometry/`, dot-prefixed ones included, as
+// the service loads that directory: a file added there joins the snippet
+// without an edit here.
+const GEOMETRY_FILES: SourceInput[] = Object.entries(
+  import.meta.glob<string>("../../../../examples/geometry/*.dao", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+    exhaustive: true,
+  }),
+)
+  .map(([path, source]) => ({ path: path.slice(path.lastIndexOf("/") + 1), source }))
+  .sort((a, b) => a.path.localeCompare(b.path));
+
+// The snippet opens on the program's entry file.  Were that file renamed,
+// the workspace would open on another tab without a word, so the site
+// refuses to load instead.
+const GEOMETRY_ENTRY = "main.dao";
+if (!GEOMETRY_FILES.some((file) => file.path === GEOMETRY_ENTRY)) {
+  throw new Error(`examples/geometry/ holds no ${GEOMETRY_ENTRY} for the site's two-module snippet`);
+}
+
+// Each snippet is a program of the example corpus, read from `examples/`
+// when the site is built, so the site shows what the compiler's tests run.
 const SNIPPETS: Record<string, SnippetSpec> = {
-  hero: {
-    id: "hero",
-    label: "resource_pipeline.dao",
-    document: "resource_pipeline.dao",
-    files: [
-      {
-        path: "resource_pipeline.dao",
-        source: `module demo
-
-enum class Reading:
-  Sample(wind_kt: i32, gust_kt: i32)
-  Missing
-
-fn score(wind: i32): i32 -> wind * 3 + 10
-
-fn evaluate(r: Reading): i32
-  match r:
-    Reading::Sample(wind_kt, gust_kt):
-      return (wind_kt + gust_kt) |> score
-    Reading::Missing:
-      return 0
-
-fn summarize(): string
-  let report: string = ""
-  resource memory scratch =>
-    let val: i32 = evaluate(Reading::Sample(wind_kt = 12, gust_kt = 6))
-    report = "score=" + i32_to_string(val)
-  return report
-
-fn main(): i32
-  print(summarize())
-  return 0
-`,
-      },
-    ],
-  },
-  unsafePtr: {
-    id: "unsafePtr",
-    label: "unsafe_ptr.dao",
-    document: "unsafe_ptr.dao",
-    files: [
-      {
-        path: "unsafe_ptr.dao",
-        source: `module unsafe_ptr
-
-fn increment_cell(ptr: Ptr<i32>): i32
-  let out: i32 = 0
-  mode unsafe =>
-    let cur: i32 = ptr.get()
-    ptr.set(cur + 1)
-    out = ptr.get()
-  return out
-
-fn main(): i32
-  let cell: Ptr<i32> = __dao_mem_alloc(size_of<i32>(), align_of<i32>()).cast<i32>()
-  let result: i32 = 0
-  mode unsafe =>
-    cell.set(41)
-    result = increment_cell(cell)
-  __dao_mem_free(cell.cast<void>())
-  print(result)
-  return 0
-`,
-      },
-    ],
-  },
-  resourceDomain: {
-    id: "resourceDomain",
-    label: "domains.dao",
-    document: "domains.dao",
-    files: [
-      {
-        path: "domains.dao",
-        source: `module domains
-
-fn collect_squares(limit: i64): Vector<i64>
-  let out: Vector<i64> = Vector<i64>::new()
-  resource memory scratch =>
-    let tmp: string = ""
-    let i: i64 = 1
-    while i <= limit:
-      tmp = tmp + "step;"
-      out = out.push(i * i)
-      i = i + 1
-  // scratch arena is reclaimed; out is promoted via Vector.copy_out
-  return out
-
-fn main(): i32
-  let vals: Vector<i64> = collect_squares(to_i64(4))
-  let idx: i64 = 0
-  while idx < vals.length():
-    print(vals.get(idx))
-    idx = idx + 1
-  return 0
-`,
-      },
-    ],
-  },
-  enumClass: {
-    id: "enumClass",
-    label: "structured_variants.dao",
-    document: "structured_variants.dao",
-    files: [
-      {
-        path: "structured_variants.dao",
-        source: `module structured_variants
-
-enum class Expr:
-  Const(value: i32)
-  Add(left: i32, right: i32)
-  Zero
-
-fn eval(e: Expr): i32
-  match e:
-    Expr::Const(value):
-      return value
-    Expr::Add(left, right):
-      return left + right
-    Expr::Zero:
-      return 0
-
-fn main(): i32
-  let a: Expr = Expr::Add(left = 18, right = 24)
-  print(eval(a))
-  return 0
-`,
-      },
-    ],
-  },
+  hero: singleFileSnippet("hero", "resource_pipeline.dao", resourcePipelineSource),
+  unsafePtr: singleFileSnippet("unsafePtr", "unsafe_ptr.dao", unsafePtrSource),
+  resourceDomain: singleFileSnippet("resourceDomain", "domains.dao", domainsSource),
+  enumClass: singleFileSnippet("enumClass", "structured_variants.dao", structuredVariantsSource),
   multifileSnippet: {
     id: "multifileSnippet",
-    label: "geometry/ (2 files)",
-    document: "main.dao",
-    files: [
-      {
-        path: "geom.dao",
-        source: `module geom
-
-class Box:
-  w: i32
-  h: i32
-
-fn perimeter(b: Box): i32 -> (b.w + b.h) * 2
-`,
-      },
-      {
-        path: "main.dao",
-        source: `module main
-
-import geom
-
-fn main(): i32
-  let frame = geom::Box(7, 5)
-  print(geom::perimeter(frame))
-  return 0
-`,
-      },
-    ],
+    label: `geometry/ (${GEOMETRY_FILES.length} files)`,
+    document: GEOMETRY_ENTRY,
+    files: GEOMETRY_FILES,
   },
 };
 
@@ -588,6 +472,7 @@ task playground   # build frontend &amp; start http://localhost:8090</code></pre
         The <code>daoc</code> driver exposes every compiler phase directly for inspection,
         verification, and native executable linking:
       </p>
+      <div class="table-scroll">
       <table class="data-table">
         <thead>
           <tr>
@@ -639,6 +524,7 @@ task playground   # build frontend &amp; start http://localhost:8090</code></pre
           </tr>
         </tbody>
       </table>
+      </div>
     </div>
 
     <div class="prose-grid">
@@ -720,6 +606,7 @@ function renderReferenceHtml(): string {
             Dao uses indentation-significant blocks with strict punctuation roles so control flow,
             expressions, namespaces, and execution contexts never blur:
           </p>
+          <div class="table-scroll">
           <table class="data-table">
             <thead>
               <tr><th>Form</th><th>Role</th><th>Examples</th></tr>
@@ -732,6 +619,7 @@ function renderReferenceHtml(): string {
               <tr><td><code>::</code> vs <code>.</code></td><td>Module/type namespace qualification vs runtime value member</td><td><code>shapes::Rect</code>, <code>Option::Some</code> vs <code>rect.width</code></td></tr>
             </tbody>
           </table>
+          </div>
         </section>
 
         <section id="ref-numerics" class="ref-section">
@@ -1010,6 +898,7 @@ function renderDownloadsHtml(): string {
     <div class="prose-grid">
       <div class="info-panel">
         <h2>Supported Host Targets</h2>
+        <div class="table-scroll">
         <table class="data-table">
           <thead>
             <tr><th>Target</th><th>Architecture &amp; ABI</th><th>Tooling &amp; Backends</th></tr>
@@ -1027,6 +916,7 @@ function renderDownloadsHtml(): string {
             </tr>
           </tbody>
         </table>
+        </div>
       </div>
 
       <div class="info-panel">

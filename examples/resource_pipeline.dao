@@ -1,0 +1,25 @@
+module demo
+
+enum class Reading:
+  Sample(wind_kt: i32, gust_kt: i32)
+  Missing
+
+fn score(wind: i32): i32 -> wind * 3 + 10
+
+fn evaluate(r: Reading): i32
+  match r:
+    Reading::Sample(wind_kt, gust_kt):
+      return (wind_kt + gust_kt) |> score
+    Reading::Missing:
+      return 0
+
+fn summarize(): string
+  let report = ""
+  resource memory scratch =>
+    let val = evaluate(Reading::Sample(wind_kt = 12, gust_kt = 6))
+    report = "score=" + i32_to_string(val)
+  return report
+
+fn main(): i32
+  print(summarize())
+  return 0

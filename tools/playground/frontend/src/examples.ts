@@ -1,13 +1,14 @@
 import { api } from "./api";
 import {
   getCurrentExampleName,
+  getUserFiles,
   getWorkspaceRevision,
   requestPlaygroundView,
   setWorkspaceProgram,
 } from "./document";
 import type { ExampleEntry, SourceInput } from "./generated/tooling_surface";
 import { showNotice } from "./notice";
-import { clearDraft, saveDraft } from "./persistence";
+import { clearDraft, readStoredDraft, saveDraft } from "./persistence";
 import { syncEditorToActiveTab } from "./workspace_ui";
 import { doRun } from "./run";
 
@@ -76,6 +77,11 @@ hashmap.dao|Compute & Search|single|Prelude HashMap<V> insertion, lookup, and Op
 hashmap_aliasing.dao|Compute & Search|single|Value-isolated HashMap<V> mutation and domain escape behavior.
 astar.dao|Compute & Search|single|Grid A* pathfinding combining classes, vectors, loops, and structured state.
 forecast_plans.dao|Compute & Search|single|Point-in-time heterogeneous DAG verifier & single-source CPU / Metal kernel workload.
+resource_pipeline.dao|Systems & Memory|single|The site's opening program: an enum class reading scored through a pipeline inside a resource memory domain.
+unsafe_ptr.dao|Systems & Memory|single|One heap cell allocated and cast outside mode unsafe =>, then written and read through Ptr<T> inside it.
+domains.dao|Systems & Memory|single|A Vector<i64> built inside a resource memory domain and copied out as the domain ends.
+structured_variants.dao|Data & Generics|single|An enum class expression evaluated by an exhaustive match over its named fields.
+geometry|Multi-file Modules|multi|A class and a function that the entry module reaches through an import.
 modules|Multi-file Modules|multi|Three-file program (main.dao, shapes.dao, report.dao) demonstrating module identity and :: imports.
 `.trim();
 
@@ -280,6 +286,7 @@ export async function loadExampleByName(
     }
 
     setWorkspaceProgram(data.files, data.document, { exampleName: name });
+    loadedExample = { name, files: filesFingerprint(data.files) };
     setExampleSelectValue(name);
     if (options?.switchRoute) {
       requestPlaygroundView();
@@ -300,10 +307,51 @@ export async function loadExampleByName(
   }
 }
 
-/** Reset workspace: discard local draft and reload active example or hello.dao. */
-export async function resetWorkspace(): Promise<void> {
+/** The files' paths and sources as one comparable string. */
+function filesFingerprint(files: readonly SourceInput[]): string {
+  return JSON.stringify(files.map((file) => [file.path, file.source]));
+}
+
+// The last example the service delivered into the workspace, and its files
+// as delivered.
+let loadedExample: { name: string; files: string } | null = null;
+
+/** The example that Reset restores. */
+function resetTarget(): string {
+  return getCurrentExampleName() || "hello.dao";
+}
+
+/**
+ * Whether Reset would throw work away.  It would not only where the files on
+ * screen are the files of the example it restores, as the service delivered
+ * them, and the stored draft, which Reset deletes, holds nothing else.
+ */
+export function resetWouldDiscardWork(): boolean {
+  const onScreen = filesFingerprint(getUserFiles());
+  const untouched =
+    loadedExample !== null && loadedExample.name === resetTarget() && loadedExample.files === onScreen;
+  // A stored draft that cannot be read may hold the only copy of its
+  // sources, so it counts as more than the screen shows.
+  const stored = readStoredDraft();
+  const draftHoldsMore =
+    stored.kind === "unreadable" ||
+    (stored.kind === "draft" && filesFingerprint(stored.snapshot.files) !== onScreen);
+  return !untouched || draftHoldsMore;
+}
+
+const RESET_QUESTION = "Discard your edits and restore the example? This cannot be undone.";
+
+/**
+ * Reset the workspace: discard the local draft and reload the active example
+ * or hello.dao.  Where that would throw work away, `confirmDiscard` is asked
+ * first, and a refusal leaves the workspace and the draft as they are.
+ */
+export async function resetWorkspace(
+  confirmDiscard: (question: string) => boolean,
+): Promise<void> {
+  if (resetWouldDiscardWork() && !confirmDiscard(RESET_QUESTION)) return;
   clearDraft();
-  const target = getCurrentExampleName() || "hello.dao";
+  const target = resetTarget();
   const resetGuard = beginExampleLoadGuard();
   if (!resetGuard) return;
 

@@ -424,7 +424,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 61
+  let total: i32 = 63
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -1016,7 +1016,7 @@ fn main(): i32
 
   // `?` on an Option: quarter(8) unwraps half(8) and yields 14, and
   // quarter(7) returns None from the `?` itself, so the program exits 0.
-  let try_option: LlvmTextResult = lower_source_to_llvm_text("enum class Option<T>:\n  Some(value: T)\n  None\n\nfn half(n: i32): Option<i32>\n  if n % 2 == 0:\n    return Option::Some(value = n / 2)\n  return Option::None\n\nfn quarter(n: i32): Option<i32>\n  let h: i32 = half(n)?\n  return Option::Some(value = h + 10)\n\nfn main(): i32\n  let got: i32 = 0\n  match quarter(8):\n    Option::Some(v):\n      got = v\n    Option::None:\n      got = 100\n  match quarter(7):\n    Option::Some(w):\n      got = got + 50\n    Option::None:\n      got = got + 1\n  return got - 15\n")
+  let try_option = lower_source_to_llvm_text("enum class Option<T>:\n  Some(value: T)\n  None\n\nfn half(n: i32): Option<i32>\n  if n % 2 == 0:\n    return Option::Some(value = n / 2)\n  return Option::None\n\nfn quarter(n: i32): Option<i32>\n  let h: i32 = half(n)?\n  return Option::Some(value = h + 10)\n\nfn main(): i32\n  let got: i32 = 0\n  match quarter(8):\n    Option::Some(v):\n      got = v\n    Option::None:\n      got = 100\n  match quarter(7):\n    Option::Some(w):\n      got = got + 50\n    Option::None:\n      got = got + 1\n  return got - 15\n")
   write_failures = write_failures + emit_ir("try_returns_none_from_the_function", try_option, 0)
   if try_option.ok:
     print("PASS try_returns_none_from_the_function")
@@ -1027,7 +1027,7 @@ fn main(): i32
   // `?` on a Result carries the operand's error into the function's own
   // Err: twice(4) yields 8, twice(-1) returns Err(7), and the program
   // exits 0.
-  let try_result: LlvmTextResult = lower_source_to_llvm_text("enum class Result<T, E>:\n  Ok(value: T)\n  Err(error: E)\n\nfn parse(n: i32): Result<i32, i32>\n  if n < 0:\n    return Result::Err(error = 7)\n  return Result::Ok(value = n)\n\nfn twice(n: i32): Result<i32, i32>\n  let v: i32 = parse(n)?\n  return Result::Ok(value = v + v)\n\nfn main(): i32\n  let got: i32 = 0\n  match twice(4):\n    Result::Ok(v):\n      got = v\n    Result::Err(e):\n      got = 100\n  match twice(0 - 1):\n    Result::Ok(u):\n      got = got + 50\n    Result::Err(carried):\n      got = got + carried\n  return got - 15\n")
+  let try_result = lower_source_to_llvm_text("enum class Result<T, E>:\n  Ok(value: T)\n  Err(error: E)\n\nfn parse(n: i32): Result<i32, i32>\n  if n < 0:\n    return Result::Err(error = 7)\n  return Result::Ok(value = n)\n\nfn twice(n: i32): Result<i32, i32>\n  let v: i32 = parse(n)?\n  return Result::Ok(value = v + v)\n\nfn main(): i32\n  let got: i32 = 0\n  match twice(4):\n    Result::Ok(v):\n      got = v\n    Result::Err(e):\n      got = 100\n  match twice(0 - 1):\n    Result::Ok(u):\n      got = got + 50\n    Result::Err(carried):\n      got = got + carried\n  return got - 15\n")
   write_failures = write_failures + emit_ir("try_carries_the_error_out", try_result, 0)
   if try_result.ok:
     print("PASS try_carries_the_error_out")
@@ -1039,13 +1039,39 @@ fn main(): i32
   // path, as a `return` does: after quarter(7) fails no domain is still
   // open, the results are those of the plain case, and the program
   // exits 0.
-  let try_in_region: LlvmTextResult = lower_source_to_llvm_text("extern fn dao_domain_depth(): i64\n\nenum class Option<T>:\n  Some(value: T)\n  None\n\nfn half(n: i32): Option<i32>\n  if n % 2 == 0:\n    return Option::Some(value = n / 2)\n  return Option::None\n\nfn quarter(n: i32): Option<i32>\n  let h: i32 = 0\n  resource memory outer =>\n    resource memory inner =>\n      h = half(n)?\n  return Option::Some(value = h + 10)\n\nfn main(): i32\n  let got: i32 = 0\n  match quarter(8):\n    Option::Some(v):\n      got = v\n    Option::None:\n      got = 100\n  match quarter(7):\n    Option::Some(w):\n      got = got + 50\n    Option::None:\n      got = got + 1\n  if dao_domain_depth() != 0:\n    return 99\n  return got - 15\n")
+  let try_in_region = lower_source_to_llvm_text("extern fn dao_domain_depth(): i64\n\nenum class Option<T>:\n  Some(value: T)\n  None\n\nfn half(n: i32): Option<i32>\n  if n % 2 == 0:\n    return Option::Some(value = n / 2)\n  return Option::None\n\nfn quarter(n: i32): Option<i32>\n  let h: i32 = 0\n  resource memory outer =>\n    resource memory inner =>\n      h = half(n)?\n  return Option::Some(value = h + 10)\n\nfn main(): i32\n  let got: i32 = 0\n  match quarter(8):\n    Option::Some(v):\n      got = v\n    Option::None:\n      got = 100\n  match quarter(7):\n    Option::Some(w):\n      got = got + 50\n    Option::None:\n      got = got + 1\n  if dao_domain_depth() != 0:\n    return 99\n  return got - 15\n")
   write_failures = write_failures + emit_ir("try_leaves_every_resource_block", try_in_region, 0)
   if try_in_region.ok:
     print("PASS try_leaves_every_resource_block")
     pass_count = pass_count + 1
   else:
     print("FAIL try_leaves_every_resource_block: " + diags_text(try_in_region.diags))
+
+  // A pipe calls its target with the piped value, whether the target is
+  // a named function, a function value, or a lambda: 3 becomes 4, then
+  // 14, then 28, and the program exits 0.
+  let piped = lower_source_to_llvm_text("fn inc(x: i32): i32 -> x + 1\n\nfn add_ten(x: i32): i32 -> x + 10\n\nfn main(): i32\n  let through: fn(i32): i32 = add_ten\n  let sum: i32 = 3 |> inc |> through\n  let doubled: i32 = sum |> |x| -> x * 2\n  return doubled - 28\n")
+  write_failures = write_failures + emit_ir("pipe_calls_its_target", piped, 0)
+  if piped.ok:
+    print("PASS pipe_calls_its_target")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL pipe_calls_its_target: " + diags_text(piped.diags))
+
+  // The piped value is evaluated before the target: `source` writes 1
+  // through the pointer, and `make_target` answers `inc` only where it
+  // reads that 1, so the pipe yields 4 and the program exits 0.  The
+  // other order would read 0, choose `add_ten`, and yield 13.
+  let ordered = Vector<graph::SourceInput>::new()
+  ordered = ordered.push(graph::SourceInput("core_memory.dao", "module core::memory\n\nextern fn __dao_mem_alloc(size: i64, align: i64): Ptr<void>\n\nfn size_of<T>(): i64\n  let r: i64 = 0\n  return r\n", true))
+  ordered = ordered.push(graph::SourceInput("main.dao", "module app::main\n\nfn inc(x: i64): i64 -> x + 1\n\nfn add_ten(x: i64): i64 -> x + 10\n\nfn source(p: Ptr<i64>): i64\n  mode unsafe =>\n    p.set(1)\n  return 3\n\nfn make_target(p: Ptr<i64>): fn(i64): i64\n  let seen: i64 = 0\n  mode unsafe =>\n    seen = p.get()\n  if seen == 1:\n    return inc\n  return add_ten\n\nfn main(): i32\n  let got: i64 = 0\n  mode unsafe =>\n    let raw: Ptr<void> = __dao_mem_alloc(size_of<i64>(), 8)\n    let p: Ptr<i64> = raw.cast<i64>()\n    p.set(0)\n    got = source(p) |> make_target(p)\n  if got == 4:\n    return 0\n  return 1\n", false))
+  let ordered_pipe = lower_program_to_llvm_text(ordered)
+  write_failures = write_failures + emit_ir("pipe_evaluates_its_source_first", ordered_pipe, 0)
+  if ordered_pipe.ok:
+    print("PASS pipe_evaluates_its_source_first")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL pipe_evaluates_its_source_first: " + diags_text(ordered_pipe.diags))
 
   // Test 36: pointers — allocated by the runtime, cast, walked, written
   // and read through (`p.offset(1).set(5)`, `.get()`), sized by

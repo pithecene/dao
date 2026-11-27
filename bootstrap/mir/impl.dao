@@ -175,7 +175,7 @@ class MsProgram:
   type_info: Vector<i64>
   symbols: Vector<resolver::Symbol>
   sym_types: Vector<i64>
-  uses_map: HashMap<string, i64>    // program-level uses_key(file_id, tok_idx) → sym_idx
+  uses_map: HashMap<resolver::UseSite, i64>  // the symbol each use site names, program-wide
   copy_out_sym: i64         // the prelude's `copy_out`, for resource exits (-1 when absent)
 
 // The current module.
@@ -321,13 +321,7 @@ fn ms_lookup_local(ms: MS, sym: i64): i64
 fn ms_tok_to_sym(ms: MS, tok_idx: i64): i64
   if tok_idx < 0:
     return to_i64(-1)
-  let key: string = resolver::uses_key(ms.source.file_id, tok_idx)
-  let found: Option<i64> = ms.program.uses_map.get(key)
-  match found:
-    Option::Some(sym):
-      return sym
-    Option::None:
-      return to_i64(-1)
+  return ms.program.uses_map.get_or(resolver::UseSite(ms.source.file_id, tok_idx), to_i64(-1))
 
 // Create a new basic block, append it to the current function's
 // block list, and return its node index.
@@ -440,6 +434,14 @@ fn br_emit_terminator(br: BlockR, node: MirNode): BlockR
   br.sealed = to_i64(1)
   return br
 
+// Emit the call of the value `callee` with the values `args`, of result
+// type `type_idx`: the argument list and its count are written together.
+// `subst` is the call's record of decided type parameters, or -1.
+fn emit_call(br: BlockR, callee: i64, args: Vector<i64>, type_idx: i64, subst: i64): ExprR
+  let args_fl = mir_flush_list(br.ms, args)
+  br.ms = args_fl.ms
+  return br_emit_value(br, MirNode::MirCall(callee = callee, arg_list_lp = args_fl.list_pos, arg_count = args.length(), type_idx = type_idx, subst = subst))
+
 // Lower `operand?`.  Control flow:
 //   [current] --cond_br--> [ok]    the operand holds its first variant
 //                      \-> [fail]  --return
@@ -451,32 +453,32 @@ fn br_emit_terminator(br: BlockR, node: MirNode): BlockR
 // `Option`), `return_ti` the type the function returns, and `value_ti`
 // the type of the succeeding variant's value.
 fn lower_try(br: BlockR, operand: i64, error_ti: i64, return_ti: i64, value_ti: i64): ExprR
-  let tried: ExprR = lower_expr_value(br, operand)
+  let tried = lower_expr_value(br, operand)
   // An enum's discriminant is an i32.
-  let tag_ti: i64 = typecheck::builtin_type_index("i32")
-  let held: ExprR = br_emit_value(tried.br, MirNode::MirEnumDiscriminant(value = tried.value, type_idx = tag_ti))
-  let first: ExprR = br_emit_value(held.br, MirNode::MirConstInt(value = to_i64(0), type_idx = tag_ti))
-  let succeeded: ExprR = br_emit_value(first.br, MirNode::MirBinary(op_tok = synthesized_equality_op(), lhs = held.value, rhs = first.value, type_idx = mir_bool_type()))
-  let cur: BlockR = succeeded.br
-  let ok_r: MirR = ms_new_block(cur.ms)
+  let tag_ti = typecheck::builtin_type_index("i32")
+  let held = br_emit_value(tried.br, MirNode::MirEnumDiscriminant(value = tried.value, type_idx = tag_ti))
+  let first = br_emit_value(held.br, MirNode::MirConstInt(value = to_i64(0), type_idx = tag_ti))
+  let succeeded = br_emit_value(first.br, MirNode::MirBinary(op_tok = synthesized_equality_op(), lhs = held.value, rhs = first.value, type_idx = mir_bool_type()))
+  let cur = succeeded.br
+  let ok_r = ms_new_block(cur.ms)
   cur.ms = ok_r.ms
-  let fail_r: MirR = ms_new_block(cur.ms)
+  let fail_r = ms_new_block(cur.ms)
   cur.ms = fail_r.ms
   cur = br_emit_terminator(cur, MirNode::MirCondBr(cond = succeeded.value, then_block = ok_r.mir, else_block = fail_r.mir))
 
-  let fail_br: BlockR = block_open(block_seal(cur), fail_r.mir)
-  let carried: Vector<i64> = Vector<i64>::new()
+  let fail_br = block_open(block_seal(cur), fail_r.mir)
+  let carried = Vector<i64>::new()
   if error_ti >= 0:
-    let error: ExprR = br_emit_value(fail_br, MirNode::MirEnumPayload(value = tried.value, variant = to_i64(1), field = to_i64(0), type_idx = error_ti))
+    let error = br_emit_value(fail_br, MirNode::MirEnumPayload(value = tried.value, variant = to_i64(1), field = to_i64(0), type_idx = error_ti))
     fail_br = error.br
     carried = carried.push(error.value)
-  let carried_fl: MirFlush = mir_flush_list(fail_br.ms, carried)
+  let carried_fl = mir_flush_list(fail_br.ms, carried)
   fail_br.ms = carried_fl.ms
-  let failure: ExprR = br_emit_value(fail_br, MirNode::MirEnumConstruct(variant = to_i64(1), arg_list_lp = carried_fl.list_pos, arg_count = carried.length(), type_idx = return_ti))
-  let left: RegionExitR = emit_region_exits(failure.br, to_i64(0), true, failure.value, return_ti)
-  let returned: BlockR = br_emit_terminator(left.br, MirNode::MirReturn(value = left.carried, has_value = to_i64(1)))
+  let failure = br_emit_value(fail_br, MirNode::MirEnumConstruct(variant = to_i64(1), arg_list_lp = carried_fl.list_pos, arg_count = carried.length(), type_idx = return_ti))
+  let left = emit_region_exits(failure.br, to_i64(0), true, failure.value, return_ti)
+  let returned = br_emit_terminator(left.br, MirNode::MirReturn(value = left.carried, has_value = to_i64(1)))
 
-  let ok_br: BlockR = block_open(block_seal(returned), ok_r.mir)
+  let ok_br = block_open(block_seal(returned), ok_r.mir)
   return br_emit_value(ok_br, MirNode::MirEnumPayload(value = tried.value, variant = to_i64(0), field = to_i64(0), type_idx = value_ti))
 
 // Lower an expression.  Returns an ExprR containing the updated BlockR
@@ -496,6 +498,14 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       return br_emit_value(payload_of.br, MirNode::MirEnumPayload(value = payload_of.value, variant = variant, field = field, type_idx = type_idx))
     HirNode::HirTry(operand, error_ti, return_ti, type_idx):
       return lower_try(br, operand, error_ti, return_ti, type_idx)
+    HirNode::HirPipe(left, right, type_idx):
+      // `left |> right` is the call `right(left)`, with the piped value
+      // evaluated before the target, in source order (host).  The checker
+      // admits only a target of one parameter, so the one argument is the
+      // whole call.
+      let piped = lower_expr_value(br, left)
+      let target = lower_expr_value(piped.br, right)
+      return emit_call(target.br, target.value, Vector<i64>::new().push(piped.value), type_idx, to_i64(-1))
     HirNode::HirPtrOp(op, pointer, argument, type_idx):
       // A read or a write goes through the pointee's place, as the
       // host's does; the other operations yield a pointer or a flag.
@@ -593,10 +603,7 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
             return br_emit_value(br, MirNode::MirErrorExpr(tok = to_i64(0)))
       let callee_r: ExprR = lower_expr_value(br, callee)
       let call_args: ExprValues = lower_expr_values(callee_r.br, read_hir_list(callee_r.br.ms.hir.idx, args_lp))
-      let cur_br: BlockR = call_args.br
-      let fl: MirFlush = mir_flush_list(cur_br.ms, call_args.values)
-      cur_br.ms = fl.ms
-      return br_emit_value(cur_br, MirNode::MirCall(callee = callee_r.value, arg_list_lp = fl.list_pos, arg_count = arg_count, type_idx = type_idx, subst = call_subst))
+      return emit_call(call_args.br, callee_r.value, call_args.values, type_idx, call_subst)
     HirNode::HirFieldAccess(obj, field_tok, type_idx):
       let obj_r: ExprR = lower_expr_value(br, obj)
       // Resolve field_index from the object's struct type (Tier B).
@@ -1114,11 +1121,7 @@ fn emit_copy_out(br: BlockR, value: i64, ti: i64): ExprR
     br.ms = ms_add_diag(br.ms, Span(to_i64(0), to_i64(1)), "no prelude `copy_out` to copy a value out of a resource block")
     return ExprR(br, value)
   let callee: ExprR = br_emit_value(br, MirNode::MirFnRef(sym = br.ms.program.copy_out_sym, type_idx = br.ms.program.sym_types.get(br.ms.program.copy_out_sym)))
-  let arg_values: Vector<i64> = Vector<i64>::new()
-  let args: MirFlush = mir_flush_list(callee.br.ms, arg_values.push(value))
-  let cur: BlockR = callee.br
-  cur.ms = args.ms
-  return br_emit_value(cur, MirNode::MirCall(callee = callee.value, arg_list_lp = args.list_pos, arg_count = to_i64(1), type_idx = ti, subst = to_i64(-1)))
+  return emit_call(callee.br, callee.value, Vector<i64>::new().push(value), ti, to_i64(-1))
 
 // Where a store inside open memory domains is rooted at an escaping
 // binding, mark it dirty in each: that domain's exit copies it.
