@@ -114,6 +114,7 @@ function createTabState(doc: string, readOnly: boolean): EditorState {
     extensions: [
       basicSetup,
       pitheceneEditorTheme,
+      EditorView.contentAttributes.of({ "aria-label": "Source editor" }),
       readOnlyCompartment.of(EditorState.readOnly.of(readOnly)),
       tokenHighlighter,
       daoCompletions,
