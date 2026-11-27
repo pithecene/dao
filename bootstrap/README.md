@@ -215,6 +215,8 @@ test runner is the separate module `bootstrap::typecheck::tests` in
   a bound (typed, and rejected fail-closed at HIR)
 - Lambda contextual typing, list literal inference
 - Addr-of, index expressions
+- `?` in a lambda whose return type is still being inferred from its
+  body (diagnosed: the lambda has no return type to propagate into)
 
 **How to run tests**:
 
@@ -283,11 +285,10 @@ constants (int/float/bool/string), binary/unary ops, let/assign,
 calls (with `MirFnRef` callees), returns, field-access reads,
 if/else, while.
 
-**Tier B deferrals**: generators, monomorphization, `resource` blocks,
+**Tier B deferrals**: generators, monomorphization,
 `mode` blocks, enum construction/discriminant/payload, lambda
 / closures, for-over-iterable, index expressions,
-break/continue.  MIR rejects a `resource` block with the unsupported-statement diagnostic, fail-closed, until MIR holds the domain
-(`CONTRACT_MIR_BOUNDARY.md` §4, Task 37 §5).
+break/continue.
 
 **How to run tests**:
 
@@ -338,7 +339,7 @@ calls, returns, if/else, while.
 (construction, field reads, struct-typed params and returns).
 
 **Tier B deferrals**: enum payloads, monomorphization, generators,
-mode/resource hooks, lambdas, try, for-over-iterable, index
+mode/resource hooks, lambdas, for-over-iterable, index
 expressions, break/continue, LLVM C API integration,
 `llc`/`clang` validation in CI.
 

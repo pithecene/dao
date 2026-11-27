@@ -1035,16 +1035,17 @@ fn main(): i32
   else:
     print("FAIL try_carries_the_error_out: " + diags_text(try_result.diags))
 
-  // `?` inside a resource block leaves the block on the failing path as a
-  // `return` does: the same results as outside one, and the program
+  // `?` inside nested resource blocks leaves each of them on the failing
+  // path, as a `return` does: after quarter(7) fails no domain is still
+  // open, the results are those of the plain case, and the program
   // exits 0.
-  let try_in_region: LlvmTextResult = lower_source_to_llvm_text("enum class Option<T>:\n  Some(value: T)\n  None\n\nfn half(n: i32): Option<i32>\n  if n % 2 == 0:\n    return Option::Some(value = n / 2)\n  return Option::None\n\nfn quarter(n: i32): Option<i32>\n  let h: i32 = 0\n  resource memory scratch =>\n    h = half(n)?\n  return Option::Some(value = h + 10)\n\nfn main(): i32\n  let got: i32 = 0\n  match quarter(8):\n    Option::Some(v):\n      got = v\n    Option::None:\n      got = 100\n  match quarter(7):\n    Option::Some(w):\n      got = got + 50\n    Option::None:\n      got = got + 1\n  return got - 15\n")
-  write_failures = write_failures + emit_ir("try_leaves_a_resource_block", try_in_region, 0)
+  let try_in_region: LlvmTextResult = lower_source_to_llvm_text("extern fn dao_domain_depth(): i64\n\nenum class Option<T>:\n  Some(value: T)\n  None\n\nfn half(n: i32): Option<i32>\n  if n % 2 == 0:\n    return Option::Some(value = n / 2)\n  return Option::None\n\nfn quarter(n: i32): Option<i32>\n  let h: i32 = 0\n  resource memory outer =>\n    resource memory inner =>\n      h = half(n)?\n  return Option::Some(value = h + 10)\n\nfn main(): i32\n  let got: i32 = 0\n  match quarter(8):\n    Option::Some(v):\n      got = v\n    Option::None:\n      got = 100\n  match quarter(7):\n    Option::Some(w):\n      got = got + 50\n    Option::None:\n      got = got + 1\n  if dao_domain_depth() != 0:\n    return 99\n  return got - 15\n")
+  write_failures = write_failures + emit_ir("try_leaves_every_resource_block", try_in_region, 0)
   if try_in_region.ok:
-    print("PASS try_leaves_a_resource_block")
+    print("PASS try_leaves_every_resource_block")
     pass_count = pass_count + 1
   else:
-    print("FAIL try_leaves_a_resource_block: " + diags_text(try_in_region.diags))
+    print("FAIL try_leaves_every_resource_block: " + diags_text(try_in_region.diags))
 
   // Test 36: pointers — allocated by the runtime, cast, walked, written
   // and read through (`p.offset(1).set(5)`, `.get()`), sized by
