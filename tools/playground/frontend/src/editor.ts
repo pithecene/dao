@@ -10,6 +10,7 @@ import {
 import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
 import { referenceHighlights, tokenHighlighter } from "./highlighting";
 import { daoCompletions } from "./completions";
+import { editorThemeRules } from "./editor_theme";
 import type { Diagnostic } from "./generated/tooling_surface";
 import { inDocument, onWorkspaceLifecycle } from "./document";
 
@@ -37,76 +38,7 @@ const diagnosticHighlights = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field),
 });
 
-/** Shared Pithecene token-driven CodeMirror theme (adapts to dark & light modes). */
-const pitheceneEditorTheme = EditorView.theme({
-  "&": {
-    backgroundColor: "var(--editor-bg)",
-    color: "var(--fg-primary)",
-    height: "100%",
-  },
-  ".cm-content": {
-    caretColor: "var(--editor-cursor)",
-    padding: "12px 0",
-    fontFamily: "var(--font-mono)",
-  },
-  ".cm-line": {
-    padding: "0 14px",
-  },
-  ".cm-cursor, .cm-dropCursor": {
-    borderLeftColor: "var(--editor-cursor)",
-  },
-  "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
-    {
-      backgroundColor: "var(--editor-selection)",
-    },
-  ".cm-activeLine": {
-    backgroundColor: "var(--editor-active-line)",
-  },
-  ".cm-gutters": {
-    backgroundColor: "var(--editor-gutter-bg)",
-    color: "var(--editor-gutter-fg)",
-    borderRight: "1px solid var(--border-hairline)",
-    fontFamily: "var(--font-mono)",
-    fontSize: "12px",
-  },
-  ".cm-activeLineGutter": {
-    backgroundColor: "var(--editor-active-line)",
-    color: "var(--editor-gutter-active-fg)",
-  },
-  ".cm-foldPlaceholder": {
-    backgroundColor: "var(--surface-elevated)",
-    border: "1px solid var(--border-strong)",
-    color: "var(--fg-secondary)",
-  },
-  ".cm-tooltip": {
-    backgroundColor: "var(--surface-elevated)",
-    border: "1px solid var(--border-strong)",
-    color: "var(--fg-primary)",
-    borderRadius: "var(--radius-md)",
-    boxShadow: "var(--shadow-popover)",
-  },
-  ".cm-tooltip-autocomplete > ul": {
-    fontFamily: "var(--font-mono)",
-    fontSize: "12.5px",
-  },
-  ".cm-tooltip-autocomplete ul li[aria-selected]": {
-    backgroundColor: "var(--accent-subtle)",
-    color: "var(--fg-primary)",
-  },
-  ".cm-completionDetail": {
-    color: "var(--fg-muted)",
-    fontStyle: "normal",
-    marginLeft: "10px",
-  },
-  ".cm-panels": {
-    backgroundColor: "var(--surface-panel)",
-    color: "var(--fg-primary)",
-  },
-  ".cm-searchMatch": {
-    backgroundColor: "var(--status-warn-subtle)",
-    outline: "1px solid var(--syntax-resource-border)",
-  },
-});
+const pitheceneEditorTheme = EditorView.theme(editorThemeRules);
 
 function createTabState(doc: string, readOnly: boolean): EditorState {
   return EditorState.create({
