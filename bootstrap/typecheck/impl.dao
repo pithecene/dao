@@ -2924,7 +2924,9 @@ fn check_compare_binop(ts: TS, node_idx: i64, op_tidx: i64, lt: i64, rt: i64, op
           return ts_add_diag(ts, sp, "'" + op_str + "' requires numeric operands")
   return ts_set_expr_type(ts, node_idx, to_i64(10))
 
-fn enum_base_name(ts: TS, ti: i64): string
+// The name a class or an enum type was declared under: its head's for
+// an instantiation (`Option` for `Option<i32>`), its own otherwise.
+fn nominal_name(ts: TS, ti: i64): string
   if ti < 0 or ti >= ts.types.length():
     return ""
   let t: base::DaoType = ts.types.get(ti)
@@ -2963,7 +2965,7 @@ fn check_equality_binop(ts: TS, node_idx: i64, op_tidx: i64, lt: i64, rt: i64, o
       if types_equal(ts, lt, rt):
         if enum_has_payload(ts, lt):
           let sp: Span = ts_node_span(ts, node_idx)
-          return ts_add_diag(ts, sp, "equality comparison is not yet supported for payload-bearing enum '" + enum_base_name(ts, lt) + "'; use match to inspect variants")
+          return ts_add_diag(ts, sp, "equality comparison is not yet supported for payload-bearing enum '" + nominal_name(ts, lt) + "'; use match to inspect variants")
         return ts_set_expr_type(ts, node_idx, to_i64(10))
       else:
         let sp: Span = ts_tok_span(ts, op_tidx)
@@ -5868,6 +5870,10 @@ fn try_return_key(module_id: i64, node_idx: i64): string
 fn try_error_key(module_id: i64, node_idx: i64): string
   return base::expr_id_key(module_id, node_idx) + ":try_error"
 
+// What `try_return_key` holds for a `?` the checker reported: no type,
+// and distinct from the absent entry of a `?` it never reached.
+fn try_rejected(): i64 -> to_i64(-2)
+
 // The enum `?` unwraps a value of: "Option" or "Result" when `ti` is an
 // enum of that name or an instantiation of one (the host's rule), else "".
 fn try_family(ts: TS, ti: i64): string
@@ -5878,17 +5884,6 @@ fn try_family(ts: TS, ti: i64): string
   if name == "Option" or name == "Result":
     return name
   return ""
-
-// The name a class or an enum type was declared under: its head's for
-// an instantiation (`Option` for `Option<i32>`), its own otherwise.
-fn nominal_name(ts: TS, ti: i64): string
-  if ti < 0 or ti >= ts.types.length():
-    return ""
-  let t: base::DaoType = ts.types.get(ti)
-  let head_ti: i64 = record_head(ts, t)
-  if head_ti >= 0:
-    return ts.types.get(head_ti).name
-  return t.name
 
 // The declaration an enum type is a value of: the type itself, or the
 // head an instantiation was made from; -1 for any other type.
@@ -5938,6 +5933,15 @@ fn variant_at(ts: TS, head_ti: i64, index: i64): VariantShape
 // returns the second with the operand's error or with nothing, so the
 // shape it builds is checked here rather than assumed there.
 fn check_try_expr(ts: TS, node_idx: i64, operand: i64): TS
+  let r: TS = check_try_shape(ts, node_idx, operand)
+  // Every path that records no return type reported the expression, so
+  // HIR can tell it from one the checker never reached.
+  let key: string = try_return_key(r.tc.module_id, node_idx)
+  if base::hm_get_or(r.reg.expr_types, key, to_i64(-1)) < 0:
+    r.reg = reg_with_expr_types(r.reg, r.reg.expr_types.set(key, try_rejected()))
+  return r
+
+fn check_try_shape(ts: TS, node_idx: i64, operand: i64): TS
   let diags_before: i64 = ts.diags.length()
   let r: TS = check_expr(ts, operand)
   let sp: Span = ts_node_span(r, node_idx)

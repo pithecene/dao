@@ -219,8 +219,9 @@ test runner is the separate module `bootstrap::typecheck::tests` in
   body (diagnosed: the lambda has no return type to propagate into)
 - A type argument left undecided below a value's outermost enum, as in
   `Option::Some(value = Option::None)`: a `let` and a `?` report only
-  the outermost one, and the rest fails closed at MIR's concreteness
-  check
+  the outermost one.  MIR's concreteness check reports what remains in
+  a concrete function and in an instantiated copy, and it does not
+  inspect a generic function that nothing instantiates
 
 **How to run tests**:
 

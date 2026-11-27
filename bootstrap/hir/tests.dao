@@ -65,7 +65,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 47
+  let total: i32 = 50
 
   // Test 1: simple_fn
   let src1: string = "fn add(a: i32, b: i32): i32\n  return a + b\n"
@@ -963,6 +963,34 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL pointer_operations_are_ptr_ops: got " + i64_to_string(hir_count_kind(r46, "HirPtrOp")) + " ptr ops, " + i64_to_string(hir_count_kind(r46, "HirCall")) + " calls, " + i64_to_string(hir_count_diags(r46)) + " diagnostics")
+
+  // `operand?` lowers to one HirTry.  A `?` the checker rejected carries
+  // the checker's diagnostic alone, and one it never reached (a lambda
+  // passed to a value that is no function) is reported by HIR.
+  let try_lowered = lower_to_hir("enum class Option<T>:\n  Some(value: T)\n  None\n\nfn half(n: i32): Option<i32>\n  return Option::Some(value = n / 2)\n\nfn quarter(n: i32): Option<i32>\n  let h: i32 = half(n)?\n  return half(h)\n")
+  if hir_count_kind(try_lowered, "HirTry") == 1 and hir_count_diags(try_lowered) == 0:
+    print("PASS try_lowers_to_one_node")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL try_lowers_to_one_node: got " + i64_to_string(hir_count_kind(try_lowered, "HirTry")) + " HirTry, " + i64_to_string(hir_count_diags(try_lowered)) + " diagnostics")
+  let try_rejected = lower_to_hir("fn f(n: i32): i32\n  return n?\n")
+  if hir_count_diags(try_rejected) == 1 and hir_count_kind(try_rejected, "HirTry") == 0:
+    print("PASS rejected_try_is_reported_once")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL rejected_try_is_reported_once: got " + i64_to_string(hir_count_diags(try_rejected)) + " diagnostics")
+  let try_unreached = lower_to_hir("fn f(n: i32): i32\n  n(|x| -> x?)\n  return n\n")
+  let unreached_reported = false
+  let ud: i64 = 0
+  while ud < try_unreached.diags.length():
+    if index_of(try_unreached.diags.get(ud).message, "'?' was never type checked") >= 0:
+      unreached_reported = true
+    ud = ud + 1
+  if unreached_reported:
+    print("PASS unchecked_try_is_reported")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL unchecked_try_is_reported: got " + i64_to_string(hir_count_diags(try_unreached)) + " diagnostics, none for the '?'")
 
   // -----------------------------------------------------------------
   // Summary
