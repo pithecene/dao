@@ -52,6 +52,7 @@ inline constexpr std::array kTokenGroups{
     std::string_view{"literal-string"},
     std::string_view{"operator"},
     std::string_view{"punctuation"},
+    std::string_view{"comment"},
 };
 
 // Order follows CONTRACT_LANGUAGE_TOOLING.md: the initial freeze, then
@@ -124,6 +125,7 @@ inline constexpr std::array kTokenKinds{
     TokenKindSpec{"literal.bool", "literal-number"},
     TokenKindSpec{"use.type", "type"},
     TokenKindSpec{"use.variant", "field"},
+    TokenKindSpec{"comment", "comment"},
 };
 
 /// Visual group of a semantic token kind, or nullopt for a kind the

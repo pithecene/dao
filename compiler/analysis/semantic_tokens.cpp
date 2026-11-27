@@ -1,6 +1,7 @@
 #include "analysis/semantic_tokens.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -811,9 +812,10 @@ auto paint_qualified(const Symbol& head_symbol) -> QualifiedPainting {
 
 } // namespace
 
-auto classify_tokens(const std::vector<Token>& tokens,
+auto classify_tokens(const LexResult& lexed,
                      const FileNode* file,
                      const ResolveResult* resolve_result) -> std::vector<SemanticToken> {
+  const auto& tokens = lexed.tokens;
   // Step 1: Collect structural classifications from AST.
   AstClassifier::SpanMap ast_map;
   AstClassifier::QualifiedSpans qualified;
@@ -972,6 +974,14 @@ auto classify_tokens(const std::vector<Token>& tokens,
     }
     // Identifiers with no classification are omitted.
   }
+
+  // Comments lie between tokens, and both runs are in source order.
+  const auto first_comment = static_cast<std::ptrdiff_t>(result.size());
+  for (const auto& comment : lexed.comments) {
+    result.push_back({.span = comment, .kind = "comment"});
+  }
+  std::ranges::inplace_merge(result, result.begin() + first_comment, {},
+                             [](const SemanticToken& token) { return token.span.offset; });
 
   return result;
 }

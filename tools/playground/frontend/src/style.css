@@ -1639,6 +1639,11 @@ pre {
   color: var(--syntax-punctuation);
 }
 
+.dao-comment {
+  color: var(--syntax-comment);
+  font-style: italic;
+}
+
 /* Reference & Diagnostic Editor Marks */
 .dao-reference {
   background: var(--editor-ref-use);

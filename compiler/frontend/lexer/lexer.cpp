@@ -101,7 +101,9 @@ public:
 
     emit(TokenKind::Eof, pos_, 0);
 
-    return {.tokens = std::move(tokens_), .diagnostics = std::move(diagnostics_)};
+    return {.tokens = std::move(tokens_),
+            .diagnostics = std::move(diagnostics_),
+            .comments = std::move(comments_)};
   }
 
 private:
@@ -114,6 +116,20 @@ private:
   bool at_line_start_ = true;
   std::vector<Token> tokens_;
   std::vector<Diagnostic> diagnostics_;
+  std::vector<Span> comments_;
+
+  // Skips the `//` comment that begins at `start` and records where it is.
+  // The skip runs to the next line feed.  The recorded comment ends at the
+  // end of its line, which a carriage return marks as well.
+  void skip_line_comment(uint32_t start) {
+    while (pos_ < src_.size() && src_[pos_] != '\n') {
+      ++pos_;
+    }
+    const auto skipped = src_.substr(start, pos_ - start);
+    const auto line_end = skipped.find('\r');
+    const auto length = line_end == std::string_view::npos ? skipped.size() : line_end;
+    comments_.push_back({.offset = base_ + start, .length = static_cast<uint32_t>(length)});
+  }
 
   // `offset` and `length` are buffer-local; the recorded span is program-wide.
   void emit(TokenKind kind, uint32_t offset, uint32_t length) {
@@ -187,10 +203,7 @@ private:
 
     // Comment-only line — treat like a blank line.
     if (pos_ + 1 < src_.size() && src_[pos_] == '/' && src_[pos_ + 1] == '/') {
-      // Skip comment text to end of line.
-      while (pos_ < src_.size() && src_[pos_] != '\n') {
-        ++pos_;
-      }
+      skip_line_comment(pos_);
       // Fall through to blank-line handling below.
     }
 
@@ -357,10 +370,7 @@ private:
       return;
     case '/':
       if (peek() == '/') {
-        // Line comment: skip to end of line (or end of file).
-        while (pos_ < src_.size() && src_[pos_] != '\n') {
-          ++pos_;
-        }
+        skip_line_comment(start);
         return;
       }
       emit(TokenKind::Slash, start, 1);

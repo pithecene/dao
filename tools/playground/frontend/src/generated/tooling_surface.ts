@@ -67,11 +67,12 @@ export const TOKEN_KINDS = [
   "literal.bool",
   "use.type",
   "use.variant",
+  "comment",
 ] as const;
 
 export type TokenKind = (typeof TOKEN_KINDS)[number];
 
-export type TokenGroup = "keyword" | "mode" | "resource" | "type" | "decl" | "variable" | "field" | "module" | "lambda-param" | "literal-number" | "literal-string" | "operator" | "punctuation";
+export type TokenGroup = "keyword" | "mode" | "resource" | "type" | "decl" | "variable" | "field" | "module" | "lambda-param" | "literal-number" | "literal-string" | "operator" | "punctuation" | "comment";
 
 /** Visual group of every token kind; the CSS class is `dao-<group>`. */
 export const TOKEN_GROUP: Record<TokenKind, TokenGroup> = {
@@ -135,6 +136,7 @@ export const TOKEN_GROUP: Record<TokenKind, TokenGroup> = {
   "literal.bool": "literal-number",
   "use.type": "type",
   "use.variant": "field",
+  "comment": "comment",
 };
 
 export type LexicalCategory = "keyword" | "identifier" | "literal.number" | "literal.string" | "literal.bool" | "operator" | "punctuation" | "synthetic" | "error" | "unknown";
