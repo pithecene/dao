@@ -214,7 +214,15 @@ test runner is the separate module `bootstrap::typecheck::tests` in
 - Lowering a member a concept provides through a derived conformance or
   a bound (typed, and rejected fail-closed at HIR)
 - Lambda contextual typing, list literal inference
-- Try operator, addr-of, index expressions
+- Addr-of, index expressions
+- `?` in a lambda whose return type the checker still infers from its
+  body.  The checker reports it: the lambda has no return type to
+  propagate into
+- A type argument left undecided below a value's outermost enum, as in
+  `Option::Some(value = Option::None)`: a `let` and a `?` report only
+  the outermost one.  MIR's concreteness check reports what remains in
+  a concrete function and in an instantiated copy, and it does not
+  inspect a generic function that nothing instantiates
 
 **How to run tests**:
 
@@ -236,6 +244,10 @@ type-checked AST.
 - Match desugared to if/else chain
 - Every HIR expression carries its resolved type index
 - Pipe preserved as first-class node (MIR lowers it)
+- `operand?` kept as one `HirTry` node carrying the type the function
+  returns and the error a failing `Result` holds.  MIR lowers it to a
+  test of the operand's first variant and a return of the function's
+  failing variant, which leaves every open region as a `return` does
 - HirMatch reserved for Tier B pattern compilation
 
 **Tier A coverage**: literals, identifiers, binary/unary ops, calls,
@@ -279,11 +291,10 @@ constants (int/float/bool/string), binary/unary ops, let/assign,
 calls (with `MirFnRef` callees), returns, field-access reads,
 if/else, while.
 
-**Tier B deferrals**: generators, monomorphization, `resource` blocks,
-`mode` blocks, enum construction/discriminant/payload, lambda
-/ closures, try operator, for-over-iterable, index expressions,
-break/continue.  MIR rejects a `resource` block with the unsupported-statement diagnostic, fail-closed, until MIR holds the domain
-(`CONTRACT_MIR_BOUNDARY.md` §4, Task 37 §5).
+**Tier B deferrals**: generators, monomorphization,
+`mode` blocks, lambda
+/ closures, for-over-iterable, index expressions,
+break/continue.
 
 **How to run tests**:
 
@@ -331,10 +342,12 @@ constants (int/float/bool/string), binary/unary ops, let/assign,
 calls, returns, if/else, while.
 
 **Tier B coverage (added)**: struct layout and field access
-(construction, field reads, struct-typed params and returns).
+(construction, field reads, struct-typed params and returns), enum
+payloads (construction, discriminant and payload reads),
+`resource memory` domains, and `?` propagation through them.
 
-**Tier B deferrals**: enum payloads, monomorphization, generators,
-mode/resource hooks, lambdas, try, for-over-iterable, index
+**Tier B deferrals**: monomorphization, generators,
+mode hooks, lambdas, for-over-iterable, index
 expressions, break/continue, LLVM C API integration,
 `llc`/`clang` validation in CI.
 

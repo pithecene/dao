@@ -28,9 +28,13 @@ import bootstrap::typecheck
 //     struct construction via alloca+GEP stores, field reads via
 //     `extractvalue`, struct-typed call and return edges.
 //
-// Still deferred: enum payloads, monomorphization, generators,
-// mode/resource hooks, lambdas, try, for-over-iterable, index,
-// break/continue, LLVM C API, llc/clang CI validation.
+//   - enum payloads, `resource memory` domains, and `?` propagation
+//     (an enum built, tested, and read, and a return through open
+//     domains), as the suite's executable fixtures run them.
+//
+// Still deferred: monomorphization, generators, mode hooks, lambdas,
+// for-over-iterable, index, break/continue, LLVM C API, llc/clang CI
+// validation.
 
 // =========================================================================
 // Section 80: LLVM mini-IR node model

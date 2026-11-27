@@ -585,7 +585,7 @@ fn resolve_expr(rs: RS, node_idx: i64): RS
           if piped >= 0:
             return rs_add_use(r, ptidx, piped)
       return resolve_expr(r, right)
-    parser::Node::TryE(operand):
+    parser::Node::TryE(operand, question_tok):
       return resolve_expr(rs, operand)
     parser::Node::LambdaE(params_lp, param_count, body):
       // Create a block scope for the lambda
