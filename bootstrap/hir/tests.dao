@@ -974,23 +974,24 @@ fn main(): i32
   else:
     print("FAIL try_lowers_to_one_node: got " + i64_to_string(hir_count_kind(try_lowered, "HirTry")) + " HirTry, " + i64_to_string(hir_count_diags(try_lowered)) + " diagnostics")
   let try_rejected = lower_to_hir("fn f(n: i32): i32\n  return n?\n")
-  if hir_count_diags(try_rejected) == 1 and hir_count_kind(try_rejected, "HirTry") == 0:
+  if hir_count_diags(try_rejected) == 1 and hir_count_kind(try_rejected, "HirTry") == 0 and index_of(try_rejected.diags.get(0).message, "requires an Option or Result type") >= 0:
     print("PASS rejected_try_is_reported_once")
     pass_count = pass_count + 1
   else:
-    print("FAIL rejected_try_is_reported_once: got " + i64_to_string(hir_count_diags(try_rejected)) + " diagnostics")
+    print("FAIL rejected_try_is_reported_once: expected the checker's diagnostic alone, got " + i64_to_string(hir_count_diags(try_rejected)) + " diagnostics")
   let try_unreached = lower_to_hir("fn f(n: i32): i32\n  n(|x| -> x?)\n  return n\n")
   let unreached_reported = false
   let ud: i64 = 0
   while ud < try_unreached.diags.length():
-    if index_of(try_unreached.diags.get(ud).message, "'?' was never type checked") >= 0:
+    let unreached = try_unreached.diags.get(ud)
+    if index_of(unreached.message, "'?' was never type checked") >= 0 and unreached.span.offset == index_of(try_unreached.src, "?") and unreached.span.length == 1:
       unreached_reported = true
     ud = ud + 1
   if unreached_reported:
     print("PASS unchecked_try_is_reported")
     pass_count = pass_count + 1
   else:
-    print("FAIL unchecked_try_is_reported: got " + i64_to_string(hir_count_diags(try_unreached)) + " diagnostics, none for the '?'")
+    print("FAIL unchecked_try_is_reported: got " + i64_to_string(hir_count_diags(try_unreached)) + " diagnostics, none on the '?'")
 
   // -----------------------------------------------------------------
   // Summary
