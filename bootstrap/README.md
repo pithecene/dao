@@ -217,6 +217,10 @@ test runner is the separate module `bootstrap::typecheck::tests` in
 - Addr-of, index expressions
 - `?` in a lambda whose return type is still being inferred from its
   body (diagnosed: the lambda has no return type to propagate into)
+- A type argument left undecided below a value's outermost enum, as in
+  `Option::Some(value = Option::None)`: a `let` and a `?` report only
+  the outermost one, and the rest fails closed at MIR's concreteness
+  check
 
 **How to run tests**:
 

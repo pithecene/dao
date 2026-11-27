@@ -5879,6 +5879,17 @@ fn try_family(ts: TS, ti: i64): string
     return name
   return ""
 
+// The name a class or an enum type was declared under: its head's for
+// an instantiation (`Option` for `Option<i32>`), its own otherwise.
+fn nominal_name(ts: TS, ti: i64): string
+  if ti < 0 or ti >= ts.types.length():
+    return ""
+  let t: base::DaoType = ts.types.get(ti)
+  let head_ti: i64 = record_head(ts, t)
+  if head_ti >= 0:
+    return ts.types.get(head_ti).name
+  return t.name
+
 // The declaration an enum type is a value of: the type itself, or the
 // head an instantiation was made from; -1 for any other type.
 fn enum_head(ts: TS, ti: i64): i64
@@ -5950,7 +5961,7 @@ fn check_try_expr(ts: TS, node_idx: i64, operand: i64): TS
   if enum_head(r, return_ti) != head_ti:
     if try_family(r, return_ti) == family:
       return ts_add_diag(r, sp, "'?' on " + family + " needs the enclosing function to return the same declaration of " + family + ", but it returns '" + type_name(r, return_ti) + "' of another declaration with that name")
-    if enum_head(r, return_ti) < 0 and return_ti < r.types.length() and r.types.get(return_ti).name == family:
+    if enum_head(r, return_ti) < 0 and nominal_name(r, return_ti) == family:
       return ts_add_diag(r, sp, "'?' on " + family + " needs the enclosing function to return that enum, but it returns '" + type_name(r, return_ti) + "', which is another declaration and no enum")
     return ts_add_diag(r, sp, "enclosing function must return " + family + " to use '?' on " + family + ", but returns '" + type_name(r, return_ti) + "'")
   // Exactly two variants: any value that is not the first is the second,
