@@ -188,14 +188,30 @@ export function normalizeSnapshot(value: unknown): WorkspaceSnapshotV1 | null {
   };
 }
 
-export function loadSavedDraft(): WorkspaceSnapshotV1 | null {
+/**
+ * What storage holds for the draft, from one read.  Only a read that succeeds
+ * and finds no entry is `absent`: a read that fails, and an entry that does
+ * not decode, are `unreadable`, since either may hide someone's work.
+ */
+export type StoredDraft =
+  | { kind: "absent" }
+  | { kind: "unreadable" }
+  | { kind: "draft"; snapshot: WorkspaceSnapshotV1 };
+
+export function readStoredDraft(): StoredDraft {
   try {
     const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
-    if (!raw) return null;
-    return normalizeSnapshot(JSON.parse(raw) as unknown);
+    if (raw === null) return { kind: "absent" };
+    const snapshot = normalizeSnapshot(JSON.parse(raw) as unknown);
+    return snapshot ? { kind: "draft", snapshot } : { kind: "unreadable" };
   } catch {
-    return null;
+    return { kind: "unreadable" };
   }
+}
+
+export function loadSavedDraft(): WorkspaceSnapshotV1 | null {
+  const stored = readStoredDraft();
+  return stored.kind === "draft" ? stored.snapshot : null;
 }
 
 // ---------------------------------------------------------------------------
