@@ -8,7 +8,7 @@ import {
 } from "./document";
 import type { ExampleEntry, SourceInput } from "./generated/tooling_surface";
 import { showNotice } from "./notice";
-import { clearDraft, hasStoredDraft, loadSavedDraft, saveDraft } from "./persistence";
+import { clearDraft, readStoredDraft, saveDraft } from "./persistence";
 import { syncEditorToActiveTab } from "./workspace_ui";
 import { doRun } from "./run";
 
@@ -330,11 +330,12 @@ export function resetWouldDiscardWork(): boolean {
   const onScreen = filesFingerprint(getUserFiles());
   const untouched =
     loadedExample !== null && loadedExample.name === resetTarget() && loadedExample.files === onScreen;
-  // A stored draft that cannot be decoded may hold the only copy of its
+  // A stored draft that cannot be read may hold the only copy of its
   // sources, so it counts as more than the screen shows.
-  const draft = loadSavedDraft();
+  const stored = readStoredDraft();
   const draftHoldsMore =
-    hasStoredDraft() && (draft === null || filesFingerprint(draft.files) !== onScreen);
+    stored.kind === "unreadable" ||
+    (stored.kind === "draft" && filesFingerprint(stored.snapshot.files) !== onScreen);
   return !untouched || draftHoldsMore;
 }
 
