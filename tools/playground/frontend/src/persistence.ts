@@ -188,6 +188,18 @@ export function normalizeSnapshot(value: unknown): WorkspaceSnapshotV1 | null {
   };
 }
 
+/**
+ * Whether storage holds a draft at all, readable or not.  `loadSavedDraft`
+ * answers null for a draft it cannot decode, which is still someone's work.
+ */
+export function hasStoredDraft(): boolean {
+  try {
+    return localStorage.getItem(DRAFT_STORAGE_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
 export function loadSavedDraft(): WorkspaceSnapshotV1 | null {
   try {
     const raw = localStorage.getItem(DRAFT_STORAGE_KEY);

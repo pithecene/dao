@@ -690,59 +690,84 @@ async function testCompletionSourceSettlesQuietlyOnceAborted(): Promise<void> {
   });
 }
 
+/** The paths and sources of `files`, as one comparable string. */
+function contentsOf(files: readonly { path: string; source: string }[] | undefined): string {
+  return JSON.stringify((files ?? []).map((file) => [file.path, file.source]));
+}
+
 async function testResetAsksBeforeItDiscardsWork(): Promise<void> {
   clearDraft();
-  const example = { name: "hello.dao", document: "hello.dao", files: [{ path: "hello.dao", source: "module hello\n" }] };
-  let loads = 0;
-  const serveExample = async (): Promise<Response> => {
-    loads += 1;
-    return jsonResponse(example);
+  const hello = { name: "hello.dao", document: "hello.dao", files: [{ path: "hello.dao", source: "module hello\n" }] };
+  const pipelines = { name: "pipelines.dao", document: "pipelines.dao", files: [{ path: "pipelines.dao", source: "module pipelines\n" }] };
+  const loads: string[] = [];
+  const serveExamples = async (url: string): Promise<Response> => {
+    loads.push(url);
+    if (url.endsWith("/hello.dao")) return jsonResponse(hello);
+    if (url.endsWith("/pipelines.dao")) return jsonResponse(pipelines);
+    return jsonResponse({ error: "no such example" }, 404);
   };
   let asked = 0;
   const refuse = (): boolean => { asked += 1; return false; };
   const accept = (): boolean => { asked += 1; return true; };
 
-  await withMockFetch(serveExample, async () => {
+  await withMockFetch(serveExamples, async () => {
     assertEqual(await loadExampleByName("hello.dao"), "applied", "The example loads");
 
     // An untouched example resets without a question.
     await resetWorkspace(refuse);
     assertEqual(asked, 0, "An untouched example raises no question");
-    assertEqual(loads, 2, "An untouched example reloads");
+    assertEqual(loads.length, 2, "An untouched example reloads");
 
-    // An edited, multi-file workspace: a refusal changes nothing.
+    // An edited, multi-file workspace: a refusal changes nothing, on the
+    // screen or in storage.
     updateActiveUserSource("module hello\n// an edit\n");
     addUserFile("extra.dao", "module extra\n");
     saveDraft();
+    const editedFiles = contentsOf(getUserFiles());
     await resetWorkspace(refuse);
     assertEqual(asked, 1, "Work raises the question");
-    assertEqual(loads, 2, "A refusal starts no load");
-    assertEqual(getUserFiles().length, 2, "A refusal keeps the files");
-    assertEqual(loadSavedDraft()?.files.length, 2, "A refusal keeps the stored draft");
+    assertEqual(loads.length, 2, "A refusal starts no load");
+    assertEqual(contentsOf(getUserFiles()), editedFiles, "A refusal keeps every file's source");
+    assertEqual(contentsOf(loadSavedDraft()?.files), editedFiles, "A refusal keeps the stored draft's sources");
 
     // An acceptance restores the example and deletes the draft.
     await resetWorkspace(accept);
     assertEqual(asked, 2, "Work raises the question again");
-    assertEqual(loads, 3, "An acceptance reloads the example");
-    assertEqual(getUserFiles().length, 1, "An acceptance restores the example's files");
+    assertEqual(loads[2], "/api/examples/hello.dao", "An acceptance reloads the current example");
+    assertEqual(contentsOf(getUserFiles()), contentsOf(hello.files), "An acceptance restores the example's files");
     assertEqual(loadSavedDraft(), null, "An acceptance deletes the stored draft");
 
     // A stored draft that the screen does not show is still work: Reset
     // deletes it.
     updateActiveUserSource("module hello\n// kept only in the draft\n");
     saveDraft();
+    const draftOnly = contentsOf(loadSavedDraft()?.files);
     assertEqual(await loadExampleByName("hello.dao"), "applied", "The example loads over the draft");
     await resetWorkspace(refuse);
     assertEqual(asked, 3, "A draft the screen does not show raises the question");
-    assert(loadSavedDraft() !== null, "A refusal keeps that draft");
+    assertEqual(contentsOf(loadSavedDraft()?.files), draftOnly, "A refusal keeps that draft's sources");
 
-    // The files of another example, opened under no example name: Reset
-    // would restore hello.dao in their place, so it asks.
+    // A stored draft that cannot be decoded may be the only copy of its
+    // sources: it raises the question, and a refusal leaves it in storage.
+    memoryStorage.clear();
+    saveDraft();
+    const draftKey = memoryStorage.key(0);
+    assert(draftKey !== null, "The draft has a storage key");
+    memoryStorage.setItem(draftKey, "{ not a snapshot");
+    assertEqual(loadSavedDraft(), null, "The damaged draft does not decode");
+    await resetWorkspace(refuse);
+    assertEqual(asked, 4, "A draft that cannot be decoded raises the question");
+    assertEqual(memoryStorage.getItem(draftKey), "{ not a snapshot", "A refusal leaves the damaged draft in storage");
+
+    // Another example's files, opened under no example name: Reset would
+    // put hello.dao in their place, so it asks, and an acceptance asks the
+    // service for hello.dao.
     clearDraft();
-    assertEqual(await loadExampleByName("pipelines.dao"), "applied", "Another example loads");
-    assert(!resetWouldDiscardWork(), "That example, untouched, holds no work");
-    setWorkspaceProgram(example.files, "hello.dao", { exampleName: "" });
-    assert(resetWouldDiscardWork(), "The same files under no example name are work");
+    setWorkspaceProgram(pipelines.files, "pipelines.dao", { exampleName: "" });
+    assert(resetWouldDiscardWork(), "Files opened under no example name are work");
+    await resetWorkspace(accept);
+    assertEqual(loads[loads.length - 1], "/api/examples/hello.dao", "Reset restores hello.dao where no example is named");
+    assertEqual(contentsOf(getUserFiles()), contentsOf(hello.files), "The workspace holds hello.dao");
   });
 }
 
