@@ -48,8 +48,9 @@ six findings that have since changed, and it does not survey the rest:
   `Equatable`, so the `IntMap<V>` that this note recommends has no
   purpose. The resolver's two program tables take a class of two `i64`
   fields as their key (`UseSite`, `ExtendSite`). Such a class derives
-  both concepts because each of its fields conforms and it declares
-  neither concept itself. The other composite string keys still wait
+  both concepts because each of its fields conforms, and because no
+  explicit implementation of either concept exists for it, in its body
+  or in an `extend` block. The other composite string keys still wait
   for the same treatment.
 - **`Vector<T>` operations.** `stdlib/core/vector.dao` now has the seven
   operations that this note recommends.
@@ -59,8 +60,10 @@ six findings that have since changed, and it does not survey the rest:
   `Node::CallE(callee, ..)`.
 - **Try propagation.** The audit's probe now passes: the bootstrap
   compiler compiles `operand?` on an `Option` or a `Result`, into a
-  function that returns the same declaration. It still rejects `?` in a
-  lambda whose return type it infers from the body.
+  function that returns the same declaration. For a `Result`, the
+  function's error type must equal the operand's, and the two success
+  types may differ. The compiler still rejects `?` in a lambda whose
+  return type it infers from the body.
 - **Pipeline.** The bootstrap compiler compiles `left |> right`, for a
   target of one parameter.
 
