@@ -1,4 +1,6 @@
+import { CompletionContext } from "@codemirror/autocomplete";
 import { EditorState, Transaction } from "@codemirror/state";
+import { daoCompletionSource } from "./completions";
 import {
   addUserFile,
   closePreludeTab,
@@ -632,6 +634,62 @@ async function testMalformedAndPartialSnapshotsAreAtomic(): Promise<void> {
   assertEqual(decoded.files.length, 2, "Share token preserves file count");
 }
 
+/**
+ * A completion context over `source` at its end, with the abort the editor
+ * performs on a buffer swap under the test's control.
+ */
+function completionContextFor(source: string): { ctx: CompletionContext; abort: () => void } {
+  const state = EditorState.create({ doc: source });
+  const ctx = new CompletionContext(state, source.length, false);
+  let aborted = false;
+  Object.defineProperty(ctx, "aborted", { get: () => aborted });
+  return { ctx, abort: () => { aborted = true; } };
+}
+
+async function testCompletionSourceSettlesQuietlyOnceAborted(): Promise<void> {
+  setWorkspaceProgram([{ path: "app.dao", source: "module app\nfn main(): i32 -> pri" }], "app.dao");
+  const source = getActiveSource();
+  const options = [{ label: "print", kind: "function", type: "fn(string): void" }];
+
+  // A live query delivers the service's options.
+  await withMockFetch(async () => jsonResponse(options), async () => {
+    const live = await daoCompletionSource(completionContextFor(source).ctx);
+    assert(live !== null, "A live query yields a result");
+    assertEqual(live.options[0].label, "print", "A live query yields the service's option");
+  });
+
+  // A query aborted while the service is answering delivers nothing.
+  const lateAnswer = deferred<Response>();
+  await withMockFetch(() => lateAnswer.promise, async () => {
+    const { ctx, abort } = completionContextFor(source);
+    const pending = daoCompletionSource(ctx);
+    abort();
+    lateAnswer.resolve(jsonResponse(options));
+    assertEqual(await pending, null, "An aborted query drops a late answer");
+  });
+
+  // A query aborted before the service refuses it delivers nothing either.
+  const lateRefusal = deferred<Response>();
+  await withMockFetch(() => lateRefusal.promise, async () => {
+    const { ctx, abort } = completionContextFor(source);
+    const pending = daoCompletionSource(ctx);
+    abort();
+    lateRefusal.resolve(jsonResponse({ error: "bad offset" }, 400));
+    assertEqual(await pending, null, "An aborted query swallows a late refusal");
+  });
+
+  // A live query still reports the refusal.
+  await withMockFetch(async () => jsonResponse({ error: "bad offset" }, 400), async () => {
+    let reported = "";
+    try {
+      await daoCompletionSource(completionContextFor(source).ctx);
+    } catch (err) {
+      reported = String(err);
+    }
+    assert(reported.includes("bad offset"), "A live query reports the service's refusal");
+  });
+}
+
 async function runAll(): Promise<void> {
   testWorkspaceRevisionIncrementsOnEveryMutation();
   await testMalformedAndPartialSnapshotsAreAtomic();
@@ -639,6 +697,7 @@ async function runAll(): Promise<void> {
   await testBootstrapStartupEditsAndGenuineFallback();
   testUndoableReplaceTransactionInvariants();
   await testFormatterTargetsWritableFileAndGuardsStaleReplies();
+  await testCompletionSourceSettlesQuietlyOnceAborted();
   console.log("workspace_state.test: all assertions passed");
 }
 
