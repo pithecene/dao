@@ -726,8 +726,8 @@ fn bs_mir_block_diverges_raw(mir_nodes: Vector<MirNode>, mir_idx: Vector<i64>, b
 // blocks of a cycle never do.  A join that lies earlier in the list than
 // a block branching to it is no cycle: an `if` makes its merge block
 // before its arms, and a nested join then branches back to it.  A branch
-// to a block outside the function counts as a cycle, so the caller
-// claims no divergence for it.
+// to a block outside the function, or to no block at all, counts as a
+// cycle, so the caller claims no divergence for it.
 fn bs_mir_blocks_cycle(bs: BS, fblocks: Vector<i64>): bool
   let position = HashMap<string, i64>::new()
   let incoming = Vector<i64>::new()
@@ -739,17 +739,16 @@ fn bs_mir_blocks_cycle(bs: BS, fblocks: Vector<i64>): bool
   bi = to_i64(0)
   while bi < fblocks.length():
     let exit = mir_block_exit(bs, fblocks.get(bi))
-    let side = 0
-    while side < 2:
+    let side = to_i64(0)
+    while side < exit.branches:
       let target = exit.target
-      if side == 1:
+      if side == to_i64(1):
         target = exit.else_block
-      if target >= 0:
-        let at = base::hm_get_or(position, i64_to_string(target), to_i64(-1))
-        if at < 0:
-          return true
-        incoming = incoming.set(at, incoming.get(at) + to_i64(1))
-      side = side + 1
+      let at = base::hm_get_or(position, i64_to_string(target), to_i64(-1))
+      if at < 0:
+        return true
+      incoming = incoming.set(at, incoming.get(at) + to_i64(1))
+      side = side + to_i64(1)
     bi = bi + to_i64(1)
   let ready = Vector<i64>::new()
   bi = to_i64(0)
@@ -760,18 +759,18 @@ fn bs_mir_blocks_cycle(bs: BS, fblocks: Vector<i64>): bool
   let retired = to_i64(0)
   while retired < ready.length():
     let exit = mir_block_exit(bs, fblocks.get(ready.get(retired)))
-    let side = 0
-    while side < 2:
+    let side = to_i64(0)
+    while side < exit.branches:
       let target = exit.target
-      if side == 1:
+      if side == to_i64(1):
         target = exit.else_block
-      if target >= 0:
-        let at = base::hm_get_or(position, i64_to_string(target), to_i64(-1))
-        let left = incoming.get(at) - to_i64(1)
-        incoming = incoming.set(at, left)
-        if left == to_i64(0):
-          ready = ready.push(at)
-      side = side + 1
+      // The first walk found every named block in the function.
+      let at = base::hm_get_or(position, i64_to_string(target), to_i64(-1))
+      let left = incoming.get(at) - to_i64(1)
+      incoming = incoming.set(at, left)
+      if left == to_i64(0):
+        ready = ready.push(at)
+      side = side + to_i64(1)
     retired = retired + to_i64(1)
   return retired < fblocks.length()
 
@@ -2272,11 +2271,13 @@ fn ll_inst_is_unreachable(inst: LlInst): bool
 
 // The blocks one block branches to.
 // How a block leaves: `br target` (else_block -1), or `cond_br cond,
-// then_block, else_block`; target -1 when it returns.
+// then_block, else_block`; target -1 when it returns.  `branches` counts
+// the blocks that the terminator names, valid or not: 0, 1 or 2.
 class BlockExit:
   cond: i64
   target: i64
   else_block: i64
+  branches: i64
 
 fn mir_block_diverges(bs: BS, block_node_idx: i64): bool
   match bs.input.mir_nodes.get(block_node_idx):
@@ -2295,8 +2296,8 @@ fn mir_block_diverges(bs: BS, block_node_idx: i64): bool
 
 fn mir_block_exit(bs: BS, block_node_idx: i64): BlockExit
   if mir_block_diverges(bs, block_node_idx):
-    return BlockExit(to_i64(-1), to_i64(-1), to_i64(-1))
-  let exit: BlockExit = BlockExit(to_i64(-1), to_i64(-1), to_i64(-1))
+    return BlockExit(to_i64(-1), to_i64(-1), to_i64(-1), to_i64(0))
+  let exit: BlockExit = BlockExit(to_i64(-1), to_i64(-1), to_i64(-1), to_i64(0))
   match bs.input.mir_nodes.get(block_node_idx):
     MirNode::MirBlock(block_id, inst_list_lp, inst_count):
       let insts_raw: Vector<i64> = read_mir_list(bs.input.mir_idx, inst_list_lp)
@@ -2304,9 +2305,9 @@ fn mir_block_exit(bs: BS, block_node_idx: i64): BlockExit
       while ii < insts_raw.length():
         match bs.input.mir_nodes.get(insts_raw.get(ii)):
           MirNode::MirBr(target_block):
-            exit = BlockExit(to_i64(-1), target_block, to_i64(-1))
+            exit = BlockExit(to_i64(-1), target_block, to_i64(-1), to_i64(1))
           MirNode::MirCondBr(cond, then_block, else_block):
-            exit = BlockExit(cond, then_block, else_block)
+            exit = BlockExit(cond, then_block, else_block, to_i64(2))
         ii = ii + to_i64(1)
   return exit
 
