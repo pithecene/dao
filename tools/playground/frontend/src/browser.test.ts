@@ -22,20 +22,23 @@ interface EditorProbe {
   tokens: [string, string][];
   tabTitles: string[];
   activeTab: number;
-  /** Whether the instruction for leaving the editor is drawn, and under the editor, not over it. */
-  exitHintUnderEditor: boolean;
 }
 
 function probe(page: Page): Promise<EditorProbe> {
   return page.evaluate(() => {
     const outline = getComputedStyle(document.querySelector(".cm-editor")!);
     const tabs = [...document.querySelectorAll(".editor-tab")];
-    const hint = document.querySelector("#editor-exit-hint")!.getBoundingClientRect();
-    const editor = document.querySelector("#editor-container")!.getBoundingClientRect();
+    const outlineWidth = parseFloat(outline.outlineWidth);
     return {
       theme: document.documentElement.dataset.theme,
       focused: document.activeElement?.classList.contains("cm-content") ?? false,
-      outlined: outline.outlineStyle !== "none" && parseFloat(outline.outlineWidth) > 0,
+      // An outline that shows: drawn in a colour, and inside the editor's
+      // edge, since its container clips anything outside.
+      outlined:
+        outline.outlineStyle !== "none" &&
+        outlineWidth > 0 &&
+        parseFloat(outline.outlineOffset) <= -outlineWidth &&
+        !/^rgba\(.*, 0\)$|^transparent$/.test(outline.outlineColor),
       lines: [...document.querySelectorAll(".cm-content .cm-line")].map(
         (line) => line.textContent ?? "",
       ),
@@ -47,8 +50,6 @@ function probe(page: Page): Promise<EditorProbe> {
       ),
       tabTitles: tabs.map((tab) => tab.textContent?.trim() ?? ""),
       activeTab: tabs.findIndex((tab) => tab.classList.contains("active")),
-      // Half a pixel of slack: the two boxes share an edge at a fractional offset.
-      exitHintUnderEditor: hint.height > 0 && hint.top >= editor.bottom - 0.5,
     };
   });
 }
@@ -112,12 +113,32 @@ async function editorIsNamedOnEveryFile(page: Page): Promise<void> {
   for (const [index, title] of loaded.tabTitles.entries()) {
     await page.locator(".editor-tab").nth(index).click();
     await eventually(page, `${title} becomes the open file`, (editor) => editor.activeTab === index);
-    const content = page.locator(".cm-content");
-    if ((await content.getAttribute("aria-label")) !== "Source editor") {
-      throw new Error(`the editor has no name on ${title}`);
+    // Found by role and name, as assistive technology finds it.
+    const named = page.getByRole("textbox", { name: "Source editor", exact: true });
+    if ((await named.count()) !== 1) throw new Error(`no text box named Source editor on ${title}`);
+    const description = (await named.getAttribute("aria-description")) ?? "";
+    if (!/\bEscape\b.*\bTab\b/.test(description)) {
+      throw new Error(`the editor does not give both keys for leaving it on ${title}`);
     }
-    if (!(await content.getAttribute("aria-description"))?.includes("Escape")) {
-      throw new Error(`the editor does not say how to leave it on ${title}`);
+  }
+}
+
+async function exitIsStatedAtEveryWidth(page: Page): Promise<void> {
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 800 });
+    const hint = page.locator("#editor-exit-hint");
+    await hint.waitFor({ state: "visible", timeout: WAIT_MS });
+    if (!/\bEsc\b.*\bTab\b/.test((await hint.innerText()).trim())) {
+      throw new Error(`${width} wide: the visible hint does not give both keys`);
+    }
+    const hintBox = await hint.boundingBox();
+    const editorBox = await page.locator("#editor-container").boundingBox();
+    if (!hintBox || !editorBox) throw new Error(`${width} wide: the hint or the editor has no box`);
+    // Half a pixel of slack: the two boxes share an edge at a fractional offset.
+    const underEditor = hintBox.y >= editorBox.y + editorBox.height - 0.5;
+    const inView = hintBox.x >= 0 && hintBox.x + hintBox.width <= width;
+    if (!underEditor || !inView) {
+      throw new Error(`${width} wide: the hint must sit under the editor, inside the window`);
     }
   }
 }
@@ -148,9 +169,6 @@ async function tabIndentsAndEscapeLeaves(page: Page): Promise<void> {
 
   await replaceEditorText(page, flat.join("\n"));
   await eventually(page, "the text is in the editor", (editor) => shows(editor, flat));
-  await eventually(page, "the way out is stated under the editor", (editor) =>
-    editor.exitHintUnderEditor,
-  );
 
   // Select from the second line's start to the third line's end.
   await page.keyboard.press("ControlOrMeta+Home");
@@ -171,11 +189,14 @@ async function tabIndentsAndEscapeLeaves(page: Page): Promise<void> {
   );
 
   // The selection is still held, and a binding takes Escape to drop it.
-  await leaveEditor(page);
+  // Tab arrives while Escape is still down, before any release.
+  await page.keyboard.down("Escape");
+  await page.keyboard.press("Tab");
+  await page.keyboard.up("Escape");
   await eventually(
     page,
-    "leaving changes no text",
-    (editor) => shows(editor, flat),
+    "Tab while Escape is held leaves the editor and changes no text",
+    (editor) => !editor.focused && shows(editor, flat),
   );
 }
 
@@ -200,6 +221,7 @@ async function run(): Promise<void> {
   const scenarios = [
     focusIsVisibleInBothThemes,
     editorIsNamedOnEveryFile,
+    exitIsStatedAtEveryWidth,
     tokensCoverTheirOwnText,
     tabIndentsAndEscapeLeaves,
     tabPassesThroughReadOnlyFile,

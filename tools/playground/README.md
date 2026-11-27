@@ -27,7 +27,7 @@ To run the browser suite, which drives the built playground in headless Chromium
 task playground-browser-test
 ```
 
-It keeps the browser inside `frontend/node_modules` and starts the service on port `8099` (`DAO_PLAYGROUND_TEST_PORT` sets another).
+It keeps the browser under the build directory and starts the service on a port the system picks for the run.
 
 ## Architecture
 

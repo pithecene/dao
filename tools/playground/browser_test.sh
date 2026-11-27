@@ -9,8 +9,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD_DIR="${DAO_BUILD_DIR:-$ROOT/build/debug}"
 BIN="$BUILD_DIR/tools/playground/compiler_service/dao_playground"
 FRONTEND="$ROOT/tools/playground/frontend"
-PORT="${DAO_PLAYGROUND_TEST_PORT:-8099}"
-URL="http://127.0.0.1:$PORT/"
+STARTUP_SECONDS=10
 
 fail() {
   printf 'error: %s\n' "$*" >&2
@@ -20,23 +19,29 @@ fail() {
 [ -x "$BIN" ] || fail "no compiler service at $BIN (run: task build)"
 [ -f "$FRONTEND/dist/index.html" ] || fail "no built frontend in $FRONTEND/dist (run: task playground-build)"
 
+# A port the system hands out for this run.  The service shares a port it
+# is told to use with any other process that asks for the same one, so a
+# fixed port could answer from another worktree's service.
+PORT="$(node -e 'const s = require("node:net").createServer().listen(0, "127.0.0.1", () => { console.log(s.address().port); s.close(); });')"
+URL="http://127.0.0.1:$PORT/"
+
 "$BIN" --root "$ROOT" --port "$PORT" > /dev/null &
 service_pid=$!
-trap 'kill "$service_pid" 2>/dev/null; wait "$service_pid" 2>/dev/null' EXIT
+# The service ends by the signal sent here, and its status must not
+# replace the suite's.
+trap 'kill "$service_pid" 2>/dev/null || true; wait "$service_pid" 2>/dev/null || true' EXIT
 
-# The service exits at once when the port is taken, so its being alive is
-# checked before each request: an answer then comes from this service and
-# not from whatever else holds the port.
+deadline=$((SECONDS + STARTUP_SECONDS))
 answered=""
-for _ in $(seq 1 50); do
-  sleep 0.2
-  kill -0 "$service_pid" 2>/dev/null || fail "the service exited before it answered (is port $PORT in use?)"
-  if curl -fs -o /dev/null "$URL"; then
+while [ "$SECONDS" -lt "$deadline" ]; do
+  kill -0 "$service_pid" 2>/dev/null || fail "the service exited before it answered on port $PORT"
+  if curl -fs -o /dev/null --max-time "$((deadline - SECONDS))" "$URL"; then
     answered=yes
     break
   fi
+  sleep 0.2
 done
-[ -n "$answered" ] || fail "the service did not answer on $URL within ten seconds"
+[ -n "$answered" ] || fail "the service did not answer on $URL within $STARTUP_SECONDS seconds"
 
 cd "$FRONTEND"
 VITE_PLAYGROUND_URL="$URL" npm run test:browser

@@ -25,5 +25,6 @@ this file.
 | Package | SPDX License | Upstream |
 |---|---|---|
 | `codemirror`, `@codemirror/*` | `MIT` | Marijn Haverbeke and contributors (`https://codemirror.net`) |
+| `playwright` | `Apache-2.0` | Microsoft Corporation (`https://playwright.dev`) |
 | `typescript` | `Apache-2.0` | Microsoft Corporation (`https://www.typescriptlang.org`) |
 | `vite` | `MIT` | Evan You and Vite contributors (`https://vite.dev`) |

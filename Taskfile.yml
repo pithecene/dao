@@ -73,12 +73,17 @@ tasks:
   playground-browser-test:
     desc: Run the playground's browser suite against the built service and frontend
     deps: [build, playground-build]
-    # The browser is kept inside the frontend's node_modules, not in the
-    # user's cache, so nothing outside the repository changes.
+    # The browser is kept under the build directory, not in the user's
+    # cache, so nothing outside the repository changes, and not in
+    # node_modules, which `npm ci` empties.
     env:
-      PLAYWRIGHT_BROWSERS_PATH: "0"
+      PLAYWRIGHT_BROWSERS_PATH: "{{.ROOT_DIR}}/{{.BUILD_DIR}}/playwright-browsers"
     cmds:
-      - cd tools/playground/frontend && npx --no-install playwright install chromium
+      # The frontend's build is skipped when its sources are unchanged,
+      # whether or not its tools are still installed.
+      - cd tools/playground/frontend && (test -x node_modules/.bin/playwright || npm ci --ignore-scripts)
+      # Only the headless shell, which is the browser the suite launches.
+      - cd tools/playground/frontend && npx --no-install playwright install --only-shell chromium
       - DAO_BUILD_DIR={{.BUILD_DIR}} bash tools/playground/browser_test.sh
 
   playground-dev:
