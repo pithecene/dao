@@ -496,6 +496,16 @@ fn lower_expr_value(br: BlockR, hir_node_idx: i64): ExprR
       return br_emit_value(payload_of.br, MirNode::MirEnumPayload(value = payload_of.value, variant = variant, field = field, type_idx = type_idx))
     HirNode::HirTry(operand, error_ti, return_ti, type_idx):
       return lower_try(br, operand, error_ti, return_ti, type_idx)
+    HirNode::HirPipe(left, right, type_idx):
+      // `left |> right` is the call `right(left)`, with the piped value
+      // evaluated before the target, in source order (host).  The checker
+      // admits only a target of one parameter, so the one argument is the
+      // whole call.
+      let piped: ExprR = lower_expr_value(br, left)
+      let target: ExprR = lower_expr_value(piped.br, right)
+      let piped_fl: MirFlush = mir_flush_list(target.br.ms, Vector<i64>::new().push(piped.value))
+      target.br.ms = piped_fl.ms
+      return br_emit_value(target.br, MirNode::MirCall(callee = target.value, arg_list_lp = piped_fl.list_pos, arg_count = to_i64(1), type_idx = type_idx, subst = to_i64(-1)))
     HirNode::HirPtrOp(op, pointer, argument, type_idx):
       // A read or a write goes through the pointee's place, as the
       // host's does; the other operations yield a pointer or a flag.

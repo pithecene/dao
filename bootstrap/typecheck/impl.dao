@@ -5042,6 +5042,10 @@ fn check_pipe_expr(ts: TS, node_idx: i64, left: i64, right: i64): TS
           let sp: Span = ts_node_span(r, right)
           r = ts_add_diag(r, sp, "pipe target function takes no arguments")
           return r
+        // The pipe is the call `right(left)`, and it supplies that one
+        // argument alone.
+        if rhs_type.info_count > 1:
+          return ts_add_diag(r, ts_node_span(r, right), "pipe target takes " + i64_to_string(rhs_type.info_count) + " parameters; a pipe supplies one")
         // Check LHS type against first param type.  Read the param slot
         // only when the function's params live in this module's type_info
         // (`info_lp` >= 0 and in range); a cross-module target's slot would

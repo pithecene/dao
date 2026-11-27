@@ -243,7 +243,8 @@ type-checked AST.
 - Expression-bodied fns desugared to block + return
 - Match desugared to if/else chain
 - Every HIR expression carries its resolved type index
-- Pipe preserved as first-class node (MIR lowers it)
+- Pipe preserved as first-class node.  MIR lowers `left |> right` to
+  the call `right(left)`, for a target of one parameter
 - `operand?` kept as one `HirTry` node carrying the type the function
   returns and the error a failing `Result` holds.  MIR lowers it to a
   test of the operand's first variant and a return of the function's

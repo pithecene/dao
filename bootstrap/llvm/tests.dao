@@ -424,7 +424,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 61
+  let total: i32 = 62
   let write_failures: i32 = 0
 
   // -----------------------------------------------------------------
@@ -1046,6 +1046,17 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL try_leaves_every_resource_block: " + diags_text(try_in_region.diags))
+
+  // A pipe calls its target with the piped value, whether the target is
+  // a named function, a function value, or a lambda: 3 becomes 4, then
+  // 14, then 28, and the program exits 0.
+  let piped: LlvmTextResult = lower_source_to_llvm_text("fn inc(x: i32): i32 -> x + 1\n\nfn add_ten(x: i32): i32 -> x + 10\n\nfn main(): i32\n  let through: fn(i32): i32 = add_ten\n  let sum: i32 = 3 |> inc |> through\n  let doubled: i32 = sum |> |x| -> x * 2\n  return doubled - 28\n")
+  write_failures = write_failures + emit_ir("pipe_calls_its_target", piped, 0)
+  if piped.ok:
+    print("PASS pipe_calls_its_target")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL pipe_calls_its_target: " + diags_text(piped.diags))
 
   // Test 36: pointers — allocated by the runtime, cast, walked, written
   // and read through (`p.offset(1).set(5)`, `.get()`), sized by

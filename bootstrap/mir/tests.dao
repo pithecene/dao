@@ -177,7 +177,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 58
+  let total: i32 = 59
 
   // -----------------------------------------------------------------
   // Test 1: minimal program produces MirModule + MirFunction
@@ -438,14 +438,15 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL bound_call_carried_by_template: expected one template holding the call, no function, no diagnostics; got " + i64_to_string(r17.diags.length()) + " diagnostics, " + i64_to_string(r17_templates.length()) + " templates")
-  // Test 18: an expression kind with no Tier A lowering is reported, so
-  // a call through a bound beneath it does not vanish with it.
+  // Test 18: a call through a bound beneath a pipe is carried by the
+  // template as it is beneath any other expression: the pipe's call and
+  // the bound call, and no diagnostic.
   let r18: MirResult = lower_to_mir("concept Printable:\n  fn to_string(self): string\n\nfn identity(s: string): string -> s\n\nfn show<T: Printable>(x: T): string\n  return x.to_string() |> identity\n")
-  if r18.diags.length() >= 1:
-    print("PASS unsupported_expression_kind_reported_in_mir")
+  if r18.diags.length() == 0 and mir_count_kind(r18, "MirCall") == 2 and mir_contains_kind(r18, "MirFieldAccess"):
+    print("PASS piped_bound_call_carried_by_template")
     pass_count = pass_count + 1
   else:
-    print("FAIL unsupported_expression_kind_reported_in_mir: expected a diagnostic, got 0")
+    print("FAIL piped_bound_call_carried_by_template: expected two calls and no diagnostics, got " + i64_to_string(mir_count_kind(r18, "MirCall")) + " calls, " + i64_to_string(r18.diags.length()) + " diagnostics")
 
   // Test 19: a program lowers to one MirModule per module, in program
   // order; the call in `app::main` names the function `core::util`
@@ -900,6 +901,15 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL both_branches_break_drop_the_rest: got " + i64_to_string(mir_count_kind(both_break, "MirCall")) + " calls, " + i64_to_string(both_break.diags.length()) + " diagnostics")
+
+  // A pipe lowers to a call of its target with the piped value: two
+  // pipes, two calls, and no diagnostic.
+  let piped: MirResult = lower_to_mir("fn inc(x: i32): i32 -> x + 1\n\nfn f(): i32\n  return 3 |> inc |> inc\n")
+  if piped.diags.length() == 0 and mir_count_kind(piped, "MirCall") == 2:
+    print("PASS pipe_lowers_to_a_call")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL pipe_lowers_to_a_call: got " + i64_to_string(mir_count_kind(piped, "MirCall")) + " calls, " + i64_to_string(piped.diags.length()) + " diagnostics")
 
   // A generic class's `copy_out` that returns another instantiation, or
   // is generic over its own parameter, is no copier: the expansion rebuilds the class field by field and never
