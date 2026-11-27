@@ -173,23 +173,24 @@ pre {
   flex-shrink: 0;
 }
 
-/* The two messages that come and go sit just below the header, out of
-   its row: in the row they would cover the links they have no room
-   beside.  The notice is at the right edge, the service status at the
-   left. */
-#nav-notice,
-#service-status {
-  position: absolute;
-  top: calc(100% + var(--space-2));
-  max-width: min(300px, calc(100vw - 2 * var(--space-4)));
-}
-
-#nav-notice {
+/* The messages that come and go: stacked at the screen's bottom
+   corner, where they stay in view however far the page has scrolled and
+   lie over no row of controls.  Clicks pass through them. */
+#feedback-region {
+  position: fixed;
   right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2);
+  max-width: min(300px, calc(100vw - 2 * var(--space-4)));
+  pointer-events: none;
 }
 
-#service-status {
-  left: var(--space-4);
+#feedback-region > * {
+  max-width: 100%;
 }
 
 #nav-notice {
@@ -1804,8 +1805,7 @@ pre {
     height: auto;
     flex-wrap: wrap;
     padding: var(--space-2) var(--space-3);
-    /* Not sticky, and still the box the two messages are placed against. */
-    position: relative;
+    position: static;
   }
 
   .ref-section {
