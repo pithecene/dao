@@ -18,12 +18,17 @@
 #include "support/test_utils.h"
 
 #include <boost/ut.hpp>
+#include <llvm/Support/ConvertUTF.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include <algorithm>
+#include <csignal>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -64,19 +69,22 @@ auto editor_offset(std::string_view text, size_t bytes) -> uint32_t {
   return units;
 }
 
-/// The byte offset in `text` of an editor offset: the inverse of
-/// editor_offset, for reading back the text a reply's range covers.
-auto byte_offset(std::string_view text, uint32_t units) -> size_t {
+/// The byte offset in `text` of an editor offset, for reading back the
+/// text a reply's range covers; nothing when the offset falls inside a
+/// character or past the text, where no text starts.
+auto byte_offset(std::string_view text, uint32_t units) -> std::optional<size_t> {
+  const auto* cursor = reinterpret_cast<const llvm::UTF8*>(text.data()); // NOLINT
+  const auto* end = cursor + text.size();                                // NOLINT
   size_t bytes = 0;
   uint32_t passed = 0;
-  // One whole character at a time, so the answer is never inside one.
-  while (bytes < text.size() && passed < units) {
-    const auto lead = static_cast<unsigned char>(text[bytes]);
-    const size_t width = lead >= 0xF0U ? 4 : lead >= 0xE0U ? 3 : lead >= 0xC0U ? 2 : 1;
+  while (passed < units && cursor < end) {
+    // A byte that begins no character is one unit, as in the service.
+    const size_t width = std::max(1U, llvm::getUTF8SequenceSize(cursor, end));
     passed += width == 4 ? 2U : 1U;
+    cursor += width; // NOLINT
     bytes += width;
   }
-  return std::min(bytes, text.size());
+  return passed == units ? std::optional<size_t>(bytes) : std::nullopt;
 }
 
 auto golden_dir() -> std::filesystem::path {
@@ -564,8 +572,9 @@ suite<"playground_service"> playground_service_suite = [] {
             << "a span outside the document";
         auto first = byte_offset(document, offset);
         auto past = byte_offset(document, offset + length);
+        expect(fatal(first.has_value() && past.has_value())) << "a span that splits a character";
         text_by_kind.emplace(token["kind"].get<std::string>(),
-                             document.substr(first, past - first));
+                             document.substr(*first, *past - *first));
       }
       return text_by_kind;
     };
@@ -827,7 +836,14 @@ suite<"playground_service"> playground_service_suite = [] {
     expect(errors.front()["length"] == 1U) << errors.front().dump();
     expect(errors.front()["col"] == 11U) << errors.front().dump();
     // The text just past the quote starts on a character boundary.
-    expect(byte_offset("\xE2\x80\x9Cx", 1U) == 3U);
+    expect(byte_offset("\xE2\x80\x9Cx", 1U) == std::optional<size_t>(3));
+    // Between an emoji's two units no text starts, and a lone lead byte
+    // takes nothing after it with it.
+    expect(!byte_offset("\xF0\x9F\x98\x80x", 1U).has_value());
+    expect(byte_offset("\xF0\x9F\x98\x80x", 2U) == std::optional<size_t>(4));
+    expect(byte_offset("\xE2"
+                       "ab",
+                       1U) == std::optional<size_t>(1));
   };
 
 #ifndef NDEBUG
@@ -842,7 +858,17 @@ suite<"playground_service"> playground_service_suite = [] {
     const uint32_t last = prog.user->eof_offset() - 1;
     expect(prog.editor_length({.offset = last, .length = 0}) == 0U);
     expect(prog.editor_length({.offset = last, .length = 1}) == 1U);
-    expect(aborts([&] { (void)prog.editor_length({.offset = last, .length = 2}); }));
+    // In a child process, which must end by the assertion's abort and
+    // by nothing else.
+    const pid_t child = fork();
+    expect(fatal(child >= 0));
+    if (child == 0) {
+      (void)prog.editor_length({.offset = last, .length = 2});
+      _exit(0);
+    }
+    int status = 0;
+    expect(waitpid(child, &status, 0) == child);
+    expect(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT) << status;
   };
 #endif
 
