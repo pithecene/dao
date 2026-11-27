@@ -1561,8 +1561,10 @@ pre {
   color: var(--fg-primary);
 }
 
+/* Inside the editor's edge: its container clips anything drawn outside. */
 .cm-editor.cm-focused {
-  outline: none;
+  outline: 1px solid var(--border-focus);
+  outline-offset: -1px;
 }
 
 .cm-editor .cm-scroller {
