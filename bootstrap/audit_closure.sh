@@ -67,6 +67,8 @@ program_sources() {
     printf '%s\n' bootstrap/typecheck/impl.dao bootstrap/typecheck/tests.dao
   elif [ "$1" = "hir" ]; then
     printf '%s\n' bootstrap/hir/impl.dao bootstrap/hir/tests.dao
+  elif [ "$1" = "mir" ]; then
+    printf '%s\n' bootstrap/mir/impl.dao bootstrap/mir/tests.dao
   else
     printf '%s\n' "bootstrap/$1/$1.gen.dao"
   fi
@@ -90,10 +92,10 @@ INVENTORY="$(awk -v labels="$LABELS" 'BEGIN { n = split(labels, a, "\n"); for (i
 #    LLVM as a definition -- the host lowers each specialization inline
 #    -- so it is counted from the MIR, where every specialization is a
 #    `fn_ref <name>$<type>`.
-INSTANCES="$("$DAOC" llvm-ir --source bootstrap/llvm/llvm.gen.dao --source bootstrap/hir/impl.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao 2>/dev/null \
+INSTANCES="$("$DAOC" llvm-ir --source bootstrap/llvm/llvm.gen.dao --source bootstrap/mir/impl.dao --source bootstrap/hir/impl.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao 2>/dev/null \
   | grep -oE 'define [^@]*@"core::[^"]*"' | sed -E 's/.*@"//; s/"$//; s/\$.*//' | sort | uniq -c | sort -rn)"
 INSTANCES_TABLE="$(echo "$INSTANCES" | awk 'NF {printf "| `%s` | %s |\n", $2, $1}')"
-INTRINSICS="$("$DAOC" mir --source bootstrap/llvm/llvm.gen.dao --source bootstrap/hir/impl.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao 2>/dev/null \
+INTRINSICS="$("$DAOC" mir --source bootstrap/llvm/llvm.gen.dao --source bootstrap/mir/impl.dao --source bootstrap/hir/impl.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao 2>/dev/null \
   | grep -oE 'fn_ref (size_of|align_of|ptr_offset)\$[^ ]+' | sed 's/^fn_ref //' | sort -u | sed 's/\$.*//' | uniq -c | sort -rn)"
 INTRINSICS_TABLE="$(echo "$INTRINSICS" | awk 'NF {printf "| `%s` (intrinsic; inlined by the host) | %s |\n", $2, $1}')"
 if [ -z "$INSTANCES_TABLE" ]; then
@@ -120,7 +122,7 @@ LIMIT_KB="${AUDIT_MEMORY_KB:-6291456}"   # 6 GiB
 LIMIT_S="${AUDIT_SECONDS:-600}"
 STAGES="parse typecheck hir mir mono llvm"
 if [ "$REPORT_ONLY" -eq 0 ]; then
-"$DAOC" build --source bootstrap/llvm/llvm.gen.dao --source bootstrap/hir/impl.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao > /dev/null || { echo "audit: building llvm.gen failed"; exit 1; }
+"$DAOC" build --source bootstrap/llvm/llvm.gen.dao --source bootstrap/mir/impl.dao --source bootstrap/hir/impl.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao > /dev/null || { echo "audit: building llvm.gen failed"; exit 1; }
 rm -f "$OUT/closure.txt" "$AUDIT_OUT/closure.merged"
 # The prelude alone, once: each file's parse and resolve counts, then
 # its typecheck count, for the document's prelude section.  A probe

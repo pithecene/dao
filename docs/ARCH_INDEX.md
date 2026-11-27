@@ -152,10 +152,10 @@ Self-hosting compiler subsystems written in Dao.
 - `ascii.dao` — `bootstrap::ascii`, character-classification module
   imported by `bootstrap::lexer`
 - `assemble.sh` — concatenates remaining unextracted subsystem fragments
-  (`mir`, `llvm`, `driver`) to produce `*.gen.dao` outputs under
+  (`llvm`, `driver`) to produce `*.gen.dao` outputs under
   `bootstrap/` or an explicit per-run output root (`ascii`, `lexer`,
-  `parser`, `graph`, `base`, `resolver`, `typecheck`, and `hir` compile
-  directly without assembly)
+  `parser`, `graph`, `base`, `resolver`, `typecheck`, `hir`, and `mir`
+  compile directly without assembly)
 - `validate_ir.sh` — compiles, links, and runs the IR the LLVM suite
   emits under `llvm/out/` or a per-run directory, comparing exit codes
   and expected fixture counts
@@ -189,10 +189,12 @@ Self-hosting compiler subsystems written in Dao.
   compiler-owned typed IR from the type-checked AST, and
   `bootstrap::hir::tests` (`tests.dao`), compiled directly as real
   modules without `assemble.sh`
-- `mir/` — Tier A MIR lowering pass producing basic-block MIR from
-  HIR: functions, locals, blocks, constants, binary/unary, let/assign,
+- `mir/` — `bootstrap::mir` (`impl.dao`) and `bootstrap::mir::tests`
+  (`tests.dao`), compiled directly as real modules without
+  `assemble.sh`: the Tier A MIR lowering pass producing basic-block MIR
+  from HIR: functions, locals, blocks, constants, binary/unary, let/assign,
   calls, returns, field-access reads, and if/else + while control
-  flow; logic + tests in `impl.dao` (Task 29)
+  flow
 - `llvm/` — LLVM backend: lowers a whole concrete MIR program, the
   prelude included, to deterministic textual LLVM IR with the host
   backend's meaning (types and layouts, `module::name` names, checked
