@@ -7,12 +7,15 @@ This note states the place of `match` in Dao's computational model, and derives
 from that place a consistent meaning for each of `:`, `->` and `=>`.  It changes
 no syntax.  The section "Open Decisions" lists the questions it leaves open.
 
-Each rule carries one of three sources.  **Contract** marks a rule that
+Each rule carries one of three sources, with one exception.  **Contract** marks a rule that
 `CONTRACT_SYNTAX_SURFACE.md`, `CONTRACT_TYPE_SYSTEM_FOUNDATIONS.md` or
 `ADR_ENUM_CLASS.md` states.  **Proposed** marks a rule from
 `control_flow_expressions.md` or `aggregate_initialization.md`.  **New** marks
 a rule that no record states and that this note proposes, so adoption
-would newly commit to it.  Section 1.6 records the behavior of the two
+would newly commit to it.  The exception is the implementation
+record that section 1.3 cites: it describes the resolvers and is not a
+language rule.
+Section 1.6 records the behavior of the two
 compilers.
 
 ## 1. Semantics of `match`
@@ -117,8 +120,8 @@ at this note's date gives these results:
 
 So an expression pattern can run user code today, against rule 1.1.4.
 The wildcard is a proposal that neither compiler implements.  The host
-accepts `as` after a fieldless variant and after a full destructuring,
-such as `V::Pair(count, label) as whole:`.  It rejects the contract's
+accepts `as` after a fieldless variant and after a destructuring list,
+such as `V::Pair(count, label) as whole:` or `V::Pair(..) as whole:`.  It rejects the contract's
 bare form, `V::Pair as whole:`, which gives access to a payload's fields
 without destructuring, so that form works in neither compiler.
 The bootstrap parser lacks the `as` syntax: it expects `:`
