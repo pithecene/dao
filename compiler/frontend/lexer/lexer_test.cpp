@@ -237,6 +237,9 @@ suite<"indentation_tests"> indentation_tests = [] {
     const std::vector<Malformed> cases = {
         {"a continuation byte with no lead", "\x9C\n", {"unexpected byte: 0x9C"}},
         {"a character cut short", "\xE2\x80\n", {"unexpected byte: 0xE2", "unexpected byte: 0x80"}},
+        {"a character cut short by the end of the source",
+         "\xE2\x80",
+         {"unexpected byte: 0xE2", "unexpected byte: 0x80"}},
         {"an overlong form", "\xC0\xAF\n", {"unexpected byte: 0xC0", "unexpected byte: 0xAF"}},
         {"an overlong form of three bytes",
          "\xE0\x9F\xBF\n",
