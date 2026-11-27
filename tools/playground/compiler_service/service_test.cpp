@@ -504,6 +504,47 @@ suite<"playground_service"> playground_service_suite = [] {
     }
   };
 
+  "a program that stops at assembly still classifies the document"_test = [] {
+    // The editor colours a file from this reply alone, so a reply with no
+    // tokens leaves the file plain.  Each program here stops at assembly,
+    // and the document must still come back classified.
+    const std::string uses_helper =
+        "module app\nimport helper\n\nfn main(): i32\n  return helper::one()\n";
+    const std::string helper = "module helper\n\nfn one(): i32 -> 1\n";
+    auto kinds_of = [&](const std::string& document, const std::string& other) {
+      auto reply = call("analyze",
+                        json{{"files",
+                              json::array({{{"path", kTestDocument}, {"source", document}},
+                                           {{"path", "helper.dao"}, {"source", other}}})},
+                             {"document", kTestDocument}});
+      expect(std::ranges::any_of(reply.body["diagnostics"],
+                                 [](const json& diag) { return diag["severity"] == "error"; }))
+          << "the program must stop at assembly: " << reply.body["diagnostics"].dump();
+      expect(!reply.body["tokens"].empty()) << "no lexical tokens: " << reply.body.dump();
+      std::set<std::string> kinds;
+      for (const auto& token : reply.body["semanticTokens"]) {
+        kinds.insert(token["kind"].get<std::string>());
+      }
+      return kinds;
+    };
+
+    // The document's own lexer error: no syntax tree, so the lexical
+    // kinds, on both sides of the error.
+    auto unlexable =
+        kinds_of("module app\n\nfn main(): i32\n  print(\"oops)\n  return 0\n", helper);
+    expect(unlexable.contains("keyword.fn")) << "nothing before the lexer error is classified";
+    expect(unlexable.contains("keyword.return")) << "nothing after the lexer error is classified";
+
+    // Another file's lexer error, and a module declared twice: the
+    // document parsed, so its declarations classify from its syntax tree.
+    auto beside_unlexable = kinds_of(uses_helper, "module helper\n\nfn one(): i32 -> @\n");
+    expect(beside_unlexable.contains("decl.function"))
+        << "another file's lexer error hid the document's declarations";
+    auto declared_twice = kinds_of(uses_helper, "module app\n\nfn one(): i32 -> 1\n");
+    expect(declared_twice.contains("decl.function"))
+        << "a module declared twice hid the document's declarations";
+  };
+
   "a document without main is advised, not failed"_test = [] {
     // EntryPolicy::Advisory: analysis runs to completion and the reply
     // says why Run will not work, as a warning rather than an error.

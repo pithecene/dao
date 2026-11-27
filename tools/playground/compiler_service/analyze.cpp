@@ -249,15 +249,18 @@ auto analyze(const nlohmann::json& request, const ServiceContext& ctx) -> Reply 
     out.unlocated.push_back(make_unlocated_diagnostic(diag.message, diag.severity));
   }
   out.add(assembly.located);
-  if (prog.user == nullptr || has_error_severity(prog.program.diagnostics)) {
+  if (prog.user == nullptr) {
     return out.reply();
   }
 
   add_lexical_tokens(out, prog);
-  if (!prog.user->lex.diagnostics.empty()) {
-    return out.reply();
-  }
-  if (prog.user->file() == nullptr) {
+  // A program that stops at assembly has no resolution to draw on, but
+  // the document's own tokens, and its syntax tree when it parsed, still
+  // classify.  Without them one unterminated string in any file would
+  // leave every file of the program uncoloured.  A document with a lexer
+  // diagnostic was never parsed, so it has no file node.
+  if (has_error_severity(prog.program.diagnostics) || prog.user->file() == nullptr) {
+    add_semantic_tokens(out, classify_tokens(prog.user->lex.tokens, prog.user->file()), prog);
     return out.reply();
   }
   // Lowering needs every file lexed and parsed cleanly; the document's
