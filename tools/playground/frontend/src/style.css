@@ -1052,8 +1052,9 @@ pre {
   align-items: stretch;
   overflow-x: auto;
   scrollbar-width: none;
-  /* Room for one tab's name and its close control at the narrowest editor. */
-  min-width: 96px;
+  /* Room for one tab's name at the narrowest editor (240px), which still
+     leaves the read-only badge its whole width beside the strip. */
+  min-width: 80px;
   /* The strip scrolls, so it gives up width ahead of the label. */
   flex: 0 4 auto;
 }
