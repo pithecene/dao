@@ -8,9 +8,7 @@ import bootstrap::resolver
 import bootstrap::typecheck
 import bootstrap::hir
 
-// Test runner for the bootstrap hir.  Assembled after the
-// shared base and every library it exercises; never compiled
-// standalone.
+// Standalone test runner for `bootstrap::hir` (`module bootstrap::hir::tests`).
 
 // =========================================================================
 // Section 61: Tests

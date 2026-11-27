@@ -188,7 +188,7 @@ Self-hosting compiler subsystems written in Dao.
 - `hir/` — `bootstrap::hir` (`impl.dao`), the HIR lowering pass producing
   compiler-owned typed IR from the type-checked AST, and
   `bootstrap::hir::tests` (`tests.dao`), compiled directly as real
-  modules without `assemble.sh` (Task 24)
+  modules without `assemble.sh`
 - `mir/` — Tier A MIR lowering pass producing basic-block MIR from
   HIR: functions, locals, blocks, constants, binary/unary, let/assign,
   calls, returns, field-access reads, and if/else + while control

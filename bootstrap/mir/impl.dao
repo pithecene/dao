@@ -459,7 +459,7 @@ fn lower_try(br: BlockR, operand: i64, error_ti: i64, return_ti: i64, value_ti: 
   let tag_ti = typecheck::builtin_type_index("i32")
   let held = br_emit_value(tried.br, MirNode::MirEnumDiscriminant(value = tried.value, type_idx = tag_ti))
   let first = br_emit_value(held.br, MirNode::MirConstInt(value = to_i64(0), type_idx = tag_ti))
-  let succeeded = br_emit_value(first.br, MirNode::MirBinary(op_tok = hir::synthesized_equality_op(), lhs = held.value, rhs = first.value, type_idx = mir_bool_type()))
+  let succeeded = br_emit_value(first.br, MirNode::MirBinary(op_tok = base::synthesized_equality_op(), lhs = held.value, rhs = first.value, type_idx = mir_bool_type()))
   let cur = succeeded.br
   let ok_r = ms_new_block(cur.ms)
   cur.ms = ok_r.ms
@@ -3294,7 +3294,7 @@ fn mono_expand_enum_copy(m: Mono, fn_node: i64, block: i64, call: i64, callee: i
     if vi + to_i64(1) < t.info_count:
       m.tables.nodes = m.tables.nodes.push(MirNode::MirConstInt(value = vi, type_idx = i32_ti))
       let tag: i64 = m.tables.nodes.length() - to_i64(1)
-      m.tables.nodes = m.tables.nodes.push(MirNode::MirBinary(op_tok = hir::synthesized_equality_op(), lhs = discr, rhs = tag, type_idx = bool_ti))
+      m.tables.nodes = m.tables.nodes.push(MirNode::MirBinary(op_tok = base::synthesized_equality_op(), lhs = discr, rhs = tag, type_idx = bool_ti))
       let is_v: i64 = m.tables.nodes.length() - to_i64(1)
       let next_test: MonoBlock = mono_new_block(m, next_id, Vector<i64>::new())
       m = next_test.m

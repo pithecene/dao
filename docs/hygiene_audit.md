@@ -67,9 +67,9 @@ six findings that have since changed, and it does not survey the rest:
 - **Pipeline.** The bootstrap compiler compiles `left |> right`, for a
   target of one parameter.
 
-The type checker is now the real module `bootstrap::typecheck`, so
-`assemble.sh` concatenates only the `hir`, `mir`, `llvm`, and `driver`
-programs.
+The type checker and the HIR pass are now the real modules
+`bootstrap::typecheck` and `bootstrap::hir`, so `assemble.sh` concatenates
+only the `mir`, `llvm`, and `driver` programs.
 
 ## Native vs. Bootstrap Parity Matrix
 

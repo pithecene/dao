@@ -54,5 +54,5 @@ Git ignores `*.gen.dao` files because they are build artifacts.
 The shared file `base.dao` eliminated triplicated frontend code before
 multi-file compilation landed. Real module boundaries (`bootstrap::ascii`,
 `bootstrap::lexer`, `bootstrap::parser`, `bootstrap::graph`, `bootstrap::base`,
-`bootstrap::resolver`, and `bootstrap::typecheck`) are retiring `assemble.sh` one phase boundary at a
+`bootstrap::resolver`, `bootstrap::typecheck`, and `bootstrap::hir`) are retiring `assemble.sh` one phase boundary at a
 time.
