@@ -68,10 +68,15 @@ auto editor_offset(std::string_view text, size_t bytes) -> uint32_t {
 /// editor_offset, for reading back the text a reply's range covers.
 auto byte_offset(std::string_view text, uint32_t units) -> size_t {
   size_t bytes = 0;
-  while (bytes < text.size() && editor_offset(text, bytes) < units) {
-    ++bytes;
+  uint32_t passed = 0;
+  // One whole character at a time, so the answer is never inside one.
+  while (bytes < text.size() && passed < units) {
+    const auto lead = static_cast<unsigned char>(text[bytes]);
+    const size_t width = lead >= 0xF0U ? 4 : lead >= 0xE0U ? 3 : lead >= 0xC0U ? 2 : 1;
+    passed += width == 4 ? 2U : 1U;
+    bytes += width;
   }
-  return bytes;
+  return std::min(bytes, text.size());
 }
 
 auto golden_dir() -> std::filesystem::path {
@@ -553,7 +558,9 @@ suite<"playground_service"> playground_service_suite = [] {
       for (const auto& token : reply.body["semanticTokens"]) {
         auto offset = token["offset"].get<uint32_t>();
         auto length = token["length"].get<uint32_t>();
-        expect(offset + length <= editor_offset(document, document.size()))
+        // The end in a wider type: a length near the type's limit must
+        // not wrap back inside the document.
+        expect(fatal(uint64_t{offset} + length <= editor_offset(document, document.size())))
             << "a span outside the document";
         auto first = byte_offset(document, offset);
         auto past = byte_offset(document, offset + length);
@@ -809,16 +816,35 @@ suite<"playground_service"> playground_service_suite = [] {
         "module app\n\nfn main(): i32\n  let x = \xE2\x80\x9C\n  return 0\n";
     const auto quote = editor_offset(source, source.find("\xE2"));
     auto sent = json::parse(call("analyze", document_request(source)).body.dump());
-    size_t marked = 0;
+    std::vector<json> errors;
     for (const auto& diag : sent["diagnostics"]) {
-      if (diag["severity"] == "error" && diag["offset"] == quote) {
-        ++marked;
-        expect(diag["length"] == 1U) << diag.dump();
-        expect(diag["col"] == 11U) << diag.dump();
+      if (diag["severity"] == "error") {
+        errors.push_back(diag);
       }
     }
-    expect(marked == 1U) << sent["diagnostics"].dump();
+    expect(fatal(errors.size() == 1U)) << sent["diagnostics"].dump();
+    expect(errors.front()["offset"] == quote) << errors.front().dump();
+    expect(errors.front()["length"] == 1U) << errors.front().dump();
+    expect(errors.front()["col"] == 11U) << errors.front().dump();
+    // The text just past the quote starts on a character boundary.
+    expect(byte_offset("\xE2\x80\x9Cx", 1U) == 3U);
   };
+
+#ifndef NDEBUG
+  "a located span that runs past its file is refused"_test = [] {
+    // A span lies within one file.  The length conversion asserts it,
+    // where shortening the span would hide the broken one.
+    const std::string source = "module app\n";
+    auto inputs = parse_program_request(document_request(source));
+    expect(fatal(inputs.has_value()));
+    auto prog = build_playground_program(service_context().repo_root, std::move(*inputs));
+    expect(fatal(prog.user != nullptr));
+    const uint32_t last = prog.user->eof_offset() - 1;
+    expect(prog.editor_length({.offset = last, .length = 0}) == 0U);
+    expect(prog.editor_length({.offset = last, .length = 1}) == 1U);
+    expect(aborts([&] { (void)prog.editor_length({.offset = last, .length = 2}); }));
+  };
+#endif
 
   "a column counts the editor's unit along its line"_test = [] {
     // Wide characters on earlier lines do not move a column; one on the
