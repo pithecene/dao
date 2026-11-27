@@ -676,19 +676,23 @@ fn main(): i32
   // Two files of one shape hold their names and their `extend` blocks at
   // the same token and declaration indices.  Each site resolves to its
   // own file's symbol, so the file is part of a site's identity.
-  let twin: string = "concept Shown:\n  fn show(self): i64\n\nclass K:\n  n: i64\n\nextend K as Shown:\n  fn show(self): i64 -> self.n\n"
+  let twin = "concept Shown:\n  fn show(self): i64\n\nclass K:\n  n: i64\n\nextend K as Shown:\n  fn show(self): i64 -> self.n\n"
   let twins = Vector<graph::SourceInput>::new().push(graph::SourceInput("a.dao", "module app::a\n" + twin, false)).push(graph::SourceInput("b.dao", "module app::b\n" + twin, false))
   let twin_pg = graph::build_program(twins)
   let twin_rr = resolver::resolve_program(twin_pg)
-  let class_a: i64 = program_use_of(twin_pg, twin_rr, "a.dao", "K")
-  let class_b: i64 = program_use_of(twin_pg, twin_rr, "b.dao", "K")
-  let concept_a: i64 = program_extend_concept_of(twin_pg, twin_rr, "a.dao")
-  let concept_b: i64 = program_extend_concept_of(twin_pg, twin_rr, "b.dao")
+  let class_a = program_use_of(twin_pg, twin_rr, "a.dao", "K")
+  let class_b = program_use_of(twin_pg, twin_rr, "b.dao", "K")
+  let concept_a = program_extend_concept_of(twin_pg, twin_rr, "a.dao")
+  let concept_b = program_extend_concept_of(twin_pg, twin_rr, "b.dao")
+  // What each module exports under the two names: the symbols its own
+  // sites must name.
+  let exports_a = twin_rr.module_exports.tables.get(graph::find_module_by_name(twin_pg.modules, "app::a")).entries
+  let exports_b = twin_rr.module_exports.tables.get(graph::find_module_by_name(twin_pg.modules, "app::b")).entries
   let sites_apart = false
-  if class_a >= 0 and class_b >= 0 and concept_a >= 0 and concept_b >= 0:
-    let owner_a: i64 = twin_rr.symbols.get(class_a).owner_module_id
-    let owner_b: i64 = twin_rr.symbols.get(class_b).owner_module_id
-    sites_apart = owner_a != owner_b and twin_rr.symbols.get(concept_a).owner_module_id == owner_a and twin_rr.symbols.get(concept_b).owner_module_id == owner_b and twin_rr.symbols.get(concept_a).name == "Shown"
+  if class_a >= 0 and concept_a >= 0 and class_a != class_b and concept_a != concept_b:
+    let a_names_its_own = class_a == exports_a.get_or("K", to_i64(-1)) and concept_a == exports_a.get_or("Shown", to_i64(-1))
+    let b_names_its_own = class_b == exports_b.get_or("K", to_i64(-1)) and concept_b == exports_b.get_or("Shown", to_i64(-1))
+    sites_apart = a_names_its_own and b_names_its_own
   if sites_apart:
     print("PASS equal_indices_in_two_files_resolve_apart")
     pass_count = pass_count + 1
