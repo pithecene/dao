@@ -17,10 +17,9 @@ import bootstrap::llvm
 // =========================================================================
 
 // Substring match helper.
-// Convenience adapter: run the bootstrap pipeline on a bare snippet
-// (same wrap/run-pipeline path as Task 29's lower_to_mir, but keep
-// symbols/types/tokens/src for the backend) and then lower to LLVM
-// text.
+// Run the bootstrap pipeline on a bare snippet, as `mir::lower_to_mir`
+// does, and keep the symbols, types, tokens and source text that the
+// backend needs.
 fn lower_to_mir_backend_input(src: string): llvm::MirBackendInput
   let wrapped: string = base::wrap_test_module(src)
   let inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()

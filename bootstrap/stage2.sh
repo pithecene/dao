@@ -75,6 +75,8 @@ else
 fi
 
 STAGE1_DIR="$RUN_DIR/stage1"
+# Every module the driver's entry point and its test runner import.
+DRIVER_MODULES="bootstrap/driver/impl.dao bootstrap/llvm/impl.dao bootstrap/mir/impl.dao bootstrap/hir/impl.dao bootstrap/typecheck/impl.dao bootstrap/resolver/impl.dao bootstrap/shared/base.dao bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao"
 LLVM_OUT="$RUN_DIR/llvm_out"
 DRIVER_TEST_WORK="$RUN_DIR/driver_tests_work"
 SMOKE_DIR="$RUN_DIR/smoke"
@@ -189,10 +191,12 @@ else
   fi
   SEED_KIND="host_daoc"
   echo "stage 1: the host builds the bootstrap compiler"
-  # The host writes a program beside its first source, so stage 1's entry
-  # source is copied into the run directory to keep the binary there.
+  # The host writes a program beside the source of its entry module,
+  # whatever the order of its sources, so stage 1's entry source is
+  # copied into the run directory to keep the binary there.
   cp bootstrap/driver/main.dao "$STAGE1_DIR/main.dao" || exit 1
-  "$DAOC" build --source "$STAGE1_DIR/main.dao" --source bootstrap/driver/impl.dao --source bootstrap/llvm/impl.dao --source bootstrap/mir/impl.dao --source bootstrap/hir/impl.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao > "$RUN_DIR/stage1.log" 2>&1 || {
+  # shellcheck disable=SC2046
+  "$DAOC" build --source "$STAGE1_DIR/main.dao" $(printf -- '--source %s ' $DRIVER_MODULES) > "$RUN_DIR/stage1.log" 2>&1 || {
     echo "stage 1 failed (see $RUN_DIR/stage1.log)" >&2
     exit 1
   }
@@ -200,7 +204,8 @@ else
 fi
 
 echo "stage 2: the bootstrap compiler compiles itself"
-compile_with "$STAGE1" "$RUN_DIR/stage2.ll" bootstrap/driver/main.dao bootstrap/driver/impl.dao bootstrap/llvm/impl.dao bootstrap/mir/impl.dao bootstrap/hir/impl.dao bootstrap/typecheck/impl.dao bootstrap/resolver/impl.dao bootstrap/shared/base.dao bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao || {
+# shellcheck disable=SC2086
+compile_with "$STAGE1" "$RUN_DIR/stage2.ll" bootstrap/driver/main.dao $DRIVER_MODULES || {
   echo "stage 2 failed (see $RUN_DIR/stage2.ll.log)" >&2
   exit 1
 }
@@ -210,7 +215,8 @@ link "$RUN_DIR/stage2.ll" "$RUN_DIR/stage2" || {
 }
 
 echo "stage 3: the stage-2 compiler compiles itself"
-compile_with "$RUN_DIR/stage2" "$RUN_DIR/stage3.ll" bootstrap/driver/main.dao bootstrap/driver/impl.dao bootstrap/llvm/impl.dao bootstrap/mir/impl.dao bootstrap/hir/impl.dao bootstrap/typecheck/impl.dao bootstrap/resolver/impl.dao bootstrap/shared/base.dao bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao || {
+# shellcheck disable=SC2086
+compile_with "$RUN_DIR/stage2" "$RUN_DIR/stage3.ll" bootstrap/driver/main.dao $DRIVER_MODULES || {
   echo "stage 3 failed (see $RUN_DIR/stage3.ll.log)" >&2
   exit 1
 }
@@ -371,7 +377,8 @@ suite_sources() {
   elif [ "$1" = "mir" ]; then
     printf '%s\n' bootstrap/mir/tests.dao bootstrap/mir/impl.dao bootstrap/hir/impl.dao bootstrap/typecheck/impl.dao bootstrap/resolver/impl.dao bootstrap/shared/base.dao bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao
   elif [ "$1" = "driver_tests" ]; then
-    printf '%s\n' bootstrap/driver/tests.dao bootstrap/driver/impl.dao bootstrap/llvm/impl.dao bootstrap/mir/impl.dao bootstrap/hir/impl.dao bootstrap/typecheck/impl.dao bootstrap/resolver/impl.dao bootstrap/shared/base.dao bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao
+    # shellcheck disable=SC2086
+    printf '%s\n' bootstrap/driver/tests.dao $DRIVER_MODULES
   else
     printf '%s\n' bootstrap/llvm/tests.dao bootstrap/llvm/impl.dao bootstrap/mir/impl.dao bootstrap/hir/impl.dao bootstrap/typecheck/impl.dao bootstrap/resolver/impl.dao bootstrap/shared/base.dao bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao
   fi

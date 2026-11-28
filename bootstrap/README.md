@@ -396,7 +396,7 @@ runner is `bootstrap::driver::tests` in `driver/tests.dao`.
 **Running tests and crossing**:
 
 ```sh
-daoc build --source bootstrap/driver/tests.dao --source bootstrap/driver/impl.dao --source bootstrap/llvm/impl.dao --source bootstrap/mir/impl.dao --source bootstrap/hir/impl.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/driver/tests
+task bootstrap-test   # every suite, this one among them
 bash bootstrap/stage2.sh build/debug
 ```
 
