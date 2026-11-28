@@ -147,15 +147,9 @@ Self-hosting compiler subsystems written in Dao.
 
 - `README.md` — scope, parity notes, and subsystem inventory
 - `shared/` — shared type universe and cross-pass program lookup tables
-  (`base.dao`, `module bootstrap::base`, compiled directly as a real module
-  without `assemble.sh`)
+  (`base.dao`, `module bootstrap::base`, compiled directly as a real module)
 - `ascii.dao` — `bootstrap::ascii`, character-classification module
   imported by `bootstrap::lexer`
-- `assemble.sh` — concatenates remaining unextracted subsystem fragments
-  (`driver`) to produce `*.gen.dao` outputs under
-  `bootstrap/` or an explicit per-run output root (`ascii`, `lexer`,
-  `parser`, `graph`, `base`, `resolver`, `typecheck`, `hir`, `mir`, and
-  `llvm` compile directly without assembly)
 - `validate_ir.sh` — compiles, links, and runs the IR the LLVM suite
   emits under `llvm/out/` or a per-run directory, comparing exit codes
   and expected fixture counts
@@ -169,43 +163,44 @@ Self-hosting compiler subsystems written in Dao.
   `driver/out/`, and records structured provenance in `result.json`
 - `lexer/` — `bootstrap::lexer` (`impl.dao`, importing `bootstrap::ascii`)
   and `bootstrap::lexer::tests` (`tests.dao`), compiled directly as real
-  modules without `assemble.sh`
+  modules
 - `parser/` — `bootstrap::parser` (`impl.dao`, importing
   `bootstrap::lexer`) and `bootstrap::parser::tests` (`tests.dao`),
-  compiled directly as real modules without `assemble.sh`
+  compiled directly as real modules
 - `graph/` — `bootstrap::graph` (`impl.dao`, importing `bootstrap::lexer`
   and `bootstrap::parser`) and `bootstrap::graph::tests` (`tests.dao`),
-  compiled directly as real modules without `assemble.sh`
+  compiled directly as real modules
 - `resolver/` — `bootstrap::resolver` (`impl.dao`, importing
   `bootstrap::lexer`, `bootstrap::parser`, `bootstrap::graph`, and
   `bootstrap::base`) and `bootstrap::resolver::tests` (`tests.dao`),
-  compiled directly as real modules without `assemble.sh`
+  compiled directly as real modules
 - `typecheck/` — `bootstrap::typecheck` (`impl.dao`, importing
   `bootstrap::lexer`, `bootstrap::parser`, `bootstrap::graph`,
   `bootstrap::base`, and `bootstrap::resolver`) and
   `bootstrap::typecheck::tests` (`tests.dao`), compiled directly as real
-  modules without `assemble.sh`
+  modules
 - `hir/` — `bootstrap::hir` (`impl.dao`), the HIR lowering pass producing
   compiler-owned typed IR from the type-checked AST, and
   `bootstrap::hir::tests` (`tests.dao`), compiled directly as real
-  modules without `assemble.sh`
+  modules
 - `mir/` — `bootstrap::mir` (`impl.dao`) and `bootstrap::mir::tests`
-  (`tests.dao`), compiled directly as real modules without
-  `assemble.sh`: the Tier A MIR lowering pass producing basic-block MIR
+  (`tests.dao`), compiled directly as real modules: the Tier A MIR lowering pass producing basic-block MIR
   from HIR: functions, locals, blocks, constants, binary/unary, let/assign,
   calls, returns, field-access reads, and if/else + while control
   flow
 - `llvm/` — `bootstrap::llvm` (`impl.dao`) and `bootstrap::llvm::tests`
-  (`tests.dao`), compiled directly as real modules without
-  `assemble.sh`: the LLVM backend, which lowers a whole concrete MIR program, the
+  (`tests.dao`), compiled directly as real modules: the LLVM backend, which lowers a whole concrete MIR program, the
   prelude included, to deterministic textual LLVM IR with the host
   backend's meaning (types and layouts, `module::name` names, checked
   arithmetic, strings, places, enums, pointers, regions, generators) via
   a backend-private Dao-side LLVM mini-IR and text serializer
-- `driver/` — the bootstrap compiler as a program: `impl.dao` validates
-  and loads manifest requests without trapping, `main.dao` lowers the
-  program over an explicit manifest path and writes one LLVM module, and
-  `tests.dao` exercises CLI argument and manifest validation
+- `driver/` — the bootstrap compiler as a program: `bootstrap::driver`
+  (`impl.dao`) validates and loads manifest requests without trapping
+  and runs the program pipeline from sources to an LLVM module,
+  `bootstrap::driver_main` (`main.dao`) is the entry point over an
+  explicit manifest path, and `bootstrap::driver::tests` (`tests.dao`)
+  exercises CLI argument and manifest validation and diagnostic
+  locations
 
 ## `examples/`
 

@@ -1,7 +1,7 @@
 module bootstrap::ascii
 // Character classes over ASCII code points, the compiler's first real
 // module: every program passes this file to the compiler beside its
-// assembled source.
+// other sources.
 
 fn is_digit(ch: i32): bool
   if ch >= 48:

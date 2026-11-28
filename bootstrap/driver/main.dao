@@ -6,6 +6,7 @@ import bootstrap::graph
 import bootstrap::base
 import bootstrap::resolver
 import bootstrap::llvm
+import bootstrap::driver
 
 // Entry point for the bootstrap compiler driver. Reads an explicit
 // manifest path from the command line, validates every directive and
@@ -14,28 +15,28 @@ import bootstrap::llvm
 
 fn main(): i32
   let manifest_path: string = ""
-  match resolve_manifest_arg(args()):
+  match driver::resolve_manifest_arg(args()):
     Result::Ok(path):
       manifest_path = path
     Result::Err(err):
       eprint("driver: " + err)
       return 2
 
-  let m: Manifest = Manifest("", Vector<graph::SourceInput>::new())
-  match load_manifest(manifest_path):
+  let m: driver::Manifest = driver::Manifest("", Vector<graph::SourceInput>::new())
+  match driver::load_manifest(manifest_path):
     Result::Ok(loaded):
       m = loaded
     Result::Err(err):
       eprint("driver: " + err)
       return 2
 
-  let lowered: llvm::ProgramLlvm = llvm::lower_program_to_llvm(m.inputs)
+  let lowered: driver::ProgramLlvm = driver::lower_program_to_llvm(m.inputs)
   let result: llvm::LlvmTextResult = lowered.result
   let located: Vector<graph::FileDiagnostic> = lowered.program.diags
   let di: i64 = to_i64(0)
   while di < result.diags.length():
     if di < located.length():
-      eprint("driver: " + llvm::located_message(located.get(di), lowered.program.module_graph.files))
+      eprint("driver: " + driver::located_message(located.get(di), lowered.program.module_graph.files))
     else:
       eprint("driver: " + result.diags.get(di).message)
     di = di + to_i64(1)

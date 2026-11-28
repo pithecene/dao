@@ -4,7 +4,7 @@
 # docs/bootstrap_closure.md.
 #
 # Three mechanical sources:
-#   1. the host AST printer over every assembled bootstrap program — which
+#   1. the host AST printer over every bootstrap program — which
 #      constructs the corpus uses, and how often
 #   2. the host LLVM lowering of the largest program — which prelude
 #      functions the corpus instantiates (the stdlib the bootstrap must
@@ -35,7 +35,6 @@ AUDIT_OUT="$BUILD_DIR/bootstrap_audit"   # this run's records: per-stage logs, t
 DOC="docs/bootstrap_closure.md"
 PROGRAMS="lexer parser graph resolver typecheck hir mir llvm"
 
-bash bootstrap/assemble.sh > /dev/null || { echo "audit: assemble failed"; exit 1; }
 mkdir -p "$OUT" "$AUDIT_OUT"
 # The prelude the program pipeline runs with: every module under
 # stdlib/core/ and stdlib/io/ in path order (CONTRACT_MODULE_SYSTEM.md
@@ -224,7 +223,7 @@ fi
 # first audit: generic arguments on a qualified name in expression
 # position (`Vector<i64>::new()`, `Option<T>::None`).  The bootstrap
 # parser reads `Vector<i64>` as the comparison `Vector < i64 > ...` and
-# stops at `::`.  Counted per assembled program to set against the
+# stops at `::`.  Counted per program to set against the
 # parse column; the parse column reaches zero when the parser closes it.
 generic_qualified_sites() {
   cat $(program_sources "$1") 2>/dev/null | grep -o -E '[A-Z][A-Za-z]*<[^;()=]*>::' | wc -l | tr -d '[:space:]'
@@ -289,7 +288,7 @@ resource_block_sites() {
       else if (key == "typecheck") typecheck=val; else if (key == "hir") hir=val;
       else if (key == "mir") mir=val; else if (key == "mono") mono=val; else if (key == "llvm") llvm=val; else if (key == "runs") runs=val; else if (key == "first") first=val;
       else if (key == "peak_mb") peak=val; else if (key == "seconds") secs=val;
-      else if (key == "missing") first="not assembled: " val;
+      else if (key == "missing") first="no source: " val;
     }
     gsub(/\|/, "\\|", first);
     # A stage the program never reached (it died earlier; the last column

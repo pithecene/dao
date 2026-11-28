@@ -14,8 +14,7 @@ import bootstrap::resolver
 //
 // Imports `bootstrap::lexer`, `bootstrap::parser`, `bootstrap::graph`,
 // `bootstrap::base`, and `bootstrap::resolver` as real modules, and
-// compiles directly as `module bootstrap::typecheck` without
-// `bootstrap/assemble.sh`.
+// compiles directly as `module bootstrap::typecheck`.
 //
 // Covered here: concepts, `extend`, derived conformance with the host's
 // module visibility, method dispatch by the receiver's type (a class's
