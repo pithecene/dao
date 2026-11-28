@@ -8,10 +8,9 @@ import bootstrap::resolver
 import bootstrap::typecheck
 import bootstrap::hir
 import bootstrap::mir
+import bootstrap::llvm
 
-// Test runner for the bootstrap llvm.  Assembled after the
-// shared base and every library it exercises; never compiled
-// standalone.
+// Standalone test runner for `bootstrap::llvm` (`module bootstrap::llvm::tests`).
 
 // =========================================================================
 // Section 99: Tests
@@ -47,12 +46,12 @@ fn llvm_out_dir(): string
 // created by the harness.  Returns the number of artifacts that could
 // not be written, so a failed write fails the suite instead of leaving a
 // stale or missing file for validation to miss.
-fn emit_ir(name: string, result: LlvmTextResult, expected_exit: i32): i32
+fn emit_ir(name: string, result: llvm::LlvmTextResult, expected_exit: i32): i32
   if result.ok == false:
     return 0
   let out_dir: string = llvm_out_dir()
   let path: string = out_dir + "/" + name + ".ll"
-  if write_llvm_text(result, path) == false:
+  if llvm::write_llvm_text(result, path) == false:
     print("FAIL " + name + ": could not write " + path)
     return 1
   if expected_exit >= 0:
@@ -70,7 +69,7 @@ fn diags_text(diags: Vector<Diagnostic>): string
     i = i + to_i64(1)
   return out.to_string()
 
-fn check_contains(result: LlvmTextResult, needle: string, test_name: string): bool
+fn check_contains(result: llvm::LlvmTextResult, needle: string, test_name: string): bool
   if contains_substring(result.text, needle):
     return true
   print("FAIL " + test_name + ": expected substring '" + needle + "' not found")
@@ -209,6 +208,8 @@ fn closure_program_checked(name: string, path: string, src: string, report: bool
             inputs = inputs.push(graph::SourceInput("bootstrap/hir/impl.dao", read_file("bootstrap/hir/impl.dao"), false))
             if name != "hir":
               inputs = inputs.push(graph::SourceInput("bootstrap/mir/impl.dao", read_file("bootstrap/mir/impl.dao"), false))
+              if name != "mir":
+                inputs = inputs.push(graph::SourceInput("bootstrap/llvm/impl.dao", read_file("bootstrap/llvm/impl.dao"), false))
   inputs = inputs.push(graph::SourceInput(path, base::wrap_test_module(src), false))
   let pg: graph::ProgramGraph = graph::program_graph_empty()
   resource memory graph =>
@@ -300,14 +301,14 @@ fn closure_probe_stage(name: string, path: string, stage: string): string
     resource memory mono =>
       pc = mir::program_monomorphize(checked.typed, pm)
     let carried_into_llvm: i64 = pc.mir.diags.length()
-    let ll: LlvmTextResult = llvm_text_result_empty()
+    let ll: llvm::LlvmTextResult = llvm::llvm_text_result_empty()
     resource memory llvm =>
-      ll = lower_mir_to_llvm_text(MirBackendInput(pc.mir, pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, BackendSource(Vector<lexer::Token>::new(), "", pc.program.module_graph)))
+      ll = llvm::lower_mir_to_llvm_text(llvm::MirBackendInput(pc.mir, pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, llvm::BackendSource(Vector<lexer::Token>::new(), "", pc.program.module_graph)))
     closure_report_diags_from(name, "llvm", ll.diags, carried_into_llvm, to_i64(50))
     cols = cols + closure_stage_column(name, "llvm", ll.diags, carried_into_llvm)
     if ll.ok:
       let ll_path: string = llvm_out_dir() + "/" + name + ".program.ll"
-      if write_llvm_text(ll, ll_path) == false:
+      if llvm::write_llvm_text(ll, ll_path) == false:
         eprint("probe: " + name + " first llvm: could not write " + ll_path)
   return name + cols + "\n"
 
@@ -414,8 +415,12 @@ fn closure_probe(marker: string): void
     line = closure_probe_stage(which, "bootstrap/hir/tests.dao", stage)
   else if which == "mir":
     line = closure_probe_stage(which, "bootstrap/mir/tests.dao", stage)
+  else if which == "llvm":
+    line = closure_probe_stage(which, "bootstrap/llvm/tests.dao", stage)
   else:
-    line = closure_probe_stage(which, "bootstrap/" + which + "/" + which + ".gen.dao", stage)
+    // An unknown program gets the record a missing source gets, never
+    // another program's measurements.
+    line = which + "\tmissing=bootstrap/" + which + "\n"
   let closure_txt: string = llvm_out_dir() + "/closure.txt"
   let previous: string = ""
   if file_exists(closure_txt):
@@ -441,7 +446,7 @@ fn main(): i32
   // Test 1: minimal_define — fn main(): i32 -> 0 emits define + entry + ret
   // -----------------------------------------------------------------
   let src1: string = "fn main(): i32\n  return 0\n"
-  let r1: LlvmTextResult = lower_source_to_llvm_text(src1)
+  let r1: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(src1)
   write_failures = write_failures + emit_ir("minimal_define", r1, 0)
   if r1.ok:
     let a: bool = check_contains(r1, "define i32 @main", "minimal_define")
@@ -459,7 +464,7 @@ fn main(): i32
   // Test 2: let_store_load — let x = 1; return x
   // -----------------------------------------------------------------
   let src2: string = "fn main(): i32\n  let x: i32 = 1\n  return x\n"
-  let r2: LlvmTextResult = lower_source_to_llvm_text(src2)
+  let r2: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(src2)
   write_failures = write_failures + emit_ir("let_store_load", r2, 1)
   if r2.ok:
     let a: bool = check_contains(r2, "alloca i32", "let_store_load")
@@ -479,7 +484,7 @@ fn main(): i32
   // Test 3: int_arithmetic — let x = 1 + 2 * 3
   // -----------------------------------------------------------------
   let src3: string = "fn main(): i32\n  let x: i32 = 1 + 2 * 3\n  return x\n"
-  let r3: LlvmTextResult = lower_source_to_llvm_text(src3)
+  let r3: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(src3)
   write_failures = write_failures + emit_ir("int_arithmetic", r3, 7)
   if r3.ok:
     // Signed arithmetic is checked (the host's overflow intrinsics).
@@ -496,7 +501,7 @@ fn main(): i32
   // Test 4: int_comparison — let b = x < 5
   // -----------------------------------------------------------------
   let src4: string = "fn f(x: i32): bool\n  return x < 5\n"
-  let r4: LlvmTextResult = lower_source_to_llvm_text(src4)
+  let r4: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(src4)
   write_failures = write_failures + emit_ir("int_comparison", r4, -1)
   if r4.ok:
     let a: bool = check_contains(r4, "icmp slt i32", "int_comparison")
@@ -512,7 +517,7 @@ fn main(): i32
   // Test 5: param_seeding — fn f(x: i32): i32 -> x must seed param slot
   // -----------------------------------------------------------------
   let src5: string = "fn f(x: i32): i32\n  return x\n"
-  let r5: LlvmTextResult = lower_source_to_llvm_text(src5)
+  let r5: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(src5)
   write_failures = write_failures + emit_ir("param_seeding", r5, -1)
   if r5.ok:
     let a: bool = check_contains(r5, "define i32 @\"test::f\"(i32 %arg0)", "param_seeding")
@@ -532,7 +537,7 @@ fn main(): i32
   // Test 6: extern_declare — extern fn puts emits declare
   // -----------------------------------------------------------------
   let src6: string = "extern fn puts(s: string): i32\n\nfn main(): i32\n  return 0\n"
-  let r6: LlvmTextResult = lower_source_to_llvm_text(src6)
+  let r6: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(src6)
   write_failures = write_failures + emit_ir("extern_declare", r6, 0)
   if r6.ok:
     let a: bool = check_contains(r6, "declare i32 @puts(ptr %arg0)", "extern_declare")
@@ -548,7 +553,7 @@ fn main(): i32
   // Test 7: call_extern — call to a user function
   // -----------------------------------------------------------------
   let src7: string = "fn add(a: i32, b: i32): i32\n  return a + b\n\nfn main(): i32\n  return add(1, 2)\n"
-  let r7: LlvmTextResult = lower_source_to_llvm_text(src7)
+  let r7: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(src7)
   write_failures = write_failures + emit_ir("call_extern", r7, 3)
   if r7.ok:
     let a: bool = check_contains(r7, "define i32 @\"test::add\"(i32 %arg0, i32 %arg1)", "call_extern")
@@ -564,7 +569,7 @@ fn main(): i32
   // Test 8: if_else_cfg — conditional branch emits cond_br + then/else/merge
   // -----------------------------------------------------------------
   let src8: string = "fn f(x: i32): i32\n  if x > 0:\n    return 1\n  else:\n    return 2\n"
-  let r8: LlvmTextResult = lower_source_to_llvm_text(src8)
+  let r8: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(src8)
   write_failures = write_failures + emit_ir("if_else_cfg", r8, -1)
   if r8.ok:
     let a: bool = check_contains(r8, "icmp sgt i32", "if_else_cfg")
@@ -584,7 +589,7 @@ fn main(): i32
   // Test 9: while_cfg — while loop emits header/body/exit + back-edge
   // -----------------------------------------------------------------
   let src9: string = "fn f(n: i32): i32\n  let i: i32 = 0\n  while i < n:\n    i = i + 1\n  return i\n"
-  let r9: LlvmTextResult = lower_source_to_llvm_text(src9)
+  let r9: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(src9)
   write_failures = write_failures + emit_ir("while_cfg", r9, -1)
   if r9.ok:
     let a: bool = check_contains(r9, "br label %bb", "while_cfg")
@@ -604,7 +609,7 @@ fn main(): i32
   // (the host's string ABI).
   // -----------------------------------------------------------------
   let src10: string = "extern fn puts(s: string): i32\n\nfn main(): i32\n  return puts(\"hi\")\n"
-  let r10: LlvmTextResult = lower_source_to_llvm_text(src10)
+  let r10: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(src10)
   write_failures = write_failures + emit_ir("string_global", r10, -1)
   if r10.ok:
     let a: bool = check_contains(r10, "@.str.0 = private unnamed_addr constant", "string_global")
@@ -622,9 +627,9 @@ fn main(): i32
   // Test 11: deterministic_repeat — byte-identical across runs
   // -----------------------------------------------------------------
   let src11: string = "fn main(): i32\n  let x: i32 = 1 + 2\n  return x\n"
-  let r11a: LlvmTextResult = lower_source_to_llvm_text(src11)
+  let r11a: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(src11)
   write_failures = write_failures + emit_ir("deterministic_repeat", r11a, 3)
-  let r11b: LlvmTextResult = lower_source_to_llvm_text(src11)
+  let r11b: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(src11)
   // Two identical failures are equal too; only two successful
   // lowerings prove determinism (and leave an artifact to validate).
   if r11a.ok and r11b.ok:
@@ -640,7 +645,7 @@ fn main(): i32
   // Test 12: struct_field_read — struct field access emits GEP + load
   // -----------------------------------------------------------------
   let src12: string = "class P:\n  x: i32\n  y: i32\n\nfn get_x(p: P): i32\n  return p.x\n"
-  let r12: LlvmTextResult = lower_source_to_llvm_text(src12)
+  let r12: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(src12)
   write_failures = write_failures + emit_ir("struct_field_read", r12, -1)
   if r12.ok:
     let a: bool = check_contains(r12, "%struct.P = type { i32, i32 }", "struct_field_read")
@@ -668,7 +673,7 @@ fn main(): i32
   // `extractvalue`
   // -----------------------------------------------------------------
   let src13: string = "class P:\n  x: i32\n  y: i32\n\nfn main(): i32\n  let p: P = P(1, 2)\n  return p.x\n"
-  let r13: LlvmTextResult = lower_source_to_llvm_text(src13)
+  let r13: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(src13)
   write_failures = write_failures + emit_ir("struct_construction", r13, 1)
   if r13.ok:
     let a: bool = check_contains(r13, "%struct.P = type { i32, i32 }", "struct_construction")
@@ -694,7 +699,7 @@ fn main(): i32
   // Exercises the struct-typed call-edge path: the argument type in
   // the emitted `call` must be `%struct.P`, NOT `<unsupported>`.
   let src14: string = "class P:\n  x: i32\n  y: i32\n\nfn take(p: P): i32\n  return p.x\n\nfn main(): i32\n  let p: P = P(3, 4)\n  return take(p)\n"
-  let r14: LlvmTextResult = lower_source_to_llvm_text(src14)
+  let r14: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(src14)
   write_failures = write_failures + emit_ir("struct_call_arg", r14, 3)
   if r14.ok:
     let a: bool = check_contains(r14, "define i32 @\"test::take\"(%struct.P", "struct_call_arg")
@@ -721,7 +726,7 @@ fn main(): i32
   // Exercises the struct-typed return-edge path: the function
   // signature and `ret` must use `%struct.P`, NOT `<unsupported>`.
   let src15: string = "class P:\n  x: i32\n  y: i32\n\nfn make(): P\n  return P(5, 6)\n\nfn main(): i32\n  let p: P = make()\n  return p.x\n"
-  let r15: LlvmTextResult = lower_source_to_llvm_text(src15)
+  let r15: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(src15)
   write_failures = write_failures + emit_ir("struct_return", r15, 5)
   if r15.ok:
     let a: bool = check_contains(r15, "define %struct.P @\"test::make\"()", "struct_return")
@@ -752,7 +757,7 @@ fn main(): i32
   // method a void return and an anonymous define.
   // -----------------------------------------------------------------
   let src15b: string = "class Box:\n  n: i32\n  fn pick(self): i32\n    return self.n\n\nfn main(): i32\n  let b: Box = Box(7)\n  return b.pick()\n"
-  let r15b: LlvmTextResult = lower_source_to_llvm_text(src15b)
+  let r15b: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(src15b)
   write_failures = write_failures + emit_ir("class_method_define", r15b, 7)
   if r15b.ok:
     let a15b: bool = check_contains(r15b, "define i32 @\"test::Box.pick\"(", "class_method_define")
@@ -782,7 +787,7 @@ fn main(): i32
   // { %struct.Inner }` without defining `%struct.Inner`, producing
   // invalid IR.
   let src16: string = "class Inner:\n  v: i32\n\nclass Outer:\n  inner: Inner\n\nfn main(): i32\n  let o: Outer = Outer(Inner(42))\n  return 0\n"
-  let r16: LlvmTextResult = lower_source_to_llvm_text(src16)
+  let r16: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(src16)
   write_failures = write_failures + emit_ir("nested_struct_registration", r16, 0)
   if r16.ok:
     let a: bool = check_contains(r16, "%struct.Inner = type { i32 }", "nested_struct_registration")
@@ -810,7 +815,7 @@ fn main(): i32
   // bootstrap/validate_ir.sh compiles it with clang, links it against
   // the runtime, runs it, and checks the exit code (42).
   let e2e_src: string = "fn main(): i32\n  return 42\n"
-  let e2e_r: LlvmTextResult = lower_source_to_llvm_text(e2e_src)
+  let e2e_r: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(e2e_src)
   write_failures = write_failures + emit_ir("write_ll_artifact", e2e_r, 42)
   if e2e_r.ok:
     print("PASS write_ll_artifact (lowering ok)")
@@ -823,7 +828,7 @@ fn main(): i32
   // block ends without a value is an error, not `unreachable`
   // -----------------------------------------------------------------
   let ft_src: string = "fn f(x: i32): i32\n  let y: i32 = x\n"
-  let ft_r: LlvmTextResult = lower_source_to_llvm_text(ft_src)
+  let ft_r: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(ft_src)
   if ft_r.ok:
     print("FAIL fallthrough_rejected: a function falling off its end was lowered")
   else:
@@ -840,7 +845,7 @@ fn main(): i32
   // reachable, so both end in `unreachable` and the function is accepted
   // -----------------------------------------------------------------
   let nt_src: string = "fn main(): i32\n  let x: i32 = 7\n  if x > 0:\n    if x > 5:\n      return 1\n    else:\n      return 2\n  else:\n    return 3\n"
-  let nt_r: LlvmTextResult = lower_source_to_llvm_text(nt_src)
+  let nt_r: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(nt_src)
   write_failures = write_failures + emit_ir("nested_total_if", nt_r, 1)
   if nt_r.ok:
     print("PASS nested_total_if")
@@ -853,7 +858,7 @@ fn main(): i32
   // diagnosed — fails the backend result: no `ok`, the diagnostic
   // carried, nothing emitted as if it were sound.
   let src21: string = "derived concept Show:\n  fn f(self): i32\n\nextend i32 as Show:\n  fn f(self): bool -> true\n\nfn main(): i32\n  return 0\n"
-  let r21: LlvmTextResult = lower_source_to_llvm_text(src21)
+  let r21: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(src21)
   if r21.ok == false and r21.diags.length() >= 1:
     print("PASS upstream_rejection_fails_backend")
     pass_count = pass_count + 1
@@ -862,11 +867,11 @@ fn main(): i32
 
   // Test 22: an upstream warning travels with the backend result but
   // leaves an otherwise sound module `ok`.
-  let in22: MirBackendInput = lower_to_mir_backend_input("fn main(): i32\n  return 0\n")
+  let in22: llvm::MirBackendInput = llvm::lower_to_mir_backend_input("fn main(): i32\n  return 0\n")
   let mir22: mir::MirResult = in22.mir
   mir22.diags = mir22.diags.push(make_warning(Span(to_i64(0), to_i64(1)), "upstream warning"))
   in22.mir = mir22
-  let r22: LlvmTextResult = lower_mir_to_llvm_text(in22)
+  let r22: llvm::LlvmTextResult = llvm::lower_mir_to_llvm_text(in22)
   if r22.ok and r22.diags.length() == to_i64(1):
     print("PASS upstream_warning_keeps_backend_ok")
     pass_count = pass_count + 1
@@ -875,7 +880,7 @@ fn main(): i32
 
   // Test 23: a generator function with no `yield` lowers too: its init
   // returns the handle, its resume only marks it done.
-  let r23: LlvmTextResult = lower_source_to_llvm_text("fn g(): Generator<i64>\n  return\n\nfn main(): i32\n  return 0\n")
+  let r23: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("fn g(): Generator<i64>\n  return\n\nfn main(): i32\n  return 0\n")
   write_failures = write_failures + emit_ir("empty_generator", r23, 0)
   if r23.ok and check_contains(r23, "define %dao.generator @\"test::g\"()", "empty_generator") and check_contains(r23, "define void @\"test::g.resume\"(ptr %frame)", "empty_generator"):
     print("PASS empty_generator")
@@ -887,7 +892,7 @@ fn main(): i32
   // by its identity, in quotes, since `<` is no unquoted LLVM
   // identifier character.
   let src24: string = "class Tag<T>:\n  n: i32\n\nfn main(): i32\n  let t: Tag<i32> = Tag<i32>(1)\n  return t.n\n"
-  let r24: LlvmTextResult = lower_source_to_llvm_text(src24)
+  let r24: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text(src24)
   write_failures = write_failures + emit_ir("instantiated_struct_name", r24, 1)
   if r24.ok:
     if check_contains(r24, "%\"struct.Tag<i32>#", "instantiated_struct_name"):
@@ -903,7 +908,7 @@ fn main(): i32
 
   // Test 25: overloads by arity are two functions, the later named with
   // its arity (the host's `g$2`), and the program runs.
-  let r25: LlvmTextResult = lower_source_to_llvm_text("fn g(n: i32): i32 -> n\nfn g(a: i32, b: i32): i32 -> a + b\n\nfn main(): i32 -> g(1) + g(1, 2) - 4\n")
+  let r25: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("fn g(n: i32): i32 -> n\nfn g(a: i32, b: i32): i32 -> a + b\n\nfn main(): i32 -> g(1) + g(1, 2) - 4\n")
   write_failures = write_failures + emit_ir("arity_overloads", r25, 0)
   if r25.ok:
     if check_contains(r25, "@\"test::g$2\"(", "arity_overloads"):
@@ -914,7 +919,7 @@ fn main(): i32
 
   // Test 26: a call of a generic function names its specialization
   // (monomorphization), which the backend emits and the program runs.
-  let r26: LlvmTextResult = lower_source_to_llvm_text("fn id<T>(x: T): T -> x\n\nfn main(): i32 -> id(1) - 1\n")
+  let r26: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("fn id<T>(x: T): T -> x\n\nfn main(): i32 -> id(1) - 1\n")
   write_failures = write_failures + emit_ir("generic_call_specialized", r26, 0)
   if r26.ok and check_contains(r26, "id$i32", "generic_call_specialized"):
     print("PASS generic_call_specialized")
@@ -923,7 +928,7 @@ fn main(): i32
     print("FAIL generic_call_specialized: " + diags_text(r26.diags))
   // An extern beside a template: the backend's scan for template
   // references reads the extern's (empty) block list, not a stray offset.
-  let r26b: LlvmTextResult = lower_source_to_llvm_text("extern fn ext(x: i32): i32\n\nfn id<T>(x: T): T -> x\n\nfn main(): i32 -> 0\n")
+  let r26b: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("extern fn ext(x: i32): i32\n\nfn id<T>(x: T): T -> x\n\nfn main(): i32 -> 0\n")
   if r26b.ok:
     print("PASS extern_beside_template")
     pass_count = pass_count + 1
@@ -932,7 +937,7 @@ fn main(): i32
 
   // Test 29: comparing strings compares their contents (the runtime's
   // __dao_eq_string), never their addresses.
-  let r29: LlvmTextResult = lower_source_to_llvm_text("fn f(s: string): i32\n  if s == \"x\":\n    return 1\n  return 0\n")
+  let r29: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("fn f(s: string): i32\n  if s == \"x\":\n    return 1\n  return 0\n")
   if r29.ok and contains_substring(r29.text, "@__dao_eq_string") and contains_substring(r29.text, "icmp eq ptr") == false:
     print("PASS string_comparison_by_contents")
     pass_count = pass_count + 1
@@ -941,7 +946,7 @@ fn main(): i32
 
   // Test 28: an enum's tag is an integer constant: a classification enum
   // is its `i32` tag (the host's): the comparison runs, exiting 1.
-  let r28: LlvmTextResult = lower_source_to_llvm_text("enum E:\n  A\n\nfn main(): i32\n  if E::A == E::A:\n    return 1\n  return 0\n")
+  let r28: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("enum E:\n  A\n\nfn main(): i32\n  if E::A == E::A:\n    return 1\n  return 0\n")
   write_failures = write_failures + emit_ir("enum_tag_constant", r28, 1)
   if r28.ok:
     print("PASS enum_tag_constant")
@@ -950,7 +955,7 @@ fn main(): i32
     print("FAIL enum_tag_constant: " + diags_text(r28.diags))
 
   // Test 27: field stores and `break` run: 5 + 7 + 4 - 16 exits 0.
-  let r27: LlvmTextResult = lower_source_to_llvm_text("class In:\n  v: i32\n\nclass Out:\n  a: i32\n  inner: In\n\nfn main(): i32\n  let o: Out = Out(1, In(2))\n  o.a = 5\n  o.inner.v = 7\n  let n: i32 = 0\n  while true:\n    if n > 3:\n      break\n    n = n + 1\n  return o.a + o.inner.v + n - 16\n")
+  let r27: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("class In:\n  v: i32\n\nclass Out:\n  a: i32\n  inner: In\n\nfn main(): i32\n  let o: Out = Out(1, In(2))\n  o.a = 5\n  o.inner.v = 7\n  let n: i32 = 0\n  while true:\n    if n > 3:\n      break\n    n = n + 1\n  return o.a + o.inner.v + n - 16\n")
   write_failures = write_failures + emit_ir("field_store_and_break", r27, 0)
   if r27.ok:
     print("PASS field_store_and_break")
@@ -960,7 +965,7 @@ fn main(): i32
 
   // Test 32: a specialization whose name LLVM cannot take bare
   // (`tag$Ptr<i32>`) is quoted, and the module is valid IR.
-  let r32: LlvmTextResult = lower_source_to_llvm_text("fn tag<T>(): i32 -> 0\n\nfn main(): i32 -> tag<Ptr<i32>>()\n")
+  let r32: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("fn tag<T>(): i32 -> 0\n\nfn main(): i32 -> tag<Ptr<i32>>()\n")
   write_failures = write_failures + emit_ir("quoted_specialization_name", r32, 0)
   if r32.ok and check_contains(r32, "@\"test::tag$Ptr<i32>\"", "quoted_specialization_name"):
     print("PASS quoted_specialization_name")
@@ -969,7 +974,7 @@ fn main(): i32
     print("FAIL quoted_specialization_name: " + diags_text(r32.diags))
   // Test 31: a call through a bound compiles and runs once its generic
   // function is specialized: call(5) - 5 exits 0.
-  let r31: LlvmTextResult = lower_source_to_llvm_text("concept Shows:\n  fn show(self): i32\n\nextend i32 as Shows:\n  fn show(self): i32 -> self\n\nfn call<T: Shows>(x: T): i32 -> x.show()\n\nfn main(): i32 -> call(5) - 5\n")
+  let r31: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("concept Shows:\n  fn show(self): i32\n\nextend i32 as Shows:\n  fn show(self): i32 -> self\n\nfn call<T: Shows>(x: T): i32 -> x.show()\n\nfn main(): i32 -> call(5) - 5\n")
   write_failures = write_failures + emit_ir("bound_call_specialized", r31, 0)
   if r31.ok:
     print("PASS bound_call_specialized")
@@ -982,7 +987,7 @@ fn main(): i32
   let prog33: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   prog33 = prog33.push(graph::SourceInput("core_util.dao", "module core::util\n\nfn add(a: i32, b: i32): i32\n  let sum: i32 = a + b\n  return sum\n", true))
   prog33 = prog33.push(graph::SourceInput("main.dao", "module app::main\n\nfn main(): i32\n  let x: i32 = add(40, 2)\n  return x - 42\n", false))
-  let r33: LlvmTextResult = lower_program_to_llvm_text(prog33)
+  let r33: llvm::LlvmTextResult = llvm::lower_program_to_llvm_text(prog33)
   write_failures = write_failures + emit_ir("two_module_program", r33, 0)
   if r33.ok and check_contains(r33, "define i32 @\"core::util::add\"(", "two_module_program"):
     print("PASS two_module_program")
@@ -993,7 +998,7 @@ fn main(): i32
   // Test 34: every builtin width lowers (unsigned by its width), and an
   // enum with payloads is `{ i32, [N x iK] }` sized by its largest
   // payload (the host's layout): Rect's i64 makes one i64 slot.
-  let r34: LlvmTextResult = lower_source_to_llvm_text("enum class Shape:\n  Circle(r: i32)\n  Rect(w: i64)\n\nfn widths(a: u8, b: i16, c: u32, s: Shape): i64 -> 0\n\nfn main(): i32 -> 0\n")
+  let r34: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("enum class Shape:\n  Circle(r: i32)\n  Rect(w: i64)\n\nfn widths(a: u8, b: i16, c: u32, s: Shape): i64 -> 0\n\nfn main(): i32 -> 0\n")
   write_failures = write_failures + emit_ir("type_universe", r34, 0)
   if r34.ok and check_contains(r34, "(i8 %arg0, i16 %arg1, i32 %arg2, %enum.Shape %arg3)", "type_universe") and check_contains(r34, "%enum.Shape = type { i32, [1 x i64] }", "type_universe"):
     print("PASS type_universe")
@@ -1003,7 +1008,7 @@ fn main(): i32
 
   // Test 35: a payload-bearing enum is built, matched and read through
   // its layout: Rect(w = 3, h = 4) has area 12, and the program exits 0.
-  let r35: LlvmTextResult = lower_source_to_llvm_text("enum class Shape:\n  Circle(r: i32)\n  Rect(w: i32, h: i32)\n\nfn area(s: Shape): i32\n  match s:\n    Shape::Circle(r):\n      return r * r * 3\n    Shape::Rect(w, h):\n      return w * h\n  return 0\n\nfn main(): i32\n  let s: Shape = Shape::Rect(h = 4, w = 3)\n  return area(s) - 12\n")
+  let r35: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("enum class Shape:\n  Circle(r: i32)\n  Rect(w: i32, h: i32)\n\nfn area(s: Shape): i32\n  match s:\n    Shape::Circle(r):\n      return r * r * 3\n    Shape::Rect(w, h):\n      return w * h\n  return 0\n\nfn main(): i32\n  let s: Shape = Shape::Rect(h = 4, w = 3)\n  return area(s) - 12\n")
   write_failures = write_failures + emit_ir("enum_payload_roundtrip", r35, 0)
   if r35.ok:
     print("PASS enum_payload_roundtrip")
@@ -1016,7 +1021,7 @@ fn main(): i32
   // the first payload, 3, whatever the binding is called, and the
   // program exits 0.  A variant without parameters takes `(..)` too, and
   // its arm is the one that answers for it.
-  let rest_arm: LlvmTextResult = lower_source_to_llvm_text("enum class Shape:\n  Circle(r: i32)\n  Rect(w: i32, h: i32)\n  Dot\n\nfn first(s: Shape): i32\n  match s:\n    Shape::Circle(..):\n      return 0\n    Shape::Dot(..):\n      return 7\n    Shape::Rect(h, ..):\n      return h\n  return 0\n\nfn main(): i32\n  let s: Shape = Shape::Rect(h = 4, w = 3)\n  let d: Shape = Shape::Dot\n  return first(s) - 3 + first(d) - 7\n")
+  let rest_arm: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("enum class Shape:\n  Circle(r: i32)\n  Rect(w: i32, h: i32)\n  Dot\n\nfn first(s: Shape): i32\n  match s:\n    Shape::Circle(..):\n      return 0\n    Shape::Dot(..):\n      return 7\n    Shape::Rect(h, ..):\n      return h\n  return 0\n\nfn main(): i32\n  let s: Shape = Shape::Rect(h = 4, w = 3)\n  let d: Shape = Shape::Dot\n  return first(s) - 3 + first(d) - 7\n")
   write_failures = write_failures + emit_ir("rest_pattern_binds_leading_payloads", rest_arm, 0)
   if rest_arm.ok:
     print("PASS rest_pattern_binds_leading_payloads")
@@ -1026,7 +1031,7 @@ fn main(): i32
 
   // `?` on an Option: quarter(8) unwraps half(8) and yields 14, and
   // quarter(7) returns None from the `?` itself, so the program exits 0.
-  let try_option = lower_source_to_llvm_text("enum class Option<T>:\n  Some(value: T)\n  None\n\nfn half(n: i32): Option<i32>\n  if n % 2 == 0:\n    return Option::Some(value = n / 2)\n  return Option::None\n\nfn quarter(n: i32): Option<i32>\n  let h: i32 = half(n)?\n  return Option::Some(value = h + 10)\n\nfn main(): i32\n  let got: i32 = 0\n  match quarter(8):\n    Option::Some(v):\n      got = v\n    Option::None:\n      got = 100\n  match quarter(7):\n    Option::Some(w):\n      got = got + 50\n    Option::None:\n      got = got + 1\n  return got - 15\n")
+  let try_option = llvm::lower_source_to_llvm_text("enum class Option<T>:\n  Some(value: T)\n  None\n\nfn half(n: i32): Option<i32>\n  if n % 2 == 0:\n    return Option::Some(value = n / 2)\n  return Option::None\n\nfn quarter(n: i32): Option<i32>\n  let h: i32 = half(n)?\n  return Option::Some(value = h + 10)\n\nfn main(): i32\n  let got: i32 = 0\n  match quarter(8):\n    Option::Some(v):\n      got = v\n    Option::None:\n      got = 100\n  match quarter(7):\n    Option::Some(w):\n      got = got + 50\n    Option::None:\n      got = got + 1\n  return got - 15\n")
   write_failures = write_failures + emit_ir("try_returns_none_from_the_function", try_option, 0)
   if try_option.ok:
     print("PASS try_returns_none_from_the_function")
@@ -1037,7 +1042,7 @@ fn main(): i32
   // `?` on a Result carries the operand's error into the function's own
   // Err: twice(4) yields 8, twice(-1) returns Err(7), and the program
   // exits 0.
-  let try_result = lower_source_to_llvm_text("enum class Result<T, E>:\n  Ok(value: T)\n  Err(error: E)\n\nfn parse(n: i32): Result<i32, i32>\n  if n < 0:\n    return Result::Err(error = 7)\n  return Result::Ok(value = n)\n\nfn twice(n: i32): Result<i32, i32>\n  let v: i32 = parse(n)?\n  return Result::Ok(value = v + v)\n\nfn main(): i32\n  let got: i32 = 0\n  match twice(4):\n    Result::Ok(v):\n      got = v\n    Result::Err(e):\n      got = 100\n  match twice(0 - 1):\n    Result::Ok(u):\n      got = got + 50\n    Result::Err(carried):\n      got = got + carried\n  return got - 15\n")
+  let try_result = llvm::lower_source_to_llvm_text("enum class Result<T, E>:\n  Ok(value: T)\n  Err(error: E)\n\nfn parse(n: i32): Result<i32, i32>\n  if n < 0:\n    return Result::Err(error = 7)\n  return Result::Ok(value = n)\n\nfn twice(n: i32): Result<i32, i32>\n  let v: i32 = parse(n)?\n  return Result::Ok(value = v + v)\n\nfn main(): i32\n  let got: i32 = 0\n  match twice(4):\n    Result::Ok(v):\n      got = v\n    Result::Err(e):\n      got = 100\n  match twice(0 - 1):\n    Result::Ok(u):\n      got = got + 50\n    Result::Err(carried):\n      got = got + carried\n  return got - 15\n")
   write_failures = write_failures + emit_ir("try_carries_the_error_out", try_result, 0)
   if try_result.ok:
     print("PASS try_carries_the_error_out")
@@ -1049,7 +1054,7 @@ fn main(): i32
   // path, as a `return` does: after quarter(7) fails no domain is still
   // open, the results are those of the plain case, and the program
   // exits 0.
-  let try_in_region = lower_source_to_llvm_text("extern fn dao_domain_depth(): i64\n\nenum class Option<T>:\n  Some(value: T)\n  None\n\nfn half(n: i32): Option<i32>\n  if n % 2 == 0:\n    return Option::Some(value = n / 2)\n  return Option::None\n\nfn quarter(n: i32): Option<i32>\n  let h: i32 = 0\n  resource memory outer =>\n    resource memory inner =>\n      h = half(n)?\n  return Option::Some(value = h + 10)\n\nfn main(): i32\n  let got: i32 = 0\n  match quarter(8):\n    Option::Some(v):\n      got = v\n    Option::None:\n      got = 100\n  match quarter(7):\n    Option::Some(w):\n      got = got + 50\n    Option::None:\n      got = got + 1\n  if dao_domain_depth() != 0:\n    return 99\n  return got - 15\n")
+  let try_in_region = llvm::lower_source_to_llvm_text("extern fn dao_domain_depth(): i64\n\nenum class Option<T>:\n  Some(value: T)\n  None\n\nfn half(n: i32): Option<i32>\n  if n % 2 == 0:\n    return Option::Some(value = n / 2)\n  return Option::None\n\nfn quarter(n: i32): Option<i32>\n  let h: i32 = 0\n  resource memory outer =>\n    resource memory inner =>\n      h = half(n)?\n  return Option::Some(value = h + 10)\n\nfn main(): i32\n  let got: i32 = 0\n  match quarter(8):\n    Option::Some(v):\n      got = v\n    Option::None:\n      got = 100\n  match quarter(7):\n    Option::Some(w):\n      got = got + 50\n    Option::None:\n      got = got + 1\n  if dao_domain_depth() != 0:\n    return 99\n  return got - 15\n")
   write_failures = write_failures + emit_ir("try_leaves_every_resource_block", try_in_region, 0)
   if try_in_region.ok:
     print("PASS try_leaves_every_resource_block")
@@ -1060,7 +1065,7 @@ fn main(): i32
   // A pipe calls its target with the piped value, whether the target is
   // a named function, a function value, or a lambda: 3 becomes 4, then
   // 14, then 28, and the program exits 0.
-  let piped = lower_source_to_llvm_text("fn inc(x: i32): i32 -> x + 1\n\nfn add_ten(x: i32): i32 -> x + 10\n\nfn main(): i32\n  let through: fn(i32): i32 = add_ten\n  let sum: i32 = 3 |> inc |> through\n  let doubled: i32 = sum |> |x| -> x * 2\n  return doubled - 28\n")
+  let piped = llvm::lower_source_to_llvm_text("fn inc(x: i32): i32 -> x + 1\n\nfn add_ten(x: i32): i32 -> x + 10\n\nfn main(): i32\n  let through: fn(i32): i32 = add_ten\n  let sum: i32 = 3 |> inc |> through\n  let doubled: i32 = sum |> |x| -> x * 2\n  return doubled - 28\n")
   write_failures = write_failures + emit_ir("pipe_calls_its_target", piped, 0)
   if piped.ok:
     print("PASS pipe_calls_its_target")
@@ -1075,7 +1080,7 @@ fn main(): i32
   let ordered = Vector<graph::SourceInput>::new()
   ordered = ordered.push(graph::SourceInput("core_memory.dao", "module core::memory\n\nextern fn __dao_mem_alloc(size: i64, align: i64): Ptr<void>\n\nfn size_of<T>(): i64\n  let r: i64 = 0\n  return r\n", true))
   ordered = ordered.push(graph::SourceInput("main.dao", "module app::main\n\nfn inc(x: i64): i64 -> x + 1\n\nfn add_ten(x: i64): i64 -> x + 10\n\nfn source(p: Ptr<i64>): i64\n  mode unsafe =>\n    p.set(1)\n  return 3\n\nfn make_target(p: Ptr<i64>): fn(i64): i64\n  let seen: i64 = 0\n  mode unsafe =>\n    seen = p.get()\n  if seen == 1:\n    return inc\n  return add_ten\n\nfn main(): i32\n  let got: i64 = 0\n  mode unsafe =>\n    let raw: Ptr<void> = __dao_mem_alloc(size_of<i64>(), 8)\n    let p: Ptr<i64> = raw.cast<i64>()\n    p.set(0)\n    got = source(p) |> make_target(p)\n  if got == 4:\n    return 0\n  return 1\n", false))
-  let ordered_pipe = lower_program_to_llvm_text(ordered)
+  let ordered_pipe = llvm::lower_program_to_llvm_text(ordered)
   write_failures = write_failures + emit_ir("pipe_evaluates_its_source_first", ordered_pipe, 0)
   if ordered_pipe.ok:
     print("PASS pipe_evaluates_its_source_first")
@@ -1091,7 +1096,7 @@ fn main(): i32
   let prog36: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   prog36 = prog36.push(graph::SourceInput("core_memory.dao", "module core::memory\n\nextern fn __dao_mem_alloc(size: i64, align: i64): Ptr<void>\n\nfn size_of<T>(): i64\n  let r: i64 = 0\n  return r\n", true))
   prog36 = prog36.push(graph::SourceInput("main.dao", "module app::main\n\nfn main(): i32\n  let got: i64 = 0\n  mode unsafe =>\n    let raw: Ptr<void> = __dao_mem_alloc(size_of<i64>() * 2, 8)\n    let p: Ptr<i64> = raw.cast<i64>()\n    p.offset(1).set(5)\n    got = p.offset(1).get()\n  if got == 5:\n    return 0\n  return 1\n", false))
-  let r36: LlvmTextResult = lower_program_to_llvm_text(prog36)
+  let r36: llvm::LlvmTextResult = llvm::lower_program_to_llvm_text(prog36)
   write_failures = write_failures + emit_ir("pointer_roundtrip", r36, 0)
   if r36.ok and check_contains(r36, "getelementptr i64", "pointer_roundtrip"):
     print("PASS pointer_roundtrip")
@@ -1101,7 +1106,7 @@ fn main(): i32
 
   // Signed `+` traps on overflow (the host's overflow intrinsic and
   // trap); an unsigned comparison is unsigned (`ult`); the program runs.
-  let checked_and_unsigned: LlvmTextResult = lower_source_to_llvm_text("fn below(a: u32, b: u32): bool -> a < b\n\nfn main(): i32\n  let x: i32 = 40 + 2\n  if below(to_u32(1), to_u32(2)):\n    return x - 42\n  return 1\n\nfn to_u32(n: i32): u32\n  return 0\n")
+  let checked_and_unsigned: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("fn below(a: u32, b: u32): bool -> a < b\n\nfn main(): i32\n  let x: i32 = 40 + 2\n  if below(to_u32(1), to_u32(2)):\n    return x - 42\n  return 1\n\nfn to_u32(n: i32): u32\n  return 0\n")
   write_failures = write_failures + emit_ir("checked_and_unsigned", checked_and_unsigned, -1)
   if checked_and_unsigned.ok and check_contains(checked_and_unsigned, "@llvm.sadd.with.overflow.i32", "checked_and_unsigned") and check_contains(checked_and_unsigned, "icmp ult i32", "checked_and_unsigned"):
     print("PASS checked_and_unsigned")
@@ -1111,7 +1116,7 @@ fn main(): i32
 
   // Strings compare and concatenate through the runtime
   // (__dao_eq_string, __dao_str_concat): "ab" + "c" == "abc", exit 0.
-  let string_operators: LlvmTextResult = lower_source_to_llvm_text("fn main(): i32\n  let s: string = \"ab\" + \"c\"\n  if s == \"abc\":\n    return 0\n  return 1\n")
+  let string_operators: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("fn main(): i32\n  let s: string = \"ab\" + \"c\"\n  if s == \"abc\":\n    return 0\n  return 1\n")
   write_failures = write_failures + emit_ir("string_operators", string_operators, 0)
   if string_operators.ok and check_contains(string_operators, "@__dao_eq_string", "string_operators") and check_contains(string_operators, "@__dao_str_concat", "string_operators"):
     print("PASS string_operators")
@@ -1122,7 +1127,7 @@ fn main(): i32
   // Test 39: a generator runs as the host's does: its frame allocated by
   // init, driven by resume through a `for`, freed at the loop's end;
   // 0 + 1 + 2 = 3, and the program exits 0.
-  let r39: LlvmTextResult = lower_source_to_llvm_text("fn count(n: i32): Generator<i32>\n  let i: i32 = 0\n  while i < n:\n    yield i\n    i = i + 1\n\nfn main(): i32\n  let total: i32 = 0\n  for x in count(3):\n    total = total + x\n  return total - 3\n")
+  let r39: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("fn count(n: i32): Generator<i32>\n  let i: i32 = 0\n  while i < n:\n    yield i\n    i = i + 1\n\nfn main(): i32\n  let total: i32 = 0\n  for x in count(3):\n    total = total + x\n  return total - 3\n")
   write_failures = write_failures + emit_ir("generator_runs", r39, 0)
   if r39.ok and check_contains(r39, "@__dao_gen_alloc", "generator_runs") and check_contains(r39, "@\"test::count.resume\"", "generator_runs"):
     print("PASS generator_runs")
@@ -1134,9 +1139,9 @@ fn main(): i32
   // fall-through after its tests is dead and a non-void function ending
   // in it is sound: tag(Color::Blue) = 2, and the program exits 0.  A
   // match missing a variant still falls off the end and is rejected.
-  let r40: LlvmTextResult = lower_source_to_llvm_text("enum class Shape:\n  Dot\n  Box(w: i32)\n\nenum Color:\n  Red\n  Green\n  Blue\n\nfn width(s: Shape): i32\n  match s:\n    Shape::Box(w):\n      return w\n    Shape::Dot:\n      return 0\n\nfn tag(c: Color): i32\n  match c:\n    Color::Red:\n      return 0\n    Color::Green:\n      return 1\n    Color::Blue:\n      return 2\n\nfn main(): i32\n  return tag(Color::Blue) + width(Shape::Box(w = 3)) - 5\n")
+  let r40: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("enum class Shape:\n  Dot\n  Box(w: i32)\n\nenum Color:\n  Red\n  Green\n  Blue\n\nfn width(s: Shape): i32\n  match s:\n    Shape::Box(w):\n      return w\n    Shape::Dot:\n      return 0\n\nfn tag(c: Color): i32\n  match c:\n    Color::Red:\n      return 0\n    Color::Green:\n      return 1\n    Color::Blue:\n      return 2\n\nfn main(): i32\n  return tag(Color::Blue) + width(Shape::Box(w = 3)) - 5\n")
   write_failures = write_failures + emit_ir("exhaustive_match_returns", r40, 0)
-  let r40b: LlvmTextResult = lower_source_to_llvm_text("enum Color:\n  Red\n  Green\n\nfn tag(c: Color): i32\n  match c:\n    Color::Red:\n      return 0\n\nfn main(): i32 -> 0\n")
+  let r40b: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("enum Color:\n  Red\n  Green\n\nfn tag(c: Color): i32\n  match c:\n    Color::Red:\n      return 0\n\nfn main(): i32 -> 0\n")
   if r40.ok and r40b.ok == false and contains_substring(diags_text(r40b.diags), "without returning a value"):
     print("PASS exhaustive_match_returns")
     pass_count = pass_count + 1
@@ -1149,7 +1154,7 @@ fn main(): i32
   let prog41: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   prog41 = prog41.push(graph::SourceInput("a.dao", "module demo::a\n\nclass P:\n  x: i32\n\nfn f(): i32 -> 1\n\nfn read_x(p: P): i32 -> p.x\n", false))
   prog41 = prog41.push(graph::SourceInput("main.dao", "module demo::main\n\nimport demo::a\n\nclass P:\n  flag: bool\n\nfn f(): i32 -> 2\n\nfn read_flag(p: P): bool -> p.flag\n\nfn main(): i32\n  return a::f() + f() - 3\n", false))
-  let r41: LlvmTextResult = lower_program_to_llvm_text(prog41)
+  let r41: llvm::LlvmTextResult = llvm::lower_program_to_llvm_text(prog41)
   write_failures = write_failures + emit_ir("names_by_module", r41, 0)
   if r41.ok and check_contains(r41, "define i32 @\"demo::a::f\"()", "names_by_module") and check_contains(r41, "define i32 @\"demo::main::f\"()", "names_by_module") and check_contains(r41, "%\"struct.demo::a::P\" = type { i32 }", "names_by_module") and check_contains(r41, "%\"struct.demo::main::P\" = type { i1 }", "names_by_module") and check_contains(r41, "define i32 @main()", "names_by_module"):
     print("PASS names_by_module")
@@ -1162,7 +1167,7 @@ fn main(): i32
   let prog42: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   prog42 = prog42.push(graph::SourceInput("a.dao", "module demo::a\n\nextern fn take(x: i32): i32\n", false))
   prog42 = prog42.push(graph::SourceInput("main.dao", "module demo::main\n\nimport demo::a\n\nextern fn take(x: f64): i32\n\nfn main(): i32 -> 0\n", false))
-  let r42: LlvmTextResult = lower_program_to_llvm_text(prog42)
+  let r42: llvm::LlvmTextResult = llvm::lower_program_to_llvm_text(prog42)
   if r42.ok == false and contains_substring(diags_text(r42.diags), "conflicting signatures"):
     print("PASS conflicting_externs_rejected")
     pass_count = pass_count + 1
@@ -1172,7 +1177,7 @@ fn main(): i32
   // Test 43: a type reached only behind a pointer or as a generator's
   // yield is still defined in the module, and a void function may
   // return its void call's result.
-  let r43: LlvmTextResult = lower_source_to_llvm_text("class Point:\n  x: i32\n\nclass Box:\n  w: i32\n\nfn read(p: Ptr<Point>): i32\n  mode unsafe =>\n    return p.get().x\n  return 0\n\nfn g(): Generator<Box>\n  return\n\nfn quiet(): void\n  return\n\nfn also_quiet(): void -> quiet()\n\nfn main(): i32 -> 0\n")
+  let r43: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("class Point:\n  x: i32\n\nclass Box:\n  w: i32\n\nfn read(p: Ptr<Point>): i32\n  mode unsafe =>\n    return p.get().x\n  return 0\n\nfn g(): Generator<Box>\n  return\n\nfn quiet(): void\n  return\n\nfn also_quiet(): void -> quiet()\n\nfn main(): i32 -> 0\n")
   write_failures = write_failures + emit_ir("types_defined_where_reached", r43, 0)
   if r43.ok and check_contains(r43, "%struct.Point = type { i32 }", "types_defined_where_reached") and check_contains(r43, "%struct.Box = type { i32 }", "types_defined_where_reached"):
     print("PASS types_defined_where_reached")
@@ -1182,7 +1187,7 @@ fn main(): i32
 
   // Test 44: `get` on a pointer a specialization makes `Ptr<void>` has
   // no value to read: rejected, as the host rejects it.
-  let r44: LlvmTextResult = lower_source_to_llvm_text("fn touch<T>(p: Ptr<T>): void\n  mode unsafe =>\n    p.get()\n  return\n\nfn main(): i32\n  touch<void>(Ptr<void>::new())\n  return 0\n")
+  let r44: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("fn touch<T>(p: Ptr<T>): void\n  mode unsafe =>\n    p.get()\n  return\n\nfn main(): i32\n  touch<void>(Ptr<void>::new())\n  return 0\n")
   if r44.ok == false and contains_substring(diags_text(r44.diags), "Ptr<void>"):
     print("PASS void_pointee_get_rejected")
     pass_count = pass_count + 1
@@ -1193,7 +1198,7 @@ fn main(): i32
   // without it still returns on every path; a class constructed in a
   // loop takes no stack per iteration (a million iterations under the
   // default stack); and the program exits 0.
-  let r45: LlvmTextResult = lower_source_to_llvm_text("enum E:\n  A\n  B\n\nclass P:\n  x: i32\n\nfn f(e: E): i32\n  match e:\n    E::A:\n      return 0\n    E::A:\n      let unused: i32 = 0\n    E::B:\n      return 1\n\nfn main(): i32\n  let i: i32 = 0\n  while i < 1000000:\n    let p: P = P(i)\n    i = p.x + 1\n  return f(E::B) - 1\n")
+  let r45: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("enum E:\n  A\n  B\n\nclass P:\n  x: i32\n\nfn f(e: E): i32\n  match e:\n    E::A:\n      return 0\n    E::A:\n      let unused: i32 = 0\n    E::B:\n      return 1\n\nfn main(): i32\n  let i: i32 = 0\n  while i < 1000000:\n    let p: P = P(i)\n    i = p.x + 1\n  return f(E::B) - 1\n")
   write_failures = write_failures + emit_ir("repeated_arm_and_loop_construct", r45, 0)
   if r45.ok:
     print("PASS repeated_arm_and_loop_construct")
@@ -1203,7 +1208,7 @@ fn main(): i32
 
   // A generator yielding inside a `for` keeps its iterator in its frame,
   // so the loop continues after a resume: 0 + 1 + 2 - 3 exits 0.
-  let across_yield: LlvmTextResult = lower_source_to_llvm_text("fn count(n: i32): Generator<i32>\n  let i: i32 = 0\n  while i < n:\n    yield i\n    i = i + 1\n\nfn relay(n: i32): Generator<i32>\n  for x in count(n):\n    yield x\n\nfn main(): i32\n  let total: i32 = 0\n  for y in relay(3):\n    total = total + y\n  return total - 3\n")
+  let across_yield: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("fn count(n: i32): Generator<i32>\n  let i: i32 = 0\n  while i < n:\n    yield i\n    i = i + 1\n\nfn relay(n: i32): Generator<i32>\n  for x in count(n):\n    yield x\n\nfn main(): i32\n  let total: i32 = 0\n  for y in relay(3):\n    total = total + y\n  return total - 3\n")
   write_failures = write_failures + emit_ir("iterator_across_yield", across_yield, 0)
   if across_yield.ok:
     print("PASS iterator_across_yield")
@@ -1215,7 +1220,7 @@ fn main(): i32
   let extern_main_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   extern_main_inputs = extern_main_inputs.push(graph::SourceInput("a.dao", "module demo::a\n\nextern fn main(): i32\n", false))
   extern_main_inputs = extern_main_inputs.push(graph::SourceInput("b.dao", "module demo::b\n\nextern fn main(): i32\n", false))
-  let extern_main: LlvmTextResult = lower_program_to_llvm_text(extern_main_inputs)
+  let extern_main: llvm::LlvmTextResult = llvm::lower_program_to_llvm_text(extern_main_inputs)
   if contains_substring(diags_text(extern_main.diags), "ambiguous entry") == false:
     print("PASS extern_main_selects_no_entry")
     pass_count = pass_count + 1
@@ -1227,10 +1232,10 @@ fn main(): i32
   let located_inputs: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   located_inputs = located_inputs.push(graph::SourceInput("demo/a.dao", "module demo::a\n\nfn fine(): i32 -> 1\n", false))
   located_inputs = located_inputs.push(graph::SourceInput("demo/b.dao", "module demo::b\n\nfn wrong(): bool\n  return 1\n\nfn main(): i32 -> 0\n", false))
-  let located: ProgramLlvm = lower_program_to_llvm(located_inputs)
+  let located: llvm::ProgramLlvm = llvm::lower_program_to_llvm(located_inputs)
   let located_text: string = ""
   if located.program.diags.length() > to_i64(0):
-    located_text = located_message(located.program.diags.get(to_i64(0)), located.program.module_graph.files)
+    located_text = llvm::located_message(located.program.diags.get(to_i64(0)), located.program.module_graph.files)
   if starts_with(located_text, "demo/b.dao:4:10: "):
     print("PASS diagnostic_names_its_file_and_position")
     pass_count = pass_count + 1
@@ -1244,8 +1249,8 @@ fn main(): i32
   prog46 = prog46.push(graph::SourceInput("a.dao", "module p::a\n\nfn main(): i32 -> 1\n", false))
   prog46 = prog46.push(graph::SourceInput("b.dao", "module p::b\n\nfn main(): i32 -> 2\n", false))
   prog46 = prog46.push(graph::SourceInput("c.dao", "module p::c\n\nfn main(): i32 -> 3\n", false))
-  let r46: LlvmTextResult = lower_program_to_llvm_text(prog46)
-  let r46b: LlvmTextResult = lower_source_to_llvm_text("class Pair:\n  x: i32\n  y: i32\n\nextern fn take(p: Pair): i32\n\nfn main(): i32 -> take(Pair(1, 2))\n")
+  let r46: llvm::LlvmTextResult = llvm::lower_program_to_llvm_text(prog46)
+  let r46b: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("class Pair:\n  x: i32\n  y: i32\n\nextern fn take(p: Pair): i32\n\nfn main(): i32 -> take(Pair(1, 2))\n")
   if r46.ok == false and contains_substring(diags_text(r46.diags), "ambiguous entry") and r46b.ok == false and contains_substring(diags_text(r46b.diags), "C ABI"):
     print("PASS entry_and_extern_abi_fail_closed")
     pass_count = pass_count + 1
@@ -1254,7 +1259,7 @@ fn main(): i32
 
   // Test 47: uniform %dao.fn callables, by-value lexical captures, generic
   // callbacks with inferred return types, and nominal generic Generator yield.
-  let r47: LlvmTextResult = lower_source_to_llvm_text("class Indexed<T>:\n  index: i64\n  value: T\n\nfn single_indexed<T>(v: T): Generator<Indexed<T>>\n  let zero: i64 = 0\n  yield Indexed(zero, v)\n\nfn apply<T, U>(x: T, f: fn(T): U): U -> f(x)\n\nfn make_adder(k: i32): fn(i32): i32 -> |x| -> x + k\n\nfn main(): i32\n  let base: i32 = 10\n  let snap: fn(i32): i32 = |x| -> x + base\n  base = 99\n  let add5: fn(i32): i32 = make_adder(5)\n  let gsum: i32 = 0\n  for item in single_indexed(4):\n    gsum = gsum + item.value\n  return snap(5) + add5(3) + apply(7, |n| -> n * 2) + gsum - 41\n")
+  let r47: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("class Indexed<T>:\n  index: i64\n  value: T\n\nfn single_indexed<T>(v: T): Generator<Indexed<T>>\n  let zero: i64 = 0\n  yield Indexed(zero, v)\n\nfn apply<T, U>(x: T, f: fn(T): U): U -> f(x)\n\nfn make_adder(k: i32): fn(i32): i32 -> |x| -> x + k\n\nfn main(): i32\n  let base: i32 = 10\n  let snap: fn(i32): i32 = |x| -> x + base\n  base = 99\n  let add5: fn(i32): i32 = make_adder(5)\n  let gsum: i32 = 0\n  for item in single_indexed(4):\n    gsum = gsum + item.value\n  return snap(5) + add5(3) + apply(7, |n| -> n * 2) + gsum - 41\n")
   write_failures = write_failures + emit_ir("closures_and_generic_callbacks", r47, 0)
   if r47.ok:
     if check_contains(r47, "%dao.fn = type { ptr, ptr }", "closures_and_generic_callbacks"):
@@ -1270,9 +1275,9 @@ fn main(): i32
   let prog48: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   prog48 = prog48.push(graph::SourceInput("stdlib/core/panic.dao", "module core::panic\nextern fn __dao_panic(msg: string): void\nfn panic(msg: string): void -> __dao_panic(msg)\n", true))
   prog48 = prog48.push(graph::SourceInput("main.dao", "module demo::main\n\nenum class Outcome:\n  Done(val: i32)\n  Failed\n\nfn unwrap(o: Outcome): i32\n  match o:\n    Outcome::Done(val):\n      return val\n    Outcome::Failed:\n      panic(\"failed\")\n\nfn main(): i32\n  return unwrap(Outcome::Done(val = 9)) - 9\n", false))
-  let r48a: LlvmTextResult = lower_program_to_llvm_text(prog48)
+  let r48a: llvm::LlvmTextResult = llvm::lower_program_to_llvm_text(prog48)
   write_failures = write_failures + emit_ir("diverging_match_arm", r48a, 0)
-  let r48b: LlvmTextResult = lower_source_to_llvm_text("fn id(x: i32): i32 -> x\n\nfn main(): i32\n  let f: fn(i32): i32 = id\n  resource memory scratch =>\n    let k: i32 = 5\n    f = |x| -> x + k\n  return f(1)\n")
+  let r48b: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("fn id(x: i32): i32 -> x\n\nfn main(): i32\n  let f: fn(i32): i32 = id\n  resource memory scratch =>\n    let k: i32 = 5\n    f = |x| -> x + k\n  return f(1)\n")
   if r48a.ok:
     if r48b.ok == false:
       if contains_substring(diags_text(r48b.diags), "cannot be copied out"):
@@ -1286,7 +1291,7 @@ fn main(): i32
     print("FAIL closure_escape_and_diverging_match: diverging match rejected " + diags_text(r48a.diags))
 
   // Test 49: %dao.fn equality and inequality compare both fn_ptr and env_ptr.
-  let r49: LlvmTextResult = lower_source_to_llvm_text("fn same(a: fn(i32): i32, b: fn(i32): i32): bool -> a == b\n\nfn diff(a: fn(i32): i32, b: fn(i32): i32): bool -> a != b\n\nfn inc(x: i32): i32 -> x + 1\n\nfn dec(x: i32): i32 -> x - 1\n\nfn make_adder(k: i32): fn(i32): i32 -> |x| -> x + k\n\nfn main(): i32\n  let c1: fn(i32): i32 = make_adder(5)\n  let c2: fn(i32): i32 = make_adder(5)\n  if same(inc, inc) == false:\n    return 1\n  if diff(inc, dec) == false:\n    return 2\n  if same(c1, c1) == false:\n    return 3\n  if diff(c1, c2) == false:\n    return 4\n  return 0\n")
+  let r49: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("fn same(a: fn(i32): i32, b: fn(i32): i32): bool -> a == b\n\nfn diff(a: fn(i32): i32, b: fn(i32): i32): bool -> a != b\n\nfn inc(x: i32): i32 -> x + 1\n\nfn dec(x: i32): i32 -> x - 1\n\nfn make_adder(k: i32): fn(i32): i32 -> |x| -> x + k\n\nfn main(): i32\n  let c1: fn(i32): i32 = make_adder(5)\n  let c2: fn(i32): i32 = make_adder(5)\n  if same(inc, inc) == false:\n    return 1\n  if diff(inc, dec) == false:\n    return 2\n  if same(c1, c1) == false:\n    return 3\n  if diff(c1, c2) == false:\n    return 4\n  return 0\n")
   write_failures = write_failures + emit_ir("callable_equality", r49, 0)
   if r49.ok:
     print("PASS callable_equality_and_inequality")
@@ -1296,7 +1301,7 @@ fn main(): i32
 
   // Test 50: extern fn returning a function pointer used as a first-class value
   // wraps its raw ptr result with a C function adapter inside the thunk.
-  let r50: LlvmTextResult = lower_source_to_llvm_text("extern fn get_op(): fn(i32): i32\n\nfn take_maker(): fn(): fn(i32): i32 -> get_op\n")
+  let r50: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("extern fn get_op(): fn(i32): i32\n\nfn take_maker(): fn(): fn(i32): i32 -> get_op\n")
   write_failures = write_failures + emit_ir("extern_fn_returning_fn_value_thunk", r50, -1)
   if r50.ok:
     if check_contains(r50, "get_op.thunk", "extern_fn_returning_fn_value_thunk"):
@@ -1315,7 +1320,7 @@ fn main(): i32
   let prog51: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new()
   prog51 = prog51.push(graph::SourceInput("fmt.dao", "module demo::fmt\n\nconcept Show:\n  fn show(self): i32\n\nextend i32 as Show:\n  fn show(self): i32 -> self + 100\n\nfn deferred_show<T: Show>(x: T): fn(i32): i32 -> |delta| -> x.show() + delta\n\nfn make_shower(x: i32): fn(i32): i32 -> deferred_show(x)\n", false))
   prog51 = prog51.push(graph::SourceInput("main.dao", "module demo::main\nimport demo::fmt\n\nfn main(): i32\n  let f: fn(i32): i32 = fmt::make_shower(7)\n  return f(5) - 112\n", false))
-  let r51: LlvmTextResult = lower_program_to_llvm_text(prog51)
+  let r51: llvm::LlvmTextResult = llvm::lower_program_to_llvm_text(prog51)
   write_failures = write_failures + emit_ir("cloned_lambda_local_extend_dispatch", r51, 0)
   if r51.ok:
     print("PASS cloned_lambda_local_extend_dispatch")
@@ -1328,12 +1333,12 @@ fn main(): i32
   // two of them after logical expressions, whose joins are not loops.
   let panic_mod52: graph::SourceInput = graph::SourceInput("stdlib/core/panic.dao", "module core::panic\nextern fn __dao_panic(msg: string): void\nfn panic(msg: string): void -> __dao_panic(msg)\n", true)
   let bad52: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new().push(panic_mod52).push(graph::SourceInput("main.dao", "module demo::main\nfn maybe_stop(stop: bool): void\n  if stop:\n    return\n  panic(\"stop\")\n\nfn bad(): i32\n  maybe_stop(true)\n\nfn main(): i32 -> bad()\n", false))
-  let r52_bad: LlvmTextResult = lower_program_to_llvm_text(bad52)
+  let r52_bad: llvm::LlvmTextResult = llvm::lower_program_to_llvm_text(bad52)
   // A helper that loops before its panic is not taken to diverge.
   let looping_helper = Vector<graph::SourceInput>::new().push(panic_mod52).push(graph::SourceInput("main.dao", "module demo::main\nfn spin_then_stop(n: i32): void\n  let i = 0\n  while i < n:\n    i = i + 1\n  panic(\"stop\")\n\nfn bad(): i32\n  spin_then_stop(3)\n\nfn main(): i32 -> bad()\n", false))
-  let looping_result = lower_program_to_llvm_text(looping_helper)
+  let looping_result = llvm::lower_program_to_llvm_text(looping_helper)
   let good52: Vector<graph::SourceInput> = Vector<graph::SourceInput>::new().push(panic_mod52).push(graph::SourceInput("main.dao", "module demo::main\nfn fail_msg(msg: string): void -> panic(msg)\n\nfn fail_both(c: bool): void\n  if c:\n    fail_msg(\"a\")\n  else:\n    panic(\"b\")\n\nfn fail_noting(a: bool, b: bool, c: bool): void\n  let noted = a or (b and c)\n  if noted:\n    fail_msg(\"a\")\n  else:\n    panic(\"b\")\n\nfn fail_after_arm(a: bool, b: bool, c: bool): void\n  if a:\n    let noted = b and c\n  panic(\"c\")\n\nfn choose(ok: bool, v: i32): i32\n  if ok:\n    return v\n  else:\n    fail_both(ok)\n\nfn pick(ok: bool, v: i32): i32\n  if ok:\n    return v\n  else:\n    fail_noting(ok, ok, ok)\n\nfn keep(ok: bool, v: i32): i32\n  if ok:\n    return v\n  else:\n    fail_after_arm(ok, ok, ok)\n\nfn main(): i32 -> choose(true, 19) - 19 + pick(true, 0) + keep(true, 0)\n", false))
-  let r52_good: LlvmTextResult = lower_program_to_llvm_text(good52)
+  let r52_good: llvm::LlvmTextResult = llvm::lower_program_to_llvm_text(good52)
   write_failures = write_failures + emit_ir("unconditional_panic_wrappers", r52_good, 0)
   if r52_bad.ok == false and contains_substring(diags_text(r52_bad.diags), "without returning a value") and looping_result.ok == false and contains_substring(diags_text(looping_result.diags), "without returning a value") and r52_good.ok:
     print("PASS void_divergence_fixed_point")
@@ -1344,10 +1349,10 @@ fn main(): i32
   // Test 53: direct 1st-order named callback (both Dao fn and extern fn) to
   // extern fn emits valid LLVM IR, while extern fn with callback param as
   // first-class value and higher-order C function types fail closed.
-  let r53_ok: LlvmTextResult = lower_source_to_llvm_text("extern fn c_inc(x: i32): i32\nextern fn apply_cb(cb: fn(i32): i32, x: i32): i32\n\nfn inc(x: i32): i32 -> x + 1\n\nfn run(): i32 -> apply_cb(inc, 41) + apply_cb(c_inc, 1)\n")
+  let r53_ok: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("extern fn c_inc(x: i32): i32\nextern fn apply_cb(cb: fn(i32): i32, x: i32): i32\n\nfn inc(x: i32): i32 -> x + 1\n\nfn run(): i32 -> apply_cb(inc, 41) + apply_cb(c_inc, 1)\n")
   write_failures = write_failures + emit_ir("extern_direct_named_callback", r53_ok, -1)
-  let r53_bad_val: LlvmTextResult = lower_source_to_llvm_text("extern fn apply_cb(cb: fn(i32): i32, x: i32): i32\n\nfn leak(): fn(fn(i32): i32, i32): i32 -> apply_cb\n")
-  let r53_bad_ho: LlvmTextResult = lower_source_to_llvm_text("extern fn ho(cb: fn(fn(i32): i32): i32): i32\n\nfn main(): i32 -> 0\n")
+  let r53_bad_val: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("extern fn apply_cb(cb: fn(i32): i32, x: i32): i32\n\nfn leak(): fn(fn(i32): i32, i32): i32 -> apply_cb\n")
+  let r53_bad_ho: llvm::LlvmTextResult = llvm::lower_source_to_llvm_text("extern fn ho(cb: fn(fn(i32): i32): i32): i32\n\nfn main(): i32 -> 0\n")
   if r53_ok.ok and check_contains(r53_ok, "declare i32 @apply_cb(ptr %arg0, i32 %arg1)", "extern_direct_named_callback") and check_contains(r53_ok, "call i32 @apply_cb(ptr @c_inc, i32 1)", "extern_direct_named_callback") and r53_bad_val.ok == false and r53_bad_ho.ok == false:
     print("PASS extern_callback_validation_and_lowering")
     pass_count = pass_count + 1
@@ -1373,7 +1378,7 @@ fn main(): i32
   prog54 = prog54.push(graph::SourceInput("traits.dao", "module app::traits\nconcept Equatable:\n  fn eq(self, other: Equatable): bool\nconcept Hashable:\n  fn hash(self): i64\nfn custom_hash<T: Hashable>(x: T): i64 -> x.hash()\n", false))
   prog54 = prog54.push(graph::SourceInput("keys.dao", "module app::keys\nimport app::traits\nclass Key:\n  a: i64\n  b: i64\nclass SelfKey:\n  a: i64\n  b: i64\nextend SelfKey as traits::Equatable:\n  fn eq(self, other: SelfKey): bool -> true\nextend SelfKey as traits::Hashable:\n  fn hash(self): i64\n    if self.a == to_i64(2):\n      let zero: i64 = 0\n      return to_i64(1) / zero\n    return to_i64(888)\nfn self_trait_hash(k: SelfKey): i64 -> traits::custom_hash(k)\n", false))
   prog54 = prog54.push(graph::SourceInput("main.dao", "module app::main\nimport app::keys\nimport app::traits\nextend keys::Key as traits::Equatable:\n  fn eq(self, other: keys::Key): bool -> true\nextend keys::Key as traits::Hashable:\n  fn hash(self): i64\n    if self.a == to_i64(2):\n      let zero: i64 = 0\n      return to_i64(1) / zero\n    return to_i64(777)\nfn main(): i32\n  let m = HashMap<keys::Key, i32>::new()\n  m = m.set(keys::Key(to_i64(1), to_i64(10)), 11)\n  m = m.set(keys::Key(to_i64(2), to_i64(20)), 22)\n  let sm = HashMap<keys::SelfKey, i32>::new()\n  sm = sm.set(keys::SelfKey(to_i64(1), to_i64(10)), 33)\n  sm = sm.set(keys::SelfKey(to_i64(2), to_i64(20)), 44)\n  if m.length() != to_i64(2) or sm.length() != to_i64(2):\n    return 1\n  if m.get_or(keys::Key(to_i64(1), to_i64(10)), 0) != 11:\n    return 2\n  if m.get_or(keys::Key(to_i64(2), to_i64(20)), 0) != 22:\n    return 3\n  if sm.get_or(keys::SelfKey(to_i64(2), to_i64(20)), 0) != 44:\n    return 4\n  if traits::custom_hash(keys::Key(to_i64(1), to_i64(10))) != to_i64(777):\n    return 5\n  if keys::self_trait_hash(keys::SelfKey(to_i64(1), to_i64(10))) != to_i64(888):\n    return 6\n  return 0\n", false))
-  let r54: LlvmTextResult = lower_program_to_llvm_text(prog54)
+  let r54: llvm::LlvmTextResult = llvm::lower_program_to_llvm_text(prog54)
   write_failures = write_failures + emit_ir("foreign_qualified_hashable_hashmap", r54, 0)
   if r54.ok:
     print("PASS foreign_qualified_hashable_hashmap")
@@ -1385,7 +1390,7 @@ fn main(): i32
   // irrelevant, and otherwise yield the right operand's value.  `tripped`
   // ends the program when it is evaluated.
   let short_circuit_source = "extern fn exit(code: i32): void\n\nfn tripped(): bool\n  exit(7)\n  return true\n\nfn same(value: bool): bool -> value\n\nfn main(): i32\n  if same(false) and tripped():\n    return 1\n  if (same(true) or tripped()) == false:\n    return 2\n  if same(true) and same(false):\n    return 3\n  if (same(false) or same(true)) == false:\n    return 4\n  if (same(true) and same(true)) == false:\n    return 5\n  if same(false) or same(false):\n    return 6\n  return 0\n"
-  let short_circuit_result = lower_source_to_llvm_text(short_circuit_source)
+  let short_circuit_result = llvm::lower_source_to_llvm_text(short_circuit_source)
   write_failures = write_failures + emit_ir("logical_operators_short_circuit", short_circuit_result, 0)
   if short_circuit_result.ok:
     print("PASS logical_operators_short_circuit")

@@ -1,4 +1,4 @@
-module bootstrap::llvm::impl
+module bootstrap::llvm
 
 import bootstrap::lexer
 import bootstrap::parser
