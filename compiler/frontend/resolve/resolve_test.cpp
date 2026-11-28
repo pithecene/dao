@@ -194,6 +194,39 @@ suite<"resolve_modules"> resolve_modules = [] {
     expect(add != nullptr && add->module != nullptr && add->module->display == "app::math");
   };
 
+  "a field named like an imported module keeps the module in field types"_test = [] {
+    auto resolved = resolve_program({
+        {"main.dao",
+         "module app::main\nimport app::math\n"
+         "class Holder:\n  math: math::Point\n  other: math::Point\n"},
+        {"math.dao", kMathModule},
+        {"util.dao", kUtilModule},
+    });
+    expect(resolved.result.diagnostics.empty()) << joined(messages_of(resolved));
+    for (size_t field = 0; field < 2; ++field) {
+      const auto* head = use_in(resolved, "main.dao", "math::Point", field);
+      expect(head != nullptr && head->kind == SymbolKind::Module) << "field " << field;
+      const auto* type = use_in(resolved, "main.dao", "Point", field);
+      expect(type != nullptr && type->kind == SymbolKind::Type && type->name == "Point")
+          << "field " << field;
+      expect(type != nullptr && type->module != nullptr && type->module->display == "app::math")
+          << "field " << field;
+    }
+  };
+
+  "a field named like an imported module still reports a missing export"_test = [] {
+    auto resolved = resolve_program({
+        {"main.dao",
+         "module app::main\nimport app::math\n"
+         "class Holder:\n  math: math::Missing\n"},
+        {"math.dao", kMathModule},
+        {"util.dao", kUtilModule},
+    });
+    expect(messages_of(resolved) ==
+           std::vector<std::string>{"module 'app::math' has no export 'Missing'"})
+        << joined(messages_of(resolved));
+  };
+
   "qualified_static_method_and_variant"_test = [] {
     auto resolved = resolve_program({
         {"main.dao",

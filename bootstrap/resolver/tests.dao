@@ -115,7 +115,7 @@ fn main(): i32
   print("")
 
   let pass_count: i32 = 0
-  let total: i32 = 65
+  let total: i32 = 66
 
   // -----------------------------------------------------------------
   // Test 1: forward_ref — fn calls fn defined later in file; no diagnostic
@@ -1233,6 +1233,21 @@ fn main(): i32
     pass_count = pass_count + 1
   else:
     print("FAIL yield_value_resolves: expected 0 diagnostics, got " + i64_to_string(r_yld_diags))
+
+  // A field named like an imported module does not hide the module in a
+  // field's type, its own or a later field's: each type binds to the
+  // module's export.
+  let shapes = Vector<graph::SourceInput>::new().push(graph::SourceInput("math.dao", "module app::math\nclass Point:\n  x: i32\n\nclass Line:\n  length: i32\n", false)).push(graph::SourceInput("main.dao", "module app::main\nimport app::math\nclass Holder:\n  math: math::Point\n  other: math::Line\n", false))
+  let shapes_pg = graph::build_program(shapes)
+  let shapes_rr = resolver::resolve_program(shapes_pg)
+  let math_exports = shapes_rr.module_exports.tables.get(graph::find_module_by_name(shapes_pg.modules, "app::math")).entries
+  let own_field_type = program_use_of(shapes_pg, shapes_rr, "main.dao", "Point")
+  let later_field_type = program_use_of(shapes_pg, shapes_rr, "main.dao", "Line")
+  if own_field_type >= 0 and own_field_type == math_exports.get_or("Point", to_i64(-1)) and later_field_type >= 0 and later_field_type == math_exports.get_or("Line", to_i64(-1)) and program_error_count(shapes_rr) == 0:
+    print("PASS field_named_like_module_keeps_module_in_types")
+    pass_count = pass_count + 1
+  else:
+    print("FAIL field_named_like_module_keeps_module_in_types: Point binds " + i64_to_string(own_field_type) + ", Line binds " + i64_to_string(later_field_type) + ", errors " + i64_to_string(program_error_count(shapes_rr)))
 
   // -----------------------------------------------------------------
   // Summary
