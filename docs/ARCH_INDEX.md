@@ -152,10 +152,10 @@ Self-hosting compiler subsystems written in Dao.
 - `ascii.dao` — `bootstrap::ascii`, character-classification module
   imported by `bootstrap::lexer`
 - `assemble.sh` — concatenates remaining unextracted subsystem fragments
-  (`llvm`, `driver`) to produce `*.gen.dao` outputs under
+  (`driver`) to produce `*.gen.dao` outputs under
   `bootstrap/` or an explicit per-run output root (`ascii`, `lexer`,
-  `parser`, `graph`, `base`, `resolver`, `typecheck`, `hir`, and `mir`
-  compile directly without assembly)
+  `parser`, `graph`, `base`, `resolver`, `typecheck`, `hir`, `mir`, and
+  `llvm` compile directly without assembly)
 - `validate_ir.sh` — compiles, links, and runs the IR the LLVM suite
   emits under `llvm/out/` or a per-run directory, comparing exit codes
   and expected fixture counts
@@ -195,12 +195,13 @@ Self-hosting compiler subsystems written in Dao.
   from HIR: functions, locals, blocks, constants, binary/unary, let/assign,
   calls, returns, field-access reads, and if/else + while control
   flow
-- `llvm/` — LLVM backend: lowers a whole concrete MIR program, the
+- `llvm/` — `bootstrap::llvm` (`impl.dao`) and `bootstrap::llvm::tests`
+  (`tests.dao`), compiled directly as real modules without
+  `assemble.sh`: the LLVM backend, which lowers a whole concrete MIR program, the
   prelude included, to deterministic textual LLVM IR with the host
   backend's meaning (types and layouts, `module::name` names, checked
   arithmetic, strings, places, enums, pointers, regions, generators) via
-  a backend-private Dao-side LLVM mini-IR and text serializer.  Logic +
-  tests in `impl.dao` (Tasks 30, 44)
+  a backend-private Dao-side LLVM mini-IR and text serializer
 - `driver/` — the bootstrap compiler as a program: `impl.dao` validates
   and loads manifest requests without trapping, `main.dao` lowers the
   program over an explicit manifest path and writes one LLVM module, and

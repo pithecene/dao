@@ -125,7 +125,6 @@ tasks:
       - bootstrap/*/tests.dao
       - bootstrap/driver/main.dao
     generates:
-      - bootstrap/llvm/llvm.gen.dao
       - bootstrap/driver/driver_tests.gen.dao
       - bootstrap/driver/driver.gen.dao
 
@@ -141,7 +140,7 @@ tasks:
       - "{{.BUILD_DIR}}/compiler/driver/daoc build --source bootstrap/hir/tests.dao --source bootstrap/hir/impl.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/hir/tests"
       - "{{.BUILD_DIR}}/compiler/driver/daoc build --source bootstrap/mir/tests.dao --source bootstrap/mir/impl.dao --source bootstrap/hir/impl.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/mir/tests"
       - rm -rf bootstrap/llvm/out && mkdir -p bootstrap/llvm/out
-      - "{{.BUILD_DIR}}/compiler/driver/daoc build --source bootstrap/llvm/llvm.gen.dao --source bootstrap/mir/impl.dao --source bootstrap/hir/impl.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/llvm/llvm.gen"
+      - "{{.BUILD_DIR}}/compiler/driver/daoc build --source bootstrap/llvm/tests.dao --source bootstrap/llvm/impl.dao --source bootstrap/mir/impl.dao --source bootstrap/hir/impl.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/llvm/tests"
       - bash bootstrap/validate_ir.sh {{.BUILD_DIR}}
       - rm -rf bootstrap/driver/out/driver_tests_work && mkdir -p bootstrap/driver/out/driver_tests_work
       - "{{.BUILD_DIR}}/compiler/driver/daoc build --source bootstrap/driver/driver_tests.gen.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/driver/driver_tests.gen bootstrap/driver/out/driver_tests_work"

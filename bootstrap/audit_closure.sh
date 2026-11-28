@@ -10,7 +10,7 @@
 #      functions the corpus instantiates (the stdlib the bootstrap must
 #      be able to compile for itself)
 #   3. the bootstrap pipeline over its own programs, stage by stage
-#      (bootstrap/llvm/llvm.gen with the closure probe enabled) — where
+#      (bootstrap/llvm/tests with the closure probe enabled) — where
 #      the bootstrap stops today and on what
 #
 #   bootstrap/audit_closure.sh [--report-only] <build dir>
@@ -30,7 +30,7 @@ if [ "${1:-}" = "--report-only" ]; then
 fi
 BUILD_DIR="${1:-build/debug}"
 DAOC="$BUILD_DIR/compiler/driver/daoc"
-OUT="bootstrap/llvm/out"                 # where llvm.gen looks for its marker and writes a stage's line
+OUT="bootstrap/llvm/out"                 # where the llvm suite looks for its marker and writes a stage's line
 AUDIT_OUT="$BUILD_DIR/bootstrap_audit"   # this run's records: per-stage logs, times, the merged matrix
 DOC="docs/bootstrap_closure.md"
 PROGRAMS="lexer parser graph resolver typecheck hir mir llvm"
@@ -44,7 +44,7 @@ mkdir -p "$OUT" "$AUDIT_OUT"
 PRELUDE_LIST="$OUT/.closure_prelude"
 ls stdlib/core/*.dao stdlib/io/*.dao | LC_ALL=C sort > "$PRELUDE_LIST"
 # The probe marker and prelude list must not outlive this run: left
-# behind, every later bootstrap/llvm/llvm.gen run would probe instead of
+# behind, every later bootstrap/llvm/tests run would probe instead of
 # testing.  Nor may a half-merged matrix: the next run would append to it.
 trap 'rm -f "$OUT/.closure_probe" "$PRELUDE_LIST" "$AUDIT_OUT/closure.merged"' EXIT
 
@@ -70,7 +70,7 @@ program_sources() {
   elif [ "$1" = "mir" ]; then
     printf '%s\n' bootstrap/mir/impl.dao bootstrap/mir/tests.dao
   else
-    printf '%s\n' "bootstrap/$1/$1.gen.dao"
+    printf '%s\n' bootstrap/llvm/impl.dao bootstrap/llvm/tests.dao
   fi
 }
 
@@ -92,10 +92,10 @@ INVENTORY="$(awk -v labels="$LABELS" 'BEGIN { n = split(labels, a, "\n"); for (i
 #    LLVM as a definition -- the host lowers each specialization inline
 #    -- so it is counted from the MIR, where every specialization is a
 #    `fn_ref <name>$<type>`.
-INSTANCES="$("$DAOC" llvm-ir --source bootstrap/llvm/llvm.gen.dao --source bootstrap/mir/impl.dao --source bootstrap/hir/impl.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao 2>/dev/null \
+INSTANCES="$("$DAOC" llvm-ir --source bootstrap/llvm/tests.dao --source bootstrap/llvm/impl.dao --source bootstrap/mir/impl.dao --source bootstrap/hir/impl.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao 2>/dev/null \
   | grep -oE 'define [^@]*@"core::[^"]*"' | sed -E 's/.*@"//; s/"$//; s/\$.*//' | sort | uniq -c | sort -rn)"
 INSTANCES_TABLE="$(echo "$INSTANCES" | awk 'NF {printf "| `%s` | %s |\n", $2, $1}')"
-INTRINSICS="$("$DAOC" mir --source bootstrap/llvm/llvm.gen.dao --source bootstrap/mir/impl.dao --source bootstrap/hir/impl.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao 2>/dev/null \
+INTRINSICS="$("$DAOC" mir --source bootstrap/llvm/tests.dao --source bootstrap/llvm/impl.dao --source bootstrap/mir/impl.dao --source bootstrap/hir/impl.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao 2>/dev/null \
   | grep -oE 'fn_ref (size_of|align_of|ptr_offset)\$[^ ]+' | sed 's/^fn_ref //' | sort -u | sed 's/\$.*//' | uniq -c | sort -rn)"
 INTRINSICS_TABLE="$(echo "$INTRINSICS" | awk 'NF {printf "| `%s` (intrinsic; inlined by the host) | %s |\n", $2, $1}')"
 if [ -z "$INSTANCES_TABLE" ]; then
@@ -122,13 +122,13 @@ LIMIT_KB="${AUDIT_MEMORY_KB:-6291456}"   # 6 GiB
 LIMIT_S="${AUDIT_SECONDS:-600}"
 STAGES="parse typecheck hir mir mono llvm"
 if [ "$REPORT_ONLY" -eq 0 ]; then
-"$DAOC" build --source bootstrap/llvm/llvm.gen.dao --source bootstrap/mir/impl.dao --source bootstrap/hir/impl.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao > /dev/null || { echo "audit: building llvm.gen failed"; exit 1; }
+"$DAOC" build --source bootstrap/llvm/tests.dao --source bootstrap/llvm/impl.dao --source bootstrap/mir/impl.dao --source bootstrap/hir/impl.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao > /dev/null || { echo "audit: building the llvm suite failed"; exit 1; }
 rm -f "$OUT/closure.txt" "$AUDIT_OUT/closure.merged"
 # The prelude alone, once: each file's parse and resolve counts, then
 # its typecheck count, for the document's prelude section.  A probe
 # that dies leaves the lines it wrote before dying, and why it died.
 printf 'prelude\tprelude' > "$OUT/.closure_probe"
-( ulimit -v "$LIMIT_KB"; timeout "$LIMIT_S" ./bootstrap/llvm/llvm.gen ) > "$AUDIT_OUT/probe-prelude.log" 2>&1
+( ulimit -v "$LIMIT_KB"; timeout "$LIMIT_S" ./bootstrap/llvm/tests ) > "$AUDIT_OUT/probe-prelude.log" 2>&1
 prelude_status=$?
 rm -f "$OUT/closure.txt" "$AUDIT_OUT/probe-prelude.died"
 if [ "$prelude_status" -eq 124 ]; then
@@ -147,7 +147,7 @@ for p in $PROGRAMS; do
     printf '%s\t%s' "$p" "$stage" > "$OUT/.closure_probe"
     rm -f "$OUT/closure.txt"
     start=$SECONDS
-    ( ulimit -v "$LIMIT_KB"; /usr/bin/time -f 'probe: peak_rss_kb=%M' -o "$AUDIT_OUT/probe-$p.time" timeout "$LIMIT_S" ./bootstrap/llvm/llvm.gen ) > "$AUDIT_OUT/probe-$p-$stage.log" 2>&1
+    ( ulimit -v "$LIMIT_KB"; /usr/bin/time -f 'probe: peak_rss_kb=%M' -o "$AUDIT_OUT/probe-$p.time" timeout "$LIMIT_S" ./bootstrap/llvm/tests ) > "$AUDIT_OUT/probe-$p-$stage.log" 2>&1
     status=$?
     elapsed=$((SECONDS - start))
     cat "$AUDIT_OUT/probe-$p-$stage.log" >> "$AUDIT_OUT/probe-$p.log"
@@ -252,7 +252,7 @@ resource_block_sites() {
   echo
   echo "## 2. Prelude functions the corpus instantiates"
   echo
-  echo "Distinct \`core::\` functions the host lowers for \`llvm.gen\` (the largest"
+  echo "Distinct \`core::\` functions the host lowers for the \`llvm\` suite (the largest"
   echo "program), with the number of instantiations each: the stdlib the"
   echo "bootstrap must compile for itself."
   echo

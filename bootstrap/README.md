@@ -15,8 +15,9 @@ downstream passes. The modules `ascii.dao` (`module bootstrap::ascii`),
 `shared/base.dao` (`module bootstrap::base`), `resolver/impl.dao`
 (`module bootstrap::resolver`), `typecheck/impl.dao`
 (`module bootstrap::typecheck`), `hir/impl.dao`
-(`module bootstrap::hir`), and `mir/impl.dao`
-(`module bootstrap::mir`) compile directly as real modules without
+(`module bootstrap::hir`), `mir/impl.dao`
+(`module bootstrap::mir`), and `llvm/impl.dao`
+(`module bootstrap::llvm`) compile directly as real modules without
 assembly. See `shared/README.md`.
 
 ## Subsystems
@@ -314,8 +315,10 @@ The `bootstrap-test` task in `Taskfile.yml` holds the source list of `bootstrap/
 
 ### `llvm/`
 
-LLVM backend: lowers bootstrap MIR to deterministic textual LLVM IR
-via a backend-private Dao-side LLVM mini-IR and text serializer.
+LLVM backend (`module bootstrap::llvm` in `llvm/impl.dao`): lowers
+bootstrap MIR to deterministic textual LLVM IR via a backend-private
+Dao-side LLVM mini-IR and text serializer.  Its test runner is the
+separate module `bootstrap::llvm::tests` in `llvm/tests.dao`.
 
 **Status**: Tier A implemented (Task 30), and first Tier B slice
 (struct field access + construction) implemented.

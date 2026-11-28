@@ -5,6 +5,7 @@ import bootstrap::parser
 import bootstrap::graph
 import bootstrap::base
 import bootstrap::resolver
+import bootstrap::llvm
 
 // Entry point for the bootstrap compiler driver. Reads an explicit
 // manifest path from the command line, validates every directive and
@@ -28,20 +29,20 @@ fn main(): i32
       eprint("driver: " + err)
       return 2
 
-  let lowered: ProgramLlvm = lower_program_to_llvm(m.inputs)
-  let result: LlvmTextResult = lowered.result
+  let lowered: llvm::ProgramLlvm = llvm::lower_program_to_llvm(m.inputs)
+  let result: llvm::LlvmTextResult = lowered.result
   let located: Vector<graph::FileDiagnostic> = lowered.program.diags
   let di: i64 = to_i64(0)
   while di < result.diags.length():
     if di < located.length():
-      eprint("driver: " + located_message(located.get(di), lowered.program.module_graph.files))
+      eprint("driver: " + llvm::located_message(located.get(di), lowered.program.module_graph.files))
     else:
       eprint("driver: " + result.diags.get(di).message)
     di = di + to_i64(1)
   if result.ok == false:
     eprint("driver: " + i64_to_string(result.diags.length()) + " diagnostic(s), no module written")
     return 1
-  if write_llvm_text(result, m.output) == false:
+  if llvm::write_llvm_text(result, m.output) == false:
     eprint("driver: could not write " + m.output)
     return 1
   return 0

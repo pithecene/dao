@@ -5,8 +5,8 @@
 #
 # `bootstrap::ascii`, `bootstrap::lexer`, `bootstrap::parser`,
 # `bootstrap::graph`, `bootstrap::base`, `bootstrap::resolver`,
-# `bootstrap::typecheck`, `bootstrap::hir`, and `bootstrap::mir` are real
-# modules compiled directly from authored sources and are not assembled
+# `bootstrap::typecheck`, `bootstrap::hir`, `bootstrap::mir`, and
+# `bootstrap::llvm` are real modules compiled directly from authored sources and are not assembled
 # here.
 #
 # Run from repository root:
@@ -72,20 +72,14 @@ assemble() {
   echo "  assembled $out"
 }
 
-LLVM=bootstrap/llvm/impl.dao
 DRIVER=bootstrap/driver/impl.dao
-
-assemble "$OUT_ROOT/llvm/llvm.gen.dao" \
-  "$LLVM" \
-  bootstrap/llvm/tests.dao
 
 assemble "$OUT_ROOT/driver/driver_tests.gen.dao" \
   "$DRIVER" \
   bootstrap/driver/tests.dao
 
 assemble "$OUT_ROOT/driver/driver.gen.dao" \
-  "$LLVM" \
   "$DRIVER" \
   bootstrap/driver/main.dao
 
-echo "done — 3 files assembled"
+echo "done — 2 files assembled"
