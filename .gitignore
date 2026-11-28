@@ -29,10 +29,9 @@ examples/**
 !examples/**/*.h
 !examples/**/*.swift
 
-# Bootstrap: ignore assembled outputs and compiled binaries
-bootstrap/**/*.gen.dao
-bootstrap/**/*.gen
+# Bootstrap: ignore compiled binaries
 bootstrap/**/tests
+bootstrap/driver/main
 .worktrees/
 
 # Playground frontend

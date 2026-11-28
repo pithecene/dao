@@ -16,9 +16,10 @@ downstream passes. The modules `ascii.dao` (`module bootstrap::ascii`),
 (`module bootstrap::resolver`), `typecheck/impl.dao`
 (`module bootstrap::typecheck`), `hir/impl.dao`
 (`module bootstrap::hir`), `mir/impl.dao`
-(`module bootstrap::mir`), and `llvm/impl.dao`
-(`module bootstrap::llvm`) compile directly as real modules without
-assembly. See `shared/README.md`.
+(`module bootstrap::mir`), `llvm/impl.dao`
+(`module bootstrap::llvm`), and `driver/impl.dao`
+(`module bootstrap::driver`) compile directly as real modules.  No
+script assembles a program from fragments. See `shared/README.md`.
 
 ## Subsystems
 
@@ -28,7 +29,7 @@ Indentation-aware lexer (`module bootstrap::lexer` in `lexer/impl.dao`,
 importing `bootstrap::ascii`) matching the host compiler's token surface
 (`compiler/frontend/lexer/`).
 
-**Status**: real multi-file module compiled directly from authored sources without `assemble.sh`.
+**Status**: real multi-file module compiled directly from authored sources.
 
 **What it supports**:
 
@@ -61,7 +62,7 @@ The bootstrap lexer matches the C++ lexer on:
 **How to run tests**:
 
 ```sh
-# From repository root (no assemble.sh step required for lexer):
+# From repository root:
 daoc build --source bootstrap/lexer/tests.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/lexer/tests
 ```
 
@@ -74,7 +75,7 @@ a comprehensive Dao snippet regression, and self-lex tests over
 Recursive-descent parser (`module bootstrap::parser` in `parser/impl.dao`,
 importing `bootstrap::lexer`) producing an arena-indexed AST for Dao syntax.
 
-**Status**: real multi-file module compiled directly from authored sources without `assemble.sh`.
+**Status**: real multi-file module compiled directly from authored sources.
 
 **Tier A syntax** (supported):
 
@@ -121,7 +122,7 @@ importing `bootstrap::lexer`) producing an arena-indexed AST for Dao syntax.
 **How to run tests**:
 
 ```sh
-# From repository root (no assemble.sh step required for parser):
+# From repository root:
 daoc build --source bootstrap/parser/tests.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao && ./bootstrap/parser/tests
 ```
 
@@ -135,7 +136,7 @@ importing `bootstrap::lexer` and `bootstrap::parser`) providing deterministic
 file ordering, import-edge extraction, topological sorting, and cycle-path
 diagnostics.
 
-**Status**: real multi-file module compiled directly from authored sources without `assemble.sh`.
+**Status**: real multi-file module compiled directly from authored sources.
 
 **Running tests**:
 
@@ -150,7 +151,7 @@ importing `bootstrap::lexer`, `bootstrap::parser`, `bootstrap::graph`, and
 `bootstrap::base`) producing scope chains, symbol tables, and a uses map over
 the bootstrap parser's AST.
 
-**Status**: real multi-file module compiled directly from authored sources without `assemble.sh`.
+**Status**: real multi-file module compiled directly from authored sources.
 
 **Tier A scope**:
 
@@ -194,7 +195,7 @@ expressions and validating type correctness for Tier A Dao syntax.  Its
 test runner is the separate module `bootstrap::typecheck::tests` in
 `typecheck/tests.dao`.
 
-**Status**: real module compiled directly from authored sources without `assemble.sh`.
+**Status**: real module compiled directly from authored sources.
 
 **Tier A scope**:
 
@@ -380,7 +381,10 @@ minimum fixture counts (Task 30.5).  `task bootstrap-test` runs both steps.
 
 ### `driver/`
 
-Bootstrap compiler entry point and manifest request loader.
+Bootstrap compiler entry point, manifest request loader, and program
+pipeline (`module bootstrap::driver` in `driver/impl.dao`).  The entry
+point is `bootstrap::driver_main` in `driver/main.dao`, and the test
+runner is `bootstrap::driver::tests` in `driver/tests.dao`.
 
 **Capabilities**:
 
@@ -392,7 +396,7 @@ Bootstrap compiler entry point and manifest request loader.
 **Running tests and crossing**:
 
 ```sh
-bash bootstrap/assemble.sh && daoc build --source bootstrap/driver/driver_tests.gen.dao --source bootstrap/ascii.dao && ./bootstrap/driver/driver_tests.gen
+task bootstrap-test   # every suite, this one among them
 bash bootstrap/stage2.sh build/debug
 ```
 
@@ -427,16 +431,15 @@ probe. The probe remains as a historical artifact.
 
 - Tier B expansion (generics, concepts, extend, mode/resource)
 - Diagnostic formatting integration
-- Multi-file compilation (eliminate assembly workaround)
 - Count the closure probe's `lex`, `parse`, `resolve`, `typecheck`, `hir`,
   and `mir` columns over every authored file of an extracted program.  The
   probe in `llvm/tests.dao` limits those columns to `tests.dao` for
-  `lexer`, `parser`, `graph`, `resolver`, and `typecheck`, so a diagnostic
-  in an `impl.dao` goes uncounted.  The `mono` and `llvm` columns already
+  every program, so a diagnostic in an `impl.dao` goes uncounted.  The
+  audit should read the same source list as the test harness, not a
+  list of its own.  The `mono` and `llvm` columns already
   count the whole program.
-- Correct the sentence that `audit_closure.sh` writes about measuring the
-  `*.gen.dao` programs, then regenerate `docs/bootstrap_closure.md` with
-  `task bootstrap-audit` on Linux.
+- Regenerate `docs/bootstrap_closure.md` with `task bootstrap-audit` on
+  Linux, after the probe counts every authored file.
 - Move the pointer-operation codes (`ptr_op_new` and its siblings) from
   `bootstrap::typecheck` to `bootstrap::base`, so `mir` and `llvm` read
   the codes as `base::ptr_op_*`.  Both passes still import the checker

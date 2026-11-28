@@ -74,11 +74,13 @@ else
   mkdir "$RUN_DIR/.stage2.lock" || exit 1
 fi
 
-GEN_DIR="$RUN_DIR/gen"
+STAGE1_DIR="$RUN_DIR/stage1"
+# Every module the driver's entry point and its test runner import.
+DRIVER_MODULES="bootstrap/driver/impl.dao bootstrap/llvm/impl.dao bootstrap/mir/impl.dao bootstrap/hir/impl.dao bootstrap/typecheck/impl.dao bootstrap/resolver/impl.dao bootstrap/shared/base.dao bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao"
 LLVM_OUT="$RUN_DIR/llvm_out"
 DRIVER_TEST_WORK="$RUN_DIR/driver_tests_work"
 SMOKE_DIR="$RUN_DIR/smoke"
-mkdir -p "$GEN_DIR" "$LLVM_OUT" "$DRIVER_TEST_WORK" "$SMOKE_DIR" || exit 1
+mkdir -p "$STAGE1_DIR" "$LLVM_OUT" "$DRIVER_TEST_WORK" "$SMOKE_DIR" || exit 1
 
 sha256_file() {
   if command -v shasum > /dev/null 2>&1; then
@@ -145,11 +147,6 @@ fi
 echo "run directory: $RUN_DIR"
 echo "limits: stack=${APPLIED_STACK_KB}KiB (${STACK_MODE}), vmem=${VMEM_MODE}"
 
-bash bootstrap/assemble.sh "$GEN_DIR" > "$RUN_DIR/assemble.log" 2>&1 || {
-  echo "stage2: assemble failed (see $RUN_DIR/assemble.log)" >&2
-  exit 1
-}
-
 write_manifest() {  # write_manifest <manifest-path> <output .ll> <source>...
   local manifest_path="$1" output="$2"; shift 2
   { echo "output $output"
@@ -194,15 +191,21 @@ else
   fi
   SEED_KIND="host_daoc"
   echo "stage 1: the host builds the bootstrap compiler"
-  "$DAOC" build --source "$GEN_DIR/driver/driver.gen.dao" --source bootstrap/llvm/impl.dao --source bootstrap/mir/impl.dao --source bootstrap/hir/impl.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao > "$RUN_DIR/stage1.log" 2>&1 || {
+  # The host writes a program beside the source of its entry module,
+  # whatever the order of its sources, so stage 1's entry source is
+  # copied into the run directory to keep the binary there.
+  cp bootstrap/driver/main.dao "$STAGE1_DIR/main.dao" || exit 1
+  # shellcheck disable=SC2046
+  "$DAOC" build --source "$STAGE1_DIR/main.dao" $(printf -- '--source %s ' $DRIVER_MODULES) > "$RUN_DIR/stage1.log" 2>&1 || {
     echo "stage 1 failed (see $RUN_DIR/stage1.log)" >&2
     exit 1
   }
-  STAGE1="$GEN_DIR/driver/driver.gen"
+  STAGE1="$STAGE1_DIR/main"
 fi
 
 echo "stage 2: the bootstrap compiler compiles itself"
-compile_with "$STAGE1" "$RUN_DIR/stage2.ll" "$GEN_DIR/driver/driver.gen.dao" bootstrap/llvm/impl.dao bootstrap/mir/impl.dao bootstrap/hir/impl.dao bootstrap/typecheck/impl.dao bootstrap/resolver/impl.dao bootstrap/shared/base.dao bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao || {
+# shellcheck disable=SC2086
+compile_with "$STAGE1" "$RUN_DIR/stage2.ll" bootstrap/driver/main.dao $DRIVER_MODULES || {
   echo "stage 2 failed (see $RUN_DIR/stage2.ll.log)" >&2
   exit 1
 }
@@ -212,7 +215,8 @@ link "$RUN_DIR/stage2.ll" "$RUN_DIR/stage2" || {
 }
 
 echo "stage 3: the stage-2 compiler compiles itself"
-compile_with "$RUN_DIR/stage2" "$RUN_DIR/stage3.ll" "$GEN_DIR/driver/driver.gen.dao" bootstrap/llvm/impl.dao bootstrap/mir/impl.dao bootstrap/hir/impl.dao bootstrap/typecheck/impl.dao bootstrap/resolver/impl.dao bootstrap/shared/base.dao bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao || {
+# shellcheck disable=SC2086
+compile_with "$RUN_DIR/stage2" "$RUN_DIR/stage3.ll" bootstrap/driver/main.dao $DRIVER_MODULES || {
   echo "stage 3 failed (see $RUN_DIR/stage3.ll.log)" >&2
   exit 1
 }
@@ -373,7 +377,8 @@ suite_sources() {
   elif [ "$1" = "mir" ]; then
     printf '%s\n' bootstrap/mir/tests.dao bootstrap/mir/impl.dao bootstrap/hir/impl.dao bootstrap/typecheck/impl.dao bootstrap/resolver/impl.dao bootstrap/shared/base.dao bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao
   elif [ "$1" = "driver_tests" ]; then
-    printf '%s\n' "$GEN_DIR/driver/driver_tests.gen.dao" bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao
+    # shellcheck disable=SC2086
+    printf '%s\n' bootstrap/driver/tests.dao $DRIVER_MODULES
   else
     printf '%s\n' bootstrap/llvm/tests.dao bootstrap/llvm/impl.dao bootstrap/mir/impl.dao bootstrap/hir/impl.dao bootstrap/typecheck/impl.dao bootstrap/resolver/impl.dao bootstrap/shared/base.dao bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao
   fi

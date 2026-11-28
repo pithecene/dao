@@ -129,7 +129,6 @@ jobs:
       - name: Run host-compiled bootstrap suites and IR validation
         run: |
           set -euo pipefail
-          task bootstrap-assemble
           task bootstrap-test
 
       - name: Verify resource-limit validation and run cold Stage-2/Stage-3 crossing
@@ -174,7 +173,7 @@ jobs:
       - name: Verify concurrent isolated crossings and run-directory lock
         run: |
           set -euo pipefail
-          stage1_bin="$RUNNER_TEMP/dao_crossing/cold/gen/driver/driver.gen"
+          stage1_bin="$RUNNER_TEMP/dao_crossing/cold/stage1/main"
           STAGE1="$stage1_bin" STAGE2_RUN_DIR="$RUNNER_TEMP/dao_crossing/concurrent_a" \
             bash bootstrap/stage2.sh build/debug > "$RUNNER_TEMP/dao_crossing/concurrent_a.stdout" 2>&1 &
           pid_a=$!

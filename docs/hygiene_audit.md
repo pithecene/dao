@@ -67,10 +67,10 @@ six findings that have since changed, and it does not survey the rest:
 - **Pipeline.** The bootstrap compiler compiles `left |> right`, for a
   target of one parameter.
 
-The type checker, the HIR pass, the MIR pass, and the LLVM backend are now
-the real modules `bootstrap::typecheck`, `bootstrap::hir`,
-`bootstrap::mir`, and `bootstrap::llvm`, so `assemble.sh` concatenates
-only the `driver` programs.
+The type checker, the HIR pass, the MIR pass, the LLVM backend, and the
+driver are now the real modules `bootstrap::typecheck`, `bootstrap::hir`,
+`bootstrap::mir`, `bootstrap::llvm`, and `bootstrap::driver`.  No script
+concatenates them any more.
 
 ## Native vs. Bootstrap Parity Matrix
 
@@ -121,4 +121,4 @@ Each probe below ran through both `daoc` (`compiler/`) and `stage2` (`bootstrap/
 
 1. Repair bootstrap payload-enum equality immediately alongside compiler module extraction (`DAO-R03` through `DAO-R05`).
 2. Land `DAO-H03` (`stdlib`) and `DAO-H04` (bootstrap parity and approved literal/pattern contracts) in bounded pull requests before the repository-wide `DAO-H02` sweep.
-3. Execute `DAO-H02` and `DAO-H05` module-by-module once `assemble.sh` concatenation retires, followed by automated structural checks (`DAO-H06`).
+3. Execute `DAO-H02` and `DAO-H05` module-by-module, now that `assemble.sh` concatenation has retired, followed by automated structural checks (`DAO-H06`).
