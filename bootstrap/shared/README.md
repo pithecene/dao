@@ -17,18 +17,18 @@ recursive-descent parsing live in `bootstrap/parser/impl.dao`
 (`module bootstrap::parser`), which imports `bootstrap::lexer`
 (`bootstrap/lexer/impl.dao`), which imports `bootstrap::ascii`
 (`bootstrap/ascii.dao`). Name resolution lives in `bootstrap/resolver/impl.dao`
-(`module bootstrap::resolver`), type checking lives in
-`bootstrap/typecheck/impl.dao` (`module bootstrap::typecheck`), HIR
-lowering lives in `bootstrap/hir/impl.dao` (`module bootstrap::hir`), MIR
-lowering lives in `bootstrap/mir/impl.dao` (`module bootstrap::mir`), the
+(`module bootstrap::resolver`), and type checking lives in
+`bootstrap/typecheck/impl.dao` (`module bootstrap::typecheck`).  HIR
+lowering lives in `bootstrap/hir/impl.dao` (`module bootstrap::hir`), and MIR
+lowering lives in `bootstrap/mir/impl.dao` (`module bootstrap::mir`).  The
 LLVM backend lives in `bootstrap/llvm/impl.dao` (`module bootstrap::llvm`),
 and the program pipeline lives in `bootstrap/driver/impl.dao`
 (`module bootstrap::driver`).
 
 ## Building
 
-Every bootstrap module compiles directly from its authored source.  A
-program is built by passing its entry source and each module that it
+Every bootstrap module compiles directly from its authored source.  The
+host builds a program from its entry source and each module that it
 imports:
 
 ```sh

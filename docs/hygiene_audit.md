@@ -69,8 +69,8 @@ six findings that have since changed, and it does not survey the rest:
 
 The type checker, the HIR pass, the MIR pass, the LLVM backend, and the
 driver are now the real modules `bootstrap::typecheck`, `bootstrap::hir`,
-`bootstrap::mir`, `bootstrap::llvm`, and `bootstrap::driver`, and the
-`assemble.sh` script that concatenated them is gone.
+`bootstrap::mir`, `bootstrap::llvm`, and `bootstrap::driver`.  No script
+concatenates them any more.
 
 ## Native vs. Bootstrap Parity Matrix
 

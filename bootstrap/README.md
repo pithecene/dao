@@ -19,7 +19,7 @@ downstream passes. The modules `ascii.dao` (`module bootstrap::ascii`),
 (`module bootstrap::mir`), `llvm/impl.dao`
 (`module bootstrap::llvm`), and `driver/impl.dao`
 (`module bootstrap::driver`) compile directly as real modules.  No
-program is assembled from fragments. See `shared/README.md`.
+script assembles a program from fragments. See `shared/README.md`.
 
 ## Subsystems
 
