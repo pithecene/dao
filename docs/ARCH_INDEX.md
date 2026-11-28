@@ -153,6 +153,9 @@ Self-hosting compiler subsystems written in Dao.
 - `validate_ir.sh` — compiles, links, and runs the IR the LLVM suite
   emits under `llvm/out/` or a per-run directory, comparing exit codes
   and expected fixture counts
+- `bounded.sh` — runs one command under a wall-clock bound
+  (`BOOTSTRAP_SECONDS`, 600 by default) and exits 124 when the command
+  outlasts it; `task bootstrap-test` runs each `daoc build` under it
 - `audit_closure.sh` — measures the constructs and prelude functions the
   bootstrap corpus needs and where the bootstrap pipeline stops on its own
   programs, writing `docs/bootstrap_closure.md`
