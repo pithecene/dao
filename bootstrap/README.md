@@ -14,8 +14,9 @@ downstream passes. The modules `ascii.dao` (`module bootstrap::ascii`),
 (`module bootstrap::parser`), `graph/impl.dao` (`module bootstrap::graph`),
 `shared/base.dao` (`module bootstrap::base`), `resolver/impl.dao`
 (`module bootstrap::resolver`), `typecheck/impl.dao`
-(`module bootstrap::typecheck`), and `hir/impl.dao`
-(`module bootstrap::hir`) compile directly as real modules without
+(`module bootstrap::typecheck`), `hir/impl.dao`
+(`module bootstrap::hir`), and `mir/impl.dao`
+(`module bootstrap::mir`) compile directly as real modules without
 assembly. See `shared/README.md`.
 
 ## Subsystems
@@ -271,8 +272,10 @@ The `bootstrap-test` task in `Taskfile.yml` holds the source list of `bootstrap/
 
 ### `mir/`
 
-Tier A MIR lowering pass producing basic-block MIR from HIR, mirroring
-the host compiler's structure (`compiler/ir/mir/mir.h`).
+Tier A MIR lowering pass (`module bootstrap::mir` in `mir/impl.dao`)
+producing basic-block MIR from HIR, mirroring the host compiler's
+structure (`compiler/ir/mir/mir.h`).  Its test runner is the separate
+module `bootstrap::mir::tests` in `mir/tests.dao`.
 
 **Status**: implemented (Task 29).
 
@@ -307,7 +310,7 @@ break/continue.
 task bootstrap-test   # every suite, this one among them
 ```
 
-The `bootstrap-test` task in `Taskfile.yml` holds the source list of `bootstrap/mir/mir.gen.dao`.
+The `bootstrap-test` task in `Taskfile.yml` holds the source list of `bootstrap/mir/tests.dao`.
 
 ### `llvm/`
 

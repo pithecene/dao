@@ -7,6 +7,7 @@ import bootstrap::base
 import bootstrap::resolver
 import bootstrap::typecheck
 import bootstrap::hir
+import bootstrap::mir
 
 // Test runner for the bootstrap llvm.  Assembled after the
 // shared base and every library it exercises; never compiled
@@ -206,6 +207,8 @@ fn closure_program_checked(name: string, path: string, src: string, report: bool
           inputs = inputs.push(graph::SourceInput("bootstrap/typecheck/impl.dao", read_file("bootstrap/typecheck/impl.dao"), false))
           if name != "typecheck":
             inputs = inputs.push(graph::SourceInput("bootstrap/hir/impl.dao", read_file("bootstrap/hir/impl.dao"), false))
+            if name != "hir":
+              inputs = inputs.push(graph::SourceInput("bootstrap/mir/impl.dao", read_file("bootstrap/mir/impl.dao"), false))
   inputs = inputs.push(graph::SourceInput(path, base::wrap_test_module(src), false))
   let pg: graph::ProgramGraph = graph::program_graph_empty()
   resource memory graph =>
@@ -266,9 +269,9 @@ fn closure_probe_stage(name: string, path: string, stage: string): string
     // on a closed program; its own column says so).
     let checked: ProbedProgram = closure_program_checked(name, path, src, false)
     let carried_into_mir: i64 = checked.program.diags.length()
-    let pm: ProgramMir = ProgramMir(checked.program, mir_result_empty())
+    let pm: mir::ProgramMir = mir::ProgramMir(checked.program, mir::mir_result_empty())
     resource memory mir =>
-      pm = program_run_mir(checked.program)
+      pm = mir::program_run_mir(checked.program)
     closure_report_file_diags(name, "mir", pm.program.diags, carried_into_mir, to_i64(50), path)
     cols = cols + closure_stage_file_column(name, "mir", pm.program.diags, carried_into_mir, path)
   if stage == "mono":
@@ -276,13 +279,13 @@ fn closure_probe_stage(name: string, path: string, stage: string): string
     // could not make concrete (its diagnostics are the program's, not one
     // file's).
     let checked: ProbedProgram = closure_program_checked(name, path, src, false)
-    let pm: ProgramMir = ProgramMir(checked.program, mir_result_empty())
+    let pm: mir::ProgramMir = mir::ProgramMir(checked.program, mir::mir_result_empty())
     resource memory mir =>
-      pm = program_run_mir(checked.program)
+      pm = mir::program_run_mir(checked.program)
     let carried_into_mono: i64 = pm.mir.diags.length()
-    let pc: ProgramConcrete = ProgramConcrete(pm.program, pm.mir)
+    let pc: mir::ProgramConcrete = mir::ProgramConcrete(pm.program, pm.mir)
     resource memory mono =>
-      pc = program_monomorphize(checked.typed, pm)
+      pc = mir::program_monomorphize(checked.typed, pm)
     closure_report_diags_from(name, "mono", pc.mir.diags, carried_into_mono, to_i64(50))
     cols = cols + closure_stage_column(name, "mono", pc.mir.diags, carried_into_mono)
   if stage == "llvm":
@@ -290,12 +293,12 @@ fn closure_probe_stage(name: string, path: string, stage: string): string
     // reports beyond what MIR and monomorphization carried in, and the
     // module written beside the probe for the audit to link and run.
     let checked: ProbedProgram = closure_program_checked(name, path, src, false)
-    let pm: ProgramMir = ProgramMir(checked.program, mir_result_empty())
+    let pm: mir::ProgramMir = mir::ProgramMir(checked.program, mir::mir_result_empty())
     resource memory mir =>
-      pm = program_run_mir(checked.program)
-    let pc: ProgramConcrete = ProgramConcrete(pm.program, pm.mir)
+      pm = mir::program_run_mir(checked.program)
+    let pc: mir::ProgramConcrete = mir::ProgramConcrete(pm.program, pm.mir)
     resource memory mono =>
-      pc = program_monomorphize(checked.typed, pm)
+      pc = mir::program_monomorphize(checked.typed, pm)
     let carried_into_llvm: i64 = pc.mir.diags.length()
     let ll: LlvmTextResult = llvm_text_result_empty()
     resource memory llvm =>
@@ -374,9 +377,9 @@ fn closure_probe_prelude(): string
     eprint("probe: prelude hir\t" + path + "\t" + i64_to_string(lowered.count) + "\t" + lowered.first)
     i = i + to_i64(1)
   let carried_into_mir: i64 = p.diags.length()
-  let pm: ProgramMir = ProgramMir(checked, mir_result_empty())
+  let pm: mir::ProgramMir = mir::ProgramMir(checked, mir::mir_result_empty())
   resource memory mir =>
-    pm = program_run_mir(checked)
+    pm = mir::program_run_mir(checked)
   i = to_i64(0)
   while i < inputs.length():
     let path: string = inputs.get(i).path
@@ -409,6 +412,8 @@ fn closure_probe(marker: string): void
     line = closure_probe_stage(which, "bootstrap/typecheck/tests.dao", stage)
   else if which == "hir":
     line = closure_probe_stage(which, "bootstrap/hir/tests.dao", stage)
+  else if which == "mir":
+    line = closure_probe_stage(which, "bootstrap/mir/tests.dao", stage)
   else:
     line = closure_probe_stage(which, "bootstrap/" + which + "/" + which + ".gen.dao", stage)
   let closure_txt: string = llvm_out_dir() + "/closure.txt"
@@ -858,7 +863,7 @@ fn main(): i32
   // Test 22: an upstream warning travels with the backend result but
   // leaves an otherwise sound module `ok`.
   let in22: MirBackendInput = lower_to_mir_backend_input("fn main(): i32\n  return 0\n")
-  let mir22: MirResult = in22.mir
+  let mir22: mir::MirResult = in22.mir
   mir22.diags = mir22.diags.push(make_warning(Span(to_i64(0), to_i64(1)), "upstream warning"))
   in22.mir = mir22
   let r22: LlvmTextResult = lower_mir_to_llvm_text(in22)

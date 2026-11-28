@@ -6,6 +6,7 @@ import bootstrap::graph
 import bootstrap::base
 import bootstrap::resolver
 import bootstrap::typecheck
+import bootstrap::mir
 
 // bootstrap/llvm/impl.dao — bootstrap LLVM backend.
 //
@@ -162,7 +163,7 @@ class LlvmTextResult:
 // op tokens and extract MirConstFloat / MirConstString lexemes.
 // `MirResult` alone does not carry any of these.
 class MirBackendInput:
-  mir: MirResult
+  mir: mir::MirResult
   symbols: Vector<resolver::Symbol>
   types: Vector<base::DaoType>
   type_info: Vector<i64>
@@ -577,7 +578,7 @@ class BsSource:
 
 // What a backend run reads and never changes, apart from `source` following the current module.
 class BsInput:
-  mir_nodes: Vector<MirNode>
+  mir_nodes: Vector<mir::MirNode>
   mir_idx: Vector<i64>
   symbols: Vector<resolver::Symbol>
   types: Vector<base::DaoType>
@@ -706,16 +707,16 @@ class BsProgram:
   shared_type_names: HashMap<string, i64>
   diverging_syms: HashMap<string, i64>
 
-fn bs_mir_block_diverges_raw(mir_nodes: Vector<MirNode>, mir_idx: Vector<i64>, block_node_idx: i64, diverging: HashMap<string, i64>): bool
+fn bs_mir_block_diverges_raw(mir_nodes: Vector<mir::MirNode>, mir_idx: Vector<i64>, block_node_idx: i64, diverging: HashMap<string, i64>): bool
   match mir_nodes.get(block_node_idx):
-    MirNode::MirBlock(block_id, inst_list_lp, inst_count):
+    mir::MirNode::MirBlock(block_id, inst_list_lp, inst_count):
       let insts_raw: Vector<i64> = read_mir_list(mir_idx, inst_list_lp)
       let ii: i64 = to_i64(0)
       while ii < insts_raw.length():
         match mir_nodes.get(insts_raw.get(ii)):
-          MirNode::MirCall(callee, alp, ac, ti, sb):
+          mir::MirNode::MirCall(callee, alp, ac, ti, sb):
             match mir_nodes.get(callee):
-              MirNode::MirFnRef(csym, cti):
+              mir::MirNode::MirFnRef(csym, cti):
                 if diverging.contains(i64_to_string(csym)):
                   return true
         ii = ii + to_i64(1)
@@ -799,12 +800,12 @@ fn bs_mir_void_fn_diverges(input: MirBackendInput, ret_type: i64, block_list_lp:
     let rb: i64 = rblocks.get(ri)
     if bs_mir_block_diverges_raw(input.mir.mir_nodes, input.mir.mir_idx, rb, diverging) == false:
       match input.mir.mir_nodes.get(rb):
-        MirNode::MirBlock(bid2, ilp2, ic2):
+        mir::MirNode::MirBlock(bid2, ilp2, ic2):
           let rinsts: Vector<i64> = read_mir_list(input.mir.mir_idx, ilp2)
           let rii: i64 = to_i64(0)
           while rii < rinsts.length():
             match input.mir.mir_nodes.get(rinsts.get(rii)):
-              MirNode::MirReturn(rv, rhv):
+              mir::MirNode::MirReturn(rv, rhv):
                 return false
             rii = rii + to_i64(1)
     ri = ri + to_i64(1)
@@ -817,7 +818,7 @@ fn bs_program_of(input: MirBackendInput): BsProgram
   let ni: i64 = to_i64(0)
   while ni < input.mir.mir_nodes.length():
     match input.mir.mir_nodes.get(ni):
-      MirNode::MirFunction(fn_sym, ret_type, param_count, local_list_lp, local_count, block_list_lp, block_count, is_extern_i):
+      mir::MirNode::MirFunction(fn_sym, ret_type, param_count, local_list_lp, local_count, block_list_lp, block_count, is_extern_i):
         if is_extern_i > to_i64(0):
           externs = externs.set(i64_to_string(fn_sym), to_i64(1))
           if fn_sym >= 0 and fn_sym < input.symbols.length():
@@ -835,7 +836,7 @@ fn bs_program_of(input: MirBackendInput): BsProgram
     let nj: i64 = to_i64(0)
     while nj < input.mir.mir_nodes.length():
       match input.mir.mir_nodes.get(nj):
-        MirNode::MirFunction(fn_sym, ret_type, param_count, local_list_lp, local_count, block_list_lp, block_count, is_extern_i):
+        mir::MirNode::MirFunction(fn_sym, ret_type, param_count, local_list_lp, local_count, block_list_lp, block_count, is_extern_i):
           if is_extern_i == to_i64(0) and fn_sym >= 0:
             if diverging.contains(i64_to_string(fn_sym)) == false:
               if bs_mir_void_fn_diverges(input, ret_type, block_list_lp, diverging):
@@ -998,7 +999,7 @@ fn bs_slot_type_idx(bs: BS, slot_idx: i64): i64
   if slot_idx < 0 or slot_idx >= bs.tables.slots.keys.length():
     return to_i64(-1)
   match bs.input.mir_nodes.get(bs.tables.slots.keys.get(slot_idx)):
-    MirNode::MirLocal(sym, type_idx, is_param):
+    mir::MirNode::MirLocal(sym, type_idx, is_param):
       return type_idx
   return to_i64(-1)
 
@@ -1073,7 +1074,7 @@ fn bs_check_extern_scalars(bs: BS, name: string, ret_type: i64, locals_raw: Vect
   let i: i64 = to_i64(0)
   while i < param_count and i < locals_raw.length():
     match bs.input.mir_nodes.get(locals_raw.get(i)):
-      MirNode::MirLocal(lsym, ltype_idx, lis_param):
+      mir::MirNode::MirLocal(lsym, ltype_idx, lis_param):
         match ll_type_of(bs, ltype_idx):
           LlType::LlStruct:
             what = "takes"
@@ -1093,7 +1094,7 @@ fn bs_extern_signature(bs: BS, ret_type: i64, locals_raw: Vector<i64>, param_cou
   let i: i64 = to_i64(0)
   while i < param_count and i < locals_raw.length():
     match bs.input.mir_nodes.get(locals_raw.get(i)):
-      MirNode::MirLocal(lsym, ltype_idx, lis_param):
+      mir::MirNode::MirLocal(lsym, ltype_idx, lis_param):
         out = out + i64_to_string(ltype_idx) + ","
     i = i + to_i64(1)
   return out + ")"
@@ -1207,9 +1208,9 @@ fn bs_lower_params(bs: BS, params_raw: Vector<i64>, param_count: i64, is_extern:
   let i: i64 = to_i64(0)
   while i < param_count:
     let local_node_idx: i64 = params_raw.get(i)
-    let node: MirNode = bs.input.mir_nodes.get(local_node_idx)
+    let node: mir::MirNode = bs.input.mir_nodes.get(local_node_idx)
     match node:
-      MirNode::MirLocal(sym, type_idx, is_param):
+      mir::MirNode::MirLocal(sym, type_idx, is_param):
         let ty: LlType = ll_type_of(bs, type_idx)
         bs = bs_check_supported_type(bs, ty, "function parameter")
         let ty_txt: string = bs_ty(bs, type_idx)
@@ -1292,7 +1293,7 @@ fn bs_place_pointer(bs: BS, insts: Vector<LlInst>, local_idx: i64, path_lp: i64,
     let owner: base::DaoType = bs.input.types.get(cur_ti)
     // A deref step: the place so far holds a pointer; what it addresses
     // is the place from here on.
-    if field == mir_deref_step():
+    if field == mir::mir_deref_step():
       let loaded: FreshR = bs_fresh_value(bs)
       bs = loaded.bs
       insts = insts.push(LlInst(LlInstKind::LlLoad(ptr_name = ptr_name, ty_text = "ptr"), loaded.name))
@@ -1320,27 +1321,27 @@ class LowerStepR:
   insts: Vector<LlInst>
 
 fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_text: string): LowerStepR
-  let node: MirNode = bs.input.mir_nodes.get(mir_node_idx)
+  let node: mir::MirNode = bs.input.mir_nodes.get(mir_node_idx)
   match node:
     // ---------- constants (inlined as operand text) ----------
-    MirNode::MirConstInt(value, type_idx):
+    mir::MirNode::MirConstInt(value, type_idx):
       let ty: LlType = ll_type_of(bs, type_idx)
       // An enum's tag is an integer of a type this backend does not lower.
       bs = bs_check_supported_type(bs, ty, "integer constant")
       bs = bs_set_value(bs, mir_node_idx, i64_to_string(value), ll_type_text(ty))
       return LowerStepR(bs, insts)
-    MirNode::MirConstBool(value, type_idx):
+    mir::MirNode::MirConstBool(value, type_idx):
       let v: string = "false"
       if value > 0:
         v = "true"
       bs = bs_set_value(bs, mir_node_idx, v, "i1")
       return LowerStepR(bs, insts)
-    MirNode::MirConstFloat(tok, type_idx):
+    mir::MirNode::MirConstFloat(tok, type_idx):
       let lex: string = bs_tok_lex(bs, tok)
       let ty: LlType = ll_type_of(bs, type_idx)
       bs = bs_set_value(bs, mir_node_idx, lex, ll_type_text(ty))
       return LowerStepR(bs, insts)
-    MirNode::MirConstString(tok, type_idx):
+    mir::MirNode::MirConstString(tok, type_idx):
       // Emit a module-global and materialize via GEP.
       let raw: string = bs_tok_lex(bs, tok)
       // Decode Dao escapes and re-escape for LLVM IR c"..." form.
@@ -1361,7 +1362,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       return LowerStepR(bs, insts)
 
     // ---------- memory ----------
-    MirNode::MirLoad(local_idx, path_lp, path_count, type_idx):
+    mir::MirNode::MirLoad(local_idx, path_lp, path_count, type_idx):
       let at: PlacePtrR = bs_place_pointer(bs, insts, local_idx, path_lp, "MirLoad")
       bs = at.bs
       insts = at.insts
@@ -1375,7 +1376,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       bs = bs_set_value(bs, mir_node_idx, result, ty_text)
       return LowerStepR(bs, insts)
 
-    MirNode::MirStore(local_idx, path_lp, path_count, value_node):
+    mir::MirNode::MirStore(local_idx, path_lp, path_count, value_node):
       let at: PlacePtrR = bs_place_pointer(bs, insts, local_idx, path_lp, "MirStore")
       bs = at.bs
       insts = at.insts
@@ -1386,14 +1387,14 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       return LowerStepR(bs, insts)
 
     // ---------- binary / unary ----------
-    MirNode::MirBinary(op_tok, lhs, rhs, type_idx):
+    mir::MirNode::MirBinary(op_tok, lhs, rhs, type_idx):
       // A comparison `match` synthesized has no source token: it is `==`.
       let tk: lexer::Token = lexer::Token(lexer::TK::EqEq, to_i64(0), to_i64(0))
       if op_tok != base::synthesized_equality_op():
         tk = bs.input.source.toks.get(op_tok)
       return bs_lower_binary(bs, insts, mir_node_idx, lexer::tk_name(tk.kind), lhs, rhs)
 
-    MirNode::MirUnary(op_tok, operand, type_idx):
+    mir::MirNode::MirUnary(op_tok, operand, type_idx):
       let tk: lexer::Token = bs.input.source.toks.get(op_tok)
       let operand_text: string = bs_get_value_text(bs, operand)
       let ty: LlType = ll_type_of(bs, type_idx)
@@ -1426,7 +1427,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       return LowerStepR(bs, insts)
 
     // ---------- calls ----------
-    MirNode::MirFnRef(sym, type_idx):
+    mir::MirNode::MirFnRef(sym, type_idx):
       let name: string = bs_function_name(bs, sym)
       if name == "":
         bs = bs_error(bs, "bootstrap llvm backend cannot mangle anonymous symbol")
@@ -1445,17 +1446,17 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       bs = bs_set_value(bs, mir_node_idx, name, "ptr")
       return LowerStepR(bs, insts)
 
-    MirNode::MirLambda(fn_node, cap_list_lp, cap_count, type_idx):
+    mir::MirNode::MirLambda(fn_node, cap_list_lp, cap_count, type_idx):
       return bs_lower_lambda(bs, insts, mir_node_idx, fn_node, cap_list_lp, cap_count)
 
-    MirNode::MirConstruct(arg_list_lp, arg_count, type_idx):
+    mir::MirNode::MirConstruct(arg_list_lp, arg_count, type_idx):
       let cr: StructCtorR = bs_lower_struct_ctor(bs, insts, type_idx, arg_list_lp)
       bs = cr.bs
       insts = cr.insts
       bs = bs_set_value(bs, mir_node_idx, cr.value_name, cr.ty_text)
       return LowerStepR(bs, insts)
 
-    MirNode::MirCall(callee, arg_list_lp, arg_count, type_idx, subst):
+    mir::MirNode::MirCall(callee, arg_list_lp, arg_count, type_idx, subst):
       // A compiler intrinsic (`size_of$T`, `align_of$T`) has no body to
       // call: it is the size or alignment of the type the call decided
       // (the host's lower_builtin_call).
@@ -1551,7 +1552,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
           bs = bs_set_value(bs, mir_node_idx, result, ret_ty_text)
       return LowerStepR(bs, insts)
 
-    MirNode::MirFieldAccess(obj, field_tok, field_index, type_idx):
+    mir::MirNode::MirFieldAccess(obj, field_tok, field_index, type_idx):
       if field_index < 0:
         bs = bs_error(bs, "bootstrap llvm backend: MirFieldAccess has unresolved field_index (-1)")
         return LowerStepR(bs, insts)
@@ -1575,12 +1576,12 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       bs = bs_set_value(bs, mir_node_idx, result, field_ty_text)
       return LowerStepR(bs, insts)
 
-    MirNode::MirErrorExpr(tok):
+    mir::MirNode::MirErrorExpr(tok):
       bs = bs_error(bs, "bootstrap llvm backend rejects MirErrorExpr sentinel")
       return LowerStepR(bs, insts)
 
     // ---------- terminators ----------
-    MirNode::MirReturn(value, has_value):
+    mir::MirNode::MirReturn(value, has_value):
       // A generator's `return` ends it: done, and back to the consumer.
       if bs.func.gen.frame != "":
         let done_at: FreshR = bs_fresh_value(bs)
@@ -1615,7 +1616,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
           insts = insts.push(dead)
       return LowerStepR(bs, insts)
 
-    MirNode::MirBr(target_block):
+    mir::MirNode::MirBr(target_block):
       let label: string = bs_get_block_label(bs, target_block)
       let inst: LlInst = LlInst(
         LlInstKind::LlBr(target_label = label),
@@ -1623,7 +1624,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       insts = insts.push(inst)
       return LowerStepR(bs, insts)
 
-    MirNode::MirCondBr(cond, then_block, else_block):
+    mir::MirNode::MirCondBr(cond, then_block, else_block):
       let cond_text: string = bs_get_value_text(bs, cond)
       let then_label: string = bs_get_block_label(bs, then_block)
       let else_label: string = bs_get_block_label(bs, else_block)
@@ -1633,7 +1634,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       insts = insts.push(inst)
       return LowerStepR(bs, insts)
     // ---------- generators (the host's lower_generator_resume / iter) ----------
-    MirNode::MirYield(value):
+    mir::MirNode::MirYield(value):
       // Store the value in the frame's yield slot, note where to resume,
       // and return to the consumer; resumption continues from here.
       if bs.func.gen.frame == "":
@@ -1652,7 +1653,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       insts = insts.push(LlInst(LlInstKind::LlText(rhs = "ret void"), ""))
       insts = insts.push(LlInst(LlInstKind::LlText(rhs = "resume." + k + ":"), ""))
       return LowerStepR(bs, insts)
-    MirNode::MirIterInit(source, type_idx):
+    mir::MirNode::MirIterInit(source, type_idx):
       // The handle's frame is the iterator; its first resume runs the
       // generator to its first yield.
       let gen_val: string = bs_get_value_text(bs, source)
@@ -1670,7 +1671,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       bs = bs_set_value(bs, mir_node_idx, frame.name, "ptr")
       bs = bs_set_value(bs, bs_resume_key(mir_node_idx), resume.name, "ptr")
       return LowerStepR(bs, insts)
-    MirNode::MirIterHasNext(iter, type_idx):
+    mir::MirNode::MirIterHasNext(iter, type_idx):
       let open: IterRef = bs_iter_ref(bs, insts, iter)
       bs = open.bs
       insts = open.insts
@@ -1685,7 +1686,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       insts = insts.push(LlInst(LlInstKind::LlText(rhs = "xor i1 " + done.name + ", true"), has_next.name))
       bs = bs_set_value(bs, mir_node_idx, has_next.name, "i1")
       return LowerStepR(bs, insts)
-    MirNode::MirIterNext(iter, type_idx):
+    mir::MirNode::MirIterNext(iter, type_idx):
       // The value in the yield slot, then a resume to the next yield.
       let open: IterRef = bs_iter_ref(bs, insts, iter)
       bs = open.bs
@@ -1700,7 +1701,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       insts = insts.push(LlInst(LlInstKind::LlText(rhs = "call void " + open.resume + "(ptr " + open.frame + ")"), ""))
       bs = bs_set_value(bs, mir_node_idx, got.name, elem_ty)
       return LowerStepR(bs, insts)
-    MirNode::MirIterDestroy(iter):
+    mir::MirNode::MirIterDestroy(iter):
       let open: IterRef = bs_iter_ref(bs, insts, iter)
       bs = open.bs
       insts = open.insts
@@ -1710,15 +1711,15 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       return LowerStepR(bs, insts)
 
     // ---------- regions ----------
-    MirNode::MirModeEnter(name_tok):
+    mir::MirNode::MirModeEnter(name_tok):
       // `mode unsafe` gates what the checker accepts; it emits nothing
       // (the host's).  Any other mode has no lowering yet.
       if bs_tok_lex(bs, name_tok) != "unsafe":
         bs = bs_error(bs, "mode '" + bs_tok_lex(bs, name_tok) + "' lowering not yet supported")
       return LowerStepR(bs, insts)
-    MirNode::MirModeExit(name_tok):
+    mir::MirNode::MirModeExit(name_tok):
       return LowerStepR(bs, insts)
-    MirNode::MirResourceEnter(kind_tok, name_tok):
+    mir::MirNode::MirResourceEnter(kind_tok, name_tok):
       // A memory domain is the runtime's (runtime/core/dao_abi.h).
       if bs_tok_lex(bs, kind_tok) != "memory":
         bs = bs_error(bs, "resource '" + bs_tok_lex(bs, kind_tok) + "' lowering not yet supported")
@@ -1729,7 +1730,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       insts = insts.push(LlInst(LlInstKind::LlText(rhs = "call ptr @__dao_mem_resource_enter()"), domain.name))
       bs = bs_set_value(bs, mir_node_idx, domain.name, "ptr")
       return LowerStepR(bs, insts)
-    MirNode::MirResourceExit(kind_tok, name_tok, handle):
+    mir::MirNode::MirResourceExit(kind_tok, name_tok, handle):
       if bs_tok_lex(bs, kind_tok) != "memory":
         return LowerStepR(bs, insts)
       let one_ptr: Vector<string> = Vector<string>::new()
@@ -1738,7 +1739,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       return LowerStepR(bs, insts)
 
     // ---------- pointers (the host's lower_ptr_op) ----------
-    MirNode::MirPtrOp(op, pointer, argument, type_idx):
+    mir::MirNode::MirPtrOp(op, pointer, argument, type_idx):
       if op == typecheck::ptr_op_new():
         bs = bs_set_value(bs, mir_node_idx, "null", "ptr")
         return LowerStepR(bs, insts)
@@ -1770,7 +1771,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       return LowerStepR(bs, insts)
 
     // ---------- enums (the host's lower_enum_*) ----------
-    MirNode::MirEnumConstruct(variant, arg_list_lp, arg_count, type_idx):
+    mir::MirNode::MirEnumConstruct(variant, arg_list_lp, arg_count, type_idx):
       // Built in memory: the tag at field 0, the variant's payload as its
       // own struct over the payload slots at field 1, then loaded whole.
       bs = bs_ensure_struct_def(bs, type_idx)
@@ -1800,7 +1801,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       bs = bs_set_value(bs, mir_node_idx, whole.name, enum_ty)
       return LowerStepR(bs, insts)
 
-    MirNode::MirEnumDiscriminant(value, type_idx):
+    mir::MirNode::MirEnumDiscriminant(value, type_idx):
       // A classification enum's value is its tag; a payload-bearing
       // one's tag is field 0.
       if bs_get_value_ty(bs, value) == "i32":
@@ -1812,7 +1813,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       bs = bs_set_value(bs, mir_node_idx, tag.name, "i32")
       return LowerStepR(bs, insts)
 
-    MirNode::MirEnumPayload(value, variant, field, type_idx):
+    mir::MirNode::MirEnumPayload(value, variant, field, type_idx):
       // Stored, then read through the variant's payload struct.
       let enum_ty: string = bs_get_value_ty(bs, value)
       let enum_ti: i64 = bs_value_enum_type(bs, value)
@@ -1834,7 +1835,7 @@ fn bs_lower_inst(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_ret_ty_tex
       return LowerStepR(bs, insts)
   // An instruction with no lowering here fails the module rather than
   // vanishing from it.
-  bs = bs_error(bs, "bootstrap llvm backend: unsupported MIR instruction " + mir_node_kind(node))
+  bs = bs_error(bs, "bootstrap llvm backend: unsupported MIR instruction " + mir::mir_node_kind(node))
   return LowerStepR(bs, insts)
 
 // A binary operator as the host lowers it (lower_binary): strings
@@ -1844,7 +1845,7 @@ fn bs_lower_binary(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, op: string,
   let lhs_text: string = bs_get_value_text(bs, lhs)
   let rhs_text: string = bs_get_value_text(bs, rhs)
   let ty_text: string = bs_get_value_ty(bs, lhs)
-  let operand_ti: i64 = mir_value_type(bs.input.mir_nodes, lhs)
+  let operand_ti: i64 = mir::mir_value_type(bs.input.mir_nodes, lhs)
   let unsigned: bool = ll_is_unsigned(bs.input.types, operand_ti)
   let is_float: bool = ty_text == "float" or ty_text == "double"
   if ty_text == "%dao.string":
@@ -2087,12 +2088,12 @@ fn bs_iter_inits(bs: BS, blocks: Vector<i64>): Vector<i64>
   let bi: i64 = to_i64(0)
   while bi < blocks.length():
     match bs.input.mir_nodes.get(blocks.get(bi)):
-      MirNode::MirBlock(bid, inst_list_lp, ic):
+      mir::MirNode::MirBlock(bid, inst_list_lp, ic):
         let insts: Vector<i64> = read_mir_list(bs.input.mir_idx, inst_list_lp)
         let ii: i64 = to_i64(0)
         while ii < insts.length():
           match bs.input.mir_nodes.get(insts.get(ii)):
-            MirNode::MirIterInit(source, type_idx):
+            mir::MirNode::MirIterInit(source, type_idx):
               found = found.push(insts.get(ii))
           ii = ii + to_i64(1)
     bi = bi + to_i64(1)
@@ -2101,7 +2102,7 @@ fn bs_iter_inits(bs: BS, blocks: Vector<i64>): Vector<i64>
 // The consumer's view of a generator frame's header, `{ i32 state,
 // i1 done, T yield_slot }`, for the iterator made at `iter`.
 fn bs_frame_view(bs: BS, iter: i64): string
-  let gen_ti: i64 = mir_value_type(bs.input.mir_nodes, iter)
+  let gen_ti: i64 = mir::mir_value_type(bs.input.mir_nodes, iter)
   let elem: i64 = to_i64(-1)
   if gen_ti >= 0 and gen_ti < bs.input.types.length():
     elem = bs.input.types.get(gen_ti).pointee
@@ -2124,7 +2125,7 @@ fn bs_declare_hook(bs: BS, name: string, ret_ty: string, param_tys: Vector<strin
 // prelude intrinsic; "" otherwise.
 fn bs_intrinsic_of(bs: BS, callee: i64): string
   match bs.input.mir_nodes.get(callee):
-    MirNode::MirFnRef(sym, ti):
+    mir::MirNode::MirFnRef(sym, ti):
       if sym >= 0 and sym < bs.input.symbols.length():
         let name: string = bs.input.symbols.get(sym).name
         if index_of(name, "size_of$") == to_i64(0):
@@ -2155,7 +2156,7 @@ fn bs_payload_struct(bs: BS, enum_ti: i64, variant: i64): string
 
 // The Dao enum type of a value an instruction produced (MIR types it).
 fn bs_value_enum_type(bs: BS, value: i64): i64
-  return mir_value_type(bs.input.mir_nodes, value)
+  return mir::mir_value_type(bs.input.mir_nodes, value)
 
 // =========================================================================
 // Section 88b: Helpers pulled out of instruction lowering
@@ -2281,14 +2282,14 @@ class BlockExit:
 
 fn mir_block_diverges(bs: BS, block_node_idx: i64): bool
   match bs.input.mir_nodes.get(block_node_idx):
-    MirNode::MirBlock(block_id, inst_list_lp, inst_count):
+    mir::MirNode::MirBlock(block_id, inst_list_lp, inst_count):
       let insts_raw: Vector<i64> = read_mir_list(bs.input.mir_idx, inst_list_lp)
       let ii: i64 = to_i64(0)
       while ii < insts_raw.length():
         match bs.input.mir_nodes.get(insts_raw.get(ii)):
-          MirNode::MirCall(callee, alp, ac, ti, sb):
+          mir::MirNode::MirCall(callee, alp, ac, ti, sb):
             match bs.input.mir_nodes.get(callee):
-              MirNode::MirFnRef(csym, cti):
+              mir::MirNode::MirFnRef(csym, cti):
                 if bs.input.source.program.diverging_syms.contains(i64_to_string(csym)):
                   return true
         ii = ii + to_i64(1)
@@ -2299,14 +2300,14 @@ fn mir_block_exit(bs: BS, block_node_idx: i64): BlockExit
     return BlockExit(to_i64(-1), to_i64(-1), to_i64(-1), to_i64(0))
   let exit: BlockExit = BlockExit(to_i64(-1), to_i64(-1), to_i64(-1), to_i64(0))
   match bs.input.mir_nodes.get(block_node_idx):
-    MirNode::MirBlock(block_id, inst_list_lp, inst_count):
+    mir::MirNode::MirBlock(block_id, inst_list_lp, inst_count):
       let insts_raw: Vector<i64> = read_mir_list(bs.input.mir_idx, inst_list_lp)
       let ii: i64 = to_i64(0)
       while ii < insts_raw.length():
         match bs.input.mir_nodes.get(insts_raw.get(ii)):
-          MirNode::MirBr(target_block):
+          mir::MirNode::MirBr(target_block):
             exit = BlockExit(to_i64(-1), target_block, to_i64(-1), to_i64(1))
-          MirNode::MirCondBr(cond, then_block, else_block):
+          mir::MirNode::MirCondBr(cond, then_block, else_block):
             exit = BlockExit(cond, then_block, else_block, to_i64(2))
         ii = ii + to_i64(1)
   return exit
@@ -2325,22 +2326,22 @@ fn mir_match_test(bs: BS, cond: i64): MatchTest
   if cond < 0:
     return none
   match bs.input.mir_nodes.get(cond):
-    MirNode::MirBinary(op_tok, lhs, rhs, type_idx):
+    mir::MirNode::MirBinary(op_tok, lhs, rhs, type_idx):
       if op_tok != base::synthesized_equality_op():
         return none
       let tested: i64 = lhs
       match bs.input.mir_nodes.get(lhs):
-        MirNode::MirEnumDiscriminant(value, dti):
+        mir::MirNode::MirEnumDiscriminant(value, dti):
           tested = value
       let local: i64 = to_i64(-1)
       match bs.input.mir_nodes.get(tested):
-        MirNode::MirLoad(local_idx, path_lp, path_count, lti):
+        mir::MirNode::MirLoad(local_idx, path_lp, path_count, lti):
           if path_count == to_i64(0):
             local = local_idx
       if local < 0:
         return none
       match bs.input.mir_nodes.get(rhs):
-        MirNode::MirConstInt(value, cti):
+        mir::MirNode::MirConstInt(value, cti):
           if cti >= 0 and cti < bs.input.types.length():
             let t: base::DaoType = bs.input.types.get(cti)
             match t.kind:
@@ -2460,9 +2461,9 @@ fn ll_inst_is_terminator(inst: LlInst): bool
 // =========================================================================
 
 fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
-  let node: MirNode = bs.input.mir_nodes.get(mir_fn_idx)
+  let node: mir::MirNode = bs.input.mir_nodes.get(mir_fn_idx)
   match node:
-    MirNode::MirFunction(fn_sym, ret_type, param_count, local_list_lp, local_count, block_list_lp, block_count, is_extern_i):
+    mir::MirNode::MirFunction(fn_sym, ret_type, param_count, local_list_lp, local_count, block_list_lp, block_count, is_extern_i):
       if fn_sym < 0:
         return bs
       bs = bs_reset_fn_state(bs)
@@ -2522,9 +2523,9 @@ fn bs_lower_function(bs: BS, mir_fn_idx: i64): BS
       let li: i64 = to_i64(0)
       while li < locals_raw.length():
         let local_node_idx: i64 = locals_raw.get(li)
-        let ln: MirNode = bs.input.mir_nodes.get(local_node_idx)
+        let ln: mir::MirNode = bs.input.mir_nodes.get(local_node_idx)
         match ln:
-          MirNode::MirLocal(lsym, ltype_idx, lis_param):
+          mir::MirNode::MirLocal(lsym, ltype_idx, lis_param):
             let slot_name: string = "%slot" + i64_to_string(li)
             let slot_ty: LlType = ll_type_of(bs, ltype_idx)
             bs = bs_check_supported_type(bs, slot_ty, "local slot")
@@ -2628,7 +2629,7 @@ fn bs_lower_generator(bs: BS, name: string, gen_ti: i64, params: Vector<LlParam>
   let li: i64 = to_i64(0)
   while li < locals_raw.length():
     match bs.input.mir_nodes.get(locals_raw.get(li)):
-      MirNode::MirLocal(lsym, lti, lis_param):
+      mir::MirNode::MirLocal(lsym, lti, lis_param):
         bs = bs_define_aggregate(bs, lti)
         fields = fields.push(bs_ty(bs, lti))
     li = li + to_i64(1)
@@ -2698,12 +2699,12 @@ fn bs_lower_generator(bs: BS, name: string, gen_ti: i64, params: Vector<LlParam>
   while bi < blocks_raw.length():
     bs = bs_set_block_label(bs, blocks_raw.get(bi), "bb" + i64_to_string(bi))
     match bs.input.mir_nodes.get(blocks_raw.get(bi)):
-      MirNode::MirBlock(bid, inst_list_lp, ic):
+      mir::MirNode::MirBlock(bid, inst_list_lp, ic):
         let insts: Vector<i64> = read_mir_list(bs.input.mir_idx, inst_list_lp)
         let ii: i64 = to_i64(0)
         while ii < insts.length():
           match bs.input.mir_nodes.get(insts.get(ii)):
-            MirNode::MirYield(v):
+            mir::MirNode::MirYield(v):
               yields = yields + to_i64(1)
           ii = ii + to_i64(1)
     bi = bi + to_i64(1)
@@ -2766,60 +2767,60 @@ fn bs_scan_fn_refs(bs: BS, blocks_raw: Vector<i64>): BS
   let bi: i64 = to_i64(0)
   while bi < blocks_raw.length():
     match bs.input.mir_nodes.get(blocks_raw.get(bi)):
-      MirNode::MirBlock(bid, ilp, ic):
+      mir::MirNode::MirBlock(bid, ilp, ic):
         let insts: Vector<i64> = read_mir_list(bs.input.mir_idx, ilp)
         let ii: i64 = to_i64(0)
         while ii < insts.length():
           let u: i64 = insts.get(ii)
           match bs.input.mir_nodes.get(u):
-            MirNode::MirFnRef(sym, ti):
+            mir::MirNode::MirFnRef(sym, ti):
               fn_refs = fn_refs.set(i64_to_string(u), sym)
           ii = ii + to_i64(1)
     bi = bi + to_i64(1)
   let bj: i64 = to_i64(0)
   while bj < blocks_raw.length():
     match bs.input.mir_nodes.get(blocks_raw.get(bj)):
-      MirNode::MirBlock(bid, ilp, ic):
+      mir::MirNode::MirBlock(bid, ilp, ic):
         let insts: Vector<i64> = read_mir_list(bs.input.mir_idx, ilp)
         let ij: i64 = to_i64(0)
         while ij < insts.length():
           match bs.input.mir_nodes.get(insts.get(ij)):
-            MirNode::MirStore(l, pl, pc, val):
+            mir::MirNode::MirStore(l, pl, pc, val):
               if fn_refs.contains(i64_to_string(val)):
                 value_refs = value_refs.set(i64_to_string(val), to_i64(1))
-            MirNode::MirBinary(bop, bl, br_node, bti):
+            mir::MirNode::MirBinary(bop, bl, br_node, bti):
               if fn_refs.contains(i64_to_string(bl)):
                 value_refs = value_refs.set(i64_to_string(bl), to_i64(1))
               if fn_refs.contains(i64_to_string(br_node)):
                 value_refs = value_refs.set(i64_to_string(br_node), to_i64(1))
-            MirNode::MirReturn(val, hv):
+            mir::MirNode::MirReturn(val, hv):
               if hv > to_i64(0) and fn_refs.contains(i64_to_string(val)):
                 value_refs = value_refs.set(i64_to_string(val), to_i64(1))
-            MirNode::MirYield(val):
+            mir::MirNode::MirYield(val):
               if fn_refs.contains(i64_to_string(val)):
                 value_refs = value_refs.set(i64_to_string(val), to_i64(1))
-            MirNode::MirConstruct(alp, ac, ti):
+            mir::MirNode::MirConstruct(alp, ac, ti):
               let cargs: Vector<i64> = read_mir_list(bs.input.mir_idx, alp)
               let ci: i64 = to_i64(0)
               while ci < cargs.length():
                 if fn_refs.contains(i64_to_string(cargs.get(ci))):
                   value_refs = value_refs.set(i64_to_string(cargs.get(ci)), to_i64(1))
                 ci = ci + to_i64(1)
-            MirNode::MirEnumConstruct(v, alp, ac, ti):
+            mir::MirNode::MirEnumConstruct(v, alp, ac, ti):
               let eargs: Vector<i64> = read_mir_list(bs.input.mir_idx, alp)
               let ei: i64 = to_i64(0)
               while ei < eargs.length():
                 if fn_refs.contains(i64_to_string(eargs.get(ei))):
                   value_refs = value_refs.set(i64_to_string(eargs.get(ei)), to_i64(1))
                 ei = ei + to_i64(1)
-            MirNode::MirLambda(fnode, clp, cc, ti):
+            mir::MirNode::MirLambda(fnode, clp, cc, ti):
               let caps: Vector<i64> = read_mir_list(bs.input.mir_idx, clp)
               let cpi: i64 = to_i64(0)
               while cpi < caps.length():
                 if fn_refs.contains(i64_to_string(caps.get(cpi))):
                   value_refs = value_refs.set(i64_to_string(caps.get(cpi)), to_i64(1))
                 cpi = cpi + to_i64(1)
-            MirNode::MirCall(callee, alp, ac, ti, sb):
+            mir::MirNode::MirCall(callee, alp, ac, ti, sb):
               let csym: i64 = base::hm_get_or(fn_refs, i64_to_string(callee), to_i64(-1))
               let is_ext: bool = csym >= 0 and bs.input.source.program.extern_syms.contains(i64_to_string(csym))
               if is_ext == false:
@@ -2936,7 +2937,7 @@ fn bs_get_or_create_c_fn_adapter(bs: BS, type_idx: i64): FreshR
 
 fn bs_lower_lambda(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_node: i64, cap_list_lp: i64, cap_count: i64): LowerStepR
   match bs.input.mir_nodes.get(fn_node):
-    MirNode::MirFunction(fn_sym, lam_ret_ti, lam_param_count, lam_local_lp, lam_local_count, lam_block_lp, lam_block_count, is_ext):
+    mir::MirNode::MirFunction(fn_sym, lam_ret_ti, lam_param_count, lam_local_lp, lam_local_count, lam_block_lp, lam_block_count, is_ext):
       let lam_id: i64 = bs.out.next_global
       bs.out.next_global = lam_id + to_i64(1)
       let parent_body: string = "anon"
@@ -2952,7 +2953,7 @@ fn bs_lower_lambda(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_node: i6
         let ci: i64 = to_i64(0)
         while ci < cap_count:
           match bs.input.mir_nodes.get(lam_locals.get(lam_param_count + ci)):
-            MirNode::MirLocal(csym, cti, cis_p):
+            mir::MirNode::MirLocal(csym, cti, cis_p):
               bs = bs_define_aggregate(bs, cti)
               cap_field_tys = cap_field_tys.push(bs_ty(bs, cti))
           ci = ci + to_i64(1)
@@ -3016,7 +3017,7 @@ fn bs_lower_lambda(bs: BS, insts: Vector<LlInst>, mir_node_idx: i64, fn_node: i6
       while lli < lam_locals.length():
         let lnode_idx: i64 = lam_locals.get(lli)
         match bs.input.mir_nodes.get(lnode_idx):
-          MirNode::MirLocal(lsym, lti, lis_p):
+          mir::MirNode::MirLocal(lsym, lti, lis_p):
             let sname: string = "%slot" + i64_to_string(lli)
             bs = bs_define_aggregate(bs, lti)
             bs = bs_set_slot(bs, lnode_idx, sname, bs_ty(bs, lti))
@@ -3091,9 +3092,9 @@ fn bs_lower_blocks(bs: BS, blocks_raw: Vector<i64>, lead: Vector<LlInst>, ret_ty
   let block_i: i64 = to_i64(0)
   while block_i < blocks_raw.length():
     let block_node_idx: i64 = blocks_raw.get(block_i)
-    let mb: MirNode = bs.input.mir_nodes.get(block_node_idx)
+    let mb: mir::MirNode = bs.input.mir_nodes.get(block_node_idx)
     match mb:
-      MirNode::MirBlock(block_id, inst_list_lp, inst_count):
+      mir::MirNode::MirBlock(block_id, inst_list_lp, inst_count):
         let insts_raw: Vector<i64> = read_mir_list(bs.input.mir_idx, inst_list_lp)
         let this_insts: Vector<LlInst> = Vector<LlInst>::new()
         if block_i == to_i64(0):
@@ -3138,11 +3139,11 @@ fn lower_mir_to_ll_module(bs: BS, root: i64): BS
   if root >= bs.input.mir_nodes.length():
     bs = bs_error(bs, "bootstrap llvm backend: MirResult.root out of bounds")
     return bs
-  let root_node: MirNode = bs.input.mir_nodes.get(root)
+  let root_node: mir::MirNode = bs.input.mir_nodes.get(root)
   match root_node:
-    MirNode::MirModule(file_id, fn_list_lp, fn_count, template_list_lp, template_count):
+    mir::MirNode::MirModule(file_id, fn_list_lp, fn_count, template_list_lp, template_count):
       return bs_lower_module_fns(bs, fn_list_lp)
-    MirNode::MirProgram(module_list_lp, module_count):
+    mir::MirNode::MirProgram(module_list_lp, module_count):
       // A whole program: every module's functions, each read with its
       // own module's tokens.
       let modules: Vector<i64> = read_mir_list(bs.input.mir_idx, module_list_lp)
@@ -3150,7 +3151,7 @@ fn lower_mir_to_ll_module(bs: BS, root: i64): BS
       while mi < modules.length():
         let lowered: bool = false
         match bs.input.mir_nodes.get(modules.get(mi)):
-          MirNode::MirModule(mfile, mfn_lp, mfn_count, mtl, mtc):
+          mir::MirNode::MirModule(mfile, mfn_lp, mfn_count, mtl, mtc):
             if mfile < 0 or mfile >= bs.input.source.program.module_graph.files.length():
               return bs_error(bs, "bootstrap llvm backend: a module's file " + i64_to_string(mfile) + " is not in the program")
             let sf: graph::SourceFile = bs.input.source.program.module_graph.files.get(mfile)
@@ -3362,7 +3363,7 @@ fn lower_mir_to_llvm_text(input: MirBackendInput): LlvmTextResult
     ui = ui + to_i64(1)
   // The module's code must be concrete: a call of a generic function
   // names a template that is never emitted.
-  let template_refs: Vector<Diagnostic> = mir_template_refs(input.mir, input.symbols, input.mir.root)
+  let template_refs: Vector<Diagnostic> = mir::mir_template_refs(input.mir, input.symbols, input.mir.root)
   let ti: i64 = to_i64(0)
   while ti < template_refs.length():
     bs.out.diags = bs.out.diags.push(template_refs.get(ti))
@@ -3401,18 +3402,18 @@ fn lower_to_mir_backend_input(src: string): MirBackendInput
   let pt: typecheck::ProgramTyped = typecheck::ProgramTyped(p, typecheck::registry_new(p.resolve.symbols, p.module_graph.modules))
   resource memory typecheck =>
     pt = typecheck::program_check(p)
-  let pm: ProgramMir = ProgramMir(pt.program, mir_result_empty())
+  let pm: mir::ProgramMir = mir::ProgramMir(pt.program, mir::mir_result_empty())
   resource memory mir =>
-    pm = program_run_mir(pt.program)
+    pm = mir::program_run_mir(pt.program)
   // Concrete before the backend sees it: every call of a generic
   // function names its specialization.
-  let pc: ProgramConcrete = ProgramConcrete(pm.program, pm.mir)
+  let pc: mir::ProgramConcrete = mir::ProgramConcrete(pm.program, pm.mir)
   resource memory mono =>
-    pc = program_monomorphize(pt, pm)
-  let r: MirResult = pc.mir
+    pc = mir::program_monomorphize(pt, pm)
+  let r: mir::MirResult = pc.mir
   let sf: graph::SourceFile = resolver::program_file_of_module(pc.program, to_i64(0))
   let po: parser::ParseOutput = sf.parse_output
-  return MirBackendInput(MirResult(r.mir_nodes, r.mir_idx, r.diags, mir_only_module(r)), pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, BackendSource(po.toks, sf.source_text, pc.program.module_graph))
+  return MirBackendInput(mir::MirResult(r.mir_nodes, r.mir_idx, r.diags, mir::mir_only_module(r)), pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, BackendSource(po.toks, sf.source_text, pc.program.module_graph))
 
 // A whole program to LLVM text: every module, checked, lowered to MIR,
 // made concrete and lowered here, each function with its own
@@ -3436,12 +3437,12 @@ fn lower_program_to_llvm(inputs: Vector<graph::SourceInput>): ProgramLlvm
   let pt: typecheck::ProgramTyped = typecheck::ProgramTyped(p, typecheck::registry_new(p.resolve.symbols, p.module_graph.modules))
   resource memory typecheck =>
     pt = typecheck::program_check(p)
-  let pm: ProgramMir = ProgramMir(pt.program, mir_result_empty())
+  let pm: mir::ProgramMir = mir::ProgramMir(pt.program, mir::mir_result_empty())
   resource memory mir =>
-    pm = program_run_mir(pt.program)
-  let pc: ProgramConcrete = ProgramConcrete(pm.program, pm.mir)
+    pm = mir::program_run_mir(pt.program)
+  let pc: mir::ProgramConcrete = mir::ProgramConcrete(pm.program, pm.mir)
   resource memory mono =>
-    pc = program_monomorphize(pt, pm)
+    pc = mir::program_monomorphize(pt, pm)
   let input: MirBackendInput = MirBackendInput(pc.mir, pc.program.resolve.symbols, pc.program.typecheck.types, pc.program.typecheck.type_info, BackendSource(Vector<lexer::Token>::new(), "", pc.program.module_graph))
   return ProgramLlvm(pc.program, lower_mir_to_llvm_text(input))
 

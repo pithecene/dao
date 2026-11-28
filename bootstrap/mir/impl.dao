@@ -1,4 +1,4 @@
-module bootstrap::mir::impl
+module bootstrap::mir
 
 import bootstrap::lexer
 import bootstrap::parser
