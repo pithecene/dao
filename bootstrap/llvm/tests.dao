@@ -415,8 +415,12 @@ fn closure_probe(marker: string): void
     line = closure_probe_stage(which, "bootstrap/hir/tests.dao", stage)
   else if which == "mir":
     line = closure_probe_stage(which, "bootstrap/mir/tests.dao", stage)
-  else:
+  else if which == "llvm":
     line = closure_probe_stage(which, "bootstrap/llvm/tests.dao", stage)
+  else:
+    // An unknown program gets the record a missing source gets, never
+    // another program's measurements.
+    line = which + "\tmissing=bootstrap/" + which + "\n"
   let closure_txt: string = llvm_out_dir() + "/closure.txt"
   let previous: string = ""
   if file_exists(closure_txt):
