@@ -975,11 +975,6 @@ fn char_to_digit(ch: string): i64
     return to_i64(9)
   return to_i64(-1)
 
-// The operator a comparison `match` lowering synthesizes carries: `==`,
-// with no source token behind it.
-fn synthesized_equality_op(): i64
-  return to_i64(-1)
-
 // The symbol of a local a lowering synthesizes — `match`'s scrutinee —
 // named by the HirLet that declares it: negative, below -1, so it is
 // never a resolver symbol and never "no symbol".
@@ -1030,7 +1025,7 @@ fn lower_match_into(hs: HS, scrut_node: i64, arms_lp: i64, out: Vector<i64>): Hi
       let pat_r: HirR = lower_expr(cur, pat_node)
       cur = pat_r.hs
       pattern = pat_r.hir
-    let cond_r: HirR = hs_add_node(cur, HirNode::HirBinary(op = synthesized_equality_op(), left = tested, right = pattern, typ = to_i64(10)))
+    let cond_r: HirR = hs_add_node(cur, HirNode::HirBinary(op = base::synthesized_equality_op(), left = tested, right = pattern, typ = to_i64(10)))
     cur = cond_r.hs
     // Each binding a `let` of its payload value, ahead of the body.
     let bound: HirStmts = HirStmts(cur, Vector<i64>::new())

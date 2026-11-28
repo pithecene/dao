@@ -34,12 +34,12 @@ and a mechanical definition of "bootstrapped":
 - Stage 3: the Stage-2 compiler does it again
 
 The crossing began over the compiler assembled into one file
-(`bootstrap/driver/driver.gen.dao`).  Seven parts of it are now real
+(`bootstrap/driver/driver.gen.dao`).  Eight parts of it are now real
 modules that the crossing compiles from their own sources and reaches
 through imports: `bootstrap::ascii`, `lexer`, `parser`, `graph`, `base`,
-`resolver`, and `typecheck`.  The `hir`, `mir`, `llvm`, and `driver`
+`resolver`, `typecheck`, and `hir`.  The `mir`, `llvm`, and `driver`
 sources are still assembled into that file.  Order 6 still owes those
-four: the same crossing over every source as a real module.
+three: the same crossing over every source as a real module.
 
 with every bootstrap semantic suite passing under Stage 2, native
 compilation succeeding at each generation, deterministic outputs where

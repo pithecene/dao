@@ -100,3 +100,9 @@ fn tc_set_expr_type(td: TypeCheckData, module_id: i64, node_idx: i64, ty: i64): 
   let key: string = expr_id_key(module_id, node_idx)
   td.lookup = ProgramLookup(td.lookup.expr_types.set(key, ty), td.lookup.methods, td.lookup.index)
   return td
+
+// The operator of a comparison that a lowering synthesizes: `==`, with no
+// source token behind it.  HIR writes it for a `match` test and MIR for a
+// discriminant test, and the backend reads it in a `MirBinary`.
+fn synthesized_equality_op(): i64
+  return to_i64(-1)

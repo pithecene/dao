@@ -6,6 +6,7 @@ import bootstrap::graph
 import bootstrap::base
 import bootstrap::resolver
 import bootstrap::typecheck
+import bootstrap::hir
 
 // Test runner for the bootstrap llvm.  Assembled after the
 // shared base and every library it exercises; never compiled
@@ -203,6 +204,8 @@ fn closure_program_checked(name: string, path: string, src: string, report: bool
         inputs = inputs.push(graph::SourceInput("bootstrap/resolver/impl.dao", read_file("bootstrap/resolver/impl.dao"), false))
         if name != "resolver":
           inputs = inputs.push(graph::SourceInput("bootstrap/typecheck/impl.dao", read_file("bootstrap/typecheck/impl.dao"), false))
+          if name != "typecheck":
+            inputs = inputs.push(graph::SourceInput("bootstrap/hir/impl.dao", read_file("bootstrap/hir/impl.dao"), false))
   inputs = inputs.push(graph::SourceInput(path, base::wrap_test_module(src), false))
   let pg: graph::ProgramGraph = graph::program_graph_empty()
   resource memory graph =>
@@ -253,7 +256,7 @@ fn closure_probe_stage(name: string, path: string, stage: string): string
     let p: resolver::Program = checked.program
     let carried_into_hir: i64 = p.diags.length()
     resource memory hir =>
-      p = program_run_hir(p)
+      p = hir::program_run_hir(p)
     closure_report_file_diags(name, "hir", p.diags, carried_into_hir, to_i64(50), path)
     cols = cols + closure_stage_file_column(name, "hir", p.diags, carried_into_hir, path)
   if stage == "mir":
@@ -363,7 +366,7 @@ fn closure_probe_prelude(): string
   let checked: resolver::Program = p
   let carried_into_hir: i64 = p.diags.length()
   resource memory hir =>
-    p = program_run_hir(p)
+    p = hir::program_run_hir(p)
   i = to_i64(0)
   while i < inputs.length():
     let path: string = inputs.get(i).path
@@ -404,6 +407,8 @@ fn closure_probe(marker: string): void
     line = closure_probe_stage(which, "bootstrap/resolver/tests.dao", stage)
   else if which == "typecheck":
     line = closure_probe_stage(which, "bootstrap/typecheck/tests.dao", stage)
+  else if which == "hir":
+    line = closure_probe_stage(which, "bootstrap/hir/tests.dao", stage)
   else:
     line = closure_probe_stage(which, "bootstrap/" + which + "/" + which + ".gen.dao", stage)
   let closure_txt: string = llvm_out_dir() + "/closure.txt"

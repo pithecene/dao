@@ -13,8 +13,9 @@ downstream passes. The modules `ascii.dao` (`module bootstrap::ascii`),
 `lexer/impl.dao` (`module bootstrap::lexer`), `parser/impl.dao`
 (`module bootstrap::parser`), `graph/impl.dao` (`module bootstrap::graph`),
 `shared/base.dao` (`module bootstrap::base`), `resolver/impl.dao`
-(`module bootstrap::resolver`), and `typecheck/impl.dao`
-(`module bootstrap::typecheck`) compile directly as real modules without
+(`module bootstrap::resolver`), `typecheck/impl.dao`
+(`module bootstrap::typecheck`), and `hir/impl.dao`
+(`module bootstrap::hir`) compile directly as real modules without
 assembly. See `shared/README.md`.
 
 ## Subsystems
@@ -232,8 +233,11 @@ daoc build --source bootstrap/typecheck/tests.dao --source bootstrap/typecheck/i
 
 ### `hir/`
 
-HIR lowering pass producing compiler-owned typed IR from the
-type-checked AST.
+HIR lowering pass (`module bootstrap::hir` in `hir/impl.dao`, importing
+`bootstrap::lexer`, `bootstrap::parser`, `bootstrap::graph`,
+`bootstrap::base`, `bootstrap::resolver`, and `bootstrap::typecheck`)
+producing compiler-owned typed IR from the type-checked AST.  Its test
+runner is the separate module `bootstrap::hir::tests` in `hir/tests.dao`.
 
 **Status**: implemented (Task 24, Phase 7).
 
@@ -263,7 +267,7 @@ fn/extern fn/class/enum/type alias declarations, `resource` blocks
 task bootstrap-test   # every suite, this one among them
 ```
 
-The `bootstrap-test` task in `Taskfile.yml` holds the source list of `bootstrap/hir/hir.gen.dao`.
+The `bootstrap-test` task in `Taskfile.yml` holds the source list of `bootstrap/hir/tests.dao`.
 
 ### `mir/`
 

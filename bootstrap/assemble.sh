@@ -4,8 +4,8 @@
 # runner or entry point.
 #
 # `bootstrap::ascii`, `bootstrap::lexer`, `bootstrap::parser`,
-# `bootstrap::graph`, `bootstrap::base`, `bootstrap::resolver`, and
-# `bootstrap::typecheck` are real modules compiled directly from authored
+# `bootstrap::graph`, `bootstrap::base`, `bootstrap::resolver`,
+# `bootstrap::typecheck`, and `bootstrap::hir` are real modules compiled directly from authored
 # sources and are not assembled here.
 #
 # Run from repository root:
@@ -71,22 +71,15 @@ assemble() {
   echo "  assembled $out"
 }
 
-HIR=bootstrap/hir/impl.dao
 MIR=bootstrap/mir/impl.dao
 LLVM=bootstrap/llvm/impl.dao
 DRIVER=bootstrap/driver/impl.dao
 
-assemble "$OUT_ROOT/hir/hir.gen.dao" \
-  "$HIR" \
-  bootstrap/hir/tests.dao
-
 assemble "$OUT_ROOT/mir/mir.gen.dao" \
-  "$HIR" \
   "$MIR" \
   bootstrap/mir/tests.dao
 
 assemble "$OUT_ROOT/llvm/llvm.gen.dao" \
-  "$HIR" \
   "$MIR" \
   "$LLVM" \
   bootstrap/llvm/tests.dao
@@ -96,10 +89,9 @@ assemble "$OUT_ROOT/driver/driver_tests.gen.dao" \
   bootstrap/driver/tests.dao
 
 assemble "$OUT_ROOT/driver/driver.gen.dao" \
-  "$HIR" \
   "$MIR" \
   "$LLVM" \
   "$DRIVER" \
   bootstrap/driver/main.dao
 
-echo "done — 5 files assembled"
+echo "done — 4 files assembled"

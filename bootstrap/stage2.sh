@@ -194,7 +194,7 @@ else
   fi
   SEED_KIND="host_daoc"
   echo "stage 1: the host builds the bootstrap compiler"
-  "$DAOC" build --source "$GEN_DIR/driver/driver.gen.dao" --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao > "$RUN_DIR/stage1.log" 2>&1 || {
+  "$DAOC" build --source "$GEN_DIR/driver/driver.gen.dao" --source bootstrap/hir/impl.dao --source bootstrap/typecheck/impl.dao --source bootstrap/resolver/impl.dao --source bootstrap/shared/base.dao --source bootstrap/graph/impl.dao --source bootstrap/parser/impl.dao --source bootstrap/lexer/impl.dao --source bootstrap/ascii.dao > "$RUN_DIR/stage1.log" 2>&1 || {
     echo "stage 1 failed (see $RUN_DIR/stage1.log)" >&2
     exit 1
   }
@@ -202,7 +202,7 @@ else
 fi
 
 echo "stage 2: the bootstrap compiler compiles itself"
-compile_with "$STAGE1" "$RUN_DIR/stage2.ll" "$GEN_DIR/driver/driver.gen.dao" bootstrap/typecheck/impl.dao bootstrap/resolver/impl.dao bootstrap/shared/base.dao bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao || {
+compile_with "$STAGE1" "$RUN_DIR/stage2.ll" "$GEN_DIR/driver/driver.gen.dao" bootstrap/hir/impl.dao bootstrap/typecheck/impl.dao bootstrap/resolver/impl.dao bootstrap/shared/base.dao bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao || {
   echo "stage 2 failed (see $RUN_DIR/stage2.ll.log)" >&2
   exit 1
 }
@@ -212,7 +212,7 @@ link "$RUN_DIR/stage2.ll" "$RUN_DIR/stage2" || {
 }
 
 echo "stage 3: the stage-2 compiler compiles itself"
-compile_with "$RUN_DIR/stage2" "$RUN_DIR/stage3.ll" "$GEN_DIR/driver/driver.gen.dao" bootstrap/typecheck/impl.dao bootstrap/resolver/impl.dao bootstrap/shared/base.dao bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao || {
+compile_with "$RUN_DIR/stage2" "$RUN_DIR/stage3.ll" "$GEN_DIR/driver/driver.gen.dao" bootstrap/hir/impl.dao bootstrap/typecheck/impl.dao bootstrap/resolver/impl.dao bootstrap/shared/base.dao bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao || {
   echo "stage 3 failed (see $RUN_DIR/stage3.ll.log)" >&2
   exit 1
 }
@@ -368,10 +368,12 @@ suite_sources() {
     printf '%s\n' bootstrap/resolver/tests.dao bootstrap/resolver/impl.dao bootstrap/shared/base.dao bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao
   elif [ "$1" = "typecheck" ]; then
     printf '%s\n' bootstrap/typecheck/tests.dao bootstrap/typecheck/impl.dao bootstrap/resolver/impl.dao bootstrap/shared/base.dao bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao
+  elif [ "$1" = "hir" ]; then
+    printf '%s\n' bootstrap/hir/tests.dao bootstrap/hir/impl.dao bootstrap/typecheck/impl.dao bootstrap/resolver/impl.dao bootstrap/shared/base.dao bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao
   elif [ "$1" = "driver_tests" ]; then
     printf '%s\n' "$GEN_DIR/driver/driver_tests.gen.dao" bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao
   else
-    printf '%s\n' "$GEN_DIR/$1/$1.gen.dao" bootstrap/typecheck/impl.dao bootstrap/resolver/impl.dao bootstrap/shared/base.dao bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao
+    printf '%s\n' "$GEN_DIR/$1/$1.gen.dao" bootstrap/hir/impl.dao bootstrap/typecheck/impl.dao bootstrap/resolver/impl.dao bootstrap/shared/base.dao bootstrap/graph/impl.dao bootstrap/parser/impl.dao bootstrap/lexer/impl.dao bootstrap/ascii.dao
   fi
 }
 
